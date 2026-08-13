@@ -6,6 +6,7 @@
 #include <span>
 #include <string_view>
 
+#include "../encoding/byte_order.h"
 #include "config/signon_config_blob.h"
 #include "extended/signon_extended_fields.h"
 #include "internal.h"
@@ -74,7 +75,7 @@ bool encode_success(const state::SignOnState& state,
                                 && success.bytes(kAuthenticationKeyField, state.authenticationKey)
                                 && success.bytes(kSessionTokenField, state.sessionToken)
                                 && success.varint(kExpiryField, expirySeconds)
-                                && success.varint(kRelayAddressField, state.relayAddress)
+                                && success.varint(kRelayAddressField, encoding::byteswap_u32(state.relayAddress))
                                 && success.varint(kRelayPortField, state.relayPort)
                                 && extended::append(success, state.relayAddress);
     if (!successEncoded) {

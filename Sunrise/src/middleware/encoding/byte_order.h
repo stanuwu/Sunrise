@@ -36,6 +36,17 @@ read_u16_be(std::span<const std::byte, kU16Size> input) noexcept {
 }
 
 /**
+ * Reverses the four bytes of a 32-bit value.
+ * @param value Host-order value.
+ * @return The value with its four bytes reversed.
+ */
+[[nodiscard]] inline constexpr std::uint32_t 
+byteswap_u32(std::uint32_t value) noexcept {
+    return ((value & 0x000000FFu) << 24) | ((value & 0x0000FF00u) << 8)
+           | ((value & 0x00FF0000u) >> 8) | ((value & 0xFF000000u) >> 24);
+}
+
+/**
  * Reads one unsigned 32-bit big-endian wire value.
  * @param input Exact 4-byte wire field.
  * @return Host-order unsigned value.
