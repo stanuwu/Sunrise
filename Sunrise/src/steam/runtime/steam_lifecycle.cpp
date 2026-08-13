@@ -46,9 +46,7 @@ bool g_platformActivationAttempted{};
 
 /** Starts the Steam shim and its exported state. */
 bool initialize(void* module) noexcept {
-    if (!client::hooks::egress::install()) {
-        return false;
-    }
+    (void)client::hooks::egress::install();
     AcquireSRWLockExclusive(&g_lifecycleLock);
     if (g_initialized.load(std::memory_order_acquire)) {
         ReleaseSRWLockExclusive(&g_lifecycleLock);
