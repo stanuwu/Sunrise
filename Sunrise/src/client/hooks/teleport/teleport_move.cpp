@@ -1,13 +1,16 @@
 /**
- * The teleport itself. The camera hook publishes a forward vector and reads the bound key once a
- * frame. The physics hook applies the move before the sync it runs ahead of. Physics owns the
+ * Teleport and noclip movement. The camera hook publishes a forward vector and polls controls once
+ * a frame. The physics hook applies movement before the sync it runs ahead of. Physics owns the
  * position, so writing the object placement would move the camera alone.
  */
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -24,33 +27,51 @@
 namespace sunrise::client::hooks::teleport {
 namespace {
 
-/**
- * Frames a press stays pending. Orbit and loading screens tick the camera but never the player's
- * physics, so a request with no limit is used up later and reads as a queued teleport.
- */
-constexpr std::uint32_t kRequestLifetimeFrames = 3;
-/** Frames an ordinary physics tick gets to collect a request before the forced path takes it. */
-constexpr std::uint32_t kForceAfterFrames = 1;
+using Action = state::account::settings::bindings::Action;
+using Clock = std::chrono::steady_clock;
 
-/**
- * Frames the injected press is held. It has to survive at least one scan and one integration
- * step, or the move it exists to publish is never read.
- */
+/** Frames a request or delta survives without a player physics consumer. */
+constexpr std::uint32_t kRequestLifetimeFrames = 3;
+/** Frames an ordinary physics tick gets to collect movement before the forced path takes it. */
+constexpr std::uint32_t kForceAfterFrames = 1;
+/** Frames the injected press is held so it survives one scan and one integration step. */
 constexpr std::uint32_t kPressFrames = 2;
-/** Authored action driven to wake the body. Forward is the gentlest one that moves it. */
-constexpr std::uint16_t kForwardAction =
-    static_cast<std::uint16_t>(state::account::settings::bindings::Action::moveForward);
+/** A delayed frame cannot turn one held movement key into a large jump. */
+constexpr float kMaximumFrameSeconds = 0.05F;
+/** Squared-vector floor used before normalization. */
+constexpr float kVectorEpsilon = 0.000001F;
+
+/** Authored action driven to wake the body when no native movement key is already effective. */
+constexpr std::uint16_t kForwardAction = static_cast<std::uint16_t>(Action::moveForward);
+
+enum class NoclipControl : std::size_t {
+    forward,
+    backward,
+    left,
+    right,
+    rise,
+    descend,
+    boost,
+    count,
+};
+
+constexpr std::size_t kNoclipControlCount = static_cast<std::size_t>(NoclipControl::count);
 
 std::atomic_bool g_requested{false};
 std::atomic_bool g_forwardValid{false};
 std::atomic_bool g_keyDown{false};
 std::atomic_uint32_t g_requestAge{0};
-/** Set while the feature is usable, so the per-tick path costs one atomic read when it is not. */
+/** Set while one-shot teleport is usable, keeping its idle hook path inexpensive. */
 std::atomic_bool g_active{false};
+
+std::atomic_bool g_noclipActive{false};
+std::atomic_bool g_noclipToggleDown{false};
+std::atomic_bool g_noclipMovePending{false};
+std::atomic_uint32_t g_noclipMoveAge{0};
 
 /**
  * The player's physics component, kept from the last tick that carried it. At rest the sync stops
- * being called for the player at all, so the pointer is the only way back to them.
+ * being called for the player, so the pointer is also the forced path back to them.
  */
 std::atomic<std::byte*> g_playerComponent{nullptr};
 /** Frames left before the injected press is released. */
@@ -59,15 +80,19 @@ std::atomic_uint32_t g_pressFrames{0};
 ControlledHandle g_controlledHandle{};
 CameraSingleton g_cameraSingleton{};
 
-/** Written by the camera hook and read by the physics hook. Both run on the same thread. */
+/** Camera and physics hooks execute on the same game thread, so these vectors need only gates. */
 std::array<float, kVectorLanes> g_forward{};
+std::array<float, kVectorLanes> g_pendingNoclipDelta{};
+std::array<float, kVectorLanes> g_noclipPosition{};
+std::array<float, kVectorLanes> g_previousValidRight{0.0F, 1.0F, 0.0F};
+std::array<std::uint32_t, kNoclipControlCount> g_noclipKeys{};
 
-/**
- * Reads one value out of game memory without faulting on a torn pointer.
- * @param address Source address.
- * @param value Receives the value.
- * @return True when Windows copied the whole value.
- */
+std::byte* g_noclipBody{};
+bool g_noclipPositionValid{};
+Clock::time_point g_lastNoclipPoll{};
+bool g_noclipClockValid{};
+
+/** Reads one value out of game memory without faulting on a torn pointer. */
 template <typename T> [[nodiscard]] bool read_at(const std::byte* address, T& value) noexcept {
     if (address == nullptr) {
         return false;
@@ -77,12 +102,7 @@ template <typename T> [[nodiscard]] bool read_at(const std::byte* address, T& va
            && read == sizeof value;
 }
 
-/**
- * Writes one vector into game memory. The call applies page protection itself.
- * @param address Destination address.
- * @param value Three lanes to store.
- * @return True when Windows copied the whole vector.
- */
+/** Writes one three-lane vector into game memory. */
 [[nodiscard]] bool write_vector(std::byte* address,
                                 const std::array<float, kVectorLanes>& value) noexcept {
     if (address == nullptr) {
@@ -94,11 +114,7 @@ template <typename T> [[nodiscard]] bool read_at(const std::byte* address, T& va
            && written == size;
 }
 
-/**
- * Finds the rigid body a physics component drives.
- * @param component Physics component.
- * @return The body, or null when the chain breaks.
- */
+/** @return The rigid body driven by a physics component, or null when the chain breaks. */
 [[nodiscard]] std::byte* body_of(std::byte* component) noexcept {
     std::byte* array = nullptr;
     std::int32_t index = 0;
@@ -112,68 +128,19 @@ template <typename T> [[nodiscard]] bool read_at(const std::byte* address, T& va
     return read_at(array + offset, body) ? body : nullptr;
 }
 
-/**
- * Ages a pending request and drops it once nothing has taken it. A press is meant for the moment
- * it is made, so one that finds no player physics tick is dropped, not held for the next one.
- */
-void expire_request() noexcept {
-    if (!g_requested.load(std::memory_order_acquire)) {
-        return;
-    }
-    if (g_requestAge.fetch_add(1, std::memory_order_relaxed) + 1 >= kRequestLifetimeFrames) {
-        g_requested.store(false, std::memory_order_release);
-    }
-}
-
-/**
- * Runs the whole move for a component already proved to be the player's.
- * @param component Physics component driving the player.
- * @return True when the body was found and its position was written.
- */
-[[nodiscard]] bool perform_move(std::byte* component) noexcept;
-
-/** @param reason Key naming the step that stopped the move. */
-void report_skip(const char* reason) noexcept;
-
-/**
- * Starts the injected press that wakes the body.
- * Nothing reads the new body position until something integrates it, so the move is published by
- * driving the player's own forward action rather than by writing what it would have produced.
- */
-void begin_press() noexcept {
-    const state::AccountState account = state::account_snapshot();
-    const auto& binding = account.settings.keyBindings.values[kForwardAction];
-    if (!binding.primary.has_value()) {
-        return;
-    }
-    const std::uint32_t virtualKey = action_key(*binding.primary);
-    if (virtualKey == 0) {
-        report_skip("no_key");
-        return;
-    }
-    hooks::polled_input::hold_key(virtualKey);
-    g_pressFrames.store(kPressFrames, std::memory_order_release);
-}
-
-/** Releases the injected press once it has been scanned. */
-void end_press() noexcept {
-    if (g_pressFrames.load(std::memory_order_acquire) == 0) {
-        return;
-    }
-    if (g_pressFrames.fetch_sub(1, std::memory_order_acq_rel) <= 1) {
-        hooks::polled_input::release_key();
+/** @param reason Key naming the step that stopped movement. */
+void report_skip(const char* reason) noexcept {
+    std::array<char, 96> line{};
+    const int written = std::snprintf(
+        line.data(), line.size(), "ev=teleport stage=move result=skip reason=%s", reason);
+    if (written > 0) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         {line.data(), static_cast<std::size_t>(written)});
     }
 }
 
-/**
- * Reports the gate values the sync tests before it publishes a transform.
- *
- * The move lands while moving and does nothing at rest for all three write targets, so what
- * changes at rest is upstream of the write. These four gates are what the sync reads first.
- *
- * @param component Physics component owning the player.
- * @param body Rigid body behind it.
- */
+/** Reports the gates the original sync tests before publishing a transform. */
 void report_gates(const std::byte* component, const std::byte* body) noexcept {
     std::uint8_t suppressed = 0;
     std::int32_t bodyIndex = 0;
@@ -200,11 +167,11 @@ void report_gates(const std::byte* component, const std::byte* body) noexcept {
     }
 }
 
-/**
- * @param component Candidate physics component.
- * @return True when it drives the object the local player controls.
- */
+/** @return True when a component drives the object the local player controls. */
 [[nodiscard]] bool owns_player(std::byte* component) noexcept {
+    if (component == nullptr || g_controlledHandle == nullptr) {
+        return false;
+    }
     std::uint32_t controlled = kInvalidHandle;
     g_controlledHandle(&controlled);
     if (controlled == kInvalidHandle) {
@@ -216,23 +183,141 @@ void report_gates(const std::byte* component, const std::byte* body) noexcept {
                   == (static_cast<std::uint32_t>(owner) & kHandleIndexMask);
 }
 
-/** @param reason Key naming the step that stopped the move. */
-void report_skip(const char* reason) noexcept {
-    std::array<char, 96> line{};
-    const int written = std::snprintf(
-        line.data(), line.size(), "ev=teleport stage=move result=skip reason=%s", reason);
-    if (written > 0) {
+/** @return True while a controlled player object exists. */
+[[nodiscard]] bool controlled_player_available() noexcept {
+    if (g_controlledHandle == nullptr) {
+        return false;
+    }
+    std::uint32_t controlled = kInvalidHandle;
+    g_controlledHandle(&controlled);
+    return controlled != kInvalidHandle;
+}
+
+void clear_noclip_delta() noexcept {
+    g_pendingNoclipDelta = {};
+    g_noclipMoveAge.store(0, std::memory_order_relaxed);
+    g_noclipMovePending.store(false, std::memory_order_release);
+}
+
+void clear_noclip_target() noexcept {
+    g_noclipPosition = {};
+    g_noclipBody = nullptr;
+    g_noclipPositionValid = false;
+}
+
+/** Invalidates every pointer and displacement that must not cross a destination transition. */
+void clear_player_state() noexcept {
+    g_playerComponent.store(nullptr, std::memory_order_relaxed);
+    clear_noclip_delta();
+    clear_noclip_target();
+    g_noclipClockValid = false;
+}
+
+void set_noclip_active(bool active) noexcept {
+    const bool changed = g_noclipActive.exchange(active, std::memory_order_acq_rel) != active;
+    if (!active) {
+        clear_noclip_delta();
+        clear_noclip_target();
+        g_noclipKeys = {};
+        g_noclipClockValid = false;
+    }
+    if (changed) {
         core::log::write(core::log::Channel::client,
-                         core::log::Level::warn,
-                         {line.data(), static_cast<std::size_t>(written)});
+                         core::log::Level::info,
+                         active ? "ev=noclip stage=toggle active=1"
+                                : "ev=noclip stage=toggle active=0");
     }
 }
 
-/**
- * Writes one vertical velocity, leaving run momentum on the other two lanes.
- * @param body Rigid body to write.
- * @param value Vertical velocity to store.
- */
+/** Ages and drops a one-shot teleport that no player tick collected. */
+void expire_request() noexcept {
+    if (!g_requested.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (g_requestAge.fetch_add(1, std::memory_order_relaxed) + 1 >= kRequestLifetimeFrames) {
+        g_requested.store(false, std::memory_order_release);
+    }
+}
+
+/** Ages and drops a noclip delta that no player tick collected. */
+void expire_noclip_delta() noexcept {
+    if (!g_noclipMovePending.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (g_noclipMoveAge.fetch_add(1, std::memory_order_relaxed) + 1 >= kRequestLifetimeFrames) {
+        clear_noclip_delta();
+    }
+}
+
+/** Stops the synthetic wake press once it has survived the required game scans. */
+void end_press() noexcept {
+    if (g_pressFrames.load(std::memory_order_acquire) == 0) {
+        return;
+    }
+    if (g_pressFrames.fetch_sub(1, std::memory_order_acq_rel) <= 1) {
+        hooks::polled_input::release_key();
+    }
+}
+
+/** Resolves one action's primary key, falling back to its secondary binding. */
+[[nodiscard]] std::uint32_t bound_key(const state::AccountState& account, Action action) noexcept {
+    const auto& binding = account.settings.keyBindings.values[static_cast<std::size_t>(action)];
+    if (binding.primary.has_value()) {
+        const std::uint32_t key = action_key(*binding.primary);
+        if (key != 0) {
+            return key;
+        }
+    }
+    return binding.secondary.has_value() ? action_key(*binding.secondary) : 0;
+}
+
+/** Resolves movement bindings once per noclip activation. */
+void resolve_noclip_controls() noexcept {
+    const state::AccountState account = state::account_snapshot();
+    g_noclipKeys[static_cast<std::size_t>(NoclipControl::forward)] =
+        bound_key(account, Action::moveForward);
+    g_noclipKeys[static_cast<std::size_t>(NoclipControl::backward)] =
+        bound_key(account, Action::moveBackward);
+    g_noclipKeys[static_cast<std::size_t>(NoclipControl::left)] =
+        bound_key(account, Action::moveLeft);
+    g_noclipKeys[static_cast<std::size_t>(NoclipControl::right)] =
+        bound_key(account, Action::moveRight);
+    g_noclipKeys[static_cast<std::size_t>(NoclipControl::rise)] = bound_key(account, Action::jump);
+
+    std::uint32_t descend = bound_key(account, Action::holdCrouch);
+    if (descend == 0) {
+        descend = bound_key(account, Action::toggleCrouch);
+    }
+    g_noclipKeys[static_cast<std::size_t>(NoclipControl::descend)] = descend;
+
+    std::uint32_t boost = bound_key(account, Action::holdSprint);
+    if (boost == 0) {
+        boost = bound_key(account, Action::toggleSprint);
+    }
+    g_noclipKeys[static_cast<std::size_t>(NoclipControl::boost)] = boost;
+}
+
+/** Starts or refreshes the synthetic forward press that wakes an otherwise sleeping body. */
+void begin_press() noexcept {
+    std::uint32_t virtualKey = 0;
+    if (g_noclipActive.load(std::memory_order_relaxed)) {
+        virtualKey = g_noclipKeys[static_cast<std::size_t>(NoclipControl::forward)];
+    } else {
+        const state::AccountState account = state::account_snapshot();
+        const auto& binding = account.settings.keyBindings.values[kForwardAction];
+        if (binding.primary.has_value()) {
+            virtualKey = action_key(*binding.primary);
+        }
+    }
+    if (virtualKey == 0) {
+        report_skip("no_key");
+        return;
+    }
+    hooks::polled_input::hold_key(virtualKey);
+    g_pressFrames.store(kPressFrames, std::memory_order_release);
+}
+
+/** Writes one vertical velocity, leaving ordinary run momentum on the other two lanes. */
 void set_vertical_velocity(std::byte* body, float value) noexcept {
     std::array<float, kVectorLanes> velocity{};
     if (!read_at(body + kBodyVelocityX, velocity)) {
@@ -242,14 +327,7 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
     (void)write_vector(body + kBodyVelocityX, velocity);
 }
 
-/**
- * Adds one world delta to a stored position.
- * @param address Vector to move.
- * @param delta World units per lane.
- * @param before Receives the value read.
- * @param after Receives the value written.
- * @return True when the new value was stored.
- */
+/** Adds one world delta to a stored vector. */
 [[nodiscard]] bool offset_vector(std::byte* address,
                                  const std::array<float, kVectorLanes>& delta,
                                  std::array<float, kVectorLanes>& before,
@@ -263,16 +341,7 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
     return write_vector(address, after);
 }
 
-/**
- * Adds the configured distance along the published forward vector.
- *
- * Only the rigid body is written. The physics component's own vector is composed against the body
- * orientation rather than added to it, so a world delta applied there corrupts the transform.
- *
- * @param body Rigid body being moved.
- * @param distance World units to travel.
- * @return True when the new position was stored.
- */
+/** Performs the original one-shot move outside noclip. */
 [[nodiscard]] bool move_body(std::byte* body, float distance) noexcept {
     std::array<float, kVectorLanes> delta{};
     for (std::size_t lane = 0; lane < kVectorLanes; ++lane) {
@@ -304,12 +373,8 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
     return true;
 }
 
-/**
- * Runs the whole move for a component already proved to be the player's.
- * @param component Physics component driving the player.
- * @return True when the body was found and its position was written.
- */
-[[nodiscard]] bool perform_move(std::byte* component) noexcept {
+/** Runs the complete original one-shot move for a proven player component. */
+[[nodiscard]] bool perform_teleport(std::byte* component) noexcept {
     std::byte* const body = body_of(component);
     if (body == nullptr) {
         report_skip("no_body");
@@ -324,6 +389,183 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
     return true;
 }
 
+struct MoveResult {
+    bool written{};
+    bool moved{};
+};
+
+/**
+ * Replaces the body position with the stored noclip target. Physics output is never used as the
+ * next-frame origin after target initialization.
+ */
+[[nodiscard]] MoveResult perform_noclip(std::byte* component, bool teleportRequested) noexcept {
+    std::byte* const body = body_of(component);
+    if (body == nullptr) {
+        clear_noclip_target();
+        report_skip("no_body");
+        return {};
+    }
+    if (g_noclipPositionValid && body != g_noclipBody) {
+        // A body replacement is also a lifecycle boundary. A delta authored for the old body must
+        // never be replayed against the replacement.
+        clear_noclip_delta();
+        clear_noclip_target();
+    }
+    if (!g_noclipPositionValid || body != g_noclipBody) {
+        std::array<float, kVectorLanes> position{};
+        if (!read_at(body + kBodyPositionX, position)) {
+            clear_noclip_target();
+            report_skip("body");
+            return {};
+        }
+        g_noclipPosition = position;
+        g_noclipBody = body;
+        g_noclipPositionValid = true;
+        report_gates(component, body);
+    }
+
+    const bool deltaPending = g_noclipMovePending.load(std::memory_order_acquire);
+    std::array<float, kVectorLanes> candidate = g_noclipPosition;
+    if (deltaPending) {
+        for (std::size_t lane = 0; lane < kVectorLanes; ++lane) {
+            candidate[lane] += g_pendingNoclipDelta[lane];
+        }
+    }
+    if (teleportRequested) {
+        const float distance = client::teleport::get().distance;
+        for (std::size_t lane = 0; lane < kVectorLanes; ++lane) {
+            candidate[lane] += g_forward[lane] * distance;
+        }
+    }
+
+    if (!write_vector(body + kBodyPositionX, candidate)) {
+        report_skip("body");
+        return {};
+    }
+    g_noclipPosition = candidate;
+    if (deltaPending) {
+        clear_noclip_delta();
+    }
+
+    constexpr std::array<float, kVectorLanes> stopped{};
+    if (!write_vector(body + kBodyVelocityX, stopped)) {
+        report_skip("velocity");
+    }
+
+    const bool moved = deltaPending || teleportRequested;
+    if (moved) {
+        begin_press();
+    }
+    return MoveResult{true, moved};
+}
+
+/** Applies all ready movement to a component already proven to own the player. */
+[[nodiscard]] MoveResult apply_player_movement(std::byte* component) noexcept {
+    const bool requested =
+        g_active.load(std::memory_order_relaxed) && g_requested.load(std::memory_order_acquire);
+    const bool teleportReady = requested && g_forwardValid.load(std::memory_order_acquire);
+    if (g_noclipActive.load(std::memory_order_acquire)) {
+        const MoveResult result = perform_noclip(component, teleportReady);
+        if (teleportReady && result.written) {
+            g_requested.store(false, std::memory_order_release);
+        }
+        return result;
+    }
+    if (!teleportReady) {
+        return {};
+    }
+    g_requested.store(false, std::memory_order_release);
+    const bool moved = perform_teleport(component);
+    return MoveResult{moved, moved};
+}
+
+/** @return The key state Sunrise sees; polled-input suppression only changes game callers. */
+[[nodiscard]] bool key_held(NoclipControl control) noexcept {
+    const std::uint32_t key = g_noclipKeys[static_cast<std::size_t>(control)];
+    return key != 0 && (GetAsyncKeyState(static_cast<int>(key)) & 0x8000) != 0;
+}
+
+[[nodiscard]] float length_squared(const std::array<float, kVectorLanes>& value) noexcept {
+    float length = 0.0F;
+    for (float lane : value) {
+        length += lane * lane;
+    }
+    return length;
+}
+
+[[nodiscard]] std::array<float, kVectorLanes>
+normalized(const std::array<float, kVectorLanes>& value) noexcept {
+    const float squared = length_squared(value);
+    if (squared <= kVectorEpsilon) {
+        return {};
+    }
+    const float inverse = 1.0F / std::sqrt(squared);
+    std::array<float, kVectorLanes> result{};
+    for (std::size_t lane = 0; lane < kVectorLanes; ++lane) {
+        result[lane] = value[lane] * inverse;
+    }
+    return result;
+}
+
+/** Adds this frame's camera-relative movement to the pending world delta. */
+void poll_noclip_movement(const client::teleport::Settings& settings) noexcept {
+    const Clock::time_point now = Clock::now();
+    if (!g_noclipClockValid) {
+        g_lastNoclipPoll = now;
+        g_noclipClockValid = true;
+        return;
+    }
+    const float frameSeconds = std::clamp(
+        std::chrono::duration<float>(now - g_lastNoclipPoll).count(), 0.0F, kMaximumFrameSeconds);
+    g_lastNoclipPoll = now;
+    if (frameSeconds <= 0.0F || !g_forwardValid.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    std::array<float, kVectorLanes> forward = normalized(g_forward);
+    if (length_squared(forward) <= kVectorEpsilon) {
+        return;
+    }
+    std::array<float, kVectorLanes> planarForward{forward[0], forward[1], 0.0F};
+    if (length_squared(planarForward) > kVectorEpsilon) {
+        planarForward = normalized(planarForward);
+        g_previousValidRight = {planarForward[1], -planarForward[0], 0.0F};
+    }
+    const std::array<float, kVectorLanes>& right = g_previousValidRight;
+
+    const float forwardInput = (key_held(NoclipControl::forward) ? 1.0F : 0.0F)
+                               - (key_held(NoclipControl::backward) ? 1.0F : 0.0F);
+    const float rightInput = (key_held(NoclipControl::right) ? 1.0F : 0.0F)
+                             - (key_held(NoclipControl::left) ? 1.0F : 0.0F);
+    const float verticalInput = (key_held(NoclipControl::rise) ? 1.0F : 0.0F)
+                                - (key_held(NoclipControl::descend) ? 1.0F : 0.0F);
+
+    std::array<float, kVectorLanes> direction{};
+    for (std::size_t lane = 0; lane < kVectorLanes; ++lane) {
+        direction[lane] = forward[lane] * forwardInput + right[lane] * rightInput;
+    }
+    direction[kVerticalLane] += verticalInput;
+    if (length_squared(direction) > 1.0F) {
+        direction = normalized(direction);
+    }
+    if (length_squared(direction) <= kVectorEpsilon) {
+        return;
+    }
+
+    float speed = settings.noclipSpeed;
+    if (key_held(NoclipControl::boost)) {
+        speed *= settings.noclipBoostMultiplier;
+    }
+    const bool alreadyPending = g_noclipMovePending.load(std::memory_order_acquire);
+    for (std::size_t lane = 0; lane < kVectorLanes; ++lane) {
+        g_pendingNoclipDelta[lane] += direction[lane] * speed * frameSeconds;
+    }
+    if (!alreadyPending) {
+        g_noclipMoveAge.store(0, std::memory_order_relaxed);
+        g_noclipMovePending.store(true, std::memory_order_release);
+    }
+}
+
 } // namespace
 
 /** Publishes the two functions the hooks call. */
@@ -332,7 +574,7 @@ void publish_targets(ControlledHandle controlled, CameraSingleton singleton) noe
     g_cameraSingleton = singleton;
 }
 
-/** Drops those functions and every latched request. */
+/** Drops target functions and every latched request, pointer, and noclip target. */
 void clear_targets() noexcept {
     g_controlledHandle = nullptr;
     g_cameraSingleton = nullptr;
@@ -341,89 +583,161 @@ void clear_targets() noexcept {
     g_keyDown.store(false, std::memory_order_relaxed);
     g_requestAge.store(0, std::memory_order_relaxed);
     g_active.store(false, std::memory_order_relaxed);
-    g_playerComponent.store(nullptr, std::memory_order_relaxed);
+    g_noclipToggleDown.store(false, std::memory_order_relaxed);
+    set_noclip_active(false);
+    clear_player_state();
 }
 
 /** Publishes the camera forward vector for the physics tick that follows. */
 void capture_forward(std::uint32_t playerIndex) noexcept {
     if (playerIndex == kInvalidHandle || g_cameraSingleton == nullptr) {
+        g_forwardValid.store(false, std::memory_order_release);
+        clear_player_state();
         return;
     }
     std::byte* const camera = g_cameraSingleton();
     if (camera == nullptr) {
+        g_forwardValid.store(false, std::memory_order_release);
+        clear_player_state();
         return;
     }
     std::array<float, kVectorLanes> forward{};
     if (!read_at(camera + kCameraBlockStride * playerIndex + kCameraForwardX, forward)) {
+        g_forwardValid.store(false, std::memory_order_release);
         return;
     }
     g_forward = forward;
     g_forwardValid.store(true, std::memory_order_release);
 }
 
-/** Latches one teleport request if the bound key went down this frame. */
-void poll_request() noexcept {
+/** Polls the one-shot key, noclip toggle, and active camera-relative movement. */
+void poll_controls() noexcept {
     end_press();
     expire_request();
+    expire_noclip_delta();
+
     const client::teleport::Settings settings = client::teleport::get();
-    const bool usable = settings.enabled && settings.virtualKey != client::teleport::kNoKey;
-    g_active.store(usable, std::memory_order_relaxed);
-    if (!usable) {
-        g_keyDown.store(false, std::memory_order_relaxed);
-        return;
-    }
-    // An open interface owns the keyboard, so the key that binds the teleport must not fire it.
-    if (core::ui::runtime::snapshot().visible) {
-        g_keyDown.store(false, std::memory_order_relaxed);
-        return;
-    }
-    const bool down = (GetAsyncKeyState(static_cast<int>(settings.virtualKey)) & 0x8000) != 0;
-    if (down && !g_keyDown.exchange(down, std::memory_order_relaxed)) {
+    const bool teleportUsable = settings.enabled && settings.virtualKey != client::teleport::kNoKey;
+    g_active.store(teleportUsable, std::memory_order_relaxed);
+    if (!teleportUsable) {
+        g_requested.store(false, std::memory_order_release);
         g_requestAge.store(0, std::memory_order_relaxed);
-        g_requested.store(true, std::memory_order_release);
+    }
+    const bool interfaceVisible = core::ui::runtime::snapshot().visible;
+
+    if (!controlled_player_available()) {
+        clear_player_state();
+    } else {
+        std::byte* const cached = g_playerComponent.load(std::memory_order_relaxed);
+        if (cached != nullptr && !owns_player(cached)) {
+            clear_player_state();
+        }
+    }
+
+    if (!teleportUsable || interfaceVisible) {
+        g_keyDown.store(false, std::memory_order_relaxed);
+    } else {
+        const bool down = (GetAsyncKeyState(static_cast<int>(settings.virtualKey)) & 0x8000) != 0;
+        if (down && !g_keyDown.exchange(down, std::memory_order_relaxed)) {
+            g_requestAge.store(0, std::memory_order_relaxed);
+            g_requested.store(true, std::memory_order_release);
+        } else {
+            g_keyDown.store(down, std::memory_order_relaxed);
+        }
+    }
+
+    const bool noclipUsable =
+        settings.noclipEnabled && settings.noclipToggleKey != client::teleport::kNoKey;
+    if (!noclipUsable) {
+        g_noclipToggleDown.store(false, std::memory_order_relaxed);
+        set_noclip_active(false);
         return;
     }
-    g_keyDown.store(down, std::memory_order_relaxed);
+    if (interfaceVisible) {
+        g_noclipToggleDown.store(false, std::memory_order_relaxed);
+        g_noclipClockValid = false;
+        return;
+    }
+
+    const bool toggleDown =
+        (GetAsyncKeyState(static_cast<int>(settings.noclipToggleKey)) & 0x8000) != 0;
+    if (toggleDown && !g_noclipToggleDown.exchange(toggleDown, std::memory_order_relaxed)) {
+        const bool activate = !g_noclipActive.load(std::memory_order_acquire);
+        if (activate) {
+            resolve_noclip_controls();
+            clear_noclip_delta();
+            clear_noclip_target();
+            g_noclipClockValid = false;
+        }
+        set_noclip_active(activate);
+    } else {
+        g_noclipToggleDown.store(toggleDown, std::memory_order_relaxed);
+    }
+
+    if (!g_noclipActive.load(std::memory_order_acquire)) {
+        return;
+    }
+    // No component means orbit/loading or the first pre-sync frame. Do not queue movement that a
+    // later spawn could consume; the active physics hook will discover and cache the next body.
+    if (g_playerComponent.load(std::memory_order_relaxed) == nullptr) {
+        g_noclipClockValid = false;
+        return;
+    }
+    poll_noclip_movement(settings);
 }
 
-/** Moves the local player if a request is pending and this component owns them. */
+/** @return True while noclip is toggled on. */
+bool noclip_active() noexcept {
+    return g_noclipActive.load(std::memory_order_acquire);
+}
+
+/** Applies pending movement before the original sync publishes the player's transform. */
 void apply_pending(void* component) noexcept {
-    if (!g_active.load(std::memory_order_relaxed) || component == nullptr
-        || g_controlledHandle == nullptr) {
+    if (component == nullptr || g_controlledHandle == nullptr) {
         return;
     }
-    const bool requested = g_requested.load(std::memory_order_acquire);
-    // The ownership test runs per component, so it is paid only while a request is open or until
-    // the player's component is known. Once it is known, an ordinary tick costs two atomic reads.
-    if (!requested && g_playerComponent.load(std::memory_order_relaxed) != nullptr) {
+    const bool requested =
+        g_active.load(std::memory_order_relaxed) && g_requested.load(std::memory_order_acquire);
+    const bool noclip = g_noclipActive.load(std::memory_order_acquire);
+    if (!requested && !noclip) {
         return;
     }
-    if (!owns_player(static_cast<std::byte*>(component))) {
-        return;
-    }
+
     std::byte* const physics = static_cast<std::byte*>(component);
-    g_playerComponent.store(physics, std::memory_order_relaxed);
-    if (!requested || !g_forwardValid.load(std::memory_order_acquire)) {
+    std::byte* const cached = g_playerComponent.load(std::memory_order_relaxed);
+    if (cached != nullptr && physics != cached) {
         return;
     }
-    g_requested.store(false, std::memory_order_release);
-    (void)perform_move(physics);
+    if (!owns_player(physics)) {
+        if (physics == cached) {
+            clear_player_state();
+        }
+        return;
+    }
+    g_playerComponent.store(physics, std::memory_order_relaxed);
+    (void)apply_player_movement(physics);
 }
 
-/** Runs the move for a request no physics tick collected. */
+/** Runs movement through the cached component when no ordinary physics tick collected it. */
 void force_pending() noexcept {
-    if (!g_requested.load(std::memory_order_acquire)
-        || !g_forwardValid.load(std::memory_order_acquire)
-        || g_requestAge.load(std::memory_order_relaxed) < kForceAfterFrames) {
+    const bool teleportReady = g_active.load(std::memory_order_relaxed)
+                               && g_requested.load(std::memory_order_acquire)
+                               && g_forwardValid.load(std::memory_order_acquire)
+                               && g_requestAge.load(std::memory_order_relaxed) >= kForceAfterFrames;
+    const bool noclipReady =
+        g_noclipMovePending.load(std::memory_order_acquire)
+        && g_noclipMoveAge.load(std::memory_order_relaxed) >= kForceAfterFrames;
+    if (!teleportReady && !noclipReady) {
         return;
     }
+
     std::byte* const physics = g_playerComponent.load(std::memory_order_relaxed);
-    // The cached pointer outlives a destination change, so it is proved again before use.
     if (physics == nullptr || g_controlledHandle == nullptr || !owns_player(physics)) {
+        clear_player_state();
         return;
     }
-    g_requested.store(false, std::memory_order_release);
-    if (!perform_move(physics)) {
+    const MoveResult result = apply_player_movement(physics);
+    if (!result.written || !result.moved) {
         return;
     }
     invoke_sync(physics);

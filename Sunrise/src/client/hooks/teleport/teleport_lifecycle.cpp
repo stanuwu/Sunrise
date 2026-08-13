@@ -67,7 +67,8 @@ template <typename T> [[nodiscard]] T original(std::size_t slot) noexcept {
 }
 
 /**
- * Publishes the forward vector and reads the bound key, then defers to the original.
+ * Publishes the forward vector and reads the movement controls, then defers to the original.
+ *
  * @param playerIndex Player whose camera was transformed.
  * @return Whatever the original returns.
  */
@@ -75,7 +76,7 @@ std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
     const CameraTransform next = original<CameraTransform>(kCameraSlot);
     const std::int64_t result = next != nullptr ? next(playerIndex) : 0;
     capture_forward(playerIndex);
-    poll_request();
+    poll_controls();
     force_pending();
     return result;
 }

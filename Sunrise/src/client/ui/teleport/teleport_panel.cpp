@@ -12,6 +12,7 @@
 #include <imgui.h>
 
 #include "../../../core/ui/components/toggle/ui_toggle_component.h"
+#include "../../hooks/teleport/runtime.h"
 #include "../../teleport/teleport_settings_store.h"
 
 namespace sunrise::client::ui::teleport {
@@ -25,7 +26,13 @@ constexpr int kLastMouseKey = 6;
 /** Longest key name Windows returns, plus the null. */
 constexpr std::size_t kKeyNameCapacity = 64;
 
-bool g_capturing{};
+enum class CaptureTarget {
+    none,
+    teleport,
+    noclip,
+};
+
+CaptureTarget g_capturing{CaptureTarget::none};
 
 /**
  * Names one virtual key for display.
@@ -80,6 +87,32 @@ void key_name(std::uint32_t virtualKey, std::array<char, kKeyNameCapacity>& outp
     return false;
 }
 
+/** Draws one key picker without allowing the two bindings to capture at the same time. */
+[[nodiscard]] bool
+key_picker(const char* id, CaptureTarget target, std::uint32_t& virtualKey, float width) noexcept {
+    if (g_capturing == target) {
+        if (ImGui::Button("...", ImVec2(width, 0.0F))) {
+            g_capturing = CaptureTarget::none;
+        }
+        std::uint32_t picked = client::teleport::kNoKey;
+        if (capture_key(picked)) {
+            virtualKey = picked;
+            g_capturing = CaptureTarget::none;
+            return true;
+        }
+        return false;
+    }
+    std::array<char, kKeyNameCapacity> name{};
+    key_name(virtualKey, name);
+    ImGui::PushID(id);
+    const bool clicked = ImGui::Button(name.data(), ImVec2(width, 0.0F));
+    ImGui::PopID();
+    if (clicked) {
+        g_capturing = target;
+    }
+    return false;
+}
+
 } // namespace
 
 /** Draws the teleport module inside the active Core UI frame. */
@@ -96,9 +129,9 @@ void draw() noexcept {
     changed = core::ui::components::toggle::control("Enabled", settings.enabled) || changed;
 
     ImGui::Spacing();
-    // One label column and one control column, so the slider and the key button share both edges.
+    // One label column and one control column, so every slider and key button shares both edges.
     const float labelWidth =
-        ImGui::CalcTextSize("Distance").x + ImGui::GetStyle().ItemSpacing.x * 2;
+        ImGui::CalcTextSize("Boost multiplier").x + ImGui::GetStyle().ItemSpacing.x * 2;
     const float controlWidth = ImGui::GetContentRegionAvail().x - labelWidth;
 
     ImGui::AlignTextToFramePadding();
@@ -119,22 +152,61 @@ void draw() noexcept {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Key");
     ImGui::SameLine(labelWidth);
-    if (g_capturing) {
-        if (ImGui::Button("...", ImVec2(controlWidth, 0.0F))) {
-            g_capturing = false;
-        }
-        std::uint32_t picked = client::teleport::kNoKey;
-        if (capture_key(picked)) {
-            settings.virtualKey = picked;
-            g_capturing = false;
-            changed = true;
-        }
-    } else {
-        std::array<char, kKeyNameCapacity> name{};
-        key_name(settings.virtualKey, name);
-        if (ImGui::Button(name.data(), ImVec2(controlWidth, 0.0F))) {
-            g_capturing = true;
-        }
+    changed = key_picker("teleport_key", CaptureTarget::teleport, settings.virtualKey, controlWidth)
+              || changed;
+
+    ImGui::Spacing();
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Noclip");
+    ImGui::Separator();
+    ImGui::TextWrapped("Camera-relative free flight. Physics still owns the player, but its "
+                       "published position and velocity are overridden while active.");
+    ImGui::Spacing();
+
+    changed = core::ui::components::toggle::control("Available", settings.noclipEnabled) || changed;
+
+    ImGui::Spacing();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Active");
+    ImGui::SameLine(labelWidth);
+    ImGui::TextUnformatted(client::hooks::teleport::noclip_active() ? "Yes" : "No");
+
+    ImGui::Spacing();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Toggle key");
+    ImGui::SameLine(labelWidth);
+    changed =
+        key_picker("noclip_key", CaptureTarget::noclip, settings.noclipToggleKey, controlWidth)
+        || changed;
+
+    ImGui::Spacing();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Speed");
+    ImGui::SameLine(labelWidth);
+    ImGui::SetNextItemWidth(controlWidth);
+    float speed = settings.noclipSpeed;
+    if (ImGui::SliderFloat("##noclip_speed",
+                           &speed,
+                           client::teleport::kMinimumNoclipSpeed,
+                           client::teleport::kMaximumNoclipSpeed,
+                           "%.0f units/s")) {
+        settings.noclipSpeed = speed;
+        changed = true;
+    }
+
+    ImGui::Spacing();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Boost multiplier");
+    ImGui::SameLine(labelWidth);
+    ImGui::SetNextItemWidth(controlWidth);
+    float boost = settings.noclipBoostMultiplier;
+    if (ImGui::SliderFloat("##noclip_boost",
+                           &boost,
+                           client::teleport::kMinimumNoclipBoostMultiplier,
+                           client::teleport::kMaximumNoclipBoostMultiplier,
+                           "%.1fx")) {
+        settings.noclipBoostMultiplier = boost;
+        changed = true;
     }
 
     if (changed && !client::teleport::publish(settings)) {

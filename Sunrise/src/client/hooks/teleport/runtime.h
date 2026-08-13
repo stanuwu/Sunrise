@@ -35,8 +35,11 @@ void uninstall() noexcept;
  */
 void capture_forward(std::uint32_t playerIndex) noexcept;
 
-/** Latches one teleport request if the bound key went down this frame. */
-void poll_request() noexcept;
+/** Polls the teleport request, noclip toggle, and active noclip movement controls. */
+void poll_controls() noexcept;
+
+/** @return True while noclip is toggled on and its feature setting remains available. */
+[[nodiscard]] bool noclip_active() noexcept;
 
 /** Runs the move for a request no physics tick collected, and drives the sync for it. */
 void force_pending() noexcept;
