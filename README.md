@@ -20,7 +20,7 @@ a lack of documentation. This will improve over the coming weeks.
 
 ## Support Me
 
-Leave a start on this repo.
+Leave a star on this repo.
 
 If you want to support my open source work you can find the means on my
 [profile](https://github.com/stanuwu). Also consider donating to charity instead.
