@@ -6,6 +6,15 @@
 #include "internal.h"
 
 namespace sunrise::client::content::items::packages {
+namespace {
+
+/** Inventory buckets the installed client maps to an equippable character slot. */
+[[nodiscard]] bool equippable_bucket(std::uint8_t bucketId) noexcept {
+    constexpr std::uint8_t buckets[]{16, 3, 4, 5, 6, 7, 0, 1, 2, 10, 9, 8, 27, 41, 17, 47};
+    return std::find(std::begin(buckets), std::end(buckets), bucketId) != std::end(buckets);
+}
+
+} // namespace
 
 /** Walks the located item index table, then publishes every domain that depends on it. */
 bool build_item_rows(const reader::Source& source,
@@ -39,8 +48,16 @@ bool build_item_rows(const reader::Source& source,
         }
         storage.rows[rowCount++] = state::build_data::items::Definition{
             item.definitionHash, item.definitionIndex, item.bucketId};
-        if (haveAuthored && authored(storage.authoredHashes, item.definitionHash)) {
+        // Keep every equippable definition, not only startup equipment. Opcode 1820 names a
+        // collection item by native index and must be resolvable without a per-item patch.
+        const bool startupAuthored =
+            haveAuthored && authored(storage.authoredHashes, item.definitionHash);
+        if (startupAuthored || equippable_bucket(item.bucketId)) {
             (void)request(item.definitionIndex, storage.requested, detailCount);
+        }
+        // Full plug details are needed for authored appearance/stat aggregation. Runtime
+        // collection items can publish their native initial plug indices directly.
+        if (startupAuthored) {
             (void)append_initial_plugs(item, storage.requested, detailCount);
         }
     }

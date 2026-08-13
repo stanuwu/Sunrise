@@ -31,6 +31,8 @@ enum class EquipmentSlot : std::uint8_t {
 
 /** One fixed entry exists for every semantic equipment slot. */
 inline constexpr std::size_t kEquipmentSlotCount = static_cast<std::size_t>(EquipmentSlot::count);
+/** Maximum number of unequipped character items exposed by the native character object. */
+inline constexpr std::size_t kCharacterInventoryCapacity = 144;
 /** An authored item can pick at most 12 ordinary socket lanes. */
 inline constexpr std::size_t kPlugCapacity = 12;
 /** The engine no-definition hash cannot identify an authored item or plug. */
@@ -72,6 +74,12 @@ struct Equipment {
     std::array<std::optional<Item>, kEquipmentSlotCount> slots{};
 };
 
+/** Persistent unequipped items owned by one character. */
+struct CharacterInventory {
+    std::array<Item, kCharacterInventoryCapacity> items{};
+    std::size_t itemCount{};
+};
+
 /**
  * Finds the semantic State slot for one exact JSON equipment name.
  * @param name Borrowed case-sensitive equipment name.
@@ -96,5 +104,8 @@ struct Equipment {
  * @return True when every used slot holds a whole item.
  */
 [[nodiscard]] bool valid(const Equipment& equipment) noexcept;
+
+/** Checks the occupied prefix of one character's unequipped inventory. */
+[[nodiscard]] bool valid(const CharacterInventory& inventory) noexcept;
 
 } // namespace sunrise::state::account::inventory

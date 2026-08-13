@@ -68,6 +68,13 @@ bool stage_service_outcome(Scratch& scratch,
                                                   bannerAfter)) {
             after = bannerAfter;
         }
+    } else if (outcome.hasInventoryMutation) {
+        if (!push::append_inventory_notification(scratch, before, outcome.mutatedInstanceSoid,
+                                                 key, nonce, response, written, after)) {
+            core::log::write(core::log::Channel::server, core::log::Level::warn,
+                             "ev=queuez stage=inventory result=fail");
+            return true;
+        }
     } else {
         return true;
     }
@@ -81,8 +88,16 @@ bool stage_service_outcome(Scratch& scratch,
                          core::log::Level::warn,
                          "ev=queuez stage=publish result=unrecorded");
     }
-    publication.armsFamily4Repush = armsRepush;
-    publication.family4RepushRoot = armsRepush ? outcome.subscription.familyRootSoid : 0;
+    // Inventory mutations are appended behind their correlated Web Service reply. This client
+    // build completes the task from that first frame but does not always dispatch its trailing
+    // QueueZ notification to the live item-detail screen. Give it the same delayed standalone
+    // Family-4 delivery used by the initial subscription.
+    const bool inventoryRepush = outcome.hasInventoryMutation && before.family4Active
+                                 && before.family4RootSoid != 0;
+    publication.armsFamily4Repush = armsRepush || inventoryRepush;
+    publication.family4RepushRoot = inventoryRepush
+                                        ? before.family4RootSoid
+                                        : (armsRepush ? outcome.subscription.familyRootSoid : 0);
     return true;
 }
 

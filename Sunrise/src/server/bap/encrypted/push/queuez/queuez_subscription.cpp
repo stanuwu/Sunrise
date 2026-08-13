@@ -2,9 +2,11 @@
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
+#include "../../../../../middleware/datagen/definitions.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "../../queuez/queuez_state_validation.h"
 #include "../snapshot/snapshot.h"
+#include "../snapshot/internal.h"
 #include "queuez_push_reporting.h"
 #include "queuez_update_frame.h"
 
@@ -78,6 +80,37 @@ namespace {
 }
 
 } // namespace
+
+bool append_inventory_notification(
+    Scratch& scratch,
+    const queuez::SessionState& before,
+    std::uint64_t mutatedInstanceSoid,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::array<std::byte, state::kBapNonceSize>& nonce,
+    std::span<std::byte> response,
+    std::size_t& written,
+    queuez::SessionState& after) noexcept {
+    after = before;
+    if (!before.family4Active || before.family4RootSoid == 0) return false;
+    snapshot::Prepared prepared{};
+    if (mutatedInstanceSoid == 0
+        || !snapshot::prepare_item_update(scratch, before.family4RootSoid,
+                                          before.family4Version + 1,
+                                          mutatedInstanceSoid, prepared)
+        || !queuez::stage_family4_replacement(before, prepared.family, after)) {
+        return false;
+    }
+    const std::size_t beforeBytes = written;
+    if (!queuez_frame::append(scratch, prepared.family, prepared.rawClearSize,
+                              prepared.compressedClearSize, key, nonce, response, written)) {
+        after = before;
+        return false;
+    }
+    middleware::secure_channel::advance_nonce(nonce);
+    queuez_report::push("inventory", queuez::kAccountFamilyType,
+                        prepared.family.objects.size(), written - beforeBytes, 1);
+    return true;
+}
 
 /**
  * Stages the snapshots one subscription needs.

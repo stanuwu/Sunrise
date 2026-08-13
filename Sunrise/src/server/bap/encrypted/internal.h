@@ -43,6 +43,8 @@ struct ServiceOutcome {
     queuez::ChangeCharacter changeCharacter{};
     bool hasSelectCharacter{};
     queuez::SelectCharacter selectCharacter{};
+    bool hasInventoryMutation{};
+    std::uint64_t mutatedInstanceSoid{};
     bool hasActivitySessionAllocation{};
     state::activity::PendingAllocation activitySessionAllocation{};
     bool hasActivityTransaction{};
@@ -238,6 +240,17 @@ append_select_character_notification(Scratch& scratch,
                                      std::span<const std::byte, state::kBapNonceSize> nonce,
                                      std::span<std::byte> response,
                                      std::size_t& written) noexcept;
+
+/** Appends a next-version full Family-4 replacement after an inventory mutation. */
+[[nodiscard]] bool append_inventory_notification(
+    Scratch& scratch,
+    const queuez::SessionState& before,
+    std::uint64_t mutatedInstanceSoid,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::array<std::byte, state::kBapNonceSize>& nonce,
+    std::span<std::byte> response,
+    std::size_t& written,
+    queuez::SessionState& after) noexcept;
 
 } // namespace push
 

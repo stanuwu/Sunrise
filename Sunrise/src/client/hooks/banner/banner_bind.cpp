@@ -106,9 +106,21 @@ __declspec(noinline) std::int64_t __fastcall tick(void* self, std::int64_t frame
     std::byte* const component = static_cast<std::byte*>(self);
     std::uint64_t account = 0;
     std::uint8_t family = 0;
+    std::int32_t currentLight = 0;
+    std::uint32_t emblemState = 0;
     std::memcpy(&account, component + BannerLayout::accountKey, sizeof account);
     std::memcpy(&family, component + BannerLayout::family, sizeof family);
-    if (account != 0 && family != kBannerFamilyNone) {
+    std::memcpy(&currentLight, component + BannerLayout::light, sizeof currentLight);
+    std::memcpy(&emblemState, component + BannerLayout::emblemState, sizeof emblemState);
+    // A component can bind before the Family-4 snapshot is usable. In that case the update body
+    // leaves power at zero or emblem state 2. Keep retrying that incomplete component; once both
+    // values resolve, the ordinary clean fast path resumes.
+    if (account != 0 && family != kBannerFamilyNone && currentLight > 0 && emblemState == 0) {
+        // The presentation widget is a second consumer behind this component. A one-shot dirty
+        // transition updates the component but can occur before that widget subscribes, leaving
+        // the visible card at its constructor defaults. Keep the resolved component publishable
+        // while it is ticking so late-created orbit/fireteam views receive the same values.
+        std::memcpy(component + BannerLayout::dirty, &kBannerDirty, sizeof kBannerDirty);
         return original(self, frame);
     }
     const Identity identity = selected_identity();

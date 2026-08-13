@@ -116,6 +116,8 @@ bool process(const ServiceRoute& route,
         }
         outcome.hasSubscription = webOutcome.hasSubscription;
         outcome.subscription = webOutcome.subscription;
+        outcome.hasInventoryMutation = webOutcome.hasInventoryMutation;
+        outcome.mutatedInstanceSoid = webOutcome.acquiredInstanceSoid;
         // A pick that names the resident character moves nothing, so staging refuses it and the
         // reply still stands on its own.
         if (webOutcome.hasSelectedCharacter

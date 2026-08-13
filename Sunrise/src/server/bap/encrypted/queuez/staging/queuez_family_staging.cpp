@@ -102,6 +102,37 @@ bool stage_family4_snapshot(const SessionState& before,
     return true;
 }
 
+bool stage_family4_replacement(const SessionState& before,
+                               const middleware::queuez::Family& family,
+                               SessionState& after) noexcept {
+    after = before;
+    if (!valid(before) || !before.family4Active || family.type != kAccountFamilyType
+        || family.rootSoid != before.family4RootSoid
+        || family.version != before.family4Version + 1
+        || family.flags != 0 || family.objects.empty()
+        || family.objects.size() > kResidentCapacity
+        || family.objects.size() > static_cast<std::size_t>((std::numeric_limits<std::uint8_t>::max)())) {
+        return false;
+    }
+    SessionState candidate = before;
+    candidate.family4Version = family.version;
+    for (const auto& object : family.objects) {
+        if (object.id == 0 || object.version == 0 || object.payload.empty()) return false;
+        std::size_t resident = 0;
+        while (resident < candidate.family4ResidentCount
+               && candidate.family4Residents[resident].objectSoid != object.version) {
+            ++resident;
+        }
+        if (resident == candidate.family4ResidentCount) {
+            if (candidate.family4ResidentCount >= candidate.family4Residents.size()) return false;
+            ++candidate.family4ResidentCount;
+        }
+        candidate.family4Residents[resident] = {object.version, object.id};
+    }
+    after = candidate;
+    return true;
+}
+
 /** Stages the family-zero publication policy. */
 bool stage_family0_subscription(const SessionState& before,
                                 std::uint64_t selectedCharacter,

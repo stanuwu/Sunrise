@@ -15,6 +15,9 @@ struct Outcome {
     /** An opcode-504 pick moved the selection and its Family-4 object still has to follow. */
     bool hasSelectedCharacter{};
     std::uint64_t selectedCharacterSoid{};
+    /** A collection withdrawal changed the selected character's inventory. */
+    bool hasInventoryMutation{};
+    std::uint64_t acquiredInstanceSoid{};
 };
 
 /**

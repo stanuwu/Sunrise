@@ -90,6 +90,14 @@ inline constexpr std::size_t kSingleObjectCount = 1;
                            const Reservation& reservation,
                            Prepared& prepared) noexcept;
 
+/** Builds a full Family-4 replacement at an active peer's next version. */
+[[nodiscard]] bool prepare_versioned(Scratch& scratch,
+                                     const middleware::queuez::Subscription& subscription,
+                                     std::uint32_t accountObjectId,
+                                     std::int32_t familyVersion,
+                                     const Reservation& reservation,
+                                     Prepared& prepared) noexcept;
+
 /**
  * Builds the Family-4 increment that moves the character object to the picked character.
  * @param scratch Object and compression storage owned by the lock.
@@ -100,6 +108,13 @@ inline constexpr std::size_t kSingleObjectCount = 1;
 [[nodiscard]] bool prepare_selection_move(Scratch& scratch,
                                           const queuez::SelectCharacter& select,
                                           Prepared& prepared) noexcept;
+
+/** Builds a minimal next-version update for one item and its owning character. */
+[[nodiscard]] bool prepare_item_update(Scratch& scratch,
+                                       std::uint64_t familyRootSoid,
+                                       std::int32_t familyVersion,
+                                       std::uint64_t instanceSoid,
+                                       Prepared& prepared) noexcept;
 
 /** Selected-character mappings the character and item-instance encoders need. */
 struct Resolved {

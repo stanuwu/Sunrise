@@ -6,6 +6,12 @@
 
 namespace sunrise::state::build_data {
 
+bool find_item_definition_index(std::uint16_t definitionIndex,
+                                items::Definition& definition) noexcept {
+    definition = {};
+    return item_definitions_ready() && items::find_index(definitionIndex, definition);
+}
+
 /** @return True when the whole inventory-bucket descriptor table is in State. */
 bool inventory_bucket_descriptors_ready() noexcept {
     return inventory::buckets::count() != 0;

@@ -7,6 +7,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../hooking/detour.h"
+#include "../network/investment/internal.h"
 #include "../../patterns/image_scan.h"
 #include "internal.h"
 
@@ -70,7 +71,19 @@ __declspec(noinline) char __fastcall handler(void* self,
         return kNotHandled;
     }
     const Handler original = g_original.load(std::memory_order_acquire);
-    return original != nullptr ? original(self, context, message) : kNotHandled;
+    // The native commit notifies live item-detail screens before returning. Arm the dependency
+    // cache first so that notification observes the new Family-4 objects instead of retaining the
+    // old socket view until the screen is closed.
+    network::investment::arm_derived_rebuild();
+    const char result = original != nullptr ? original(self, context, message) : kNotHandled;
+    if (result != kNotHandled) {
+        // Family updates replace authoritative investment objects, but this client build does not
+        // reliably expire the derived character/loadout cache after the first Family-4 arrival.
+        // Marking it stale here makes one subsequent read rebuild power, socket, equipment and
+        // bucket views from the objects the native handler has just committed.
+        network::investment::arm_derived_rebuild();
+    }
+    return result;
 }
 
 } // namespace

@@ -10,13 +10,16 @@
 namespace sunrise::middleware::datagen::family4::loadout {
 
 /** One selected item can occupy each of the 16 authored semantic equipment slots. */
-inline constexpr std::size_t kItemCapacity = state::account::inventory::kEquipmentSlotCount;
+inline constexpr std::size_t kItemCapacity =
+    state::account::inventory::kEquipmentSlotCount
+    + state::account::inventory::kCharacterInventoryCapacity;
 
 /** One installed-build-resolved item ready for character and instance encoding. */
 struct ResolvedItem {
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};
     std::int32_t quantity{};
+    bool equipped{};
     instance::ResolvedInstance instance{};
 };
 

@@ -29,6 +29,7 @@ namespace family4_datagen = middleware::datagen::family4;
  * @return True when the staged descriptors pass the ownership check.
  */
 [[nodiscard]] bool publish(const middleware::queuez::Subscription& subscription,
+                           std::int32_t familyVersion,
                            std::size_t objectCount,
                            std::size_t compressedExtent,
                            const Reservation& reservation,
@@ -38,7 +39,7 @@ namespace family4_datagen = middleware::datagen::family4;
     staged.family = middleware::queuez::Family{
         kAccountFamilyType,
         subscription.familyRootSoid,
-        kInitialFamilyVersion,
+        familyVersion,
         middleware::queuez::kFullSnapshotFlag,
         std::span(staged.objects).first(objectCount),
     };
@@ -48,9 +49,10 @@ namespace family4_datagen = middleware::datagen::family4;
 } // namespace
 
 /** Builds the Family-4 account, selected-character, and item-instance snapshot. */
-bool prepare(Scratch& scratch,
+bool prepare_versioned(Scratch& scratch,
              const middleware::queuez::Subscription& subscription,
              std::uint32_t accountObjectId,
+             std::int32_t familyVersion,
              const Reservation& reservation,
              Prepared& prepared) noexcept {
     if (reservation.rawWriteOffset > scratch.plaintext.size()
@@ -150,7 +152,16 @@ bool prepare(Scratch& scratch,
             (std::max)(staged.rawClearSize,
                        reservation.rawWriteOffset + family4_datagen::instance::layout::kObjectSize);
     }
-    return publish(subscription, objectCount, compressedExtent, reservation, staged, prepared);
+    return publish(subscription, familyVersion, objectCount, compressedExtent, reservation, staged, prepared);
+}
+
+bool prepare(Scratch& scratch,
+             const middleware::queuez::Subscription& subscription,
+             std::uint32_t accountObjectId,
+             const Reservation& reservation,
+             Prepared& prepared) noexcept {
+    return prepare_versioned(scratch, subscription, accountObjectId, kInitialFamilyVersion,
+                             reservation, prepared);
 }
 
 } // namespace sunrise::server::bap::encrypted::push::snapshot

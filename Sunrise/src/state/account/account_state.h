@@ -90,6 +90,8 @@ struct CharacterState {
     std::uint8_t classAbilityEntry{kDefaultClassAbilityEntry};
     /** Authored loadout keyed only by stable semantic equipment slots. */
     account::inventory::Equipment equipment;
+    /** Runtime-owned items acquired from collections and retained between snapshots. */
+    account::inventory::CharacterInventory inventory;
 };
 
 /** Account identity shared by backend object families. */

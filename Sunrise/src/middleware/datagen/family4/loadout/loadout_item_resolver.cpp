@@ -19,6 +19,12 @@ namespace build_socket_lists = state::build_data::socket_entry_lists;
 
 /** Native instanced inventory rows always carry exactly one item. */
 constexpr std::int32_t kInstancedQuantity = 1;
+/** User-selected appearance overrides for the two native-default Warlock pieces. */
+constexpr std::uint32_t kShadowsMindHash = 0xC7A2025EU;
+constexpr std::uint32_t kEmperorsMinisterRobesHash = 0xD621F24BU;
+constexpr std::uint32_t kAmethystVeilHash = 0x51487F22U;
+/** Native socket type 26 is the armour shader lane. */
+constexpr std::uint16_t kArmourShaderSocketType = 26;
 
 /**
  * Finds the installed item index for one authored plug hash.
@@ -48,6 +54,7 @@ constexpr std::int32_t kInstancedQuantity = 1;
  * @return True when policy, lane count, and every present plug resolve.
  */
 [[nodiscard]] bool resolve_ordinary_sockets(const authored_inventory::Sockets& authored,
+                                            std::uint32_t baseDefinitionHash,
                                             const build_details::Definition& definition,
                                             std::size_t itemDefinitionCount,
                                             instance::OrdinarySockets& output) noexcept {
@@ -75,6 +82,24 @@ constexpr std::int32_t kInstancedQuantity = 1;
                 return false;
             }
             output.plugs[index] = plugIndex;
+        }
+        if (baseDefinitionHash == kShadowsMindHash
+            || baseDefinitionHash == kEmperorsMinisterRobesHash) {
+            std::uint16_t shaderIndex = 0;
+            if (!resolve_plug(kAmethystVeilHash, itemDefinitionCount, shaderIndex)) {
+                return false;
+            }
+            bool replaced = false;
+            for (std::size_t index = 0; index < definition.ordinarySocketCount; ++index) {
+                if (definition.socketTypes[index] == kArmourShaderSocketType) {
+                    output.plugs[index] = shaderIndex;
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                return false;
+            }
         }
         return true;
     }
@@ -155,6 +180,7 @@ bool resolve_item(const authored_inventory::Item& authored,
     candidate.item.equipmentSlot = static_cast<std::uint8_t>(*itemDetail.equipmentSlot);
     if (!resolve_quantity(authored, itemDetail, candidate.item.quantity)
         || !resolve_ordinary_sockets(authored.sockets,
+                                     authored.definitionHash,
                                      itemDetail,
                                      itemDefinitionCount,
                                      candidate.item.instance.ordinarySockets)) {

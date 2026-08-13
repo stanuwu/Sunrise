@@ -109,6 +109,16 @@ bool resolve_instances(const state::AccountState& account,
             || !place_item(candidate, occupied, resolved[itemCount])) {
             return false;
         }
+        resolved[itemCount].equipped = true;
+        ++itemCount;
+    }
+    for (std::size_t inventoryIndex = 0;
+         character.selected && inventoryIndex < character.inventory.itemCount; ++inventoryIndex) {
+        Candidate candidate{};
+        if (itemCount >= resolved.size()
+            || !resolve_item(character.inventory.items[inventoryIndex], character, itemDefinitionCount, socketEntryListCount, candidate)
+            || !place_item(candidate, occupied, resolved[itemCount])) return false;
+        resolved[itemCount].equipped = false;
         ++itemCount;
     }
     std::sort(resolved.begin(),
@@ -186,8 +196,16 @@ bool resolve(const state::AccountState& account,
             }
             if (characterIndex == selectedCharacterIndex) {
                 selectedCandidates[semanticIndex] = candidate;
+                selectedCandidates[semanticIndex].item.equipped = true;
                 selectedPresent[semanticIndex] = true;
             }
+        }
+        for (std::size_t inventoryIndex = 0; inventoryIndex < character.inventory.itemCount; ++inventoryIndex) {
+            const authored_inventory::Item& authored = character.inventory.items[inventoryIndex];
+            const auto instanceSoidEnd = instanceSoids.cbegin() + static_cast<std::ptrdiff_t>(instanceSoidCount);
+            if (instanceSoidCount >= instanceSoids.size()
+                || std::find(instanceSoids.cbegin(), instanceSoidEnd, authored.instanceSoid) != instanceSoidEnd) return false;
+            instanceSoids[instanceSoidCount++] = authored.instanceSoid;
         }
     }
 
@@ -203,6 +221,15 @@ bool resolve(const state::AccountState& account,
                 selectedCandidates[semanticIndex], occupied, staged.items[staged.itemCount])) {
             return false;
         }
+        ++staged.itemCount;
+    }
+    const state::CharacterState& selectedCharacter = account.characters[selectedCharacterIndex];
+    for (std::size_t inventoryIndex = 0; inventoryIndex < selectedCharacter.inventory.itemCount; ++inventoryIndex) {
+        Candidate candidate{};
+        if (staged.itemCount >= staged.items.size()
+            || !resolve_item(selectedCharacter.inventory.items[inventoryIndex], selectedCharacter, itemDefinitionCount, socketEntryListCount, candidate)
+            || !place_item(candidate, occupied, staged.items[staged.itemCount])) return false;
+        staged.items[staged.itemCount].equipped = false;
         ++staged.itemCount;
     }
     std::sort(staged.items.begin(),

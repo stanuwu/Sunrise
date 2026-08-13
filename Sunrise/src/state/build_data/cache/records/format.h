@@ -24,7 +24,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Current build-data cache format. An older cache is rebuilt rather than read, so a bump needs
  * no other edit. Bump it whenever a domain's stored shape changes.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 22;
+inline constexpr std::uint32_t kCacheFormatVersion = 25;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */

@@ -7,7 +7,10 @@
 namespace sunrise::state::build_data::items {
 
 /** Signed native definition indices give 32,768 item rows. */
-inline constexpr std::size_t kDefinitionCapacity = 32768;
+// Collection requests carry the native item-table index as an unsigned 16-bit value. Season 11
+// definitions extend well beyond 0x7FFF (for example 0xB992), so a half-range catalog silently
+// made otherwise valid collection withdrawals unresolvable.
+inline constexpr std::size_t kDefinitionCapacity = 65536;
 /** All bucket bits set mark a valid item row whose inventory bucket was not found. */
 inline constexpr std::uint8_t kUnresolvedBucketId = 0xFF;
 

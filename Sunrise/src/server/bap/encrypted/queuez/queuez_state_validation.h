@@ -20,7 +20,12 @@ namespace sunrise::server::bap::encrypted::queuez {
  */
 [[nodiscard]] bool stage_family4_snapshot(const SessionState& before,
                                           const middleware::queuez::Family& family,
-                                          SessionState& after) noexcept;
+                                           SessionState& after) noexcept;
+
+/** Stages a next-version incremental after-image after an inventory mutation. */
+[[nodiscard]] bool stage_family4_replacement(const SessionState& before,
+                                             const middleware::queuez::Family& family,
+                                             SessionState& after) noexcept;
 
 /**
  * Decides whether one family-zero subscription publishes, and as which kind of frame.

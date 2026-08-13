@@ -9,6 +9,8 @@
 account_selection_patch_encoder.h"
 #include "../../../../../middleware/datagen/family4/character/character_encoder.h"
 #include "../../../../../middleware/datagen/family4/character/layout.h"
+#include "../../../../../middleware/datagen/family4/instance/instance_encoder.h"
+#include "../../../../../middleware/datagen/family4/instance/layout.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "internal.h"
 #include "snapshot_storage.h"
@@ -135,6 +137,62 @@ bool prepare_selection_move(Scratch& scratch,
         return report_failure("move_commit");
     }
     return true;
+}
+
+bool prepare_item_update(Scratch& scratch,
+                         std::uint64_t familyRootSoid,
+                         std::int32_t familyVersion,
+                         std::uint64_t instanceSoid,
+                         Prepared& prepared) noexcept {
+    if (familyRootSoid == 0 || familyVersion <= kInitialFamilyVersion || instanceSoid == 0) {
+        return report_failure("item_update_input");
+    }
+    const state::AccountState account = state::account_snapshot();
+    const std::optional<std::size_t> selectedIndex = find_character_index(account);
+    Resolved selected{};
+    if (!state::account::valid(account) || !selectedIndex.has_value()
+        || !resolve(account, *selectedIndex, selected)) {
+        return report_failure("item_update_selection");
+    }
+    const family4_datagen::instance::ResolvedInstance* changed = nullptr;
+    for (std::size_t index = 0; index < selected.loadout.itemCount; ++index) {
+        const auto& candidate = selected.loadout.items[index].instance;
+        if (candidate.instanceSoid == instanceSoid) {
+            changed = &candidate;
+            break;
+        }
+    }
+    if (changed == nullptr) return report_failure("item_update_instance");
+
+    Prepared staged{};
+    const auto raw = std::span(scratch.plaintext);
+    std::size_t compressedExtent = 0;
+    if (family4_datagen::character::layout::kObjectSize > raw.size()) {
+        return report_failure("item_update_character_storage");
+    }
+    const auto characterBytes = raw.first(family4_datagen::character::layout::kObjectSize);
+    const auto& character = account.characters[selected.characterIndex];
+    if (!family4_datagen::character::encode(character, selected.loadout,
+                                            selected.lightEvaluation, characterBytes)
+        || !append_object(scratch, characterBytes, selected.characterObjectId, character.soid,
+                          staged.objects[1], compressedExtent)) {
+        return report_failure("item_update_character");
+    }
+    if (family4_datagen::instance::layout::kObjectSize > raw.size()) {
+        return report_failure("item_update_instance_storage");
+    }
+    const auto instanceBytes = raw.first(family4_datagen::instance::layout::kObjectSize);
+    if (!family4_datagen::instance::encode(*changed, instanceBytes)
+        || !append_object(scratch, instanceBytes, selected.itemInstanceObjectId, instanceSoid,
+                          staged.objects[0], compressedExtent)) {
+        return report_failure("item_update_instance_encode");
+    }
+    staged.rawClearSize = (std::max)(family4_datagen::character::layout::kObjectSize,
+                                     family4_datagen::instance::layout::kObjectSize);
+    staged.compressedClearSize = compressedExtent;
+    staged.family = middleware::queuez::Family{kAccountFamilyType, familyRootSoid, familyVersion,
+                                                0, std::span(staged.objects).first(2)};
+    return commit(staged, prepared);
 }
 
 } // namespace sunrise::server::bap::encrypted::push::snapshot

@@ -59,6 +59,18 @@ void shutdown() noexcept;
 /** @return A copy of the active account state, read under the lock. */
 [[nodiscard]] AccountState account_snapshot() noexcept;
 
+/** Adds one valid collection item to the selected character's matching inventory bucket. */
+[[nodiscard]] bool reacquire_collection_item(std::uint16_t definitionIndex,
+                                             std::uint64_t& instanceSoid) noexcept;
+
+/** Atomically writes the current equipment and inventory overlay beside settings.json. */
+[[nodiscard]] bool persist_inventory_state() noexcept;
+
+/** Replaces one ordinary socket lane on an owned item instance. */
+[[nodiscard]] bool apply_item_plug(std::uint64_t instanceSoid,
+                                   std::uint8_t socketLane,
+                                   std::uint16_t plugDefinitionIndex) noexcept;
+
 /** @return A copy of the evaluated content state, read under the lock. */
 [[nodiscard]] InvestmentState investment_snapshot() noexcept;
 

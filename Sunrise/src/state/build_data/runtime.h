@@ -79,6 +79,10 @@ publish_item_definitions(std::span<const items::Definition> definitions) noexcep
 [[nodiscard]] bool find_item_definition_hash(std::uint32_t definitionHash,
                                              items::Definition& definition) noexcept;
 
+/** Finds one installed-build item by the native index carried by collection requests. */
+[[nodiscard]] bool find_item_definition_index(std::uint16_t definitionIndex,
+                                              items::Definition& definition) noexcept;
+
 /** @return True when a complete configured-detail domain, empty or not, is published. */
 [[nodiscard]] bool configured_item_details_ready() noexcept;
 

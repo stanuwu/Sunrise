@@ -1,7 +1,9 @@
 #include "web_service_runtime.h"
 
 #include <array>
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 #include "../../core/logging/log.h"
 #include "../../middleware/web_service/messages/opcode205.h"
@@ -24,14 +26,71 @@ constexpr std::size_t kOpcodeLineCapacity = 64;
  * the opcodes the Client sends are what drive its queuez state machine.
  * @param opcode Parsed wire opcode.
  */
-void report_opcode(std::uint32_t opcode) noexcept {
-    std::array<char, kOpcodeLineCapacity> line{};
-    const int written =
-        std::snprintf(line.data(), line.size(), "ev=ws stage=request opcode=%u", opcode);
+void report_opcode(const middleware::web_service::Message& message) noexcept {
+    std::array<char, core::log::kLineCapacity> line{};
+    int written = std::snprintf(line.data(),
+                                line.size(),
+                                "ev=ws stage=request opcode=%u tx=%u bytes=%zu head=",
+                                message.opcode,
+                                message.transactionId,
+                                message.payload.size());
+    constexpr std::size_t kPreviewBytes = 32;
+    const std::size_t preview = (std::min)(message.payload.size(), kPreviewBytes);
+    for (std::size_t index = 0;
+         written > 0 && index < preview
+         && static_cast<std::size_t>(written) + 2 < line.size();
+         ++index) {
+        const int appended = std::snprintf(line.data() + written,
+                                           line.size() - static_cast<std::size_t>(written),
+                                           "%02X",
+                                           std::to_integer<unsigned>(message.payload[index]));
+        if (appended <= 0) {
+            break;
+        }
+        written += appended;
+    }
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,
                          {line.data(), static_cast<std::size_t>(written)});
+    }
+
+    // Mutation requests are still being mapped. Preserve their complete payload in bounded
+    // chunks so settings saves and collection withdrawals can be decoded from one test run.
+    const bool mutationCandidate = message.opcode == 701
+                                   || (message.opcode >= 1200 && message.opcode < 1400);
+    constexpr std::size_t kChunkBytes = 48;
+    if (!mutationCandidate) {
+        return;
+    }
+    for (std::size_t offset = 0; offset < message.payload.size(); offset += kChunkBytes) {
+        std::array<char, core::log::kLineCapacity> chunkLine{};
+        int chunkWritten = std::snprintf(chunkLine.data(),
+                                         chunkLine.size(),
+                                         "ev=ws stage=payload opcode=%u offset=%zu data=",
+                                         message.opcode,
+                                         offset);
+        const std::size_t chunkSize =
+            (std::min)(kChunkBytes, message.payload.size() - offset);
+        for (std::size_t index = 0;
+             chunkWritten > 0 && index < chunkSize
+             && static_cast<std::size_t>(chunkWritten) + 2 < chunkLine.size();
+             ++index) {
+            const int appended =
+                std::snprintf(chunkLine.data() + chunkWritten,
+                              chunkLine.size() - static_cast<std::size_t>(chunkWritten),
+                              "%02X",
+                              std::to_integer<unsigned>(message.payload[offset + index]));
+            if (appended <= 0) {
+                break;
+            }
+            chunkWritten += appended;
+        }
+        if (chunkWritten > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {chunkLine.data(), static_cast<std::size_t>(chunkWritten)});
+        }
     }
 }
 
@@ -73,6 +132,65 @@ void select_character(const middleware::web_service::Message& message, Outcome& 
                          core::log::Level::info,
                          {line.data(), static_cast<std::size_t>(written)});
     }
+}
+
+void reacquire_collection_item(const middleware::web_service::Message& message,
+                               Outcome& outcome) noexcept {
+    if (message.payload.size() != 3) return;
+    const std::uint32_t value = std::to_integer<std::uint8_t>(message.payload[0])
+                                | (std::to_integer<std::uint8_t>(message.payload[1]) << 8U)
+                                | (std::to_integer<std::uint8_t>(message.payload[2]) << 16U);
+    if (value > UINT16_MAX) return;
+    std::uint64_t instanceSoid = 0;
+    if (!state::reacquire_collection_item(static_cast<std::uint16_t>(value), instanceSoid)) {
+        core::log::write(core::log::Channel::server, core::log::Level::warn,
+                         "ev=ws1820 stage=reacquire result=refused");
+        return;
+    }
+    outcome.hasInventoryMutation = true;
+    outcome.acquiredInstanceSoid = instanceSoid;
+    std::array<char, 128> line{};
+    const int count = std::snprintf(line.data(), line.size(),
+                                    "ev=ws1820 stage=reacquire result=ok index=%u soid=0x%llX",
+                                    value, static_cast<unsigned long long>(instanceSoid));
+    if (count > 0) core::log::write(core::log::Channel::server, core::log::Level::info,
+                                    {line.data(), static_cast<std::size_t>(count)});
+}
+
+void apply_item_plug(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
+    if (message.payload.size() != 24) return;
+    const auto read_u32_be = [&](std::size_t offset) noexcept {
+        std::uint32_t value = 0;
+        for (std::size_t byte = 0; byte < 4; ++byte)
+            value = (value << 8U) | std::to_integer<std::uint8_t>(message.payload[offset + byte]);
+        return value;
+    };
+    const auto read_u64_be = [&](std::size_t offset) noexcept {
+        std::uint64_t value = 0;
+        for (std::size_t byte = 0; byte < 8; ++byte)
+            value = (value << 8U) | std::to_integer<std::uint8_t>(message.payload[offset + byte]);
+        return value;
+    };
+    const std::uint32_t plugSelector = read_u32_be(0);
+    const std::uint32_t socketSelector = read_u32_be(4);
+    const std::uint64_t marker = read_u64_be(8);
+    const std::uint64_t encodedInstance = read_u64_be(16);
+    if (marker != 1 || socketSelector < 2 || (socketSelector - 2) % 4 != 0
+        || plugSelector < 0x18000000U) return;
+    const std::uint32_t plugIndex = (plugSelector >> 12U) - 0x18000U;
+    const std::uint32_t lane = (socketSelector - 2U) / 4U;
+    const std::uint64_t instanceSoid = 0x4000000000000000ULL | (encodedInstance >> 2U);
+    if (plugIndex > UINT16_MAX || lane >= state::account::inventory::kPlugCapacity
+        || !state::apply_item_plug(instanceSoid, static_cast<std::uint8_t>(lane),
+                                  static_cast<std::uint16_t>(plugIndex))) {
+        core::log::write(core::log::Channel::server, core::log::Level::warn,
+                         "ev=ws1901 stage=plug result=refused");
+        return;
+    }
+    outcome.hasInventoryMutation = true;
+    outcome.acquiredInstanceSoid = instanceSoid;
+    core::log::write(core::log::Channel::server, core::log::Level::info,
+                     "ev=ws1901 stage=plug result=ok");
 }
 
 /**
@@ -134,7 +252,7 @@ bool consume(std::span<const std::byte> request,
             core::log::Channel::server, core::log::Level::warn, "ev=ws stage=parse result=fail");
         return false;
     }
-    report_opcode(message.opcode);
+    report_opcode(message);
 
     if (message.opcode == middleware::web_service::messages::opcode205::kOpcode) {
         const auto investment = state::investment_snapshot();
@@ -196,6 +314,10 @@ bool consume(std::span<const std::byte> request,
     if (message.opcode == middleware::web_service::messages::opcode504::kOpcode) {
         // The selection is State, not a response field, so it publishes after the reply encodes.
         select_character(message, outcome);
+    } else if (message.opcode == 1820) {
+        reacquire_collection_item(message, outcome);
+    } else if (message.opcode == 1901) {
+        apply_item_plug(message, outcome);
     }
     return true;
 }

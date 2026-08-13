@@ -62,6 +62,10 @@ constexpr std::size_t kPreviewFlagOffsets[]{8, 9};
 /** @param light Equipment light. @return The trailing summary block both records carry. */
 [[nodiscard]] layout::Summary build_summary(std::int32_t light) noexcept {
     layout::Summary summary{};
+    // Different presentation paths consume different mirrors of the same value. The
+    // character screen uses the signed field while the orbit fireteam card reads a float.
+    summary.lightFloatA = static_cast<float>(light);
+    summary.lightFloatB = static_cast<float>(light);
     summary.light = light;
     summary.hashA = layout::kNoHash;
     return summary;

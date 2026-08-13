@@ -87,4 +87,16 @@ bool valid(const Equipment& equipment) noexcept {
     return true;
 }
 
+bool valid(const CharacterInventory& inventory) noexcept {
+    if (inventory.itemCount > inventory.items.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < inventory.itemCount; ++index) {
+        if (!valid(inventory.items[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace sunrise::state::account::inventory

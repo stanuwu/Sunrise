@@ -9,6 +9,7 @@
 #include <limits>
 #include <span>
 
+#include "../../core/filesystem/path.h"
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
 #include "../activity/defaults/activity_defaults_validation.h"
@@ -27,6 +28,60 @@ SRWLOCK g_stateLock{SRWLOCK_INIT};
 } // namespace runtime::storage
 
 namespace {
+
+core::path::Buffer g_inventoryStatePath{};
+constexpr std::uint32_t kInventoryStateMagic = 0x564E4953U; // SINV
+constexpr std::uint32_t kInventoryStateVersion = 1;
+struct InventoryStateHeader {
+    std::uint32_t magic{};
+    std::uint32_t version{};
+    std::uint32_t recordSize{};
+    std::uint32_t characterCount{};
+};
+struct InventoryCharacterRecord {
+    std::uint64_t characterSoid{};
+    account::inventory::Equipment equipment{};
+    account::inventory::CharacterInventory inventory{};
+};
+
+void configure_inventory_state_path(void* module) noexcept {
+    g_inventoryStatePath = {};
+    if (module != nullptr && core::path::artifact_directory(module, g_inventoryStatePath)) {
+        (void)core::path::append(g_inventoryStatePath, L"\\inventory_state.bin");
+    }
+}
+
+void overlay_persisted_inventory(AccountState& accountState) noexcept {
+    if (g_inventoryStatePath.length == 0) return;
+    const AccountState baseline = accountState;
+    const HANDLE file = CreateFileW(g_inventoryStatePath.chars.data(), GENERIC_READ, FILE_SHARE_READ,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    InventoryStateHeader header{};
+    DWORD read = 0;
+    bool complete = ReadFile(file, &header, sizeof header, &read, nullptr) != FALSE
+                    && read == sizeof header && header.magic == kInventoryStateMagic
+                    && header.version == kInventoryStateVersion
+                    && header.recordSize == sizeof(InventoryCharacterRecord)
+                    && header.characterCount <= kCharacterCapacity;
+    for (std::size_t recordIndex = 0; complete && recordIndex < header.characterCount;
+         ++recordIndex) {
+        InventoryCharacterRecord record{};
+        complete = ReadFile(file, &record, sizeof record, &read, nullptr) != FALSE
+                   && read == sizeof record;
+        for (std::size_t characterIndex = 0; complete && characterIndex < accountState.characterCount;
+             ++characterIndex) {
+            if (accountState.characters[characterIndex].soid == record.characterSoid) {
+                accountState.characters[characterIndex].equipment = record.equipment;
+                accountState.characters[characterIndex].inventory = record.inventory;
+            }
+        }
+    }
+    CloseHandle(file);
+    if (!complete || !account::valid(accountState)) {
+        accountState = baseline;
+    }
+}
 
 /** Network-order IPv4 loopback returned by the in-process SignOn route. */
 constexpr std::uint32_t kLoopbackAddress = 0x7F000001;
@@ -77,7 +132,11 @@ bool initialize(void* module,
     if (!account::valid(initialAccount) || !activity::defaults::valid(activityDefaults)) {
         return false;
     }
-    if (!build_data::initialize(module, runtime::equipment::configured_hash(initialAccount))) {
+    configure_inventory_state_path(module);
+    AccountState restoredAccount = initialAccount;
+    overlay_persisted_inventory(restoredAccount);
+    if (!account::valid(restoredAccount)
+        || !build_data::initialize(module, runtime::equipment::configured_hash(restoredAccount))) {
         return false;
     }
     {
@@ -87,8 +146,8 @@ bool initialize(void* module,
             std::snprintf(line.data(),
                           line.size(),
                           "ev=account stage=identity primary=0x%016llX characters=%zu",
-                          static_cast<unsigned long long>(initialAccount.primarySoid),
-                          initialAccount.characterCount);
+                          static_cast<unsigned long long>(restoredAccount.primarySoid),
+                          restoredAccount.characterCount);
         if (written > 0) {
             core::log::write(core::log::Channel::state,
                              core::log::Level::info,
@@ -107,7 +166,7 @@ bool initialize(void* module,
     initialized.signOn.relayAddress = kLoopbackAddress;
     initialized.signOn.relayPort = kDefaultRelayPort;
     initialized.signOn.tokenLifetimeSeconds = kDefaultTokenLifetimeSeconds;
-    initialized.account = initialAccount;
+    initialized.account = restoredAccount;
     initialized.activity.defaults = activityDefaults;
     initialized.investment.family5.objectSoid = kGlobalFamily5Soid;
     // Only the override lists come from settings. Identity and gate stay owned by State.
@@ -119,8 +178,8 @@ bool initialize(void* module,
     // The arm is account-wide and rides the first ws-503, which goes out before any pick. Nothing
     // is selected at boot, so it is armed when any authored character carries the bypass. The
     // per-character objB byte is the other half, and it still decides which character it opens.
-    for (std::size_t index = 0; index < initialAccount.characterCount; ++index) {
-        if (initialAccount.characters[index].contentBypass) {
+    for (std::size_t index = 0; index < restoredAccount.characterCount; ++index) {
+        if (restoredAccount.characters[index].contentBypass) {
             initialized.investment.family5.contentGateArm = true;
             break;
         }

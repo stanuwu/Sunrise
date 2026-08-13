@@ -71,14 +71,15 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             || itemInstance.bounds.itemDefinitionCount > instance::layout::kDefinitionIndexCapacity
             || itemInstance.baseDefinitionIndex == kEmptyDefinitionIndex
             || itemInstance.baseDefinitionIndex >= itemInstance.bounds.itemDefinitionCount
-            || occupiedRows[item.inventoryRow] || occupiedEquipmentSlots[item.equipmentSlot]
+            || occupiedRows[item.inventoryRow]
+            || (item.equipped && occupiedEquipmentSlots[item.equipmentSlot])
             || std::find(instanceSoids.cbegin(), priorSoidsEnd, itemInstance.instanceSoid)
                    != priorSoidsEnd
             || (index != 0 && resolvedLoadout.items[index - 1].inventoryRow >= item.inventoryRow)) {
             return false;
         }
         occupiedRows[item.inventoryRow] = true;
-        occupiedEquipmentSlots[item.equipmentSlot] = true;
+        if (item.equipped) occupiedEquipmentSlots[item.equipmentSlot] = true;
         instanceSoids[index] = itemInstance.instanceSoid;
     }
     return true;
@@ -97,11 +98,16 @@ summary_matches_loadout(const loadout::ResolvedLoadout& resolvedLoadout,
     for (const std::optional<state::equipment::light::ItemScore>& score : evaluation.character) {
         summaryItemCount += static_cast<std::size_t>(score.has_value());
     }
-    if (summaryItemCount != resolvedLoadout.itemCount) {
+    const std::size_t equippedCount = static_cast<std::size_t>(std::count_if(
+        resolvedLoadout.items.cbegin(),
+        resolvedLoadout.items.cbegin() + static_cast<std::ptrdiff_t>(resolvedLoadout.itemCount),
+        [](const loadout::ResolvedItem& item) { return item.equipped; }));
+    if (summaryItemCount != equippedCount) {
         return false;
     }
     for (std::size_t index = 0; index < resolvedLoadout.itemCount; ++index) {
         const loadout::ResolvedItem& item = resolvedLoadout.items[index];
+        if (!item.equipped) continue;
         const auto& score = evaluation.character[item.equipmentSlot];
         if (!score.has_value() || score->definitionIndex != item.instance.baseDefinitionIndex) {
             return false;
@@ -165,7 +171,7 @@ bool encode(const state::CharacterState& state,
         object.newItemFlags[item.inventoryRow / kBitsPerFlagByte] |=
             std::byte{1U} << (item.inventoryRow % kBitsPerFlagByte);
         object.instanceProgressWatermarks[item.inventoryRow] = kOccupiedRowWatermark;
-        object.equippedInstanceSoids[item.equipmentSlot] = item.instance.instanceSoid;
+        if (item.equipped) object.equippedInstanceSoids[item.equipmentSlot] = item.instance.instanceSoid;
     }
 
     // Commit only after validation so callers never receive a partially initialized object.

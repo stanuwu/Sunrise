@@ -8,11 +8,11 @@
 namespace sunrise::state::build_data::items::details {
 
 /**
- * Configured equipment plus every plug those items socket. 16 slots on 3 characters is 48 items,
- * and each item sockets up to 12 plugs whose own details the character record needs. The size
- * covers both sets with duplicates removed.
+ * Equippable installed-build items plus their initial plugs. Collection reacquisition names a
+ * native index, so the server must be able to instantiate items that were not present in the
+ * initial settings file.
  */
-inline constexpr std::size_t kDefinitionCapacity = 768;
+inline constexpr std::size_t kDefinitionCapacity = 16'384;
 /** Family item instances have 12 fixed ordinary socket lanes. */
 inline constexpr std::size_t kInitialPlugCapacity = 12;
 /** Native equipment ids run from 0 to 19. */
