@@ -18,6 +18,30 @@ Destiny 2 Offline Exploration Mod
 This mod is work in progress. Things might break or work in unexpected ways. There is also currently
 a lack of documentation. This will improve over the coming weeks.
 
+## Building on Linux
+
+Cross-compiles the Windows DLL with `clang-cl` + `lld-link` + [xwin](https://github.com/Jake-Shadle/xwin).
+
+Built with: clang/lld/llvm 20.1.8, cmake 3.31.6, ninja 1.12.1, xwin 0.10.0, on Ubuntu 25.10.
+
+Splat the MSVC CRT + Windows SDK once:
+
+```
+xwin --accept-license splat --output ~/.xwin
+```
+
+Then build:
+
+```
+./Sunrise/build.sh
+```
+
+Output: `build/steam_api64.dll`.
+
+Tested running under Wine 11 (winehq-staging 11.12); Proton's bundled Wine 11 works too. The
+system `wine-10.0` (Ubuntu 25.10) fails at `vkCreateInstance` (`res=-7`): DXVK requests Vulkan
+before Wine's display driver is up, so winevulkan falls back to `nulldrv`. Wine ≥ 11 fixes it.
+
 ## Support Me
 
 Leave a start on this repo.
