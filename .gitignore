@@ -1,4 +1,8 @@
 /build/
+/.direnv/
+/.envrc.local
+/.xwin/
+/.xwin-cache/
 /.vs/
 /.idea/
 /.vscode/
