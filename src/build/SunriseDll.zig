@@ -63,10 +63,10 @@ pub fn init(
 
     dll.rc_includes = .none;
     dll.root_module.addWin32ResourceFile(.{
-        .file = b.path("Sunrise/resources/sunrise.rc"),
+        .file = b.path("resources/sunrise.rc"),
         .flags = &.{ "/d", "SUNRISE_ZIG_BUILD=1" },
         .include_paths = &.{
-            b.path("Sunrise"),
+            b.path("."),
             deps.config_header.getOutputDir(),
             deps.xwin.path(b, "crt/include"),
             deps.xwin.path(b, "sdk/include/ucrt"),
@@ -92,7 +92,7 @@ fn addSources(
     module: *std.Build.Module,
     optimize: std.builtin.OptimizeMode,
 ) !void {
-    const project_sources = try collectSources(b, "Sunrise/src", ".cpp");
+    const project_sources = try collectSources(b, "src", ".cpp");
     module.addCSourceFiles(.{
         .files = project_sources,
         .flags = if (optimize == .Debug) project_debug_flags else project_flags,
@@ -101,15 +101,15 @@ fn addSources(
 
     module.addCSourceFiles(.{
         .files = &.{
-            "Sunrise/vendor/detours/detours.cpp",
-            "Sunrise/vendor/detours/disasm.cpp",
-            "Sunrise/vendor/detours/modules.cpp",
-            "Sunrise/vendor/imgui/imgui.cpp",
-            "Sunrise/vendor/imgui/imgui_draw.cpp",
-            "Sunrise/vendor/imgui/imgui_tables.cpp",
-            "Sunrise/vendor/imgui/imgui_widgets.cpp",
-            "Sunrise/vendor/imgui/backends/imgui_impl_win32.cpp",
-            "Sunrise/vendor/imgui/backends/imgui_impl_dx11.cpp",
+            "vendor/detours/detours.cpp",
+            "vendor/detours/disasm.cpp",
+            "vendor/detours/modules.cpp",
+            "vendor/imgui/imgui.cpp",
+            "vendor/imgui/imgui_draw.cpp",
+            "vendor/imgui/imgui_tables.cpp",
+            "vendor/imgui/imgui_widgets.cpp",
+            "vendor/imgui/backends/imgui_impl_win32.cpp",
+            "vendor/imgui/backends/imgui_impl_dx11.cpp",
         },
         .flags = if (optimize == .Debug) vendor_debug_flags else vendor_flags,
         .language = .cpp,
@@ -117,11 +117,11 @@ fn addSources(
 }
 
 fn addIncludePaths(b: *std.Build, module: *std.Build.Module) void {
-    module.addIncludePath(b.path("Sunrise/src"));
-    module.addSystemIncludePath(b.path("Sunrise/vendor"));
-    module.addSystemIncludePath(b.path("Sunrise/vendor/detours"));
-    module.addSystemIncludePath(b.path("Sunrise/vendor/imgui"));
-    module.addSystemIncludePath(b.path("Sunrise/vendor/imgui/backends"));
+    module.addIncludePath(b.path("src"));
+    module.addSystemIncludePath(b.path("vendor"));
+    module.addSystemIncludePath(b.path("vendor/detours"));
+    module.addSystemIncludePath(b.path("vendor/imgui"));
+    module.addSystemIncludePath(b.path("vendor/imgui/backends"));
 }
 
 fn addDefinitions(module: *std.Build.Module, optimize: std.builtin.OptimizeMode) void {

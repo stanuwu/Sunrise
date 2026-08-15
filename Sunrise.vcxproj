@@ -33,8 +33,8 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup>
     <TargetName>steam_api64</TargetName>
-    <OutDir>$(ProjectDir)..\build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(ProjectDir)..\build\obj\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>$(ProjectDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)build\obj\$(Platform)\$(Configuration)\</IntDir>
     <ExternalIncludePath>$(ExternalIncludePath);$(ProjectDir)vendor\detours;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends</ExternalIncludePath>
     <VcpkgApplocalDeps>false</VcpkgApplocalDeps>
   </PropertyGroup>
