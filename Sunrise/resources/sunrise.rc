@@ -1,10 +1,10 @@
 #include <winresrc.h>
 
-#include "resource.h"
+#include "resources/resource.h"
 
-IDR_DEFAULT_SETTINGS RCDATA "default_settings.json"
-IDR_IMGUI_LICENSE RCDATA "..\\vendor\\imgui\\LICENSE.txt"
-IDR_DETOURS_LICENSE RCDATA "..\\vendor\\detours\\LICENSE.md"
+IDR_DEFAULT_SETTINGS RCDATA "resources/default_settings.json"
+IDR_IMGUI_LICENSE RCDATA "vendor/imgui/LICENSE.txt"
+IDR_DETOURS_LICENSE RCDATA "vendor/detours/LICENSE.md"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION SUNRISE_VER_MAJOR, SUNRISE_VER_MINOR, SUNRISE_VER_PATCH, SUNRISE_VER_BUILD

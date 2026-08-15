@@ -18,6 +18,19 @@ Destiny 2 Offline Exploration Mod
 This mod is work in progress. Things might break or work in unexpected ways. There is also currently
 a lack of documentation. This will improve over the coming weeks.
 
+## Building
+
+The Nix shell provides Zig 0.16.0, xwin, and the Windows build tools. On first use, xwin downloads
+Microsoft's licensed SDK.
+
+Review Microsoft's license. Then build the release DLL:
+
+```sh
+nix develop -c zig build --release=fast
+```
+
+The output is `zig-out/bin/steam_api64.dll`.
+
 ## Support Me
 
 Leave a star on this repo.
