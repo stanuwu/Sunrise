@@ -1,0 +1,1054 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{A665726B-97A2-4E35-B518-0FC207D3DA1B}</ProjectGuid>
+    <RootNamespace>sunrise</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <ProjectName>Sunrise</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>steam_api64</TargetName>
+    <OutDir>$(ProjectDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)build\obj\$(Platform)\$(Configuration)\</IntDir>
+    <ExternalIncludePath>$(ExternalIncludePath);$(ProjectDir)vendor\detours;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends</ExternalIncludePath>
+    <VcpkgApplocalDeps>false</VcpkgApplocalDeps>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)vendor\detours;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_USRDLL;WIN32_LEAN_AND_MEAN;NOMINMAX;IMGUI_USER_CONFIG=&quot;core/ui/imgui_user_config.h&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>kernel32.lib;bcrypt.lib;user32.lib;gdi32.lib;dwmapi.lib;d3dcompiler.lib;shell32.lib;ws2_32.lib;synchronization.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\sunrise.rc">
+      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="resources\default_settings.json" />
+    <None Include="vendor\detours\LICENSE.md" />
+    <None Include="vendor\imgui\LICENSE.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\dllmain.cpp" />
+    <ClCompile Include="src\core\logging\log.cpp" />
+    <ClCompile Include="src\core\logging\snapshot\log_snapshot_ring.cpp" />
+    <ClCompile Include="src\core\logging\view\log_snapshot_view.cpp" />
+    <ClCompile Include="src\core\filesystem\path.cpp" />
+    <ClCompile Include="src\core\filesystem\temporary_sibling.cpp" />
+    <ClCompile Include="src\core\settings\settings_parser.cpp" />
+    <ClCompile Include="src\core\settings\json_number.cpp" />
+    <ClCompile Include="src\core\settings\json_scalar.cpp" />
+    <ClCompile Include="src\core\settings\json_structure.cpp" />
+    <ClCompile Include="src\core\settings\settings_runtime.cpp" />
+    <ClCompile Include="src\core\settings\settings_upgrade.cpp" />
+    <ClCompile Include="src\core\settings\client\client_settings_parser.cpp" />
+    <ClCompile Include="src\core\settings\client\client_ui_settings_parser.cpp" />
+    <ClCompile Include="src\core\settings\server\server_settings_parser.cpp" />
+    <ClCompile Include="src\core\settings\server\entitlement_settings_parser.cpp" />
+    <ClCompile Include="src\core\settings\steam\steam_settings_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\account_settings_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\family5_override_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\activity_default_destination_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\inventory_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\audio_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\controls_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\display_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\interface_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\key_bindings_parser.cpp" />
+    <ClCompile Include="src\core\settings\state\social_parser.cpp" />
+    <ClCompile Include="src\core\runtime\core_runtime.cpp" />
+    <ClCompile Include="src\core\ui\modules\ui_module_descriptor.cpp" />
+    <ClCompile Include="src\core\ui\modules\registry\ui_module_registry.cpp" />
+    <ClCompile Include="src\core\ui\modules\logs\logs_module_runtime.cpp" />
+    <ClCompile Include="src\core\ui\modules\logs\logs_clipboard_writer.cpp" />
+    <ClCompile Include="src\client\hooks\cursor\cursor_guard_replacements.cpp" />
+    <ClCompile Include="src\client\hooks\cursor\cursor_hook_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_device.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode504_codec.cpp" />
+    <ClCompile Include="src\state\runtime\state_account_runtime.cpp" />
+    <ClCompile Include="src\core\ui\busy\ui_busy_overlay.cpp" />
+    <ClCompile Include="src\core\ui\busy\ui_busy_state.cpp" />
+    <ClCompile Include="src\core\ui\notice\ui_notice_overlay.cpp" />
+    <ClCompile Include="src\core\ui\modules\logs\logs_panel_render.cpp" />
+    <ClCompile Include="src\core\ui\modules\logs\filters\logs_filter_controls.cpp" />
+    <ClCompile Include="src\core\ui\runtime\ui_visibility_runtime.cpp" />
+    <ClCompile Include="src\core\ui\memory\fixed\ui_fixed_allocator.cpp" />
+    <ClCompile Include="src\core\ui\memory\fixed\ui_fixed_arena.cpp" />
+    <ClCompile Include="src\core\ui\animation\transition\ui_transition_animation.cpp" />
+    <ClCompile Include="src\core\ui\components\card\ui_card_component.cpp" />
+    <ClCompile Include="src\core\ui\components\filter\ui_filter_component.cpp" />
+    <ClCompile Include="src\core\ui\components\picker\ui_picker_component.cpp" />
+    <ClCompile Include="src\core\ui\components\navigation\ui_navigation_component.cpp" />
+    <ClCompile Include="src\core\ui\components\section\ui_section_component.cpp" />
+    <ClCompile Include="src\core\ui\components\toggle\ui_toggle_component.cpp" />
+    <ClCompile Include="src\core\ui\fonts\installed\ui_installed_font_reader.cpp" />
+    <ClCompile Include="src\core\ui\fonts\runtime\ui_runtime_font_lifecycle.cpp" />
+    <ClCompile Include="src\core\ui\scaling\dpi\ui_dpi_scaling.cpp" />
+    <ClCompile Include="src\core\ui\theme\sunrise_ui_theme.cpp" />
+    <ClCompile Include="src\core\ui\layout\ui_layout_lifecycle.cpp" />
+    <ClCompile Include="src\core\ui\layout\navigation\ui_layout_navigation.cpp" />
+    <ClCompile Include="src\core\ui\layout\ui_layout_render.cpp" />
+    <ClCompile Include="src\core\ui\layout\credits\sunrise_credits_badge.cpp" />
+    <ClCompile Include="src\client\runtime\client_hook_activation.cpp" />
+    <ClCompile Include="src\client\runtime\client_platform_hook_activation.cpp" />
+    <ClCompile Include="src\client\runtime\host\game_host_classification.cpp" />
+    <ClCompile Include="src\client\runtime\client_runtime_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\discovery\graphics_target_discovery.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\graphics_hook_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\graphics_hook_replacements.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\input\graphics_window_input.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\input\graphics_raw_input_window.cpp" />
+    <ClCompile Include="src\client\hooks\polled_input\polled_input_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\polled_input\polled_input_replacements.cpp" />
+    <ClCompile Include="src\client\hooks\banner\banner_bind.cpp" />
+    <ClCompile Include="src\client\hooks\banner\banner_hook_lifecycle.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\loadout\subclass_socket_selection.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_socket_record_codec.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\renderer\selection\graphics_swap_chain_selection.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_frame.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_report.cpp" />
+    <ClCompile Include="src\client\hooks\egress\dns\egress_dns_replacements.cpp" />
+    <ClCompile Include="src\client\hooks\egress\resolver\egress_resolver_forward.cpp" />
+    <ClCompile Include="src\client\hooks\egress\resolver\egress_resolver_reverse.cpp" />
+    <ClCompile Include="src\client\hooks\egress\extensions\egress_extension_replacements.cpp" />
+    <ClCompile Include="src\client\hooks\egress\lifecycle\egress_guard_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\egress\lifecycle\egress_guard_modules.cpp" />
+    <ClCompile Include="src\client\hooks\egress\lifecycle\egress_guard_exports.cpp" />
+    <ClCompile Include="src\client\hooks\egress\policy\egress_policy_logging.cpp" />
+    <ClCompile Include="src\client\hooks\egress\policy\egress_policy_endpoint.cpp" />
+    <ClCompile Include="src\client\hooks\egress\winsock\connection\egress_connection_replacements.cpp" />
+    <ClCompile Include="src\client\hooks\egress\winsock\control\egress_control_replacement.cpp" />
+    <ClCompile Include="src\client\hooks\egress\winsock\discovery\egress_discovery_responder.cpp" />
+    <ClCompile Include="src\client\hooks\egress\winsock\reception\egress_reception_replacements.cpp" />
+    <ClCompile Include="src\client\hooks\egress\winsock\transmission\egress_transmission_replacements.cpp" />
+    <ClCompile Include="src\client\hooks\egress\winsock\transmission\egress_datagram_transmission.cpp" />
+    <ClCompile Include="src\client\hooks\egress\winsock\transmission\egress_message_transmission.cpp" />
+    <ClCompile Include="src\client\ui\runtime\client_ui_module_runtime.cpp" />
+    <ClCompile Include="src\client\ui\teleport\teleport_panel.cpp" />
+    <ClCompile Include="src\client\teleport\teleport_settings_store.cpp" />
+    <ClCompile Include="src\client\hooks\teleport\teleport_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\teleport\teleport_move.cpp" />
+    <ClCompile Include="src\client\hooks\teleport\teleport_action_key.cpp" />
+    <ClCompile Include="src\client\hooking\detour.cpp" />
+    <ClCompile Include="src\client\hooking\detour\protected_detour_uninstall.cpp" />
+    <ClCompile Include="src\client\hooking\detour\transaction\detour_thread_transaction.cpp" />
+    <ClCompile Include="src\client\executable\image.cpp" />
+    <ClCompile Include="src\client\memory\current_process_memory.cpp" />
+    <ClCompile Include="src\client\hooks\network\investment\investment_derived_rebuild.cpp" />
+    <ClCompile Include="src\client\hooks\network\investment\investment_family5_rearm.cpp" />
+    <ClCompile Include="src\client\hooks\bitmap\bitmap_hook_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\bitmap\bitmap_ref_guard.cpp" />
+    <ClCompile Include="src\client\hooks\external_server\external_server_route.cpp" />
+    <ClCompile Include="src\client\hooks\external_server\external_server_setopt_guard.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\bootflow_hook_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\character_select_hold.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\composition_check.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\orbit_handoff.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\owner_activity_slot.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\orbit_slice_set.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\region_private.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\profile_setup_skip.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\join_request_ready.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\world_step.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\spawn_hold.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\spawn\spawn_gate_probe.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\spawn\spawn_gate_targets.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\spawn\spawn_gate_record_dump.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\fade_release.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_arrival.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_host_manager\request\selection\activity_manager_selection_bits.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_host_manager\request\selection\activity_manager_selection_snapshot.cpp" />
+    <ClCompile Include="src\core\settings\state\activity_arrival_override_parser.cpp" />
+    <ClCompile Include="src\client\hooks\queuez\family0_subscription.cpp" />
+    <ClCompile Include="src\client\hooks\queuez\svc123_null_payload_guard.cpp" />
+    <ClCompile Include="src\client\hooks\queuez\queuez_hook_lifecycle.cpp" />
+    <ClCompile Include="src\client\content\diagnostics\content_readiness_report.cpp" />
+    <ClCompile Include="src\client\hooks\network\bubble_authority\bubble_authority_replacements.cpp" />
+    <ClCompile Include="src\client\hooks\network\bubble_authority\scope\bubble_authority_scope.cpp" />
+    <ClCompile Include="src\client\hooks\network\http\http_descriptor_route.cpp" />
+    <ClCompile Include="src\client\hooks\network\http\http_executor_replacement.cpp" />
+    <ClCompile Include="src\client\hooks\network\http\http_worker_completion.cpp" />
+    <ClCompile Include="src\client\hooks\network\signon\signon_readiness_replacements.cpp" />
+    <ClCompile Include="src\client\patterns\game\signon\signon_readiness_signature_bytes.cpp" />
+    <ClCompile Include="src\core\settings\client\external\client_external_settings_parser.cpp" />
+    <ClCompile Include="src\client\targets\game\game_retail_log_targets.cpp" />
+    <ClCompile Include="src\client\patterns\game\retail_log\retail_log_signature_bytes.cpp" />
+    <ClCompile Include="src\client\hooks\retail_log\retail_log_enqueue_observer.cpp" />
+    <ClCompile Include="src\client\hooks\retail_log\retail_log_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\assert_handler\assert_handler_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\assert_handler\assert_handler_observer.cpp" />
+    <ClCompile Include="src\client\targets\game\assert_handler\game_assert_targets.cpp" />
+    <ClCompile Include="src\client\targets\game\packages\game_package_targets.cpp" />
+    <ClCompile Include="src\client\targets\game\config_getter\game_config_getter_targets.cpp" />
+    <ClCompile Include="src\client\patterns\game\config_getter\config_getter_signature_bytes.cpp" />
+    <ClCompile Include="src\client\hooks\config_getter\config_getter_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\config_getter\config_getter_answers.cpp" />
+    <ClCompile Include="src\client\patterns\game\packages\package_key_signature_bytes.cpp" />
+    <ClCompile Include="src\client\patterns\game\assert_handler\assert_signature_bytes.cpp" />
+    <ClCompile Include="src\client\hooks\network\coordinator\network_call_coordinator.cpp" />
+    <ClCompile Include="src\client\hooks\network\network_call_quiescence.cpp" />
+    <ClCompile Include="src\client\hooks\network\content_config\coordinator\content_config_call_coordinator.cpp" />
+    <ClCompile Include="src\client\hooks\network\content_config\gate\content_config_signature_gate.cpp" />
+    <ClCompile Include="src\client\hooks\network\content_config\lifecycle\content_config_hook_install.cpp" />
+    <ClCompile Include="src\client\hooks\network\content_config\lifecycle\content_config_hook_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\network\content_config\lifecycle\content_config_hook_storage.cpp" />
+    <ClCompile Include="src\client\hooks\network\content_config\lifecycle\content_config_hook_uninstall.cpp" />
+    <ClCompile Include="src\client\hooks\network\content_config\request\content_config_get_replacement.cpp" />
+    <ClCompile Include="src\client\hooks\network\content_config\tick\content_config_tick_replacement.cpp" />
+    <ClCompile Include="src\client\hooks\network\lifecycle\network_hook_group.cpp" />
+    <ClCompile Include="src\client\hooks\network\lifecycle\network_hook_entries.cpp" />
+    <ClCompile Include="src\client\hooks\network\lifecycle\network_hook_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\network\network_consumer_registration.cpp" />
+    <ClCompile Include="src\client\hooks\network\platform.cpp" />
+    <ClCompile Include="src\client\patterns\registry.cpp" />
+    <ClCompile Include="src\client\patterns\image_scan.cpp" />
+    <ClCompile Include="src\client\patterns\game_signatures.cpp" />
+    <ClCompile Include="src\client\patterns\steam_signatures.cpp" />
+    <ClCompile Include="src\client\targets\steam_targets.cpp" />
+    <ClCompile Include="src\client\targets\game\game_content_targets.cpp" />
+    <ClCompile Include="src\client\targets\game\game_network_targets.cpp" />
+    <ClCompile Include="src\client\targets\game\network\network_content_derivation.cpp" />
+    <ClCompile Include="src\client\targets\game\resolution\game_target_resolution.cpp" />
+    <ClCompile Include="vendor\detours\detours.cpp">
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="vendor\detours\disasm.cpp">
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="vendor\detours\modules.cpp">
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="vendor\imgui\imgui.cpp">
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="vendor\imgui\imgui_draw.cpp">
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="vendor\imgui\imgui_tables.cpp">
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="vendor\imgui\imgui_widgets.cpp">
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="vendor\imgui\backends\imgui_impl_win32.cpp">
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="vendor\imgui\backends\imgui_impl_dx11.cpp">
+      <WarningLevel>Level3</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ExcludedFromBuild Condition="'$(SunriseRunClangTidy)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="src\steam\runtime\callbacks\callback_dispatch.cpp" />
+    <ClCompile Include="src\steam\runtime\callbacks\callback_registry.cpp" />
+    <ClCompile Include="src\steam\runtime\steam_lifecycle.cpp" />
+    <ClCompile Include="src\steam\runtime\context\steam_context_state.cpp" />
+    <ClCompile Include="src\steam\interfaces\methods\common.cpp" />
+    <ClCompile Include="src\steam\interfaces\methods\apps_dlc.cpp" />
+    <ClCompile Include="src\steam\interfaces\methods\apps_metadata.cpp" />
+    <ClCompile Include="src\steam\interfaces\methods\friends.cpp" />
+    <ClCompile Include="src\steam\interfaces\methods\signon_inputs.cpp" />
+    <ClCompile Include="src\steam\interfaces\methods\app_ticket.cpp" />
+    <ClCompile Include="src\steam\interfaces\methods\matchmaking.cpp" />
+    <ClCompile Include="src\steam\interfaces\methods\serialized_networking.cpp" />
+    <ClCompile Include="src\steam\interfaces\tables\common_tables.cpp" />
+    <ClCompile Include="src\steam\interfaces\tables\network_tables.cpp" />
+    <ClCompile Include="src\steam\interfaces\tables\table_runtime.cpp" />
+    <ClCompile Include="src\steam\interfaces\steam_interface_factory.cpp" />
+    <ClCompile Include="src\state\runtime\state_runtime.cpp" />
+    <ClCompile Include="src\state\activity\activity_session_lookup.cpp" />
+    <ClCompile Include="src\state\activity\activity_world_arrival.cpp" />
+    <ClCompile Include="src\state\activity\membership\activity_membership_query.cpp" />
+    <ClCompile Include="src\state\unlocks\unlocks_runtime.cpp" />
+    <ClCompile Include="src\state\entitlements\entitlement_defaults.cpp" />
+    <ClCompile Include="src\state\entitlements\entitlement_runtime.cpp" />
+    <ClCompile Include="src\state\entitlements\entitlement_validation.cpp" />
+    <ClCompile Include="src\state\activity\defaults\activity_defaults_snapshot.cpp" />
+    <ClCompile Include="src\state\activity\defaults\activity_defaults_validation.cpp" />
+    <ClCompile Include="src\state\activity\destination\activity_destination_snapshot.cpp" />
+    <ClCompile Include="src\state\activity\destination\activity_destination_spawn_binding.cpp" />
+    <ClCompile Include="src\state\activity\destination\activity_destination_validation.cpp" />
+    <ClCompile Include="src\state\activity\transactions\activity_session_prepare.cpp" />
+    <ClCompile Include="src\state\activity\transactions\activity_session_commit.cpp" />
+    <ClCompile Include="src\state\activity\entity_slots\transactions\activity_entity_slot_prepare.cpp" />
+    <ClCompile Include="src\state\activity\entity_slots\transactions\activity_entity_slot_commit.cpp" />
+    <ClCompile Include="src\state\activity\bubble_authority\transactions\activity_bubble_authority_grant.cpp" />
+    <ClCompile Include="src\state\activity\membership\transactions\activity_membership_prepare_base.cpp" />
+    <ClCompile Include="src\state\activity\membership\transactions\activity_membership_authoritative_prepare.cpp" />
+    <ClCompile Include="src\state\activity\membership\transactions\activity_membership_authoritative_commit.cpp" />
+    <ClCompile Include="src\state\activity\membership\transactions\activity_membership_prepare.cpp" />
+    <ClCompile Include="src\state\activity\membership\transactions\activity_membership_commit.cpp" />
+    <ClCompile Include="src\state\matchmaking\matchmaking_state.cpp" />
+    <ClCompile Include="src\state\matchmaking\transactions\matchmaking_prepare.cpp" />
+    <ClCompile Include="src\state\matchmaking\transactions\matchmaking_commit.cpp" />
+    <ClCompile Include="src\state\runtime\equipment\configured_equipment_identity.cpp" />
+    <ClCompile Include="src\state\account\account_state.cpp" />
+    <ClCompile Include="src\state\account\inventory\inventory_state.cpp" />
+    <ClCompile Include="src\state\account\settings\settings_state.cpp" />
+    <ClCompile Include="src\state\equipment\light\calculation\equipment_light_calculation.cpp" />
+    <ClCompile Include="src\state\equipment\light\resolution\configured_equipment_light_resolver.cpp" />
+    <ClCompile Include="src\state\content\content_catalog.cpp" />
+    <ClCompile Include="src\state\content_manifest\cache\content_manifest_cache_reader.cpp" />
+    <ClCompile Include="src\state\content_manifest\cache\content_manifest_cache_writer.cpp" />
+    <ClCompile Include="src\state\content_manifest\fingerprint\content_manifest_fingerprint.cpp" />
+    <ClCompile Include="src\state\content_manifest\content_manifest_state_runtime.cpp" />
+    <ClCompile Include="src\state\content_manifest\scanner\content_manifest_directory_scan.cpp" />
+    <ClCompile Include="src\state\content_manifest\scanner\content_manifest_header_extraction.cpp" />
+    <ClCompile Include="src\state\content_manifest\scanner\package\content_manifest_package_header.cpp" />
+    <ClCompile Include="src\state\content_manifest\scanner\package\content_manifest_package_name.cpp" />
+    <ClCompile Include="src\state\content_manifest\content_manifest_row_validation.cpp" />
+    <ClCompile Include="src\state\build_data\build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\runtime\persistence\build_data_persistence.cpp" />
+    <ClCompile Include="src\state\build_data\runtime\persistence\publication_transaction.cpp" />
+    <ClCompile Include="src\state\build_data\cache\read\cache_file_reader.cpp" />
+    <ClCompile Include="src\state\build_data\cache\read\cache_payload_reader.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_domain_validation.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_record_codec.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_scenario_records.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_spawn_set_records.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_hash_name_records.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_detail_links.cpp" />
+    <ClCompile Include="src\state\build_data\scenarios\scenario_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\spawn_sets\spawn_set_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\hash_names\hash_name_catalog.cpp" />
+    <ClCompile Include="src\state\activity\forced\activity_forced_destination.cpp" />
+    <ClCompile Include="src\state\build_data\runtime\build_data_roster_runtime.cpp" />
+    <ClCompile Include="src\client\content\scenarios\scenario_build.cpp" />
+    <ClCompile Include="src\client\content\scenarios\scenario_collect.cpp" />
+    <ClCompile Include="src\client\content\spawn_sets\spawn_set_build.cpp" />
+    <ClCompile Include="src\client\content\hash_names\hash_name_build.cpp" />
+    <ClCompile Include="src\client\content\hash_names\hash_name_matcher.cpp" />
+    <ClCompile Include="src\client\content\spawn_sets\spawn_set_catalog_builder.cpp" />
+    <ClCompile Include="src\client\content\scenarios\scenario_roster_build.cpp" />
+    <ClCompile Include="src\client\content\scenarios\scenario_roster_groups.cpp" />
+    <ClCompile Include="src\client\content\scenarios\scenario_roster_publish.cpp" />
+    <ClCompile Include="src\state\build_data\cache\write\cache_file_writer.cpp" />
+    <ClCompile Include="src\state\build_data\cache\write\temporary\temporary_cache_file.cpp" />
+    <ClCompile Include="src\state\build_data\cache\write\validation\cache_file_comparison.cpp" />
+    <ClCompile Include="src\state\build_data\cache\write\cache_payload_writer.cpp" />
+    <ClCompile Include="src\state\build_data\items\item_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\items\item_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\items\details\item_detail_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\constants\investment_constant_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\abilities\ability_bucket_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\progressions\progression_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\runtime\domain_markers.cpp" />
+    <ClCompile Include="src\state\build_data\inventory\buckets\inventory_bucket_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\runtime\build_data_catalog_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\named_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\socket_entry_lists\socket_entry_list_catalog.cpp" />
+    <ClCompile Include="src\client\content\handles\handle_resolver.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_tag_reader.cpp" />
+    <ClCompile Include="src\client\content\bootstrap\bootstrap_token_publish.cpp" />
+    <ClCompile Include="src\client\content\investment\investment_source.cpp" />
+    <ClCompile Include="src\client\content\investment\investment_refresh.cpp" />
+    <ClCompile Include="src\client\content\investment\worker\investment_refresh_worker.cpp" />
+    <ClCompile Include="src\client\content\items\details\configured_item_detail_extractor.cpp" />
+    <ClCompile Include="src\client\content\items\details\definition_detail_reader.cpp" />
+    <ClCompile Include="src\client\content\items\details\socket_detail_reader.cpp" />
+    <ClCompile Include="src\middleware\datagen\character_record\character_record_encoder.cpp" />
+    <ClCompile Include="src\middleware\datagen\character_record\appearance\character_appearance_stats.cpp" />
+    <ClCompile Include="src\middleware\datagen\character_record\appearance\character_appearance_abilities.cpp" />
+    <ClCompile Include="src\middleware\datagen\character_record\appearance\character_appearance_banks.cpp" />
+    <ClCompile Include="src\middleware\datagen\character_record\appearance\character_appearance_render.cpp" />
+    <ClCompile Include="src\middleware\datagen\character_record\appearance\character_appearance_sentinels.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\loadout\loadout_item_resolver.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\loadout\loadout_resolver.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\account\selection_patch\account_selection_patch_encoder.cpp" />
+    <ClCompile Include="src\server\runtime\server_runtime.cpp" />
+    <ClCompile Include="src\server\ui\runtime\server_ui_module_runtime.cpp" />
+    <ClCompile Include="src\server\ui\activity_override\activity_override_panel.cpp" />
+    <ClCompile Include="src\server\ui\activity_override\activity_override_lists.cpp" />
+    <ClCompile Include="src\server\transport\bap_listener.cpp" />
+    <ClCompile Include="src\server\bap\bap_route.cpp" />
+    <ClCompile Include="src\server\bap\plaintext.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\encrypted_runtime.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\activity_transaction\activity_transaction_notifications.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\body\bap_service_body.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\routing\bap_service_routing.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\routing\bap_service_failure.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\reply\bap_encrypted_reply.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\activity_host_manager\activity_host_manager_route.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\activity_message\activity_message_route.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\activity_message\patch_epoch\activity_patch_epoch_route.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\activity_message\membership\activity_membership_route.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\matchmaking\matchmaking_route.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\transactions\service_outcome_commit.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\queuez_state_validation.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\staging\queuez_family_staging.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\staging\queuez_character_staging.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\queuez_deferred_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\queuez_outcome_staging.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_update_frame.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_subscription.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_change_character.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_select_character.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_message_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_snapshot.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_report.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_keepalive_seed.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\bap_connection_publication.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_membership_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_global_state_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_keepalive_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_notification_frame.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\snapshot_object_compressor.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_selection_resolver.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_snapshot_preparer.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_selection_move.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\initial_snapshot.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\banner_snapshot.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\roster_snapshot.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\snapshot_storage.cpp" />
+    <ClCompile Include="src\server\web_service\opcode_routes.cpp" />
+    <ClCompile Include="src\server\web_service\web_service_runtime.cpp" />
+    <ClCompile Include="src\server\http\server_http.cpp" />
+    <ClCompile Include="src\middleware\runtime\middleware_runtime.cpp" />
+    <ClCompile Include="src\middleware\protobuf\protobuf_measure.cpp" />
+    <ClCompile Include="src\middleware\protobuf\protobuf_reader.cpp" />
+    <ClCompile Include="src\middleware\protobuf\protobuf_wire.cpp" />
+    <ClCompile Include="src\middleware\protobuf\protobuf_writer.cpp" />
+    <ClCompile Include="src\middleware\bap\bap_frame.cpp" />
+    <ClCompile Include="src\middleware\bap\account_translation\account_translation_response.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_host\activity_host_response.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_host_manager\request\activity_manager_request.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_host_manager\request\selection\activity_manager_selection_descriptor.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_host_manager\request\selection\activity_manager_selection_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_host_manager\request\selection\activity_manager_descriptor_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_host_manager\request\selection\activity_manager_descriptor_reader.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_host_manager\response\activity_manager_response.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_message_request_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_sensor_auth_encoder.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_sensor_auth_blocks.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_sensor_auth_bodies.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_authoritative_data_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_authoritative_opaque_skip.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_client_keepalive_validator.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_high_water_validator.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_join_request_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_client_identity_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_state_refresh_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_membership_acknowledgement_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_global_state_encoder.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_patch_epoch_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_membership_member_writer.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_membership_region_writer.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_replicate_membership_encoder.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_message_notification_encoder.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_join_result_encoder.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_entity_slot_request_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_entity_slots_decoder.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_entity_authority_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_incident_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_entity_slots_encoder.cpp" />
+    <ClCompile Include="src\middleware\bap\certificate.cpp" />
+    <ClCompile Include="src\middleware\bap\client_config\client_config_response.cpp" />
+    <ClCompile Include="src\middleware\bap\family_subscription.cpp" />
+    <ClCompile Include="src\middleware\bap\family_unsubscription.cpp" />
+    <ClCompile Include="src\middleware\bap\matchmaking\request\matchmaking_request_parser.cpp" />
+    <ClCompile Include="src\middleware\bap\matchmaking\request\matchmaking_field_selection.cpp" />
+    <ClCompile Include="src\middleware\bap\matchmaking\request\matchmaking_nested_selection.cpp" />
+    <ClCompile Include="src\middleware\bap\matchmaking\response\matchmaking_response_encoder.cpp" />
+    <ClCompile Include="src\middleware\bap\matchmaking\response\matchmaking_dynamic_response.cpp" />
+    <ClCompile Include="src\middleware\bap\user_message\user_message_response.cpp" />
+    <ClCompile Include="src\middleware\compression\oodle\oodle_runtime.cpp" />
+    <ClCompile Include="src\middleware\compression\oodle\oodle_installed.cpp" />
+    <ClCompile Include="src\middleware\datagen\family3\family3_roster.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\account\account_encoder.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\progression\progression_bank_keys.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\account\preferences\preferences_encoder.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\character\character_encoder.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\character\equipment_summary_builder.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\instance\instance_encoder.cpp" />
+    <ClCompile Include="src\middleware\datagen\roster\queuez_roster.cpp" />
+    <ClCompile Include="src\middleware\content\packages\named_tags\named_tag_parser.cpp" />
+    <ClCompile Include="src\middleware\content\packages\named_tags\named_tag_file.cpp" />
+    <ClCompile Include="src\middleware\content\packages\named_tags\named_tag_patch.cpp" />
+    <ClCompile Include="src\middleware\content\packages\package_catalog.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_class_scan.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_parallel_read.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_entry_reader.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_header.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\bubble_state_reader.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\definition_index_table.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\item_definition_reader.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\region_reader.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\roster_intersection.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\scenario_reader.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\scenario_walk.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\slot_descriptor_reader.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\spawn_reader.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\component_container_reader.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\item_appearance_reader.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\ability_pool_reader.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_item_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_detail_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_ability_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_subclass_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_progression_build.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_file_locator.cpp" />
+    <ClCompile Include="src\middleware\crypto\aes_gcm_decrypt.cpp" />
+    <ClCompile Include="src\middleware\content\manifest\content_manifest_encoder.cpp" />
+    <ClCompile Include="src\middleware\content\manifest\manifest_entitlement_encoder.cpp" />
+    <ClCompile Include="src\middleware\encoding\bit_writer.cpp" />
+    <ClCompile Include="src\middleware\encoding\bit_reader.cpp" />
+    <ClCompile Include="src\middleware\queuez\queuez_update.cpp" />
+    <ClCompile Include="src\middleware\web_service\web_service_envelope.cpp" />
+    <ClCompile Include="src\middleware\web_service\status_fields.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\family5\family5_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode205\opcode205_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode503\opcode503_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode206_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode501_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode505\opcode505_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode601\opcode601_codec.cpp" />
+    <ClCompile Include="src\core\settings\state_settings.cpp" />
+    <ClCompile Include="src\middleware\secure_channel\envelope.cpp" />
+    <ClCompile Include="src\middleware\secure_channel\encrypted_frame.cpp" />
+    <ClCompile Include="src\middleware\signon\response.cpp" />
+    <ClCompile Include="src\middleware\signon\extended\signon_extended_fields.cpp" />
+    <ClCompile Include="src\middleware\signon\config\signon_config_blob.cpp" />
+    <ClCompile Include="src\middleware\signon\ownership\signon_ownership_encoder.cpp" />
+    <ClCompile Include="src\server\transport\bap_peer_session.cpp" />
+    <ClCompile Include="src\client\hooks\queuez\family0\family0_source_seed.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_locator_cache.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_block_cache.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_handle_cache.cpp" />
+    <ClCompile Include="src\middleware\content\packages\reader\package_table_cache.cpp" />
+    <ClCompile Include="src\state\build_data\runtime\build_data_routing_catalogs.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_investment_records.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_object_staging.cpp" />
+    <ClCompile Include="src\core\settings\state\account_rows_parser.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_banner_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_push_reporting.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_container_location.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_build_report.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_root_tables.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_item_rows.cpp" />
+    <ClCompile Include="src\client\diagnostics\module_range.cpp" />
+    <ClCompile Include="src\client\process\freeze\client_process_freeze.cpp" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(SunriseRunClangTidy)'=='true'">
+    <ClCompile Remove="vendor\detours\detours.cpp" />
+    <ClCompile Remove="vendor\detours\disasm.cpp" />
+    <ClCompile Remove="vendor\detours\modules.cpp" />
+    <ClCompile Remove="vendor\imgui\imgui.cpp" />
+    <ClCompile Remove="vendor\imgui\imgui_draw.cpp" />
+    <ClCompile Remove="vendor\imgui\imgui_tables.cpp" />
+    <ClCompile Remove="vendor\imgui\imgui_widgets.cpp" />
+    <ClCompile Remove="vendor\imgui\backends\imgui_impl_win32.cpp" />
+    <ClCompile Remove="vendor\imgui\backends\imgui_impl_dx11.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resources\resource.h" />
+    <ClInclude Include="src\core\logging\log.h" />
+    <ClInclude Include="src\core\logging\snapshot\snapshot.h" />
+    <ClInclude Include="src\core\logging\snapshot\internal.h" />
+    <ClInclude Include="src\core\logging\view\log_snapshot_view.h" />
+    <ClInclude Include="src\core\filesystem\path.h" />
+    <ClInclude Include="src\core\filesystem\temporary_sibling.h" />
+    <ClInclude Include="src\core\settings\settings.h" />
+    <ClInclude Include="src\core\settings\parser.h" />
+    <ClInclude Include="src\core\settings\client\definition.h" />
+    <ClInclude Include="src\core\settings\server\definition.h" />
+    <ClInclude Include="src\core\settings\steam\definition.h" />
+    <ClInclude Include="src\core\runtime\core_runtime.h" />
+    <ClInclude Include="src\core\ui\imgui_user_config.h" />
+    <ClInclude Include="src\core\ui\modules\ui_module_descriptor.h" />
+    <ClInclude Include="src\core\ui\modules\registry\ui_module_registry.h" />
+    <ClInclude Include="src\core\ui\modules\logs\logs.h" />
+    <ClInclude Include="src\client\hooks\cursor\cursor_guard_replacements.h" />
+    <ClInclude Include="src\client\hooks\cursor\runtime.h" />
+    <ClInclude Include="src\client\hooks\polled_input\polled_input_replacements.h" />
+    <ClInclude Include="src\client\hooks\polled_input\runtime.h" />
+    <ClInclude Include="src\client\hooks\banner\banner_bind.h" />
+    <ClInclude Include="src\client\hooks\banner\banner_hook_lifecycle.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode504.h" />
+    <ClInclude Include="src\core\ui\busy\busy.h" />
+    <ClInclude Include="src\core\ui\busy\ui_busy_state.h" />
+    <ClInclude Include="src\core\ui\notice\ui_notice_overlay.h" />
+    <ClInclude Include="src\core\ui\modules\logs\internal.h" />
+    <ClInclude Include="src\core\ui\modules\logs\filters\logs_filter_controls.h" />
+    <ClInclude Include="src\core\ui\runtime\ui_visibility_runtime.h" />
+    <ClInclude Include="src\core\ui\runtime\settings.h" />
+    <ClInclude Include="src\core\ui\memory\allocator.h" />
+    <ClInclude Include="src\core\ui\memory\fixed\internal.h" />
+    <ClInclude Include="src\core\ui\animation\animation.h" />
+    <ClInclude Include="src\core\ui\animation\transition\ui_transition_animation.h" />
+    <ClInclude Include="src\core\ui\components\components.h" />
+    <ClInclude Include="src\core\ui\components\card\ui_card_component.h" />
+    <ClInclude Include="src\core\ui\components\drawing\drawing.h" />
+    <ClInclude Include="src\core\ui\components\filter\ui_filter_component.h" />
+    <ClInclude Include="src\core\ui\components\picker\ui_picker_component.h" />
+    <ClInclude Include="src\core\ui\components\navigation\ui_navigation_component.h" />
+    <ClInclude Include="src\core\ui\components\section\ui_section_component.h" />
+    <ClInclude Include="src\core\ui\components\toggle\ui_toggle_component.h" />
+    <ClInclude Include="src\core\ui\fonts\fonts.h" />
+    <ClInclude Include="src\core\ui\fonts\installed\ui_installed_font_reader.h" />
+    <ClInclude Include="src\core\ui\fonts\runtime\ui_runtime_font_lifecycle.h" />
+    <ClInclude Include="src\core\ui\scaling\scaling.h" />
+    <ClInclude Include="src\core\ui\scaling\dpi\ui_dpi_scaling.h" />
+    <ClInclude Include="src\core\ui\theme\sunrise_ui_theme.h" />
+    <ClInclude Include="src\core\ui\layout\layout.h" />
+    <ClInclude Include="src\core\ui\layout\ui_layout_lifecycle.h" />
+    <ClInclude Include="src\core\ui\layout\navigation\ui_layout_navigation.h" />
+    <ClInclude Include="src\core\ui\layout\credits\sunrise_credits_badge.h" />
+    <ClInclude Include="src\client\runtime\runtime.h" />
+    <ClInclude Include="src\client\teleport\teleport_settings_store.h" />
+    <ClInclude Include="src\client\hooks\teleport\internal.h" />
+    <ClInclude Include="src\client\hooks\teleport\runtime.h" />
+    <ClInclude Include="src\client\ui\teleport\teleport_panel.h" />
+    <ClInclude Include="src\client\runtime\internal.h" />
+    <ClInclude Include="src\client\runtime\host\game_host_classification.h" />
+    <ClInclude Include="src\client\hooks\graphics\graphics_hook_lifecycle.h" />
+    <ClInclude Include="src\client\hooks\graphics\graphics_hook_replacements.h" />
+    <ClInclude Include="src\client\hooks\graphics\input\input.h" />
+    <ClInclude Include="src\client\hooks\graphics\renderer\renderer.h" />
+    <ClInclude Include="src\client\hooks\graphics\renderer\state.h" />
+    <ClInclude Include="src\client\hooks\graphics\renderer\graphics_renderer_report.h" />
+    <ClInclude Include="src\client\ui\runtime\client_ui_module_runtime.h" />
+    <ClInclude Include="src\client\memory\current_process_memory.h" />
+    <ClInclude Include="src\client\content\handles\layout.h" />
+    <ClInclude Include="src\client\content\handles\handle_resolver.h" />
+    <ClInclude Include="src\client\content\activity\source.h" />
+    <ClInclude Include="src\client\content\scenarios\scenario_build.h" />
+    <ClInclude Include="src\client\content\scenarios\internal.h" />
+    <ClInclude Include="src\client\content\spawn_sets\spawn_set_build.h" />
+    <ClInclude Include="src\client\content\hash_names\hash_name_build.h" />
+    <ClInclude Include="src\client\content\hash_names\hash_name_matcher.h" />
+    <ClInclude Include="src\client\content\spawn_sets\spawn_set_catalog_builder.h" />
+    <ClInclude Include="src\client\content\investment\layout.h" />
+    <ClInclude Include="src\client\content\investment\internal.h" />
+    <ClInclude Include="src\client\content\investment\source.h" />
+    <ClInclude Include="src\client\content\investment\worker.h" />
+    <ClInclude Include="src\client\content\items\layout.h" />
+    <ClInclude Include="src\client\content\items\details\configured_item_detail_extractor.h" />
+    <ClInclude Include="src\client\content\items\details\layout.h" />
+    <ClInclude Include="src\client\content\items\details\memory.h" />
+    <ClInclude Include="src\client\content\items\details\definition_detail_reader.h" />
+    <ClInclude Include="src\client\content\items\details\relative.h" />
+    <ClInclude Include="src\client\content\items\details\socket_detail_reader.h" />
+    <ClInclude Include="src\client\network\consumer.h" />
+    <ClInclude Include="src\client\hooking\detour.h" />
+    <ClInclude Include="src\client\hooking\detour\transaction\detour_thread_transaction.h" />
+    <ClInclude Include="src\client\executable\image.h" />
+    <ClInclude Include="src\client\hooks\network\investment\investment_derived_rebuild.h" />
+    <ClInclude Include="src\client\hooks\network\runtime.h" />
+    <ClInclude Include="src\client\hooks\network\bubble_authority\bubble_authority_replacements.h" />
+    <ClInclude Include="src\client\hooks\network\bubble_authority\scope\bubble_authority_scope.h" />
+    <ClInclude Include="src\client\hooks\network\coordinator\network_call_coordinator.h" />
+    <ClInclude Include="src\client\hooks\network\content_config\coordinator\content_config_call_coordinator.h" />
+    <ClInclude Include="src\client\hooks\network\content_config\gate\content_config_signature_gate.h" />
+    <ClInclude Include="src\client\hooks\network\content_config\internal.h" />
+    <ClInclude Include="src\client\hooks\network\content_config\lifecycle\content_config_hook_storage.h" />
+    <ClInclude Include="src\client\hooks\network\content_config\protocol.h" />
+    <ClInclude Include="src\client\hooks\network\content_config\runtime.h" />
+    <ClInclude Include="src\client\hooks\network\platform.h" />
+    <ClInclude Include="src\client\hooks\network\network_call_quiescence.h" />
+    <ClInclude Include="src\client\hooks\network\http\internal.h" />
+    <ClInclude Include="src\client\hooks\network\lifecycle\network_hook_group.h" />
+    <ClInclude Include="src\client\hooks\network\lifecycle\network_hook_entries.h" />
+    <ClInclude Include="src\client\hooks\egress\dns\egress_dns_replacements.h" />
+    <ClInclude Include="src\client\hooks\egress\extensions\egress_extension_replacements.h" />
+    <ClInclude Include="src\client\hooks\egress\internal.h" />
+    <ClInclude Include="src\client\hooks\egress\platform\abi.h" />
+    <ClInclude Include="src\client\hooks\egress\platform\sdk.h" />
+    <ClInclude Include="src\client\hooks\egress\policy\policy.h" />
+    <ClInclude Include="src\client\hooks\egress\resolver\replacements.h" />
+    <ClInclude Include="src\client\hooks\egress\runtime.h" />
+    <ClInclude Include="src\client\hooks\egress\winsock\replacements.h" />
+    <ClInclude Include="src\client\hooks\egress\winsock\connection\egress_connection_replacements.h" />
+    <ClInclude Include="src\client\hooks\egress\winsock\control\egress_control_replacement.h" />
+    <ClInclude Include="src\client\hooks\egress\winsock\discovery\egress_discovery_responder.h" />
+    <ClInclude Include="src\client\hooks\egress\winsock\reception\egress_reception_replacements.h" />
+    <ClInclude Include="src\client\hooks\egress\winsock\transmission\replacements.h" />
+    <ClInclude Include="src\client\patterns\registry.h" />
+    <ClInclude Include="src\client\patterns\signature_text.h" />
+    <ClInclude Include="src\client\patterns\game.h" />
+    <ClInclude Include="src\client\patterns\steam.h" />
+    <ClInclude Include="src\client\targets\steam_targets.h" />
+    <ClInclude Include="src\client\targets\game.h" />
+    <ClInclude Include="src\client\targets\game\content.h" />
+    <ClInclude Include="src\client\targets\game\network.h" />
+    <ClInclude Include="src\client\targets\game\network\network_content_derivation.h" />
+    <ClInclude Include="src\client\targets\game\relative.h" />
+    <ClInclude Include="src\client\targets\game\resolution\internal.h" />
+    <ClInclude Include="src\client\targets\game\resolution\game_target_resolution.h" />
+    <ClInclude Include="src\steam\runtime\runtime.h" />
+    <ClInclude Include="src\steam\runtime\callbacks\callback_registry.h" />
+    <ClInclude Include="src\steam\runtime\internal.h" />
+    <ClInclude Include="src\steam\interfaces\steam_interface_factory.h" />
+    <ClInclude Include="src\steam\interfaces\internal.h" />
+    <ClInclude Include="src\steam\interfaces\tables\internal.h" />
+    <ClInclude Include="src\state\unlocks\definition.h" />
+    <ClInclude Include="src\state\unlocks\unlocks_runtime.h" />
+    <ClInclude Include="src\state\runtime\runtime.h" />
+    <ClInclude Include="src\state\runtime\state.h" />
+    <ClInclude Include="src\state\runtime\storage\internal.h" />
+    <ClInclude Include="src\state\activity\definition.h" />
+    <ClInclude Include="src\state\activity\defaults\definition.h" />
+    <ClInclude Include="src\state\activity\defaults\activity_defaults_snapshot.h" />
+    <ClInclude Include="src\state\activity\defaults\activity_defaults_validation.h" />
+    <ClInclude Include="src\state\activity\destination\definition.h" />
+    <ClInclude Include="src\state\activity\forced\definition.h" />
+    <ClInclude Include="src\state\activity\forced\activity_forced_destination.h" />
+    <ClInclude Include="src\state\activity\destination\activity_destination_snapshot.h" />
+    <ClInclude Include="src\state\activity\destination\activity_destination_validation.h" />
+    <ClInclude Include="src\state\activity\destination\activity_destination_spawn_binding.h" />
+    <ClInclude Include="src\state\activity\entity_slots\definition.h" />
+    <ClInclude Include="src\state\activity\entity_slots\runtime.h" />
+    <ClInclude Include="src\state\activity\entity_slots\transactions\internal.h" />
+    <ClInclude Include="src\state\activity\bubble_authority\definition.h" />
+    <ClInclude Include="src\state\activity\bubble_authority\runtime.h" />
+    <ClInclude Include="src\state\activity\bubble_authority\transactions\internal.h" />
+    <ClInclude Include="src\state\activity\membership\definition.h" />
+    <ClInclude Include="src\state\activity\membership\activity_membership_query.h" />
+    <ClInclude Include="src\state\activity\membership\transactions\internal.h" />
+    <ClInclude Include="src\state\activity\runtime.h" />
+    <ClInclude Include="src\state\activity\transactions\internal.h" />
+    <ClInclude Include="src\state\matchmaking\definition.h" />
+    <ClInclude Include="src\state\matchmaking\matchmaking_state.h" />
+    <ClInclude Include="src\state\matchmaking\transactions\internal.h" />
+    <ClInclude Include="src\state\runtime\equipment\configured_equipment_identity.h" />
+    <ClInclude Include="src\state\account\account_state.h" />
+    <ClInclude Include="src\state\account\inventory\inventory_state.h" />
+    <ClInclude Include="src\state\account\settings\settings_state.h" />
+    <ClInclude Include="src\state\account\settings\key_bindings.h" />
+    <ClInclude Include="src\state\equipment\light\definition.h" />
+    <ClInclude Include="src\state\equipment\light\calculation\equipment_light_calculation.h" />
+    <ClInclude Include="src\state\equipment\light\resolution\configured_equipment_light_resolver.h" />
+    <ClInclude Include="src\state\investment\investment.h" />
+    <ClInclude Include="src\state\content\content_catalog.h" />
+    <ClInclude Include="src\state\content_manifest\cache\format.h" />
+    <ClInclude Include="src\state\content_manifest\cache\internal.h" />
+    <ClInclude Include="src\state\content_manifest\definition.h" />
+    <ClInclude Include="src\state\content_manifest\fingerprint\content_manifest_fingerprint.h" />
+    <ClInclude Include="src\state\content_manifest\content_manifest_state_runtime.h" />
+    <ClInclude Include="src\state\content_manifest\scanner\internal.h" />
+    <ClInclude Include="src\state\content_manifest\scanner\package\content_manifest_package_header.h" />
+    <ClInclude Include="src\state\content_manifest\scanner\package\content_manifest_package_name.h" />
+    <ClInclude Include="src\state\content_manifest\content_manifest_row_validation.h" />
+    <ClInclude Include="src\state\build_data\definition.h" />
+    <ClInclude Include="src\state\build_data\runtime.h" />
+    <ClInclude Include="src\state\build_data\table.h" />
+    <ClInclude Include="src\state\build_data\scenarios\scenario_catalog.h" />
+    <ClInclude Include="src\state\build_data\spawn_sets\spawn_set_catalog.h" />
+    <ClInclude Include="src\state\build_data\hash_names\hash_name_catalog.h" />
+    <ClInclude Include="src\state\build_data\hash_names\definition.h" />
+    <ClInclude Include="src\state\build_data\spawn_sets\definition.h" />
+    <ClInclude Include="src\state\build_data\scenarios\definition.h" />
+    <ClInclude Include="src\state\build_data\runtime\persistence\build_data_persistence.h" />
+    <ClInclude Include="src\state\build_data\runtime\persistence\publication_transaction.h" />
+    <ClInclude Include="src\state\build_data\cache\internal.h" />
+    <ClInclude Include="src\state\build_data\cache\read\cache_payload_reader.h" />
+    <ClInclude Include="src\state\build_data\cache\records\codec.h" />
+    <ClInclude Include="src\state\build_data\cache\records\domains.h" />
+    <ClInclude Include="src\state\build_data\cache\records\format.h" />
+    <ClInclude Include="src\state\build_data\cache\records\validation.h" />
+    <ClInclude Include="src\state\build_data\cache\write\cache_payload_writer.h" />
+    <ClInclude Include="src\state\build_data\cache\write\temporary\temporary_cache_file.h" />
+    <ClInclude Include="src\state\build_data\cache\write\validation\cache_file_comparison.h" />
+    <ClInclude Include="src\state\build_data\items\item_catalog.h" />
+    <ClInclude Include="src\state\build_data\items\details\definition.h" />
+    <ClInclude Include="src\state\build_data\items\details\item_detail_catalog.h" />
+    <ClInclude Include="src\state\build_data\inventory\buckets\definition.h" />
+    <ClInclude Include="src\state\build_data\inventory\buckets\inventory_bucket_catalog.h" />
+    <ClInclude Include="src\state\build_data\socket_entry_lists\definition.h" />
+    <ClInclude Include="src\state\build_data\socket_entry_lists\socket_entry_list_catalog.h" />
+    <ClInclude Include="src\state\build_data\runtime\build_data_catalog_runtime.h" />
+    <ClInclude Include="src\state\build_data\runtime\domain_markers.h" />
+    <ClInclude Include="src\server\transport\bap_listener.h" />
+    <ClInclude Include="src\server\runtime\server_runtime.h" />
+    <ClInclude Include="src\server\ui\runtime\server_ui_module_runtime.h" />
+    <ClInclude Include="src\server\ui\activity_override\activity_override_panel.h" />
+    <ClInclude Include="src\server\ui\activity_override\activity_override_lists.h" />
+    <ClInclude Include="src\server\bap\runtime.h" />
+    <ClInclude Include="src\server\bap\internal.h" />
+    <ClInclude Include="src\server\bap\encrypted\internal.h" />
+    <ClInclude Include="src\server\bap\encrypted\activity_transaction\activity_transaction_notifications.h" />
+    <ClInclude Include="src\server\bap\encrypted\activity_host_manager\activity_host_manager_route.h" />
+    <ClInclude Include="src\server\bap\encrypted\activity_message\definition.h" />
+    <ClInclude Include="src\server\bap\encrypted\activity_message\activity_message_route.h" />
+    <ClInclude Include="src\server\bap\encrypted\activity_message\patch_epoch\activity_patch_epoch_route.h" />
+    <ClInclude Include="src\server\bap\encrypted\activity_message\membership\activity_membership_route.h" />
+    <ClInclude Include="src\server\bap\encrypted\matchmaking\matchmaking_route.h" />
+    <ClInclude Include="src\server\bap\encrypted\transactions\definition.h" />
+    <ClInclude Include="src\server\bap\encrypted\transactions\service_outcome_commit.h" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\definition.h" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\queuez_state_validation.h" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\queuez_outcome_staging.h" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\staging\queuez_family_staging.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\queuez\queuez_update_frame.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_message_push.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_roster_push.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_global_state_push.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_keepalive_push.h" />
+    <ClInclude Include="src\server\bap\encrypted\bap_connection_publication.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_membership_push.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_notification_frame.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\activity_arrival.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\internal.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\snapshot\internal.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\snapshot\snapshot.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\snapshot\snapshot_storage.h" />
+    <ClInclude Include="src\server\web_service\opcode_routes.h" />
+    <ClInclude Include="src\server\web_service\web_service_runtime.h" />
+    <ClInclude Include="src\server\http\server_http.h" />
+    <ClInclude Include="src\middleware\runtime\middleware_runtime.h" />
+    <ClInclude Include="src\middleware\protobuf\codec.h" />
+    <ClInclude Include="src\middleware\protobuf\protobuf_wire.h" />
+    <ClInclude Include="src\middleware\bap\frame.h" />
+    <ClInclude Include="src\middleware\bap\account_translation\account_translation_response.h" />
+    <ClInclude Include="src\middleware\bap\activity_host\activity_host_response.h" />
+    <ClInclude Include="src\middleware\bap\activity_host_manager\definition.h" />
+    <ClInclude Include="src\middleware\bap\activity_host_manager\request\activity_manager_request.h" />
+    <ClInclude Include="src\middleware\bap\activity_host_manager\request\selection\definition.h" />
+    <ClInclude Include="src\middleware\bap\activity_host_manager\request\selection\internal.h" />
+    <ClInclude Include="src\middleware\bap\activity_host_manager\request\selection\activity_manager_selection_parser.h" />
+    <ClInclude Include="src\middleware\bap\activity_host_manager\response\activity_manager_response.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\definition.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_message_request_parser.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\sensor_auth_update.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_global_state_encoder.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\client_authoritative_data.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_client_keepalive_validator.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_high_water_validator.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_join_request_parser.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_client_identity_parser.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_state_refresh_parser.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_membership_acknowledgement_parser.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_patch_epoch_parser.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\replicate_membership.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_message_notification_encoder.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_join_result_encoder.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_entity_slot_request_parser.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\entity_slots.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\entity_authority.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\incident.h" />
+    <ClInclude Include="src\middleware\bap\certificate.h" />
+    <ClInclude Include="src\middleware\bap\client_config\client_config_response.h" />
+    <ClInclude Include="src\middleware\bap\family_subscription.h" />
+    <ClInclude Include="src\middleware\bap\family_unsubscription.h" />
+    <ClInclude Include="src\middleware\bap\matchmaking\definition.h" />
+    <ClInclude Include="src\middleware\bap\matchmaking\request\matchmaking_request_parser.h" />
+    <ClInclude Include="src\middleware\bap\matchmaking\request\field_selection.h" />
+    <ClInclude Include="src\middleware\bap\matchmaking\response\matchmaking_response_encoder.h" />
+    <ClInclude Include="src\middleware\bap\matchmaking\response\matchmaking_dynamic_response.h" />
+    <ClInclude Include="src\middleware\bap\user_message\user_message_response.h" />
+    <ClInclude Include="src\middleware\queuez\subscription.h" />
+    <ClInclude Include="src\middleware\compression\oodle\runtime.h" />
+    <ClInclude Include="src\middleware\datagen\character_record\layout.h" />
+    <ClInclude Include="src\middleware\datagen\character_record\character_record_encoder.h" />
+    <ClInclude Include="src\middleware\datagen\family3\family3_roster.h" />
+    <ClInclude Include="src\middleware\datagen\family4\account\account_encoder.h" />
+    <ClInclude Include="src\middleware\datagen\family4\account\layout.h" />
+    <ClInclude Include="src\middleware\datagen\family4\account\preferences\layout.h" />
+    <ClInclude Include="src\middleware\datagen\family4\account\preferences\native_key_binding_map.h" />
+    <ClInclude Include="src\middleware\datagen\family4\account\preferences\preferences_encoder.h" />
+    <ClInclude Include="src\middleware\datagen\family4\character\abi.h" />
+    <ClInclude Include="src\middleware\datagen\family4\loadout\definition.h" />
+    <ClInclude Include="src\middleware\datagen\family4\loadout\loadout_resolver.h" />
+    <ClInclude Include="src\middleware\datagen\family4\loadout\loadout_item_resolver.h" />
+    <ClInclude Include="src\middleware\datagen\family4\loadout\subclass_socket_selection.h" />
+    <ClInclude Include="src\middleware\datagen\family4\character\character_encoder.h" />
+    <ClInclude Include="src\middleware\datagen\family4\character\equipment_summary_builder.h" />
+    <ClInclude Include="src\middleware\datagen\family4\character\layout.h" />
+    <ClInclude Include="src\middleware\datagen\family4\instance\abi.h" />
+    <ClInclude Include="src\middleware\datagen\family4\instance\instance_encoder.h" />
+    <ClInclude Include="src\middleware\datagen\family4\instance\layout.h" />
+    <ClInclude Include="src\middleware\datagen\family4\inventory\layout.h" />
+    <ClInclude Include="src\middleware\datagen\family4\progression\layout.h" />
+    <ClInclude Include="src\middleware\datagen\roster\queuez_roster.h" />
+    <ClInclude Include="src\middleware\content\packages\named_tags.h" />
+    <ClInclude Include="src\middleware\content\packages\named_tags\internal.h" />
+    <ClInclude Include="src\middleware\content\packages\package_catalog.h" />
+    <ClInclude Include="src\middleware\content\manifest\encoder.h" />
+    <ClInclude Include="src\middleware\encoding\bit_writer.h" />
+    <ClInclude Include="src\middleware\encoding\bit_reader.h" />
+    <ClInclude Include="src\middleware\encoding\byte_order.h" />
+    <ClInclude Include="src\middleware\queuez\queuez_update.h" />
+    <ClInclude Include="src\middleware\web_service\web_service_envelope.h" />
+    <ClInclude Include="src\middleware\web_service\status_fields.h" />
+    <ClInclude Include="src\middleware\web_service\messages\family5\family5_codec.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode205.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode503.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode206.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode501_codec.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode505\opcode505_codec.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode601\opcode601_codec.h" />
+    <ClInclude Include="src\middleware\datagen\family4\account\selection_patch\account_selection_patch_encoder.h" />
+    <ClInclude Include="src\middleware\secure_channel\runtime.h" />
+    <ClInclude Include="src\middleware\signon\response.h" />
+    <ClInclude Include="vendor\detours\detours.h" />
+    <ClInclude Include="vendor\imgui\imconfig.h" />
+    <ClInclude Include="vendor\imgui\imgui.h" />
+    <ClInclude Include="vendor\imgui\imgui_internal.h" />
+    <ClInclude Include="vendor\imgui\imstb_rectpack.h" />
+    <ClInclude Include="vendor\imgui\imstb_textedit.h" />
+    <ClInclude Include="vendor\imgui\imstb_truetype.h" />
+    <ClInclude Include="vendor\imgui\backends\imgui_impl_win32.h" />
+    <ClInclude Include="vendor\imgui\backends\imgui_impl_dx11.h" />
+    <ClInclude Include="src\client\targets\game\retail_log.h" />
+    <ClInclude Include="src\client\patterns\game\retail_log\retail_log_signature_bytes.h" />
+    <ClInclude Include="src\client\hooks\retail_log\retail_log_enqueue_observer.h" />
+    <ClInclude Include="src\client\hooks\retail_log\retail_log_lifecycle.h" />
+    <ClInclude Include="src\client\hooks\egress\resolver\redirect.h" />
+    <ClInclude Include="src\core\settings\client\external\definition.h" />
+    <ClInclude Include="src\client\hooks\external_server\internal.h" />
+    <ClInclude Include="src\client\hooks\external_server\route.h" />
+    <ClInclude Include="src\client\content\bootstrap\bootstrap_token_publish.h" />
+    <ClInclude Include="src\steam\runtime\context\steam_context_state.h" />
+    <ClInclude Include="src\client\content\diagnostics\content_readiness_report.h" />
+    <ClInclude Include="src\client\content\investment\runtime.h" />
+    <ClInclude Include="src\client\content\items\packages\build.h" />
+    <ClInclude Include="src\client\content\items\packages\internal.h" />
+    <ClInclude Include="src\client\hooks\assert_handler\assert_handler_observer.h" />
+    <ClInclude Include="src\client\hooks\assert_handler\assert_handler_lifecycle.h" />
+    <ClInclude Include="src\client\hooks\bitmap\bitmap_ref_guard.h" />
+    <ClInclude Include="src\client\hooks\bitmap\bitmap_hook_lifecycle.h" />
+    <ClInclude Include="src\client\hooks\bootflow\internal.h" />
+    <ClInclude Include="src\client\hooks\bootflow\bootflow_hook_lifecycle.h" />
+    <ClInclude Include="src\client\hooks\bootflow\spawn\spawn_gate_record_dump.h" />
+    <ClInclude Include="src\client\hooks\bootflow\spawn\probe.h" />
+    <ClInclude Include="src\client\hooks\config_getter\config_getter_answers.h" />
+    <ClInclude Include="src\client\hooks\config_getter\config_getter_lifecycle.h" />
+    <ClInclude Include="src\client\hooks\egress\lifecycle\internal.h" />
+    <ClInclude Include="src\client\hooks\egress\policy\egress_policy_logging.h" />
+    <ClInclude Include="src\client\hooks\network\investment\internal.h" />
+    <ClInclude Include="src\client\hooks\queuez\internal.h" />
+    <ClInclude Include="src\client\hooks\queuez\queuez_hook_lifecycle.h" />
+    <ClInclude Include="src\client\patterns\game\assert_handler\assert_signature_bytes.h" />
+    <ClInclude Include="src\client\patterns\game\config_getter\config_getter_signature_bytes.h" />
+    <ClInclude Include="src\client\patterns\game\packages\package_key_signature_bytes.h" />
+    <ClInclude Include="src\client\patterns\game\signon\signon_readiness_signature_bytes.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\spawn_reader.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\component_container_reader.h" />
+    <ClInclude Include="src\client\patterns\image_scan.h" />
+    <ClInclude Include="src\client\targets\game\assert_handler\game_assert_targets.h" />
+    <ClInclude Include="src\client\targets\game\assert_handler.h" />
+    <ClInclude Include="src\client\targets\game\config_getter\game_config_getter_targets.h" />
+    <ClInclude Include="src\client\targets\game\config_getter.h" />
+    <ClInclude Include="src\client\targets\game\packages\game_package_targets.h" />
+    <ClInclude Include="src\client\targets\game\packages.h" />
+    <ClInclude Include="src\middleware\content\packages\reader\internal.h" />
+    <ClInclude Include="src\middleware\content\packages\reader\layout.h" />
+    <ClInclude Include="src\middleware\content\packages\reader\reader.h" />
+    <ClInclude Include="src\middleware\content\packages\reader\parallel.h" />
+    <ClInclude Include="src\middleware\content\packages\reader\block_cache.h" />
+    <ClInclude Include="src\middleware\content\packages\reader\handle_cache.h" />
+    <ClInclude Include="src\middleware\content\packages\reader\package_table_cache.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\ability_pool_reader.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\bubble_state_reader.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\internal.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\items.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\region_reader.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\roster_intersection.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\scenario_reader.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\slot_descriptor_reader.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\definition_index_table.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\scenario_walk.h" />
+    <ClInclude Include="src\middleware\crypto\aes_gcm_decrypt.h" />
+    <ClInclude Include="src\middleware\datagen\character_record\appearance\internal.h" />
+    <ClInclude Include="src\middleware\datagen\definitions.h" />
+    <ClInclude Include="src\middleware\datagen\family4\progression\progression_bank_keys.h" />
+    <ClInclude Include="src\middleware\signon\config\signon_config_blob.h" />
+    <ClInclude Include="src\middleware\signon\extended\signon_extended_fields.h" />
+    <ClInclude Include="src\middleware\signon\internal.h" />
+    <ClInclude Include="src\middleware\signon\ownership\signon_ownership_encoder.h" />
+    <ClInclude Include="src\state\build_data\abilities\ability_bucket_catalog.h" />
+    <ClInclude Include="src\state\build_data\abilities\definition.h" />
+    <ClInclude Include="src\state\build_data\constants\investment_constant_catalog.h" />
+    <ClInclude Include="src\state\build_data\constants\definition.h" />
+    <ClInclude Include="src\state\build_data\progressions\progression_catalog.h" />
+    <ClInclude Include="src\state\build_data\progressions\definition.h" />
+    <ClInclude Include="src\state\entitlements\definition.h" />
+    <ClInclude Include="src\state\entitlements\entitlement_runtime.h" />
+    <ClInclude Include="src\state\entitlements\validation.h" />
+    <ClInclude Include="src\server\transport\internal.h" />
+    <ClInclude Include="src\client\hooks\queuez\family0\family0_source_seed.h" />
+    <ClInclude Include="src\middleware\content\packages\reader\locator_cache.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\queuez\queuez_push_reporting.h" />
+    <ClInclude Include="src\client\diagnostics\module_range.h" />
+    <ClInclude Include="src\client\process\freeze\client_process_freeze.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

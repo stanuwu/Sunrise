@@ -29,7 +29,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 ## Dear ImGui
 
 Sunrise compiles the Dear ImGui sources into the single production DLL. The upstream notice is
-retained at `Sunrise/vendor/imgui/LICENSE.txt` and embedded in the DLL as a resource.
+retained at `vendor/imgui/LICENSE.txt` and embedded in the DLL as a resource.
 
 The MIT License (MIT)
 
