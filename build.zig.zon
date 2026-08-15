@@ -1,0 +1,10 @@
+.{
+    .name = .sunrise,
+    .version = "0.2.1",
+    .fingerprint = 0x82fb67cc9f682584,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .xwin_sdk = .{ .path = "./pkg/xwin-sdk" },
+    },
+    .paths = .{""},
+}

@@ -3,6 +3,8 @@
 /.envrc.local
 /.xwin/
 /.xwin-cache/
+/.zig-cache/
+/zig-out/
 /.vs/
 /.idea/
 /.vscode/

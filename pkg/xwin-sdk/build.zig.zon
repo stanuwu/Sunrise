@@ -1,0 +1,10 @@
+.{
+    .name = .xwin_sdk,
+    .version = "0.0.2",
+    .fingerprint = 0x2489f3d9fac12ee4,
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+    },
+}

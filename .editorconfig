@@ -15,3 +15,9 @@ max_line_length = 100
 [*.{md,ps1,vcxproj}]
 indent_style = space
 indent_size = 2
+
+[*.{nix,zig,zon}]
+end_of_line = lf
+
+[.envrc]
+end_of_line = lf
