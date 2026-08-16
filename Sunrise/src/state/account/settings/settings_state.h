@@ -52,6 +52,7 @@ struct Display {
     float calibrationPrimary{};
     /** Second unidentified renderer-calibration scalar. */
     float calibrationAlpha{};
+    std::int32_t fieldOfView{};
 };
 
 /** Authored HUD, subtitle, reticle, and text presentation preferences. */

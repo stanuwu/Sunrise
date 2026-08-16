@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "core": {
     "logging": {
       "debugger_sink": true,
@@ -203,7 +203,8 @@
           "show_fps": false,
           "hdr_mode": 0,
           "calibration_primary": 10000.0,
-          "calibration_alpha": 0.0
+          "calibration_alpha": 0.0,
+          "field_of_view": 85
         },
         "interface": {
           "subtitles_mode": 0,

@@ -35,6 +35,7 @@ constexpr Range<std::int8_t> kAudioVolume{0, 10};
 
 /** Brightness stores the 7 menu choices, 0 to 6. */
 constexpr Range<std::int8_t> kBrightness{0, 6};
+constexpr Range<std::int32_t> kFieldOfView{55, 105};
 /** The first unidentified calibration field uses the working renderer fallback. */
 constexpr float kCalibrationPrimary = 10000.0F;
 /** The second unidentified calibration field uses the working renderer alpha. */
@@ -117,7 +118,8 @@ template <typename Value, std::size_t Count>
 [[nodiscard]] bool valid_display(const Display& value) noexcept {
     return within(value.brightness, kBrightness) && within(value.hdrMode, kTwoChoiceSelector)
            && value.calibrationPrimary == kCalibrationPrimary
-           && value.calibrationAlpha == kCalibrationAlpha;
+           && value.calibrationAlpha == kCalibrationAlpha
+           && within(value.fieldOfView, kFieldOfView);
 }
 
 /**

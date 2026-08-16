@@ -84,7 +84,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ResourceCompile Include="resources\sunrise.rc" />
+    <ResourceCompile Include="resources\sunrise.rc">
+      <AdditionalInputs>%(AdditionalInputs);$(MSBuildThisFileDirectory)resources\default_settings.json</AdditionalInputs>
+    </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="resources\default_settings.json" />
