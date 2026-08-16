@@ -34,8 +34,16 @@ extern "C" __declspec(dllexport) bool SunriseShutdown() noexcept {
     return sunrise::steam::shutdown();
 }
 
+void InitializeWineDisplay() {
+    HDC hdc = GetDC(NULL);
+    if (hdc) {
+        ReleaseDC(NULL, hdc);
+    }
+}
+
 /** @return True when the Steam-compatible runtime initializes. */
 extern "C" __declspec(dllexport) bool SteamAPI_Init() noexcept {
+    InitializeWineDisplay();
     return sunrise::steam::initialize(g_module);
 }
 

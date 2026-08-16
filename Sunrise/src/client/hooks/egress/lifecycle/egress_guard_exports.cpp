@@ -1,3 +1,5 @@
+#include <string>
+
 #include "../dns/egress_dns_replacements.h"
 #include "../extensions/egress_extension_replacements.h"
 #include "../resolver/replacements.h"
@@ -20,6 +22,19 @@ export_definition(ModuleSlot module, const char* name, Function replacement) noe
 }
 
 } // namespace
+
+// --- Dummy Functions ---
+__declspec(noinline) int WSAAPI Dummy_WSAConnectByList() {
+    volatile int dummy = 0;
+    dummy += 1;
+    return -1; // SOCKET_ERROR
+}
+
+__declspec(noinline) int WSAAPI Dummy_GetAddrInfoExA() {
+    volatile int dummy = 0;
+    dummy += 1;
+    return 11001; // WSAHOST_NOT_FOUND
+}
 
 /** Finds the whole Windows SDK egress surface for one atomic Detours batch. */
 bool resolve_specs(std::span<hooking::detour::Spec, kHookCount> specs,
@@ -71,12 +86,25 @@ bool resolve_specs(std::span<hooking::detour::Spec, kHookCount> specs,
     for (std::size_t index = 0; index < exports.size(); ++index) {
         const ExportDefinition& definition = exports[index];
         const HMODULE module = module_handle(definition.module);
-        void* const target = reinterpret_cast<void*>(GetProcAddress(module, definition.name));
+        void* target = reinterpret_cast<void*>(GetProcAddress(module, definition.name));
         names[index] = definition.name;
         resolved[index] = target != nullptr;
         if (target == nullptr) {
-            // Older Windows builds cannot expose an egress path through an absent DnsQueryRaw.
-            return index == kRequiredHookCount;
+            std::string funcName(definition.name);
+
+            if (funcName == "WSAConnectByList") {
+                target = reinterpret_cast<void*>(&Dummy_WSAConnectByList);
+                resolved[index] = false;
+            }
+            else if (funcName == "GetAddrInfoExA") {
+                target = reinterpret_cast<void*>(&Dummy_GetAddrInfoExA);
+                resolved[index] = false;
+            } else {
+                // Older Windows builds cannot expose an egress path through an absent DnsQueryRaw.
+                return index == kRequiredHookCount;
+            }
+        } else {
+            resolved[index] = true;
         }
         specs[index] = hooking::detour::Spec{target, definition.replacement};
         count = index + 1;
