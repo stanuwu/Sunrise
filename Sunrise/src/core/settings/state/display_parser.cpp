@@ -12,6 +12,7 @@ bool Parser::display_settings(state::account::settings::Display& output) noexcep
         hdrMode,
         calibrationPrimary,
         calibrationAlpha,
+        fieldOfView,
         count,
     };
 
@@ -54,6 +55,10 @@ bool Parser::display_settings(state::account::settings::Display& output) noexcep
             }
         } else if (key == "calibration_alpha") {
             if (!mark(Field::calibrationAlpha) || !floating_point(output.calibrationAlpha)) {
+                return false;
+            }
+        } else if (key == "field_of_view") {
+            if (!mark(Field::fieldOfView) || !signed_32(output.fieldOfView)) {
                 return false;
             }
         } else if (!skip_value(0)) {

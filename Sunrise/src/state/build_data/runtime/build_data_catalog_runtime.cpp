@@ -4,6 +4,7 @@
 #include "../abilities/ability_bucket_catalog.h"
 #include "../constants/investment_constant_catalog.h"
 #include "../hash_names/hash_name_catalog.h"
+#include "../hash_names/overlay/name_overlay_catalog.h"
 #include "../inventory/buckets/inventory_bucket_catalog.h"
 #include "../items/details/item_detail_catalog.h"
 #include "../progressions/progression_catalog.h"
@@ -164,7 +165,10 @@ bool publish_hash_names(std::span<const hash_names::Name> names) noexcept {
 /** Finds one bubble's internal name by its hash. */
 bool find_hash_name(std::uint32_t hash, hash_names::Name& name) noexcept {
     name = {};
-    return hash_names_ready() && hash_names::find(hash, name);
+    if (hash_names_ready() && hash_names::find(hash, name)) {
+        return true;
+    }
+    return hash_names::overlay::find(hash, name);
 }
 
 /** @return True when a complete spawn-set catalog, empty or not, is published. */

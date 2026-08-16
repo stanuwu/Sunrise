@@ -7,12 +7,10 @@ namespace {
 
 /** Native keybinding halves use input code 0x74 as the unbound sentinel. */
 constexpr std::uint16_t kUnboundInputCode = 0x0074;
-/** Seed version 0 lets the client set up local mirrors once after sign-in. */
-constexpr std::int32_t kOpenSeedVersion = 0;
 /**
  * Seed version 1 closes a gate so the client keeps the replicated values behind it.
- * The keybinding gate stays open so the client seeds its own defaults. The post-processing gate
- * stays closed, or local cvars would overwrite its 3 replicated fields on every sign-in.
+ * Both gates stay closed, or local cvars would overwrite their replicated fields on every
+ * sign-in.
  */
 constexpr std::int32_t kClosedSeedVersion = 1;
 /** Source 0 makes later input reads use the replicated keybinding array. */
@@ -53,7 +51,7 @@ bool encode(const state::account::settings::AccountSettings& settings,
     record = {};
     bindingsRecord = {};
     record.postProcessingSeedVersion = kClosedSeedVersion;
-    bindingsRecord.accountSeedVersion = kOpenSeedVersion;
+    bindingsRecord.accountSeedVersion = kClosedSeedVersion;
     bindingsRecord.sourceSelector = kReplicatedBindingSource;
 
     const auto& controls = settings.controls;
@@ -90,6 +88,7 @@ bool encode(const state::account::settings::AccountSettings& settings,
     record.hdrMode = display.hdrMode;
     record.calibrationPrimary = display.calibrationPrimary;
     record.calibrationAlpha = display.calibrationAlpha;
+    bindingsRecord.fieldOfViewAdjustment = display.fieldOfView;
 
     const auto& interfaceSettings = settings.interface;
     record.subtitlesMode = interfaceSettings.subtitlesMode;
