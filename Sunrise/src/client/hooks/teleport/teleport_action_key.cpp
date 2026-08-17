@@ -40,6 +40,13 @@ constexpr std::size_t kKeyTableCount = 105;
 constexpr std::uint16_t kKeyCodeMask = 0x00FF;
 /** The table byte meaning the index resolves through its scan code instead. */
 constexpr std::uint8_t kAbsentVirtualKey = 0xFF;
+/** First either-side modifier code. These sit above the key table and are not indexed by it. */
+constexpr std::uint16_t kFirstModifierCode = 105;
+/**
+ * Virtual keys for the four either-side codes: shift, control, key_windows, alt.
+ * Windows has no either-side windows key, so that one resolves to the left key alone.
+ */
+constexpr std::array<std::uint8_t, 4> kModifierKeys{VK_SHIFT, VK_CONTROL, VK_LWIN, VK_MENU};
 
 const std::uint8_t* g_virtualKeys{};
 const std::uint8_t* g_scanCodes{};
@@ -92,6 +99,10 @@ void clear_action_keys() noexcept {
 std::uint32_t action_key(std::uint16_t binding) noexcept {
     // The key code is the low byte. The bits above it are modifiers, which the tables do not index.
     const std::uint16_t index = binding & kKeyCodeMask;
+    // A binding may name a modifier on its own. Crouch does by default.
+    if (index >= kFirstModifierCode && index < kFirstModifierCode + kModifierKeys.size()) {
+        return kModifierKeys[index - kFirstModifierCode];
+    }
     if (g_virtualKeys == nullptr || g_scanCodes == nullptr || index >= kKeyTableCount) {
         return 0;
     }

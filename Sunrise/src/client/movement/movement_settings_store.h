@@ -12,8 +12,13 @@ inline constexpr float kMinimumDistance = 1.0F;
 inline constexpr float kMaximumDistance = 100.0F;
 /** No key is bound until one is picked, so a fresh install cannot fire a movement feature. */
 inline constexpr std::uint32_t kNoKey = 0;
-/** Space is the stock jump binding, and the one the sword skate fix has to watch to do anything. */
-inline constexpr std::uint32_t kDefaultJumpKey = 0x20;
+
+/** Default fly speed, in world units per second. */
+inline constexpr float kDefaultFlySpeed = 15.0F;
+/** Slowest offered fly speed. Below this a press does not visibly move the player. */
+inline constexpr float kMinimumFlySpeed = 1.0F;
+/** Fastest offered fly speed. Past this the player outruns what the map streams in. */
+inline constexpr float kMaximumFlySpeed = 100.0F;
 
 /** Runtime movement configuration. This module owns it; Core settings do not carry it. */
 struct Settings {
@@ -22,9 +27,12 @@ struct Settings {
     std::uint32_t virtualKey{kNoKey};
     bool noclipEnabled{false};
     std::uint32_t noclipToggleKey{kNoKey};
+    /** The jump key comes from the account binding, so none is stored here. */
     bool swordSkateEnabled{false};
-    /** The player's jump key. The refusal is only cleared on the tick this key goes down. */
-    std::uint32_t swordSkateJumpKey{kDefaultJumpKey};
+    bool flyEnabled{false};
+    std::uint32_t flyToggleKey{kNoKey};
+    /** World units per second while a direction is pressed. */
+    float flySpeed{kDefaultFlySpeed};
 };
 
 /**

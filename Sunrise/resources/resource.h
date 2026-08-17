@@ -6,7 +6,6 @@
 #define IDR_IMGUI_LICENSE 102
 /** The next module-local RCDATA identifier embeds the required Microsoft Detours notice. */
 #define IDR_DETOURS_LICENSE 103
-
 /** The four numeric fields of the version resource, in FILEVERSION order. */
 #define SUNRISE_VER_MAJOR 0
 #define SUNRISE_VER_MINOR 3

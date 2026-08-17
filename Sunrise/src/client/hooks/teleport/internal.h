@@ -22,6 +22,7 @@ inline constexpr std::uint32_t kInvalidHandle = 0xFFFFFFFF;
 
 /** Camera pose block stride, indexed by player. Its vectors are plain floats. */
 inline constexpr std::size_t kCameraBlockStride = 0xC50;
+inline constexpr std::size_t kCameraPositionX = 1428;
 /** Camera forward vector. Its default is (1,0,0), so the basis is X forward, Z up. */
 inline constexpr std::size_t kCameraForwardX = 1468;
 
@@ -51,10 +52,5 @@ inline constexpr std::size_t kBodyPointer = 32;
 inline constexpr std::size_t kBodyPositionX = 448;
 /** Rigid-body velocity. The sync copies this into the physics component every tick. */
 inline constexpr std::size_t kBodyVelocityX = 560;
-
-/** Three floats make one position or velocity vector. */
-inline constexpr std::size_t kVectorLanes = 3;
-/** The vertical lane, given the camera basis above. */
-inline constexpr std::size_t kVerticalLane = 2;
 
 } // namespace sunrise::client::hooks::teleport

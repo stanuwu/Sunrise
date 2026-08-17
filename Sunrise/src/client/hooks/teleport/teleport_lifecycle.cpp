@@ -13,6 +13,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../hooking/detour.h"
+#include "../fly/fly.h"
 #include "../polled_input/runtime.h"
 #include "../sword_skate/sword_skate.h"
 #include "internal.h"
@@ -78,6 +79,8 @@ std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
     capture_forward(playerIndex);
     poll_request();
     force_pending();
+    // Read here, not on the physics tick: that tick stops for a player who is standing still.
+    hooks::fly::poll_toggle();
     return result;
 }
 
@@ -93,6 +96,7 @@ std::int64_t __fastcall physics_sync(std::byte* component, std::byte* outFlags) 
     // Shares this detour rather than adding a second one to the same function. The flag it clears
     // is written and read inside this tick, so it has to run here and not on a frame poll.
     hooks::sword_skate::apply(component);
+    hooks::fly::apply(component);
     const PhysicsSync next = original<PhysicsSync>(kPhysicsSlot);
     return next != nullptr ? next(component, outFlags) : 0;
 }
@@ -190,6 +194,7 @@ void uninstall() noexcept {
     }
     clear_targets();
     clear_action_keys();
+    hooks::fly::reset();
     polled_input::release_key();
     (void)hooking::detour::uninstall(g_handles);
     g_handles = {};

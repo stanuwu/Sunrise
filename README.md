@@ -5,13 +5,17 @@ Destiny 2 Offline Exploration Mod
 > This mod installs onto an old build of the game and allows you to play it offline, loading into
 > destinations and exploring them.
 >
-> No other features are currently supported. (Missions, Enemies, NPCs, Quests, Inventory
-> Management, ...)
+> Most gameplay features are not currently supported. (Missions, Enemies, NPCs, Quests, Persistent Saves, ...)
 
 - [Install Instructions](https://github.com/stanuwu/Sunrise/wiki/Installing)
 - [FAQ](https://github.com/stanuwu/Sunrise/wiki/FAQ)
 - [Common Issues](https://github.com/stanuwu/Sunrise/wiki/Common-Issues)
 - [Discord](https://discord.gg/22JS6et5k9)
+
+## Features
+- Load into any Destination (matchmade activities are currently broken)
+- Exploration Features (Fly, Noclip, Activity Override, ...)
+- Basic Inventory Management
 
 ## WIP
 
