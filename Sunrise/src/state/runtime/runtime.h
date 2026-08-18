@@ -15,6 +15,31 @@ namespace sunrise::state {
  */
 [[nodiscard]] bool ensure_profile_item_identities() noexcept;
 
+/** Why one attempt to canonicalize the "Emotes" collection item ended. */
+enum class EmoteCollectionOutcome : std::uint8_t {
+    /** Every character carries a sound collection item, either already or as of this call. */
+    ready,
+    /** The build data or account this reads is not published yet, so a retry is still owed. */
+    notReady,
+    /** The installed content does not carry the item this expects, so it can never be applied. */
+    unsupported,
+    /** The item could not be placed, so no character was changed and a retry is still owed. */
+    failed,
+};
+
+/**
+ * Equips each character with the "Emotes" collection item (hash 3183180185) in the emote slot, in
+ * place of an individual emote. The stock client opens its own wheel-configuration screen for this
+ * item; its 4 ordinary sockets seed default lanes from the item's real plug pool so the wheel has
+ * something in every slot the first time it opens.
+ * Idempotent, and safe to call from more than one boundary: a character already carrying a sound
+ * copy is left alone, and one whose sockets no longer resolve is repaired in place, keeping its
+ * instance identity and every field this does not own.
+ * The outcome distinguishes "nothing to do" from "could not be done", so a caller never records
+ * the account as canonical on the strength of a prerequisite that was never met.
+ */
+[[nodiscard]] EmoteCollectionOutcome ensure_character_emote_collection() noexcept;
+
 /** Direction of one checked character equipment mutation. */
 enum class EquipmentMutationKind : std::uint8_t {
     none,

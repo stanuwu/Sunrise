@@ -579,4 +579,189 @@ bool commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) no
     return ready;
 }
 
+namespace {
+
+/**
+ * Default plug hashes the wheel seeds when granting or repairing the collection item's sockets.
+ * All four are universal Common emotes from Bright Engrams, with no class or race restriction:
+ * "Yes" (3184938442), "Nope" (48790291), "Casual Sit" (383973261), "Cheer" (2834933816).
+ * Lane order follows the client's own wheel layout, confirmed empirically in-game:
+ * lane 0 = top, lane 1 = bottom, lane 2 = left, lane 3 = right.
+ */
+constexpr std::uint32_t kYesEmoteDefinitionHash = 3184938442U;
+constexpr std::uint32_t kNopeEmoteDefinitionHash = 48790291U;
+constexpr std::uint32_t kCasualSitEmoteDefinitionHash = 383973261U;
+constexpr std::uint32_t kCheerEmoteDefinitionHash = 2834933816U;
+
+constexpr std::array<std::uint32_t, authored_inventory::kEmoteCollectionSocketLaneCount>
+    kEmoteCollectionDefaultPlugHashes{
+        kCheerEmoteDefinitionHash,     // lane 0 -- top
+        kCasualSitEmoteDefinitionHash, // lane 1 -- bottom
+        kYesEmoteDefinitionHash,       // lane 2 -- left
+        kNopeEmoteDefinitionHash,      // lane 3 -- right
+    };
+
+/**
+ * Resolves and cross-checks the "Emotes" collection item's own configured content. The detail row
+ * is only read to validate the definition, so it stays local rather than reaching the caller.
+ * @param definition Receives the matching native item-definition row.
+ * @return True only when both rows agree with each other, carry no native equipment slot (the one
+ *         trait that singles this item out among every character-scoped item), and declare exactly
+ *         the expected 4 ordinary socket lanes.
+ */
+[[nodiscard]] bool
+resolve_emote_collection_definition(build_data::items::Definition& definition) noexcept {
+    item_details::Definition detail{};
+    return build_data::find_item_definition_hash(authored_inventory::kEmoteCollectionDefinitionHash,
+                                                 definition)
+           && definition.definitionHash == authored_inventory::kEmoteCollectionDefinitionHash
+           && build_data::find_configured_item_detail(definition.definitionIndex, detail)
+           && detail.definitionIndex == definition.definitionIndex
+           && detail.definitionHash == authored_inventory::kEmoteCollectionDefinitionHash
+           && detail.bucketId == definition.bucketId && !detail.equipmentSlot.has_value()
+           && detail.ordinarySocketState == item_details::OrdinarySocketState::present
+           && detail.ordinarySocketCount == authored_inventory::kEmoteCollectionSocketLaneCount;
+}
+
+/**
+ * Checks that every one of the collection item's real plug pool candidates is actually installed
+ * and allowed in its intended lane, so a granted item can never carry a plug the client rejects.
+ */
+[[nodiscard]] bool default_plugs_valid(std::uint16_t collectionDefinitionIndex) noexcept {
+    for (std::size_t lane = 0; lane < kEmoteCollectionDefaultPlugHashes.size(); ++lane) {
+        build_data::items::Definition plugDefinition{};
+        if (!build_data::find_item_definition_hash(kEmoteCollectionDefaultPlugHashes[lane],
+                                                   plugDefinition)
+            || !build_data::is_socket_plug_allowed(collectionDefinitionIndex,
+                                                   static_cast<std::uint8_t>(lane),
+                                                   plugDefinition.definitionIndex)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * Checks an already-equipped collection item's own socket state, so a corrupted or stale set of
+ * plugs is repaired instead of trusted just because the definition hash already matches.
+ */
+[[nodiscard]] bool socket_state_sound(const authored_inventory::Item& item,
+                                      std::uint16_t collectionDefinitionIndex) noexcept {
+    if (item.sockets.policy != authored_inventory::SocketPolicy::authored
+        || item.sockets.plugCount != authored_inventory::kEmoteCollectionSocketLaneCount) {
+        return false;
+    }
+    for (std::size_t lane = 0; lane < authored_inventory::kEmoteCollectionSocketLaneCount; ++lane) {
+        const std::optional<std::uint32_t>& plugHash = item.sockets.plugs[lane];
+        build_data::items::Definition plugDefinition{};
+        if (!plugHash.has_value()
+            || !build_data::find_item_definition_hash(*plugHash, plugDefinition)
+            || !build_data::is_socket_plug_allowed(collectionDefinitionIndex,
+                                                   static_cast<std::uint8_t>(lane),
+                                                   plugDefinition.definitionIndex)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+/**
+ * Equips each character with the "Emotes" collection item in the real emote slot, in place of an
+ * individual emote. Unlike every other character-scoped item, its real content carries no native
+ * equipment-slot mapping at all, so the resolvers this depends on (loadout resolution, light,
+ * appearance refresh) fall back to authored_inventory::kEmoteCollectionNativeEquipmentSlot for it
+ * specifically, gated to its exact definition hash (state::account::inventory::
+ * resolve_native_equipment_slot). Its 4 ordinary sockets carry no native default plug, so 4 hashes
+ * from its real reusable plug pool seed a default wheel; the client's own generic socket-plug
+ * request (opcode 1901) lets the player reassign them afterward, the same mechanism it already uses
+ * for weapon mods and shaders.
+ */
+EmoteCollectionOutcome ensure_character_emote_collection() noexcept {
+    constexpr std::size_t kEmoteCollectionSlot =
+        static_cast<std::size_t>(authored_inventory::EquipmentSlot::emote);
+
+    // The domains every check below reads have to be published first. Until they are, nothing can
+    // be concluded about the installed content, so this is a retry rather than a verdict.
+    if (!build_data::item_definitions_ready() || !build_data::configured_item_details_ready()
+        || !build_data::socket_plug_rules_ready()) {
+        return EmoteCollectionOutcome::notReady;
+    }
+    // With those published, an item that still does not resolve this way is a build that cannot
+    // carry the wheel at all. Retrying that within this process would never change the answer.
+    build_data::items::Definition collectionDefinition{};
+    if (!resolve_emote_collection_definition(collectionDefinition)
+        || !default_plugs_valid(collectionDefinition.definitionIndex)) {
+        return EmoteCollectionOutcome::unsupported;
+    }
+
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    AccountState candidate = runtime::storage::g_state.account;
+    if (!account::valid(candidate)) {
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return EmoteCollectionOutcome::notReady;
+    }
+    bool changed = false;
+    bool failed = false;
+    for (std::size_t characterIndex = 0; characterIndex < candidate.characterCount && !failed;
+         ++characterIndex) {
+        CharacterState& character = candidate.characters[characterIndex];
+        auto& collectionSlot = character.equipment.slots[kEmoteCollectionSlot];
+        const bool present =
+            collectionSlot.has_value()
+            && collectionSlot->definitionHash == authored_inventory::kEmoteCollectionDefinitionHash;
+        if (present && socket_state_sound(*collectionSlot, collectionDefinition.definitionIndex)) {
+            continue;
+        }
+        if (character.nextInventorySerial
+            >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+            failed = true;
+            break;
+        }
+        // A repair owns only the definition, the sockets and the serial. Everything else the item
+        // already carries, the accumulated item-state flags above all, belongs to the player and
+        // survives. The account was checked whole on entry, so a present item's remaining scalars
+        // are already known good and need no normalizing here.
+        authored_inventory::Item granted = present ? *collectionSlot : authored_inventory::Item{};
+        if (!present) {
+            std::uint64_t instanceSoid = 0;
+            if (!next_item_instance_soid(candidate, instanceSoid)) {
+                failed = true;
+                break;
+            }
+            granted.instanceSoid = instanceSoid;
+            granted.level = 0;
+            granted.quantity = 1;
+        }
+        granted.definitionHash = authored_inventory::kEmoteCollectionDefinitionHash;
+        granted.mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
+        // Replaced whole rather than edited: the lanes past the used prefix have to be empty for
+        // the socket block to validate, whatever the malformed copy left behind.
+        granted.sockets = authored_inventory::Sockets{};
+        granted.sockets.policy = authored_inventory::SocketPolicy::authored;
+        granted.sockets.plugCount = kEmoteCollectionDefaultPlugHashes.size();
+        for (std::size_t lane = 0; lane < kEmoteCollectionDefaultPlugHashes.size(); ++lane) {
+            granted.sockets.plugs[lane] = kEmoteCollectionDefaultPlugHashes[lane];
+        }
+        collectionSlot = granted;
+        changed = true;
+    }
+    if (failed) {
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return EmoteCollectionOutcome::failed;
+    }
+    if (!changed) {
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return EmoteCollectionOutcome::ready;
+    }
+    if (!account::valid(candidate)) {
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return EmoteCollectionOutcome::failed;
+    }
+    runtime::storage::g_state.account = candidate;
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    return EmoteCollectionOutcome::ready;
+}
+
 } // namespace sunrise::state

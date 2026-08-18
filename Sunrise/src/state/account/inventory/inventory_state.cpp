@@ -45,6 +45,24 @@ std::optional<EquipmentSlot> slot_from_name(std::string_view name) noexcept {
     return std::nullopt;
 }
 
+/** Resolves the native equipment slot a configured item detail occupies. */
+bool resolve_native_equipment_slot(std::uint32_t definitionHash,
+                                   const std::optional<std::int8_t>& detailEquipmentSlot,
+                                   std::uint8_t& nativeSlot) noexcept {
+    if (detailEquipmentSlot.has_value()) {
+        if (*detailEquipmentSlot < 0) {
+            return false;
+        }
+        nativeSlot = static_cast<std::uint8_t>(*detailEquipmentSlot);
+        return true;
+    }
+    if (definitionHash != kEmoteCollectionDefinitionHash) {
+        return false;
+    }
+    nativeSlot = kEmoteCollectionNativeEquipmentSlot;
+    return true;
+}
+
 /** Checks the canonical socket policy and every authored plug hash. */
 bool valid(const Sockets& sockets) noexcept {
     if (sockets.plugCount > sockets.plugs.size()) {

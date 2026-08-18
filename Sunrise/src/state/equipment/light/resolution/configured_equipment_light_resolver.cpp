@@ -54,15 +54,19 @@ using NativeSlotMap = std::array<std::optional<std::size_t>, build_details::kEqu
 resolve_item(const authored::Item& item, std::size_t& nativeSlot, ItemScore& itemScore) noexcept {
     build_items::Definition definition{};
     build_details::Definition detail{};
+    std::uint8_t resolvedSlot = 0;
     if (!build_data::find_item_definition_hash(item.definitionHash, definition)
         || !build_data::find_configured_item_detail(definition.definitionIndex, detail)
-        || detail.definitionIndex != definition.definitionIndex || !detail.equipmentSlot.has_value()
-        || *detail.equipmentSlot < 0
-        || static_cast<std::size_t>(*detail.equipmentSlot) >= build_details::kEquipmentSlotCount) {
+        || detail.definitionIndex != definition.definitionIndex
+        || !authored::resolve_native_equipment_slot(
+            item.definitionHash, detail.equipmentSlot, resolvedSlot)
+        || static_cast<std::size_t>(resolvedSlot) >= build_details::kEquipmentSlotCount) {
         return false;
     }
-    nativeSlot = static_cast<std::size_t>(*detail.equipmentSlot);
-    itemScore = ItemScore{definition.definitionIndex, item_power(item.level)};
+    nativeSlot = static_cast<std::size_t>(resolvedSlot);
+    // The "Emotes" collection item's real content contributes no light either way.
+    itemScore = ItemScore{definition.definitionIndex,
+                          detail.equipmentSlot.has_value() ? item_power(item.level) : 0};
     return true;
 }
 

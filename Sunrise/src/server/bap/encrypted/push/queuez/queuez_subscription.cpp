@@ -90,6 +90,7 @@ bool append_account_resync_notification(Scratch& scratch,
                                         std::size_t& written,
                                         queuez::SessionState& after) noexcept {
     after = before;
+    ensure_account_canonical();
     if (!queuez::valid(before) || !before.family4Active || before.family4RootSoid == 0
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()) {
         return false;
@@ -146,6 +147,10 @@ void append_queuez_notification(Scratch& scratch,
     after = before;
     armsRepush = false;
     armsBannerRepush = false;
+    // Ahead of the dispatch below, not inside one family's builder: family zero reads the account
+    // directly and family three is built before the family-four companion, so a migration run any
+    // later would leave the three images describing different accounts.
+    ensure_account_canonical();
     if (subscription.familyType == queuez::kAccountFamilyType && before.family4Active
         && before.family4Version != queuez::kInitialFamilyVersion) {
         // Our mirror of the Client's records is an observation, not an authority on what may be

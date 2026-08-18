@@ -136,11 +136,14 @@ bool resolve_item(const authored_inventory::Item& authored,
     build_details::Definition itemDetail{};
     build_buckets::Descriptor bucket{};
     build_socket_lists::Definition socketList{};
+    std::uint8_t nativeEquipmentSlot = 0;
     if (!state::build_data::find_item_definition_hash(authored.definitionHash, itemDefinition)
         || !state::build_data::find_configured_item_detail(itemDefinition.definitionIndex,
                                                            itemDetail)
-        || itemDefinition.bucketId != itemDetail.bucketId || !itemDetail.equipmentSlot.has_value()
-        || *itemDetail.equipmentSlot < 0
+        || itemDefinition.bucketId != itemDetail.bucketId
+        || !authored_inventory::resolve_native_equipment_slot(
+            authored.definitionHash, itemDetail.equipmentSlot, nativeEquipmentSlot)
+        || static_cast<std::size_t>(nativeEquipmentSlot) >= build_details::kEquipmentSlotCount
         || !state::build_data::find_inventory_bucket_descriptor(itemDetail.bucketId, bucket)
         || bucket.arraySelector != build_buckets::ArraySelector::character
         || !state::build_data::find_socket_entry_list(itemDetail.socketEntryListIndex, socketList)
@@ -152,7 +155,7 @@ bool resolve_item(const authored_inventory::Item& authored,
 
     Candidate candidate{};
     candidate.bucket = bucket;
-    candidate.item.equipmentSlot = static_cast<std::uint8_t>(*itemDetail.equipmentSlot);
+    candidate.item.equipmentSlot = nativeEquipmentSlot;
     candidate.item.mutationSerial = authored.mutationSerial;
     candidate.item.flags = authored.flags;
     if (!resolve_quantity(authored, itemDetail, candidate.item.quantity)
