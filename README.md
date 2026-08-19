@@ -103,6 +103,7 @@ Pull Requests are welcome. Please follow these rules:
 - https://github.com/nblockbuster/tachyscope
 - https://github.com/cohaereo/destinydocs
 - https://github.com/MontagueM/DestinyUnpacker
+- https://github.com/nblockbuster/bungie-lua-decompiler
 
 ### Other:
 

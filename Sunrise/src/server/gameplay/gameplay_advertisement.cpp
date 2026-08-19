@@ -5,10 +5,9 @@
 #include <cstdint>
 
 #include "../../middleware/gameplay/descriptor/join_descriptor.h"
-#include "../../state/activity/definition.h"
 #include "endpoint/gameplay_endpoint.h"
 #include "gameplay_log.h"
-#include "group/group_host.h"
+#include "group/group_host_sessions.h"
 
 namespace sunrise::server::gameplay {
 
@@ -23,28 +22,14 @@ constexpr std::uint8_t kQueriedMemberSlot = 0;
 /** Odd multiplier that spreads one region index across the whole 64-bit space. */
 constexpr std::uint64_t kRegionStride = 0x9E3779B97F4A7C15ULL;
 
-/**
- * Derives one region's copy of an identity field.
- * It is derived rather than allocated so every push for a region names the same value with no
- * table.
- * @param base Whole-process identity field.
- * @param regionIndex Region the record belongs to.
- * @return Nonzero value for that region.
- */
+/** @return A stable nonzero region-specific copy of one process identity field. */
 [[nodiscard]] std::uint64_t region_identity(std::uint64_t base, std::int32_t regionIndex) noexcept {
     const auto region = static_cast<std::uint64_t>(static_cast<std::uint32_t>(regionIndex));
     const std::uint64_t derived = base ^ (kRegionStride * (region + 1U));
-    // The descriptor refuses a zero machine id and a zero session id alike.
     return derived == 0 ? kRegionStride : derived;
 }
 
-/**
- * Derives the descriptor machine id one region advertises.
- * It is also the key of that region's activity host session, so a readiness query has to derive it
- * the same way the advertisement does.
- * @param regionIndex Region the record belongs to.
- * @return The region's machine id.
- */
+/** @return Group-session key carried by one region's descriptor. */
 [[nodiscard]] std::uint64_t region_machine_id(std::int32_t regionIndex) noexcept {
     return region_identity(endpoint::identity().machineId, regionIndex);
 }
@@ -58,15 +43,17 @@ constexpr unsigned kReasonShift = 40;
 /** Region source sits above the skip reason. */
 constexpr unsigned kSourceShift = 48;
 
-/** Why an advertisement was not built. Reported so a silent skip cannot look like a send. */
+/** Why an advertisement was not built. */
 enum class Skip : std::uint64_t {
     none,
     notReady,
     noRegion,
     slotRange,
+    noSource,
     descriptor,
     noHostSession,
-    hostSessionFull
+    hostSessionConflict,
+    hostSessionFull,
 };
 
 std::atomic<std::uint64_t> g_reported{kNoOutcome};
@@ -74,14 +61,7 @@ std::atomic<std::uint64_t> g_reported{kNoOutcome};
 /** Log names for RegionSource, in its declaration order. */
 constexpr const char* kSources[] = {"reported", "arrival"};
 
-/**
- * Reports one advertisement outcome, and only when it differs from the last.
- * A membership push runs every few seconds, so an unchanged outcome must stay silent.
- * @param skip Check that refused the build, or Skip::none.
- * @param regionIndex Region the outcome belongs to.
- * @param regionSource Where that index came from.
- * @param ambassadorSlot Slot the advertisement named, or zero when it did not build.
- */
+/** Reports one changed advertisement outcome. */
 void report_outcome(Skip skip,
                     std::int32_t regionIndex,
                     RegionSource regionSource,
@@ -103,13 +83,15 @@ void report_outcome(Skip skip,
                static_cast<unsigned>(ambassadorSlot));
         return;
     }
-    // Log names for Skip, in its declaration order.
+    /** Stable log labels follow the Skip enumeration's ordinal order. */
     static constexpr const char* kReasons[] = {"none",
                                                "not_ready",
                                                "no_region",
                                                "slot_range",
+                                               "no_source",
                                                "descriptor",
                                                "no_host_session",
+                                               "host_session_conflict",
                                                "host_session_full"};
     report(core::log::Level::info,
            "ev=gameplay stage=advertise result=skip reason=%s region=%d region_source=%s",
@@ -118,30 +100,19 @@ void report_outcome(Skip skip,
            source);
 }
 
-/**
- * Picks an ambassador slot that is not the joining client's own.
- * An equal slot sends the peer into the local-ambassador stage, and it never reaches the citizen
- * join.
- * @param localMemberSlot Slot the joining client occupies.
- * @return A different, encodable member slot.
- */
+/** @return Encodable ambassador slot that differs from the joining client's slot. */
 [[nodiscard]] std::uint8_t ambassador_slot(std::uint8_t localMemberSlot) noexcept {
     return localMemberSlot == 0 ? 1 : 0;
 }
 
-/**
- * Builds one region's advertisement, or names the first check that refused it.
- * Every caller runs this same body, so a readiness query and the advertisement itself can never
- * disagree about whether a descriptor is coming.
- * @param regionIndex Region the record belongs to.
- * @param localMemberSlot Member slot of the joining client.
- * @param candidate Cleared, then filled when the whole advertisement builds.
- * @return Skip::none when it built, otherwise the check that refused.
- */
-[[nodiscard]] Skip build_candidate(std::int32_t regionIndex,
+/** Builds one source-bound candidate and retains its host generation on success. */
+[[nodiscard]] Skip build_candidate(const state::activity::SessionBinding& source,
+                                   std::int32_t regionIndex,
                                    std::uint8_t localMemberSlot,
-                                   message::CitizenAdvertisement& candidate) noexcept {
+                                   message::CitizenAdvertisement& candidate,
+                                   std::uint64_t& hostGeneration) noexcept {
     candidate = {};
+    hostGeneration = 0;
     if (!endpoint::ready()) {
         return Skip::notReady;
     }
@@ -151,54 +122,71 @@ void report_outcome(Skip skip,
     if (localMemberSlot > kMaximumMemberSlot) {
         return Skip::slotRange;
     }
+
     const endpoint::Identity identity = endpoint::identity();
     const state::gameplay::Endpoint advertised = endpoint::advertised();
+    group::HostSessionBinding host{};
+    switch (
+        group::request_host_session(region_machine_id(regionIndex), source, regionIndex, host)) {
+    case group::HostSessionState::ready:
+        break;
+    case group::HostSessionState::pending:
+        return Skip::noHostSession;
+    case group::HostSessionState::conflict:
+        return Skip::hostSessionConflict;
+    case group::HostSessionState::full:
+        return Skip::hostSessionFull;
+    case group::HostSessionState::absent:
+    default:
+        return Skip::noSource;
+    }
+    if (!group::retain_host_session(host.generation)) {
+        return Skip::noHostSession;
+    }
+
     middleware::gameplay::descriptor::JoinEndpoint join{};
     join.address = advertised.address;
     join.port = advertised.port;
-    // The client keys its managed sessions by the descriptor's machine id, not by its session id.
-    // Two regions may never share one.
-    join.machineId = region_machine_id(regionIndex);
+    join.machineId = host.groupSessionId;
     join.onlineSessionId = region_identity(identity.onlineSessionId, regionIndex);
-    // The region compares this against the `activity-host` parameter and errors out with
-    // `public_activity_host_mismatch` when they disagree, so both carry the same allocated id.
-    // The key is the machine id, because that is what the peer echoes in every later message.
-    bool claimedSlot = false;
-    const std::uint64_t hostSession =
-        group::activity_host_session(join.machineId, regionIndex, claimedSlot);
-    if (hostSession == state::activity::kAbsentSessionId) {
-        // A claimed slot is filled by the next service slice. An unclaimed one never will be, so
-        // the two must not read the same to a caller deciding whether to wait.
-        return claimedSlot ? Skip::noHostSession : Skip::hostSessionFull;
-    }
     if (!middleware::gameplay::descriptor::build(join, candidate.descriptor)) {
+        group::release_host_session(host.generation);
         candidate = {};
         return Skip::descriptor;
     }
-    candidate.onlineSessionId = hostSession;
+
+    candidate.onlineSessionId = host.target.sessionId;
     candidate.regionIndex = regionIndex;
     candidate.ambassadorSlot = ambassador_slot(localMemberSlot);
     candidate.present = true;
+    hostGeneration = host.generation;
     return Skip::none;
 }
 
 } // namespace
 
-/** Builds the citizen advertisement for one region record. */
-void build_advertisement(std::int32_t regionIndex,
+/** Builds a citizen advertisement from one exact source activity generation. */
+void build_advertisement(const state::activity::SessionBinding& source,
+                         std::int32_t regionIndex,
                          RegionSource regionSource,
                          std::uint8_t localMemberSlot,
-                         message::CitizenAdvertisement& output) noexcept {
-    const Skip skip = build_candidate(regionIndex, localMemberSlot, output);
+                         message::CitizenAdvertisement& output,
+                         std::uint64_t& hostGeneration) noexcept {
+    const Skip skip = build_candidate(source, regionIndex, localMemberSlot, output, hostGeneration);
     report_outcome(skip, regionIndex, regionSource, output.ambassadorSlot);
 }
 
-/** Reports whether one region's advertisement can be built now. */
-AdvertisementState advertisement_state(std::int32_t regionIndex) noexcept {
+/** Claims a missing host row and reports whether its advertisement is ready. */
+AdvertisementState advertisement_state(const state::activity::SessionBinding& source,
+                                       std::int32_t regionIndex) noexcept {
     message::CitizenAdvertisement candidate{};
-    // The same body the advertisement runs, so it cannot promise a descriptor the build refuses.
-    // It also claims the region's host-session slot, so the service slice allocates one.
-    switch (build_candidate(regionIndex, kQueriedMemberSlot, candidate)) {
+    std::uint64_t generation = 0;
+    const Skip skip =
+        build_candidate(source, regionIndex, kQueriedMemberSlot, candidate, generation);
+    if (generation != 0) {
+        group::release_host_session(generation);
+    }
+    switch (skip) {
     case Skip::none:
         return AdvertisementState::ready;
     case Skip::noHostSession:
@@ -206,6 +194,22 @@ AdvertisementState advertisement_state(std::int32_t regionIndex) noexcept {
     default:
         return AdvertisementState::absent;
     }
+}
+
+/** Source-less publishers remain wire-silent and do not claim a host row. */
+void build_advertisement(std::int32_t regionIndex,
+                         RegionSource regionSource,
+                         std::uint8_t localMemberSlot,
+                         message::CitizenAdvertisement& output) noexcept {
+    static_cast<void>(localMemberSlot);
+    output = {};
+    report_outcome(Skip::noSource, regionIndex, regionSource, 0);
+}
+
+/** Source-less readiness queries remain absent and do not claim a host row. */
+AdvertisementState advertisement_state(std::int32_t regionIndex) noexcept {
+    static_cast<void>(regionIndex);
+    return AdvertisementState::absent;
 }
 
 } // namespace sunrise::server::gameplay

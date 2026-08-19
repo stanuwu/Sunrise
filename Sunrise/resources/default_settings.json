@@ -45,7 +45,14 @@
       "advertised_address": "127.0.0.1",
       "transport_address": "127.0.0.1",
       "port": 30976,
-      "server_reserve_count": 256
+      "server_reserve_count": 256,
+      "client_join_grant_count": 8192
+    },
+    "activation": {
+      "default_client_activation": true,
+      "activity_compatibility_mirror": true,
+      "gameplay_external_body": false,
+      "server_default_entity": false
     },
     "entitlements": [
       { "name": "1085660", "owned": "handle" },

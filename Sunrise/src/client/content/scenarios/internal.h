@@ -8,6 +8,7 @@
 
 #include "../../../middleware/content/packages/reader/reader.h"
 #include "../../../middleware/content/packages/tables/roster_intersection.h"
+#include "../../../middleware/content/packages/tables/slot_descriptor_reader.h"
 #include "../../../state/build_data/scenarios/definition.h"
 
 namespace sunrise::client::content::scenarios {
@@ -22,13 +23,18 @@ namespace reader = middleware::content::packages::reader;
 inline constexpr std::size_t kObjectMemoCapacity = 16'384;
 /** Memo value for an object that declares no roster slot type. */
 inline constexpr std::uint16_t kNotARosterGroup = 0xFFFF;
-/** Slot types run from 1 through the widest the packages declare. */
-inline constexpr std::size_t kSlotTypeSpan = layouts::kMaximumSlotType + 1;
 
 /** One memo row: a placed-object tag and the roster group it produced. */
 struct ObjectMemo {
     std::uint32_t tag{};
     std::uint16_t group{kNotARosterGroup};
+};
+
+/** One slot, as its own descriptor declares it. */
+struct SlotRecord {
+    std::uint16_t index{};
+    std::uint8_t type{};
+    std::uint8_t flags{};
 };
 
 /** Fixed working storage for one roster pass, kept off the caller stack. */
@@ -41,10 +47,12 @@ struct RosterStorage {
     std::array<ObjectMemo, kObjectMemoCapacity> memo{};
     std::array<layouts::RosterGroup, layouts::kRosterGroupCapacity> groups{};
     std::size_t groupCount{};
-    /** Slot flags per slot type, read from a group object's descriptor chain. */
-    std::array<std::uint8_t, kSlotTypeSpan> slotFlags{};
-    std::array<std::uint8_t, kSlotTypeSpan> slotFlagsKnown{};
-    /** Group objects whose descriptor chain did not give every slot type they declare. */
+    /** Descriptors found on the object being resolved, one per slot it can publish. */
+    std::array<SlotRecord, layouts::kRosterSlotCapacity> slots{};
+    std::size_t slotCount{};
+    /** Set when the object declared more descriptors than storage holds, which refuses it. */
+    bool slotsOverflowed{};
+    /** Group objects whose descriptor walk yielded no publishable slot. */
     std::size_t unresolvedGroups{};
     /** Destinations walked so far. The walk resumes here on the next call. */
     std::size_t cursor{};
@@ -134,6 +142,50 @@ void compact_rows(Storage& storage) noexcept;
  */
 void rearm_resolve(Storage& storage) noexcept;
 
+/**
+ * Reduces one descriptor's two schemas to the slot flag bits the wire body carries.
+ * A slot claiming an auth schema is one this host holds authority over, so its object reaches the
+ * world through the bubble grant. A slot claiming neither is placed from content alone.
+ * @param authSchema Auth schema the descriptor declares, or the absent sentinel.
+ * @param senseSchema Sense schema the descriptor declares, or the absent sentinel.
+ * @return The flag bits for that slot type.
+ */
+[[nodiscard]] constexpr std::uint8_t slot_flags(std::uint32_t authSchema,
+                                                std::uint32_t senseSchema) noexcept {
+    namespace wire = middleware::content::packages::tables;
+    std::uint8_t flags = 0;
+    if (authSchema != wire::kAbsentSchema) {
+        flags |= layouts::kSlotAuthFlag;
+    }
+    if (senseSchema != wire::kAbsentSchema) {
+        flags |= layouts::kSlotSenseFlag;
+    }
+    return flags;
+}
+
+/**
+ * Records one descriptor as a slot of the object being resolved.
+ * A repeated index keeps the first descriptor, because the blobs hosting two sibling slots offer
+ * a second structurally valid hit for the same position.
+ * @param storage Working storage receiving the slot.
+ * @param descriptor Descriptor read from a placed-object blob.
+ */
+void record_slot(RosterStorage& storage,
+                 const middleware::content::packages::tables::SlotDescriptor& descriptor) noexcept;
+
+/**
+ * Fills one candidate group from the descriptors the walk found, in slot-index order.
+ * One slot is one descriptor, indexed by the descriptor rather than by its position.
+ * A group short of one descriptor is dropped, never published short.
+ * @param storage Working storage holding the descriptors.
+ * @param declaredSlotCount Slots the object's own slot array declares.
+ * @param group Receives the slot types, flags and indices.
+ * @return True when every declared slot has a descriptor and nothing overflowed.
+ */
+[[nodiscard]] bool fill_slots(RosterStorage& storage,
+                              std::size_t declaredSlotCount,
+                              layouts::RosterGroup& group) noexcept;
+
 /** One candidate group of one destination, with what its publish order is sorted on. */
 struct Candidate {
     std::uint16_t group{};
@@ -141,6 +193,12 @@ struct Candidate {
     bool bindsPlayer{};
     bool reportsLifetime{};
     bool primaryRegistry{};
+};
+
+/** One group a destination publishes per bubble, and the bubbles it is published in. */
+struct BubbleCandidate {
+    std::uint16_t group{};
+    std::uint64_t mask{};
 };
 
 /** @return True when both groups carry the same registry key and full wire slot layout. */
@@ -151,7 +209,8 @@ struct Candidate {
     }
     for (std::size_t slot = 0; slot < left.slotCount; ++slot) {
         if (left.slotTypes[slot] != right.slotTypes[slot]
-            || left.slotFlags[slot] != right.slotFlags[slot]) {
+            || left.slotFlags[slot] != right.slotFlags[slot]
+            || left.slotIndices[slot] != right.slotIndices[slot]) {
             return false;
         }
     }
@@ -166,11 +225,13 @@ struct Walk {
 };
 
 /**
- * Keeps the candidates whose key is in every slice set and writes them into the destination row.
+ * Splits the candidates between the destination row's two lists.
+ * A key in every slice set goes in the top-level list. A key in some and not all goes in the
+ * per-bubble list with the bubbles that hold it. A key in none is dropped.
  * @param walk Accumulator for one destination.
- * @param row Destination row receiving its group indices.
+ * @param row Destination row receiving both sets of group indices.
  */
-void publish_safe(Walk& walk, layouts::Definition& row) noexcept;
+void publish_groups(Walk& walk, layouts::Definition& row) noexcept;
 
 /**
  * Finds the roster group of one placed object, reading it only the first time it is seen.

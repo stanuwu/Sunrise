@@ -1,4 +1,4 @@
-#include "activity_transaction_notifications.h"
+﻿#include "activity_transaction_notifications.h"
 
 #include "../../../../core/logging/log.h"
 #include "../../../gameplay/gameplay_advertisement.h"
@@ -13,17 +13,22 @@ namespace {
 
 /**
  * Reports whether the citizen advertisement this membership body would carry is still coming.
- * The client applies one membership update per revision, so a body sent before the region's host
- * session exists spends that revision on a record no later push can fill. Holding costs one
- * keepalive.
+ * One membership update lands per revision, so a body sent before the region's host session exists
+ * spends that revision on a record no later push can fill. Holding costs one keepalive.
  * @param activity Prepared activity transaction, whose region this body publishes.
  * @return True when the push has to wait.
  */
-[[nodiscard]] bool advertisement_pending(const activity_message::ActivityPlan& activity) noexcept {
+[[nodiscard]] bool advertisement_pending(const Session& session,
+                                         const activity_message::ActivityPlan& activity) noexcept {
+    if (session.activity.role != ActivityClientRole::privateCurrent
+        || !state::activity::binding_matches(session.activity.source)) {
+        return false;
+    }
     // Take the delta's region, not the committed one. Staging runs before the commit, so the
     // committed value still names the region the player has left.
     const server::gameplay::AdvertisementState state = server::gameplay::advertisement_state(
-        push::activity::planned_region(activity.membershipMutation, activity.sessionId).index);
+        session.activity.source,
+        push::activity::planned_region(activity.membershipMutation, session.activity.source).index);
     if (state != server::gameplay::AdvertisementState::pending) {
         return false;
     }
@@ -54,10 +59,11 @@ namespace {
                                  std::span<std::byte> response,
                                  std::size_t& written) noexcept {
     bool staged = push::activity::append_global_state_notification(
-        scratch, activity.sessionId, key, nonce, response, written);
-    if (activity.membershipMutation.hasSnapshot && !advertisement_pending(activity)) {
+        scratch, session.activity.session, key, nonce, response, written);
+    if (session.activity.role == ActivityClientRole::privateCurrent
+        && activity.membershipMutation.hasSnapshot && !advertisement_pending(session, activity)) {
         staged = push::activity::append_membership_notification(
-                     scratch, activity, key, nonce, response, written)
+                     scratch, session, activity, key, nonce, response, written)
                  || staged;
     }
     return push::activity::append_roster_notification(
@@ -87,11 +93,12 @@ namespace {
                                        std::size_t& written) noexcept {
     bool staged = false;
     bool held = false;
-    if (activity.membershipMutation.hasSnapshot) {
-        held = advertisement_pending(activity);
+    if (session.activity.role == ActivityClientRole::privateCurrent
+        && activity.membershipMutation.hasSnapshot) {
+        held = advertisement_pending(session, activity);
         if (!held) {
             staged = push::activity::append_membership_notification(
-                scratch, activity, key, nonce, response, written);
+                scratch, session, activity, key, nonce, response, written);
         }
     }
     if (activity.regionMoved) {
@@ -141,7 +148,7 @@ bool stage_notifications(Session& session,
     }
     if (activity.delivery == activity_message::Delivery::membershipNotification) {
         return push::activity::append_membership_notification(
-            scratch, activity, key, nonce, response, written);
+            scratch, session, activity, key, nonce, response, written);
     }
     if (activity.delivery == activity_message::Delivery::refreshNotifications) {
         return stage_refresh(session, scratch, activity, key, nonce, response, written);

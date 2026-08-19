@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -40,6 +40,33 @@ struct ParameterRequestHeader {
  */
 [[nodiscard]] bool read_parameter_request(encoding::bits::Reader& reader,
                                           ParameterRequestHeader& output) noexcept;
+
+/** How far the selected request bodies of one parameter request could be located. */
+struct ParameterRequestWalk {
+    /** Parameters whose request body was located and consumed. */
+    std::uint64_t walkedMask{};
+    /** Bits left in the container once the walk stopped. */
+    std::uint32_t tailBits{};
+    /** First selected parameter with no recovered request codec, or the count when there is none.
+     */
+    std::uint8_t ambiguousParameter{kParameterCount};
+    /** Set when every selected body was located, so a later message in the container is findable.
+     */
+    bool complete{};
+};
+
+/**
+ * Walks the request bodies that follow a parameter request header.
+ * The bodies are interleaved with no per-body length, so a parameter with no recovered codec makes
+ * every later body unfindable. The walk stops there and reports the rest as one ambiguous tail.
+ * @param reader Reader positioned immediately after the request header.
+ * @param requestedMask Requested bitmap, already reduced to its meaningful bits.
+ * @param walk Cleared first, then filled with how far the walk got.
+ * @return True when every located body was complete. False means a body ran off the container.
+ */
+[[nodiscard]] bool walk_parameter_request(encoding::bits::Reader& reader,
+                                          std::uint64_t requestedMask,
+                                          ParameterRequestWalk& walk) noexcept;
 
 /**
  * @param mask Requested bitmap from one request header.

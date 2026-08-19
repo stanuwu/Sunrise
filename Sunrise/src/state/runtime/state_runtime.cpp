@@ -109,7 +109,16 @@ template <std::size_t Size>
  * @return True when every profile row canonicalizes.
  */
 [[nodiscard]] bool canonicalize_profile_item_identities(AccountState& accountState) noexcept {
-    if (!account::valid(accountState) || !build_data::socket_plug_rules_ready()) {
+    if (!account::valid(accountState)) {
+        return false;
+    }
+    if (accountState.profileItemCount == 0) {
+        // Nothing to canonicalize, so the socket relation is not needed. Demanding it here would
+        // refuse the first account snapshot of an account that owns no profile stack at all, and
+        // an empty account family never becomes active.
+        return true;
+    }
+    if (!build_data::socket_plug_rules_ready()) {
         return false;
     }
     std::array<bool, account::inventory::kProfileItemCapacity> actionSources{};

@@ -18,6 +18,7 @@ bool Parser::server_settings(server::Settings& output) noexcept {
     bool hasEntitlements = false;
     bool hasBapPort = false;
     bool hasGameplay = false;
+    bool hasActivation = false;
     for (;;) {
         std::string_view key;
         if (!string(key) || !consume(':')) {
@@ -41,6 +42,11 @@ bool Parser::server_settings(server::Settings& output) noexcept {
                 return false;
             }
             hasGameplay = true;
+        } else if (key == "activation") {
+            if (hasActivation || !activation_settings(output.activation)) {
+                return false;
+            }
+            hasActivation = true;
         } else if (!skip_value(0)) {
             return false;
         }

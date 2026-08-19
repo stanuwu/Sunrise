@@ -138,4 +138,40 @@ bool safe_roster_keys(const RosterIntersection& state,
     return true;
 }
 
+/**
+ * Reports the keys present in some observed slice sets and not all, with their bubbles.
+ * @param state Accumulator for one destination.
+ * @param keys Receives the partially present keys.
+ * @param masks Receives each key's bubbles, in the same order.
+ * @param count Receives how many were written.
+ * @return True when nothing overflowed and every partial key fits the output.
+ */
+bool partial_roster_keys(const RosterIntersection& state,
+                         std::span<std::uint32_t> keys,
+                         std::span<std::uint64_t> masks,
+                         std::size_t& count) noexcept {
+    count = 0;
+    if (state.overflowed || keys.size() != masks.size()) {
+        return false;
+    }
+    // An unread slice set has no index, so no bubble can be ruled in or out and none is safe.
+    if (state.unresolvedSet) {
+        return true;
+    }
+    for (std::size_t index = 0; index < state.keyCount; ++index) {
+        const std::uint64_t mask = state.masks[index];
+        if (mask == 0 || mask == state.observedSets) {
+            continue;
+        }
+        if (count == keys.size()) {
+            count = 0;
+            return false;
+        }
+        keys[count] = state.keys[index];
+        masks[count] = mask;
+        ++count;
+    }
+    return true;
+}
+
 } // namespace sunrise::middleware::content::packages::tables

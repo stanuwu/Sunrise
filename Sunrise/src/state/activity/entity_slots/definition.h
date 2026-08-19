@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 
@@ -15,6 +16,15 @@ inline constexpr std::size_t kMaskSize = kSlotCount / kSlotsPerByte;
 
 /** Slots granted by the host to one client and not yet returned. */
 using LeaseMask = std::array<std::byte, kMaskSize>;
+
+/** @param mask Lease mask. @return How many slots it names. */
+[[nodiscard]] inline std::size_t slot_count(const LeaseMask& mask) noexcept {
+    std::size_t count = 0;
+    for (const std::byte value : mask) {
+        count += static_cast<std::size_t>(std::popcount(std::to_integer<unsigned char>(value)));
+    }
+    return count;
+}
 
 /** Operation represented by one prepared entity-slot mutation. */
 enum class MutationKind : std::uint8_t {

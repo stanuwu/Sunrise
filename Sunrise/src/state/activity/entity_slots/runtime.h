@@ -75,4 +75,28 @@ struct PendingMutation final {
  */
 [[nodiscard]] bool commit(PendingMutation& mutation) noexcept;
 
+/**
+ * Reports how many slots one session currently leases.
+ * The client cannot create a simulation entity without a free index, and nothing else on this
+ * path says how many it has, so a run that fails to create one can be read against the lease.
+ * @param sessionId Activity session id.
+ * @param held Receives the slots the client holds.
+ * @param reserved Receives the slots the host held back for itself.
+ * @return True when the session exists and has joined.
+ */
+[[nodiscard]] bool
+lease_counts(std::uint64_t sessionId, std::size_t& held, std::size_t& reserved) noexcept;
+
+/**
+ * Copies both lease masks one session currently holds.
+ * The physics replica context needs the bits, not the counts: an allocation picks one exact index
+ * out of the server reserve, and State refuses a context whose two masks overlap.
+ * @param sessionId Activity session id.
+ * @param held Receives the slots the client leases.
+ * @param reserved Receives the slots the host held back for itself.
+ * @return True when the session exists and has joined.
+ */
+[[nodiscard]] bool
+lease_masks(std::uint64_t sessionId, LeaseMask& held, LeaseMask& reserved) noexcept;
+
 } // namespace sunrise::state::activity::entity_slots

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -30,9 +30,8 @@ struct PendingMutation final {
     bool changesState{};
     /**
      * Set when the delta moves the player to a different region.
-     * The region is not a published membership field, so this is separate from changesState. The
-     * citizen advertisement is rebuilt from it, so a move advances the revision and sends the
-     * roster at once.
+     * The region is not a published field, so this is separate from changesState. A move rebuilds
+     * the citizen advertisement, advances the revision and sends the roster at once.
      */
     bool movesRegion{};
     /**
@@ -88,13 +87,14 @@ struct PendingMutation final {
 [[nodiscard]] bool acknowledged(std::uint64_t sessionId) noexcept;
 
 /**
- * Advances the published membership revision so an already-applied snapshot can be corrected.
- * The client applies one update per revision and drops every repeat. A body published with a
+ * Prepares a membership-revision advance so an already-applied snapshot can be corrected.
+ * The client applies one update per revision and drops every repeat, so a body published with a
  * stale citizen advertisement can only be replaced at a new revision.
  * @param sessionId Joined activity session.
- * @return True when the revision advanced.
+ * @param mutation Cleared, then receives the next snapshot and exact State guards.
+ * @return True when the next revision can be staged.
  */
-[[nodiscard]] bool republish(std::uint64_t sessionId) noexcept;
+[[nodiscard]] bool prepare_republish(std::uint64_t sessionId, PendingMutation& mutation) noexcept;
 
 /**
  * Reads the region the client last reported it was in.
@@ -134,7 +134,7 @@ struct PendingMutation final {
                                            PendingMutation& mutation) noexcept;
 
 /**
- * Commits one identity, authoritative, refresh, or acknowledgement operation.
+ * Commits one identity, authoritative, refresh, republish, or acknowledgement operation.
  * @param mutation Prepared plan. Always cleared before this function returns.
  * @return True when the operation commits or needs no State change.
  */

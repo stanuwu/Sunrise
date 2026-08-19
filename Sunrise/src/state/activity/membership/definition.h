@@ -119,6 +119,7 @@ enum class MutationKind : std::uint8_t {
     identity,
     authoritative,
     refresh,
+    republish,
     acknowledgement,
 };
 

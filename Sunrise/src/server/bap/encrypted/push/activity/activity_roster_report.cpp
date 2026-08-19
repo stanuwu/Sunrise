@@ -31,19 +31,29 @@ void report_roster_push(Session& session,
     for (std::size_t index = 0; index < roster.groupCount; ++index) {
         slots += roster.groups[index].slotTypes.size();
     }
+    // The per-bubble half is reported on its own. A body carrying it and one that does not are
+    // otherwise the same line, and the group count alone cannot tell them apart.
+    std::size_t bubbleKeys = 0;
+    for (const message::BubbleSubBlock& block : roster.bubbleSubBlocks) {
+        bubbleKeys += block.keys.size();
+    }
     std::array<char, core::log::kLineCapacity> line{};
     const int written =
         std::snprintf(line.data(),
                       line.size(),
-                      "ev=activity stage=roster result=%s soid=0x%llX foreign=%u dest=%.*s "
-                      "groups=%zu objects=%zu bytes=%zu state=%u keygroup=0x%X grant=%d "
-                      "region=%u slice=%u spawn=0x%X join=0x%llX player=0x%llX",
+                      "ev=activity stage=roster result=%s soid=0x%llX public=%u dest=%.*s "
+                      "groups=%zu top=%zu sub=%zu subkeys=%zu objects=%zu bytes=%zu state=%u "
+                      "keygroup=0x%X grant=%d region=%u slice=%u spawn=0x%X join=0x%llX "
+                      "player=0x%llX",
                       kOutcomeNames[static_cast<std::size_t>(outcome)],
-                      static_cast<unsigned long long>(session.activitySessionId),
-                      session.activityJoinedForeignSession ? 1U : 0U,
+                      static_cast<unsigned long long>(session.activity.session.sessionId),
+                      session.activity.role == ActivityClientRole::publicTarget ? 1U : 0U,
                       static_cast<int>(destination.size()),
                       destination.data(),
                       roster.groupCount,
+                      roster.topLevelGroupCount,
+                      roster.bubbleSubBlocks.size(),
+                      bubbleKeys,
                       slots,
                       bytes,
                       session.activityRosterState,

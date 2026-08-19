@@ -42,12 +42,18 @@ inline bool equal(const TeleportState& first, const TeleportState& second) noexc
            && first.sliceSetHash == second.sliceSetHash;
 }
 
+/** @return True when both reported regions hold the same index and hash. */
+inline bool equal(const RegionState& first, const RegionState& second) noexcept {
+    return first.index == second.index && first.hash == second.hash;
+}
+
 /** @return True when both sparse authoritative updates match field by field. */
 inline bool equal(const AuthoritativeUpdate& first, const AuthoritativeUpdate& second) noexcept {
     return equal(first.spawn, second.spawn) && equal(first.teleport, second.teleport)
-           && first.transitionToken == second.transitionToken
+           && equal(first.region, second.region) && first.transitionToken == second.transitionToken
            && first.hasTransitionToken == second.hasTransitionToken
-           && first.hasSpawn == second.hasSpawn && first.hasTeleport == second.hasTeleport;
+           && first.hasSpawn == second.hasSpawn && first.hasTeleport == second.hasTeleport
+           && first.hasRegion == second.hasRegion;
 }
 
 /** @return True when both full refresh snapshots hold the same values. */

@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include "../../../runtime/storage/internal.h"
+#include "../../transactions/internal.h"
 #include "../runtime.h"
 #include "internal.h"
 
@@ -29,6 +30,9 @@ namespace {
         // Both ownership masks become visible under the one revision this commit takes.
         record.serverEntitySlots = prepared.serverMask;
         record.memberKey = prepared.memberKey;
+        // A new ActivityClient starts with no membership mirror or bubble grant.
+        record.membership = {};
+        record.bubbleAuthority = {};
         record.joined = true;
         return true;
     }
@@ -159,6 +163,44 @@ bool commit(PendingMutation& mutation) noexcept {
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
     return true;
+}
+
+/** Reports how many slots one session currently leases. */
+bool lease_counts(std::uint64_t sessionId, std::size_t& held, std::size_t& reserved) noexcept {
+    held = 0;
+    reserved = 0;
+    if (sessionId == kAbsentSessionId) {
+        return false;
+    }
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    const bool found = target != kInvalidSessionSlot && state.sessions[target].joined;
+    if (found) {
+        held = slot_count(state.sessions[target].heldEntitySlots);
+        reserved = slot_count(state.sessions[target].serverEntitySlots);
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return found;
+}
+
+/** Copies both lease masks one session currently holds. */
+bool lease_masks(std::uint64_t sessionId, LeaseMask& held, LeaseMask& reserved) noexcept {
+    held = {};
+    reserved = {};
+    if (sessionId == kAbsentSessionId) {
+        return false;
+    }
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    const bool found = target != kInvalidSessionSlot && state.sessions[target].joined;
+    if (found) {
+        held = state.sessions[target].heldEntitySlots;
+        reserved = state.sessions[target].serverEntitySlots;
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return found;
 }
 
 } // namespace sunrise::state::activity::entity_slots

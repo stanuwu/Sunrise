@@ -78,6 +78,22 @@ namespace {
     return transactions::equal(prepared.snapshot, expected);
 }
 
+/** Applies one prepared revision advance to the exact current membership snapshot. */
+[[nodiscard]] bool commit_republish(ActivityState& state,
+                                    SessionRecord& record,
+                                    const PendingMutation& prepared) noexcept {
+    if (!prepared.hasSnapshot || !record.membership.hasIdentity
+        || record.membership.revision == kMaximumMembershipRevision
+        || prepared.snapshot.revision != record.membership.revision + 1U
+        || !transactions::equal(prepared.snapshot.identity, record.membership.identity)) {
+        return false;
+    }
+    ++record.membership.revision;
+    record.membership.acknowledgedRevision = kAbsentRevision;
+    transactions::publish_change(state, record);
+    return true;
+}
+
 /**
  * Applies one membership acknowledgement to current State.
  * @param state Activity State held under the root write lock.
@@ -102,34 +118,6 @@ namespace {
 }
 
 } // namespace
-
-/** Advances the published membership revision so an already-applied snapshot can be corrected. */
-bool republish(std::uint64_t sessionId) noexcept {
-    if (sessionId == kAbsentSessionId) {
-        return false;
-    }
-    bool advanced = false;
-    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    auto& root = runtime::storage::g_state;
-    ActivityState& state = root.activity;
-    for (SessionRecord& record : state.sessions) {
-        if (!record.occupied || !record.joined || record.sessionId != sessionId) {
-            continue;
-        }
-        // A record with no identity has published nothing. Its first identity carries the
-        // current body anyway.
-        if (record.membership.hasIdentity && state.stateRevision != activity::kMaximumRevision
-            && record.membership.revision != kMaximumMembershipRevision) {
-            ++record.membership.revision;
-            record.membership.acknowledgedRevision = kAbsentRevision;
-            transactions::publish_change(state, record);
-            advanced = true;
-        }
-        break;
-    }
-    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
-    return advanced;
-}
 
 /** Commits one identity, authoritative, refresh, or acknowledgement operation. */
 bool commit(PendingMutation& mutation) noexcept {
@@ -158,6 +146,8 @@ bool commit(PendingMutation& mutation) noexcept {
         committed = transactions::commit_authoritative(state, record, prepared);
     } else if (committed && prepared.kind == MutationKind::refresh) {
         committed = commit_refresh(record, prepared);
+    } else if (committed && prepared.kind == MutationKind::republish) {
+        committed = commit_republish(state, record, prepared);
     } else if (committed && prepared.kind == MutationKind::acknowledgement) {
         committed = commit_acknowledgement(state, record, prepared);
     } else {

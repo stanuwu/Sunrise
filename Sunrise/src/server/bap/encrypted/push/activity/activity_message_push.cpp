@@ -80,7 +80,7 @@ bool append_join_notifications(Scratch& scratch,
     // the set with its empty host table.
     if (encoded) {
         encoded = append_global_state_notification(
-            scratch, activity.sessionId, key, nonce, response, written);
+            scratch, activity.targetBinding, key, nonce, response, written);
     }
     if (encoded) {
         encoded = append_notification_frame(scratch,

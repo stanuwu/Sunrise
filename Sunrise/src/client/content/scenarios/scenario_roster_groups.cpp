@@ -12,25 +12,13 @@ namespace tables = middleware::content::packages::tables;
 constexpr std::size_t kChainDepthLimit = 8;
 
 /**
- * Records one descriptor's schemas against its slot type.
+ * Records one descriptor as a slot of the object being resolved.
  * @param context Roster storage.
  * @param descriptor Descriptor read from a placed-object blob.
- * @return Always true, because a descriptor of an unknown type is ordinary.
+ * @return Always true, because a descriptor this pass cannot use is ordinary.
  */
-bool record_flags(void* context, const tables::SlotDescriptor& descriptor) noexcept {
-    auto& storage = *static_cast<RosterStorage*>(context);
-    if (descriptor.slotType >= kSlotTypeSpan) {
-        return true;
-    }
-    std::uint8_t flags = 0;
-    if (descriptor.authSchema != tables::kAbsentSchema) {
-        flags |= layouts::kSlotAuthFlag;
-    }
-    if (descriptor.senseSchema != tables::kAbsentSchema) {
-        flags |= layouts::kSlotSenseFlag;
-    }
-    storage.slotFlags[descriptor.slotType] = flags;
-    storage.slotFlagsKnown[descriptor.slotType] = 1;
+bool collect_slot(void* context, const tables::SlotDescriptor& descriptor) noexcept {
+    record_slot(*static_cast<RosterStorage*>(context), descriptor);
     return true;
 }
 
@@ -56,7 +44,7 @@ void follow_handle(const reader::Source& source,
         }
         if (classId == tables::kPlacedObjectClass) {
             (void)tables::visit_slot_descriptors(
-                storage.chain, tag, registryKey, &record_flags, &storage);
+                storage.chain, tag, registryKey, &collect_slot, &storage);
             return;
         }
         std::uint32_t next = 0;
@@ -67,32 +55,23 @@ void follow_handle(const reader::Source& source,
     }
 }
 
-/** @param group Candidate group. @return True when every slot type is known. */
-[[nodiscard]] bool flags_complete(const RosterStorage& storage,
-                                  const layouts::RosterGroup& group) noexcept {
-    for (std::size_t slot = 0; slot < group.slotCount; ++slot) {
-        if (storage.slotFlagsKnown[group.slotTypes[slot]] == 0) {
-            return false;
-        }
-    }
-    return true;
-}
-
 /**
- * Reads the slot flags one group object declares, stopping once every type is known.
+ * Collects every descriptor one group object declares, over all of its per-bubble sub-blocks.
+ * Every leaf is followed: one leaf is one slot, so stopping early would drop slots rather than
+ * merely leave a slot type unresolved.
  * @param source Package directory and borrowed block keys.
  * @param scratch Lock-owned block storage.
- * @param storage Working storage for this pass.
+ * @param storage Working storage receiving the descriptors.
  * @param objectBlob Whole placed-object bytes.
- * @param group Candidate group whose slot types are already filled.
+ * @param registryKey Registry key the descriptors must name.
  */
-void resolve_flags(const reader::Source& source,
-                   reader::Scratch& scratch,
-                   RosterStorage& storage,
-                   std::span<const std::byte> objectBlob,
-                   const layouts::RosterGroup& group) noexcept {
+void collect_descriptors(const reader::Source& source,
+                         reader::Scratch& scratch,
+                         RosterStorage& storage,
+                         std::span<const std::byte> objectBlob,
+                         std::uint32_t registryKey) noexcept {
     tables::Array bubbles{};
-    if (flags_complete(storage, group) || !tables::object_bubbles(objectBlob, bubbles)) {
+    if (!tables::object_bubbles(objectBlob, bubbles)) {
         return;
     }
     for (std::uint64_t index = 0; index < bubbles.count; ++index) {
@@ -105,37 +84,9 @@ void resolve_flags(const reader::Source& source,
             if (!tables::object_placed_handle_at(objectBlob, bubble, slot, handle)) {
                 return;
             }
-            follow_handle(source, scratch, storage, handle, group.registryKey);
-            if (flags_complete(storage, group)) {
-                return;
-            }
+            follow_handle(source, scratch, storage, handle, registryKey);
         }
     }
-}
-
-/**
- * Fills one candidate group's slot types from the object's own slot array.
- * @param objectBlob Whole placed-object bytes.
- * @param group Receives the key and slot types.
- * @return True when the object declares a usable slot array.
- */
-[[nodiscard]] bool fill_slots(std::span<const std::byte> objectBlob,
-                              layouts::RosterGroup& group) noexcept {
-    tables::Array slots{};
-    if (!tables::object_slots(objectBlob, slots) || slots.count == 0
-        || slots.count > layouts::kRosterSlotCapacity) {
-        return false;
-    }
-    for (std::uint64_t index = 0; index < slots.count; ++index) {
-        tables::Slot slot{};
-        if (!tables::object_slot_at(objectBlob, slots, index, slot) || slot.type == 0
-            || slot.type > layouts::kMaximumSlotType) {
-            return false;
-        }
-        group.slotTypes[index] = static_cast<std::uint8_t>(slot.type);
-    }
-    group.slotCount = static_cast<std::uint16_t>(slots.count);
-    return true;
 }
 
 /** @param storage Working storage. @param tag Object tag. @return Its memo slot, or capacity. */
@@ -178,27 +129,29 @@ bool resolve_object(const reader::Source& source,
     storage.memo[slot].tag = objectTag;
     storage.memo[slot].group = kNotARosterGroup;
     ++storage.reads;
-    if (!reader::read_tag(source, scratch, objectTag, storage.object)
-        || !tables::carries_roster_slot(storage.object)) {
+    if (!reader::read_tag(source, scratch, objectTag, storage.object)) {
         return true;
     }
 
     layouts::RosterGroup candidate{};
+    tables::Array declared{};
     if (!tables::object_key(storage.object, candidate.registryKey) || candidate.registryKey == 0
-        || !fill_slots(storage.object, candidate)) {
+        || !tables::carries_roster_slot(storage.object)
+        || !tables::object_slots(storage.object, declared) || declared.count == 0
+        || declared.count > layouts::kRosterSlotCapacity) {
         return true;
     }
-    candidate.objectTag = objectTag;
-    resolve_flags(source, scratch, storage, storage.object, candidate);
-    if (!flags_complete(storage, candidate)) {
-        // A slot whose flags are unknown would be encoded with the wrong reset bits, and phase 2
-        // has no resync point, so the whole group is dropped instead.
+    storage.slotCount = 0;
+    storage.slotsOverflowed = false;
+    collect_descriptors(source, scratch, storage, storage.object, candidate.registryKey);
+    if (!fill_slots(storage, declared.count, candidate)) {
+        // The client registers a record per slot the object declares and refuses its whole apply
+        // while any record in the current bubble is unseeded, so a group missing one descriptor is
+        // dropped rather than published short.
         ++storage.unresolvedGroups;
         return true;
     }
-    for (std::size_t index = 0; index < candidate.slotCount; ++index) {
-        candidate.slotFlags[index] = storage.slotFlags[candidate.slotTypes[index]];
-    }
+    candidate.objectTag = objectTag;
     // One key may carry different layouts in different activities, so only exact layouts reuse.
     for (std::size_t index = 0; index < storage.groupCount; ++index) {
         if (same_group_layout(storage.groups[index], candidate)) {

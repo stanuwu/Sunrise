@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <span>
 
+#include "../../encoding/bit_writer.h"
+
 namespace sunrise::middleware::bap::activity_message::incident {
 
 /** Activity message type 19 carries one incident. Both sides can send it. */
@@ -23,10 +25,16 @@ inline constexpr std::uint8_t kExtraCountWidth = 5;
 inline constexpr std::uint32_t kExtraTargetMaximum = 25;
 /** One bit says whether a compressed target selector follows. */
 inline constexpr std::uint8_t kSelectorPresenceWidth = 1;
+/** The selector byte length is 9 bits, so the wire can ask for more than the limit allows. */
+inline constexpr std::uint8_t kSelectorLengthWidth = 9;
+/** At most 260 selector bytes follow. Their meaning stays opaque. */
+inline constexpr std::uint32_t kSelectorMaximum = 260;
 /** One bit says whether optional field K follows. */
 inline constexpr std::uint8_t kOptionalPresenceWidth = 1;
 /** Optional field K is two 32-bit words. */
 inline constexpr std::uint8_t kOptionalFieldWidth = 64;
+/** Each optional word is a full 32-bit field. */
+inline constexpr std::uint8_t kOptionalWordWidth = 32;
 /** The payload byte length is 9 bits, so the wire can ask for more than the limit allows. */
 inline constexpr std::uint8_t kPayloadLengthWidth = 9;
 /** At most 500 payload bytes follow. */
@@ -49,16 +57,28 @@ enum class Verdict : std::uint8_t {
     tooManyTargets,
     /** More than 500 payload bytes were declared. */
     payloadTooLong,
+    /** More than 260 selector bytes were declared. */
+    selectorTooLong,
 };
 
-/** One validated incident. Fields after a compressed selector are not decoded. */
+/** One validated incident, framed to the end of its payload. */
 struct Incident {
+    std::array<std::byte, kSelectorMaximum> selector{};
+    std::array<std::byte, kPayloadMaximum> payload{};
     std::uint32_t primaryTarget{};
     std::uint32_t extraTargets[kExtraTargetMaximum]{};
     std::uint32_t extraTargetCount{};
+    std::uint32_t selectorLength{};
     std::uint32_t payloadLength{};
-    /** Set when a compressed selector follows, which ends decoding for this body. */
+    /** Both optional words, read only when the optional block is present. */
+    std::uint32_t optionalWordA{};
+    std::uint32_t optionalWordB{};
+    /** Bits the body used. Below the payload's own bit count means trailing padding. */
+    std::uint32_t consumedBits{};
+    /** Set when a compressed selector is present. Its bytes stay opaque. */
     bool hasCompressedSelector{};
+    /** Set when the two optional words are present. */
+    bool hasOptionalBlock{};
     /** Set when the payload length and its bytes were reached and checked. */
     bool hasPayload{};
 };
@@ -67,13 +87,19 @@ struct Incident {
 [[nodiscard]] const char* verdict_name(Verdict verdict) noexcept;
 
 /**
- * Validates one msg-19 body as far as its wire shape allows.
- * Every target index is range and poison checked. Decoding stops at a compressed target selector,
- * whose wire length is not recoverable from this artifact, so the payload behind one is not read.
- * @param payload Activity message payload after the 17-byte envelope.
+ * Validates one incident body from its first target to the end of its payload.
+ * Every target index is range and poison checked before anything else, because an out-of-range
+ * index is a crash in the consumer rather than a decode error.
+ * @param payload Activity message payload after the envelope.
  * @param parsed Cleared first. Receives every field reached before the verdict.
  * @return accepted, or the first rule the body broke.
  */
 [[nodiscard]] Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept;
+
+/**
+ * Writes one bounded incident body after a complete semantic preflight.
+ * TODO: no sender yet. The outbound gameplay-event route has to open before this is called.
+ */
+[[nodiscard]] bool write(encoding::bits::Writer& writer, const Incident& incident) noexcept;
 
 } // namespace sunrise::middleware::bap::activity_message::incident

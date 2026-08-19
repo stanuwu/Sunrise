@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "../../../../../middleware/bap/activity_message/sensor_auth_update.h"
+#include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../internal.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
@@ -13,22 +14,18 @@ namespace sunrise::server::bap::encrypted::push::activity {
 namespace message = middleware::bap::activity_message::sensor_auth_update;
 
 /**
- * Seeds the membership identity from the join when no identity message has arrived.
+ * Prepares the fallback membership identity when no identity message has arrived.
  * @param sessionId Joined activity session.
  * @param memberKey Client member key captured from the join request.
  * @param characterSoid Character the client signed in on.
- * @return True when a membership snapshot exists afterwards.
+ * @param mutation Cleared, then receives the exact deferred identity operation.
+ * @return True when a membership snapshot can be staged.
  */
-[[nodiscard]] bool seed_identity(std::uint64_t sessionId,
-                                 std::uint64_t memberKey,
-                                 std::uint64_t characterSoid) noexcept;
-
-/**
- * Seeds the transition token when nothing has published one.
- * @param sessionId Joined activity session.
- * @return True when the token is published.
- */
-[[nodiscard]] bool seed_transition_token(std::uint64_t sessionId) noexcept;
+[[nodiscard]] bool
+prepare_seed_identity(std::uint64_t sessionId,
+                      std::uint64_t memberKey,
+                      std::uint64_t characterSoid,
+                      state::activity::membership::PendingMutation& mutation) noexcept;
 
 /** Why one roster push produced nothing, or that it produced a body. */
 enum class RosterOutcome : std::uint8_t {

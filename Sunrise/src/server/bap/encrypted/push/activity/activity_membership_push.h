@@ -21,6 +21,7 @@ namespace sunrise::server::bap::encrypted::push::activity {
  */
 [[nodiscard]] bool
 append_membership_notification(Scratch& scratch,
+                               Session& session,
                                const activity_message::ActivityPlan& activity,
                                std::span<const std::byte, state::kAesKeySize> key,
                                std::array<std::byte, state::kBapNonceSize>& nonce,

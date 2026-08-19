@@ -88,8 +88,11 @@ inline constexpr std::size_t kViewListCapacity = 16;
 struct ViewSignature {
     std::array<std::byte, kViewListCapacity> list{};
     std::uint64_t token{};
+    /** Optional value the sender carried. Its meaning is unrecovered, so it is kept, not read. */
+    std::int32_t optionalValue{};
     std::uint8_t kind{};
     std::uint8_t listCount{};
+    bool hasOptionalValue{};
     bool hasList{};
     bool bound{};
 };

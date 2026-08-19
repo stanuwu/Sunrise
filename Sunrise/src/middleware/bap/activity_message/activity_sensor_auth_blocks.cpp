@@ -44,12 +44,80 @@ bool write_bubble_block(bits::Writer& writer, const Grant& grant) noexcept {
     return encoded;
 }
 
+namespace {
+
+/**
+ * Writes one sub-block's key presence mask, low bit first.
+ * A key whose bit is clear is dropped in silence, so the mask has to match the key count exactly.
+ * @param writer Body writer.
+ * @param keyCount Keys the sub-block carries.
+ * @return True when all three words fit.
+ */
+[[nodiscard]] bool write_key_mask(bits::Writer& writer, std::size_t keyCount) noexcept {
+    bool encoded = true;
+    for (std::size_t word = 0; encoded && word < kBubbleMaskWords; ++word) {
+        const std::size_t low = word * kChunkWidth;
+        const std::size_t set = keyCount > low ? keyCount - low : 0;
+        const std::size_t bits = set > kChunkWidth ? kChunkWidth : set;
+        encoded = writer.write((std::uint64_t{1} << bits) - 1, kChunkWidth);
+    }
+    return encoded;
+}
+
+/**
+ * Writes one per-bubble sub-block: the bubble it belongs to, then its keys with their mask bits
+ * and state bytes. ClientRoster_ApplyDelta applies only the sub-block whose key equals the current
+ * bubble index, which is what makes these keys bubble-local.
+ * @param writer Body writer.
+ * @param block Bubble and keys to publish.
+ * @param stateSequence Value each state byte carries, so a re-send can force a re-add.
+ * @return True when the whole sub-block fits.
+ */
+[[nodiscard]] bool write_bubble_sub_block(bits::Writer& writer,
+                                          const BubbleSubBlock& block,
+                                          std::uint8_t stateSequence) noexcept {
+    const std::size_t keyCount = block.keys.size();
+    const auto count = static_cast<std::uint32_t>(keyCount);
+    bool encoded = writer.write(1, kPresenceWidth)
+                   && writer.write(kBubbleKeyBias + block.bubble, kKeyWidth)
+                   && writer.write(1, kPresenceWidth) && writer.write(1, kPresenceWidth)
+                   && writer.write(count, kBubbleCountWidth);
+    for (std::size_t index = 0; encoded && index < keyCount; ++index) {
+        encoded = writer.write(block.keys[index], kKeyWidth);
+    }
+    encoded = encoded && writer.write(1, kPresenceWidth) && write_key_mask(writer, keyCount)
+              && writer.write(1, kPresenceWidth) && writer.write(count, kBubbleCountWidth);
+    for (std::size_t index = 0; encoded && index < keyCount; ++index) {
+        encoded = writer.write(kStateByteBias + stateSequence, 8);
+    }
+    return encoded;
+}
+
+/**
+ * Writes the delta's field-1 half: the sub-block count, then one element each.
+ * @param writer Body writer positioned after the field's presence bit.
+ * @param subBlocks Sub-blocks to publish, in bubble order.
+ * @param stateSequence Value each state byte carries.
+ * @return True when every sub-block fits.
+ */
+[[nodiscard]] bool write_bubble_sub_blocks(bits::Writer& writer,
+                                           std::span<const BubbleSubBlock> subBlocks,
+                                           std::uint8_t stateSequence) noexcept {
+    bool encoded = writer.write(static_cast<std::uint32_t>(subBlocks.size()), kBubbleCountWidth);
+    for (std::size_t index = 0; encoded && index < subBlocks.size(); ++index) {
+        encoded = write_bubble_sub_block(writer, subBlocks[index], stateSequence);
+    }
+    return encoded;
+}
+
+} // namespace
+
 /** Writes the phase-1 roster delta, which registers the group keys. */
 bool write_roster_delta(bits::Writer& writer,
                         const Roster& roster,
                         std::uint8_t stateSequence) noexcept {
     const std::size_t root = writer.bit_count();
-    const std::size_t keyCount = roster.groupCount;
+    const std::size_t keyCount = roster.topLevelGroupCount;
     // Clearing the root presence bit means nothing below it is read.
     bool encoded = writer.write(1, kPresenceWidth) && writer.write(1, kPresenceWidth)
                    && writer.write(1, kPresenceWidth)
@@ -71,8 +139,14 @@ bool write_roster_delta(bits::Writer& writer,
     for (std::size_t group = 0; encoded && group < keyCount; ++group) {
         encoded = writer.write(kStateByteBias + stateSequence, 8);
     }
-    return encoded && writer.write(0, kPresenceWidth)
-           && writer.bit_count() == root + delta_bits(keyCount);
+    // Field 1 is the per-bubble sub-block half. Absent, it is one zero bit and 32 KB of the
+    // client's roster struct stays untouched.
+    const std::span<const BubbleSubBlock> subBlocks = roster.bubbleSubBlocks;
+    encoded = encoded && writer.write(subBlocks.empty() ? 0U : 1U, kPresenceWidth);
+    if (encoded && !subBlocks.empty()) {
+        encoded = write_bubble_sub_blocks(writer, subBlocks, stateSequence);
+    }
+    return encoded && writer.bit_count() == root + delta_bits(keyCount, subBlocks);
 }
 
 /** Writes one per-object state block. */

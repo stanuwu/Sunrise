@@ -63,4 +63,39 @@ bool read_player_add(bits::Reader& reader, PlayerAddRequest& output) noexcept {
     return true;
 }
 
+/** Reads a whole player-remove message. */
+bool read_player_remove(bits::Reader& reader, PlayerRemoveRequest& output) noexcept {
+    PlayerRemoveRequest candidate{};
+    std::uint64_t reserved = 0;
+    if (!bits::read_raw_u64(reader, candidate.sessionId)
+        || !reader.read(kReservedWidth, reserved)) {
+        return false;
+    }
+    // The consumer refuses a set reserved bit, the same as it does on an add.
+    if (reserved != 0) {
+        return false;
+    }
+    output = candidate;
+    return true;
+}
+
+/** Reads the leading fields of a player-properties message. */
+bool read_player_properties_header(bits::Reader& reader, PlayerPropertiesRequest& output) noexcept {
+    PlayerPropertiesRequest candidate{};
+    std::uint64_t reserved = 0;
+    std::uint64_t sequence = 0;
+    std::uint64_t kind = 0;
+    if (!bits::read_raw_u64(reader, candidate.sessionId) || !reader.read(kReservedWidth, reserved)
+        || !reader.read(kSequenceWidth, sequence) || !reader.read(kKindWidth, kind)) {
+        return false;
+    }
+    if (reserved != 0) {
+        return false;
+    }
+    candidate.sequence = static_cast<std::uint32_t>(sequence);
+    candidate.kind = static_cast<std::uint8_t>(kind);
+    output = candidate;
+    return true;
+}
+
 } // namespace sunrise::middleware::gameplay::group

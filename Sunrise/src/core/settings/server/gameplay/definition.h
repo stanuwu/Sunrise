@@ -32,6 +32,13 @@ inline constexpr std::uint16_t kDefaultServerReserve = 256;
 inline constexpr std::uint16_t kMinimumServerReserve = 8;
 /** The client keeps at least this many lease bits after the reserve is subtracted. */
 inline constexpr std::uint16_t kClientLeaseMinimum = 4096;
+/**
+ * Entity slots the join hands the client before it asks for any.
+ * The whole slot space, capped at what the reserve leaves, which is the measured behaviour.
+ */
+inline constexpr std::uint16_t kDefaultClientJoinGrant = 8'192;
+/** Below this a join cannot cover the client's own low water mark of 400. */
+inline constexpr std::uint16_t kMinimumClientJoinGrant = 400;
 
 /**
  * Gameplay endpoint topology and the entity-slot split it implies.
@@ -51,6 +58,8 @@ struct Settings {
     std::uint16_t port{kDefaultPort};
     /** Entity indices held back from the client lease for server-authored entities. */
     std::uint16_t serverReserveCount{kDefaultServerReserve};
+    /** Entity indices the join grants. The rest stay free for the client to request. */
+    std::uint16_t clientJoinGrantCount{kDefaultClientJoinGrant};
 };
 
 /**
@@ -68,5 +77,13 @@ struct Settings {
  * @return Configured reserve, or zero while the channel is off.
  */
 [[nodiscard]] std::uint16_t effective_reserve(const Settings& settings) noexcept;
+
+/**
+ * Reports the entity slots one join grants.
+ * A disabled channel reserves nothing, so the grant is bounded by the whole slot space instead.
+ * @param settings Active gameplay settings.
+ * @return Configured grant, capped at what the reserve leaves free.
+ */
+[[nodiscard]] std::size_t join_grant(const Settings& settings) noexcept;
 
 } // namespace sunrise::core::settings::server::gameplay

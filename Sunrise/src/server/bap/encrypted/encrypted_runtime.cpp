@@ -98,7 +98,7 @@ bool consume(Session& session,
     if (processesBody
         && !body::process(route,
                           session.queuez,
-                          session.activitySessionId,
+                          session.activity,
                           session.matchmakingContext,
                           frame.body,
                           scratch.responseBody,
@@ -217,6 +217,12 @@ bool consume(Session& session,
             publish_connection_fields(session, publication, connection);
             // The caller copy is done, so what the staged roster body owes is settled here.
             push::activity::commit_staged_roster(session);
+            commit_staged_advertisement(session);
+            // Any delivered activity notification resets the client's silence timer. Delay the
+            // fallback keepalive so this same request does not append a redundant second push.
+            if (activityPlan != nullptr && framedSize != 0) {
+                session.activityKeepaliveDueTick = GetTickCount64() + kActivityKeepaliveIntervalMs;
+            }
             session.accountMutationPublished = mutatesAccount;
             if (transaction_if<EquipmentSwapTransaction>(outcome) != nullptr) {
                 std::array<char, core::log::kLineCapacity> line{};
@@ -346,6 +352,7 @@ bool consume(Session& session,
     if (!handled) {
         // The staged body is dropped, so its grant and its state byte go back for the next push.
         push::activity::discard_staged_roster(session);
+        discard_staged_advertisement(session);
     }
     clear_prefix(scratch.plaintext, plaintextSize);
     clear_prefix(scratch.responseBody, responseBodySize);

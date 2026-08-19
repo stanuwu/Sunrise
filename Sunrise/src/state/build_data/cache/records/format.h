@@ -25,10 +25,11 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /**
- * Current build-data cache format. An older cache is rebuilt rather than read, so a bump needs
- * no other edit. Bump it whenever a domain's stored shape changes.
+ * Current build-data cache format. An older cache is rebuilt rather than read.
+ * Bump it when a stored shape changes, and when the extraction filling it changes what it writes.
+ * A cached row survives a code change, so a corrected walk keeps publishing the old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 35;
+inline constexpr std::uint32_t kCacheFormatVersion = 43;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -265,8 +266,10 @@ struct ScenarioRecord {
     std::uint8_t rosterGroupCount{};
     /** Map-package stem the destination's spawn sets are grouped under. */
     std::uint8_t spawnStemLength{};
+    /** Groups published through the delta's per-bubble sub-blocks. */
+    std::uint8_t bubbleGroupCount{};
     /** Must be zero, so the packed destination row always matches. */
-    std::array<std::uint8_t, 3> reserved{};
+    std::array<std::uint8_t, 2> reserved{};
     std::array<char, scenarios::kSpawnStemCapacity> spawnStem{};
     std::array<std::uint8_t, scenarios::kBubbleCapacity> bubbleStates{};
     /** Each bubble's own name hash, in the same order as the states. */
@@ -275,6 +278,15 @@ struct ScenarioRecord {
     std::array<std::uint8_t, scenarios::kBubbleCapacity> bubbleStateCounts{};
     /** Roster table indices, in publish order. */
     std::array<std::uint16_t, scenarios::kDestinationGroupCapacity> rosterGroups{};
+    /** Roster table indices published per bubble, in publish order. */
+    std::array<std::uint16_t, scenarios::kDestinationBubbleGroupCapacity> bubbleGroups{};
+    /**
+     * Bubbles each per-bubble group is published in, one bit per client bubble index.
+     * Stored as bytes, low bubble first, so the row keeps its one-byte alignment.
+     */
+    std::array<std::array<std::uint8_t, scenarios::kBubbleMaskBytes>,
+               scenarios::kDestinationBubbleGroupCapacity>
+        bubbleGroupMasks{};
     /** Each bubble's map-global index, which spawn-set bubble masks are keyed by. */
     std::array<std::uint16_t, scenarios::kBubbleCapacity> bubbleMapIndices{};
     /** Packages this destination loads, from its slice-set entries and its own tag. */
@@ -397,6 +409,8 @@ struct RosterGroupRecord {
     std::uint16_t slotCount{};
     std::array<std::uint8_t, scenarios::kRosterSlotCapacity> slotTypes{};
     std::array<std::uint8_t, scenarios::kRosterSlotCapacity> slotFlags{};
+    /** Each slot's own index, from its descriptor. */
+    std::array<std::uint16_t, scenarios::kRosterSlotCapacity> slotIndices{};
 };
 
 #pragma pack(pop)
@@ -426,8 +440,10 @@ static_assert(sizeof(ScenarioRecord)
                      + scenarios::kBubbleCapacity * sizeof(std::uint32_t)
                      + scenarios::kBubbleCapacity * sizeof(std::uint16_t)
                      + (scenarios::kDestinationGroupCapacity
-                        + scenarios::kDestinationPackageCapacity)
-                           * sizeof(std::uint16_t));
+                        + scenarios::kDestinationPackageCapacity
+                        + scenarios::kDestinationBubbleGroupCapacity)
+                           * sizeof(std::uint16_t)
+                     + scenarios::kDestinationBubbleGroupCapacity * scenarios::kBubbleMaskBytes);
 static_assert(sizeof(SpawnStemRecord)
               == spawn_sets::kStemNameCapacity + sizeof(std::uint32_t) + 3 * sizeof(std::uint16_t)
                      + 2 * sizeof(std::uint8_t));
@@ -437,7 +453,8 @@ static_assert(sizeof(SpawnNameHashRecord)
                      + 6 * sizeof(std::uint8_t) + spawn_sets::kBubbleMaskBytes);
 static_assert(sizeof(RosterGroupRecord)
               == 2 * sizeof(std::uint32_t) + sizeof(std::uint16_t)
-                     + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t));
+                     + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
+                     + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
 static_assert(sizeof(ProgressionRecord) == sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(AbilityBucketRecord)
               == sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)

@@ -5,9 +5,9 @@
 
 #include "../../../../../state/account/account_state.h"
 #include "../../../../../state/activity/defaults/activity_defaults_snapshot.h"
-#include "../../../../../state/activity/destination/activity_destination_snapshot.h"
 #include "../../../../../state/activity/destination/activity_destination_spawn_binding.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
+#include "../../../../../state/activity/runtime.h"
 #include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "activity_arrival.h"
@@ -59,6 +59,65 @@ constexpr std::uint64_t kIdentityLowMask = 0xFFFFFFFFULL;
 }
 
 /**
+ * Copies one roster group into the encoder's fixed input.
+ * @param tableIndex Roster table index the destination row names.
+ * @param scratch Lock-owned roster group storage the spans point into.
+ * @param slot Storage and input slot to fill, which are the same ordinal.
+ * @param roster Receives the group.
+ * @return True when the named group was found.
+ */
+[[nodiscard]] bool fill_group(std::uint16_t tableIndex,
+                              Scratch& scratch,
+                              std::size_t slot,
+                              message::Roster& roster) noexcept {
+    layouts::RosterGroup& group = scratch.rosterGroups[slot];
+    if (!state::build_data::find_roster_group(tableIndex, group)) {
+        return false;
+    }
+    roster.groups[slot].key = group.registryKey;
+    roster.groups[slot].slotTypes =
+        std::span<const std::uint8_t>(group.slotTypes.data(), group.slotCount);
+    roster.groups[slot].slotFlags =
+        std::span<const std::uint8_t>(group.slotFlags.data(), group.slotCount);
+    roster.groups[slot].slotIndices =
+        std::span<const std::uint16_t>(group.slotIndices.data(), group.slotCount);
+    return true;
+}
+
+/**
+ * Builds the per-bubble sub-blocks from the destination's per-bubble groups.
+ * The row holds one bubble mask per group. The wire wants the transpose: one sub-block per
+ * bubble, carrying every key that bubble registers.
+ * @param layout Destination row carrying the groups and their bubble masks.
+ * @param scratch Lock-owned sub-block storage the spans point into.
+ * @param roster Groups already filled, whose per-bubble half starts at the top-level count.
+ * @return The sub-blocks to publish, which is empty when the destination has no per-bubble group.
+ */
+[[nodiscard]] std::span<const message::BubbleSubBlock> fill_sub_blocks(
+    const layouts::Definition& layout, Scratch& scratch, const message::Roster& roster) noexcept {
+    std::size_t published = 0;
+    for (std::size_t bubble = 0; bubble < scratch.rosterSubBlocks.size(); ++bubble) {
+        std::size_t keyCount = 0;
+        for (std::size_t index = 0; index < layout.bubbleGroupCount; ++index) {
+            if ((layout.bubbleGroupMasks[index] & (std::uint64_t{1} << bubble)) == 0) {
+                continue;
+            }
+            scratch.rosterSubBlockKeys[published][keyCount] =
+                roster.groups[roster.topLevelGroupCount + index].key;
+            ++keyCount;
+        }
+        if (keyCount == 0) {
+            continue;
+        }
+        scratch.rosterSubBlocks[published].bubble = static_cast<std::uint32_t>(bubble);
+        scratch.rosterSubBlocks[published].keys =
+            std::span<const std::uint32_t>(scratch.rosterSubBlockKeys[published].data(), keyCount);
+        ++published;
+    }
+    return std::span(scratch.rosterSubBlocks).first(published);
+}
+
+/**
  * Copies the destination's published groups into the encoder's fixed input.
  * @param layout Destination row naming its groups by roster table index.
  * @param scratch Lock-owned roster group storage the spans point into.
@@ -68,23 +127,32 @@ constexpr std::uint64_t kIdentityLowMask = 0xFFFFFFFFULL;
 [[nodiscard]] bool
 fill_roster(const layouts::Definition& layout, Scratch& scratch, message::Roster& roster) noexcept {
     roster = {};
-    if (layout.rosterGroupCount == 0 || layout.rosterGroupCount > scratch.rosterGroups.size()
-        || layout.rosterGroupCount > roster.groups.size()) {
+    const std::size_t groupCount =
+        std::size_t{layout.rosterGroupCount} + std::size_t{layout.bubbleGroupCount};
+    if (layout.rosterGroupCount == 0 || groupCount > scratch.rosterGroups.size()
+        || groupCount > roster.groups.size()) {
         return false;
     }
     for (std::size_t index = 0; index < layout.rosterGroupCount; ++index) {
-        layouts::RosterGroup& group = scratch.rosterGroups[index];
-        if (!state::build_data::find_roster_group(layout.rosterGroups[index], group)) {
+        if (!fill_group(layout.rosterGroups[index], scratch, index, roster)) {
             return false;
         }
-        roster.groups[index].key = group.registryKey;
-        roster.groups[index].slotTypes =
-            std::span<const std::uint8_t>(group.slotTypes.data(), group.slotCount);
-        roster.groups[index].slotFlags =
-            std::span<const std::uint8_t>(group.slotFlags.data(), group.slotCount);
     }
-    roster.groupCount = layout.rosterGroupCount;
-    for (std::size_t index = 0; index < roster.groupCount && roster.playerKeyGroup == 0; ++index) {
+    // The per-bubble groups follow the top-level ones in the same array, because phase 2 seeds
+    // every group the body registers and the client holds its apply back until they are all in.
+    for (std::size_t index = 0; index < layout.bubbleGroupCount; ++index) {
+        if (!fill_group(
+                layout.bubbleGroups[index], scratch, layout.rosterGroupCount + index, roster)) {
+            return false;
+        }
+    }
+    roster.topLevelGroupCount = layout.rosterGroupCount;
+    roster.groupCount = groupCount;
+    roster.bubbleSubBlocks = fill_sub_blocks(layout, scratch, roster);
+    // Only a top-level group can bind the player: its object is in every slice set, so the gate
+    // reads it wherever the player is.
+    for (std::size_t index = 0; index < roster.topLevelGroupCount && roster.playerKeyGroup == 0;
+         ++index) {
         const layouts::RosterGroup& group = scratch.rosterGroups[index];
         for (std::size_t slot = 0; slot < group.slotCount; ++slot) {
             if (group.slotTypes[slot] == kSlotTypeParticipation) {
@@ -131,24 +199,23 @@ next_state_sequence(Session& session, std::uint32_t folded, bool burst) noexcept
 } // namespace
 
 /** Resolves the one region a session publishes. */
-EffectiveRegion effective_region(std::uint64_t sessionId) noexcept {
-    state::activity::defaults::ActivityDefaults defaults{};
-    state::activity::destination::DestinationSelection selection{};
-    state::activity::defaults::snapshot(defaults);
-    // The session's own destination wins. The authored default covers a session that committed
-    // before any selection was readable.
-    if (!state::activity::destination::snapshot(sessionId, selection)) {
-        selection = defaults.defaultDestination.selection;
+EffectiveRegion effective_region(const state::activity::SessionBinding& binding) noexcept {
+    EffectiveRegion region{};
+    region.index = state::activity::membership::kAbsentRegionIndex;
+    if (!state::activity::binding_matches(binding)) {
+        return region;
     }
+    state::activity::defaults::ActivityDefaults defaults{};
+    state::activity::defaults::snapshot(defaults);
+    const state::activity::destination::DestinationSelection& selection = binding.destination;
     const std::string_view name(reinterpret_cast<const char*>(selection.packageName.data()),
                                 selection.packageNameLength);
     // A missing layout leaves a cleared definition, and the arrival rule then returns the
     // authored fallback index.
     layouts::Definition layout{};
     static_cast<void>(state::build_data::find_scenario_layout(name, layout));
-    EffectiveRegion region{};
     region.arrival = arrival_slice_set(defaults.defaultDestination, selection, name, layout);
-    const std::int32_t reported = state::activity::membership::reported_region(sessionId);
+    const std::int32_t reported = state::activity::membership::reported_region(binding.sessionId);
     region.reported = reported >= 0;
     region.index = region.reported ? reported : static_cast<std::int32_t>(region.arrival);
     return region;
@@ -156,8 +223,8 @@ EffectiveRegion effective_region(std::uint64_t sessionId) noexcept {
 
 /** Resolves the region one prepared membership body publishes. */
 EffectiveRegion planned_region(const state::activity::membership::PendingMutation& mutation,
-                               std::uint64_t sessionId) noexcept {
-    EffectiveRegion region = effective_region(sessionId);
+                               const state::activity::SessionBinding& binding) noexcept {
+    EffectiveRegion region = effective_region(binding);
     // The same rule the State merge uses, so the body and the record it will commit agree. A
     // negative index is the unset value the client sends on its way out, not a position.
     if (mutation.authoritativeInput.hasRegion
@@ -179,20 +246,15 @@ RosterOutcome build_roster_snapshot(Session& session,
     snapshot = {};
     destinationLength = 0;
     state::activity::defaults::ActivityDefaults defaults{};
-    state::activity::destination::DestinationSelection selection{};
     state::activity::defaults::snapshot(defaults);
-    // A joined link takes its region from the link that knows where the player is, so its bubble
-    // grant names the bubble the world is in. Its roster groups stay its own: the client-reference
-    // table holds one record per key, so two containers sharing a key orphan each other's rows.
-    const std::uint64_t regionFrom =
-        session.activityJoinedForeignSession
-            ? state::activity::membership::live_region_session(session.activitySessionId)
-            : session.activitySessionId;
-    // The session's own destination wins. The authored default covers a session that committed
-    // before any selection was readable.
-    if (!state::activity::destination::snapshot(session.activitySessionId, selection)) {
-        selection = defaults.defaultDestination.selection;
+    if (session.activity.role == ActivityClientRole::none
+        || !state::activity::binding_matches(session.activity.session)
+        || !state::activity::binding_matches(session.activity.source)) {
+        return RosterOutcome::noLayout;
     }
+    // Public targets keep the destination copied from their exact advertised source generation.
+    const state::activity::destination::DestinationSelection& selection =
+        session.activity.session.destination;
     layouts::Definition layout{};
     const std::string_view name(reinterpret_cast<const char*>(selection.packageName.data()),
                                 selection.packageNameLength);
@@ -209,8 +271,21 @@ RosterOutcome build_roster_snapshot(Session& session,
         defaults.defaultDestination.fallback;
     // One resolution serves this body and the citizen advertisement in message 12. Two would let
     // the join descriptor land in a region record the client is not pending on.
-    const EffectiveRegion region = effective_region(regionFrom);
-    snapshot.patchEpoch = session.activityPatchEpoch;
+    EffectiveRegion region{};
+    region.arrival = arrival_slice_set(defaults.defaultDestination, selection, name, layout);
+    if (session.activity.role == ActivityClientRole::publicTarget) {
+        region.index = session.activity.advertisedRegion;
+        region.reported = region.index >= 0;
+    } else {
+        const std::int32_t reported =
+            state::activity::membership::reported_region(session.activity.source.sessionId);
+        region.reported = reported >= 0;
+        region.index = region.reported ? reported : static_cast<std::int32_t>(region.arrival);
+    }
+    if (region.index < 0) {
+        return RosterOutcome::noLayout;
+    }
+    snapshot.patchEpoch = session.activityPatchEpoch.value;
     // The character the join named wins, resolved to its authored SOID. The client binds its
     // player by matching this value against the object registry, and the short form the join
     // carries matches nothing.
@@ -219,7 +294,7 @@ RosterOutcome build_roster_snapshot(Session& session,
     // sends the character SOID. That field is the membership identity, so this sends it instead.
     if (defaults.rosterKeyFromIdentity) {
         const std::uint64_t identity =
-            state::activity::membership::join_identity(session.activitySessionId);
+            state::activity::membership::join_identity(session.activity.session.sessionId);
         if (identity != 0) {
             snapshot.playerKey = identity;
         }

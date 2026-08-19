@@ -56,6 +56,12 @@ private:
      */
     [[nodiscard]] bool server_settings(server::Settings& output) noexcept;
     /**
+     * Parses the activation gate block on top of the fixed defaults.
+     * @param output Receives the block only after every key in it is valid.
+     * @return True when every supported key carries a boolean; unknown keys are skipped.
+     */
+    [[nodiscard]] bool activation_settings(server::activation::Settings& output) noexcept;
+    /**
      * Parses the gameplay endpoint block on top of the fixed defaults.
      * @param output Receives the block only after the whole object is consistent.
      * @return True when the topology, addresses, port, and slot reserve agree.

@@ -199,6 +199,7 @@ bool build_rosters(const reader::Source& source,
         ++storage.cursor;
         row.rosterGroupCount = 0;
         row.rosterGroups = {};
+        row.bubbleGroupCount = 0;
         ++storage.reads;
         if (!reader::read_tag(source, scratch, row.tag, storage.scenario)) {
             continue;
@@ -207,7 +208,7 @@ bool build_rosters(const reader::Source& source,
         if (!walk_destination(source, scratch, storage, walk)) {
             continue;
         }
-        publish_safe(walk, row);
+        publish_groups(walk, row);
     }
     return storage.cursor >= rows.size();
 }

@@ -50,6 +50,7 @@ bool Parser::gameplay_settings(gameplay::Settings& output) noexcept {
     bool hasTransport = false;
     bool hasPort = false;
     bool hasReserve = false;
+    bool hasJoinGrant = false;
     for (;;) {
         std::string_view key;
         if (!string(key) || !consume(':')) {
@@ -97,6 +98,14 @@ bool Parser::gameplay_settings(gameplay::Settings& output) noexcept {
             }
             candidate.serverReserveCount = static_cast<std::uint16_t>(value);
             hasReserve = true;
+        } else if (key == "client_join_grant_count") {
+            std::uint64_t value = 0;
+            if (hasJoinGrant || !unsigned_integer(value)
+                || value > (std::numeric_limits<std::uint16_t>::max)()) {
+                return false;
+            }
+            candidate.clientJoinGrantCount = static_cast<std::uint16_t>(value);
+            hasJoinGrant = true;
         } else if (!skip_value(0)) {
             return false;
         }

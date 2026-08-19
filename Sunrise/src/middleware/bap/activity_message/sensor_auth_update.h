@@ -18,8 +18,12 @@ inline constexpr std::size_t kAuthoritySlotCount = 65;
 inline constexpr std::uint8_t kMaximumGrantBubble = 63;
 /** A grant token of zero equals the client's cleared mirror, so it grants nothing. */
 inline constexpr std::uint16_t kMinimumGrantToken = 1;
-/** Groups one destination may publish. No installed destination reaches more than two. */
-inline constexpr std::size_t kGroupCapacity = 4;
+/**
+ * Groups one body may carry, top-level and per-bubble together.
+ * No installed destination reaches more than two objects that go in the top-level list, and the
+ * per-bubble half adds its own. Phase 2 seeds every one of them.
+ */
+inline constexpr std::size_t kGroupCapacity = 8;
 /** The three lifetime states spawn gate G4's unbounded jump table accepts. */
 inline constexpr std::array<std::uint8_t, 3> kLifetimeStates = {3, 6, 10};
 /** Slot flag bit for a block that carries a sense reset bit. */
@@ -39,20 +43,49 @@ struct Grant final {
 
 /**
  * One roster group and its slots, in slot-index order.
- * Slot indices are contiguous from zero, so a slot's ordinal in these arrays is its index.
+ * A slot the object declares but no descriptor names is not here, so an ordinal is not an index
+ * and `slotIndices` carries each slot's own, from its descriptor.
  */
 struct Group final {
     std::uint32_t key{};
     std::span<const std::uint8_t> slotTypes{};
     std::span<const std::uint8_t> slotFlags{};
+    std::span<const std::uint16_t> slotIndices{};
+};
+
+/** Sub-blocks the delta's field 1 may carry. The wire array declares one element per bubble. */
+inline constexpr std::size_t kBubbleSubBlockCapacity = 64;
+/** Keys one sub-block may carry. Its wire key array declares 96. */
+inline constexpr std::size_t kBubbleKeyCapacity = 96;
+/** The widest bubble a sub-block may name. The client masks the index it compares to six bits. */
+inline constexpr std::uint32_t kMaximumSubBlockBubble = 63;
+
+/**
+ * One per-bubble roster sub-block, an element of the delta's field 1.
+ * Its keys register only while that bubble is current, and the slice-set sweep deactivates them
+ * through the same unchecked lookup, so a key here must be in every slice set of this bubble.
+ */
+struct BubbleSubBlock final {
+    std::uint32_t bubble{};
+    /** Keys registered while that bubble is current. Each one also needs a group to seed it. */
+    std::span<const std::uint32_t> keys{};
 };
 
 /** Which groups one destination publishes and which of them binds the player. */
 struct Roster final {
+    /**
+     * Every group this body registers, top-level first and per-bubble after.
+     * Phase 2 seeds all of them: the client applies auth state only once every object registered
+     * in the current bubble is seeded, so a group left out holds back the whole apply.
+     */
     std::array<Group, kGroupCapacity> groups{};
     std::size_t groupCount{};
+    /** Leading groups that go in the delta's top-level key list. The rest are per-bubble only. */
+    std::size_t topLevelGroupCount{};
     /** Group whose first type-13 block carries the player key. It must be one that registers. */
     std::uint32_t playerKeyGroup{};
+    /** Sub-blocks published in the delta's field 1. None leaves that field one zero bit. */
+    std::span<const BubbleSubBlock> bubbleSubBlocks{};
 };
 
 /** Everything one `sensor_auth_update` carries. */
@@ -128,6 +161,8 @@ inline constexpr std::uint8_t kSlotTypeWidth = 7;
 inline constexpr std::uint8_t kSlotIndexWidth = 16;
 inline constexpr std::uint32_t kSlotTypeBias = 1;
 inline constexpr std::uint32_t kSlotIndexBias = 32768;
+/** The widest slot index the biased 16-bit field carries. One above it wraps to zero. */
+inline constexpr std::uint16_t kMaximumSlotIndex = 32767;
 /** The per-entry state byte is stored biased, so the wire value never goes negative. */
 inline constexpr std::uint32_t kStateByteBias = 0x80;
 
@@ -141,9 +176,45 @@ inline constexpr std::uint32_t kStateByteBias = 0x80;
     return delta_mask_bit(keyCount) + 32 * kDeltaMaskWords + 1;
 }
 
-/** @param keyCount Published group count. @return Total delta size from its own root bit. */
-[[nodiscard]] constexpr std::size_t delta_bits(std::size_t keyCount) noexcept {
-    return delta_state_count_bit(keyCount) + kDeltaCountWidth + 8 * keyCount + 1;
+/** The sub-block count and each nested count are 7-bit fields with no presence bit. */
+inline constexpr std::uint8_t kBubbleCountWidth = 7;
+/** The sub-block's own key is a signed 32-bit field, so its wire value carries the -2^31 bias. */
+inline constexpr std::uint32_t kBubbleKeyBias = 0x80000000;
+/** The sub-block presence mask is three words whatever the key count. */
+inline constexpr std::size_t kBubbleMaskWords = 3;
+/**
+ * Bits one sub-block costs before its keys: the element's own presence bit, its bubble key, the
+ * four remaining flags, both counts and the presence mask. These are the 5 flags per sub-block
+ * that close the schema's 325-flag sum.
+ */
+inline constexpr std::size_t kBubbleSubBlockFixedBits =
+    kPresenceWidth + kKeyWidth + kPresenceWidth + kPresenceWidth + kBubbleCountWidth
+    + kPresenceWidth + 32 * kBubbleMaskWords + kPresenceWidth + kBubbleCountWidth;
+/** Bits one key costs inside a sub-block: the key itself, then its state byte. */
+inline constexpr std::size_t kBubbleSubBlockKeyBits = kKeyWidth + 8;
+
+/**
+ * @param subBlocks Sub-blocks the delta carries, which must not be empty.
+ * @return Bits the whole field-1 half costs, after the field's own presence bit.
+ */
+[[nodiscard]] constexpr std::size_t
+bubble_bits(std::span<const BubbleSubBlock> subBlocks) noexcept {
+    std::size_t bits = kBubbleCountWidth;
+    for (const BubbleSubBlock& block : subBlocks) {
+        bits += kBubbleSubBlockFixedBits + kBubbleSubBlockKeyBits * block.keys.size();
+    }
+    return bits;
+}
+
+/**
+ * @param keyCount Top-level group count.
+ * @param subBlocks Sub-blocks the delta carries, empty when field 1 is absent.
+ * @return Total delta size from its own root bit.
+ */
+[[nodiscard]] constexpr std::size_t delta_bits(std::size_t keyCount,
+                                               std::span<const BubbleSubBlock> subBlocks) noexcept {
+    return delta_state_count_bit(keyCount) + kDeltaCountWidth + 8 * keyCount + 1
+           + (subBlocks.empty() ? 0 : bubble_bits(subBlocks));
 }
 
 /**

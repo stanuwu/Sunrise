@@ -31,6 +31,41 @@ constexpr std::uint8_t kGroupSize = 16;
 constexpr std::uint8_t kGroupCount = 2;
 /** Only the low 25 bits of either mask name a parameter. */
 constexpr std::uint64_t kParameterMaskBits = 0x1FFFFFF;
+/** A request-body width of zero means that parameter has no recovered request codec. */
+constexpr std::uint16_t kNoRequestCodec = 0;
+
+/**
+ * Width in bits of each parameter's request body, indexed by registry index.
+ * The bodies are interleaved with no length prefix, so these widths are what locates the next one.
+ * A zero means the grammar is unrecovered and the walk stops: every later offset would be wrong.
+ */
+constexpr std::array<std::uint16_t, kParameterCount> kRequestBodyWidths{
+    23,              // 0: value6 bias 1, value9 bias 1, value8
+    34,              // 1: four value6, three bits, value5, value2
+    kNoRequestCodec, // 2: shared 140-byte schema
+    208,             // 3: raw64, value64, raw32, value32, value16
+    kNoRequestCodec, // 4: nested request root
+    kNoRequestCodec, // 5: nested request root
+    kNoRequestCodec, // 6: nested request root
+    kNoRequestCodec, // 7: activity descriptor root
+    kNoRequestCodec, // 8: activity descriptor root
+    3,               // 9: value2, bit
+    14,              // 10: value6, value5, value2, bit
+    4,               // 11: value4
+    kNoRequestCodec, // 12: bounded address record
+    kNoRequestCodec, // 13: same codec as 12
+    69,              // 14: raw64, value5
+    1,               // 15: bit
+    28,              // 16: value4, value4, value20
+    1,               // 17: bit
+    6,               // 18: value6
+    23,              // 19: value3, value6, value6, value8
+    42,              // 20: value7, value3, value32
+    kNoRequestCodec, // 21: nested request root
+    kNoRequestCodec, // 22: nested root
+    kNoRequestCodec, // 23: nested root
+    kNoRequestCodec, // 24: single-record request
+};
 
 /**
  * Reduces one parameter mask to the presence bits the encoder writes ahead of it.
@@ -131,6 +166,33 @@ bool read_parameter_request(bits::Reader& reader, ParameterRequestHeader& output
     }
     candidate.modeFlag = mode != 0;
     output = candidate;
+    return true;
+}
+
+/** Walks the request bodies that follow a parameter request header. */
+bool walk_parameter_request(bits::Reader& reader,
+                            std::uint64_t requestedMask,
+                            ParameterRequestWalk& walk) noexcept {
+    walk = {};
+    const std::uint64_t selected = requestedMask & kParameterMaskBits;
+    for (std::uint8_t parameter = 0; parameter < kParameterCount; ++parameter) {
+        if (((selected >> parameter) & 1ULL) == 0) {
+            continue;
+        }
+        const std::uint16_t width = kRequestBodyWidths[parameter];
+        if (width == kNoRequestCodec) {
+            walk.ambiguousParameter = parameter;
+            walk.tailBits = static_cast<std::uint32_t>(reader.remaining_bits());
+            return true;
+        }
+        if (!reader.skip(width)) {
+            walk.tailBits = static_cast<std::uint32_t>(reader.remaining_bits());
+            return false;
+        }
+        walk.walkedMask |= 1ULL << parameter;
+    }
+    walk.tailBits = static_cast<std::uint32_t>(reader.remaining_bits());
+    walk.complete = true;
     return true;
 }
 

@@ -10,6 +10,7 @@
 #include "../../../../../state/activity/defaults/activity_defaults_snapshot.h"
 #include "../../../../../state/activity/destination/activity_destination_snapshot.h"
 #include "../../../../../state/activity/destination/activity_destination_spawn_binding.h"
+#include "../../../../../state/activity/runtime.h"
 #include "../../../../../state/build_data/runtime.h"
 #include "activity_arrival.h"
 #include "activity_notification_frame.h"
@@ -45,20 +46,19 @@ void copy_name(const state::activity::destination::DestinationSelection& selecti
 
 /** Builds the whole message body input for one session. */
 [[nodiscard]] bool
-resolve_state(std::uint64_t sessionId,
+resolve_state(const state::activity::SessionBinding& binding,
               message::GlobalActivityState& output,
               state::activity::destination::DestinationSelection& selection) noexcept {
     output = {};
+    if (!state::activity::binding_matches(binding)) {
+        return false;
+    }
     state::activity::defaults::ActivityDefaults defaults{};
     state::activity::defaults::snapshot(defaults);
     const state::activity::defaults::FallbackPolicy& fallback =
         defaults.defaultDestination.fallback;
 
-    // The session's own destination wins. The authored default covers a session that committed
-    // before any selection was readable.
-    if (!state::activity::destination::snapshot(sessionId, selection)) {
-        selection = defaults.defaultDestination.selection;
-    }
+    selection = binding.destination;
     copy_name(selection, output);
     // The descriptor view points into caller storage that outlives the encode.
     output.descriptorBits = std::span<const std::byte>(selection.descriptorBits);
@@ -96,14 +96,14 @@ resolve_state(std::uint64_t sessionId,
 
 /** Appends one global-activity-state svc9 notification and advances its local nonce. */
 bool append_global_state_notification(Scratch& scratch,
-                                      std::uint64_t sessionId,
+                                      const state::activity::SessionBinding& binding,
                                       std::span<const std::byte, state::kAesKeySize> key,
                                       std::array<std::byte, state::kBapNonceSize>& nonce,
                                       std::span<std::byte> response,
                                       std::size_t& written) noexcept {
     message::GlobalActivityState body{};
     state::activity::destination::DestinationSelection selection{};
-    if (written > response.size() || !resolve_state(sessionId, body, selection)) {
+    if (written > response.size() || !resolve_state(binding, body, selection)) {
         return false;
     }
 
@@ -113,7 +113,7 @@ bool append_global_state_notification(Scratch& scratch,
     const bool encoded =
         message::encode_global_activity_state(body, scratch.responseBody, messageSize)
         && append_notification_frame(scratch,
-                                     sessionId,
+                                     binding.sessionId,
                                      message::kMessageType,
                                      std::span(scratch.responseBody).first(messageSize),
                                      key,

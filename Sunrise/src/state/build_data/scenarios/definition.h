@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <array>
 #include <cstddef>
@@ -34,6 +34,14 @@ inline constexpr std::size_t kRosterGroupCapacity = 128;
 inline constexpr std::size_t kRosterSlotCapacity = 1280;
 /** Roster groups one destination publishes. No installed destination reaches more than two. */
 inline constexpr std::size_t kDestinationGroupCapacity = 4;
+/**
+ * Roster groups one destination publishes per bubble.
+ * A group qualifies only when it is in some of the destination's slice sets and not all, so this
+ * is a small set: the widest measured destination reaches one of its six keys that way.
+ */
+inline constexpr std::size_t kDestinationBubbleGroupCapacity = 4;
+/** A per-bubble group's bubble mask, one bit per bubble, as it is stored on disk. */
+inline constexpr std::size_t kBubbleMaskBytes = kBubbleCapacity / 8;
 /** Slot flag bit for a slot whose type declares a sense schema. */
 inline constexpr std::uint8_t kSlotSenseFlag = 1;
 /** Slot flag bit for a slot whose type declares an auth schema. */
@@ -52,7 +60,8 @@ inline constexpr std::size_t kDestinationPackageCapacity = 8;
 
 /**
  * One roster group object and the slots activity message 5 seeds for it.
- * Slot indices are contiguous from zero, so a slot's ordinal in these arrays is its index.
+ * One slot here is one descriptor. A slot the object declares but no descriptor names is left
+ * out, so the ordinal in these arrays is NOT the slot index and `slotIndices` carries it.
  */
 struct RosterGroup {
     std::uint32_t registryKey{};
@@ -61,6 +70,8 @@ struct RosterGroup {
     std::uint16_t slotCount{};
     std::array<std::uint8_t, kRosterSlotCapacity> slotTypes{};
     std::array<std::uint8_t, kRosterSlotCapacity> slotFlags{};
+    /** Each slot's own index, from its descriptor. Ascending, and not always contiguous. */
+    std::array<std::uint16_t, kRosterSlotCapacity> slotIndices{};
 };
 
 /** One destination's bubble layout, reduced to what the activity messages publish. */
@@ -80,6 +91,8 @@ struct Definition {
      * present in only some of them is dropped, not published.
      */
     std::uint8_t rosterGroupCount{};
+    /** Used entries in the per-bubble group arrays below. */
+    std::uint8_t bubbleGroupCount{};
     /**
      * Map-package stem this destination loads from, or empty when the sweep did not name it.
      * It is the key the spawn-set catalog is grouped under.
@@ -88,6 +101,18 @@ struct Definition {
     std::uint8_t spawnStemLength{};
     std::array<char, kSpawnStemCapacity> spawnStem{};
     std::array<std::uint16_t, kDestinationGroupCapacity> rosterGroups{};
+    /**
+     * Groups this destination publishes per bubble, as roster table indices.
+     * A group in only some slice sets cannot go in the list above: the teardown sweep would deref
+     * a key the current slice set cannot find. The per-bubble sub-block carries it instead.
+     */
+    std::array<std::uint16_t, kDestinationBubbleGroupCapacity> bubbleGroups{};
+    /**
+     * Bubbles each per-bubble group is published in, one bit per client bubble index.
+     * A bit is set only where the group's object is in that bubble's slice set, which is what
+     * keeps the sweep's lookup resolvable while the bubble is current.
+     */
+    std::array<std::uint64_t, kDestinationBubbleGroupCapacity> bubbleGroupMasks{};
     /**
      * One wire byte per bubble, as activity message 1 publishes them. Every byte comes from the
      * scenario blob alone, which is why one tag read per destination builds the whole domain.

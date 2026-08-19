@@ -7,6 +7,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../state/matchmaking/matchmaking_state.h"
+#include "encrypted/bap_connection_publication.h"
 #include "internal.h"
 #include "runtime.h"
 
@@ -63,6 +64,8 @@ void publish_account_mutation(Session& origin) noexcept {
 /** @param session Its secrets and identity are wiped. */
 void clear_session(Session& session) noexcept {
     SecureZeroMemory(&session, sizeof session);
+    // Zeroing is not the cleared state: `advertisedRegion` is -1 and zero is a real region.
+    session.activity = {};
 }
 
 /**
@@ -91,6 +94,9 @@ void clear_session(Session& session) noexcept {
     if (session.id != 0 && !release_matchmaking_context(session)) {
         return false;
     }
+    if (session.id != 0) {
+        encrypted::release_activity_connection(session);
+    }
     clear_session(session);
     session.id = id;
     return true;
@@ -104,6 +110,9 @@ void clear_session(Session& session) noexcept {
     auto& session = g_sessions[id - 1];
     if (session.id != 0 && !release_matchmaking_context(session)) {
         return false;
+    }
+    if (session.id != 0) {
+        encrypted::release_activity_connection(session);
     }
     clear_session(session);
     return true;
@@ -214,6 +223,9 @@ void shutdown() noexcept {
             && session.matchmakingContext.generation != state::matchmaking::kInvalidGeneration) {
             // State erases runtime descriptors before the opaque association is cleared.
             (void)state::matchmaking::release_context(session.matchmakingContext);
+        }
+        if (session.id != 0) {
+            encrypted::release_activity_connection(session);
         }
     }
     SecureZeroMemory(g_sessions.data(), sizeof g_sessions);

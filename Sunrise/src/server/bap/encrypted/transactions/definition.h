@@ -2,14 +2,16 @@
 
 #include <cstdint>
 
+#include "../../internal.h"
+
 namespace sunrise::server::bap::encrypted::transactions {
 
 /** Connection fields published only after State commits and caller output is copied. */
 struct Publication {
-    std::uint64_t activitySessionId{};
+    ActivityClientBinding activity{};
     bool hasActivitySessionBinding{};
-    /** True when the binding came from a join rather than from this link's own allocation. */
-    bool activitySessionFromJoin{};
+    /** Rejoin keeps the exact retained private/public owner and only resets connection state. */
+    bool preservesActivitySessionBinding{};
 };
 
 } // namespace sunrise::server::bap::encrypted::transactions

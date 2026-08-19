@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "../../../client/content/investment/worker.h"
+#include "../../../client/hooks/membership_probe/membership_probe.h"
 #include "../../../core/logging/log.h"
 #include "../../../core/ui/busy/busy.h"
 #include "../../../server/runtime/server_runtime.h"
@@ -118,6 +119,9 @@ void run_callbacks() noexcept {
         const auto now = GetTickCount64();
         server::service(now);
         client::content::investment::worker::service(now);
+        // Read-only. The container bind lands on a tick after the message, so the probe cannot
+        // see its effect from inside the message handler.
+        client::hooks::membership_probe::service(now);
     }
 }
 

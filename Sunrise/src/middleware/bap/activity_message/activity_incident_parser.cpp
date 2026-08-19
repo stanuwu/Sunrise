@@ -1,15 +1,16 @@
 /**
- * Msg 19 targets index a 7,763-record table that the Client reads without a bound check, so a bad
- * index is a crash and not a decode error. Rows 795, 4690 and 5375 hold type code -1 and are the
- * same risk. This validator rejects both before anything acts on the body.
- * A compressed target selector ends decoding: its wire length is not recoverable from this build,
- * so the fields behind one cannot be located.
+ * Incident targets index a 7,763-record table that the Client reads without a bound check, so a
+ * bad index is a crash and not a decode error. Rows 795, 4690 and 5375 hold type code -1 and are
+ * the same risk. This validator rejects both before anything acts on the body.
+ * The compressed target selector carries its own 9-bit byte length, so the fields behind it are
+ * located and the whole body is framed.
  */
 
 #include <algorithm>
 #include <climits>
 
 #include "../../encoding/bit_reader.h"
+#include "../../encoding/byte_order.h"
 #include "incident.h"
 
 namespace sunrise::middleware::bap::activity_message::incident {
@@ -45,11 +46,13 @@ const char* verdict_name(Verdict verdict) noexcept {
         return "too_many_targets";
     case Verdict::payloadTooLong:
         return "payload_too_long";
+    case Verdict::selectorTooLong:
+        return "selector_too_long";
     }
     return "unknown";
 }
 
-/** Validates one msg-19 body as far as its wire shape allows. */
+/** Validates one incident body from its first target to the end of its payload. */
 Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept {
     parsed = {};
     encoding::bits::Reader reader(payload);
@@ -84,17 +87,34 @@ Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept 
     if (!reader.read(kSelectorPresenceWidth, field)) {
         return Verdict::truncated;
     }
-    if (field != 0) {
-        // Every target is checked by now, which is the part that can crash the Client.
-        parsed.hasCompressedSelector = true;
-        return Verdict::accepted;
+    parsed.hasCompressedSelector = field != 0;
+    if (parsed.hasCompressedSelector) {
+        if (!reader.read(kSelectorLengthWidth, field)) {
+            return Verdict::truncated;
+        }
+        parsed.selectorLength = static_cast<std::uint32_t>(field);
+        if (parsed.selectorLength > kSelectorMaximum) {
+            return Verdict::selectorTooLong;
+        }
+        for (std::uint32_t index = 0; index < parsed.selectorLength; ++index) {
+            if (!reader.read(CHAR_BIT, field)) {
+                return Verdict::truncated;
+            }
+            parsed.selector[index] = static_cast<std::byte>(field);
+        }
     }
 
     if (!reader.read(kOptionalPresenceWidth, field)) {
         return Verdict::truncated;
     }
-    if (field != 0 && !reader.skip(kOptionalFieldWidth)) {
-        return Verdict::truncated;
+    parsed.hasOptionalBlock = field != 0;
+    if (parsed.hasOptionalBlock) {
+        std::uint64_t wordB = 0;
+        if (!reader.read(kOptionalWordWidth, field) || !reader.read(kOptionalWordWidth, wordB)) {
+            return Verdict::truncated;
+        }
+        parsed.optionalWordA = static_cast<std::uint32_t>(field);
+        parsed.optionalWordB = static_cast<std::uint32_t>(wordB);
     }
 
     if (!reader.read(kPayloadLengthWidth, field)) {
@@ -104,10 +124,15 @@ Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept 
     if (parsed.payloadLength > kPayloadMaximum) {
         return Verdict::payloadTooLong;
     }
-    if (reader.remaining_bits() < static_cast<std::size_t>(parsed.payloadLength) * CHAR_BIT) {
-        return Verdict::truncated;
+    for (std::uint32_t index = 0; index < parsed.payloadLength; ++index) {
+        if (!reader.read(CHAR_BIT, field)) {
+            return Verdict::truncated;
+        }
+        parsed.payload[index] = static_cast<std::byte>(field);
     }
     parsed.hasPayload = true;
+    parsed.consumedBits = static_cast<std::uint32_t>(payload.size() * encoding::kBitsPerByte
+                                                     - reader.remaining_bits());
     return Verdict::accepted;
 }
 

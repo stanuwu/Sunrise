@@ -1,7 +1,4 @@
-#include <Windows.h>
-
 #include "../../../../../state/account/account_state.h"
-#include "../../../../../state/activity/defaults/activity_defaults_snapshot.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "internal.h"
@@ -19,15 +16,14 @@ constexpr std::int32_t kMemberSkipTest = -1;
  * which is logical -1. Seeding zero instead cost the ship and the banner.
  */
 constexpr std::int32_t kUnsetOpaque = -1;
-/** Default transition token. A client value from message 22 replaces it. */
-constexpr std::uint8_t kDefaultTransitionToken = 1;
-
 } // namespace
 
-/** Seeds the membership identity from the join when no identity message has arrived. */
-bool seed_identity(std::uint64_t sessionId,
-                   std::uint64_t memberKey,
-                   std::uint64_t characterSoid) noexcept {
+/** Prepares the fallback membership identity without changing stored State. */
+bool prepare_seed_identity(std::uint64_t sessionId,
+                           std::uint64_t memberKey,
+                           std::uint64_t characterSoid,
+                           state::activity::membership::PendingMutation& mutation) noexcept {
+    mutation = {};
     if (memberKey == 0) {
         return false;
     }
@@ -42,29 +38,7 @@ bool seed_identity(std::uint64_t sessionId,
     // signed in on. The selected character is only the fallback for a join that named none.
     identity.opaqueSoid =
         characterSoid != 0 ? characterSoid : state::account::selected_character_soid(account);
-    state::activity::membership::PendingMutation mutation{};
-    const bool seeded = state::activity::membership::prepare_identity(sessionId, identity, mutation)
-                        && state::activity::membership::commit(mutation);
-    SecureZeroMemory(&mutation, sizeof mutation);
-    return seeded;
-}
-
-/** Seeds the transition token when nothing has published one. */
-bool seed_transition_token(std::uint64_t sessionId) noexcept {
-    state::activity::defaults::ActivityDefaults defaults{};
-    state::activity::defaults::snapshot(defaults);
-    state::activity::membership::AuthoritativeUpdate update{};
-    // No teleport is published here. It goes out only when the client's own authoritative-data
-    // message supplies one, because a fabricated teleport is a transition the client never asked
-    // for. The token fills every member lane of all 64 region records. Zero is never sent.
-    update.hasTransitionToken = true;
-    update.transitionToken = kDefaultTransitionToken;
-    state::activity::membership::PendingMutation mutation{};
-    const bool seeded =
-        state::activity::membership::prepare_authoritative(sessionId, update, mutation)
-        && state::activity::membership::commit(mutation);
-    SecureZeroMemory(&mutation, sizeof mutation);
-    return seeded;
+    return state::activity::membership::prepare_identity(sessionId, identity, mutation);
 }
 
 } // namespace sunrise::server::bap::encrypted::push::activity

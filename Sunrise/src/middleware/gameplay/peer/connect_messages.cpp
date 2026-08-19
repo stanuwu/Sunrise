@@ -14,6 +14,22 @@ constexpr std::uint8_t kSequenceWidth = 32;
 constexpr std::uint8_t kRefuseReasonWidth = 3;
 /** The close reason is five bits. */
 constexpr std::uint8_t kCloseReasonWidth = 5;
+/** The ping sequence is a 16-bit value field. */
+constexpr std::uint8_t kPingSequenceWidth = 16;
+/** The ping timestamp is a 64-bit value field. */
+constexpr std::uint8_t kPingTimestampWidth = 64;
+/** The ping's trailing flag and the pong's response kind are the only fields that differ. */
+constexpr std::uint8_t kPingFlagWidth = 1;
+/** The pong response kind is two bits. */
+constexpr std::uint8_t kPongKindWidth = 2;
+/** The discarded-packet count is five bits. */
+constexpr std::uint8_t kDiscardedWidth = 5;
+/** A mayday names its group session in raw bits. */
+constexpr std::uint8_t kMaydaySessionWidth = 64;
+/** The mayday code is nine bits and decodes to one above its wire value. */
+constexpr std::uint8_t kMaydayCodeWidth = 9;
+/** The mayday code carries a bias of one. */
+constexpr std::uint16_t kMaydayCodeBias = 1;
 
 /** Reads the two sequence fields every connection message starts with. */
 [[nodiscard]] bool
@@ -80,6 +96,54 @@ bool read_closed(bits::Reader& reader, ConnectEnd& output) noexcept {
         return false;
     }
     output.reason = static_cast<std::uint8_t>(reason);
+    return true;
+}
+
+/** Reads a ping body. */
+bool read_ping(bits::Reader& reader, PingBody& output) noexcept {
+    std::uint64_t sequence = 0;
+    std::uint64_t flag = 0;
+    if (!reader.read(kPingSequenceWidth, sequence)
+        || !reader.read(kPingTimestampWidth, output.timestamp)
+        || !reader.read(kPingFlagWidth, flag)) {
+        return false;
+    }
+    output.sequence = static_cast<std::uint16_t>(sequence);
+    output.flag = flag != 0;
+    return true;
+}
+
+/** Writes a pong body. */
+bool write_pong(bits::Writer& writer, const PongBody& body) noexcept {
+    // The sender matches a pong to its ping on the echoed pair, so both lead unaltered.
+    return writer.write(body.sequence, kPingSequenceWidth)
+           && writer.write(body.timestamp, kPingTimestampWidth)
+           && writer.write(body.responseKind, kPongKindWidth);
+}
+
+/** Reads a packets-discarded diagnostic. */
+bool read_packets_discarded(bits::Reader& reader, std::uint8_t& discarded) noexcept {
+    std::uint64_t count = 0;
+    if (!reader.read(kDiscardedWidth, count)) {
+        return false;
+    }
+    discarded = static_cast<std::uint8_t>(count);
+    return true;
+}
+
+/** Reads a recovery diagnostic. */
+bool read_mayday(bits::Reader& reader, MaydayBody& output) noexcept {
+    MaydayBody candidate{};
+    std::uint64_t code = 0;
+    if (!reader.read(kMaydaySessionWidth, candidate.sessionId)
+        || !reader.read(kMaydayCodeWidth, code)) {
+        return false;
+    }
+    candidate.code = static_cast<std::uint16_t>(code) + kMaydayCodeBias;
+    if (candidate.code > kMaydayCodeMaximum) {
+        return false;
+    }
+    output = candidate;
     return true;
 }
 

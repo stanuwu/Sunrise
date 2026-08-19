@@ -99,4 +99,19 @@ inline constexpr std::array<std::uint16_t, 9> kRosterSlotTypes = {
                                     std::span<std::uint32_t> output,
                                     std::size_t& count) noexcept;
 
+/**
+ * Reports the keys present in some observed slice sets and not all, with the bubbles holding them.
+ * These belong in a per-bubble sub-block: the top-level list would make the teardown sweep deref a
+ * key the current slice set cannot find. One recorded bit is one bubble.
+ * @param state Accumulator for one destination.
+ * @param keys Receives the partially present keys.
+ * @param masks Receives each key's bubbles, one bit per bubble index, in the same order.
+ * @param count Receives how many were written.
+ * @return True when nothing overflowed and every partial key fits the output.
+ */
+[[nodiscard]] bool partial_roster_keys(const RosterIntersection& state,
+                                       std::span<std::uint32_t> keys,
+                                       std::span<std::uint64_t> masks,
+                                       std::size_t& count) noexcept;
+
 } // namespace sunrise::middleware::content::packages::tables

@@ -46,8 +46,6 @@ constexpr unsigned kMarkerShift = 7;
 constexpr unsigned kByteBits = 8;
 /** Mask of one byte. */
 constexpr std::uint32_t kByteMask = 0xFF;
-/** The connection guard is the sequence modulo four. */
-constexpr std::uint32_t kSequenceGuardBase = 4;
 /** Delay sentinel used until a round trip has been measured. */
 constexpr std::uint16_t kDelaySentinel = 1023;
 /** Packet sequences are published as ten bits. */
@@ -421,6 +419,34 @@ void answer_join(const state::gameplay::Endpoint& from, const wire::JoinRequest&
 }
 
 /**
+ * Answers one ping with the pong that echoes it.
+ * The pair is mandatory: a peer that pings and is never answered treats the link as unreachable.
+ * @param from Peer endpoint.
+ * @param reader Reader positioned at the ping body.
+ * @return True when the body read, whether or not the reply left the endpoint.
+ */
+[[nodiscard]] bool answer_ping(const state::gameplay::Endpoint& from,
+                               bits::Reader& reader) noexcept {
+    wire::PingBody ping{};
+    if (!wire::read_ping(reader, ping)) {
+        return false;
+    }
+    wire::PongBody pong{};
+    pong.sequence = ping.sequence;
+    pong.timestamp = ping.timestamp;
+    const bool sent = send_out_of_band(
+        from,
+        static_cast<std::uint8_t>(wire::ConnectId::pong),
+        wire::kPongSize,
+        [&pong](bits::Writer& writer) noexcept { return wire::write_pong(writer, pong); });
+    report(sent ? core::log::Level::debug : core::log::Level::warn,
+           "ev=gameplay stage=ping result=%s sequence=%u",
+           sent ? "answered" : "fail",
+           static_cast<unsigned>(ping.sequence));
+    return true;
+}
+
+/**
  * Consumes one out-of-band message container.
  * @param from Peer endpoint.
  * @param payload Whole decrypted payload.
@@ -442,6 +468,33 @@ void consume_container(const state::gameplay::Endpoint& from,
         }
         if (!present) {
             return;
+        }
+        if (header.id == static_cast<std::uint8_t>(wire::ConnectId::ping)) {
+            if (!answer_ping(from, reader)) {
+                return;
+            }
+            continue;
+        }
+        if (header.id == static_cast<std::uint8_t>(wire::ConnectId::packetsDiscarded)) {
+            std::uint8_t discarded = 0;
+            if (!wire::read_packets_discarded(reader, discarded)) {
+                return;
+            }
+            report(core::log::Level::debug,
+                   "ev=gameplay stage=discarded result=read packets=%u",
+                   static_cast<unsigned>(discarded));
+            continue;
+        }
+        if (header.id == static_cast<std::uint8_t>(wire::ConnectId::mayday)) {
+            wire::MaydayBody mayday{};
+            if (!wire::read_mayday(reader, mayday)) {
+                return;
+            }
+            report(core::log::Level::warn,
+                   "ev=gameplay stage=mayday result=read session=0x%016llX code=%u",
+                   static_cast<unsigned long long>(mayday.sessionId),
+                   static_cast<unsigned>(mayday.code));
+            continue;
         }
         if (header.id == static_cast<std::uint8_t>(wire::ConnectId::request)) {
             wire::ConnectRequest request{};
@@ -581,12 +634,18 @@ void consume_established(const state::gameplay::Endpoint& from,
     std::size_t largeDropped = 0;
     std::uint16_t largeNext = 0;
     std::uint16_t largeFirst = 0;
+    bool peerFound = false;
+    bool guardAccepted = false;
+    std::uint8_t expectedGuard = 0;
     AcquireSRWLockExclusive(&g_lock);
-    // One link per endpoint, so the packet's two-bit guard identifies nothing this host has to
-    // resolve. Every session-scoped message names its own session instead.
     state::gameplay::PeerLink* peer = find_locked(from);
     std::array<wire::AssembledMessage, kMessageReportCapacity> bodies{};
     if (peer != nullptr) {
+        peerFound = true;
+        expectedGuard = wire::connection_sequence_low2(peer->remoteConnectionSequence);
+        guardAccepted = packet.connectionSequenceLow2 == expectedGuard;
+    }
+    if (guardAccepted) {
         sessionId = sole_session_locked(*peer);
         if (packet.ack.outboundHeadPresent) {
             record_sequence(*peer, packet.ack.outboundHead);
@@ -619,7 +678,14 @@ void consume_established(const state::gameplay::Endpoint& from,
         stage = static_cast<unsigned>(peer->stage);
     }
     ReleaseSRWLockExclusive(&g_lock);
-    if (peer == nullptr) {
+    if (!peerFound) {
+        return;
+    }
+    if (!guardAccepted) {
+        report(core::log::Level::debug,
+               "ev=gameplay stage=packet result=drop reason=channel_low2 got=%u expect=%u",
+               static_cast<unsigned>(packet.connectionSequenceLow2),
+               static_cast<unsigned>(expectedGuard));
         return;
     }
     for (std::size_t index = 0; index < deliveredCount; ++index) {
@@ -682,7 +748,7 @@ void consume_established(const state::gameplay::Endpoint& from,
 
     std::array<std::byte, kReplyCapacity> buffer{};
     bits::Writer writer(buffer);
-    const auto guard = static_cast<std::uint8_t>(peer.localConnectionSequence % kSequenceGuardBase);
+    const std::uint8_t guard = wire::connection_sequence_low2(peer.localConnectionSequence);
     std::size_t size = 0;
     // Only the 32-byte queue carries this host's messages; the 6-byte queue stays empty.
     if (!wire::write_head_and_ack(writer, guard, ack) || !wire::write_queue(writer, peer.outbound)
@@ -772,22 +838,28 @@ bool remote_address(std::uint64_t sessionId,
 }
 
 /** Binds one peer's view signature. */
-void bind_view(std::uint64_t sessionId, const state::gameplay::ViewSignature& signature) noexcept {
+void bind_view(const state::gameplay::Endpoint& from,
+               const state::gameplay::ViewSignature& signature) noexcept {
     AcquireSRWLockExclusive(&g_lock);
-    state::gameplay::PeerLink* peer = find_session_locked(sessionId);
+    // Keyed by endpoint, not by session: the view body carries no session id, and a link holding
+    // both a current and a target region resolves no sole session to key it by.
+    state::gameplay::PeerLink* peer = find_locked(from);
     if (peer != nullptr) {
         peer->view = signature;
     }
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-/** Reports whether a view signature is bound. */
+/** Reports whether the link carrying one session holds a bound view and is established. */
 bool view_bound(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&g_lock);
     const state::gameplay::PeerLink* peer = find_session_locked(sessionId);
-    const bool bound = peer != nullptr && peer->view.bound;
+    // A bound body alone is not readiness. The link also has to be past its connect exchange, or
+    // the view belongs to a channel the peer has already rebuilt.
+    const bool ready =
+        peer != nullptr && peer->view.bound && peer->stage == state::gameplay::PeerStage::connected;
     ReleaseSRWLockShared(&g_lock);
-    return bound;
+    return ready;
 }
 
 /** Reports how far the link carrying one group session has got. */
@@ -798,6 +870,20 @@ bool link_stage(std::uint64_t sessionId, state::gameplay::PeerStage& stage) noex
     const bool present = peer != nullptr;
     if (present) {
         stage = peer->stage;
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return present;
+}
+
+/** Copies the connect sequences of the link carrying one group session. */
+bool link_identity(std::uint64_t sessionId, LinkIdentity& output) noexcept {
+    output = {};
+    AcquireSRWLockShared(&g_lock);
+    const state::gameplay::PeerLink* peer = find_session_locked(sessionId);
+    const bool present = peer != nullptr;
+    if (present) {
+        output.localConnectionSequence = peer->localConnectionSequence;
+        output.remoteConnectionSequence = peer->remoteConnectionSequence;
     }
     ReleaseSRWLockShared(&g_lock);
     return present;

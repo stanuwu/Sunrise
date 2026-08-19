@@ -18,9 +18,9 @@ inline std::size_t find_session(const ActivityState& state, std::uint64_t sessio
 }
 
 /**
- * Picks the first empty record, or the oldest occupied one.
+ * Picks the first empty record, or the oldest unretained occupied one.
  * @param state Activity State, guarded by the root State lock.
- * @return Target slot in the fixed session table.
+ * @return Target slot, or the invalid-slot sentinel when every occupied row is retained.
  */
 inline std::size_t select_target(const ActivityState& state) noexcept {
     for (std::size_t index = 0; index < state.sessions.size(); ++index) {
@@ -29,10 +29,14 @@ inline std::size_t select_target(const ActivityState& state) noexcept {
         }
     }
 
-    std::size_t selected{};
-    for (std::size_t index = 1; index < state.sessions.size(); ++index) {
+    std::size_t selected = kInvalidSessionSlot;
+    for (std::size_t index = 0; index < state.sessions.size(); ++index) {
+        if (state.sessions[index].bindingRetainCount != 0) {
+            continue;
+        }
         // Strict comparison keeps the lowest slot when creation revisions tie.
-        if (state.sessions[index].createdRevision < state.sessions[selected].createdRevision) {
+        if (selected == kInvalidSessionSlot
+            || state.sessions[index].createdRevision < state.sessions[selected].createdRevision) {
             selected = index;
         }
     }
@@ -53,6 +57,30 @@ inline constexpr std::uint64_t kSessionClass = 0x00200000ULL;
 [[nodiscard]] inline std::uint64_t compose_session_soid(std::uint64_t soidBase,
                                                         std::uint64_t counter) noexcept {
     return soidBase != 0 ? soidBase | kSessionClass | counter : counter;
+}
+
+/** Account half of every soid this account owns, which the activity session shares. */
+inline constexpr std::uint64_t kAccountMask = 0xFFFFFFFF00000000ULL;
+
+/**
+ * Recovers the allocator counter from a published session soid.
+ * The check is a round trip rather than a bit test, so an id this allocator could not have built
+ * is refused whatever shape it has.
+ * @param soidBase Account half, or zero while no account is loaded.
+ * @param sessionId Published session soid.
+ * @param counter Cleared, then receives the allocator index.
+ * @return True when the soid is one this allocator publishes.
+ */
+[[nodiscard]] inline bool decompose_session_soid(std::uint64_t soidBase,
+                                                 std::uint64_t sessionId,
+                                                 std::uint64_t& counter) noexcept {
+    counter = 0;
+    if (soidBase == 0) {
+        counter = sessionId;
+        return counter != kAbsentSessionId;
+    }
+    counter = sessionId & ~(kAccountMask | kSessionClass);
+    return counter != kAbsentSessionId && compose_session_soid(soidBase, counter) == sessionId;
 }
 
 /**

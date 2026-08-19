@@ -89,13 +89,16 @@ template <typename Body>
 }
 
 /**
- * Binds one peer's view signature.
- * @param sessionId Group session the link carries.
+ * Binds one link's view signature.
+ * The view body names no group session, and one link can carry both a current and a target
+ * region, so the link's endpoint is what identifies it.
+ * @param from Peer endpoint the view arrived from.
  * @param signature Signature taken from the peer's own view message.
  */
-void bind_view(std::uint64_t sessionId, const state::gameplay::ViewSignature& signature) noexcept;
+void bind_view(const state::gameplay::Endpoint& from,
+               const state::gameplay::ViewSignature& signature) noexcept;
 
-/** @return True once a view signature is bound for that session's link. */
+/** @return True once that session's link holds a bound view and has finished connecting. */
 [[nodiscard]] bool view_bound(std::uint64_t sessionId) noexcept;
 
 /**
@@ -104,6 +107,22 @@ void bind_view(std::uint64_t sessionId, const state::gameplay::ViewSignature& si
  * @return True when a link carries it.
  */
 [[nodiscard]] bool link_stage(std::uint64_t sessionId, state::gameplay::PeerStage& stage) noexcept;
+
+/** The connect-exchange sequences that separate one link generation from its successor. */
+struct LinkIdentity final {
+    std::uint32_t localConnectionSequence{};
+    std::uint32_t remoteConnectionSequence{};
+};
+
+/**
+ * Copies the connect sequences of the link carrying one group session.
+ * The client rebuilds its channel under the same session id, so anything holding a reference
+ * across that rebuild needs these to tell the two links apart.
+ * @param sessionId Group session the link carries.
+ * @param output Receives both sequences only when a link carries the session.
+ * @return True when a link carries it.
+ */
+[[nodiscard]] bool link_identity(std::uint64_t sessionId, LinkIdentity& output) noexcept;
 
 /**
  * Sends any owed acknowledgement.

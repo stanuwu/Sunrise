@@ -13,6 +13,34 @@ constexpr std::uint8_t kSlotTypeParticipation = 13;
 constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
 
 /**
+ * Checks the per-bubble sub-blocks against what the client's own arrays hold.
+ * An empty sub-block would publish a zero count and a zero mask, which registers nothing and
+ * spends a slot, so it is refused rather than encoded.
+ * @param subBlocks Sub-blocks the body would carry.
+ * @return True when every sub-block names a usable bubble and a bounded key set.
+ */
+[[nodiscard]] bool valid_sub_blocks(std::span<const BubbleSubBlock> subBlocks) noexcept {
+    if (subBlocks.size() > kBubbleSubBlockCapacity) {
+        return false;
+    }
+    for (std::size_t index = 0; index < subBlocks.size(); ++index) {
+        const BubbleSubBlock& block = subBlocks[index];
+        if (block.bubble > kMaximumSubBlockBubble || block.keys.empty()
+            || block.keys.size() > kBubbleKeyCapacity) {
+            return false;
+        }
+        // The client's array holds one element per bubble, and its sweep walks every element that
+        // matches. A repeated bubble would register the same keys twice in one apply.
+        for (std::size_t earlier = 0; earlier < index; ++earlier) {
+            if (subBlocks[earlier].bubble == block.bubble) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/**
  * Checks the scalars whose out-of-range values would encode with no complaint.
  * @param snapshot Message input.
  * @return True when every scalar fits its field.
@@ -37,22 +65,31 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
             || snapshot.grant.token < kMinimumGrantToken)) {
         return false;
     }
-    if (snapshot.roster.groupCount > kGroupCapacity) {
+    if (snapshot.roster.groupCount > kGroupCapacity
+        || snapshot.roster.topLevelGroupCount > snapshot.roster.groupCount) {
         return false;
     }
     for (std::size_t group = 0; group < snapshot.roster.groupCount; ++group) {
         const Group& row = snapshot.roster.groups[group];
-        if (row.slotTypes.size() != row.slotFlags.size() || row.slotTypes.empty()) {
+        if (row.slotTypes.size() != row.slotFlags.size()
+            || row.slotTypes.size() != row.slotIndices.size() || row.slotTypes.empty()) {
             return false;
         }
+        // An index past the field's range wraps into another slot's, which seeds the wrong
+        // object rather than refusing.
+        for (const std::uint16_t index : row.slotIndices) {
+            if (index > kMaximumSlotIndex) {
+                return false;
+            }
+        }
     }
-    return true;
+    return valid_sub_blocks(snapshot.roster.bubbleSubBlocks);
 }
 
 /**
- * Writes every group's object blocks, in publish order. Every registered object must be seeded
- * before any auth state applies, because the client's gate walks the whole sync-record pool. A
- * partial message seeds nothing that applies.
+ * Writes every group's object blocks, in publish order, per-bubble groups included.
+ * Every registered object must be seeded before any auth state applies, because the client's gate
+ * walks the whole sync-record pool. A partial message seeds nothing that applies.
  * @param writer Body writer sitting after the phase-1 delta.
  * @param snapshot Message input.
  * @return True when every block fits.
@@ -76,7 +113,7 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
                                          snapshot,
                                          row.key,
                                          slotType,
-                                         static_cast<std::uint16_t>(slot),
+                                         row.slotIndices[slot],
                                          row.slotFlags[slot],
                                          carriesPlayerKey);
         }
@@ -106,7 +143,10 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
     // The enable latch is not sticky, so it goes on every message.
     encoded = encoded && writer.write(1, kPresenceWidth)
               && write_roster_delta(writer, snapshot.roster, snapshot.stateSequence)
-              && writer.bit_count() == latchBit + 1 + delta_bits(snapshot.roster.groupCount);
+              && writer.bit_count()
+                     == latchBit + 1
+                            + delta_bits(snapshot.roster.topLevelGroupCount,
+                                         snapshot.roster.bubbleSubBlocks);
     if (encoded && !snapshot.phaseOneOnly) {
         encoded = write_phase_two(writer, snapshot);
     }

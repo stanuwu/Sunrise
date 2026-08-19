@@ -69,6 +69,12 @@ constexpr std::uint16_t kByteBits = 8;
 constexpr std::uint8_t kMessageIdWidth = 6;
 /** The declared decoded size after it is 18 bits. */
 constexpr std::uint8_t kMessageSizeWidth = 18;
+/** The filler length is a 14-bit field. */
+constexpr std::uint8_t kFillerLengthWidth = 14;
+/** The recovered filler body limit is 9,920 bits. */
+constexpr std::uint64_t kMaximumFillerBits = 9920;
+/** Byte padding can carry at most seven bits. */
+constexpr std::size_t kMaximumPaddingBits = 7;
 
 /**
  * Reads one ternary packet status.
@@ -499,6 +505,33 @@ bool enqueue_message(state::gameplay::OutboundQueue& queue,
             ++queue.count;
         }
     }
+    return true;
+}
+
+/** Reads the bounded outer filler and requires exact zero byte padding. */
+bool read_filler_and_padding(bits::Reader& reader, FillerTrailer& output) noexcept {
+    FillerTrailer candidate{};
+    std::uint64_t present = 0;
+    if (!reader.read(kFlagWidth, present)) {
+        return false;
+    }
+    candidate.present = present != 0;
+    if (candidate.present) {
+        std::uint64_t bitCount = 0;
+        if (!reader.read(kFillerLengthWidth, bitCount) || bitCount == 0
+            || bitCount > kMaximumFillerBits || !reader.skip(static_cast<std::size_t>(bitCount))) {
+            return false;
+        }
+        candidate.bitCount = static_cast<std::size_t>(bitCount);
+    }
+
+    const std::size_t paddingBits = reader.remaining_bits();
+    std::uint64_t padding = 0;
+    if (paddingBits > kMaximumPaddingBits
+        || !reader.read(static_cast<std::uint8_t>(paddingBits), padding) || padding != 0) {
+        return false;
+    }
+    output = candidate;
     return true;
 }
 

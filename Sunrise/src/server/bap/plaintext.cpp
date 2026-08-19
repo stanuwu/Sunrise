@@ -149,7 +149,7 @@ void arm_encryption(Session& session, const state::BapState& bap) noexcept {
     // pending ring, so one unanswered request jams that ring for the rest of the run.
     if (!encrypted::body::process(route,
                                   session.queuez,
-                                  session.activitySessionId,
+                                  session.activity,
                                   session.matchmakingContext,
                                   request.body,
                                   scratch.responseBody,

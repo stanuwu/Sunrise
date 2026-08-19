@@ -1,6 +1,7 @@
 /**
  * The session overlay. One row per instance the player is in.
- * A row names the region, its group session, its activity host, its channel and its join.
+ * A row names the region, its group session, its activity host, its channel, how far its join has
+ * got and whether its player row has published.
  */
 
 #include "ui_hud_session_overlay.h"
@@ -28,7 +29,7 @@ constexpr std::size_t kRowCapacity = 8;
 /** Admitted peers one snapshot reads. */
 constexpr std::size_t kAdmittedCapacity = 8;
 /** Columns of the instance table, in draw order. */
-constexpr int kColumnCount = 6;
+constexpr int kColumnCount = 7;
 /** Shown while this host serves no instance. */
 constexpr char kNoInstance[] = "no session instances";
 /** Shown for a row no advertisement gave a region. */
@@ -44,22 +45,48 @@ constexpr std::array<const char*, 6> kChannelStages{
     return index < kChannelStages.size() ? kChannelStages[index] : kChannelStages[0];
 }
 
-/** Names how far one join has got. @param count Admitted rows in use. @return The join word. */
-[[nodiscard]] const char*
-join_name(const std::array<group::AdmittedRow, kAdmittedCapacity>& admitted,
-          std::size_t count,
-          std::uint64_t sessionId) noexcept {
+/**
+ * The two state words for one instance, in the order the join reaches them.
+ * `hosted` is the end of the join ladder: the peer builds no activity client until it holds the
+ * activity-host parameter, so a row short of it is still waiting on this host.
+ */
+struct InstanceState {
+    const char* join{"unjoined"};
+    const char* player{"-"};
+};
+
+/**
+ * Reads how far one instance has got.
+ * @param admitted Admitted rows from the snapshot.
+ * @param count Admitted rows in use.
+ * @param sessionId Group session the row names.
+ * @return Both state words, or the absent pair when no record holds that session.
+ */
+[[nodiscard]] InstanceState
+instance_state(const std::array<group::AdmittedRow, kAdmittedCapacity>& admitted,
+               std::size_t count,
+               std::uint64_t sessionId) noexcept {
     for (std::size_t index = 0; index < count; ++index) {
         const group::AdmittedRow& row = admitted[index];
         if (row.sessionId != sessionId) {
             continue;
         }
+        InstanceState state{};
         if (!row.joinComplete) {
-            return "joining";
+            state.join = "joining";
+        } else {
+            state.join = row.activityHostPublished ? "hosted" : "admitted";
         }
-        return row.activityHostPublished ? "ready" : "joined";
+        // A peer that has asked for no player owes nothing, which is not the same as one whose
+        // player row the reliable queue has refused so far.
+        if (!row.hasPlayer) {
+            state.player = "none";
+        } else {
+            state.player = row.playerPublished ? "published" : "owed";
+        }
+        return state;
     }
-    return "unjoined";
+    return {};
 }
 
 /** Draws one cell of hexadecimal identity. @param value Session id, or zero when there is none. */
@@ -118,6 +145,7 @@ void draw() noexcept {
     ImGui::TableSetupColumn("activity host");
     ImGui::TableSetupColumn("channel");
     ImGui::TableSetupColumn("join");
+    ImGui::TableSetupColumn("player");
     ImGui::TableHeadersRow();
     for (std::size_t index = 0; index < live; ++index) {
         const group::HostSessionRow& row = rows[index];
@@ -130,8 +158,11 @@ void draw() noexcept {
         draw_session_cell(row.hostSessionId);
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(channel_name(stages[index]));
+        const InstanceState state = instance_state(admitted, admittedCount, row.groupSessionId);
         ImGui::TableNextColumn();
-        ImGui::TextUnformatted(join_name(admitted, admittedCount, row.groupSessionId));
+        ImGui::TextUnformatted(state.join);
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(state.player);
     }
     ImGui::EndTable();
 }

@@ -42,7 +42,8 @@ bool append_roster_notification(Session& session,
     std::array<char, kDestinationCapacity> destination{};
     std::size_t destinationLength = 0;
     RosterOutcome outcome = RosterOutcome::noEpoch;
-    if (session.activityPatchEpochSeen) {
+    if (session.activityPatchEpoch.seen
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration) {
         outcome = build_roster_snapshot(
             session, scratch, snapshot, destination, destinationLength, burst);
     }
@@ -60,8 +61,9 @@ bool append_roster_notification(Session& session,
     // the bubble the player actually entered without authority.
     // The wire field is unsigned. A value past the signed range turns negative and the selector
     // rejects it, the same answer as its own upper bound.
-    if (state::activity::bubble_authority::select_grant(
-            session.activitySessionId, static_cast<std::int32_t>(snapshot.region), grant)) {
+    if (state::activity::bubble_authority::select_grant(session.activity.session.sessionId,
+                                                        static_cast<std::int32_t>(snapshot.region),
+                                                        grant)) {
         snapshot.hasGrant = true;
         snapshot.grant.bubble = grant.bubble;
         snapshot.grant.token = grant.token;
@@ -72,7 +74,7 @@ bool append_roster_notification(Session& session,
     std::size_t messageSize = 0;
     bool encoded = message::encode_sensor_auth_update(snapshot, scratch.responseBody, messageSize)
                    && append_notification_frame(scratch,
-                                                session.activitySessionId,
+                                                session.activity.session.sessionId,
                                                 message::kMessageType,
                                                 std::span(scratch.responseBody).first(messageSize),
                                                 key,
@@ -84,12 +86,13 @@ bool append_roster_notification(Session& session,
         // Staged, not published. The grant and the counters are one-way and this body may still be
         // discarded, so they are held here and settled by `commit_staged_roster` or
         // `discard_staged_roster`.
-        session.activityRosterStaged = {grant,
-                                        initialRosterGroups,
-                                        initialRosterSends,
-                                        initialRosterState,
-                                        snapshot.hasGrant,
-                                        true};
+        session.activityRosterStaged.grant = grant;
+        session.activityRosterStaged.bindingGeneration = session.activity.bindingGeneration;
+        session.activityRosterStaged.priorGroups = initialRosterGroups;
+        session.activityRosterStaged.priorSends = initialRosterSends;
+        session.activityRosterStaged.priorState = initialRosterState;
+        session.activityRosterStaged.hasGrant = snapshot.hasGrant;
+        session.activityRosterStaged.staged = true;
     }
     report_roster_push(session,
                        snapshot,
@@ -117,8 +120,12 @@ void commit_staged_roster(Session& session) noexcept {
     if (!session.activityRosterStaged.staged) {
         return;
     }
+    if (session.activityRosterStaged.bindingGeneration != session.activity.bindingGeneration) {
+        session.activityRosterStaged = {};
+        return;
+    }
     if (session.activityRosterStaged.hasGrant) {
-        state::activity::bubble_authority::record_grant(session.activitySessionId,
+        state::activity::bubble_authority::record_grant(session.activity.session.sessionId,
                                                         session.activityRosterStaged.grant);
     }
     session.activityRosterStaged = {};

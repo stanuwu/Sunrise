@@ -2,6 +2,12 @@
 
 #include <Windows.h>
 
+#include <atomic>
+#include <limits>
+
+#include "../../../state/activity/runtime.h"
+#include "../../gameplay/group/group_host_sessions.h"
+
 namespace sunrise::server::bap::encrypted {
 namespace {
 
@@ -15,7 +21,47 @@ constexpr std::uint64_t kBannerRepushDelayMs = 400;
  */
 constexpr std::uint64_t kTransitionWindowMs = 15'000;
 
+/** Process-lifetime generation that rejects delayed epochs after a BAP slot is reused. */
+std::atomic<std::uint64_t> g_nextActivityBindingGeneration{1};
+
+/** Releases one host-session retain when it is present. */
+void release_host_generation(std::uint64_t generation) noexcept {
+    if (generation != 0) {
+        server::gameplay::group::release_host_session(generation);
+    }
+}
+
+/** Clears all connection state rebuilt by a successful activity join. */
+void reset_join_state(Session& session) noexcept {
+    session.activityMemberKey = 0;
+    session.activityCharacterSoid = 0;
+    session.activityKeepaliveDueTick = 0;
+    session.activityRosterDueTick = 0;
+    session.activityTransitionUntilTick = 0;
+    session.activityPatchEpoch = {};
+    session.activityRosterGroups = 0;
+    session.activityRosterSends = 0;
+    session.activityRosterReason = 0;
+    session.activityRosterStaged = {};
+    if (session.activity.role == ActivityClientRole::privateCurrent) {
+        session.activity.advertisedRegion = -1;
+    }
+}
+
 } // namespace
+
+/** Reserves one process-lifetime ActivityClient generation without wrapping. */
+bool reserve_activity_binding_generation(std::uint64_t& generation) noexcept {
+    generation = 0;
+    std::uint64_t current = g_nextActivityBindingGeneration.load();
+    while (current != (std::numeric_limits<std::uint64_t>::max)()) {
+        if (g_nextActivityBindingGeneration.compare_exchange_weak(current, current + 1)) {
+            generation = current;
+            return true;
+        }
+    }
+    return false;
+}
 
 /** Captures the connection fields one service outcome carries. */
 ConnectionFields connection_fields(const ServiceOutcome& outcome) noexcept {
@@ -44,22 +90,25 @@ void publish_connection_fields(Session& session,
                                const transactions::Publication& publication,
                                const ConnectionFields& fields) noexcept {
     if (publication.hasActivitySessionBinding) {
-        // Only the first binding decides the link's kind. A link that allocated its own session
-        // also joins later, and that join must not reclassify it.
-        if (session.activitySessionId == 0 && publication.activitySessionFromJoin) {
-            session.activityJoinedForeignSession = true;
+        if (!publication.preservesActivitySessionBinding) {
+            release_activity_connection(session);
+            session.activity = publication.activity;
+            reset_join_state(session);
         }
-        session.activitySessionId = publication.activitySessionId;
+        session.activity.bindingGeneration = publication.activity.bindingGeneration;
     }
-    if (fields.joinMemberKey != 0) {
+    if (fields.joinsActivity) {
+        discard_staged_advertisement(session);
+        release_host_generation(session.activityAdvertisementHostGeneration);
+        session.activityAdvertisementHostGeneration = 0;
+        reset_join_state(session);
         session.activityMemberKey = fields.joinMemberKey;
-    }
-    if (fields.joinCharacterSoid != 0) {
         session.activityCharacterSoid = fields.joinCharacterSoid;
     }
     if (fields.retainsPatchEpoch) {
-        session.activityPatchEpoch = fields.patchEpoch;
-        session.activityPatchEpochSeen = true;
+        session.activityPatchEpoch.value = fields.patchEpoch;
+        session.activityPatchEpoch.bindingGeneration = session.activity.bindingGeneration;
+        session.activityPatchEpoch.seen = session.activity.role != ActivityClientRole::none;
     }
     if (fields.opensTransitionWindow) {
         session.activityTransitionUntilTick = GetTickCount64() + kTransitionWindowMs;
@@ -71,6 +120,47 @@ void publish_connection_fields(Session& session,
         session.activityRosterSends = 0;
         session.activityRosterGroups = 0;
     }
+}
+
+/** Stages one retained host row until the membership frame has an outcome. */
+void stage_activity_advertisement(Session& session, std::uint64_t hostGeneration) noexcept {
+    discard_staged_advertisement(session);
+    session.activityAdvertisementStaged.hostGeneration = hostGeneration;
+    session.activityAdvertisementStaged.staged = true;
+}
+
+/** Publishes one staged advertisement retain. */
+void commit_staged_advertisement(Session& session) noexcept {
+    if (!session.activityAdvertisementStaged.staged) {
+        return;
+    }
+    release_host_generation(session.activityAdvertisementHostGeneration);
+    session.activityAdvertisementHostGeneration =
+        session.activityAdvertisementStaged.hostGeneration;
+    session.activityAdvertisementStaged = {};
+}
+
+/** Releases one staged advertisement retain. */
+void discard_staged_advertisement(Session& session) noexcept {
+    if (session.activityAdvertisementStaged.staged) {
+        release_host_generation(session.activityAdvertisementStaged.hostGeneration);
+        session.activityAdvertisementStaged = {};
+    }
+}
+
+/** Releases every exact activity owner held by one BAP connection. */
+void release_activity_connection(Session& session) noexcept {
+    discard_staged_advertisement(session);
+    release_host_generation(session.activityAdvertisementHostGeneration);
+    session.activityAdvertisementHostGeneration = 0;
+    if (session.activity.hostGeneration != 0) {
+        server::gameplay::group::release_host_session(session.activity.hostGeneration);
+    }
+    if (session.activity.session.sessionId != state::activity::kAbsentSessionId) {
+        state::activity::release_binding(session.activity.session);
+    }
+    session.activity = {};
+    session.activityPatchEpoch = {};
 }
 
 /** Arms the owed Family-4 and banner re-pushes when the queuez publication asks for them. */

@@ -19,6 +19,7 @@
 #include "../hooks/cursor/runtime.h"
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
+#include "../hooks/membership_probe/membership_probe.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
@@ -179,6 +180,10 @@ void clear_game_targets() noexcept {
     // The bitmap reference guard puts the none sentinel in place of a reference outside tag
     // space. Without it the widget's stored-reference reader faults.
     (void)hooks::bitmap::install();
+    // Read-only. It reports the status word the activity msg 12 handler writes, which is the one
+    // thing that separates "the client never saw our membership body" from "it saw it and the
+    // world container still did not bind".
+    (void)hooks::membership_probe::install();
     content::investment::worker::activate();
     return true;
 }

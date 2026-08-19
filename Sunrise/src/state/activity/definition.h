@@ -11,6 +11,7 @@
 #include "entity_slots/definition.h"
 #include "forced/definition.h"
 #include "membership/definition.h"
+#include "receipts/definition.h"
 
 namespace sunrise::state::activity {
 
@@ -39,6 +40,15 @@ inline constexpr std::uint64_t kMaximumSessionId = (std::numeric_limits<std::uin
 /** Revisions never wrap because stale transactions could otherwise become valid again. */
 inline constexpr std::uint64_t kMaximumRevision = (std::numeric_limits<std::uint64_t>::max)();
 
+/** Immutable identity of one committed activity-session record generation. */
+struct SessionBinding {
+    /** Exact destination committed with the session record. */
+    destination::DestinationSelection destination{};
+    std::uint64_t sessionId{};
+    /** Creation revision distinguishes a replacement that reuses the same session id. */
+    std::uint64_t createdRevision{};
+};
+
 /** One committed activity-session id and its lifecycle revisions. */
 struct SessionRecord {
     /** Scalar destination committed in the same transaction as this session. */
@@ -62,6 +72,8 @@ struct SessionRecord {
     std::uint64_t recordRevision{};
     /** Last successful join revision, or the invalid revision before any join. */
     std::uint64_t joinedRevision{};
+    /** Live consumers retaining this exact record generation against release or eviction. */
+    std::uint32_t bindingRetainCount{};
     bool occupied{};
     bool joined{};
 };
@@ -77,6 +89,12 @@ struct PendingAllocation {
     std::uint64_t expectedAllocatorRevision{};
     std::uint64_t expectedNextSessionId{};
     std::size_t targetSlot{kInvalidSessionSlot};
+    /**
+     * Set when this plan re-creates an id the allocator has already passed.
+     * Such a plan takes the id it was given instead of the next one, and leaves the allocator
+     * where it is, because the counter it fills was spent long ago.
+     */
+    bool recreated{};
     bool prepared{};
 };
 
@@ -87,6 +105,8 @@ struct ActivityState {
     defaults::ActivityDefaults defaults{};
     /** Operator-chosen destination that replaces the client's own. Never saved. */
     forced::ForcedDestination forced{};
+    /** One arrival row per activity message type, so no routed message is silently dropped. */
+    receipts::ReceiptRegistry receipts{};
     std::uint64_t stateRevision{kInitialStateRevision};
     std::uint64_t nextSessionId{kFirstSessionId};
     std::uint64_t allocatorRevision{kInitialAllocatorRevision};

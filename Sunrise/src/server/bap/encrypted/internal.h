@@ -167,7 +167,7 @@ namespace body {
  * Processes a request body and encodes a correlated body when the route needs one.
  * @param route Service route data found earlier.
  * @param queuezState Queuez versions and residents set up by this BAP peer.
- * @param activitySessionId Activity capability allocated through this BAP session.
+ * @param activity Exact ActivityClient generation owned by this BAP session.
  * @param matchmakingContext State-owned logical context for this BAP session.
  * @param requestBody Borrowed decrypted request body.
  * @param output Caller-owned response-body storage.
@@ -177,7 +177,7 @@ namespace body {
  */
 [[nodiscard]] bool process(const ServiceRoute& route,
                            const queuez::SessionState& queuezState,
-                           std::uint64_t activitySessionId,
+                           const ActivityClientBinding& activity,
                            state::matchmaking::ContextHandle matchmakingContext,
                            std::span<const std::byte> requestBody,
                            std::span<std::byte> output,

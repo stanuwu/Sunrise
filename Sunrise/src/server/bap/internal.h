@@ -7,8 +7,10 @@
 
 #include "../../client/network/consumer.h"
 #include "../../middleware/bap/activity_message/activity_patch_epoch_parser.h"
+#include "../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../middleware/bap/frame.h"
 #include "../../state/activity/bubble_authority/definition.h"
+#include "../../state/activity/definition.h"
 #include "../../state/build_data/scenarios/definition.h"
 #include "../../state/runtime/state.h"
 #include "encrypted/queuez/definition.h"
@@ -17,6 +19,8 @@ namespace sunrise::server::bap {
 
 /** One session per transport peer slot, so a connection id indexes this array directly. */
 inline constexpr std::size_t kSessionCount = client::network::kBapConnectionCount;
+/** A delivered activity frame defers the next silence-prevention write by five seconds. */
+inline constexpr std::uint64_t kActivityKeepaliveIntervalMs = 5'000;
 
 /** Fixed scratch storage owned by the lock, kept off the Client thread's stack. */
 struct Scratch {
@@ -25,10 +29,19 @@ struct Scratch {
     std::array<std::byte, client::network::kBapFrameCapacity> responsePayload{};
     std::array<std::byte, client::network::kBapFrameCapacity> sealed{};
     std::array<std::byte, client::network::kBapFrameCapacity> framed{};
-    /** Roster groups the outbound body's slot spans point into. */
+    /** Roster groups the outbound body's slot spans point into, top-level and per-bubble alike. */
     std::array<state::build_data::scenarios::RosterGroup,
-               state::build_data::scenarios::kDestinationGroupCapacity>
+               middleware::bap::activity_message::sensor_auth_update::kGroupCapacity>
         rosterGroups{};
+    /** Per-bubble sub-blocks the outbound body's field-1 span points into. */
+    std::array<middleware::bap::activity_message::sensor_auth_update::BubbleSubBlock,
+               state::build_data::scenarios::kBubbleCapacity>
+        rosterSubBlocks{};
+    /** Keys each sub-block carries, which its own span points into. */
+    std::array<
+        std::array<std::uint32_t, state::build_data::scenarios::kDestinationBubbleGroupCapacity>,
+        state::build_data::scenarios::kBubbleCapacity>
+        rosterSubBlockKeys{};
 };
 
 /**
@@ -38,12 +51,49 @@ struct Scratch {
  */
 struct RosterPublication {
     state::activity::bubble_authority::Grant grant{};
+    /** ActivityClient generation that staged this grant and its roster counters. */
+    std::uint64_t bindingGeneration{};
     std::uint32_t priorGroups{};
     std::uint8_t priorSends{};
     std::uint8_t priorState{};
     /** Set when the staged body carried a bubble grant that State has not recorded yet. */
     bool hasGrant{};
     /** Set while a roster body is staged and its outcome is undecided. */
+    bool staged{};
+};
+
+/** ActivityClient role owned by one authenticated BAP link. */
+enum class ActivityClientRole : std::uint8_t {
+    none,
+    privateCurrent,
+    publicTarget,
+};
+
+/** Exact activity-session generations owned by one BAP link. */
+struct ActivityClientBinding {
+    /** Target/current session that every activity envelope on this link names. */
+    state::activity::SessionBinding session{};
+    /** Same as session for private links; advertised source for public targets. */
+    state::activity::SessionBinding source{};
+    std::uint64_t groupSessionId{};
+    std::uint64_t hostGeneration{};
+    /** Changes on every bind and rejoin, even when the session id stays the same. */
+    std::uint64_t bindingGeneration{};
+    /** Private: last citizen region. Public: immutable region captured by the host binding. */
+    std::int32_t advertisedRegion{-1};
+    ActivityClientRole role{ActivityClientRole::none};
+};
+
+/** Patch epoch tied to the exact ActivityClient binding that received it. */
+struct BoundPatchEpoch {
+    middleware::bap::activity_message::patch_epoch::PatchEpoch value{};
+    std::uint64_t bindingGeneration{};
+    bool seen{};
+};
+
+/** Host-session retain staged by one membership body until its frame is published. */
+struct AdvertisementPublication {
+    std::uint64_t hostGeneration{};
     bool staged{};
 };
 
@@ -55,8 +105,8 @@ struct Session {
     std::array<std::byte, state::kBapNonceSize> receiveNonce{};
     /** Opaque State handle taken only after the server hello authenticates. */
     state::matchmaking::ContextHandle matchmakingContext{};
-    /** Activity capability allocated and published through this authenticated session. */
-    std::uint64_t activitySessionId{};
+    /** Exact private or public ActivityClient generation owned by this connection. */
+    ActivityClientBinding activity{};
     /** Tick count after which the activity link owes its next keepalive write. */
     std::uint64_t activityKeepaliveDueTick{};
     /** Client member key from the join request. It seeds the membership id. */
@@ -70,31 +120,29 @@ struct Session {
     /** Tick count after which the activity link owes its next roster update. */
     std::uint64_t activityRosterDueTick{};
     /**
+     * Binding generation whose membership body this link has already delivered.
+     * The client sets its own membership flag once and never clears it, and never acknowledges a
+     * body on a public-target link, so a send condition has to be a one-shot per binding rather
+     * than a revision or acknowledgement gate. Latched on delivery, never on encode.
+     */
+    std::uint64_t activityMembershipSentGeneration{};
+    /**
      * Tick count until which the client is loading, so the roster runs at its faster cadence.
      * A join and a transition-token change are the only two things that open it.
      */
     std::uint64_t activityTransitionUntilTick{};
-    /** The client's own patch epoch, from message 52. The roster body splices it verbatim. */
-    middleware::bap::activity_message::patch_epoch::PatchEpoch activityPatchEpoch{};
+    /** The client's own patch epoch, scoped to the binding that received message 52. */
+    BoundPatchEpoch activityPatchEpoch{};
     /** Group set the last roster update published, folded into one comparable value. */
     std::uint32_t activityRosterGroups{};
     /** Roster updates sent on this connection, capped once the warm-up bumps are spent. */
     std::uint8_t activityRosterSends{};
     /** Per-entry state byte the last roster update carried. */
     std::uint8_t activityRosterState{};
-    /** Set once message 52 has arrived, which is what makes a roster update sendable. */
-    bool activityPatchEpochSeen{};
-    /**
-     * Set when this link's first binding came from joining a session it did not allocate.
-     * Such a link carries the keepalive alone. A roster or membership push on it stalls the load.
-     */
-    bool activityJoinedForeignSession{};
-    /**
-     * Region the last delivered citizen advertisement named. -1 until one has gone out.
-     * It moves only on a frame that reached the client and carried a descriptor. Anything else
-     * leaves the region-change trigger armed for the next poll.
-     */
-    std::int32_t activityAdvertisedRegion{-1};
+    /** Host row retained by the last delivered citizen advertisement. */
+    std::uint64_t activityAdvertisementHostGeneration{};
+    /** Host row retained by a staged membership body until publication is known. */
+    AdvertisementPublication activityAdvertisementStaged{};
     /**
      * Reason code of the last logged roster outcome.
      * The push runs every second, so a refusal is logged only when the reason changes. One flag

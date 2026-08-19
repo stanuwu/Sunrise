@@ -24,12 +24,20 @@ Table<RosterGroup, kRosterGroupCapacity> g_groups;
         const bool declared = slot < group.slotCount;
         if (declared
             && (group.slotTypes[slot] == 0 || group.slotTypes[slot] > kMaximumSlotType
-                || (group.slotFlags[slot] & ~kSlotFlagMask) != 0)) {
+                || (group.slotFlags[slot] & ~kSlotFlagMask) != 0
+                || group.slotIndices[slot] >= kRosterSlotCapacity)) {
+            return false;
+        }
+        // Indices are the slots' own, so they ascend but may skip. A repeat would seed one object
+        // twice and leave another unseeded, which holds the whole apply back.
+        if (declared && slot != 0 && group.slotIndices[slot] <= group.slotIndices[slot - 1]) {
             return false;
         }
         // Storage past the declared count must stay zero, or two caches of the same packages
         // could differ byte for byte while meaning the same thing.
-        if (!declared && (group.slotTypes[slot] != 0 || group.slotFlags[slot] != 0)) {
+        if (!declared
+            && (group.slotTypes[slot] != 0 || group.slotFlags[slot] != 0
+                || group.slotIndices[slot] != 0)) {
             return false;
         }
     }
@@ -45,6 +53,7 @@ Table<RosterGroup, kRosterGroupCapacity> g_groups;
     if (definition.nameLength == 0 || definition.nameLength > kNameCapacity
         || definition.bubbleCount > kBubbleCapacity || definition.truncated > 1
         || definition.rosterGroupCount > kDestinationGroupCapacity
+        || definition.bubbleGroupCount > kDestinationBubbleGroupCapacity
         || definition.spawnStemLength > kSpawnStemCapacity) {
         return false;
     }
@@ -59,6 +68,20 @@ Table<RosterGroup, kRosterGroupCapacity> g_groups;
             return false;
         }
         if (!declared && definition.rosterGroups[group] != 0) {
+            return false;
+        }
+    }
+    for (std::size_t group = 0; group < kDestinationBubbleGroupCapacity; ++group) {
+        const bool declared = group < definition.bubbleGroupCount;
+        // A published bubble mask of zero names no bubble, so the sub-block would register a key
+        // the client never reads while spending a slot in a 64-element array.
+        if (declared
+            && (definition.bubbleGroups[group] >= groupCount
+                || definition.bubbleGroupMasks[group] == 0)) {
+            return false;
+        }
+        if (!declared
+            && (definition.bubbleGroups[group] != 0 || definition.bubbleGroupMasks[group] != 0)) {
             return false;
         }
     }

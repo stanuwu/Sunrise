@@ -9,6 +9,8 @@ activity_membership_acknowledgement_parser.h"
 #include "../../../../../middleware/bap/activity_message/activity_client_identity_parser.h"
 #include "../../../../../middleware/bap/activity_message/activity_state_refresh_parser.h"
 #include "../../../../../middleware/bap/activity_message/client_authoritative_data.h"
+#include "../../../../../middleware/bap/activity_message/start_activity.h"
+#include "../../../../../state/activity/destination/definition.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 
 namespace sunrise::server::bap::encrypted::activity_message::membership {
@@ -16,6 +18,9 @@ namespace {
 
 namespace service = middleware::bap::activity_message;
 namespace membership_state = state::activity::membership;
+
+/** A request with no revision of its own asks for the current one, not a numbered resend. */
+constexpr std::uint32_t kNoRequestedRevision = 0;
 
 /**
  * Maps one parsed client identity into State's protocol-neutral storage.
@@ -146,6 +151,50 @@ bool prepare_refresh(const service::Request& request, ActivityPlan& plan) noexce
     plan.sessionId = request.accountHandle;
     // A refresh asks for the whole host snapshot. Answering with membership alone leaves the
     // client's own request half answered, and the global state and roster are what it re-reads.
+    plan.delivery = Delivery::refreshNotifications;
+    plan.mutationDomain = MutationDomain::membership;
+    return true;
+}
+
+/** Stages the host snapshot a start-new-activity request asks for. */
+bool prepare_start_activity(const service::Request& request, ActivityPlan& plan) noexcept {
+    service::start_activity::StartActivity parsed{};
+    std::size_t consumed = 0;
+    if (!service::start_activity::parse_start_activity(request.payload, parsed, consumed)) {
+        return false;
+    }
+    // The destination index is checked against the width its own field can carry. Which indices
+    // are installed comes from the activity definition table, which this host does not read, so
+    // an in-range index is as far as the route can be validated here.
+    const bool routed =
+        parsed.destinationActivityIndex >= 0
+        && parsed.destinationActivityIndex <= state::activity::destination::kMaximumActivityIndex;
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=start_activity result=%s from=%d to=%d "
+                                      "tail=%u",
+                                      routed ? "accepted" : "out_of_range",
+                                      parsed.sourceActivityIndex,
+                                      parsed.destinationActivityIndex,
+                                      parsed.tailBits);
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         routed ? core::log::Level::info : core::log::Level::warn,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+    if (!routed) {
+        return false;
+    }
+    // The request carries no revision or bubble of its own, so the refresh guard is built from the
+    // absent pair rather than from a value the client did not send.
+    if (!membership_state::prepare_refresh(request.accountHandle,
+                                           kNoRequestedRevision,
+                                           state::activity::destination::kAbsentActivityIndex,
+                                           plan.membershipMutation)) {
+        return false;
+    }
+    plan.sessionId = request.accountHandle;
     plan.delivery = Delivery::refreshNotifications;
     plan.mutationDomain = MutationDomain::membership;
     return true;

@@ -21,6 +21,17 @@ inline constexpr std::size_t kLargeFragmentBytes = 32;
 inline constexpr std::size_t kSmallFragmentBytes = 6;
 /** One packet carries at most this many queue records before it is refused. */
 inline constexpr std::size_t kMaximumRecords = 64;
+/** The two-bit connection guard is the full connection sequence modulo four. */
+inline constexpr std::uint32_t kConnectionSequenceGuardModulus = 4;
+
+/**
+ * Reduces a full connection sequence to the guard carried by an established packet.
+ * @param sequence Full connection sequence announced during connect.
+ * @return The sequence modulo four.
+ */
+[[nodiscard]] constexpr std::uint8_t connection_sequence_low2(std::uint32_t sequence) noexcept {
+    return static_cast<std::uint8_t>(sequence % kConnectionSequenceGuardModulus);
+}
 
 /** Acknowledgement state this side publishes and the other side reads. */
 struct AckState {
@@ -69,6 +80,12 @@ struct EstablishedPacket {
     /** Bit offset of the external gameplay handler body, once the view gate has opened. */
     std::size_t externalBitOffset{};
     bool hasExternal{};
+};
+
+/** Bounded filler trailer after the external handler. */
+struct FillerTrailer {
+    std::size_t bitCount{};
+    bool present{};
 };
 
 /**
@@ -135,6 +152,10 @@ struct EstablishedPacket {
                                    std::uint32_t declaredSize,
                                    std::span<const std::byte> body,
                                    std::size_t bodyBits) noexcept;
+
+/** Reads the filler and requires exact zero byte padding. */
+[[nodiscard]] bool read_filler_and_padding(encoding::bits::Reader& reader,
+                                           FillerTrailer& output) noexcept;
 
 /**
  * Writes the filler trailer that ends every packet.

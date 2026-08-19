@@ -1,11 +1,9 @@
-#include "dtls_host.h"
+﻿#include "dtls_host.h"
 
 #include <Windows.h>
 
-#include <algorithm>
 #include <array>
 #include <atomic>
-#include <string_view>
 #include <type_traits>
 
 #include "../../../middleware/crypto/ecc_p224.h"
@@ -13,6 +11,7 @@
 #include "../../../middleware/gameplay/dtls/association_keys.h"
 #include "../../../middleware/gameplay/dtls/dtls_messages.h"
 #include "../../../middleware/gameplay/dtls/record.h"
+#include "../../../middleware/gameplay/dtls/replay_high_water.h"
 #include "../endpoint/gameplay_endpoint.h"
 #include "../gameplay_log.h"
 #include "../peer/peer_transport.h"
@@ -45,6 +44,8 @@ struct Association {
     std::array<std::byte, wire::kInitAckSize> issued{};
     /** Keys and tag every record of this association uses. */
     middleware::gameplay::dtls::RecordContext record{};
+    /** Authenticated record sequences already admitted on this association. */
+    middleware::gameplay::dtls::ReplayHighWater receiveHighWater{};
     /** False until one received record names the digest that authenticates it. */
     bool authKnown{};
     /** Sequence the next sent record carries. */
@@ -71,26 +72,6 @@ constexpr std::uint8_t kRecordType = 6;
 std::atomic<unsigned> g_recordReported{0};
 
 std::array<Association, kAssociationCapacity> g_associations{};
-
-/**
- * Formats bytes as lowercase hex for one log line.
- * @param input Bytes to render.
- * @param output Receives the text and its terminator; it must hold two characters per byte.
- */
-void to_hex(std::span<const std::byte> input, std::span<char> output) noexcept {
-    /** Digits one nibble maps to. */
-    constexpr std::string_view kDigits{"0123456789abcdef"};
-    /** Bits in one nibble. */
-    constexpr unsigned kNibbleBits = 4;
-    /** Mask of one nibble. */
-    constexpr unsigned kNibbleMask = 0xF;
-    for (std::size_t index = 0; index < input.size(); ++index) {
-        const auto value = std::to_integer<unsigned>(input[index]);
-        output[index * 2] = kDigits[(value >> kNibbleBits) & kNibbleMask];
-        output[(index * 2) + 1] = kDigits[value & kNibbleMask];
-    }
-    output[input.size() * 2] = '\0';
-}
 
 /** @return True when both endpoints name the same address and port. */
 [[nodiscard]] bool same_endpoint(const state::gameplay::Endpoint& left,
@@ -294,8 +275,10 @@ void on_cookie_echo(const state::gameplay::Endpoint& from,
         report(core::log::Level::warn, "ev=gameplay stage=dtls result=drop reason=key_agreement");
         return;
     }
-    if (!middleware::gameplay::dtls::derive(
-            agreement.sharedSecret, kJoinKey, association->record.keys)) {
+    const bool derived = middleware::gameplay::dtls::derive(
+        agreement.sharedSecret, kJoinKey, association->record.keys);
+    SecureZeroMemory(agreement.sharedSecret.data(), agreement.sharedSecret.size());
+    if (!derived) {
         report(core::log::Level::warn, "ev=gameplay stage=dtls result=drop reason=key_derivation");
         return;
     }
@@ -315,18 +298,10 @@ void on_cookie_echo(const state::gameplay::Endpoint& from,
         ++g_openClock;
         association->opened = g_openClock;
     }
-    // TODO: stop logging key material once the digest choice is settled. Secrets must not be
-    // written to a log.
-    std::array<char, (2 * middleware::crypto::ecc::kFieldSize) + 1> secretText{};
-    to_hex(agreement.sharedSecret, secretText);
-    std::array<char, (2 * middleware::gameplay::dtls::kCypherKeySize) + 1> cypherText{};
-    to_hex(association->record.keys.cypher, cypherText);
     report(core::log::Level::info,
-           "ev=gameplay stage=dtls result=%s step=cookie_ack peer_tag=0x%04X secret=%s cypher=%s",
+           "ev=gameplay stage=dtls result=%s step=cookie_ack peer_tag=0x%04X",
            sent ? "ok" : "send_failed",
-           static_cast<unsigned>(association->requesterTag),
-           secretText.data(),
-           cypherText.data());
+           static_cast<unsigned>(association->requesterTag));
 }
 
 /**
@@ -372,6 +347,16 @@ void on_record(const state::gameplay::Endpoint& from,
             report(core::log::Level::warn,
                    "ev=gameplay stage=dtls result=drop reason=record bytes=%zu",
                    datagram.size());
+        }
+        return;
+    }
+    const wire::ReplayDecision replay = wire::update(association->receiveHighWater, sequence);
+    if (replay != wire::ReplayDecision::accepted) {
+        if (g_recordReported.fetch_add(1, std::memory_order_relaxed) < kMaxRecordReports) {
+            report(core::log::Level::warn,
+                   "ev=gameplay stage=dtls result=drop reason=%s seq=%u",
+                   replay == wire::ReplayDecision::duplicate ? "replay_duplicate" : "replay_old",
+                   sequence);
         }
         return;
     }

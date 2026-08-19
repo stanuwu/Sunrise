@@ -84,6 +84,36 @@ bool prepare_refresh(std::uint64_t sessionId,
     return true;
 }
 
+/** Prepares one exact membership-revision advance without changing stored State. */
+bool prepare_republish(std::uint64_t sessionId, PendingMutation& mutation) noexcept {
+    mutation = {};
+    if (sessionId == kAbsentSessionId) {
+        return false;
+    }
+
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const auto& root = runtime::storage::g_state;
+    PendingMutation prepared{};
+    const SessionRecord* record =
+        transactions::prepare_base(root.activity, root.account.primarySoid, sessionId, prepared);
+    const bool ready = record != nullptr && record->membership.hasIdentity
+                       && root.activity.stateRevision != activity::kMaximumRevision
+                       && record->membership.revision != kMaximumMembershipRevision;
+    if (ready) {
+        prepared.snapshot = transactions::make_snapshot(
+            record->membership, record->membership.identity, record->membership.revision + 1U);
+        prepared.kind = MutationKind::republish;
+        prepared.hasSnapshot = true;
+        prepared.changesState = true;
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    if (!ready) {
+        return false;
+    }
+    mutation = prepared;
+    return true;
+}
+
 /** Prepares an acknowledgement mark for the current membership revision. */
 bool prepare_acknowledgement(std::uint64_t sessionId,
                              std::uint32_t revision,

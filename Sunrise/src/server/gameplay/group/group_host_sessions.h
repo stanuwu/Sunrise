@@ -4,36 +4,79 @@
 #include <cstdint>
 #include <span>
 
+#include "../../../state/activity/definition.h"
+
 namespace sunrise::server::gameplay::group {
 
-/** Region of a caller that knows none. Such a call keeps the region already on the row. */
+/** Region sentinel that cannot claim or replace a host-session row. */
 inline constexpr std::int32_t kUnknownRegion = -1;
 
-/** One region's advertised group session and the activity host session it holds. */
+/** Immutable identity of one source-bound activity-host row generation. */
+struct HostSessionBinding {
+    state::activity::SessionBinding source{};
+    state::activity::SessionBinding target{};
+    std::uint64_t groupSessionId{};
+    std::uint64_t generation{};
+    std::int32_t regionIndex{kUnknownRegion};
+};
+
+/** Result of requesting one source-bound activity-host row. */
+enum class HostSessionState : std::uint8_t {
+    absent,
+    pending,
+    ready,
+    conflict,
+    full,
+};
+
+/** One advertised group session and its currently allocated activity-host session. */
 struct HostSessionRow {
     std::uint64_t groupSessionId{};
     std::uint64_t hostSessionId{};
     std::int32_t regionIndex{};
+    /** Rises on every claim, so it separates one host binding from the next on the same region. */
+    std::uint64_t generation{};
 };
 
 /**
- * Reports the activity host session already held for one region, without claiming a slot.
- * @param groupSessionId Group session the region advertises.
- * @return The host session id, or the absent id when none is held yet.
+ * Claims or finds one host row bound to an exact source activity generation and region.
+ * An unknown region never claims a row. A conflicting referenced row is never replaced.
+ * @param groupSessionId Group session carried by the matching join descriptor.
+ * @param source Exact source activity whose destination the target must copy.
+ * @param regionIndex Concrete advertised region.
+ * @param output Cleared, then receives the pending or ready row generation.
+ * @return Current state of the requested row.
  */
-[[nodiscard]] std::uint64_t held_host_session(std::uint64_t groupSessionId) noexcept;
+[[nodiscard]] HostSessionState request_host_session(std::uint64_t groupSessionId,
+                                                    const state::activity::SessionBinding& source,
+                                                    std::int32_t regionIndex,
+                                                    HostSessionBinding& output) noexcept;
+
+/** Copies a ready row by its exact group-session key. */
+[[nodiscard]] bool host_session_for_group(std::uint64_t groupSessionId,
+                                          HostSessionBinding& output) noexcept;
+
+/** Copies a ready row by its allocated target activity-session id. */
+[[nodiscard]] bool host_session_for_activity(std::uint64_t hostSessionId,
+                                             HostSessionBinding& output) noexcept;
+
+/** Retains one ready host-row generation against replacement or eviction. */
+[[nodiscard]] bool retain_host_session(std::uint64_t generation) noexcept;
+
+/** Releases one external retain on the exact host-row generation. */
+void release_host_session(std::uint64_t generation) noexcept;
 
 /** Copies every occupied host-session row. @param count Receives the copied row count. */
 void snapshot_host_sessions(std::span<HostSessionRow> output, std::size_t& count) noexcept;
 
 /**
- * Fills every claimed host-session slot that has no session yet, and frees every evicted session.
- * The allocation advances the state revision, so it must never run inside a staged push. That
- * push would fail its own revision guard. Callers hold no lock.
+ * Allocates pending source-bound targets and releases retired rows.
+ * State calls run outside the host lock and advance State revisions, so this must not run inside a
+ * staged push.
  */
 void allocate_claimed_host_sessions() noexcept;
 
-/** Returns every held host session to State and clears the table. */
+/** Returns every retained binding and allocated target to State, then clears the table. */
 void reset_host_sessions() noexcept;
 
 } // namespace sunrise::server::gameplay::group
