@@ -204,7 +204,6 @@ void uninstall() noexcept {
     }
     clear_targets();
     clear_action_keys();
-    hooks::director::cancel();
     hooks::fly::reset();
     client::player::position::reset();
     polled_input::release_key();

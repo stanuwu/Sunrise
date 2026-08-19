@@ -116,11 +116,23 @@ Framed frame_start_activity(const message::Request& request) noexcept {
     if (!start::parse_start_activity(request.payload, parsed, consumed)) {
         return {report_malformed("start_activity", request), consumed};
     }
+    const auto& continuation = parsed.continuation;
+    const int packageLength = parsed.hasContinuation && continuation.hasPackageName
+                                  ? static_cast<int>(continuation.packageNameLength)
+                                  : 0;
     report(core::log::Level::info,
-           "ev=activity stage=start_activity result=read from=%d to=%d tail=%u",
+           "ev=activity stage=start_activity result=read from=%d to=%d tail=%u "
+           "continuation=%u bubble=0x%X spawn=0x%X package=%.*s",
            parsed.sourceActivityIndex,
            parsed.destinationActivityIndex,
-           parsed.tailBits);
+           parsed.tailBits,
+           parsed.hasContinuation ? 1U : 0U,
+           parsed.hasContinuation && continuation.hasArrivalBubbleHash
+               ? continuation.arrivalBubbleHash
+               : 0U,
+           parsed.hasContinuation && continuation.hasSpawnSetHash ? continuation.spawnSetHash : 0U,
+           packageLength,
+           reinterpret_cast<const char*>(continuation.packageName.data()));
     return {parsed.tailBits == 0 ? Verdict::framed : Verdict::partial, consumed};
 }
 

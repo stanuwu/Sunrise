@@ -88,12 +88,17 @@ void report_forced(const state::activity::destination::DestinationSelection& for
     const int written = std::snprintf(line.data(),
                                       line.size(),
                                       "ev=bap svc=6 stage=selection result=forced name=%.*s "
-                                      "bubble=%u slice_set=%u spawn=0x%X",
+                                      "activity=%d from_activity=%d reason=%d bubble=%u "
+                                      "slice_set=%u spawn=0x%X descriptor_bits=%u",
                                       static_cast<int>(forced.packageNameLength),
                                       reinterpret_cast<const char*>(forced.packageName.data()),
+                                      static_cast<int>(forced.activityIndex),
+                                      static_cast<int>(forced.previousActivityIndex),
+                                      static_cast<int>(forced.reason),
                                       static_cast<unsigned>(forced.arrivalBubbleOverride),
                                       static_cast<unsigned>(forced.sliceSetOverride),
-                                      forced.spawnSetOverride);
+                                      forced.spawnSetOverride,
+                                      static_cast<unsigned>(forced.descriptorBitLength));
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,
@@ -116,17 +121,25 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
     const bool hasCopy = parsed.hasSelection || parsed.hasSecondary;
     const request_selection::ActivityManagerSelection& source =
         hasCopy ? choose_copy(parsed) : parsed.selection;
-    // An index-only selection cannot be mixed with unrelated authored package bytes, so it takes
-    // the same State fallback an absent selection takes. Refusing would leave the request
-    // unanswered, and svc 6 declares a response service.
+    // An index-only selection still carries the client's opaque descriptor. A forced destination
+    // can insert its package name into that descriptor instead of losing the fields around it.
     if (hasCopy && !source.hasPackageName) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=bap svc=6 stage=package result=fallback");
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written = std::snprintf(line.data(),
+                                          line.size(),
+                                          "ev=bap svc=6 stage=package result=carrier activity=%d "
+                                          "from_activity=%d descriptor_bits=%zu",
+                                          static_cast<int>(source.activityIndex),
+                                          static_cast<int>(source.sourceActivityIndex),
+                                          source.descriptorBitLength);
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
     }
-    // Neither case captures a descriptor, so a forced destination there sends the minimal one.
-    // The State fallback still stands when the switch is off.
-    if (!hasCopy || !source.hasPackageName) {
+    // An absent selection has no descriptor to preserve. It retains the minimal forced fallback.
+    if (!hasCopy) {
         state::activity::destination::DestinationSelection forced{};
         if (state::activity::forced::apply(forced)) {
             report_forced(forced);
@@ -134,7 +147,9 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
         }
         return state::activity::prepare_session(sessionId, allocation);
     }
-    report_selection(source);
+    if (source.hasPackageName) {
+        report_selection(source);
+    }
     state::activity::destination::DestinationSelection destination{};
     destination.packageName = source.packageName;
     destination.packageNameLength = source.packageNameLength;
@@ -157,6 +172,8 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
         destination.descriptorBits = source.descriptorBits;
         destination.descriptorBitLength = static_cast<std::uint16_t>(source.descriptorBitLength);
         destination.descriptorNameBit = static_cast<std::uint16_t>(source.packageNameBitOffset);
+        destination.descriptorNamePresenceBit =
+            static_cast<std::uint16_t>(source.packageNamePresenceBitOffset);
         destination.hasDescriptorName = source.hasPackageName;
     }
     // The authored override is applied here, once, so every message built from this selection sees
@@ -164,9 +181,13 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
     state::activity::defaults::ActivityDefaults defaults{};
     state::activity::defaults::snapshot(defaults);
     state::activity::defaults::apply_arrival_override(defaults, destination);
-    // Forced lands last and renames the captured descriptor in place.
-    if (state::activity::forced::apply(destination)) {
+    // Forced lands last and renames the captured descriptor in place without replacing the
+    // carrier's activity identity.
+    const bool forced = state::activity::forced::apply(destination);
+    if (forced) {
         report_forced(destination);
+    } else if (!source.hasPackageName) {
+        return state::activity::prepare_session(sessionId, allocation);
     }
     return state::activity::prepare_session(destination, sessionId, allocation);
 }

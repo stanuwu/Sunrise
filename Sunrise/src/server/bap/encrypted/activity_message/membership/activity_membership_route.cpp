@@ -169,15 +169,28 @@ bool prepare_start_activity(const service::Request& request, ActivityPlan& plan)
     const bool routed =
         parsed.destinationActivityIndex >= 0
         && parsed.destinationActivityIndex <= state::activity::destination::kMaximumActivityIndex;
+    const auto& continuation = parsed.continuation;
+    const int packageLength = parsed.hasContinuation && continuation.hasPackageName
+                                  ? static_cast<int>(continuation.packageNameLength)
+                                  : 0;
+    const char* const packageName = reinterpret_cast<const char*>(continuation.packageName.data());
     std::array<char, core::log::kLineCapacity> line{};
-    const int written = std::snprintf(line.data(),
-                                      line.size(),
-                                      "ev=activity stage=start_activity result=%s from=%d to=%d "
-                                      "tail=%u",
-                                      routed ? "accepted" : "out_of_range",
-                                      parsed.sourceActivityIndex,
-                                      parsed.destinationActivityIndex,
-                                      parsed.tailBits);
+    const int written = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=activity stage=start_activity result=%s from=%d to=%d "
+        "tail=%u continuation=%u bubble=0x%X spawn=0x%X "
+        "package=%.*s",
+        routed ? "accepted" : "out_of_range",
+        parsed.sourceActivityIndex,
+        parsed.destinationActivityIndex,
+        parsed.tailBits,
+        parsed.hasContinuation ? 1U : 0U,
+        parsed.hasContinuation && continuation.hasArrivalBubbleHash ? continuation.arrivalBubbleHash
+                                                                    : 0U,
+        parsed.hasContinuation && continuation.hasSpawnSetHash ? continuation.spawnSetHash : 0U,
+        packageLength,
+        packageName);
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          routed ? core::log::Level::info : core::log::Level::warn,

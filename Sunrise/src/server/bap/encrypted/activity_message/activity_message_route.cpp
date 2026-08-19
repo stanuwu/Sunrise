@@ -316,20 +316,24 @@ bool process(const ActivityClientBinding& binding,
         return false;
     }
     report_arrival(request);
-    // Join acquires or preserves an exact binding. Every other message, including type 52 and the
-    // receipt-only types, must name the exact session already owned by this link before it can
-    // mutate State or the receipt registry.
+    // Join acquires or preserves an exact binding. Type 52 is connection-scoped: captures carry
+    // either a zero handle or the exact bound session, so the current retained binding owns it.
+    // Every other message must name the exact session already owned by this link.
     const std::uint32_t messageType = request.messageType;
-    const bool ownsMessage =
-        messageType == kJoinRequestMessageType || owns_session(binding, request);
+    const bool isPatchEpoch = messageType == epoch_message::kMessageType;
+    const bool ownsPatchEpoch = isPatchEpoch && binding_is_current(binding)
+                                && (request.accountHandle == state::activity::kAbsentSessionId
+                                    || request.accountHandle == binding.session.sessionId);
+    const bool ownsMessage = messageType == kJoinRequestMessageType || ownsPatchEpoch
+                             || (!isPatchEpoch && owns_session(binding, request));
     if (!ownsMessage) {
         report_message(request.messageType, request.accountHandle, "unowned");
         record(request, store::Verdict::unowned, 0);
         return true;
     }
     bool prepared = false;
-    if (request.messageType == epoch_message::kMessageType) {
-        prepared = patch_epoch::prepare(request.accountHandle, request, plan);
+    if (isPatchEpoch) {
+        prepared = patch_epoch::prepare(binding.session.sessionId, request, plan);
     } else if (request.messageType == kJoinRequestMessageType) {
         prepared = prepare_join(binding, request, plan);
     } else if (request.messageType == service::entity_slot_request::kMessageType) {

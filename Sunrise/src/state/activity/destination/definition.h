@@ -82,6 +82,8 @@ struct DestinationSelection final {
     std::uint16_t descriptorBitLength{};
     /** First name byte's bit offset inside descriptorBits. A forced name is written there. */
     std::uint16_t descriptorNameBit{};
+    /** Package-name presence bit, used to insert the field when the client omitted it. */
+    std::uint16_t descriptorNamePresenceBit{};
     /** True only when the captured descriptor carried the fixed package-name field. */
     bool hasDescriptorName{};
 };

@@ -17,6 +17,7 @@
 #include "../hooks/bootflow/bootflow_hook_lifecycle.h"
 #include "../hooks/config_getter/config_getter_lifecycle.h"
 #include "../hooks/cursor/runtime.h"
+#include "../hooks/director/director_handoff.h"
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/membership_probe/membership_probe.h"
@@ -168,6 +169,9 @@ void clear_game_targets() noexcept {
     (void)hooks::config_getter::install();
     // Boot-step fixes scan for their own single-site targets; each reports its own outcome.
     (void)hooks::bootflow::install();
+    // Diagnostic and nonfatal: the exact-caller carrier probe must attach before orbit builds the
+    // local activity selection that Forge later publishes.
+    (void)hooks::director::install_local_carrier();
     // The teleport hooks attach whether or not the feature is on, so the interface can enable it
     // without a restart. Both replacements return immediately while nothing is requested.
     (void)hooks::teleport::install();

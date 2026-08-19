@@ -56,7 +56,7 @@ NativeDirectorHandoffResult request_native_director_handoff() noexcept {
             .uiHidden = uiHidden};
 }
 
-/** Queues Destiny's native activity-session creation step, then yields the screen to the game. */
+/** Queues Destiny's native activity-session creation, then yields the screen to the game. */
 NativeActivityLaunchResult request_native_activity_launch() noexcept {
     const client::hooks::director::ActivityLaunchResult launch =
         client::hooks::director::request_activity_launch();

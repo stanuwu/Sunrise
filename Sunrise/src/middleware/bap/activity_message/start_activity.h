@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <span>
 
+#include "../activity_host_manager/request/selection/definition.h"
+
 namespace sunrise::middleware::bap::activity_message::start_activity {
 
 /** The client asks to start a different activity from inside the world. */
@@ -44,9 +46,13 @@ struct StartActivity {
     std::uint64_t selectionIdentity{};
     /** Bits left after the last recovered field. Their grammar is unresolved. */
     std::uint32_t tailBits{};
+    /** Read-only decode of the descriptor continuation that follows the identity prefix. */
+    activity_host_manager::request::selection::ActivityManagerSelection continuation{};
     bool hasElement{};
     bool hasIdentity{};
     bool hasSelectionIdentity{};
+    /** True when the complete continuation decoded without changing framing policy. */
+    bool hasContinuation{};
 };
 
 /**

@@ -7,11 +7,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <intrin.h>
 #include <string_view>
 
 #include "../../../core/logging/log.h"
 #include "../../../state/account/account_state.h"
+#include "../../../state/activity/defaults/activity_defaults_snapshot.h"
+#include "../../../state/activity/destination/definition.h"
 #include "../../../state/runtime/runtime.h"
+#include "../../hooking/detour.h"
 #include "../../patterns/image_scan.h"
 #include "../bootflow/bootflow_hook_lifecycle.h"
 #include "../polled_input/runtime.h"
@@ -57,7 +61,7 @@ constexpr auto kGetLiveSession =
 
 /**
  * Publishes `world-controller-goal-data` through the native session-parameter object. Besides
- * changing the target and mode, this advances the parameter revision and invokes its replication
+ * Changing the target and mode advances the parameter revision and invokes its replication
  * callback. Writing the membership's replicated copy directly leaves its checksum stale.
  */
 constexpr std::string_view kPublishSessionGoalText =
@@ -68,16 +72,32 @@ constexpr auto kPublishSessionGoal =
     patterns::signature<patterns::signature_length(kPublishSessionGoalText)>(
         kPublishSessionGoalText);
 
+/**
+ * World-controller setup asks this zero-argument getter for its secondary activity-selection
+ * index, then builds and launches a local selection from it. A direct state-30 jump otherwise
+ * receives index zero, whose placeholder selection never creates a world container.
+ */
+constexpr std::string_view kSecondarySelectionCallText =
+    "48 8D 4C 24 28 E8 ? ? ? ? 0F B7 4C 24 20 66 83 F9 FF 74 5A E8 ? ? ? ? 84 C0 "
+    "75 51 48 8D 4C 24 30";
+constexpr auto kSecondarySelectionCall =
+    patterns::signature<patterns::signature_length(kSecondarySelectionCallText)>(
+        kSecondarySelectionCallText);
+
 using GetBootflowManager = void*(__fastcall*)() noexcept;
 using RequestBootflowState = void(__fastcall*)(void*, std::int32_t, std::int32_t) noexcept;
 using GetLiveSession = bool(__fastcall*)(std::int32_t, void**) noexcept;
 using PublishSessionGoal = bool(__fastcall*)(void*, std::int32_t, std::int32_t) noexcept;
+using GetSecondarySelection = std::uint16_t*(__fastcall*)(std::uint16_t*) noexcept;
 
 /** Relative operands inside the matched wrapper's manager call and generic state-request jump. */
 constexpr std::size_t kManagerAccessorOperand = 9;
 constexpr std::size_t kManagerAccessorEnd = 13;
 constexpr std::size_t kStateRequestOperand = 35;
 constexpr std::size_t kStateRequestEnd = 39;
+/** Relative call operand and return address inside kSecondarySelectionCall. */
+constexpr std::size_t kSecondarySelectionOperand = 6;
+constexpr std::size_t kSecondarySelectionReturn = 10;
 /** The native log names zero as the default/unavailable state-change reason. */
 constexpr std::int32_t kDefaultStateChangeReason = 0;
 
@@ -93,6 +113,79 @@ std::atomic<RequestBootflowState> g_requestBootflowState{nullptr};
 std::atomic<GetLiveSession> g_getLiveSession{nullptr};
 std::atomic<PublishSessionGoal> g_publishSessionGoal{nullptr};
 std::atomic_bool g_activityLaunchPending{false};
+std::atomic_bool g_carrierOverrideArmed{false};
+std::atomic<std::int16_t> g_carrierTarget{-1};
+std::atomic<void*> g_secondarySelectionReturn{nullptr};
+hooking::detour::Handle g_secondarySelectionHandle{};
+std::atomic_bool g_secondarySelectionInstalled{false};
+
+/** Logs installation of Forge's one-shot native carrier. */
+void report_carrier_install(std::string_view result, std::int16_t targetIndex) noexcept {
+    std::array<char, 160> line{};
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=director_activity_launch stage=local_carrier result=%.*s "
+                      "fallback=%d armed=%u",
+                      static_cast<int>(result.size()),
+                      result.data(),
+                      static_cast<int>(targetIndex),
+                      g_carrierOverrideArmed.load(std::memory_order_acquire) ? 1U : 0U);
+    if (written > 0) {
+        core::log::write(core::log::Channel::client,
+                         result == "installed" ? core::log::Level::info : core::log::Level::warn,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
+/** Logs an exact-caller observation without consulting State from inside the detour. */
+void report_carrier_observation(std::string_view action,
+                                std::uint16_t nativeIndex,
+                                std::int16_t targetIndex) noexcept {
+    std::array<char, 176> line{};
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=director_activity_launch stage=local_carrier result=observed "
+                      "native=%u fallback=%d action=%.*s",
+                      static_cast<unsigned>(nativeIndex),
+                      static_cast<int>(targetIndex),
+                      static_cast<int>(action.size()),
+                      action.data());
+    if (written > 0) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
+/**
+ * Substitutes the configured, validated fallback activity only for the setup caller resolved
+ * above. The server still owns the forced package rewrite; this supplies the client-side activity
+ * identity that its world loader requires before it can bind an ActivityClient.
+ */
+std::uint16_t* __fastcall get_secondary_selection(std::uint16_t* output) noexcept {
+    const auto original =
+        reinterpret_cast<GetSecondarySelection>(g_secondarySelectionHandle.original);
+    std::uint16_t* const result = original != nullptr ? original(output) : output;
+    if (result == nullptr || output == nullptr
+        || _ReturnAddress() != g_secondarySelectionReturn.load(std::memory_order_acquire)) {
+        return result;
+    }
+
+    const std::uint16_t native = *result;
+    const std::int16_t target = g_carrierTarget.load(std::memory_order_acquire);
+    if (native != 0) {
+        report_carrier_observation("preserve_nonzero", native, target);
+        return result;
+    }
+    if (target < 0 || !g_carrierOverrideArmed.exchange(false, std::memory_order_acq_rel)) {
+        return result;
+    }
+    *result = static_cast<std::uint16_t>(target);
+    report_carrier_observation("substitute", native, target);
+    return result;
+}
 
 /** Resolves the manager accessor and generic state request from the matched cleanup wrapper. */
 [[nodiscard]] bool resolve_activity_launch_target() noexcept {
@@ -134,6 +227,30 @@ std::atomic_bool g_activityLaunchPending{false};
                            std::memory_order_release);
     g_publishSessionGoal.store(reinterpret_cast<PublishSessionGoal>(publishTarget),
                                std::memory_order_release);
+    return true;
+}
+
+/** Resolves and detours the secondary local-selection getter used by setup state 30. */
+[[nodiscard]] bool resolve_secondary_selection_target() noexcept {
+    if (g_secondarySelectionInstalled.load(std::memory_order_acquire)) {
+        return true;
+    }
+    std::byte* const call =
+        patterns::scan_main_image_unique(kSecondarySelectionCall, "director_local_carrier");
+    if (call == nullptr) {
+        return false;
+    }
+    void* const target = patterns::resolve_relative(call + kSecondarySelectionOperand,
+                                                    call + kSecondarySelectionReturn);
+    if (target == nullptr) {
+        return false;
+    }
+    const hooking::detour::Spec spec{target, reinterpret_cast<void*>(&get_secondary_selection)};
+    if (!hooking::detour::install(spec, g_secondarySelectionHandle)) {
+        return false;
+    }
+    g_secondarySelectionReturn.store(call + kSecondarySelectionReturn, std::memory_order_release);
+    g_secondarySelectionInstalled.store(true, std::memory_order_release);
     return true;
 }
 
@@ -277,10 +394,35 @@ void report_release(std::uint32_t virtualKey) noexcept {
 
 } // namespace
 
+/** Installs and arms the exact-caller local carrier before orbit constructs its selection. */
+bool install_local_carrier() noexcept {
+    if (g_secondarySelectionInstalled.load(std::memory_order_acquire)) {
+        return true;
+    }
+
+    state::activity::defaults::ActivityDefaults defaults{};
+    state::activity::defaults::snapshot(defaults);
+    const std::int16_t target = defaults.defaultDestination.selection.activityIndex;
+    g_carrierTarget.store(target, std::memory_order_release);
+    if (target < 0 || target > state::activity::destination::kMaximumActivityIndex) {
+        report_carrier_install("invalid_fallback", target);
+        return false;
+    }
+    if (!resolve_secondary_selection_target()) {
+        g_carrierTarget.store(-1, std::memory_order_release);
+        report_carrier_install("attach_failed", target);
+        return false;
+    }
+    g_carrierOverrideArmed.store(true, std::memory_order_release);
+    report_carrier_install("installed", target);
+    return true;
+}
+
 /** Queues Destiny's own orbit-to-activity transition. */
 ActivityLaunchResult request_activity_launch() noexcept {
     ActivityLaunchResult result{};
-    result.targetResolved = resolve_activity_launch_target() && resolve_session_goal_targets();
+    result.targetResolved = resolve_activity_launch_target() && resolve_session_goal_targets()
+                            && g_secondarySelectionInstalled.load(std::memory_order_acquire);
     result.inOrbit = bootflow::in_orbit();
     result.requested = result.targetResolved && result.inOrbit;
     if (result.requested) {
@@ -361,6 +503,19 @@ void cancel() noexcept {
     g_virtualKey.store(0, std::memory_order_release);
     g_actionKeysResolved.store(false, std::memory_order_release);
     polled_input::release_key();
+}
+
+/** Cancels pending work and detaches the local-selection hook before client teardown. */
+void shutdown() noexcept {
+    cancel();
+    g_carrierOverrideArmed.store(false, std::memory_order_release);
+    g_carrierTarget.store(-1, std::memory_order_release);
+    if (!g_secondarySelectionInstalled.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+    (void)hooking::detour::uninstall(g_secondarySelectionHandle);
+    g_secondarySelectionHandle = {};
+    g_secondarySelectionReturn.store(nullptr, std::memory_order_release);
 }
 
 } // namespace sunrise::client::hooks::director

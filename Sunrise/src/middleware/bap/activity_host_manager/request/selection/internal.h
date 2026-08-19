@@ -105,4 +105,18 @@ read_hash(encoding::bits::Reader& reader, bool& present, std::uint32_t& value) n
 [[nodiscard]] bool parse(encoding::bits::Reader& reader,
                          ActivityManagerSelection& selection) noexcept;
 
+/**
+ * Reads the descriptor suffix shared with activity-message type 11. The reader must start at
+ * the
+ * five-bit skull count, after both optional identity fields.
+ * @param reader Bounded
+ * MSB-first reader positioned at the skull count.
+ * @param selection Receives skull, destination,
+ * package, and tail scalars.
+ * @return True when the complete continuation is present and
+ * structurally valid.
+ */
+[[nodiscard]] bool parse_continuation(encoding::bits::Reader& reader,
+                                      ActivityManagerSelection& selection) noexcept;
+
 } // namespace sunrise::middleware::bap::activity_host_manager::request::selection

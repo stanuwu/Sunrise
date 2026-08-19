@@ -3,8 +3,11 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <string_view>
 
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/activity_global_state_encoder.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
 #include "../../../../../state/activity/defaults/activity_defaults_snapshot.h"
@@ -124,6 +127,24 @@ bool append_global_state_notification(Scratch& scratch,
     // size actually produced, not that minimum.
     SecureZeroMemory(scratch.responseBody.data(), messageSize);
     if (encoded) {
+        std::array<char, core::log::kLineCapacity> line{};
+        const int reportSize =
+            std::snprintf(line.data(),
+                          line.size(),
+                          "ev=activity stage=global_state result=encoded name=%.*s activity=%d "
+                          "from_activity=%d reason=%d descriptor_bits=%u body_bytes=%zu",
+                          static_cast<int>(selection.packageNameLength),
+                          reinterpret_cast<const char*>(selection.packageName.data()),
+                          static_cast<int>(selection.activityIndex),
+                          static_cast<int>(selection.previousActivityIndex),
+                          static_cast<int>(selection.reason),
+                          static_cast<unsigned>(selection.descriptorBitLength),
+                          messageSize);
+        if (reportSize > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(reportSize)});
+        }
         middleware::secure_channel::advance_nonce(nonce);
     } else {
         if (written > initialWritten) {

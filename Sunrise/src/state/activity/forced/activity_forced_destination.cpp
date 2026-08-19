@@ -16,6 +16,20 @@ constexpr std::size_t kBitsPerByte = 8;
 constexpr unsigned kPackageNameBias = 128;
 /** The most significant bit of a byte, where each packed field starts. */
 constexpr unsigned kHighBit = 0x80;
+/** Reads one most-significant-bit-first value from descriptor storage. */
+[[nodiscard]] constexpr bool read_bit(std::span<const std::byte> bits,
+                                      std::size_t bitOffset) noexcept {
+    const unsigned mask = kHighBit >> (bitOffset % kBitsPerByte);
+    return (static_cast<unsigned>(bits[bitOffset / kBitsPerByte]) & mask) != 0;
+}
+
+/** Writes one most-significant-bit-first value into descriptor storage. */
+constexpr void write_bit(std::span<std::byte> bits, std::size_t bitOffset, bool value) noexcept {
+    std::byte& target = bits[bitOffset / kBitsPerByte];
+    const unsigned mask = kHighBit >> (bitOffset % kBitsPerByte);
+    target = static_cast<std::byte>(value ? static_cast<unsigned>(target) | mask
+                                          : static_cast<unsigned>(target) & ~mask);
+}
 
 /**
  * Writes one byte into bit-packed storage at a bit offset.
@@ -25,14 +39,56 @@ constexpr unsigned kHighBit = 0x80;
  */
 void write_byte(std::span<std::byte> bits, std::size_t bitOffset, unsigned value) noexcept {
     for (std::size_t index = 0; index < kBitsPerByte; ++index) {
-        const std::size_t bit = bitOffset + index;
-        std::byte& target = bits[bit / kBitsPerByte];
-        const unsigned mask = kHighBit >> (bit % kBitsPerByte);
         const bool set = (value >> (kBitsPerByte - 1 - index) & 1U) != 0;
-        target = static_cast<std::byte>(set ? static_cast<unsigned>(target) | mask
-                                            : static_cast<unsigned>(target) & ~mask);
+        write_bit(bits, bitOffset + index, set);
     }
 }
+
+/** Inserts the fixed name payload after an optional field's clear presence bit. */
+[[nodiscard]] constexpr bool
+insert_name_field(destination::DestinationSelection& selection) noexcept {
+    const std::size_t nameBits = destination::kPackageNameCapacity * kBitsPerByte;
+    const std::size_t oldLength = selection.descriptorBitLength;
+    const std::size_t presenceBit = selection.descriptorNamePresenceBit;
+    const std::size_t tailBit = presenceBit + 1;
+    if (oldLength == 0 || presenceBit >= oldLength
+        || oldLength + nameBits > selection.descriptorBits.size() * kBitsPerByte) {
+        return false;
+    }
+
+    for (std::size_t sourceEnd = oldLength; sourceEnd > tailBit; --sourceEnd) {
+        const std::size_t sourceBit = sourceEnd - 1;
+        write_bit(selection.descriptorBits,
+                  sourceBit + nameBits,
+                  read_bit(selection.descriptorBits, sourceBit));
+    }
+    for (std::size_t bit = tailBit; bit < tailBit + nameBits; ++bit) {
+        write_bit(selection.descriptorBits, bit, false);
+    }
+    write_bit(selection.descriptorBits, presenceBit, true);
+    selection.descriptorBitLength = static_cast<std::uint16_t>(oldLength + nameBits);
+    selection.descriptorNameBit = static_cast<std::uint16_t>(tailBit);
+    selection.hasDescriptorName = true;
+    return true;
+}
+
+/** Proves insertion leaves every opaque tail bit in order. */
+[[nodiscard]] constexpr bool insertion_preserves_tail() noexcept {
+    destination::DestinationSelection selection{};
+    selection.descriptorBitLength = 13;
+    selection.descriptorNamePresenceBit = 4;
+    write_bit(selection.descriptorBits, 5, true);
+    write_bit(selection.descriptorBits, 12, true);
+    if (!insert_name_field(selection)) {
+        return false;
+    }
+    return selection.descriptorBitLength == 333 && selection.descriptorNameBit == 5
+           && selection.hasDescriptorName && read_bit(selection.descriptorBits, 4)
+           && read_bit(selection.descriptorBits, 325) && !read_bit(selection.descriptorBits, 326)
+           && read_bit(selection.descriptorBits, 332);
+}
+
+static_assert(insertion_preserves_tail());
 
 /**
  * Rewrites the captured descriptor's package name with the forced one.
@@ -43,7 +99,8 @@ void write_byte(std::span<std::byte> bits, std::size_t bitOffset, unsigned value
 [[nodiscard]] bool rename_descriptor(destination::DestinationSelection& selection,
                                      const ForcedDestination& value) noexcept {
     const std::size_t nameBits = destination::kPackageNameCapacity * kBitsPerByte;
-    if (!selection.hasDescriptorName || selection.descriptorBitLength == 0
+    if ((!selection.hasDescriptorName && !insert_name_field(selection))
+        || selection.descriptorBitLength == 0
         || selection.descriptorNameBit + nameBits > selection.descriptorBitLength) {
         return false;
     }
@@ -107,11 +164,14 @@ bool apply(destination::DestinationSelection& selection) noexcept {
         selection.packageName[index] = static_cast<std::int8_t>(value.packageName[index]);
     }
     selection.packageNameLength = value.packageNameLength;
-    // All three are absent when a destination is forced rather than picked. Many package names
-    // map to several definitions, so no index can be derived from a name.
-    selection.reason = destination::kMinimumReason;
-    selection.previousActivityIndex = destination::kAbsentActivityIndex;
-    selection.activityIndex = destination::kAbsentActivityIndex;
+    // A captured descriptor owns its carrier identity. With no descriptor, no activity index can
+    // be derived from a package name because several definitions can name the same package.
+    const bool hasCarrierDescriptor = selection.descriptorBitLength != 0;
+    if (!hasCarrierDescriptor) {
+        selection.reason = destination::kMinimumReason;
+        selection.previousActivityIndex = destination::kAbsentActivityIndex;
+        selection.activityIndex = destination::kAbsentActivityIndex;
+    }
     selection.elementIndex = destination::kAbsentElementIndex;
     selection.hasElementIndex = false;
     // The client named its arrival for the destination it picked, so both wire hashes go with it.
@@ -135,6 +195,7 @@ bool apply(destination::DestinationSelection& selection) noexcept {
         selection.descriptorBits = {};
         selection.descriptorBitLength = 0;
         selection.descriptorNameBit = 0;
+        selection.descriptorNamePresenceBit = 0;
         selection.hasDescriptorName = false;
     }
     return true;

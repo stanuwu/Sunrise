@@ -8,6 +8,7 @@
 
 #include "../../encoding/bit_reader.h"
 #include "../../encoding/byte_order.h"
+#include "../activity_host_manager/request/selection/internal.h"
 #include "start_activity.h"
 
 namespace sunrise::middleware::bap::activity_message::start_activity {
@@ -84,10 +85,13 @@ bool parse_start_activity(std::span<const std::byte> input,
         return false;
     }
 
-    // The nested selection record starts here. Its field widths are unresolved, so the rest of the
-    // body is one bounded region rather than a sequence this parser can claim to have read.
+    // Preserve the established partial/framing boundary. The shared continuation is diagnostic:
+    // failure leaves the packet accepted to the same prefix as before.
     request.tailBits = static_cast<std::uint32_t>(reader.remaining_bits());
     consumedBits = input.size() * encoding::kBitsPerByte - reader.remaining_bits();
+    auto continuationReader = reader;
+    request.hasContinuation = activity_host_manager::request::selection::parse_continuation(
+        continuationReader, request.continuation);
     return true;
 }
 

@@ -22,13 +22,26 @@ namespace {
 
 constexpr std::uint64_t kIzanamiUuidDomain = 0x495A414E414D4930ULL;
 
-constexpr std::array<BaseplateTemplate, 5> kTemplates{{
+constexpr std::array<BaseplateTemplate, 6> kTemplates{{
     {"blank_baseplate",
      "Blank Baseplate",
      "Izanami Baseplate",
      "custom package required",
      "Targets a scenery-free Izanami map package. Stock Destiny destinations are deliberately "
      "disabled for this template until that package has been generated and validated.",
+     "",
+     0,
+     0,
+     0,
+     false,
+     false,
+     false},
+    {"tower_carrier_control",
+     "Tower Carrier Control",
+     "activity index 20 fallback",
+     "forced redirect disabled",
+     "Controlled direct-launch test for the early local carrier. It clears every forced package "
+     "override before requesting Destiny's native activity-session transition.",
      "",
      0,
      0,
@@ -569,8 +582,16 @@ LaunchResult EditorWorkspace::launch_selected_template() {
     }
     LaunchResult result = open_selected_template();
     runtime::baseplate_composition::disarm();
-    const bool armed = arm_forced_destination(target);
-    if (!armed) {
+    const bool carrierControl = target.id == std::string_view{"tower_carrier_control"};
+    bool destinationReady = false;
+    if (carrierControl) {
+        state::activity::forced::clear();
+        destinationReady = true;
+        report("carrier_control", "forced_destination_cleared", target.id);
+    } else {
+        destinationReady = arm_forced_destination(target);
+    }
+    if (!destinationReady) {
         std::array<char, 320> message{};
         const int written =
             std::snprintf(message.data(),
@@ -593,12 +614,13 @@ LaunchResult EditorWorkspace::launch_selected_template() {
         message.data(),
         message.size(),
         launch.requested
-            ? "%s queued Destiny's native activity-session transition. No Director click is "
-              "required."
-            : (launch.targetResolved
-                   ? "%s armed its destination, but Destiny is not currently in orbit."
-                   : "%s armed its destination, but this game build's native activity-launch "
-                     "target was not resolved."),
+            ? (carrierControl ? "%s queued Destiny's native activity-session transition with "
+                                "forced package redirection disabled."
+                              : "%s queued Destiny's native activity-session transition. No "
+                                "Director click is required.")
+            : (launch.targetResolved ? "%s is ready, but Destiny is not currently in orbit."
+                                     : "%s is ready, but this game build's native activity-launch "
+                                       "target was not resolved."),
         target.displayName.data());
     lastGameplayModeMessage_ = written > 0
                                    ? std::string(message.data(), static_cast<std::size_t>(written))
@@ -607,7 +629,7 @@ LaunchResult EditorWorkspace::launch_selected_template() {
     report("launch_native", launch.requested ? "ok" : "native_request_fail", target.id);
     return {.workspaceStarted = true,
             .destinationTransitionStarted = launch.requested,
-            .forcedDestinationArmed = true,
+            .forcedDestinationArmed = !carrierControl,
             .nativeActivityLaunchRequested = launch.requested,
             .uiHidden = launch.uiHidden,
             .message = lastLaunchMessage_};

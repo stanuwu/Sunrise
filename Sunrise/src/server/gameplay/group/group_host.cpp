@@ -354,9 +354,15 @@ void fill_activity_host(wire::ActivityHostParameter& body,
         [&update](bits::Writer& writer) { return wire::write_parameter_update(writer, update); });
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::debug,
-           "ev=gameplay stage=activityhost result=%s host=0x%llX address=0x%08X port=%u names=%s",
+           "ev=gameplay stage=activityhost result=%s selection=0x%llX host=0x%llX "
+           "source_activity=%d target_activity=%d descriptor_bits=%u address=0x%08X port=%u "
+           "names=%s",
            sent ? "queued" : "deferred",
+           static_cast<unsigned long long>(update.activityHost.selectionId),
            static_cast<unsigned long long>(update.activityHost.hostId),
+           static_cast<int>(binding.source.destination.activityIndex),
+           static_cast<int>(binding.target.destination.activityIndex),
+           static_cast<unsigned>(binding.target.destination.descriptorBitLength),
            update.activityHost.address,
            static_cast<unsigned>(update.activityHost.port),
            wire::parameter_names(update.carriedMask, names.data(), names.size()));

@@ -17,6 +17,12 @@ struct ActivityLaunchResult {
 };
 
 /**
+ * Installs the one-shot local activity-carrier probe during the main-image hook sweep.
+ * A miss is diagnostic and must not prevent ordinary Sunrise activation.
+ */
+[[nodiscard]] bool install_local_carrier() noexcept;
+
+/**
  * Queues Destiny's native orbit-to-activity transition for the next game-thread poll.
  * @return Resolution and orbit validation details for the request.
  */
@@ -34,5 +40,8 @@ void poll() noexcept;
 
 /** Cancels pending launch work and releases the spoofed key. */
 void cancel() noexcept;
+
+/** Cancels pending work and detaches the local-selection hook before client teardown. */
+void shutdown() noexcept;
 
 } // namespace sunrise::client::hooks::director

@@ -59,6 +59,8 @@ struct ActivityManagerSelection final {
     std::array<std::int8_t, kActivityManagerPackageNameCapacity> packageName{};
     /** First name byte's bit offset from the descriptor's first bit. Valid with hasPackageName. */
     std::size_t packageNameBitOffset{};
+    /** Package-name presence bit, retained even when the optional field carried no name. */
+    std::size_t packageNamePresenceBitOffset{};
     /** Last root boolean. Its gameplay meaning is not known. */
     bool trailingFlag{};
     /**

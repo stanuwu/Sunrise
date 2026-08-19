@@ -116,6 +116,7 @@ constexpr std::size_t kPairEntryWidth = 13;
 [[nodiscard]] bool read_package_name(Reader& reader,
                                      std::size_t descriptorStart,
                                      ActivityManagerSelection& selection) noexcept {
+    selection.packageNamePresenceBitOffset = descriptorStart - reader.remaining_bits();
     bool present = false;
     if (!read_presence(reader, present)) {
         return false;
@@ -147,17 +148,20 @@ constexpr std::size_t kPairEntryWidth = 13;
 }
 
 /**
- * Reads the safe prefix fields and skips the identity-like scalar and the runtime nonce.
- * @param reader Bounded MSB-first descriptor reader.
+ * Reads the scalar prefix and skips the identity-like scalar and runtime nonce.
+ * The shared
+ * continuation starts immediately after this function returns.
+ * @param reader Bounded MSB-first
+ * descriptor reader.
  * @param selection Temporary scalar-only selection output.
- * @return True when every prefix field and skull entry is complete.
+ * @return True when every prefix field is complete.
  */
 [[nodiscard]] bool read_prefix(Reader& reader, ActivityManagerSelection& selection) noexcept {
     return read_i8(reader, kReasonWidth, kScalarBias, selection.reason)
            && read_i16(reader, kActivityIndexWidth, kScalarBias, selection.sourceActivityIndex)
            && read_i16(reader, kActivityIndexWidth, kScalarBias, selection.activityIndex)
            && read_element_index(reader, selection) && skip_optional(reader, kSensitiveScalarWidth)
-           && skip_optional(reader, kSensitiveScalarWidth) && read_skulls(reader, selection);
+           && skip_optional(reader, kSensitiveScalarWidth);
 }
 
 /**
@@ -212,7 +216,14 @@ constexpr std::size_t kPairEntryWidth = 13;
 /** Reads one complete descriptor into safe scalar-only output. */
 bool parse(Reader& reader, ActivityManagerSelection& selection) noexcept {
     const std::size_t descriptorStart = reader.remaining_bits();
-    return read_prefix(reader, selection) && read_destination(reader, descriptorStart, selection)
+    return read_prefix(reader, selection) && read_skulls(reader, selection)
+           && read_destination(reader, descriptorStart, selection) && skip_tail(reader);
+}
+
+/** Reads the suffix shared by service 6 and activity-message type 11. */
+bool parse_continuation(Reader& reader, ActivityManagerSelection& selection) noexcept {
+    const std::size_t continuationStart = reader.remaining_bits();
+    return read_skulls(reader, selection) && read_destination(reader, continuationStart, selection)
            && skip_tail(reader);
 }
 

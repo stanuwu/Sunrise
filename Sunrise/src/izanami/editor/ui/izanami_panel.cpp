@@ -450,10 +450,13 @@ void draw_launcher(workspace::EditorWorkspace& editor) noexcept {
         ImGui::TableSetColumnIndex(1);
         const workspace::BaseplateTemplate& current =
             templates[selected < templates.size() ? selected : 0];
+        const bool carrierControl = current.id == std::string_view{"tower_carrier_control"};
         text(current.displayName);
         ImGui::Text("Destination: %s", current.destinationHint.data());
         ImGui::Text("Bubble: %s", current.bubbleHint.data());
-        ImGui::Text("Redirect target: %s", current.hasLaunchTarget ? "available" : "not validated");
+        ImGui::Text("Redirect target: %s",
+                    carrierControl ? "disabled for control"
+                                   : (current.hasLaunchTarget ? "available" : "not validated"));
         ImGui::TextWrapped("%s", current.description.data());
         ImGui::EndTable();
     }
@@ -462,7 +465,8 @@ void draw_launcher(workspace::EditorWorkspace& editor) noexcept {
     const workspace::BaseplateTemplate& selectedTemplate =
         templates[selected < templates.size() ? selected : 0];
     const bool packageAuthoring = selectedTemplate.id == std::string_view{"blank_baseplate"};
-    ImGui::BeginDisabled(!selectedTemplate.hasLaunchTarget && !packageAuthoring);
+    const bool carrierControl = selectedTemplate.id == std::string_view{"tower_carrier_control"};
+    ImGui::BeginDisabled(!selectedTemplate.hasLaunchTarget && !packageAuthoring && !carrierControl);
     if (ImGui::Button(packageAuthoring ? "Build Map Package" : "Launch In Destiny",
                       ImVec2(180.0F, 0.0F))) {
         (void)editor.launch_selected_template();
@@ -1201,6 +1205,7 @@ void draw_inspector(workspace::EditorWorkspace& editor, EditorUiState& state) {
 void draw_runtime_bridge(workspace::EditorWorkspace& editor, EditorUiState& state) {
     const workspace::BaseplateTemplate& current = editor.active_template();
     const bool packageAuthoring = current.id == std::string_view{"blank_baseplate"};
+    const bool carrierControl = current.id == std::string_view{"tower_carrier_control"};
     const runtime::CapabilitySet capabilities = editor.runtime_capabilities();
     const runtime::WorldContext world = editor.runtime_world();
     ImGui::SeparatorText("Destiny Bridge");
@@ -1211,14 +1216,16 @@ void draw_runtime_bridge(workspace::EditorWorkspace& editor, EditorUiState& stat
     ImGui::SameLine();
     ImGui::Text("Bubble: %s", current.bubbleHint.data());
     ImGui::SameLine();
-    ImGui::Text("Redirect: %s", current.hasLaunchTarget ? "available" : "not validated");
+    ImGui::Text("Redirect: %s",
+                carrierControl ? "disabled for control"
+                               : (current.hasLaunchTarget ? "available" : "not validated"));
     ImGui::Text("World: destination %u / bubble %u", world.destination.value, world.bubble.value);
     ImGui::Text("Object runtime: static %s, pattern %s, transform write %s",
                 capabilities.has(runtime::Capability::worldStaticSpawn) ? "yes" : "no",
                 capabilities.has(runtime::Capability::worldPatternSpawn) ? "yes" : "no",
                 capabilities.has(runtime::Capability::worldTransformWrite) ? "yes" : "no");
 
-    ImGui::BeginDisabled(!current.hasLaunchTarget && !packageAuthoring);
+    ImGui::BeginDisabled(!current.hasLaunchTarget && !packageAuthoring && !carrierControl);
     if (ImGui::Button(packageAuthoring ? "Build Map Package" : "Launch In Destiny")) {
         (void)editor.launch_selected_template();
     }

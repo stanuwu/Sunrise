@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -61,6 +62,10 @@ constexpr std::array<std::byte, 4> kSuccessResult{
 constexpr std::size_t kCachedDataBranchOffset = 2;
 constexpr std::array<std::byte, 2> kAlwaysTakeSuccessBranch{std::byte{0x90}, std::byte{0xE9}};
 
+/** Izanami's staged package and the patch currently under loader investigation. */
+constexpr std::uint16_t kIzanamiPackageId = 0x0687;
+constexpr std::uint16_t kIzanamiPatchId = 6;
+
 /** ABI recovered from the validator's native call site. */
 using ValidateHeader = std::int32_t(__fastcall*)(const std::uint32_t* validationMask,
                                                  std::uint16_t packageGroup,
@@ -75,6 +80,50 @@ std::byte* g_extendedHeaderResult{};
 std::array<std::byte, kSuccessResult.size()> g_extendedHeaderOriginal{};
 std::byte* g_cachedDataBranch{};
 std::array<std::byte, kAlwaysTakeSuccessBranch.size()> g_cachedDataBranchOriginal{};
+std::atomic_bool g_stockHeaderObserved{false};
+std::atomic_bool g_izanamiHeaderObserved{false};
+
+/** Records one stock control and one Izanami target at the native header-validation boundary. */
+void report_header_observation(std::uint16_t packageId,
+                               std::uint16_t patchId,
+                               std::uint32_t headerFileSize,
+                               std::int32_t expectedFileSize,
+                               std::uint8_t rsaTrusted,
+                               std::int32_t validatorResult) noexcept {
+    const bool izanami = packageId == kIzanamiPackageId && patchId == kIzanamiPatchId;
+    if (izanami) {
+        if (g_izanamiHeaderObserved.exchange(true, std::memory_order_acq_rel)) {
+            return;
+        }
+    } else {
+        if (packageId == kIzanamiPackageId
+            || g_stockHeaderObserved.exchange(true, std::memory_order_acq_rel)) {
+            return;
+        }
+    }
+
+    std::array<char, 256> event{};
+    const int length = std::snprintf(event.data(),
+                                     event.size(),
+                                     "ev=package_trust stage=header_sensor result=%s kind=%s "
+                                     "package=0x%04X patch=%u header=%u expected=%u rsa=%u "
+                                     "validator=%d",
+                                     validatorResult > 0 ? "accepted" : "rejected",
+                                     izanami ? "izanami" : "stock",
+                                     packageId,
+                                     patchId,
+                                     headerFileSize,
+                                     static_cast<std::uint32_t>(expectedFileSize),
+                                     static_cast<unsigned>(rsaTrusted),
+                                     validatorResult);
+    if (length > 0) {
+        core::log::write(
+            core::log::Channel::client,
+            core::log::Level::info,
+            std::string_view(event.data(),
+                             (std::min)(static_cast<std::size_t>(length), event.size() - 1)));
+    }
+}
 
 /** Writes instruction bytes and restores the page's original protection. */
 template <std::size_t Size>
@@ -100,13 +149,13 @@ std::int32_t __fastcall validate_header(const std::uint32_t* validationMask,
                                         std::uint64_t buildSignature,
                                         std::int32_t expectedFileSize,
                                         std::uint16_t localeToken,
-                                        std::uint8_t,
+                                        std::uint8_t rsaTrusted,
                                         const void* header) noexcept {
+    std::uint16_t packageId = 0;
+    std::uint16_t patchId = 0;
+    std::uint32_t headerFileSize = 0;
     if (header != nullptr) {
         const auto* const bytes = static_cast<const std::byte*>(header);
-        std::uint16_t packageId = 0;
-        std::uint16_t patchId = 0;
-        std::uint32_t headerFileSize = 0;
         std::memcpy(&packageId, bytes + 0x04, sizeof packageId);
         std::memcpy(&patchId, bytes + 0x20, sizeof patchId);
         std::memcpy(&headerFileSize, bytes + 0x164, sizeof headerFileSize);
@@ -130,8 +179,13 @@ std::int32_t __fastcall validate_header(const std::uint32_t* validationMask,
         }
     }
     const auto original = reinterpret_cast<ValidateHeader>(g_handle.original);
-    return original(
+    const std::int32_t result = original(
         validationMask, packageGroup, buildSignature, expectedFileSize, localeToken, 1, header);
+    if (header != nullptr) {
+        report_header_observation(
+            packageId, patchId, headerFileSize, expectedFileSize, rsaTrusted, result);
+    }
+    return result;
 }
 
 } // namespace
@@ -153,6 +207,8 @@ bool install() noexcept {
                          "ev=package_trust stage=resolve result=fail");
         return false;
     }
+    g_stockHeaderObserved.store(false, std::memory_order_release);
+    g_izanamiHeaderObserved.store(false, std::memory_order_release);
     const hooking::detour::Spec spec{target, reinterpret_cast<void*>(&validate_header)};
     if (!hooking::detour::install(spec, g_handle)) {
         core::log::write(core::log::Channel::client,
@@ -209,6 +265,8 @@ bool uninstall() noexcept {
         }
     }
     const bool detached = !g_handle.attached || hooking::detour::uninstall(g_handle);
+    g_stockHeaderObserved.store(false, std::memory_order_release);
+    g_izanamiHeaderObserved.store(false, std::memory_order_release);
     return restored && detached;
 }
 

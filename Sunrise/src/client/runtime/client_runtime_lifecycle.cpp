@@ -5,6 +5,7 @@
 #include "../hooks/bootflow/bootflow_hook_lifecycle.h"
 #include "../hooks/config_getter/config_getter_lifecycle.h"
 #include "../hooks/cursor/runtime.h"
+#include "../hooks/director/director_handoff.h"
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/network/runtime.h"
@@ -63,6 +64,7 @@ bool shutdown() noexcept {
         return false;
     }
     hooks::bitmap::uninstall();
+    hooks::director::shutdown();
     hooks::bootflow::uninstall();
     hooks::infinite_ammo::uninstall();
     hooks::noclip::uninstall();

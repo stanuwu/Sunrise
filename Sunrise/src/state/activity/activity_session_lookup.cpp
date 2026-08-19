@@ -30,6 +30,7 @@ namespace {
            && left.descriptorBits == right.descriptorBits
            && left.descriptorBitLength == right.descriptorBitLength
            && left.descriptorNameBit == right.descriptorNameBit
+           && left.descriptorNamePresenceBit == right.descriptorNamePresenceBit
            && left.hasDescriptorName == right.hasDescriptorName;
 }
 
