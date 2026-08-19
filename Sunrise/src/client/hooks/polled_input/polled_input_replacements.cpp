@@ -73,8 +73,13 @@ __declspec(noinline) SHORT WINAPI get_key_state(int virtualKey) noexcept {
  * @return Released while the interface is open and the caller is the game, else the real state.
  */
 __declspec(noinline) SHORT WINAPI get_async_key_state(int virtualKey) noexcept {
-    if (g_interfaceOpen.load(std::memory_order_relaxed) && caller_is_game(_ReturnAddress())) {
-        return kKeyReleased;
+    if (caller_is_game(_ReturnAddress())) {
+        if (g_interfaceOpen.load(std::memory_order_relaxed)) {
+            return kKeyReleased;
+        }
+        if (is_forced(virtualKey)) {
+            return kKeyHeld;
+        }
     }
     const GetAsyncKeyState next = original<GetAsyncKeyState>(HookSlot::getAsyncKeyState);
     if (next == nullptr) {

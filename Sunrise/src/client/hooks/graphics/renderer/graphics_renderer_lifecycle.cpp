@@ -6,6 +6,7 @@
 
 #include "../../../../core/ui/layout/layout.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
+#include "../../../../izanami/editor/ui/izanami_panel.h"
 #include "../../cursor/runtime.h"
 #include "../../polled_input/runtime.h"
 #include "../input/input.h"
@@ -321,7 +322,8 @@ void present(IDXGISwapChain* swapChain) noexcept {
     ReleaseSRWLockExclusive(&g_rendererLock);
 
     // The cursor policy calls Win32, so it runs only after the renderer lock is gone.
-    const bool visible = core::ui::runtime::snapshot().visible;
+    const bool visible = core::ui::runtime::snapshot().visible
+                         || ::sunrise::izanami::editor::ui::standalone_visible();
     cursor::apply_visibility(visible);
     polled_input::apply_visibility(visible);
     // The game makes its raw-mouse window during startup, so the first tries find nothing.

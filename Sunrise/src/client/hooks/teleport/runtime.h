@@ -29,6 +29,18 @@ void publish_targets(ControlledHandle controlled, CameraSingleton singleton) noe
 /** Drops those functions and every latched request. */
 void clear_targets() noexcept;
 
+/** @return True when an object record belongs to the locally controlled player. */
+[[nodiscard]] bool is_controlled_object(const void* object) noexcept;
+
+/** Reads the local player's current world position. */
+[[nodiscard]] bool current_position(Vector& output) noexcept;
+
+/** Reads the local player's controlled-object handle. */
+[[nodiscard]] bool current_controlled_handle(std::uint32_t& output) noexcept;
+
+/** Reads the most recently published camera position and forward vector. */
+[[nodiscard]] bool current_camera_pose(Vector& position, Vector& forward) noexcept;
+
 /**
  * Attaches the camera and physics hooks that carry the teleport.
  * @return True when all three targets were found and both detours attached.
@@ -109,6 +121,13 @@ void apply_pending(void* component) noexcept;
  * @return True when the body was found and written.
  */
 [[nodiscard]] bool write_position(void* component, const Vector& position) noexcept;
+
+/**
+ * Moves the local player's rigid body to an absolute world position and publishes it
+ * immediately.
+ * @return True when a live local-player component accepted the move.
+ */
+[[nodiscard]] bool move_local_player(const Vector& position) noexcept;
 
 /**
  * Reads the linear velocity of the body a physics component drives.

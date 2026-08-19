@@ -8,6 +8,7 @@
 
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -62,6 +63,7 @@ CameraSingleton g_cameraSingleton{};
 
 /** Written by the camera hook and read by the physics hook. Both run on the same thread. */
 std::array<float, kVectorLanes> g_forward{};
+std::array<float, kVectorLanes> g_cameraPosition{};
 
 /**
  * Reads one value out of game memory without faulting on a torn pointer.
@@ -345,6 +347,53 @@ void clear_targets() noexcept {
     g_playerComponent.store(nullptr, std::memory_order_relaxed);
 }
 
+/** Reports whether one object record belongs to the locally controlled player. */
+bool is_controlled_object(const void* object) noexcept {
+    if (object == nullptr || g_controlledHandle == nullptr) {
+        return false;
+    }
+    std::uint32_t controlled = kInvalidHandle;
+    std::uint32_t candidate = kInvalidHandle;
+    g_controlledHandle(&controlled);
+    constexpr std::size_t kObjectHandle = 0x2C;
+    return controlled != kInvalidHandle
+           && read_at(static_cast<const std::byte*>(object) + kObjectHandle, candidate)
+           && (controlled & kHandleIndexMask) == (candidate & kHandleIndexMask);
+}
+
+/** Reads the local player's current world position. */
+bool current_position(Vector& output) noexcept {
+    output = {};
+    std::byte* const physics = g_playerComponent.load(std::memory_order_acquire);
+    return physics != nullptr && g_controlledHandle != nullptr && owns_player(physics)
+           && read_position(physics, output);
+}
+
+/** Reads the current controlled-object handle. */
+bool current_controlled_handle(std::uint32_t& output) noexcept {
+    output = kInvalidHandle;
+    if (g_controlledHandle == nullptr) {
+        return false;
+    }
+    g_controlledHandle(&output);
+    return output != kInvalidHandle;
+}
+
+/** Reads the camera pose most recently published by the camera hook. */
+bool current_camera_pose(Vector& position, Vector& forward) noexcept {
+    position = g_cameraPosition;
+    forward = g_forward;
+    if (!g_forwardValid.load(std::memory_order_acquire)) {
+        return false;
+    }
+    for (std::size_t lane = 0; lane < kVectorLanes; ++lane) {
+        if (!std::isfinite(position[lane]) || !std::isfinite(forward[lane])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /** Publishes the camera forward vector for the physics tick that follows. */
 void capture_forward(std::uint32_t playerIndex) noexcept {
     if (playerIndex == kInvalidHandle || g_cameraSingleton == nullptr) {
@@ -354,11 +403,15 @@ void capture_forward(std::uint32_t playerIndex) noexcept {
     if (camera == nullptr) {
         return;
     }
+    const std::byte* const block = camera + kCameraBlockStride * playerIndex;
     std::array<float, kVectorLanes> forward{};
-    if (!read_at(camera + kCameraBlockStride * playerIndex + kCameraForwardX, forward)) {
+    std::array<float, kVectorLanes> position{};
+    if (!read_at(block + kCameraForwardX, forward)
+        || !read_at(block + kCameraPositionX, position)) {
         return;
     }
     g_forward = forward;
+    g_cameraPosition = position;
     g_forwardValid.store(true, std::memory_order_release);
 }
 
@@ -390,21 +443,25 @@ void poll_request() noexcept {
 
 /** Moves the local player if a request is pending and this component owns them. */
 void apply_pending(void* component) noexcept {
-    if (!g_active.load(std::memory_order_relaxed) || component == nullptr
-        || g_controlledHandle == nullptr) {
-        return;
-    }
-    const bool requested = g_requested.load(std::memory_order_acquire);
-    // The ownership test runs per component, so it is paid only while a request is open or until
-    // the player's component is known. Once it is known, an ordinary tick costs two atomic reads.
-    if (!requested && g_playerComponent.load(std::memory_order_relaxed) != nullptr) {
-        return;
-    }
-    if (!owns_player(static_cast<std::byte*>(component))) {
+    if (component == nullptr || g_controlledHandle == nullptr) {
         return;
     }
     std::byte* const physics = static_cast<std::byte*>(component);
-    g_playerComponent.store(physics, std::memory_order_relaxed);
+    std::byte* const cached = g_playerComponent.load(std::memory_order_relaxed);
+    if (cached != physics) {
+        if (cached != nullptr && owns_player(cached)) {
+            return;
+        }
+        g_playerComponent.store(nullptr, std::memory_order_relaxed);
+        if (!owns_player(physics)) {
+            return;
+        }
+        g_playerComponent.store(physics, std::memory_order_relaxed);
+    }
+    if (!g_active.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const bool requested = g_requested.load(std::memory_order_acquire);
     if (!requested || !g_forwardValid.load(std::memory_order_acquire)) {
         return;
     }
@@ -460,6 +517,17 @@ bool write_position(void* component, const Vector& position) noexcept {
     }
     std::byte* const body = body_of(static_cast<std::byte*>(component));
     return body != nullptr && write_vector(body + kBodyPositionX, position);
+}
+
+/** Moves the local player to an absolute world position and runs the native sync immediately. */
+bool move_local_player(const Vector& position) noexcept {
+    std::byte* const component = g_playerComponent.load(std::memory_order_acquire);
+    if (component == nullptr || g_controlledHandle == nullptr || !owns_player(component)
+        || !write_position(component, position)) {
+        return false;
+    }
+    invoke_sync(component);
+    return true;
 }
 
 /** Reads the linear velocity of the body a physics component drives. */

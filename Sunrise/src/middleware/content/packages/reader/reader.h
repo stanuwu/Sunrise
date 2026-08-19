@@ -209,4 +209,38 @@ void close_files(Scratch& scratch) noexcept;
                             std::vector<std::byte>& output,
                             std::uint32_t& classId) noexcept;
 
+/**
+ * Decodes one complete package block from the highest installed patch.
+ * Package patch authoring needs the untouched bytes around one modified entry, so reading only
+ * the entry is insufficient.
+ * @param source Package directory and borrowed block keys.
+ * @param scratch Reader-owned cache and decode storage.
+ * @param packageId Package whose latest table selects the block.
+ * @param blockIndex Block-table ordinal.
+ * @param output Receives the exact decoded block bytes.
+ * @param record Receives the latest table row that selected the stored block.
+ * @return True when the block authenticates and decompresses completely.
+ */
+[[nodiscard]] bool read_block(const Source& source,
+                              Scratch& scratch,
+                              std::uint16_t packageId,
+                              std::uint32_t blockIndex,
+                              std::vector<std::byte>& output,
+                              layout::BlockRecord& record) noexcept;
+
+/**
+ * Resolves one stable 64-bit handle through a package's public wide-hash table.
+ * @param directory Installed package directory.
+ * @param packageId Package whose content contains the wide reference.
+ * @param hash64 Stable authored handle.
+ * @param tag Receives the installed build's 32-bit tag handle.
+ * @param classId Receives the referenced tag class recorded beside the mapping.
+ * @return True when the latest package has one structurally valid matching row.
+ */
+[[nodiscard]] bool resolve_hash64(std::wstring_view directory,
+                                  std::uint16_t packageId,
+                                  std::uint64_t hash64,
+                                  std::uint32_t& tag,
+                                  std::uint32_t& classId) noexcept;
+
 } // namespace sunrise::middleware::content::packages::reader

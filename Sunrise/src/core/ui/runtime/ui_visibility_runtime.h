@@ -29,8 +29,17 @@ void shutdown() noexcept;
 [[nodiscard]] VisibilitySnapshot snapshot() noexcept;
 
 /**
+ * Sets the menu visibility without synthesizing a key press.
+ * @param visible New visibility
+ * target.
+ * @return True when visibility runtime is initialized and enabled.
+ */
+[[nodiscard]] bool set_visible(bool visible) noexcept;
+
+/**
  * Applies one key press to the visibility state.
- * @param virtualKey Code from Client input handling.
+ * @param virtualKey Code from Client input
+ * handling.
  * @return True only when the active binding matched and visibility changed.
  */
 [[nodiscard]] bool toggle_for_key(UINT virtualKey) noexcept;

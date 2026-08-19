@@ -13,9 +13,11 @@
 #include "../hooks/polled_input/runtime.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
+#include "../hooks/spawn/spawn_runtime.h"
 #include "../hooks/teleport/runtime.h"
 #include "../movement/movement_settings_store.h"
 #include "../player/player_settings_store.h"
+#include "../spawn/spawn_keybind_store.h"
 #include "../targets/game.h"
 #include "../targets/steam_targets.h"
 #include "../ui/runtime/client_ui_module_runtime.h"
@@ -28,6 +30,7 @@ namespace sunrise::client {
 bool initialize(void* module) noexcept {
     // Loaded before the pages register, so each page draws saved values on its first frame.
     movement::initialize(module);
+    spawn::initialize(module);
     player::initialize(module);
     return ui::runtime::initialize();
 }
@@ -63,6 +66,7 @@ bool shutdown() noexcept {
     hooks::bootflow::uninstall();
     hooks::infinite_ammo::uninstall();
     hooks::noclip::uninstall();
+    hooks::spawn::uninstall();
     hooks::teleport::uninstall();
     hooks::queuez::uninstall();
     if (!hooks::config_getter::uninstall()) {
@@ -99,6 +103,7 @@ bool shutdown() noexcept {
     runtime::g_graphicsStage = runtime::StageState::pending;
     runtime::g_platformStage = runtime::StageState::pending;
     ui::runtime::shutdown();
+    spawn::shutdown();
     player::shutdown();
     movement::shutdown();
     core::log::write(core::log::Channel::client, core::log::Level::info, "ev=shutdown result=ok");

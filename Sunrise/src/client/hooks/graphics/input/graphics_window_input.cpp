@@ -6,6 +6,7 @@
 #include "../../../../core/ui/layout/credits/sunrise_credits_badge.h"
 #include "../../../../core/ui/modules/logs/logs.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
+#include "../../../../izanami/editor/ui/izanami_panel.h"
 #include "../renderer/renderer.h"
 #include "input.h"
 
@@ -95,13 +96,18 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM word, LPARAM
         return forward(original, window, message, word, value);
     }
     // The toggle key is ours in both states, so the game cannot see half of a press.
-    const bool toggleKey =
+    const bool coreToggleKey =
         is_key_message(message)
         && static_cast<UINT>(word) == core::ui::runtime::snapshot().toggleVirtualKey;
+    const bool forgeToggleKey =
+        is_key_message(message)
+        && static_cast<UINT>(word) == ::sunrise::izanami::editor::ui::standalone_toggle_key();
     if (message == WM_KEYUP || message == WM_SYSKEYUP) {
         (void)core::ui::runtime::toggle_for_key(static_cast<UINT>(word));
+        (void)::sunrise::izanami::editor::ui::toggle_standalone_for_key(static_cast<UINT>(word));
     }
-    if (renderer::handle_window_message(window, message, word, value) || toggleKey) {
+    if (renderer::handle_window_message(window, message, word, value) || coreToggleKey
+        || forgeToggleKey) {
         // A visible UI takes every input message; the game's procedure never sees it.
         renderer::dispatch_pending_input_release(window);
         if (message == WM_INPUT) {

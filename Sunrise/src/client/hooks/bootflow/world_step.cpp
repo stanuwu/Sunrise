@@ -25,6 +25,8 @@ constexpr auto kStepSignature = signature<signature_length(kStepSignatureText)>(
 
 /** First step that loads the map with no player in it yet. */
 constexpr std::int32_t kActivityLoadFirst = 33;
+/** `setup:orbit`, the only state from which Izanami may request activity creation. */
+constexpr std::int32_t kOrbit = 29;
 /** `activity:in_world`. The fade is armed by then, so a spawn now releases it. */
 constexpr std::int32_t kInWorld = 38;
 /** No step has been published. */
@@ -39,6 +41,15 @@ std::atomic<GetStep> g_step{nullptr};
 std::atomic_int32_t g_publishedStep{kNoStep};
 /** Tick that step was read on. A stale value reads as out of world. */
 std::atomic_uint64_t g_publishedTick{0};
+
+/** @return True when a requested step is both current and fresh. */
+[[nodiscard]] bool is_fresh_step(std::int32_t expected) noexcept {
+    if (g_publishedStep.load(std::memory_order_relaxed) != expected) {
+        return false;
+    }
+    const std::uint64_t published = g_publishedTick.load(std::memory_order_acquire);
+    return published != 0 && GetTickCount64() - published < kStepStaleMs;
+}
 
 /** @return The current step, or the absent one when the accessor is missing. */
 [[nodiscard]] std::int32_t read_step() noexcept {
@@ -56,11 +67,12 @@ void poll_world_step() noexcept {
 
 /** Reports whether the player is in a loaded destination. */
 bool in_world() noexcept {
-    if (g_publishedStep.load(std::memory_order_relaxed) != kInWorld) {
-        return false;
-    }
-    const std::uint64_t published = g_publishedTick.load(std::memory_order_acquire);
-    return published != 0 && GetTickCount64() - published < kStepStaleMs;
+    return is_fresh_step(kInWorld);
+}
+
+/** Reports whether the client is currently parked in orbit. */
+bool in_orbit() noexcept {
+    return is_fresh_step(kOrbit);
 }
 
 /** Maps the client's own boot-flow step onto the world phase. */

@@ -51,6 +51,17 @@ VisibilitySnapshot snapshot() noexcept {
     return result;
 }
 
+/** Sets the menu visibility directly. */
+bool set_visible(bool visible) noexcept {
+    AcquireSRWLockExclusive(&g_visibilityLock);
+    const bool handled = g_state.initialized && g_state.enabled;
+    if (handled) {
+        g_state.visible = visible;
+    }
+    ReleaseSRWLockExclusive(&g_visibilityLock);
+    return handled;
+}
+
 /** Applies one key press to the visibility state. */
 bool toggle_for_key(UINT virtualKey) noexcept {
     AcquireSRWLockExclusive(&g_visibilityLock);

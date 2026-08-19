@@ -12,9 +12,11 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../../izanami/runtime/baseplate_composition.h"
 #include "../../hooking/detour.h"
 #include "../../player/player_position.h"
 #include "../bootflow/bootflow_hook_lifecycle.h"
+#include "../director/director_handoff.h"
 #include "../fly/fly.h"
 #include "../polled_input/runtime.h"
 #include "../sword_skate/sword_skate.h"
@@ -85,6 +87,8 @@ std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
     hooks::fly::poll_toggle();
     client::player::position::poll();
     hooks::bootflow::poll_world_step();
+    hooks::director::poll();
+    izanami::runtime::baseplate_composition::poll();
     return result;
 }
 
@@ -200,6 +204,7 @@ void uninstall() noexcept {
     }
     clear_targets();
     clear_action_keys();
+    hooks::director::cancel();
     hooks::fly::reset();
     client::player::position::reset();
     polled_input::release_key();

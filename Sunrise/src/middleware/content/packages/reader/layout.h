@@ -36,8 +36,17 @@ struct HeaderOffsets {
     static constexpr std::size_t kEntryCount = 0xB4;
     /** Block-table row count. */
     static constexpr std::size_t kBlockCount = 0xD0;
+    /** Relative-pointer tables for names and stable 64-bit tag handles. */
+    static constexpr std::size_t kMiscData = 0xF0;
     /** File offset of the entry table, whose rows this reader indexes by tag. */
     static constexpr std::size_t kEntryTable = 0x110;
+};
+
+/** One public row translating a stable 64-bit handle into the installed build's tag. */
+struct Hash64Record {
+    std::uint64_t hash64{};
+    std::uint32_t hash32{};
+    std::uint32_t classId{};
 };
 
 /** One 16-byte entry-table record. */
@@ -81,8 +90,10 @@ inline constexpr std::size_t kBlockRecordSize = 48;
 
 static_assert(sizeof(EntryRecord) == kEntryRecordSize);
 static_assert(sizeof(BlockRecord) == kBlockRecordSize);
+static_assert(sizeof(Hash64Record) == 16);
 static_assert(std::is_trivially_copyable_v<EntryRecord>);
 static_assert(std::is_trivially_copyable_v<BlockRecord>);
+static_assert(std::is_trivially_copyable_v<Hash64Record>);
 
 /** @param record Entry-table record. @return Its decoded block placement. */
 [[nodiscard]] constexpr EntryPlacement placement(const EntryRecord& record) noexcept {

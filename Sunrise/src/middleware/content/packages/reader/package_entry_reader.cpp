@@ -196,4 +196,38 @@ bool read_tag(const Source& source,
     return read_tag(source, scratch, tag, output, classId);
 }
 
+/** Decodes one whole block selected by the latest installed package table. */
+bool read_block(const Source& source,
+                Scratch& scratch,
+                std::uint16_t packageId,
+                std::uint32_t blockIndex,
+                std::vector<std::byte>& output,
+                layout::BlockRecord& record) noexcept {
+    output.clear();
+    record = {};
+    if (source.keys == nullptr) {
+        return false;
+    }
+    Path stem{};
+    std::uint32_t patchIndex = 0;
+    Path path{};
+    Header header{};
+    if (!find_latest(source.directory, packageId, stem, patchIndex)
+        || !build_path(stem, patchIndex, path)
+        || !block_cache::load_header(path, packageId, patchIndex, scratch, header)
+        || blockIndex >= header.blockCount
+        || !table_cache::block_record(scratch, path, header, blockIndex, record)) {
+        return false;
+    }
+    const auto nonce = package_nonce(
+        std::span<const std::byte, crypto::aes_gcm::kNonceSize>(source.keys->nonceBase), packageId);
+    std::span<const std::byte> plaintext{};
+    if (!load_block(stem, packageId, record, *source.keys, nonce, scratch, plaintext)) {
+        record = {};
+        return false;
+    }
+    output.assign(plaintext.begin(), plaintext.end());
+    return !output.empty();
+}
+
 } // namespace sunrise::middleware::content::packages::reader

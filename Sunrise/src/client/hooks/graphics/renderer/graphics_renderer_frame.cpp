@@ -13,6 +13,7 @@
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
 #include "../../../../core/ui/theme/sunrise_ui_theme.h"
+#include "../../../../izanami/editor/ui/izanami_panel.h"
 #include "../input/input.h"
 #include "graphics_renderer_report.h"
 #include "state.h"
@@ -136,7 +137,9 @@ void render_frame_locked() noexcept {
         }
     }
     const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
-    transition_input_visibility_locked(visibility.visible);
+    const bool forgeVisible = ::sunrise::izanami::editor::ui::standalone_visible();
+    const bool modalVisible = visibility.visible || forgeVisible;
+    transition_input_visibility_locked(modalVisible);
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
@@ -145,9 +148,10 @@ void render_frame_locked() noexcept {
     // goes first, so the surface stays above it when the two meet.
     const bool hudDrawn = core::ui::hud::draw(visibility.enabled);
     const bool surfaceDrawn = core::ui::layout::render(visibility.visible);
+    const bool forgeDrawn = ::sunrise::izanami::editor::ui::draw_standalone();
     const bool busyDrawn = core::ui::busy::draw();
     const bool noticeDrawn = core::ui::notice::draw();
-    if (!hudDrawn && !surfaceDrawn && !busyDrawn && !noticeDrawn) {
+    if (!hudDrawn && !surfaceDrawn && !forgeDrawn && !busyDrawn && !noticeDrawn) {
         // A frame nobody claimed still drains backend state, and sends no draw data.
         ImGui::EndFrame();
         return;
@@ -165,8 +169,10 @@ bool handle_window_message(HWND window, UINT message, WPARAM word, LPARAM value)
     }
 
     const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
-    transition_input_visibility_locked(visibility.visible);
-    if (!visibility.visible) {
+    const bool forgeVisible = ::sunrise::izanami::editor::ui::standalone_visible();
+    const bool modalVisible = visibility.visible || forgeVisible;
+    transition_input_visibility_locked(modalVisible);
+    if (!modalVisible) {
         // Hidden input stays with the game and never enters Dear ImGui's event queue.
         ReleaseSRWLockExclusive(&g_rendererLock);
         return false;

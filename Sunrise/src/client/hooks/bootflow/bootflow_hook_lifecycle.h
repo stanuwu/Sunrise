@@ -26,4 +26,7 @@ void poll_world_step() noexcept;
  */
 [[nodiscard]] bool in_world() noexcept;
 
+/** @return True while the fresh published boot-flow step is `setup:orbit`. */
+[[nodiscard]] bool in_orbit() noexcept;
+
 } // namespace sunrise::client::hooks::bootflow
