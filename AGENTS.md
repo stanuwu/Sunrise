@@ -59,3 +59,9 @@ Use the authoritative commands and prerequisites in [README — Building](README
   paths valid relative to that file and update project/resource metadata together when adding an
   embedded resource.
 - Do not commit `build/`, `.vs/`, `.xwin-cache/`, IDE settings, or other ignored generated output.
+
+## Other
+
+- If the task requires out-of-scope/unreachable information that needs speculation/clarification
+  indicate that to the user, either in the form of choice questions or requests for information.
+  - e.g. some API call needs reverse engineering.
