@@ -21,21 +21,20 @@
 #include "../queuez/queuez_state_validation.h"
 
 namespace sunrise::server::bap::encrypted::body {
-namespace {
 
 /** One line carries the family and the root soid and nothing else. */
-constexpr std::size_t kSubscribeReportLimit = 96;
+static constexpr std::size_t kSubscribeReportLimit = 96;
 /** The svc-23 request identity sits after its entry count and both type bytes. */
-constexpr std::size_t kTranslationIdentityOffset = 4;
+static constexpr std::size_t kTranslationIdentityOffset = 4;
 /** A request shorter than this carries no identity to read. */
-constexpr std::size_t kTranslationRequestSize =
+static constexpr std::size_t kTranslationRequestSize =
     kTranslationIdentityOffset + middleware::encoding::kU64Size;
 
 /**
  * Identity already paired with the account soid, or zero before the first pairing.
  * There is one account, so this is process-wide rather than per connection.
  */
-std::atomic<std::uint64_t> g_translatedIdentity{0};
+static std::atomic<std::uint64_t> g_translatedIdentity{0};
 
 /**
  * Reports whether one svc-23 request may be paired with the account soid.
@@ -44,7 +43,7 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
  * @param requestBody Complete svc-23 request body.
  * @return True when this identity is the one paired, or the first to ask.
  */
-[[nodiscard]] bool pairs_identity(std::span<const std::byte> requestBody) noexcept {
+[[nodiscard]] static bool pairs_identity(std::span<const std::byte> requestBody) noexcept {
     if (requestBody.size() < kTranslationRequestSize) {
         return false;
     }
@@ -59,8 +58,6 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
                claimed, identity, std::memory_order_relaxed)
            || claimed == identity;
 }
-
-} // namespace
 
 /**
  * Processes the body for one authenticated service route.
@@ -211,6 +208,12 @@ bool process(const ServiceRoute& route,
             web_service::mutation_if<state::PendingProfileItemAcquisition>(webOutcome);
         const auto* itemDismantle =
             web_service::mutation_if<state::PendingItemDismantle>(webOutcome);
+        const auto* settingsUpdate =
+            web_service::mutation_if<state::PendingSettingsUpdate>(webOutcome);
+        if (settingsUpdate != nullptr) {
+            // WS-701 promises no immediate QueueZ after-image, so State alone is delayed.
+            outcome.transaction.emplace<state::PendingSettingsUpdate>(*settingsUpdate);
+        }
         if (equipmentSwap != nullptr) {
             // Equip is an optimistic Character-screen action. Its status-pair value is the exact
             // Family-4 revision whose following Queuez frame makes it authoritative. Stage that

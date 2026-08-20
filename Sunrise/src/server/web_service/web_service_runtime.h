@@ -17,7 +17,10 @@ struct Outcome {
     /** An opcode-504 pick moved the selection and its Family-4 object still has to follow. */
     bool hasSelectedCharacter{};
     std::uint64_t selectedCharacterSoid{};
-    /** A request prepares at most one State mutation; the alternative owns only that payload. */
+    /**
+     * A request prepares at most one State mutation; the alternative owns only that payload.
+     * Rejected actions and accepted no-op writebacks both leave this empty.
+     */
     using Mutation = std::variant<std::monostate,
                                   state::PendingEquipmentSwap,
                                   state::PendingSubclassSelection,
@@ -25,7 +28,8 @@ struct Outcome {
                                   state::PendingProfileItemAcquisition,
                                   state::PendingItemDismantle,
                                   state::PendingSocketPlug,
-                                  state::PendingItemState>;
+                                  state::PendingItemState,
+                                  state::PendingSettingsUpdate>;
     Mutation mutation{};
 };
 

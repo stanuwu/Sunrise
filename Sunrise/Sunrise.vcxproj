@@ -130,6 +130,7 @@
     <ClCompile Include="src\client\hooks\cursor\cursor_hook_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_device.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode504_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode701\opcode701_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode903_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode1901_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode402_codec.cpp" />
@@ -144,6 +145,7 @@
     <ClCompile Include="src\state\runtime\state_account_identity_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_profile_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_socket_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\state_account_settings_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_rolled_socket_plugs.cpp" />
     <ClCompile Include="src\state\runtime\state_account_item_action_runtime.cpp" />
     <ClCompile Include="src\core\ui\busy\ui_busy_overlay.cpp" />
@@ -408,6 +410,7 @@
     <ClCompile Include="src\state\account\account_state.cpp" />
     <ClCompile Include="src\state\account\inventory\inventory_state.cpp" />
     <ClCompile Include="src\state\account\settings\settings_state.cpp" />
+    <ClCompile Include="src\state\account\settings\settings_delta.cpp" />
     <ClCompile Include="src\state\equipment\light\calculation\equipment_light_calculation.cpp" />
     <ClCompile Include="src\state\equipment\light\resolution\configured_equipment_light_resolver.cpp" />
     <ClCompile Include="src\state\content\content_catalog.cpp" />
@@ -860,6 +863,7 @@
     <ClInclude Include="src\client\hooks\banner\banner_bind.h" />
     <ClInclude Include="src\client\hooks\banner\banner_hook_lifecycle.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode504.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode701\opcode701_codec.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode903.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode1901.h" />
     <ClInclude Include="src\core\ui\busy\busy.h" />
@@ -1034,7 +1038,9 @@
     <ClInclude Include="src\state\account\account_state.h" />
     <ClInclude Include="src\state\account\inventory\inventory_state.h" />
     <ClInclude Include="src\state\account\settings\settings_state.h" />
+    <ClInclude Include="src\state\account\settings\settings_delta.h" />
     <ClInclude Include="src\state\account\settings\key_bindings.h" />
+    <ClInclude Include="src\state\account\settings\native_key_binding_map.h" />
     <ClInclude Include="src\state\equipment\light\definition.h" />
     <ClInclude Include="src\state\equipment\light\calculation\equipment_light_calculation.h" />
     <ClInclude Include="src\state\equipment\light\resolution\configured_equipment_light_resolver.h" />
@@ -1176,7 +1182,6 @@
     <ClInclude Include="src\middleware\datagen\family4\account\account_encoder.h" />
     <ClInclude Include="src\middleware\datagen\family4\account\layout.h" />
     <ClInclude Include="src\middleware\datagen\family4\account\preferences\layout.h" />
-    <ClInclude Include="src\middleware\datagen\family4\account\preferences\native_key_binding_map.h" />
     <ClInclude Include="src\middleware\datagen\family4\account\preferences\preferences_encoder.h" />
     <ClInclude Include="src\middleware\datagen\family4\character\abi.h" />
     <ClInclude Include="src\middleware\datagen\family4\loadout\definition.h" />
