@@ -1,14 +1,13 @@
 /**
- * Velocity fly. The movement keys set the player's velocity every tick.
- * Velocity is set, not added. Adding compounds each tick and leaves gravity in the vertical lane.
- * Setting it means releasing every key stops the player, which is what holds a hover.
- * The write goes in before the simulation step, and again before the sync that publishes it.
+ * Selectable fly. Velocity mode drives the body's velocity through the simulation. Coordinate mode
+ * moves its position after the simulation, bypassing collision without requiring noclip.
  */
 
 #include "fly.h"
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -34,6 +33,8 @@ namespace bindings = state::account::settings::bindings;
 constexpr SHORT kKeyHeldBit = static_cast<SHORT>(0x8000);
 /** Below this squared length a direction counts as none. */
 constexpr float kMinimumLengthSquared = 0.000001F;
+/** A resumed or stalled frame must not turn into one large coordinate jump. */
+constexpr float kMaximumStepSeconds = 0.05F;
 
 /** The horizontal lanes. The basis is X forward, Z up. */
 constexpr std::size_t kLaneX = 0;
@@ -81,6 +82,9 @@ float g_heightBeforeStep{0.0F};
 bool g_heightValid{false};
 /** Set while a press owns the vertical lane. The hold stands aside. */
 bool g_steered{false};
+/** Coordinate target authored before the step and written after collision resolution. */
+noclip::Vector g_coordinateTarget{};
+bool g_coordinateTargetValid{false};
 
 /**
  * Takes the account's movement bindings once they are loaded.
@@ -279,10 +283,13 @@ void apply(void* component) noexcept {
     if (!read_bindings()) {
         return;
     }
-    // Capped, because this is the field the game reads to decide the player hit something too
-    // hard. The step has the real speed; this is only what the sync publishes.
-    teleport::Vector velocity = desired_velocity(settings.flySpeed);
-    cap_speed(velocity, kPublishedSpeedCap);
+    teleport::Vector velocity{};
+    if (settings.flyMode == client::movement::FlyMode::velocity) {
+        // Capped, because this is the field the game reads to decide the player hit something too
+        // hard. The step has the real speed; this is only what the sync publishes.
+        velocity = desired_velocity(settings.flySpeed);
+        cap_speed(velocity, kPublishedSpeedCap);
+    }
     (void)teleport::write_velocity(component, velocity);
 }
 
@@ -291,21 +298,40 @@ bool enabled() noexcept {
     return client::movement::get().flyEnabled;
 }
 
-/** Sets the velocity the coming simulation step integrates. */
-void before_step(void* body) noexcept {
+/** Prepares the selected fly mode for the coming simulation step. */
+void before_step(void* body, float deltaTime) noexcept {
     g_heightValid = false;
+    g_coordinateTargetValid = false;
     if (body == nullptr || !read_bindings()) {
         return;
     }
-    noclip::write_body_velocity(body, desired_velocity(client::movement::get().flySpeed));
+    const client::movement::Settings settings = client::movement::get();
+    const teleport::Vector velocity = desired_velocity(settings.flySpeed);
+    if (settings.flyMode == client::movement::FlyMode::coordinate) {
+        noclip::read_body_position(body, g_coordinateTarget);
+        const float step = std::clamp(deltaTime, 0.0F, kMaximumStepSeconds);
+        for (std::size_t lane = 0; lane < teleport::kVectorLanes; ++lane) {
+            g_coordinateTarget[lane] += velocity[lane] * step;
+        }
+        noclip::write_body_velocity(body, noclip::Vector{});
+        g_coordinateTargetValid = true;
+        return;
+    }
+    noclip::write_body_velocity(body, velocity);
     noclip::Vector position{};
     noclip::read_body_position(body, position);
     g_heightBeforeStep = position[teleport::kVerticalLane];
     g_heightValid = true;
 }
 
-/** Puts back the height the step's gravity took. */
+/** Completes coordinate movement or puts back the height gravity took in velocity mode. */
 void after_step(void* body, bool heldElsewhere) noexcept {
+    if (body != nullptr && g_coordinateTargetValid) {
+        noclip::write_body_position(body, g_coordinateTarget);
+        noclip::write_body_velocity(body, noclip::Vector{});
+        g_coordinateTargetValid = false;
+        return;
+    }
     if (body == nullptr || heldElsewhere || g_steered || !g_heightValid) {
         return;
     }
@@ -325,6 +351,7 @@ void after_step(void* body, bool heldElsewhere) noexcept {
 void reset() noexcept {
     g_toggleDown.store(false, std::memory_order_release);
     g_heightValid = false;
+    g_coordinateTargetValid = false;
 }
 
 } // namespace sunrise::client::hooks::fly

@@ -37,11 +37,13 @@ bool g_pathResolved{};
 
 /** @param settings Candidate configuration. @return True when every field is in range. */
 [[nodiscard]] bool valid(const Settings& settings) noexcept {
+    const bool validFlyMode = settings.flyMode == FlyMode::velocity
+                              || settings.flyMode == FlyMode::coordinate;
     return settings.distance >= kMinimumDistance && settings.distance <= kMaximumDistance
            && settings.virtualKey <= kMaximumVirtualKey
            && settings.noclipToggleKey <= kMaximumVirtualKey
-           && settings.flyToggleKey <= kMaximumVirtualKey && settings.flySpeed >= kMinimumFlySpeed
-           && settings.flySpeed <= kMaximumFlySpeed;
+           && settings.flyToggleKey <= kMaximumVirtualKey && validFlyMode
+           && settings.flySpeed >= kMinimumFlySpeed && settings.flySpeed <= kMaximumFlySpeed;
 }
 
 /** @param reason Key naming the step that failed. */
@@ -138,6 +140,10 @@ void parse(std::string_view text, Settings& output) noexcept {
     if (scalar_for(text, "\"fly_toggle_key\"", scalar) && terminated(scalar, buffer)) {
         output.flyToggleKey = static_cast<std::uint32_t>(std::strtoul(buffer.data(), nullptr, 0));
     }
+    if (scalar_for(text, "\"fly_mode\"", scalar) && terminated(scalar, buffer)) {
+        const auto mode = static_cast<std::uint8_t>(std::strtoul(buffer.data(), nullptr, 0));
+        output.flyMode = static_cast<FlyMode>(mode);
+    }
     if (scalar_for(text, "\"fly_speed\"", scalar) && terminated(scalar, buffer)) {
         // Clamped, not refused. A speed saved before the maximum came down would otherwise fail
         // the range check and take every other movement setting with it.
@@ -166,6 +172,7 @@ void parse(std::string_view text, Settings& output) noexcept {
                                    "  \"sword_skate_enabled\": %s,\n"
                                    "  \"fly_enabled\": %s,\n"
                                    "  \"fly_toggle_key\": %u,\n"
+                                   "  \"fly_mode\": %u,\n"
                                    "  \"fly_speed\": %.3f\n}\n",
                                    settings.enabled ? "true" : "false",
                                    static_cast<double>(settings.distance),
@@ -175,6 +182,7 @@ void parse(std::string_view text, Settings& output) noexcept {
                                    settings.swordSkateEnabled ? "true" : "false",
                                    settings.flyEnabled ? "true" : "false",
                                    static_cast<unsigned>(settings.flyToggleKey),
+                                   static_cast<unsigned>(settings.flyMode),
                                    static_cast<double>(settings.flySpeed));
     if (size <= 0) {
         return false;

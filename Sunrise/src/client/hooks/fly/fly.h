@@ -21,13 +21,14 @@ void apply(void* component) noexcept;
 [[nodiscard]] bool enabled() noexcept;
 
 /**
- * Sets the velocity the coming simulation step integrates. Noclip reads it too.
+ * Prepares the selected fly mode for the coming simulation step. Noclip reads its velocity too.
  * @param body Character rigid body. Live only inside the step hook.
+ * @param deltaTime Duration of this simulation step in seconds.
  */
-void before_step(void* body) noexcept;
+void before_step(void* body, float deltaTime) noexcept;
 
 /**
- * Puts back the height the step's gravity took.
+ * Completes coordinate movement or restores the height held by velocity mode.
  * @param body Character rigid body. Live only inside the step hook.
  * @param heldElsewhere True when noclip carries the vertical lane.
  */

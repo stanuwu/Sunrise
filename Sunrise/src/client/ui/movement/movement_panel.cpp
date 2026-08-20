@@ -208,6 +208,18 @@ void draw() noexcept {
     ImGui::Spacing();
     ImGui::AlignTextToFramePadding();
     label::align();
+    ImGui::TextUnformatted("Type");
+    ImGui::SameLine(labelWidth);
+    ImGui::SetNextItemWidth(controlWidth);
+    int flyMode = static_cast<int>(settings.flyMode);
+    if (ImGui::Combo("##fly_mode", &flyMode, "Velocity\0Coordinate\0")) {
+        settings.flyMode = static_cast<client::movement::FlyMode>(flyMode);
+        changed = true;
+    }
+
+    ImGui::Spacing();
+    ImGui::AlignTextToFramePadding();
+    label::align();
     ImGui::TextUnformatted("Speed");
     ImGui::SameLine(labelWidth);
     ImGui::SetNextItemWidth(controlWidth);

@@ -235,7 +235,7 @@ std::int32_t __fastcall havok_step(std::byte* simulation, float deltaTime) noexc
     std::byte* const before = (enabledBeforeStep || flying) ? character_body(simulation) : nullptr;
     // Fly writes first, so the velocity read below is the one it asked for.
     if (flying) {
-        fly::before_step(before);
+        fly::before_step(before, deltaTime);
     }
     const bool hasBody = before != nullptr;
     if (hasBody) {
