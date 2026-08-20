@@ -52,11 +52,17 @@ const char* verdict_name(Verdict verdict) noexcept {
     return "unknown";
 }
 
-/** Validates one incident body from its first target to the end of its payload. */
-Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept {
-    parsed = {};
-    encoding::bits::Reader reader(payload);
+namespace {
 
+/**
+ * Frames one incident body, stopping at the first rule it breaks.
+ * A failed read leaves the cursor on the last complete field, so the caller can measure
+ * the prefix that framed whatever the verdict is.
+ * @param reader Reader sitting at the primary target field.
+ * @param parsed Already cleared. Receives every field reached before the verdict.
+ * @return accepted, or the first rule the body broke.
+ */
+[[nodiscard]] Verdict frame(encoding::bits::Reader& reader, Incident& parsed) noexcept {
     std::uint64_t field = 0;
     if (!reader.read(kTargetWidth, field)) {
         return Verdict::truncated;
@@ -131,9 +137,21 @@ Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept 
         parsed.payload[index] = static_cast<std::byte>(field);
     }
     parsed.hasPayload = true;
+    return Verdict::accepted;
+}
+
+} // namespace
+
+/** Validates one incident body from its first target to the end of its payload. */
+Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept {
+    parsed = {};
+    encoding::bits::Reader reader(payload);
+    const Verdict verdict = frame(reader, parsed);
+    // A refused body still reports the prefix that framed before the rule broke, so a
+    // receipt row separates a body that broke late from one that framed no field at all.
     parsed.consumedBits = static_cast<std::uint32_t>(payload.size() * encoding::kBitsPerByte
                                                      - reader.remaining_bits());
-    return Verdict::accepted;
+    return verdict;
 }
 
 } // namespace sunrise::middleware::bap::activity_message::incident

@@ -73,7 +73,11 @@ struct Incident {
     /** Both optional words, read only when the optional block is present. */
     std::uint32_t optionalWordA{};
     std::uint32_t optionalWordB{};
-    /** Bits the body used. Below the payload's own bit count means trailing padding. */
+    /**
+     * Bits the body used, whatever the verdict. On an accepted body, below the payload's
+     * own bit count means trailing padding. On a refused one it is the prefix that framed
+     * before the rule broke.
+     */
     std::uint32_t consumedBits{};
     /** Set when a compressed selector is present. Its bytes stay opaque. */
     bool hasCompressedSelector{};
@@ -91,7 +95,8 @@ struct Incident {
  * Every target index is range and poison checked before anything else, because an out-of-range
  * index is a crash in the consumer rather than a decode error.
  * @param payload Activity message payload after the envelope.
- * @param parsed Cleared first. Receives every field reached before the verdict.
+ * @param parsed Cleared first. Receives every field reached before the verdict, and the
+ * framed prefix in `consumedBits` whether or not the body passed.
  * @return accepted, or the first rule the body broke.
  */
 [[nodiscard]] Verdict validate(std::span<const std::byte> payload, Incident& parsed) noexcept;
