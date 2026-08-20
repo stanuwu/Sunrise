@@ -85,6 +85,7 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     layout::Object object{};
     object.accountSoid = state.primarySoid;
     object.selectedCharacterSoid = state::account::selected_character_soid(state);
+    object.profileSetupCompleted = state.profileSetupCompleted ? 1U : 0U;
     if (!roster::initialize(state, object.roster)
         || !preferences::encode(state.settings, object.preferences, object.bindings)) {
         return false;

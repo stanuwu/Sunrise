@@ -28,8 +28,10 @@ inline constexpr std::size_t kAccountHeaderTailSize = 128;
 inline constexpr std::size_t kRosterSelectionPaddingSize = 8;
 /** 24 reserved bytes separate selection from publicity deadlines. */
 inline constexpr std::size_t kSelectionPublicityPaddingSize = 24;
-/** 24 reserved bytes separate seen messages from account preferences. */
-inline constexpr std::size_t kSeenPreferencesPaddingSize = 24;
+/** 20 reserved bytes separate seen messages from the profile-setup completion byte. */
+inline constexpr std::size_t kSeenProfileSetupPaddingSize = 20;
+/** 3 reserved bytes align account preferences after the profile-setup completion byte. */
+inline constexpr std::size_t kProfileSetupPreferencesPaddingSize = 3;
 /** 607 reserved bytes separate preference and keybinding records. */
 inline constexpr std::size_t kPreferencesBindingsPaddingSize = 607;
 /** 456 reserved bytes follow the replicated keybinding record. */
@@ -68,6 +70,8 @@ inline constexpr std::size_t kSelectedCharacterSoidOffset = 1'832;
 inline constexpr std::size_t kPublicityExpiriesOffset = 1'864;
 /** The seen-message bit bank follows all fixed publicity deadlines. */
 inline constexpr std::size_t kSeenMessagesOffset = 2'888;
+/** One byte at native offset 0xB90 records whether the one-time profile setup is complete. */
+inline constexpr std::size_t kProfileSetupCompletedOffset = 2'960;
 /** The native preference record follows the seen-message padding. */
 inline constexpr std::size_t kPreferencesOffset = 2'964;
 /** The replicated keybinding record follows its fixed preference padding. */
@@ -131,7 +135,9 @@ struct Object {
     std::array<std::byte, kSelectionPublicityPaddingSize> selectionPublicityPadding{};
     std::array<std::uint64_t, kPublicityExpiryCapacity> publicityExpiries{};
     std::array<std::byte, kSeenMessageByteCount> seenMessages{};
-    std::array<std::byte, kSeenPreferencesPaddingSize> seenPreferencesPadding{};
+    std::array<std::byte, kSeenProfileSetupPaddingSize> seenProfileSetupPadding{};
+    std::uint8_t profileSetupCompleted{};
+    std::array<std::byte, kProfileSetupPreferencesPaddingSize> profileSetupPreferencesPadding{};
     preferences::Record preferences{};
     std::array<std::byte, kPreferencesBindingsPaddingSize> preferencesBindingsPadding{};
     preferences::BindingsRecord bindings{};
@@ -165,6 +171,7 @@ static_assert(offsetof(Object, roster) == kRosterOffset);
 static_assert(offsetof(Object, selectedCharacterSoid) == kSelectedCharacterSoidOffset);
 static_assert(offsetof(Object, publicityExpiries) == kPublicityExpiriesOffset);
 static_assert(offsetof(Object, seenMessages) == kSeenMessagesOffset);
+static_assert(offsetof(Object, profileSetupCompleted) == kProfileSetupCompletedOffset);
 static_assert(offsetof(Object, preferences) == kPreferencesOffset);
 static_assert(offsetof(Object, bindings) == kBindingsOffset);
 static_assert(offsetof(Object, profileItemCount) == kProfileItemCountOffset);

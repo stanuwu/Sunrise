@@ -25,6 +25,12 @@ struct Settings {
      */
     bool fadeRelease{true};
     /**
+     * Skips the one-time profile setup bootflow screens.
+     * Off by default: the server-authored account completion byte should drive normal behavior.
+     * Keep this only as a fallback for incomplete profile-state implementations.
+     */
+    bool skipProfileSetup{false};
+    /**
      * Forces the activity session's status 5-to-6 ready check.
      * Two of its five terms are client flags no host message reaches, so the host cannot open it.
      */

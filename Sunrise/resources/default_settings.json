@@ -31,6 +31,7 @@
       "config_guid": "d2legacy-0000-0000-0000-000000000001"
     },
     "fade_release": true,
+    "skip_profile_setup": false,
     "force_join_request_ready": true,
     "region_private": false,
     "pin_replicated_record": true,
@@ -146,6 +147,7 @@
     },
     "account": {
       "primary_soid": "0x9EAA300100100100",
+      "profile_setup_completed": true,
       "dismantle_rewards": [
         { "definition_hash": "0xBC53E66E", "quantity": 25, "rarity": "common" },
         { "definition_hash": "0xBC53E66E", "quantity": 50, "rarity": "uncommon" },
