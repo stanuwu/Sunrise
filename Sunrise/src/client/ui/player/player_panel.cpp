@@ -8,7 +8,9 @@
 #include <imgui.h>
 
 #include "../../../core/ui/components/toggle/ui_toggle_component.h"
+#include "../../hooks/godmode/godmode.h"
 #include "../../hooks/inactivity/inactivity_override.h"
+#include "../../hooks/no_turnback/no_turnback.h"
 #include "../../inactivity/inactivity_settings_store.h"
 #include "../../player/player_settings_store.h"
 
@@ -172,6 +174,36 @@ void draw() noexcept {
                                                                settings.infiniteAmmoEnabled);
     if (changed) {
         (void)client::player::publish(settings);
+    }
+
+    ImGui::Spacing();
+    ImGui::Spacing();
+    ImGui::TextUnformatted("No Turnback");
+    ImGui::Separator();
+    ImGui::TextWrapped("Disable turnback-zone enforcement.");
+    ImGui::Spacing();
+
+    if (toggle::control("Enabled##no_turnback", settings.noTurnbackEnabled)) {
+        if (hooks::no_turnback::set_enabled(settings.noTurnbackEnabled)) {
+            (void)client::player::publish(settings);
+        } else {
+            settings.noTurnbackEnabled = !settings.noTurnbackEnabled;
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Godmode");
+    ImGui::Separator();
+    ImGui::TextWrapped("Prevent the player from taking damage.");
+    ImGui::Spacing();
+
+    if (toggle::control("Enabled##godmode", settings.godmodeEnabled)) {
+        if (hooks::godmode::set_enabled(settings.godmodeEnabled)) {
+            (void)client::player::publish(settings);
+        } else {
+            settings.godmodeEnabled = !settings.godmodeEnabled;
+        }
     }
 
     ImGui::Spacing();

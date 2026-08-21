@@ -6,10 +6,12 @@
 #include "../hooks/config_getter/config_getter_lifecycle.h"
 #include "../hooks/cursor/runtime.h"
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
+#include "../hooks/godmode/godmode.h"
 #include "../hooks/inactivity/inactivity_override.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
+#include "../hooks/no_turnback/no_turnback.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
 #include "../hooks/polled_input/runtime.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
@@ -65,6 +67,8 @@ bool shutdown() noexcept {
     hooks::bitmap::uninstall();
     hooks::bootflow::uninstall();
     hooks::infinite_ammo::uninstall();
+    hooks::godmode::uninstall();
+    hooks::no_turnback::uninstall();
     hooks::inactivity::uninstall();
     hooks::noclip::uninstall();
     hooks::teleport::uninstall();

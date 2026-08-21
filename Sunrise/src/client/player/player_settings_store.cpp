@@ -70,6 +70,8 @@ void boolean_for(std::string_view text, std::string_view key, bool& output) noex
  */
 void parse(std::string_view text, Settings& output) noexcept {
     boolean_for(text, "\"infinite_ammo_enabled\"", output.infiniteAmmoEnabled);
+    boolean_for(text, "\"no_turnback_enabled\"", output.noTurnbackEnabled);
+    boolean_for(text, "\"godmode_enabled\"", output.godmodeEnabled);
 }
 
 /**
@@ -85,8 +87,14 @@ void parse(std::string_view text, Settings& output) noexcept {
     std::array<char, kFileCapacity> document{};
     const int size = std::snprintf(document.data(),
                                    document.size(),
-                                   "{\n  \"infinite_ammo_enabled\": %s\n}\n",
-                                   settings.infiniteAmmoEnabled ? "true" : "false");
+                                   "{\n"
+                                   "  \"infinite_ammo_enabled\": %s,\n"
+                                   "  \"no_turnback_enabled\": %s,\n"
+                                   "  \"godmode_enabled\": %s\n"
+                                   "}\n",
+                                   settings.infiniteAmmoEnabled ? "true" : "false",
+                                   settings.noTurnbackEnabled ? "true" : "false",
+                                   settings.godmodeEnabled ? "true" : "false");
     if (size <= 0) {
         return false;
     }
