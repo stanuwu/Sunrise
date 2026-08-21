@@ -35,7 +35,8 @@
     "region_private": false,
     "pin_replicated_record": true,
     "hold_spawn": true,
-    "spawn_hold_ms": 30000
+    "spawn_hold_ms": 30000,
+    "orbit_slice_set": ""
   },
   "server": {
     "bap_port": 30974,

@@ -12,6 +12,7 @@ activity_manager_selection_parser.h"
 #include "../../../../middleware/bap/activity_host_manager/response/activity_manager_response.h"
 #include "../../../../state/activity/defaults/activity_defaults_snapshot.h"
 #include "../../../../state/activity/forced/activity_forced_destination.h"
+#include "../../../../client/hooks/bootflow/bootflow_hook_lifecycle.h"
 #include "../../../../state/activity/runtime.h"
 #include "../../../../state/build_data/runtime.h"
 
@@ -168,6 +169,9 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
     if (state::activity::forced::apply(destination)) {
         report_forced(destination);
     }
+    client::hooks::bootflow::note_destination(
+        {reinterpret_cast<const char*>(destination.packageName.data()),
+         destination.packageNameLength});
     return state::activity::prepare_session(destination, sessionId, allocation);
 }
 

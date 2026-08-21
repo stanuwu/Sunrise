@@ -1,6 +1,31 @@
 #include "../parser.h"
 
 namespace sunrise::core::settings::parser {
+namespace {
+
+constexpr std::uint32_t kHashBasis = 0x811C9DC5U;
+constexpr std::uint32_t kHashPrime = 0x01000193U;
+
+[[nodiscard]] std::uint32_t orbit_hash(std::string_view name) noexcept {
+    if (name.empty() || name.size() > 48) {
+        return 0;
+    }
+    std::uint32_t value = kHashBasis;
+    for (char character : name) {
+        if (character >= 'A' && character <= 'Z') {
+            character = static_cast<char>(character - 'A' + 'a');
+        }
+        const bool usable = (character >= 'a' && character <= 'z')
+                            || (character >= '0' && character <= '9') || character == '_';
+        if (!usable) {
+            return 0;
+        }
+        value = (value * kHashPrime) ^ static_cast<std::uint8_t>(character);
+    }
+    return value;
+}
+
+} // namespace
 
 /** Parses Client-owned configuration over deterministic defaults. */
 bool Parser::client_settings(client::Settings& output) noexcept {
@@ -16,6 +41,7 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     bool hasPinReplicatedRecord = false;
     bool hasHoldSpawn = false;
     bool hasSpawnHoldMs = false;
+    bool hasOrbitSliceSet = false;
     if (consume('}')) {
         return true;
     }
@@ -67,6 +93,16 @@ bool Parser::client_settings(client::Settings& output) noexcept {
             }
             candidate.spawnHoldMs = value;
             hasSpawnHoldMs = true;
+        } else if (key == "orbit_slice_set") {
+            std::string_view name;
+            if (hasOrbitSliceSet || !string(name)) {
+                return false;
+            }
+            if (!name.empty() && orbit_hash(name) == 0) {
+                return false;
+            }
+            candidate.orbitSliceSetHash = orbit_hash(name);
+            hasOrbitSliceSet = true;
         } else if (!skip_value(0)) {
             return false;
         }

@@ -250,6 +250,7 @@
     <ClCompile Include="src\client\hooks\bootflow\orbit_handoff.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\owner_activity_slot.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\orbit_slice_set.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\orbit_seed.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\region_private.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\profile_setup_skip.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\join_request_ready.cpp" />

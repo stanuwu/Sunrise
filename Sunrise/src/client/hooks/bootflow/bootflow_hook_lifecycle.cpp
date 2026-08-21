@@ -19,6 +19,7 @@ std::atomic_bool g_installed{false};
 bool install() noexcept {
     const bool hold = install_character_select_hold();
     const bool sliceSet = install_orbit_slice_set();
+    const bool orbitSeed = install_orbit_seed();
     const bool skip = install_profile_setup_skip();
     const bool composition = install_composition_check();
     const bool handoff = install_orbit_handoff();
@@ -28,10 +29,10 @@ bool install() noexcept {
     const bool worldStep = install_world_step();
     const bool spawn = install_spawn_hold();
     const bool fade = install_fade_release();
-    const bool anyFix = hold || sliceSet || skip || composition || handoff || joinReady || ownerSlot
-                        || regionPrivate || worldStep || spawn || fade;
+    const bool anyFix = hold || sliceSet || orbitSeed || skip || composition || handoff
+                        || joinReady || ownerSlot || regionPrivate || worldStep || spawn || fade;
     g_installed.store(anyFix, std::memory_order_release);
-    return hold && sliceSet && skip && composition && handoff && joinReady && ownerSlot
+    return hold && sliceSet && orbitSeed && skip && composition && handoff && joinReady && ownerSlot
            && regionPrivate && worldStep && spawn && fade;
 }
 
@@ -46,6 +47,7 @@ void uninstall() noexcept {
     uninstall_orbit_handoff();
     uninstall_composition_check();
     uninstall_profile_setup_skip();
+    uninstall_orbit_seed();
     uninstall_orbit_slice_set();
     uninstall_character_select_hold();
     g_installed.store(false, std::memory_order_release);

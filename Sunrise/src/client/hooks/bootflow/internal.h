@@ -36,6 +36,10 @@ void uninstall_profile_setup_skip() noexcept;
 /** Detaches the orbit slice-set picker. */
 void uninstall_orbit_slice_set() noexcept;
 
+[[nodiscard]] bool install_orbit_seed() noexcept;
+
+void uninstall_orbit_seed() noexcept;
+
 /**
  * Attaches the solo composition fix, which clears the count the matchmaking check rejects.
  * @return True when the target is found and the detour attaches.

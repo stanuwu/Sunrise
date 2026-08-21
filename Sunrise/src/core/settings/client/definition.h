@@ -49,6 +49,7 @@ struct Settings {
     bool holdSpawn{true};
     /** How long the spawn waits for a load. `hold_spawn` decides whether it waits at all. */
     std::uint64_t spawnHoldMs{kDefaultSpawnHoldMs};
+    std::uint32_t orbitSliceSetHash{};
 };
 
 } // namespace sunrise::core::settings::client

@@ -1,6 +1,10 @@
 #pragma once
 
+#include <string_view>
+
 namespace sunrise::client::hooks::bootflow {
+
+void note_destination(std::string_view packageName) noexcept;
 
 /**
  * Attaches the boot-step fixes that carry sign-in through to character select.
