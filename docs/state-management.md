@@ -48,9 +48,11 @@ Sunrise supports up to three playable character slots per account (`kCharacterCa
 ### Equipment and loadouts
 
 Each character maintains dedicated equipment slots:
-- **Weapons**: Kinetic, Energy, Power.
+
+- **Weapons**: Kinetic, Energy, Heavy.
 - **Armor**: Helmet, Gauntlets, Chest Armor, Leg Armor, Class Item.
-- **Cosmetics**: Ghost Shell, Vehicle (Sparrow), Ship, Emblem, Emote.
+- **Other slots**: Ghost Shell, Vehicle (Sparrow), Ship, Subclass, Clan Banner, Emblem,
+  Emote, and Finisher.
 
 ### Unequipped inventory
 
@@ -69,6 +71,7 @@ When an account loads, Sunrise verifies that each character possesses all three 
 ### Ability nodes and selection
 
 Subclass talents organize into semantic ability categories:
+
 - Movement ability (Jumps, glides, lifts).
 - Super ability.
 - Melee ability.

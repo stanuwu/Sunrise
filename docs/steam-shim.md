@@ -21,26 +21,27 @@ graph TD
 
 Sunrise exports standard Steam API functions from `Sunrise/src/dllmain.cpp`:
 
-| Exported function | Purpose | Shim behavior |
-|---|---|---|
-| `SteamAPI_Init` | Initializes the Steam client API | Starts Sunrise Steam runtime and Core subsystems |
-| `SteamAPI_Shutdown` | Shuts down Steam client API | Stops Sunrise runtime cleanly |
-| `SteamAPI_RunCallbacks` | Dispatches pending API callbacks | Executes registered callback objects on calling thread |
-| `SteamAPI_RestartAppIfNecessary` | Checks if game was started via Steam | Returns `false` to prevent process restarts |
-| `SteamAPI_IsSteamRunning` | Checks if Steam client is active | Returns `true` |
-| `SteamAPI_GetHSteamUser` | Gets current Steam user handle | Returns local constant user handle |
-| `SteamAPI_GetHSteamPipe` | Gets current Steam IPC pipe handle | Returns local constant pipe handle |
-| `SteamAPI_RegisterCallback` | Registers a callback listener | Adds listener to local callback registry |
-| `SteamAPI_UnregisterCallback` | Removes a callback listener | Removes listener from registry |
-| `SteamAPI_RegisterCallResult` | Registers an async call result listener | Associates listener with pending API call ID |
-| `SteamAPI_UnregisterCallResult`| Removes an async call result listener | Disassociates listener |
-| `SteamInternal_ContextInit` | Initializes Steam context table | Populates context struct with interface pointers |
-| `SteamInternal_CreateInterface` | Instantiates interface by name | Returns pointer to matching virtual method table |
-| `SteamInternal_FindOrCreateUserInterface` | Finds or creates user interface | Returns pointer to user-scoped interface |
+| Exported function                         | Purpose                                     | Shim behavior                                          |
+| ----------------------------------------- | ------------------------------------------- | ------------------------------------------------------ |
+| `SteamAPI_Init`                           | Initializes the Steam client API            | Starts Sunrise Steam runtime and Core subsystems       |
+| `SteamAPI_Shutdown`                       | Shuts down Steam client API                 | Stops Sunrise runtime cleanly                          |
+| `SteamAPI_RunCallbacks`                   | Dispatches pending API callbacks            | Executes registered callback objects on calling thread |
+| `SteamAPI_RestartAppIfNecessary`          | Checks if game was started via Steam        | Returns `false` to prevent process restarts            |
+| `SteamAPI_IsSteamRunning`                 | Checks if the local Steam runtime is active | Returns the current runtime state                      |
+| `SteamAPI_GetHSteamUser`                  | Gets current Steam user handle              | Returns local constant user handle                     |
+| `SteamAPI_GetHSteamPipe`                  | Gets current Steam IPC pipe handle          | Returns local constant pipe handle                     |
+| `SteamAPI_RegisterCallback`               | Registers a callback listener               | Adds listener to local callback registry               |
+| `SteamAPI_UnregisterCallback`             | Removes a callback listener                 | Removes listener from registry                         |
+| `SteamAPI_RegisterCallResult`             | Registers an async call result listener     | Associates listener with pending API call ID           |
+| `SteamAPI_UnregisterCallResult`           | Removes an async call result listener       | Disassociates listener                                 |
+| `SteamInternal_ContextInit`               | Initializes Steam context table             | Populates context struct with interface pointers       |
+| `SteamInternal_CreateInterface`           | Instantiates interface by name              | Returns pointer to matching virtual method table       |
+| `SteamInternal_FindOrCreateUserInterface` | Finds or creates user interface             | Returns pointer to user-scoped interface               |
 
 ### Sunrise bootstrap exports
 
 Sunrise also exports functions for standalone loaders or test runners:
+
 - `SunriseInitialize()`: Initializes egress sandbox and Core runtime.
 - `SunriseActivateClient()`: Activates in-process game hooks.
 - `SunriseShutdown()`: Stops all subsystems.

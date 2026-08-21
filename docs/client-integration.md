@@ -79,7 +79,9 @@ Sunrise can also point the client to a separate server. This mode changes the ho
 
 ## 4. Egress sandbox hooks (`hooks/egress/`)
 
-- **DNS resolution (`egress_dns_replacements.cpp`)**: Intercepts `getaddrinfo` calls and redirects remote Bungie domain names to local loopback addresses (`127.0.0.1`).
+- **Name resolution (`egress/resolver/` and `egress/dns/`)**: Intercepts address-info and
+  DNS APIs. It redirects all non-numeric names to the configured external-server host, or to
+  loopback by default. DNS query replacements use the local name `localhost`.
 - **Winsock connections (`egress_connection_replacements.cpp`)**: Blocks external telemetry connections and prevents data leakage to third-party endpoints.
 - **Discovery responder (`egress_discovery_responder.cpp`)**: Handles local loopback discovery packets.
 
@@ -88,7 +90,9 @@ Sunrise can also point the client to a separate server. This mode changes the ho
 ## 5. Client boot and activity admission
 
 The game requires several client states before it loads an activity. Sunrise installs separate hooks for:
+
 - Character selection.
+- Orbit slice-set setup.
 - Profile setup.
 - Activity composition.
 - Orbit handoff.
@@ -125,7 +129,8 @@ Sunrise also installs hooks for diagnostics, interface rendering, and player mec
 - **Fly mode (`hooks/fly/`)**: Writes local player velocity before the physics step to allow flying and hovering.
 - **Noclip mode (`hooks/noclip/`)**: Disables player collision meshes against world geometry.
 - **Teleport (`hooks/teleport/`)**: Overwrites player 3D position coordinates.
-- **Infinite ammo (`hooks/infinite_ammo/`)**: Prevents decrementing weapon magazine counts when firing.
+- **Infinite ammo (`hooks/infinite_ammo/`)**: Keeps reserve ammunition and sword supply full.
+  Magazine writes still pass through unchanged.
 - **Inactivity override (`hooks/inactivity/`)**: Resets player AFK timers to prevent idle kicks.
 
 ---

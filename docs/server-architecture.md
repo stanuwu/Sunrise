@@ -52,7 +52,7 @@ sequenceDiagram
     participant BAP as BAP Router
     participant State as State Layer
 
-    Client->>BAP: Request (Opcode 402 / 801 / 901)
+    Client->>BAP: Mutating request (for example, opcode 402 / 403 / 801 / 903)
     BAP->>State: Prepare mutation (Preconditions & snapshots)
     BAP->>BAP: Stage response payload
     BAP->>State: Commit mutation under lock
@@ -63,6 +63,7 @@ sequenceDiagram
 ### Push notification staging
 
 The server maintains push notification queues for connected clients:
+
 - **Activity arrivals**: Notifies the client when session members enter an activity.
 - **Membership updates**: Synchronizes character rosters and fireteam slots.
 - **Queuez updates**: Broadcasts modified state family objects.
@@ -83,24 +84,25 @@ The gameplay server simulates the interactive world, synchronizes peers, and pro
 
 ### Physics and world simulation
 
-The world host executes a fixed-step simulation loop:
+Gameplay endpoint processing drains and routes datagrams separately from the fixed-step world
+service loop. Inside `HostTickProcessor`, one service tick runs in this order:
 
 ```mermaid
 flowchart TD
-    A["1. Drain incoming datagrams from socket"] --> B["2. Process DTLS decryption & reassembly"]
-    B --> C["3. Validate actor motion updates (MotionValidator)"]
-    C --> D["4. Advance world step simulation timer"]
-    D --> E["5. Execute scheduled HostCommands"]
-    E --> F["6. Compute entity visibility per bubble (InterestManager)"]
-    F --> G["7. Encode & replicate packets to clients"]
+    A["1. Synchronize actor bodies"] --> B["2. Run controller navigation"]
+    B --> C["3. Run physics and collect pose commits"]
+    C --> D["4. Run combat"]
+    D --> E["5. Evaluate triggers"]
+    E --> F["6. Apply objective credit"]
+    F --> G["7. Run timers"]
 ```
 
 ### World simulation components
 
-- **`BubbleHost`**: Manages geographical world partitions (bubbles) and handles loading transitions between areas.
-- **`HostWorld`**: Holds active actors, entity transforms, velocity vectors, and simulation clocks.
+- **`BubbleHost`**: Composes the built-in world services and owns the active world slots.
+- **`WorldRunner`**: Executes one world's activity policy, commands, actors, and fixed ticks.
 - **`ActorControllerService`**: Updates actor positions, health values, and state flags.
 - **`MotionValidator`**: Enforces velocity thresholds and prevents illegal client position leaps.
 - **`InterestManager`**: Filters entity replication so clients receive updates only for entities in their active bubble.
-- **`HostCommand` and `HostJournal`**: Logs world state transitions and provides rollback checkpoints.
-- **`FallbackPolicy`**: Provides safe default world behavior when no mission script is active.
+- **`HostCommand` and `CommandJournal`**: Represent host actions and persist committed command records.
+- **`ScriptlessPolicy`**: Provides inert fallback behavior when no mission policy is active.

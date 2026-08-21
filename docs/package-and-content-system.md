@@ -21,6 +21,7 @@ graph TD
 ### 1. Package header
 
 The package file begins with a binary header:
+
 - **Magic identifier**: Validates file integrity.
 - **Package identifier**: 16-bit integer identifying the package family.
 - **Patch identifier**: Suffix index (such as `_0.pkg`, `_1.pkg`). Higher patch numbers override earlier versions.
@@ -29,20 +30,25 @@ The package file begins with a binary header:
 
 ### 2. Entry table
 
-The entry table contains fixed-width records for each stored tag:
-- **Tag handle**: 32-bit handle combining the package ID (upper bits) and entry index (lower 13 bits).
-- **Class ID**: 32-bit integer identifying the asset type (for example, scenario, item definition, or texture).
-- **Starting block index**: Index into the block table where the tag data begins.
-- **Starting offset**: Byte offset within the uncompressed block.
-- **Uncompressed length**: Total length of the asset in bytes.
+The entry table contains 16-byte records for each stored tag:
+
+- **`reference`**: 32-bit class or reference identifier used by class scans.
+- **`typeInfo`**: 32-bit packed type information.
+- **`blockInfo`**: 64-bit packed placement containing the starting block, starting offset, and
+  uncompressed length.
+
+The reader derives a tag handle from the package ID and entry index. The entry index occupies the
+low 13 bits.
 
 ### 3. Block table
 
-Data is divided into discrete blocks (nominally 64 KB per block):
-- **Compressed size**: Number of bytes stored on disk.
-- **Uncompressed size**: Decompressed size in memory.
-- **Encryption flags**: Flags indicating whether the block requires AES decryption.
-- **Patch hash**: Verification hash for block data integrity.
+Data is divided into discrete 256 KiB decompressed blocks (`kBlockSize = 0x40000`). Each
+48-byte block record stores:
+
+- **File offset and stored size**: Location and byte count of the block body.
+- **Patch ID**: Package patch file that owns the block body.
+- **Flags**: Compression, encryption, and alternate-key flags.
+- **Opaque bytes and authentication tag**: 20 opaque bytes followed by a 16-byte AES-GCM tag.
 
 ---
 
@@ -52,7 +58,8 @@ Sunrise extracts content directly from installed packages without external extra
 
 ### AES block decryption
 
-Encrypted blocks use AES in GCM or CBC mode. The reader derives decryption keys from package key material:
+Encrypted package blocks use AES-GCM. The reader derives decryption keys from package key material:
+
 - Primary key: 16 bytes.
 - Alternate key: 16 bytes.
 - Nonce base: 12 bytes.
@@ -60,7 +67,8 @@ Encrypted blocks use AES in GCM or CBC mode. The reader derives decryption keys 
 ### Oodle compression
 
 Blocks compress with the Oodle data compression library:
-- Sunrise dynamically links with the game engine's Oodle implementation.
+
+- Sunrise resolves the already loaded `oo2core_3_win64.dll` module and calls its decompressor.
 - Decompression buffers include slack space (`kBlockSlack = 64` bytes) to prevent memory corruption.
 
 ---
@@ -77,6 +85,7 @@ Game packages refer to assets using integer hashes rather than file paths.
 ### Named tags database
 
 Sunrise maintains a built-in catalog of named tags (`named_tags.h`). This catalog maps human-readable strings to tag hashes for:
+
 - Activity destination roots.
 - Scenario definitions.
 - Item definition tables.

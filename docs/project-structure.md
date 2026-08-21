@@ -42,7 +42,7 @@ The Core runtime coordinates initialization in forward dependency order. When a 
 
 ### Initialization order
 
-1. `settings`: Reads `sunrise_settings.json` from disk or loads compiled defaults.
+1. `settings`: Reads `settings.json` from disk or loads compiled defaults.
 2. `unlocks`: Publishes default unlock flags into State.
 3. `logging`: Starts log sinks and background snapshot views.
 4. `ui`: Starts the Dear ImGui renderer and input state.
@@ -57,18 +57,21 @@ The Core runtime coordinates initialization in forward dependency order. When a 
 
 ### Shutdown order
 
-When the process exits, Sunrise stops layers in exact reverse order:
+When the process exits, Sunrise unwinds the initialized stages in reverse dependency order:
 
 1. `client`: Detaches all Detours hooks and restores original code pointers.
 2. `server`: Stops gameplay endpoints and closes active BAP connections.
 3. `middleware`: Clears encryption contexts and temporary protocol buffers.
 4. `content_manifest`: Releases cached package tables and file handles.
-5. `state`: Clears in-memory account data and unlocks.
+5. `state`: Clears in-memory account and activity data.
 6. `entitlements`: Clears published entitlements.
-7. `ui_modules`: Unregisters UI panels and overlays.
-8. `ui`: Stops the rendering pipeline and font resources.
-9. `logging`: Flushes sinks and terminates logging threads.
-10. `settings`: Releases active configuration memory.
+7. `ui_logs`: Unregisters the log viewer.
+8. `ui_hud`: Unregisters HUD controls and shuts down HUD state.
+9. `ui_registry`: Clears the UI module registry.
+10. `ui`: Stops the rendering pipeline and font resources.
+11. `unlocks`: Clears published unlock policy.
+12. `logging`: Flushes sinks and terminates logging threads.
+13. `settings`: Releases active configuration memory.
 
 ## Threading and synchronization
 
@@ -81,13 +84,14 @@ Sunrise operates in a multithreaded game process. Subsystems apply these concurr
 
 ## Settings system
 
-Settings live in `sunrise_settings.json` next to `steam_api64.dll`.
+Settings live in `settings.json` next to `steam_api64.dll`.
 
 - Schema version: Current layout version is 8 (`kSettingsVersion = 8`).
 - Migration: Missing fields populate with default values. Unsupported structure versions trigger upgrade routines.
-- Configuration sections:
-  - `logging`: Sinks, output file paths, and per-channel log levels.
+- Top-level configuration keys:
+  - `version`: Settings schema version.
+  - `core`: Logging sinks and per-channel log levels.
   - `client`: UI preferences, movement cheat keys, and camera controls.
-  - `server`: HTTP port, gameplay UDP port, network topology, and default activity.
+  - `server`: BAP and gameplay endpoint settings, activation gates, and entitlements.
   - `steam`: Emulated Steam ID and player persona name.
-  - `initialAccount`: Initial characters, gear, currencies, and appearance settings.
+  - `state`: Initial account, characters, unlocks, investment overrides, and activity defaults.
