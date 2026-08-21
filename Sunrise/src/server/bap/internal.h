@@ -164,6 +164,12 @@ struct Session {
     std::uint64_t bannerRepushRoot{};
     /** True while one banner re-push is still owed to this peer. */
     bool bannerRepushArmed{};
+    /** Tick count after which the owed social-roster re-push may go out. */
+    std::uint64_t socialRosterRepushDueTick{};
+    /** Root the last family-two subscribe was answered against, and the re-push must reuse. */
+    std::uint64_t socialRosterRepushRoot{};
+    /** True while one family-two re-push is still owed to this peer. */
+    bool socialRosterRepushArmed{};
     /** Latest shared-account generation this peer has received. */
     std::uint64_t accountGeneration{};
     /** Newest shared-account generation owed as a full cross-peer refresh. */

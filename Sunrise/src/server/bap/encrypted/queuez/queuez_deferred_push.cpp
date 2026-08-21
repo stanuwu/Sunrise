@@ -172,6 +172,76 @@ void report_repush(const char* stage, std::size_t bytes) noexcept {
 }
 
 /**
+ * Sends the owed family-two re-push once its delay has passed.
+ *
+ * The family-two snapshot is built when the peer subscribes, so the emblem it carries is only
+ * correct as of that moment. An equip into the emblem slot leaves it stale, and the Client
+ * resolves that account-keyed object as *the* account emblem -- so the display stays pinned to
+ * whatever was worn at subscribe time while the equip itself keeps succeeding. This republishes
+ * the live value against the root the subscribe was answered with.
+ *
+ * **One attempt, spent whether or not it lands.** The arm is cleared before the frame is built, so
+ * a refusal cannot leave this re-arming every tick; this file records that a boot-shaped replay
+ * repeated after the ladder has moved took the connection down.
+ *
+ * @param session Auth, nonce and queuez state owned by the connection.
+ * @param scratch Transform buffers owned by the lock.
+ * @param response Whole-frame storage owned by the caller.
+ * @param written Gets the encoded notification size in bytes.
+ * @param touchesScratch Set before any scratch buffer is used.
+ * @return True when a whole family-two notification is published.
+ */
+[[nodiscard]] bool consume_social_roster_repush(Session& session,
+                                                Scratch& scratch,
+                                                std::span<std::byte> response,
+                                                std::size_t& written,
+                                                bool& touchesScratch) noexcept {
+    if (!session.socialRosterRepushArmed || session.socialRosterRepushRoot == 0
+        || GetTickCount64() < session.socialRosterRepushDueTick) {
+        return false;
+    }
+    // Spent up front, so no path below can leave it owed.
+    session.socialRosterRepushArmed = false;
+    touchesScratch = true;
+
+    // The same body the subscribe answer builds, rebuilt against current State so the emblem it
+    // carries is the one now worn.
+    middleware::queuez::Subscription subscription{};
+    subscription.familyType = queuez::kSocialRosterFamilyType;
+    subscription.familyRootSoid = session.socialRosterRepushRoot;
+
+    auto nextSendNonce = session.sendNonce;
+    std::size_t framedSize = 0;
+    queuez::SessionState rosterAfter{};
+    bool armsRepush = false;
+    bool armsBannerRepush = false;
+    push::append_queuez_notification(scratch,
+                                     session.queuez,
+                                     subscription,
+                                     state::bap().sessionKey,
+                                     nextSendNonce,
+                                     scratch.framed,
+                                     framedSize,
+                                     rosterAfter,
+                                     armsRepush,
+                                     armsBannerRepush);
+    if (framedSize == 0 || framedSize > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=social_roster_repush result=fail");
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    session.sendNonce = nextSendNonce;
+    if (valid(rosterAfter)) {
+        session.queuez = rosterAfter;
+    }
+    report_repush("social_roster_repush", framedSize);
+    return true;
+}
+
+/**
  * Re-derives the selected character's appearance and roster once the ability-bucket rebuild owed
  * by a subclass selection has landed. The refresh sent inline with the opcode-801 response can
  * still carry empty buckets, because that rebuild runs off the Client content-extraction pump.
@@ -276,7 +346,8 @@ bool consume_deferred(Session& session,
     }
     if (!session.family4RepushArmed || session.family4RepushRoot == 0
         || GetTickCount64() < session.family4RepushDueTick) {
-        return consume_banner_repush(session, scratch, response, written, touchesScratch)
+        return consume_social_roster_repush(session, scratch, response, written, touchesScratch)
+               || consume_banner_repush(session, scratch, response, written, touchesScratch)
                || push::activity::consume_activity_keepalive(
                    session, scratch, response, written, touchesScratch);
     }

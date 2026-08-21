@@ -11,6 +11,8 @@ namespace sunrise::server::bap::encrypted::queuez {
 
 /** Family zero carries the banner anchor and the record for the character it names. */
 inline constexpr std::uint32_t kBannerFamilyType = 0;
+/** Family two carries the social roster the Roster and Fireteam panels draw. */
+inline constexpr std::uint32_t kSocialRosterFamilyType = 2;
 /** Family three carries the account character roster. */
 inline constexpr std::uint32_t kRosterFamilyType = 3;
 /** Family four carries account, character, and item state. */
@@ -194,6 +196,25 @@ struct StagedPublication {
     bool armsBannerRepush{};
     /** Root that copy must use. */
     std::uint64_t bannerRepushRoot{};
+    /**
+     * Root a family-two subscribe was answered against, or zero when this frame answered none.
+     *
+     * A subscribe is the only moment a family-two root arrives. The connection keeps the last one
+     * so a later re-push can reuse it rather than deriving a value the peer never named.
+     */
+    std::uint64_t socialRosterRepushRoot{};
+    /**
+     * An emblem equip left the published family-two object stale and it owes a fresh copy.
+     *
+     * The family-two snapshot is built when the peer subscribes, so the emblem it carries is only
+     * correct as of that moment; the Client resolves that account-keyed object as *the* account
+     * emblem, so a stale one pins the display for the rest of the session while the equip itself
+     * keeps succeeding.
+     *
+     * Its own flag on its own signal. The banner arm is deliberately not reused: the consumer
+     * records that arming a re-push from another family's signal took the connection down.
+     */
+    bool rearmsSocialRosterRepush{};
     /** A subclass selection just staged and owes a delayed ability-icon refresh. */
     bool armsAbilityRefresh{};
 };

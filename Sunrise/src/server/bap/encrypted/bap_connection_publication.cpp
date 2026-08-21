@@ -16,6 +16,14 @@ constexpr std::uint64_t kFamily4RepushDelayMs = 400;
 /** The banner pair lands the same unsolicited way and hits the same record-state race. */
 constexpr std::uint64_t kBannerRepushDelayMs = 400;
 /**
+ * Delay before the family-two re-push owed by an emblem equip.
+ *
+ * Matched to the two above, which are the measured-working value for the same record-state race:
+ * a snapshot answered too soon reaches the record before it writes its new state and is refused
+ * silently. If a re-push ever fails to land, this constant is the one guess in the mechanism.
+ */
+constexpr std::uint64_t kSocialRosterRepushDelayMs = 400;
+/**
  * Delay before the ability-icon re-derivation owed by a subclass selection.
  * The Client content-extraction pump that rebuilds the invalidated ability buckets runs on the
  * next few RunCallbacks pumps, well under this window.
@@ -187,6 +195,19 @@ void arm_repushes(Session& session, const queuez::StagedPublication& queuezPubli
         session.bannerRepushDueTick = now + kBannerRepushDelayMs;
         session.bannerRepushRoot = queuezPublication.bannerRepushRoot;
         session.bannerRepushArmed = true;
+    }
+    // Recorded whenever a family-two subscribe was answered, so a later equip has a root to
+    // publish against. A peer that never subscribed to family two keeps root zero and is left
+    // alone below, which is the correct no-op for it.
+    if (queuezPublication.socialRosterRepushRoot != 0) {
+        session.socialRosterRepushRoot = queuezPublication.socialRosterRepushRoot;
+    }
+    // Its own arm on its own signal, for the reason recorded above: the banner arm was once
+    // driven from the wrong family's and took the connection down. Re-arming is idempotent and
+    // coalescing, so a burst of equips owes one delayed send rather than one each.
+    if (queuezPublication.rearmsSocialRosterRepush && session.socialRosterRepushRoot != 0) {
+        session.socialRosterRepushDueTick = now + kSocialRosterRepushDelayMs;
+        session.socialRosterRepushArmed = true;
     }
 }
 

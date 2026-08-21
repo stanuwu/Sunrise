@@ -536,6 +536,7 @@
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\initial_snapshot.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\banner_snapshot.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\roster_snapshot.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\snapshot\social_roster_snapshot.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\snapshot_storage.cpp" />
     <ClCompile Include="src\server\web_service\opcode_routes.cpp" />
     <ClCompile Include="src\server\web_service\web_service_runtime.cpp" />

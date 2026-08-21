@@ -7,6 +7,30 @@
 #include "queuez_state_validation.h"
 
 namespace sunrise::server::bap::encrypted::queuez {
+namespace {
+
+/**
+ * Says whether equipping into one slot changes what the family-two member record publishes.
+ *
+ * That record carries two fields fed by different slots. The emblem comes from the emblem slot,
+ * and the light is the mean of the eight gear slots -- the three weapons and the five armour
+ * pieces -- so an armour swap moves the record just as surely as an emblem swap does. Gating on
+ * the emblem alone would leave the roster row holding a stale light until the next subscribe.
+ *
+ * Everything else is excluded because it moves neither field: a ghost, sparrow, ship, subclass,
+ * clan banner, emote or finisher carries no Power in this season and is not the emblem, so a
+ * swap there would spend a re-push republishing an unchanged object.
+ *
+ * @param equipmentSlotIndex Authored semantic slot the equip targeted.
+ * @return True when the slot feeds the emblem or the light the member record carries.
+ */
+[[nodiscard]] constexpr bool moves_social_roster(std::size_t equipmentSlotIndex) noexcept {
+    namespace inventory = state::account::inventory;
+    return equipmentSlotIndex <= static_cast<std::size_t>(inventory::EquipmentSlot::classItem)
+           || equipmentSlotIndex == static_cast<std::size_t>(inventory::EquipmentSlot::emblem);
+}
+
+} // namespace
 
 /** Stages queuez subscription, unsubscription, or character-move output for one peer. */
 bool stage_service_outcome(Scratch& scratch,
@@ -22,6 +46,7 @@ bool stage_service_outcome(Scratch& scratch,
     bool armsRepush = false;
     bool armsBannerRepush = false;
     std::uint64_t bannerRoot = 0;
+    std::uint64_t socialRosterRoot = 0;
     bool armsAbilityRefresh = false;
     const auto* equipment = transaction_if<EquipmentSwapTransaction>(outcome);
     const auto* subclassSelection = transaction_if<SubclassSelectionTransaction>(outcome);
@@ -30,6 +55,11 @@ bool stage_service_outcome(Scratch& scratch,
     const auto* itemAcquisition = transaction_if<ItemAcquisitionTransaction>(outcome);
     const auto* profileAcquisition = transaction_if<ProfileItemAcquisitionTransaction>(outcome);
     const auto* itemDismantle = transaction_if<ItemDismantleTransaction>(outcome);
+    // Set before the branch chain rather than inside the equipment arm. That arm returns early
+    // when the staged after-image fails validation, and the equip has already moved State by
+    // then -- so the published record is stale on exactly the path the arm never finishes.
+    publication.rearmsSocialRosterRepush =
+        equipment != nullptr && moves_social_roster(equipment->pending.equipmentSlotIndex);
     if (outcome.hasSubscription) {
         push::append_queuez_notification(scratch,
                                          before,
@@ -42,6 +72,12 @@ bool stage_service_outcome(Scratch& scratch,
                                          armsRepush,
                                          armsBannerRepush);
         bannerRoot = outcome.subscription.familyRootSoid;
+        // The subscribe is the only moment a family-two root arrives. Recorded rather than acted
+        // on: the inline answer to this subscribe lands, so nothing is owed until an equip makes
+        // what it published stale.
+        if (outcome.subscription.familyType == kSocialRosterFamilyType) {
+            socialRosterRoot = outcome.subscription.familyRootSoid;
+        }
     } else if (outcome.hasUnsubscription) {
         stage_unsubscription(before, outcome.unsubscription.familyRootSoid, after);
     } else if (outcome.hasChangeCharacter) {
@@ -489,6 +525,7 @@ bool stage_service_outcome(Scratch& scratch,
     publication.family4RepushRoot = armsRepush ? outcome.subscription.familyRootSoid : 0;
     publication.armsBannerRepush = armsBannerRepush && bannerRoot != 0;
     publication.bannerRepushRoot = publication.armsBannerRepush ? bannerRoot : 0;
+    publication.socialRosterRepushRoot = socialRosterRoot;
     publication.armsAbilityRefresh = armsAbilityRefresh;
     return true;
 }

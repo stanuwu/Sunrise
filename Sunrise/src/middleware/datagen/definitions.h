@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace sunrise::middleware::datagen {
@@ -19,13 +20,25 @@ inline constexpr std::uint32_t kCharacterObjectId = 0xE5E86992U;
 /** Object id for the family-four item-instance slot. */
 inline constexpr std::uint32_t kItemInstanceObjectId = 0x6CFBA3ABU;
 
+/** Object id for the family-two social roster directory slot. */
+inline constexpr std::uint32_t kSocialRosterDirectoryObjectId = 0xDA277CE4U;
+/** Object id for the family-two social roster member slot. */
+inline constexpr std::uint32_t kSocialRosterMemberObjectId = 0x811115CEU;
+
+/** Sizes the family-two slot descriptors declare, in bytes. */
+inline constexpr std::size_t kSocialRosterDirectorySize = 96;
+inline constexpr std::size_t kSocialRosterMemberSize = 80;
+
 /** Families that carry a generated object. */
 inline constexpr std::uint32_t kBannerFamily = 0;
+inline constexpr std::uint32_t kSocialRosterFamily = 2;
 inline constexpr std::uint32_t kRosterFamily = 3;
 inline constexpr std::uint32_t kAccountFamily = 4;
 
 /** Slots those objects occupy. */
 inline constexpr std::uint32_t kRosterSlot = 0;
+inline constexpr std::uint32_t kSocialRosterDirectorySlot = 0;
+inline constexpr std::uint32_t kSocialRosterMemberSlot = 1;
 inline constexpr std::uint32_t kAccountSlot = 0;
 inline constexpr std::uint32_t kCharacterSlot = 1;
 inline constexpr std::uint32_t kItemInstanceSlot = 3;
@@ -40,7 +53,11 @@ inline constexpr std::uint32_t kItemInstanceSlot = 3;
 [[nodiscard]] constexpr bool
 object_id(std::uint32_t familyType, std::uint32_t slotIndex, std::uint32_t& objectId) noexcept {
     objectId = 0;
-    if (familyType == kRosterFamily && slotIndex == kRosterSlot) {
+    if (familyType == kSocialRosterFamily && slotIndex == kSocialRosterDirectorySlot) {
+        objectId = kSocialRosterDirectoryObjectId;
+    } else if (familyType == kSocialRosterFamily && slotIndex == kSocialRosterMemberSlot) {
+        objectId = kSocialRosterMemberObjectId;
+    } else if (familyType == kRosterFamily && slotIndex == kRosterSlot) {
         objectId = kRosterObjectId;
     } else if (familyType == kAccountFamily && slotIndex == kAccountSlot) {
         objectId = kAccountObjectId;

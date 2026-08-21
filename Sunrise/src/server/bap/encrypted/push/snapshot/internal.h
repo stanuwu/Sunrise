@@ -12,6 +12,8 @@ namespace sunrise::server::bap::encrypted::push::snapshot {
 
 /** Initial family snapshots start at version zero. */
 inline constexpr std::int32_t kInitialFamilyVersion = 0;
+/** Family two carries the social roster the Roster and Fireteam panels draw. */
+inline constexpr std::uint32_t kSocialRosterFamilyType = 2;
 /** Family three carries the account roster selected by Web Service subscription. */
 inline constexpr std::uint32_t kRosterFamilyType = 3;
 /** Family four carries account and selected-character investment state. */
@@ -55,6 +57,24 @@ inline constexpr std::size_t kSingleObjectCount = 1;
                                   std::uint32_t objectId,
                                   const Reservation& reservation,
                                   Prepared& prepared) noexcept;
+
+/**
+ * Builds the family-two social roster snapshot.
+ *
+ * Both slots go out together: the row resolves the emblem by reading the link at directory +8
+ * and looking the member record up by it, and a full snapshot prunes whatever it does not name.
+ * @param scratch Object storage owned by the lock.
+ * @param subscription Family id the Client picked.
+ * @param objectId Unused. Both slot ids are resolved by the builder.
+ * @param reservation Prior payload prefixes that staging must keep.
+ * @param prepared Gets both descriptors and the scratch clear extents.
+ * @return True when an account is signed in and both objects fit.
+ */
+[[nodiscard]] bool prepare_social_roster(Scratch& scratch,
+                                         const middleware::queuez::Subscription& subscription,
+                                         std::uint32_t objectId,
+                                         const Reservation& reservation,
+                                         Prepared& prepared) noexcept;
 
 /**
  * Compresses one encoded family-four object into the next sealed scratch segment.
