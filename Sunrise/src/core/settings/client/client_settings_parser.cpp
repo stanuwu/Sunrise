@@ -11,6 +11,7 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     bool hasUserInterface = false;
     bool hasExternalServer = false;
     bool hasFadeRelease = false;
+    bool hasSkipProfileSetup = false;
     bool hasForceJoinRequestReady = false;
     bool hasRegionPrivate = false;
     bool hasPinReplicatedRecord = false;
@@ -39,6 +40,11 @@ bool Parser::client_settings(client::Settings& output) noexcept {
                 return false;
             }
             hasFadeRelease = true;
+        } else if (key == "skip_profile_setup") {
+            if (hasSkipProfileSetup || !boolean(candidate.skipProfileSetup)) {
+                return false;
+            }
+            hasSkipProfileSetup = true;
         } else if (key == "force_join_request_ready") {
             if (hasForceJoinRequestReady || !boolean(candidate.forceJoinRequestReady)) {
                 return false;

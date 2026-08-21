@@ -267,6 +267,27 @@ bool set_primary_soid(std::uint64_t primarySoid) noexcept {
     return true;
 }
 
+/** Closes the account's one-time profile-setup gate. */
+bool complete_profile_setup() noexcept {
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    AccountState& accountState = runtime::storage::g_state.account;
+    if (accountState.primarySoid == 0 || !account::valid(accountState)) {
+        ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+        return false;
+    }
+
+    const bool changed = !accountState.profileSetupCompleted;
+    accountState.profileSetupCompleted = true;
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+
+    if (changed) {
+        core::log::write(core::log::Channel::state,
+                         core::log::Level::info,
+                         "ev=profile_setup stage=complete result=ok");
+    }
+    return true;
+}
+
 /** Moves the selection to one authored character. */
 bool set_selected_character(std::uint64_t characterSoid, bool& changed) noexcept {
     changed = false;

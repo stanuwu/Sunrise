@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../../core/settings/settings.h"
 #include "../../hooking/detour.h"
 #include "internal.h"
 
@@ -94,6 +95,12 @@ __declspec(noinline) char __fastcall update(std::byte* step) noexcept {
  * @return True when the target is found and the detour attaches.
  */
 bool install_profile_setup_skip() noexcept {
+    if (!core::settings::get().client.skipProfileSetup) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
+                         "ev=bootflow stage=profile_setup result=disabled");
+        return true;
+    }
     if (g_handle.attached) {
         return true;
     }

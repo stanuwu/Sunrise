@@ -170,6 +170,8 @@ struct AccountState {
     std::size_t profileItemCount{};
     std::array<CharacterState, kCharacterCapacity> characters{};
     std::size_t characterCount{};
+    /** True after this account has completed the client's one-time profile setup flow. */
+    bool profileSetupCompleted{};
     account::settings::AccountSettings settings;
 };
 
