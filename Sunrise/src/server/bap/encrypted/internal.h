@@ -97,7 +97,8 @@ struct ServiceOutcome {
                                      ItemStateTransaction,
                                      ItemAcquisitionTransaction,
                                      ProfileItemAcquisitionTransaction,
-                                     ItemDismantleTransaction>;
+                                     ItemDismantleTransaction,
+                                     state::PendingSettingsUpdate>;
     Transaction transaction{};
 };
 

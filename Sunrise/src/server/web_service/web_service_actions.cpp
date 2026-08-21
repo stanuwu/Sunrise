@@ -12,6 +12,7 @@
 #include "../../middleware/web_service/messages/opcode403.h"
 #include "../../middleware/web_service/messages/opcode406.h"
 #include "../../middleware/web_service/messages/opcode504.h"
+#include "../../middleware/web_service/messages/opcode701/opcode701_codec.h"
 #include "../../middleware/web_service/messages/opcode801.h"
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../state/account/account_state.h"
@@ -20,14 +21,47 @@
 
 namespace sunrise::server::web_service {
 
-namespace {
-
 /** Socket kind the shader model occupies, which is the only kind a shader swap may target. */
-constexpr std::uint8_t kEquippedShaderModelSocketKind = 0;
+static constexpr std::uint8_t kEquippedShaderModelSocketKind = 0;
 /** Index stored when no definition resolves. The catalog is u16-indexed, so this cannot be one. */
-constexpr std::uint32_t kUnavailableDefinitionIndex = (std::numeric_limits<std::uint16_t>::max)();
+static constexpr std::uint32_t kUnavailableDefinitionIndex =
+    (std::numeric_limits<std::uint16_t>::max)();
 
-} // namespace
+/** Decodes and prepares one sparse account-settings writeback without publishing State. */
+state::SettingsUpdateDisposition mutate_settings(const middleware::web_service::Message& message,
+                                                 Outcome& outcome) noexcept {
+    namespace opcode701 = middleware::web_service::messages::opcode701;
+
+    opcode701::Request request{};
+    if (!opcode701::parse_request(message, request)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=ws701 stage=prepare result=rejected reason=parse");
+        return state::SettingsUpdateDisposition::rejected;
+    }
+
+    state::PendingSettingsUpdate mutation{};
+    const state::SettingsUpdateDisposition disposition =
+        state::prepare_settings_update(request.settings, mutation);
+    if (disposition == state::SettingsUpdateDisposition::preparedMutation) {
+        outcome.mutation = mutation;
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         "ev=ws701 stage=prepare result=ready");
+        return disposition;
+    }
+    if (disposition == state::SettingsUpdateDisposition::acceptedNoChange) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         "ev=ws701 stage=prepare result=no_change");
+        return disposition;
+    }
+
+    core::log::write(core::log::Channel::server,
+                     core::log::Level::warn,
+                     "ev=ws701 stage=prepare result=rejected reason=validation");
+    return state::SettingsUpdateDisposition::rejected;
+}
 
 /** Logs one exact correlated equipment response after its Queuez update is staged. */
 void report_equip_response(const middleware::web_service::Message& message,

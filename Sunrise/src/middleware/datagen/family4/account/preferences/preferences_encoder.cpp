@@ -1,9 +1,11 @@
 #include "preferences_encoder.h"
 
-#include "native_key_binding_map.h"
+#include "../../../../../state/account/settings/native_key_binding_map.h"
 
 namespace sunrise::middleware::datagen::family4::account::preferences {
 namespace {
+
+namespace bindings = state::account::settings::bindings;
 
 /** Native keybinding halves use input code 0x74 as the unbound sentinel. */
 constexpr std::uint16_t kUnboundInputCode = 0x0074;
@@ -128,8 +130,9 @@ bool encode(const state::account::settings::AccountSettings& settings,
     record.chatAutoHideMode = social.chatAutoHideMode;
     bindingsRecord.voiceChatMirror = native_boolean(social.voiceChatEnabled);
 
-    for (std::size_t nativeSlot = 0; nativeSlot < kActionsBySlot.size(); ++nativeSlot) {
-        const auto action = kActionsBySlot[nativeSlot];
+    for (std::size_t nativeSlot = 0; nativeSlot < bindings::kActionsByNativeSlot.size();
+         ++nativeSlot) {
+        const auto action = bindings::kActionsByNativeSlot[nativeSlot];
         const std::size_t stateIndex = static_cast<std::size_t>(action);
         // Native ABI order stays independent from the semantic State enum order.
         bindingsRecord.keyBindings[nativeSlot] =

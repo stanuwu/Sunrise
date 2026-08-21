@@ -12,15 +12,15 @@
 #include "../internal.h"
 
 namespace sunrise::server::bap::encrypted::transactions {
-namespace {
 
 namespace slots = state::activity::entity_slots;
 
 /** Log names for each lease operation, in the enum's own order. */
-constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "release"};
+static constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "release"};
 
 /** Retains one newly committed private ActivityClient generation for its BAP link. */
-[[nodiscard]] bool retain_private(std::uint64_t sessionId, Publication& publication) noexcept {
+[[nodiscard]] static bool retain_private(std::uint64_t sessionId,
+                                         Publication& publication) noexcept {
     state::activity::SessionBinding binding{};
     if (!state::activity::snapshot_binding(sessionId, binding)
         || !state::activity::retain_binding(binding)) {
@@ -34,8 +34,8 @@ constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "re
 }
 
 /** Retains one exact advertised public target before its join mutation commits. */
-[[nodiscard]] bool retain_public(const activity_message::ActivityPlan& plan,
-                                 Publication& publication) noexcept {
+[[nodiscard]] static bool retain_public(const activity_message::ActivityPlan& plan,
+                                        Publication& publication) noexcept {
     server::gameplay::group::HostSessionBinding current{};
     if (!server::gameplay::group::host_session_for_activity(plan.sessionId, current)
         || current.generation != plan.publicHost.generation
@@ -65,7 +65,7 @@ constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "re
 }
 
 /** Releases provisional activity owners when the following State commit fails. */
-void discard_activity_publication(Publication& publication) noexcept {
+static void discard_activity_publication(Publication& publication) noexcept {
     if (publication.activity.hostGeneration != 0) {
         server::gameplay::group::release_host_session(publication.activity.hostGeneration);
     }
@@ -82,7 +82,7 @@ void discard_activity_publication(Publication& publication) noexcept {
  * @param mutation Plan as it was before the commit consumed it.
  * @param committed Whether the commit succeeded.
  */
-void report_lease(const slots::PendingMutation& mutation, bool committed) noexcept {
+static void report_lease(const slots::PendingMutation& mutation, bool committed) noexcept {
     std::size_t held = 0;
     std::size_t reserved = 0;
     const bool known = slots::lease_counts(mutation.sessionId, held, reserved);
@@ -107,8 +107,6 @@ void report_lease(const slots::PendingMutation& mutation, bool committed) noexce
                          {line.data(), static_cast<std::size_t>(written)});
     }
 }
-
-} // namespace
 
 /**
  * Commits at most one delayed State transaction.
@@ -180,6 +178,14 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
     }
     if (auto* mutation = transaction_if<state::matchmaking::PendingMutation>(outcome)) {
         return state::matchmaking::commit(*mutation);
+    }
+    if (auto* mutation = transaction_if<state::PendingSettingsUpdate>(outcome)) {
+        const bool committed = state::commit_settings_update(*mutation);
+        core::log::write(core::log::Channel::server,
+                         committed ? core::log::Level::debug : core::log::Level::warn,
+                         committed ? "ev=ws701 stage=transaction_commit result=ok"
+                                   : "ev=ws701 stage=transaction_commit result=fail");
+        return committed;
     }
     if (auto* transaction = transaction_if<EquipmentSwapTransaction>(outcome)) {
         const bool isSubclassSlot =

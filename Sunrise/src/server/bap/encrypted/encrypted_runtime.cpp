@@ -16,18 +16,15 @@
 #include "transactions/service_outcome_commit.h"
 
 namespace sunrise::server::bap::encrypted {
-namespace {
 
 /**
  * Wipes the part of one scratch buffer that may hold written bytes.
  * @param buffer Lock-owned scratch storage.
  * @param size Largest prefix that may hold transformed bytes.
  */
-void clear_prefix(std::span<std::byte> buffer, std::size_t size) noexcept {
+static void clear_prefix(std::span<std::byte> buffer, std::size_t size) noexcept {
     SecureZeroMemory(buffer.data(), (std::min)(buffer.size(), size));
 }
-
-} // namespace
 
 /**
  * Authenticates and answers one supported encrypted post-bootstrap request.
@@ -172,7 +169,8 @@ bool consume(Session& session,
         || transaction_if<ItemStateTransaction>(outcome) != nullptr
         || transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
-        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
+        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr
+        || transaction_if<state::PendingSettingsUpdate>(outcome) != nullptr;
     // State commits consume and clear their pending payloads. Retain only the small diagnostic
     // fields needed after publication; QueueZ after-images stay owned by the transaction variant.
     const auto* stagedSocket = transaction_if<SocketPlugTransaction>(outcome);

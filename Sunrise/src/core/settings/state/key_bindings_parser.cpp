@@ -4,7 +4,6 @@
 #include "../parser.h"
 
 namespace sunrise::core::settings::parser {
-namespace {
 
 namespace bindings = state::account::settings::bindings;
 
@@ -77,7 +76,7 @@ constexpr std::array<std::string_view, bindings::kActionCount> kActionNames{
  * @param name Borrowed JSON property name.
  * @return Fixed State index, or the action count when the name is unknown.
  */
-[[nodiscard]] std::size_t action_index(std::string_view name) noexcept {
+[[nodiscard]] static std::size_t action_index(std::string_view name) noexcept {
     const auto found = std::find(kActionNames.begin(), kActionNames.end(), name);
     return static_cast<std::size_t>(found - kActionNames.begin());
 }
@@ -209,17 +208,12 @@ constexpr std::array<InputName, 121> kInputNames{{
     {"extra mouse button 2", 113},
     {"mouse wheel up", 114},
     {"mouse wheel down", 115},
-    {"unused", 116},
+    {"unused", bindings::kUnboundInputCode},
     {"ctrl", 106},
     {"left ctrl", 69},
     {"right ctrl", 76},
     {"\\\\", 43},
 }};
-
-/** A binding half carries its key code in the low byte and one modifier above it. */
-constexpr std::uint16_t kAltFlag = 0x0100;
-constexpr std::uint16_t kControlFlag = 0x0200;
-constexpr std::uint16_t kShiftFlag = 0x0400;
 
 /** One code that may prefix another key, and the flag it sets there. */
 struct ModifierName {
@@ -229,19 +223,19 @@ struct ModifierName {
 
 /** Both sides of a modifier fold onto the same flag, as they do in the Client. */
 constexpr std::array<ModifierName, 9> kModifiers{{
-    {57, kShiftFlag},
-    {68, kShiftFlag},
-    {105, kShiftFlag},
-    {69, kControlFlag},
-    {76, kControlFlag},
-    {106, kControlFlag},
-    {71, kAltFlag},
-    {73, kAltFlag},
-    {108, kAltFlag},
+    {57, bindings::kShiftModifierFlag},
+    {68, bindings::kShiftModifierFlag},
+    {105, bindings::kShiftModifierFlag},
+    {69, bindings::kControlModifierFlag},
+    {76, bindings::kControlModifierFlag},
+    {106, bindings::kControlModifierFlag},
+    {71, bindings::kAltModifierFlag},
+    {73, bindings::kAltModifierFlag},
+    {108, bindings::kAltModifierFlag},
 }};
 
 /** @return The name without leading and trailing ASCII blanks. */
-[[nodiscard]] constexpr std::string_view trim(std::string_view text) noexcept {
+[[nodiscard]] static constexpr std::string_view trim(std::string_view text) noexcept {
     while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) {
         text.remove_prefix(1);
     }
@@ -252,7 +246,8 @@ constexpr std::array<ModifierName, 9> kModifiers{{
 }
 
 /** @return True when the two names match with ASCII case folded, as the Client compares them. */
-[[nodiscard]] constexpr bool same_name(std::string_view left, std::string_view right) noexcept {
+[[nodiscard]] static constexpr bool same_name(std::string_view left,
+                                              std::string_view right) noexcept {
     if (left.size() != right.size()) {
         return false;
     }
@@ -274,7 +269,7 @@ constexpr std::array<ModifierName, 9> kModifiers{{
  * @param output Receives the code the table gives that name.
  * @return True when the name is in the table.
  */
-[[nodiscard]] bool named_code(std::string_view name, std::uint16_t& output) noexcept {
+[[nodiscard]] static bool named_code(std::string_view name, std::uint16_t& output) noexcept {
     for (const InputName& entry : kInputNames) {
         if (same_name(entry.name, name)) {
             output = entry.code;
@@ -289,7 +284,7 @@ constexpr std::array<ModifierName, 9> kModifiers{{
  * @param output Receives the flag that code sets on the key it prefixes.
  * @return True when the code is a modifier.
  */
-[[nodiscard]] bool modifier_flag(std::uint16_t code, std::uint16_t& output) noexcept {
+[[nodiscard]] static bool modifier_flag(std::uint16_t code, std::uint16_t& output) noexcept {
     for (const ModifierName& entry : kModifiers) {
         if (entry.code == code) {
             output = entry.flag;
@@ -298,8 +293,6 @@ constexpr std::array<ModifierName, 9> kModifiers{{
     }
     return false;
 }
-
-} // namespace
 
 /** Parses the whole fixed action table under named JSON properties. */
 bool Parser::key_bindings(bindings::KeyBindings& output) noexcept {
@@ -386,6 +379,15 @@ bool Parser::optional_input_code(std::optional<std::uint16_t>& output) noexcept 
     std::string_view name;
     std::uint16_t code = 0;
     if (!string(name) || !input_code_value(name, code)) {
+        return false;
+    }
+    if (code == bindings::kUnboundInputCode) {
+        // The Client's "unused" table row is the wire sentinel, not a bindable input.
+        output.reset();
+        return true;
+    }
+    if ((code & bindings::kInputCodeMask) == bindings::kUnboundInputCode) {
+        // A modifier cannot turn the unbound sentinel into a real key.
         return false;
     }
     output = code;

@@ -18,6 +18,7 @@
 #include "../../middleware/web_service/messages/opcode503.h"
 #include "../../middleware/web_service/messages/opcode504.h"
 #include "../../middleware/web_service/messages/opcode601/opcode601_codec.h"
+#include "../../middleware/web_service/messages/opcode701/opcode701_codec.h"
 #include "../../middleware/web_service/messages/opcode801.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
 #include "../../middleware/web_service/messages/opcode903.h"
@@ -31,36 +32,36 @@
 namespace sunrise::server::web_service {
 
 /** One ordinary event line carries an opcode and its fixed prefix. */
-constexpr std::size_t kOpcodeLineCapacity = 64;
+static constexpr std::size_t kOpcodeLineCapacity = 64;
 /** A request trace keeps enough payload to identify an item-action descriptor. */
-constexpr std::size_t kRequestPayloadTraceBytes = 192;
+static constexpr std::size_t kRequestPayloadTraceBytes = 192;
 /** Marks a trace that stopped at the cap, so a short hex string is not read as a short payload. */
-constexpr std::string_view kTruncated = " truncated=1";
+static constexpr std::string_view kTruncated = " truncated=1";
 /** Web Service opcode used by the Character screen's Equip action. */
-constexpr std::uint16_t kEquipOpcode = 403;
+static constexpr std::uint16_t kEquipOpcode = 403;
 /** Web Service opcode used by the Character screen's Unequip action. */
-constexpr std::uint16_t kUnequipOpcode = 404;
+static constexpr std::uint16_t kUnequipOpcode = 404;
 /** Web Service opcode used by item-state actions such as finisher Favorite. */
-constexpr std::uint16_t kItemStateOpcode = 406;
+static constexpr std::uint16_t kItemStateOpcode = 406;
 /** Web Service opcode used by the Character screen's Dismantle action. */
-constexpr std::uint16_t kItemDismantleOpcode = 402;
+static constexpr std::uint16_t kItemDismantleOpcode = 402;
 /** Web Service opcode used by Collections to create one item instance. */
-constexpr std::uint16_t kItemAcquisitionOpcode = 1820;
+static constexpr std::uint16_t kItemAcquisitionOpcode = 1820;
 /** The mutation variant's first alternative is the empty one, so index zero prepared nothing. */
-constexpr std::size_t kNoMutation = 0;
+static constexpr std::size_t kNoMutation = 0;
 /**
  * Logical status of a refused action. The descriptor biases logical zero to the wire success the
  * Client expects, so any other logical value reports a refusal. Its five bits hold no error
  * taxonomy, so one code covers every reason and the log line names the actual one.
  */
-constexpr std::int32_t kRefusedStatus = 1;
+static constexpr std::int32_t kRefusedStatus = 1;
 
 /**
  * Logs the Web Service opcode and a bounded payload trace.
  * One svc-10 frame looks like any other, and the opcode drives the client's queuez state machine.
  * @param message Parsed request envelope and borrowed payload.
  */
-void report_request(const middleware::web_service::Message& message) noexcept {
+static void report_request(const middleware::web_service::Message& message) noexcept {
     std::array<char, core::log::kLineCapacity> line{};
     const int prefix =
         std::snprintf(line.data(),
@@ -87,19 +88,19 @@ void report_request(const middleware::web_service::Message& message) noexcept {
 }
 
 /** One refusal line carries both request indices, the clock presence, and the clock verdict. */
-constexpr std::size_t kPurchaseLineCapacity = 128;
+static constexpr std::size_t kPurchaseLineCapacity = 128;
 /**
  * Status code answered to a purchase request.
  * Any non-zero value refuses. Zero is the success code, so it must not be used here.
  */
-constexpr std::int32_t kPurchaseRefusedCode = 1;
+static constexpr std::int32_t kPurchaseRefusedCode = 1;
 
 /**
  * Reads the server's own clock for the purchase clock rule.
  * The system clock counts from the Unix epoch, which is the same base the request field uses.
  * @return Current time in Unix seconds.
  */
-[[nodiscard]] std::int64_t server_clock_seconds() noexcept {
+[[nodiscard]] static std::int64_t server_clock_seconds() noexcept {
     const auto sinceEpoch = std::chrono::system_clock::now().time_since_epoch();
     return std::chrono::duration_cast<std::chrono::seconds>(sinceEpoch).count();
 }
@@ -113,9 +114,9 @@ constexpr std::int32_t kPurchaseRefusedCode = 1;
  * @param written Receives the encoded response size.
  * @return True when the refusal was encoded.
  */
-[[nodiscard]] bool refuse_purchase(const middleware::web_service::Message& message,
-                                   std::span<std::byte> response,
-                                   std::size_t& written) noexcept {
+[[nodiscard]] static bool refuse_purchase(const middleware::web_service::Message& message,
+                                          std::span<std::byte> response,
+                                          std::size_t& written) noexcept {
     namespace purchase_codec = middleware::web_service::messages::opcode901;
     purchase_codec::Request purchase;
     const bool parsed = purchase_codec::parse_request(message, purchase);
@@ -160,9 +161,9 @@ constexpr std::int32_t kPurchaseRefusedCode = 1;
  * @param written Gets the encoded response-body size in bytes.
  * @return True when the echo fits.
  */
-bool encode_echo(const middleware::web_service::Message& message,
-                 std::span<std::byte> response,
-                 std::size_t& written) noexcept {
+static bool encode_echo(const middleware::web_service::Message& message,
+                        std::span<std::byte> response,
+                        std::size_t& written) noexcept {
     std::array<char, kOpcodeLineCapacity> line{};
     const int count = std::snprintf(
         line.data(), line.size(), "ev=ws stage=body result=echo opcode=%u", message.opcode);
@@ -271,9 +272,10 @@ bool consume(std::span<const std::byte> request,
         && middleware::web_service::messages::opcode206::parse_request(message, subscription);
 
     // The action runs before its reply is encoded, because the reply reports whether it worked.
-    // An action fills the outcome only once it has prepared its whole transition, so an outcome
-    // still empty afterwards is that action refusing the request. Nothing is published here.
+    // Most actions fill the outcome only after preparing a whole transition. WS-701 also accepts
+    // a valid no-op heartbeat, so that one success is tracked separately from mutation presence.
     bool dispatched = true;
+    bool acceptedWithoutMutation = false;
     if (message.opcode == middleware::web_service::messages::opcode504::kOpcode) {
         select_character(message, outcome);
     } else if (message.opcode == kItemDismantleOpcode) {
@@ -290,6 +292,9 @@ bool consume(std::span<const std::byte> request,
         mutate_equipped_socket_plug(message, outcome);
     } else if (message.opcode == kItemStateOpcode) {
         mutate_item_state(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode701::kOpcode) {
+        const state::SettingsUpdateDisposition disposition = mutate_settings(message, outcome);
+        acceptedWithoutMutation = disposition == state::SettingsUpdateDisposition::acceptedNoChange;
     } else if (message.opcode == kItemAcquisitionOpcode) {
         acquire_item(message, outcome);
     } else {
@@ -300,7 +305,7 @@ bool consume(std::span<const std::byte> request,
     middleware::web_service::ResponseShape shape{};
     resolve_response_shape(message.opcode, shape);
     middleware::web_service::StatusResponse status{};
-    if (dispatched && !prepared) {
+    if (dispatched && !prepared && !acceptedWithoutMutation) {
         status.code = kRefusedStatus;
     }
     if (!middleware::web_service::encode_response(message, shape, status, response, written)) {
