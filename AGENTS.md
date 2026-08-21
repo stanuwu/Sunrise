@@ -69,3 +69,4 @@ Use the authoritative commands and prerequisites in [README — Building](README
   into `/docs` in a structured way so it's easy to find what the next person/agent is looking for.
   Try using simple technical english for that `(ASD-STE100)`.
 - Try looking for relevant information in `/docs`.
+- If you create diagrams use `[mermaid](https://mermaid.js.org/)` because github markdown supports it.
