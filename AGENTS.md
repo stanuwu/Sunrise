@@ -60,8 +60,12 @@ Use the authoritative commands and prerequisites in [README — Building](README
   embedded resource.
 - Do not commit `build/`, `.vs/`, `.xwin-cache/`, IDE settings, or other ignored generated output.
 
-## Other
+## AGENT BEHAVIOR
 
 - If the task requires out-of-scope/unreachable information that needs speculation/clarification
   indicate that to the user, either in the form of choice questions or requests for information.
   - e.g. some API call needs reverse engineering.
+- Document every finding relating to project stucture, Destiny 2 codebase, network calls
+  into `/docs` in a structured way so it's easy to find what the next person/agent is looking for.
+  Try using simple technical english for that `(ASD-STE100)`.
+- Try looking for relevant information in `/docs`.

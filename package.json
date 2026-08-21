@@ -1,0 +1,7 @@
+{
+  "name": "Sunrise",
+  "packageManager": "bun",
+  "scripts": {
+    "build": "cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=$(pwd)/linux-to-win-toolchain.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release"
+  }
+}
