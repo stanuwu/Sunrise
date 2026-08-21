@@ -1,4 +1,7 @@
+#include <cstddef>
 #include <limits>
+#include <span>
+#include <string_view>
 
 #include "../../../state/build_data/items/item_catalog.h"
 #include "../parser.h"
@@ -11,9 +14,34 @@ constexpr std::uint64_t kMaximumCharacterLevel = (std::numeric_limits<std::uint8
 /** A destination definition hash is one unsigned 32-bit field. */
 constexpr std::uint64_t kMaximumDestinationHash = (std::numeric_limits<std::uint32_t>::max)();
 
-} // namespace
+[[nodiscard]] int hex_digit(char value) noexcept {
+    if (value >= '0' && value <= '9') {
+        return value - '0';
+    }
+    if (value >= 'a' && value <= 'f') {
+        return 10 + value - 'a';
+    }
+    if (value >= 'A' && value <= 'F') {
+        return 10 + value - 'A';
+    }
+    return -1;
+}
 
-namespace {
+/** Decodes one exact fixed-width opaque creator block stored on an authored character. */
+[[nodiscard]] bool decode_hex_bytes(std::string_view text, std::span<std::byte> output) noexcept {
+    if (text.size() != output.size() * 2U) {
+        return false;
+    }
+    for (std::size_t index = 0; index < output.size(); ++index) {
+        const int high = hex_digit(text[index * 2U]);
+        const int low = hex_digit(text[index * 2U + 1U]);
+        if (high < 0 || low < 0) {
+            return false;
+        }
+        output[index] = static_cast<std::byte>((high << 4) | low);
+    }
+    return true;
+}
 
 /** Sets the tier bit one rarity name stands for. */
 [[nodiscard]] bool dismantle_tier_bit(std::string_view name, std::uint8_t& mask) noexcept {
@@ -233,7 +261,7 @@ bool Parser::characters(state::AccountState& output) noexcept {
     }
 }
 
-/** Parses one authored character identity. */
+/** Parses one authored character identity, including optional native creator presentation data. */
 bool Parser::character(state::CharacterState& output) noexcept {
     output = {};
     if (!consume('{')) {
@@ -242,6 +270,10 @@ bool Parser::character(state::CharacterState& output) noexcept {
     bool hasSoid = false;
     bool hasEquipment = false;
     bool hasInventory = false;
+    bool hasPresentation = false;
+    bool hasCreationHeader = false;
+    bool hasCreationTail = false;
+    bool hasCreatorTrailer = false;
     if (consume('}')) {
         return false;
     }
@@ -251,7 +283,7 @@ bool Parser::character(state::CharacterState& output) noexcept {
             return false;
         }
         if (key == "soid") {
-            if (!unsigned_value(output.soid) || output.soid == 0) {
+            if (hasSoid || !unsigned_value(output.soid) || output.soid == 0) {
                 return false;
             }
             hasSoid = true;
@@ -304,6 +336,34 @@ bool Parser::character(state::CharacterState& output) noexcept {
             if (!boolean(output.contentBypass)) {
                 return false;
             }
+        } else if (key == "presentation_header") {
+            std::string_view value;
+            if (hasPresentation || !string(value)
+                || !decode_hex_bytes(value, output.presentationHeader)) {
+                return false;
+            }
+            hasPresentation = true;
+        } else if (key == "creation_header") {
+            std::string_view value;
+            if (hasCreationHeader || !string(value)
+                || !decode_hex_bytes(value, output.creationHeader)) {
+                return false;
+            }
+            hasCreationHeader = true;
+        } else if (key == "creation_tail") {
+            std::string_view value;
+            if (hasCreationTail || !string(value)
+                || !decode_hex_bytes(value, output.creationTail)) {
+                return false;
+            }
+            hasCreationTail = true;
+        } else if (key == "creator_trailer") {
+            std::uint64_t value = 0;
+            if (hasCreatorTrailer || !unsigned_integer(value) || value > 0x1FU) {
+                return false;
+            }
+            output.creatorTrailer = static_cast<std::uint8_t>(value);
+            hasCreatorTrailer = true;
         } else if (key == "movement_ability" || key == "grenade_ability" || key == "super_ability"
                    || key == "melee_ability" || key == "class_ability") {
             // Deliberately ignored on load. The subclass screen's first paint each login shows
@@ -326,7 +386,11 @@ bool Parser::character(state::CharacterState& output) noexcept {
             return false;
         }
         if (consume('}')) {
-            return hasSoid;
+            const bool anyCreator = hasPresentation || hasCreationHeader || hasCreationTail
+                                    || hasCreatorTrailer;
+            const bool completeCreator = hasPresentation && hasCreationHeader && hasCreationTail
+                                         && hasCreatorTrailer;
+            return hasSoid && (!anyCreator || completeCreator);
         }
         if (!consume(',')) {
             return false;

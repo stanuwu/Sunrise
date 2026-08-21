@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <string_view>
 
 #include "../../state/account/account_state.h"
@@ -35,7 +38,7 @@ struct Settings {
     server::Settings server;
     /** Options used only by the Steam compatibility layer. */
     steam::Settings steam;
-    /** Complete authored account State, or an empty account. */
+    /** Complete authored account State, including all configured playable characters. */
     state::AccountState initialAccount;
     /** Small local destination fallback published when State starts. */
     state::activity::defaults::ActivityDefaults initialActivityDefaults;

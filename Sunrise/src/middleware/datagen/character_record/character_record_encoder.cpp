@@ -38,9 +38,20 @@ constexpr std::size_t kPreviewFlagOffsets[]{8, 9};
         static_cast<std::int8_t>(character.gender),
         static_cast<std::int8_t>(character.characterClass),
     };
-    std::memcpy(identity.headerBlock.data(),
-                layout::kHeaderBlockBytes.data(),
-                layout::kHeaderBlockBytes.size());
+    const bool hasNativePresentation = std::any_of(character.presentationHeader.begin(),
+                                                   character.presentationHeader.end(),
+                                                   [](std::byte value) {
+                                                       return value != std::byte{};
+                                                   });
+    if (hasNativePresentation) {
+        std::memcpy(identity.headerBlock.data(),
+                    character.presentationHeader.data(),
+                    character.presentationHeader.size());
+    } else {
+        std::memcpy(identity.headerBlock.data(),
+                    layout::kHeaderBlockBytes.data(),
+                    layout::kHeaderBlockBytes.size());
+    }
 
     output = {};
     appearance::apply_sentinels(output);

@@ -176,6 +176,36 @@ bool encode_echo(const middleware::web_service::Message& message,
         message, ws::ResponseShape::generic, ws::StatusResponse{}, response, written);
 }
 
+/** Reports whether the native opcode-501 creator body matches the verified decoder. */
+void report_character_create_decode(
+    const middleware::web_service::messages::opcode501::DecodedRequest* decoded,
+    std::size_t payloadSize) noexcept {
+    std::array<char, 192> line{};
+    const int count =
+        decoded != nullptr
+            ? std::snprintf(line.data(),
+                            line.size(),
+                            "ev=ws501 stage=decode result=ok bytes=%zu race=%u gender=%u class=%u "
+                            "presentation=%zu creation=%zu tail=%zu trailer=%u",
+                            payloadSize,
+                            static_cast<unsigned>(decoded->race),
+                            static_cast<unsigned>(decoded->gender),
+                            static_cast<unsigned>(decoded->characterClass),
+                            decoded->presentationHeader.size(),
+                            decoded->creationHeader.size(),
+                            decoded->creationTail.size(),
+                            static_cast<unsigned>(decoded->creatorTrailer))
+            : std::snprintf(line.data(),
+                            line.size(),
+                            "ev=ws501 stage=decode result=fail bytes=%zu",
+                            payloadSize);
+    if (count > 0 && static_cast<std::size_t>(count) < line.size()) {
+        core::log::write(core::log::Channel::server,
+                         decoded != nullptr ? core::log::Level::info : core::log::Level::warn,
+                         {line.data(), static_cast<std::size_t>(count)});
+    }
+}
+
 /**
  * Parses and answers one Web Service request with its whole descriptor layout.
  * @param request Whole decrypted svc-10 body.
@@ -244,7 +274,13 @@ bool consume(std::span<const std::byte> request,
     }
 
     if (message.opcode == middleware::web_service::messages::opcode501::kOpcode) {
-        // Returns a SOID family three already publishes. The request body is not parsed.
+        middleware::web_service::messages::opcode501::DecodedRequest decoded{};
+        const bool decodedOk =
+            middleware::web_service::messages::opcode501::decode_request(message, decoded);
+        report_character_create_decode(decodedOk ? &decoded : nullptr, message.payload.size());
+
+        // The generic direct path remains non-mutating. The authenticated BAP route intercepts
+        // opcode 501 before this handler and owns the atomic State/Queuez creation transaction.
         const std::uint64_t characterSoid =
             state::account::selected_character_soid(state::account_snapshot());
         return middleware::web_service::messages::opcode501::encode_response(

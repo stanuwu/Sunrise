@@ -1,4 +1,4 @@
-﻿/** Instance identity helpers: generated SOIDs, ownership tests, and loadout row lookups. */
+/** Instance identity helpers: generated SOIDs, ownership tests, and loadout row lookups. */
 
 #include <Windows.h>
 
@@ -209,3 +209,6 @@ constexpr std::uint64_t kFirstGeneratedItemSoid = 0x4000000000000001ULL;
 
 } // namespace runtime::detail
 } // namespace sunrise::state
+
+#include "character_creation.inl"
+#include "character_deletion.inl"

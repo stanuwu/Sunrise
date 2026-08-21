@@ -11,7 +11,11 @@
 #include "../../../../middleware/bap/family_unsubscription.h"
 #include "../../../../middleware/bap/user_message/user_message_response.h"
 #include "../../../../middleware/encoding/byte_order.h"
+#include "../../../../middleware/web_service/messages/opcode501_codec.h"
+#include "../../../../middleware/web_service/messages/opcode502.h"
 #include "../../../../middleware/web_service/messages/opcode505/opcode505_codec.h"
+#include "../../../../state/runtime/character_creation.h"
+#include "../../../../state/runtime/character_deletion.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../../../web_service/web_service_runtime.h"
 #include "../activity_host_manager/activity_host_manager_route.h"
@@ -23,27 +27,13 @@
 namespace sunrise::server::bap::encrypted::body {
 namespace {
 
-/** One line carries the family and the root soid and nothing else. */
 constexpr std::size_t kSubscribeReportLimit = 96;
-/** The svc-23 request identity sits after its entry count and both type bytes. */
 constexpr std::size_t kTranslationIdentityOffset = 4;
-/** A request shorter than this carries no identity to read. */
 constexpr std::size_t kTranslationRequestSize =
     kTranslationIdentityOffset + middleware::encoding::kU64Size;
 
-/**
- * Identity already paired with the account soid, or zero before the first pairing.
- * There is one account, so this is process-wide rather than per connection.
- */
 std::atomic<std::uint64_t> g_translatedIdentity{0};
 
-/**
- * Reports whether one svc-23 request may be paired with the account soid.
- * The reply writes the soid into a queuez roster member. Two identities on one soid put two
- * family-zero source entries on it, and every lookup then resolves only the first.
- * @param requestBody Complete svc-23 request body.
- * @return True when this identity is the one paired, or the first to ask.
- */
 [[nodiscard]] bool pairs_identity(std::span<const std::byte> requestBody) noexcept {
     if (requestBody.size() < kTranslationRequestSize) {
         return false;
@@ -54,26 +44,24 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
         return false;
     }
     std::uint64_t claimed = 0;
-    // A repeat of the same identity still pairs: the peer re-asks until the flag sticks.
     return g_translatedIdentity.compare_exchange_strong(
                claimed, identity, std::memory_order_relaxed)
            || claimed == identity;
 }
 
+/** Encodes a non-mutating create response so a refused request still completes its task. */
+[[nodiscard]] bool encode_create_fallback(const middleware::web_service::Message& message,
+                                          std::span<std::byte> output,
+                                          std::size_t& written) noexcept {
+    return middleware::web_service::messages::opcode501::encode_response(
+        message,
+        state::account::selected_character_soid(state::account_snapshot()),
+        output,
+        written);
+}
+
 } // namespace
 
-/**
- * Processes the body for one authenticated service route.
- * @param route Service route data found earlier.
- * @param queuezState Queuez versions and residents set up by this BAP peer.
- * @param activity Exact ActivityClient generation owned by this BAP session.
- * @param matchmakingContext State-owned logical context for this BAP session.
- * @param requestBody Borrowed decrypted request body.
- * @param output Caller-owned response-body storage.
- * @param written Receives encoded body bytes.
- * @param outcome Receives one validated transport action or deferred State transaction.
- * @return True when the chosen body codec succeeds.
- */
 bool process(const ServiceRoute& route,
              const queuez::SessionState& queuezState,
              const ActivityClientBinding& activity,
@@ -89,8 +77,6 @@ bool process(const ServiceRoute& route,
         return true;
     case BodyCodec::accountTranslationResponse: {
         const state::AccountState account = state::account_snapshot();
-        // A zero soid makes the encoder write its zero-entry answer. That refuses an unpaired
-        // request without leaving the peer waiting.
         const bool pairs = pairs_identity(requestBody);
         const std::uint64_t soid = pairs ? account.primarySoid : 0;
         core::log::write(core::log::Channel::server,
@@ -132,8 +118,6 @@ bool process(const ServiceRoute& route,
         written = 0;
         outcome.hasSubscription =
             middleware::bap::family_subscription::parse(requestBody, outcome.subscription);
-        // The subscribe names the record now ready for a snapshot. The family and root are the
-        // only way to tell one record's cycle from several records interleaving.
         std::array<char, kSubscribeReportLimit> line{};
         const int count =
             std::snprintf(line.data(),
@@ -171,7 +155,109 @@ bool process(const ServiceRoute& route,
         return middleware::bap::user_message::encode_minimal_response(output, written);
     case BodyCodec::webService: {
         middleware::web_service::Message message;
-        if (middleware::web_service::parse_request(requestBody, message)
+        const bool parsedMessage = middleware::web_service::parse_request(requestBody, message);
+        if (parsedMessage
+            && message.opcode == middleware::web_service::messages::opcode501::kOpcode) {
+            middleware::web_service::messages::opcode501::DecodedRequest decoded{};
+            state::PendingCharacterCreation mutation{};
+            state::CharacterCreationResult result = state::CharacterCreationResult::invalid;
+            if (middleware::web_service::messages::opcode501::decode_request(message, decoded)) {
+                state::NativeCharacterCreation creation{};
+                creation.race = static_cast<state::CharacterRace>(decoded.race);
+                creation.gender = static_cast<state::CharacterGender>(decoded.gender);
+                creation.characterClass = static_cast<state::CharacterClass>(decoded.characterClass);
+                creation.presentationHeader = decoded.presentationHeader;
+                creation.creationHeader = decoded.creationHeader;
+                creation.creationTail = decoded.creationTail;
+                creation.creatorTrailer = decoded.creatorTrailer;
+                result = state::prepare_character_creation(creation, mutation);
+            }
+
+            const bool queuezReady =
+                result == state::CharacterCreationResult::ok && queuez::valid(queuezState)
+                && queuezState.family4Active && queuezState.family3Active
+                && queuezState.family4RootSoid == mutation.accountSoid
+                && queuezState.family3RootSoid == mutation.accountSoid
+                && queuezState.family3Phase == queuez::Family3Phase::normal
+                && (!mutation.selectCreated || queuezState.family0Active);
+            std::array<char, core::log::kLineCapacity> line{};
+            const int count = std::snprintf(
+                line.data(),
+                line.size(),
+                "ev=character_create stage=prepare result=%s reason=%s tx=%u payload=%zu "
+                "race=%u gender=%u class=%u trailer=%u soid=0x%llX select=%u",
+                queuezReady ? "ok" : "fail",
+                state::character_creation_result_name(result),
+                message.transactionId,
+                message.payload.size(),
+                static_cast<unsigned>(decoded.race),
+                static_cast<unsigned>(decoded.gender),
+                static_cast<unsigned>(decoded.characterClass),
+                static_cast<unsigned>(decoded.creatorTrailer),
+                static_cast<unsigned long long>(mutation.characterSoid),
+                mutation.selectCreated ? 1U : 0U);
+            if (count > 0) {
+                core::log::write(core::log::Channel::server,
+                                 queuezReady ? core::log::Level::info : core::log::Level::warn,
+                                 {line.data(), static_cast<std::size_t>(count)});
+            }
+            if (!queuezReady) {
+                return encode_create_fallback(message, output, written);
+            }
+            if (!middleware::web_service::messages::opcode501::encode_response(
+                    message, mutation.characterSoid, output, written)) {
+                return false;
+            }
+            auto& transaction = outcome.transaction.emplace<CharacterCreationTransaction>();
+            transaction.pending = mutation;
+            return true;
+        }
+        if (parsedMessage
+            && message.opcode == middleware::web_service::messages::opcode502::kOpcode) {
+            middleware::web_service::messages::opcode502::Request request{};
+            state::PendingCharacterDeletion mutation{};
+            state::CharacterDeletionResult result = state::CharacterDeletionResult::invalid;
+            if (middleware::web_service::messages::opcode502::parse_request(message, request)) {
+                result = state::prepare_character_deletion(request.characterSoid, mutation);
+            }
+
+            const bool prepared = result == state::CharacterDeletionResult::ok;
+            std::array<char, core::log::kLineCapacity> line{};
+            const int count = std::snprintf(
+                line.data(),
+                line.size(),
+                "ev=character_delete stage=prepare result=%s reason=%s tx=%u payload=%zu "
+                "soid=0x%llX before=%zu index=%zu",
+                prepared ? "ok" : "fail",
+                state::character_deletion_result_name(result),
+                message.transactionId,
+                message.payload.size(),
+                static_cast<unsigned long long>(request.characterSoid),
+                mutation.beforeCharacterCount,
+                mutation.characterIndex);
+            if (count > 0) {
+                core::log::write(core::log::Channel::server,
+                                 prepared ? core::log::Level::info : core::log::Level::warn,
+                                 {line.data(), static_cast<std::size_t>(count)});
+            }
+
+            middleware::web_service::StatusResponse status{};
+            status.code = prepared ? 0 : 1;
+            if (!middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPair,
+                    status,
+                    output,
+                    written)) {
+                return false;
+            }
+            if (prepared) {
+                auto& transaction = outcome.transaction.emplace<CharacterDeletionTransaction>();
+                transaction.pending = mutation;
+            }
+            return true;
+        }
+        if (parsedMessage
             && message.opcode == middleware::web_service::messages::opcode505::kOpcode) {
             if (!middleware::web_service::messages::opcode505::parse_request(message)
                 || !queuez::stage_change_character(queuezState, outcome.changeCharacter)
@@ -180,8 +266,6 @@ bool process(const ServiceRoute& route,
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
                                  "ev=ws505 stage=change result=fail");
-                // The plain status pair still goes out. The Client's Change Character waits on the
-                // echoed transaction id, so a missing reply hangs it for the rest of the run.
                 outcome.changeCharacter = {};
                 return middleware::web_service::encode_response(
                     message,
@@ -212,17 +296,12 @@ bool process(const ServiceRoute& route,
         const auto* itemDismantle =
             web_service::mutation_if<state::PendingItemDismantle>(webOutcome);
         if (equipmentSwap != nullptr) {
-            // Equip is an optimistic Character-screen action. Its status-pair value is the exact
-            // Family-4 revision whose following Queuez frame makes it authoritative. Stage that
-            // revision before encoding the reply, or the Client completes against the old store.
             auto& transaction = outcome.transaction.emplace<EquipmentSwapTransaction>();
             if (!queuez::stage_equipment_swap(
                     queuezState, equipmentSwap->characterSoid, transaction.update)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
                                  "ev=ws403 stage=queuez_preflight result=fail");
-                // Keep the already-encoded sentinel response and publish no mutation, matching
-                // the change-character failure contract instead of dropping the correlated task.
                 outcome.transaction = std::monostate{};
             } else {
                 middleware::web_service::StatusResponse status{};
@@ -243,8 +322,6 @@ bool process(const ServiceRoute& route,
             }
         }
         if (subclassSelection != nullptr) {
-            // Opcode 801 completes at the exact Family-4 revision carrying the selected subclass
-            // socket entry. The resident manifest and equipped subclass identity stay unchanged.
             auto& transaction = outcome.transaction.emplace<SubclassSelectionTransaction>();
             if (!queuez::stage_subclass_selection(queuezState,
                                                   subclassSelection->accountSoid,
@@ -275,8 +352,6 @@ bool process(const ServiceRoute& route,
             }
         }
         if (socketPlug != nullptr) {
-            // Opcode 903 completes at the exact Family-4 revision carrying the changed resident
-            // item instance. The resident manifest and character placement remain unchanged.
             auto& transaction = outcome.transaction.emplace<SocketPlugTransaction>();
             if (!queuez::stage_socket_plug(queuezState,
                                            socketPlug->accountSoid,
@@ -312,8 +387,6 @@ bool process(const ServiceRoute& route,
             }
         }
         if (itemState != nullptr) {
-            // Opcode 406 completes at the exact Family-4 revision carrying the changed inventory
-            // row flags. Placement and every resident item-instance body remain unchanged.
             auto& transaction = outcome.transaction.emplace<ItemStateTransaction>();
             if (!queuez::stage_equipment_swap(
                     queuezState, itemState->characterSoid, transaction.update)) {
@@ -339,9 +412,6 @@ bool process(const ServiceRoute& route,
             }
         }
         if (itemAcquisition != nullptr) {
-            // A Collections pull is complete only at the exact Family-4 revision that adds both
-            // the inventory row and its newly resident instance object. Stage that revision before
-            // re-encoding the correlated status pair, just like an equipment swap.
             auto& transaction = outcome.transaction.emplace<ItemAcquisitionTransaction>();
             if (!queuez::stage_item_acquisition(queuezState,
                                                 itemAcquisition->accountSoid,
@@ -375,9 +445,6 @@ bool process(const ServiceRoute& route,
             }
         }
         if (profileItemAcquisition != nullptr) {
-            // Profile stacks live in the account body. Actionable shaders/modifications also name
-            // a Family-4 item resident: an existing stack must already own it, while a newly
-            // appended row adds it atomically at this exact +1 revision.
             auto& transaction = outcome.transaction.emplace<ProfileItemAcquisitionTransaction>();
             if (!queuez::stage_profile_item_acquisition(
                     queuezState,
@@ -414,9 +481,6 @@ bool process(const ServiceRoute& route,
             }
         }
         if (itemDismantle != nullptr) {
-            // Dismantle is another optimistic Character-screen action. Promise only the exact
-            // Family-4 revision carrying both the character after-image and the empty release
-            // descriptor; otherwise keep the generic sentinel reply and publish no removal.
             auto& transaction = outcome.transaction.emplace<ItemDismantleTransaction>();
             if (!queuez::stage_item_dismantle(queuezState,
                                               itemDismantle->accountSoid,
@@ -449,8 +513,6 @@ bool process(const ServiceRoute& route,
                 transaction.pending = *itemDismantle;
             }
         }
-        // A pick that names the resident character moves nothing, so staging refuses it and the
-        // reply still stands on its own.
         if (webOutcome.hasSelectedCharacter
             && queuez::stage_select_character(
                 queuezState, webOutcome.selectedCharacterSoid, outcome.selectCharacter)) {

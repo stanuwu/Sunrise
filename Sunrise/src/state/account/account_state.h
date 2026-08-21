@@ -77,6 +77,13 @@ enum class CharacterClass : std::uint8_t {
     warlock = 2,
 };
 
+/** Native character-select presentation block retained from character creation. */
+inline constexpr std::size_t kCharacterPresentationHeaderSize = 36;
+/** Native-width creator block provisionally associated with character creation publication. */
+inline constexpr std::size_t kCharacterCreationHeaderSize = 36;
+/** Final native-width creator block retained losslessly for its eventual authored consumer. */
+inline constexpr std::size_t kCharacterCreationTailSize = 24;
+
 /** Default movement entry. Each subclass offers 3, as entries 4, 5 and 6 of its group. */
 inline constexpr std::uint8_t kDefaultMovementAbilityEntry = 4;
 /** No socket entry list declares more entries than this, so a larger value is not an entry. */
@@ -156,6 +163,20 @@ struct CharacterState {
     account::inventory::CharacterItems inventory;
     /** Next row generation; equip transactions consume two values for the two moved items. */
     std::uint32_t nextInventorySerial{};
+
+    /**
+     * Native presentation/customization data captured from the in-game character creator.
+     *
+     * A cleared block means the character predates native creator capture. The fields stay opaque
+     * here so the authored native consumers, rather than State, define their internal semantics.
+     *
+     * These fields are appended to preserve the ordering of all pre-existing aggregate members.
+     */
+    std::array<std::byte, kCharacterPresentationHeaderSize> presentationHeader{};
+    std::array<std::byte, kCharacterCreationHeaderSize> creationHeader{};
+    std::array<std::byte, kCharacterCreationTailSize> creationTail{};
+    /** Opaque final five bits of the native opcode-501 creator payload. */
+    std::uint8_t creatorTrailer{};
 };
 
 /** Account identity shared by backend object families. */

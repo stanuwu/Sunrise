@@ -20,17 +20,9 @@ namespace {
 
 namespace family4_datagen = middleware::datagen::family4;
 
-/**
- * Publishes the staged family metadata once every needed object is done.
- * @param subscription Family id the Client picked.
- * @param objectCount Descriptors staged for this family.
- * @param compressedExtent Size of the used prefix of the sealed buffer.
- * @param reservation Cleanup extent carried over from any prior live snapshot.
- * @param staged Descriptors and clear extents built by the caller.
- * @param output Gets the family snapshot only on success.
- * @return True when the staged descriptors pass the ownership check.
- */
+/** Publishes staged family metadata once every needed object is done. */
 [[nodiscard]] bool publish(const middleware::queuez::Subscription& subscription,
+                           std::int32_t version,
                            std::size_t objectCount,
                            std::size_t compressedExtent,
                            const Reservation& reservation,
@@ -40,37 +32,30 @@ namespace family4_datagen = middleware::datagen::family4;
     staged.family = middleware::queuez::Family{
         kAccountFamilyType,
         subscription.familyRootSoid,
-        kInitialFamilyVersion,
+        version,
         middleware::queuez::kFullSnapshotFlag,
         std::span(staged.objects).first(objectCount),
     };
     return commit(staged, output);
 }
 
-} // namespace
-
-/** Builds the Family-4 account, selected-character, and item-instance snapshot. */
-bool prepare(Scratch& scratch,
-             const middleware::queuez::Subscription& subscription,
-             std::uint32_t accountObjectId,
-             const Reservation& reservation,
-             Prepared& prepared) noexcept {
-    if (reservation.rawWriteOffset > scratch.plaintext.size()
+/** Builds one complete Family-4 image from the supplied canonical account. */
+[[nodiscard]] bool prepare_account(Scratch& scratch,
+                                   const middleware::queuez::Subscription& subscription,
+                                   std::uint32_t accountObjectId,
+                                   std::int32_t version,
+                                   const state::AccountState& account,
+                                   const Reservation& reservation,
+                                   Prepared& prepared) noexcept {
+    if (subscription.familyType != kAccountFamilyType || subscription.familyRootSoid == 0
+        || account.primarySoid != subscription.familyRootSoid || !state::account::valid(account)
+        || reservation.rawWriteOffset > scratch.plaintext.size()
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
-        return report_failure("reservation");
+        return report_failure("account_input");
     }
     const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     if (family4_datagen::account::layout::kObjectSize > rawStorage.size()) {
         return report_failure("account_storage");
-    }
-    // Package extraction may have completed after State initialization on a first cache build.
-    // Canonicalize profile action-source identities immediately before the first Family-4 image.
-    if (!state::ensure_profile_item_identities()) {
-        return report_failure("profile_identities");
-    }
-    const state::AccountState account = state::account_snapshot();
-    if (!state::account::valid(account)) {
-        return report_failure("account_state");
     }
 
     const std::optional<std::size_t> selectedIndex = find_character_index(account);
@@ -96,8 +81,8 @@ bool prepare(Scratch& scratch,
                        compressedExtent)) {
         return report_failure("account_object");
     }
-    // The character object is the only descriptor a selection owns. With no selection it is absent
-    // and the items move up behind the account object, keeping the published prefix contiguous.
+
+    // The selected-character object is optional; all characters' item residents are not.
     const std::size_t itemBaseIndex =
         selectedIndex.has_value() ? kFirstItemObjectIndex : kFirstItemObjectIndexUnselected;
     if (selectedIndex.has_value()) {
@@ -124,8 +109,7 @@ bool prepare(Scratch& scratch,
             return report_failure("character_object");
         }
     }
-    // Every character in the roster needs its item records. The equip-summary reader looks up an
-    // instance with no null check, so a missing record is a null read.
+
     std::uint32_t itemInstanceObjectId = 0;
     if (!middleware::datagen::object_id(
             kAccountFamilyType, kItemDefinitionSlotIndex, itemInstanceObjectId)) {
@@ -151,8 +135,6 @@ bool prepare(Scratch& scratch,
             return report_failure("items");
         }
     }
-    // Profile rows with nonzero SOIDs are native action sources.  Their item residents follow all
-    // character-owned instances so the full-snapshot manifest remains deterministic.
     if (!append_profile_items(scratch,
                               rawStorage,
                               itemInstanceObjectId,
@@ -170,7 +152,68 @@ bool prepare(Scratch& scratch,
             (std::max)(staged.rawClearSize,
                        reservation.rawWriteOffset + family4_datagen::instance::layout::kObjectSize);
     }
-    return publish(subscription, objectCount, compressedExtent, reservation, staged, prepared);
+    return publish(subscription,
+                   version,
+                   objectCount,
+                   compressedExtent,
+                   reservation,
+                   staged,
+                   prepared);
+}
+
+} // namespace
+
+/** Builds the Family-4 account, selected-character, and item-instance snapshot from live State. */
+bool prepare(Scratch& scratch,
+             const middleware::queuez::Subscription& subscription,
+             std::uint32_t accountObjectId,
+             const Reservation& reservation,
+             Prepared& prepared) noexcept {
+    // Package extraction may have completed after State initialization on a first cache build.
+    // Canonicalize profile action-source identities immediately before the first Family-4 image.
+    if (!state::ensure_profile_item_identities()) {
+        return report_failure("profile_identities");
+    }
+    const state::AccountState account = state::account_snapshot();
+    return prepare_account(scratch,
+                           subscription,
+                           accountObjectId,
+                           kInitialFamilyVersion,
+                           account,
+                           reservation,
+                           prepared);
+}
+
+/** Builds a complete next-version Family-4 snapshot from an uncommitted account after-image. */
+bool prepare_family4_refresh_from_account(Scratch& scratch,
+                                          std::uint64_t familyRootSoid,
+                                          std::int32_t version,
+                                          const state::AccountState& account,
+                                          Prepared& prepared) noexcept {
+    if (familyRootSoid == 0 || version <= kInitialFamilyVersion
+        || account.primarySoid != familyRootSoid || !state::account::valid(account)) {
+        return false;
+    }
+    std::uint32_t accountObjectId = 0;
+    if (!middleware::datagen::object_id(
+            kAccountFamilyType, kAccountDefinitionSlotIndex, accountObjectId)) {
+        return false;
+    }
+    middleware::queuez::Subscription subscription{};
+    subscription.familyType = kAccountFamilyType;
+    subscription.familyRootSoid = familyRootSoid;
+    const Reservation reservation = reserve_prior(scratch, prepared);
+    if (!prepare_account(scratch,
+                         subscription,
+                         accountObjectId,
+                         version,
+                         account,
+                         reservation,
+                         prepared)) {
+        clear_after(scratch, reservation);
+        return false;
+    }
+    return true;
 }
 
 } // namespace sunrise::server::bap::encrypted::push::snapshot

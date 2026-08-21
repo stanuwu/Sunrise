@@ -219,7 +219,6 @@ finalize_equipment_transition(const AccountState& account,
         }
     }
 
-    // The serial is signed on the wire, so it must stay inside the positive int32 range.
     constexpr std::uint32_t kMaximumInventorySerial =
         static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)());
     if (movedItemCount == 0 || after.nextInventorySerial > kMaximumInventorySerial
@@ -350,6 +349,9 @@ void report_item_state(std::string_view stage,
         || left.appearanceValue != right.appearanceValue
         || left.lastOrbitedDestination != right.lastOrbitedDestination
         || left.contentBypass != right.contentBypass
+        || left.presentationHeader != right.presentationHeader
+        || left.creationHeader != right.creationHeader || left.creationTail != right.creationTail
+        || left.creatorTrailer != right.creatorTrailer
         || left.nextInventorySerial != right.nextInventorySerial
         || left.inventory.count != right.inventory.count) {
         return false;

@@ -143,6 +143,25 @@ bool encode(const state::CharacterState& state,
     object.identity.race = static_cast<std::int8_t>(state.race);
     object.identity.gender = static_cast<std::int8_t>(state.gender);
     object.identity.characterClass = static_cast<std::int8_t>(state.characterClass);
+    const bool hasPresentationHeader =
+        std::any_of(state.presentationHeader.begin(),
+                    state.presentationHeader.end(),
+                    [](std::byte value) { return value != std::byte{}; });
+    const bool hasCreationHeader =
+        std::any_of(state.creationHeader.begin(),
+                    state.creationHeader.end(),
+                    [](std::byte value) { return value != std::byte{}; });
+    if (hasPresentationHeader) {
+        static_assert(state::kCharacterPresentationHeaderSize
+                      == state::kCharacterCreationHeaderSize);
+        std::memcpy(object.creationHeader.data(),
+                    state.presentationHeader.data(),
+                    state.presentationHeader.size());
+    } else if (hasCreationHeader) {
+        std::memcpy(object.creationHeader.data(),
+                    state.creationHeader.data(),
+                    state.creationHeader.size());
+    }
     object.lastOrbitedDestination = state.lastOrbitedDestination;
     object.previewMirrors.fill(state.previewAvailable ? kNativeTrue : kNativeFalse);
     object.contentBypass = state.contentBypass ? kNativeTrue : kNativeFalse;

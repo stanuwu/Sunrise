@@ -7,6 +7,8 @@
 #include "../../../../core/logging/log.h"
 #include "../../../../state/activity/runtime.h"
 #include "../../../../state/matchmaking/matchmaking_state.h"
+#include "../../../../state/runtime/character_creation.h"
+#include "../../../../state/runtime/character_deletion.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../bap_connection_publication.h"
 #include "../internal.h"
@@ -15,11 +17,8 @@ namespace sunrise::server::bap::encrypted::transactions {
 namespace {
 
 namespace slots = state::activity::entity_slots;
-
-/** Log names for each lease operation, in the enum's own order. */
 constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "release"};
 
-/** Retains one newly committed private ActivityClient generation for its BAP link. */
 [[nodiscard]] bool retain_private(std::uint64_t sessionId, Publication& publication) noexcept {
     state::activity::SessionBinding binding{};
     if (!state::activity::snapshot_binding(sessionId, binding)
@@ -33,7 +32,6 @@ constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "re
     return true;
 }
 
-/** Retains one exact advertised public target before its join mutation commits. */
 [[nodiscard]] bool retain_public(const activity_message::ActivityPlan& plan,
                                  Publication& publication) noexcept {
     server::gameplay::group::HostSessionBinding current{};
@@ -64,7 +62,6 @@ constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "re
     return true;
 }
 
-/** Releases provisional activity owners when the following State commit fails. */
 void discard_activity_publication(Publication& publication) noexcept {
     if (publication.activity.hostGeneration != 0) {
         server::gameplay::group::release_host_session(publication.activity.hostGeneration);
@@ -75,13 +72,6 @@ void discard_activity_publication(Publication& publication) noexcept {
     publication = {};
 }
 
-/**
- * Reports one entity-slot lease change.
- * The client prints only `failed to create` when it has no free index, and nothing else on this
- * path reports the lease, so a failed create reads the same as an empty grant without this line.
- * @param mutation Plan as it was before the commit consumed it.
- * @param committed Whether the commit succeeded.
- */
 void report_lease(const slots::PendingMutation& mutation, bool committed) noexcept {
     std::size_t held = 0;
     std::size_t reserved = 0;
@@ -110,12 +100,6 @@ void report_lease(const slots::PendingMutation& mutation, bool committed) noexce
 
 } // namespace
 
-/**
- * Commits at most one delayed State transaction.
- * @param outcome Checked service result whose pending transaction is used up.
- * @param publication Gets connection fields to publish after the output copy.
- * @return True when there is no transaction, or the one transaction commits.
- */
 bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
     publication = {};
     if (auto* allocation = transaction_if<state::activity::PendingAllocation>(outcome)) {
@@ -150,7 +134,6 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
                 && !retain_public(*plan, publication)) {
                 return false;
             }
-            // The commit consumes the plan, so the counts are taken from a copy of it.
             const slots::PendingMutation attempted = plan->entitySlotMutation;
             const bool committed = slots::commit(plan->entitySlotMutation);
             report_lease(attempted, committed);
@@ -158,8 +141,6 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
                 discard_activity_publication(publication);
                 return false;
             }
-            // The keepalive only finds a link that is bound to a session. A link that allocated
-            // its own session carries the same id, so this rebinds it to itself.
             if (joins && plan->sessionId != state::activity::kAbsentSessionId) {
                 publication.hasActivitySessionBinding = true;
                 if (plan->bindingIntent == activity_message::BindingIntent::preserveCurrent) {
@@ -175,11 +156,26 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
         if (plan->mutationDomain == activity_message::MutationDomain::membership) {
             return state::activity::membership::commit(plan->membershipMutation);
         }
-        // The retained patch epoch is connection state, so it commits nothing here.
         return plan->mutationDomain == activity_message::MutationDomain::patchEpoch;
     }
     if (auto* mutation = transaction_if<state::matchmaking::PendingMutation>(outcome)) {
         return state::matchmaking::commit(*mutation);
+    }
+    if (auto* transaction = transaction_if<CharacterCreationTransaction>(outcome)) {
+        const bool committed = state::commit_character_creation(transaction->pending);
+        core::log::write(core::log::Channel::server,
+                         committed ? core::log::Level::debug : core::log::Level::warn,
+                         committed ? "ev=character_create stage=transaction_commit result=ok"
+                                   : "ev=character_create stage=transaction_commit result=fail");
+        return committed;
+    }
+    if (auto* transaction = transaction_if<CharacterDeletionTransaction>(outcome)) {
+        const bool committed = state::commit_character_deletion(transaction->pending);
+        core::log::write(core::log::Channel::server,
+                         committed ? core::log::Level::debug : core::log::Level::warn,
+                         committed ? "ev=character_delete stage=transaction_commit result=ok"
+                                   : "ev=character_delete stage=transaction_commit result=fail");
+        return committed;
     }
     if (auto* transaction = transaction_if<EquipmentSwapTransaction>(outcome)) {
         const bool isSubclassSlot =
@@ -191,9 +187,6 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
                          committed ? "ev=equip stage=transaction_commit result=ok"
                                    : "ev=equip stage=transaction_commit result=fail");
         if (committed && isSubclassSlot) {
-            // The equipped subclass just changed, which makes the published ability buckets
-            // stale the same way an ability-entry pick does. Wake the investment worker so the
-            // character screen stops showing the previous subclass's resolution.
             client::content::investment::worker::request_slice();
         }
         return committed;
@@ -205,9 +198,6 @@ bool commit(ServiceOutcome& outcome, Publication& publication) noexcept {
                          committed ? "ev=subclass_select stage=transaction_commit result=ok"
                                    : "ev=subclass_select stage=transaction_commit result=fail");
         if (committed) {
-            // The published ability buckets are keyed off the selection that just changed; wake
-            // the investment worker so its next pump rebuilds them instead of waiting on whatever
-            // cadence would otherwise trigger a fresh slice.
             client::content::investment::worker::request_slice();
         }
         return committed;

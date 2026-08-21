@@ -5,7 +5,6 @@
 #include "parser.h"
 
 namespace sunrise::core::settings::parser {
-
 /**
  * Fills one flag bank from [start, length] runs. A run outside the bank is refused.
  * @param bank Expanded destination bank.

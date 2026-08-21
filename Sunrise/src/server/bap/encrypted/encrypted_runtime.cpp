@@ -18,26 +18,12 @@
 namespace sunrise::server::bap::encrypted {
 namespace {
 
-/**
- * Wipes the part of one scratch buffer that may hold written bytes.
- * @param buffer Lock-owned scratch storage.
- * @param size Largest prefix that may hold transformed bytes.
- */
 void clear_prefix(std::span<std::byte> buffer, std::size_t size) noexcept {
     SecureZeroMemory(buffer.data(), (std::min)(buffer.size(), size));
 }
 
 } // namespace
 
-/**
- * Authenticates and answers one supported encrypted post-bootstrap request.
- * @param session Connection-owned authentication and nonce state.
- * @param scratch Lock-owned transform buffers kept off the Client thread stack.
- * @param outer Validated encrypted outer frame.
- * @param response Caller-owned complete-frame storage.
- * @param written Receives encoded response bytes.
- * @return True when routing succeeds and any response fits, commits State, and publishes its nonce.
- */
 bool consume(Session& session,
              Scratch& scratch,
              const middleware::bap::OuterFrame& outer,
@@ -46,7 +32,6 @@ bool consume(Session& session,
     written = 0;
     session.accountMutationPublished = false;
     if (!session.authenticated) {
-        // Staying silent here looks the same as a decode fault, and both look like a dead link.
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=bap stage=encrypted result=drop reason=unauthenticated");
@@ -65,13 +50,11 @@ bool consume(Session& session,
                 ? outer.payload.size() - middleware::secure_channel::kFrameTagSize
                 : 0;
         clear_prefix(scratch.plaintext, possiblePlaintextSize);
-        // The service is unreadable while the frame is sealed, so this line names no service.
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=bap svc=none stage=decrypt result=fail");
         return false;
     }
-    // Authentication consumes the receive nonce even when the inner service is unsupported.
     middleware::secure_channel::advance_nonce(session.receiveNonce);
 
     middleware::bap::RequestFrame frame;
@@ -94,7 +77,6 @@ bool consume(Session& session,
     }
     const bool processesBody = handled && route.responseMode != ResponseMode::none;
     const bool sendsReply = handled && route.responseMode == ResponseMode::reply;
-    // Pure one-way services consume only the authenticated receive nonce.
     if (processesBody
         && !body::process(route,
                           session.queuez,
@@ -105,9 +87,6 @@ bool consume(Session& session,
                           responseBodySize,
                           outcome)) {
         diagnostics::report_failure(frame.messageId, "body");
-        // A reply-mode service answers with an empty body instead of not at all. The Client
-        // matches only the head of its pending ring, so one unanswered request jams that ring for
-        // good and every later reply is rejected, which is worse than a thin reply.
         clear_prefix(scratch.responseBody, responseBodySize);
         responseBodySize = 0;
         outcome = {};
@@ -125,7 +104,7 @@ bool consume(Session& session,
             diagnostics::report_failure(frame.messageId, "encode");
         }
     }
-    // Stage every requested frame and check for caller room before committing State or the nonce.
+
     auto nextSendNonce = session.sendNonce;
     if (handled && sendsReply) {
         middleware::secure_channel::advance_nonce(nextSendNonce);
@@ -160,21 +139,26 @@ bool consume(Session& session,
                                                               nextSendNonce,
                                                               scratch.framed,
                                                               framedSize)) {
-            // The transaction still commits. A push that cannot be built is one lost message, and
-            // dropping the commit with it would strand the client's reported state for the session.
             diagnostics::report_failure(frame.messageId, "notify");
         }
     }
     const bool mutatesAccount =
         outcome.hasChangeCharacter || outcome.hasSelectCharacter
+        || transaction_if<CharacterCreationTransaction>(outcome) != nullptr
+        || transaction_if<CharacterDeletionTransaction>(outcome) != nullptr
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
         || transaction_if<SocketPlugTransaction>(outcome) != nullptr
         || transaction_if<ItemStateTransaction>(outcome) != nullptr
         || transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
-    // State commits consume and clear their pending payloads. Retain only the small diagnostic
-    // fields needed after publication; QueueZ after-images stay owned by the transaction variant.
+
+    const auto* stagedCreation = transaction_if<CharacterCreationTransaction>(outcome);
+    const std::uint64_t createdCharacterSoid =
+        stagedCreation == nullptr ? 0 : stagedCreation->pending.characterSoid;
+    const auto* stagedDeletion = transaction_if<CharacterDeletionTransaction>(outcome);
+    const std::uint64_t deletedCharacterSoid =
+        stagedDeletion == nullptr ? 0 : stagedDeletion->pending.characterSoid;
     const auto* stagedSocket = transaction_if<SocketPlugTransaction>(outcome);
     const std::uint8_t socketLane = stagedSocket == nullptr ? 0 : stagedSocket->pending.socketLane;
     const std::uint16_t socketPlugDefinition =
@@ -196,11 +180,8 @@ bool consume(Session& session,
     const bool profileActionSource =
         stagedProfile != nullptr && stagedProfile->pending.actionSource;
     const bool profileAppended = stagedProfile != nullptr && stagedProfile->pending.appended;
-    // Committing the transaction clears the mutation the member key lives in, so the connection
-    // fields are captured before the commit and published after it.
     const ConnectionFields connection = connection_fields(outcome);
     if (handled && processesBody) {
-        // State changes become visible only after every requested frame and caller byte fit.
         handled = framedSize <= response.size() && transactions::commit(outcome, publication);
         if (!handled) {
             diagnostics::report_failure(frame.messageId, "commit");
@@ -208,22 +189,58 @@ bool consume(Session& session,
         if (handled) {
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
             written = framedSize;
-            // The caller copy finishes before connection fields are published.
             session.sendNonce = nextSendNonce;
             if (publishesQueuez) {
                 session.queuez = nextQueuez;
             }
             arm_repushes(session, queuezPublication);
             publish_connection_fields(session, publication, connection);
-            // The caller copy is done, so what the staged roster body owes is settled here.
             push::activity::commit_staged_roster(session);
             commit_staged_advertisement(session);
-            // Any delivered activity notification resets the client's silence timer. Delay the
-            // fallback keepalive so this same request does not append a redundant second push.
             if (activityPlan != nullptr && framedSize != 0) {
                 session.activityKeepaliveDueTick = GetTickCount64() + kActivityKeepaliveIntervalMs;
             }
             session.accountMutationPublished = mutatesAccount;
+            if (createdCharacterSoid != 0) {
+                std::array<char, core::log::kLineCapacity> line{};
+                const int count = std::snprintf(
+                    line.data(),
+                    line.size(),
+                    "ev=character_create stage=output_publish result=ok framed_bytes=%zu "
+                    "queuez_published=%u family_version=%d family0_version=%d family3_version=%d "
+                    "character=0x%llX",
+                    framedSize,
+                    static_cast<unsigned>(publishesQueuez),
+                    session.queuez.family4Version,
+                    session.queuez.family0Version,
+                    session.queuez.family3Version,
+                    static_cast<unsigned long long>(createdCharacterSoid));
+                if (count > 0) {
+                    core::log::write(core::log::Channel::server,
+                                     core::log::Level::info,
+                                     {line.data(), static_cast<std::size_t>(count)});
+                }
+            }
+            if (deletedCharacterSoid != 0) {
+                std::array<char, core::log::kLineCapacity> line{};
+                const int count = std::snprintf(
+                    line.data(),
+                    line.size(),
+                    "ev=character_delete stage=output_publish result=ok framed_bytes=%zu "
+                    "queuez_published=%u family_version=%d family0_version=%d family3_version=%d "
+                    "character=0x%llX",
+                    framedSize,
+                    static_cast<unsigned>(publishesQueuez),
+                    session.queuez.family4Version,
+                    session.queuez.family0Version,
+                    session.queuez.family3Version,
+                    static_cast<unsigned long long>(deletedCharacterSoid));
+                if (count > 0) {
+                    core::log::write(core::log::Channel::server,
+                                     core::log::Level::info,
+                                     {line.data(), static_cast<std::size_t>(count)});
+                }
+            }
             if (transaction_if<EquipmentSwapTransaction>(outcome) != nullptr) {
                 std::array<char, core::log::kLineCapacity> line{};
                 const int count = std::snprintf(
@@ -350,7 +367,6 @@ bool consume(Session& session,
         }
     }
     if (!handled) {
-        // The staged body is dropped, so its grant and its state byte go back for the next push.
         push::activity::discard_staged_roster(session);
         discard_staged_advertisement(session);
     }
