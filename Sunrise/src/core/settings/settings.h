@@ -27,6 +27,8 @@ struct Settings {
      * every file written before versioning. Checked against kSettingsVersion at load.
      */
     std::uint32_t version{};
+    /** Completes released exotic weapon catalysts while resolving client item state. */
+    bool completeExoticCatalysts{true};
     /** Core-owned sink and channel policy. */
     log::Settings logging;
     /** Options used only by the Client layer. */

@@ -1,5 +1,6 @@
 {
   "version": 8,
+  "complete_exotic_catalysts": true,
   "core": {
     "logging": {
       "debugger_sink": true,

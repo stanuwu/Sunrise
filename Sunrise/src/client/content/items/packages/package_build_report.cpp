@@ -128,6 +128,31 @@ void report_socket_plug_count(std::size_t rules,
     }
 }
 
+/** Reports the build-scoped catalyst catalog and its first safe failure. */
+void report_catalyst_catalog(const state::build_data::items::catalysts::Report& report,
+                             bool built) noexcept {
+    std::array<char, 192> line{};
+    const int written = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=pkg stage=exotic_catalysts result=%s released=%zu placeholder=%zu unsupported=%zu "
+        "error=%s item=0x%08X lane=%u",
+        built ? "ok" : "fail",
+        report.released,
+        report.placeholder,
+        report.unsupported,
+        state::build_data::items::catalysts::error_name(report.error).data(),
+        report.itemDefinitionHash,
+        static_cast<unsigned>(report.socketLane));
+    if (written > 0) {
+        const core::log::Level level = !built                    ? core::log::Level::error
+                                       : report.unsupported != 0 ? core::log::Level::warn
+                                                                 : core::log::Level::info;
+        core::log::write(
+            core::log::Channel::client, level, {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
 /** Reports the installed bucket definition relation used by loadout resolution. */
 void report_bucket_equipment_mapping(std::size_t mappedSlots) noexcept {
     std::array<char, 128> line{};

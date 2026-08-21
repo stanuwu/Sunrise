@@ -14,6 +14,7 @@
 #include "../../constants/investment_constant_catalog.h"
 #include "../../hash_names/hash_name_catalog.h"
 #include "../../inventory/buckets/inventory_bucket_catalog.h"
+#include "../../items/catalysts/exotic_catalyst_catalog.h"
 #include "../../items/details/item_detail_catalog.h"
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
@@ -75,6 +76,7 @@ to_record(const constants::InvestmentConstants& value) noexcept {
                                             counts.socketPlugPools,
                                             scratch.socketPlugMembers,
                                             counts.socketPlugMembers)
+           && items::catalysts::snapshot(scratch.exoticCatalysts, counts.exoticCatalysts)
            && inventory::buckets::snapshot(scratch.inventoryBuckets, counts.inventoryBuckets)
            && socket_entry_lists::snapshot(scratch.socketEntryLists, counts.socketEntryLists)
            && socket_entry_lists::snapshot_entry_tables(scratch.socketEntryTables,
@@ -95,15 +97,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && cache::records::canonicalize(scratch, counts);
 }
 
-} // namespace
-
-/** @return The process-wide persistence context, shared by lifecycle and writer code. */
-Context& context() noexcept {
-    return g_context;
-}
-
-/** @return True when every extracted domain is complete in State. */
-bool all_domains_ready() noexcept {
+/** @return True when every required extracted domain is complete in State. */
+[[nodiscard]] bool required_domains_ready() noexcept {
     constants::InvestmentConstants published{};
     return runtime::named::ready() && item_definitions_ready() && configured_item_details_ready()
            && collectible_definitions_ready() && socket_plug_rules_ready()
@@ -111,6 +106,13 @@ bool all_domains_ready() noexcept {
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
            && hash_names_ready() && constants::find(published);
+}
+
+} // namespace
+
+/** @return The process-wide persistence context, shared by lifecycle and writer code. */
+Context& context() noexcept {
+    return g_context;
 }
 
 /** Gives mutable views over every fixed snapshot buffer. */
@@ -138,6 +140,9 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
     const auto socketPlugMembers = ensure_scratch<build_data::items::socket_plugs::Member,
                                                   build_data::items::socket_plugs::kMemberCapacity>(
         state.socketPlugMemberScratch);
+    const auto exoticCatalysts = ensure_scratch<build_data::items::catalysts::Definition,
+                                                build_data::items::catalysts::kDefinitionCapacity>(
+        state.exoticCatalystScratch);
     const auto inventoryBuckets =
         ensure_scratch<inventory::buckets::Descriptor, inventory::buckets::kDescriptorCapacity>(
             state.inventoryBucketScratch);
@@ -187,6 +192,7 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         socketPlugRules,
         socketPlugPools,
         socketPlugMembers,
+        exoticCatalysts,
         inventoryBuckets,
         socketEntryLists,
         socketEntryTables,
@@ -224,6 +230,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.socketPlugRuleScratch);
     release_bank(state.socketPlugPoolScratch);
     release_bank(state.socketPlugMemberScratch);
+    release_bank(state.exoticCatalystScratch);
     release_bank(state.inventoryBucketScratch);
     release_bank(state.socketEntryListScratch);
     release_bank(state.socketEntryTableScratch);
@@ -248,6 +255,7 @@ void clear_locked(Context& state) noexcept {
     state.cacheDirectory = {};
     state.cachePath = {};
     state.buildIdentity = {};
+    state.catalystError = items::catalysts::Error::none;
     state.enabled = false;
     state.persisted = false;
     state.replaceStaleCache = false;
@@ -264,6 +272,8 @@ cache::records::Domains occupied_domains(Context& state,
         state.socketPlugPoolScratch.data(), counts.socketPlugPools};
     const std::span<const items::socket_plugs::Member> socketPlugMembers{
         state.socketPlugMemberScratch.data(), counts.socketPlugMembers};
+    const std::span<const items::catalysts::Definition> exoticCatalysts{
+        state.exoticCatalystScratch.data(), counts.exoticCatalysts};
     return {
         state.constantsScratch,
         std::span<const content::Definition>{state.namedScratch.data(), counts.named},
@@ -276,6 +286,7 @@ cache::records::Domains occupied_domains(Context& state,
         socketPlugRules,
         socketPlugPools,
         socketPlugMembers,
+        exoticCatalysts,
         std::span<const inventory::buckets::Descriptor>{state.inventoryBucketScratch.data(),
                                                         counts.inventoryBuckets},
         std::span<const socket_entry_lists::Definition>{state.socketEntryListScratch.data(),
@@ -303,9 +314,10 @@ cache::records::Domains occupied_domains(Context& state,
     };
 }
 
-/** Saves one complete canonical snapshot when every domain is ready. */
-bool persist_if_complete_locked(Context& state) noexcept {
-    if (!all_domains_ready() || state.persisted || !state.enabled) {
+/** Saves one canonical snapshot when all domains required by its build are ready. */
+bool persist_if_ready_locked(Context& state, bool catalystRequired) noexcept {
+    if (!required_domains_ready() || (catalystRequired && !exotic_catalysts_ready())
+        || state.persisted || !state.enabled) {
         return true;
     }
     cache::records::DomainCounts counts{};
@@ -337,12 +349,24 @@ bool persist_if_complete_locked(Context& state) noexcept {
 
 namespace sunrise::state::build_data {
 
-/** @return True only when every domain is ready and any needed cache write works. */
+/** @return True when required domains are ready and any safe cache write works. */
 bool persist() noexcept {
     runtime::persistence::Context& state = runtime::persistence::context();
     AcquireSRWLockExclusive(&state.lock);
-    const bool result = runtime::persistence::all_domains_ready()
-                        && runtime::persistence::persist_if_complete_locked(state);
+    const bool requiredReady = runtime::persistence::required_domains_ready();
+    bool result = false;
+    switch (runtime::persistence::cache_action(
+        requiredReady, exotic_catalysts_ready(), state.catalystError)) {
+    case runtime::persistence::CacheAction::waitForDomains:
+        break;
+    case runtime::persistence::CacheAction::writeRequiredDomains:
+        // Unsupported catalyst facts do not prevent the other build-bound domains from caching.
+        result = runtime::persistence::persist_if_ready_locked(state, false);
+        break;
+    case runtime::persistence::CacheAction::writeCompleteCache:
+        result = runtime::persistence::persist_if_ready_locked(state, true);
+        break;
+    }
     ReleaseSRWLockExclusive(&state.lock);
     return result;
 }

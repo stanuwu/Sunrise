@@ -1,6 +1,6 @@
 #include <cstddef>
-#include <limits>
 
+#include "../../../state/account/inventory/item_state.h"
 #include "../../encoding/bit_reader.h"
 #include "opcode406.h"
 
@@ -17,8 +17,6 @@ constexpr std::uint8_t kValueWidth = 32;
 constexpr std::uint8_t kPaddingWidth = 7;
 /** Nonnegative signed 32-bit values have this bit set after native descriptor biasing. */
 constexpr std::uint64_t kValueBias = 0x80000000ULL;
-/** Only the two lowest state bits are supported by this build. */
-constexpr std::uint64_t kSupportedStateBits = 0x3U;
 
 } // namespace
 
@@ -43,17 +41,15 @@ bool parse_request(const Message& message, Request& request) noexcept {
 
     // Whatever the read reached is kept, so a refused request still describes itself.
     request.instanceSoid = instanceSoid;
-    if (definitionIndex <= (std::numeric_limits<std::uint16_t>::max)()) {
-        request.definitionIndex = static_cast<std::uint16_t>(definitionIndex);
-    }
+    request.definitionIndex = static_cast<std::uint16_t>(definitionIndex);
     if (encodedFlags >= kValueBias) {
         request.flags = static_cast<std::uint32_t>(encodedFlags - kValueBias);
     }
 
     if (!read || instancePresent == 0 || instanceSoid == 0 || definitionPresent == 0
-        || definitionIndex > (std::numeric_limits<std::uint16_t>::max)()
         || encodedFlags < kValueBias || padding != 0
-        || encodedFlags - kValueBias > kSupportedStateBits) {
+        || !state::account::inventory::valid_item_state(
+            static_cast<std::uint32_t>(encodedFlags - kValueBias))) {
         return false;
     }
     return true;

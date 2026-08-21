@@ -3,15 +3,18 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
+#include "../investment/investment.h"
 #include "abilities/definition.h"
 #include "collectibles/collectible_catalog.h"
 #include "constants/definition.h"
 #include "definition.h"
 #include "hash_names/definition.h"
 #include "inventory/buckets/definition.h"
+#include "items/catalysts/definition.h"
 #include "items/details/definition.h"
 #include "items/item_catalog.h"
 #include "items/socket_plugs/definition.h"
@@ -22,6 +25,10 @@
 #include "socket_entry_lists/definition.h"
 #include "spawn_sets/definition.h"
 #include "vendors/definition.h"
+
+namespace sunrise::state::build_data::items::catalysts {
+struct Source;
+}
 
 namespace sunrise::state::build_data {
 
@@ -188,6 +195,80 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
 
 /** @return True when one plug definition occurs in any installed ordinary-socket plug pool. */
 [[nodiscard]] bool is_socket_plug_pooled(std::uint16_t plugDefinitionIndex) noexcept;
+
+/** @return True when the build-scoped exotic catalyst catalog is ready. */
+[[nodiscard]] bool exotic_catalysts_ready() noexcept;
+
+/**
+ * Derives released and placeholder catalysts from one complete package pass.
+ * The active PE identity supplies the build fingerprint.
+ * @param source Complete installed item, detail, and socket-pool domains.
+ * @param output Fixed storage that receives the catalyst catalog.
+ * @param count Receives the used output row count.
+ * @param report Receives catalog counts and the first unsafe released relation.
+ * @return True when the complete catalog is safe for publication.
+ */
+[[nodiscard]] bool derive_exotic_catalysts(const items::catalysts::Source& source,
+                                           std::span<items::catalysts::Definition> output,
+                                           std::size_t& count,
+                                           items::catalysts::Report& report) noexcept;
+
+/**
+ * @param source Complete installed item, detail, and socket-pool domains.
+ * @param definitions Complete build-derived catalyst catalog.
+ * @return True when validation, publication, and any due cache write succeed.
+ */
+[[nodiscard]] bool
+publish_exotic_catalysts(const items::catalysts::Source& source,
+                         std::span<const items::catalysts::Definition> definitions) noexcept;
+
+/**
+ * @param itemDefinitionIndex Native item definition index.
+ * @param flags Candidate accumulated item-state bits.
+ * @param plugs Candidate ordinary socket plugs.
+ * @return Completed, unchanged, or failed without a partial change.
+ */
+[[nodiscard]] items::catalysts::ApplyResult
+complete_exotic_catalyst(std::uint16_t itemDefinitionIndex,
+                         std::uint32_t& flags,
+                         std::span<std::optional<std::uint16_t>> plugs) noexcept;
+
+/**
+ * Adds all released catalyst acquisition and completion overrides to one Family-5 snapshot.
+ * @param family Candidate Family-5 state.
+ * @return True when all overrides fit and the complete state commits.
+ */
+[[nodiscard]] bool complete_exotic_catalyst_investment(Family5State& family) noexcept;
+
+/**
+ * Raises every account objective required by a released legacy catalyst.
+ * @param values Candidate account objective bank.
+ * @return True when all derived objectives fit and apply.
+ */
+[[nodiscard]] bool complete_exotic_catalyst_objectives(std::span<std::int32_t> values) noexcept;
+
+/**
+ * Resolves the item row that supplies one socketed catalyst's native perks and stat changes.
+ * @param itemDefinitionIndex Native weapon definition index.
+ * @param socketLane Ordinary socket lane.
+ * @param plugDefinitionIndex Socketed plug definition index.
+ * @return Effective definition index, or the input plug when no released completion matches.
+ */
+[[nodiscard]] std::uint16_t
+resolve_exotic_catalyst_effect(std::uint16_t itemDefinitionIndex,
+                               std::uint8_t socketLane,
+                               std::uint16_t plugDefinitionIndex) noexcept;
+
+/**
+ * @param itemDefinitionIndex Native item definition index.
+ * @param socketLane Ordinary socket lane.
+ * @return True when the catalog owns this catalyst socket lane.
+ */
+[[nodiscard]] bool is_exotic_catalyst_lane(std::uint16_t itemDefinitionIndex,
+                                           std::uint8_t socketLane) noexcept;
+
+/** @param enabled True to complete released catalysts during item resolution. */
+void set_exotic_catalyst_completion_enabled(bool enabled) noexcept;
 
 /**
  * Answers whether one profile definition needs an item-instance resident so the native socket
@@ -521,7 +602,10 @@ publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
 [[nodiscard]] bool find_vendor_definition(std::uint32_t definitionHash,
                                           vendors::Definition& definition) noexcept;
 
-/** @return True only when every domain is ready and any needed cache write succeeds. */
+/**
+ * An unsupported catalyst build finishes without writing an incomplete cache.
+ * @return True when required domains are ready and cache persistence safely finishes.
+ */
 [[nodiscard]] bool persist() noexcept;
 
 } // namespace sunrise::state::build_data

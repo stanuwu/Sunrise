@@ -7,7 +7,7 @@
 namespace sunrise::state {
 
 /** Fixed runtime capacity for safe account unlock overrides. */
-inline constexpr std::size_t kUnlockOverrideCapacity = 100;
+inline constexpr std::size_t kUnlockOverrideCapacity = 127;
 
 /** One logical unlock-flag value stored by slot. */
 struct UnlockFlagOverride {

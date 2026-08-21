@@ -14,6 +14,7 @@
 #include "../../definition.h"
 #include "../../hash_names/definition.h"
 #include "../../inventory/buckets/definition.h"
+#include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
@@ -26,6 +27,34 @@
 
 namespace sunrise::state::build_data::runtime::persistence {
 
+/** Cache action after one extraction pass. */
+enum class CacheAction {
+    waitForDomains,
+    writeRequiredDomains,
+    writeCompleteCache,
+};
+
+/**
+ * Selects the only safe persistence action for the current extraction state.
+ * @param requiredReady True when all required non-catalyst domains are ready.
+ * @param catalystReady True when the complete catalyst catalog is published.
+ * @param catalystError Exact result of the last catalyst derivation.
+ * @return Wait, write required domains, or write every domain.
+ */
+[[nodiscard]] constexpr CacheAction cache_action(bool requiredReady,
+                                                 bool catalystReady,
+                                                 items::catalysts::Error catalystError) noexcept {
+    if (!requiredReady) {
+        return CacheAction::waitForDomains;
+    }
+    if (catalystReady) {
+        return CacheAction::writeCompleteCache;
+    }
+    return catalystError == items::catalysts::Error::unsupportedBuild
+               ? CacheAction::writeRequiredDomains
+               : CacheAction::waitForDomains;
+}
+
 /** Fixed cache paths, identity, and canonical snapshot storage guarded by one State lock. */
 struct Context {
     SRWLOCK lock{SRWLOCK_INIT};
@@ -37,6 +66,7 @@ struct Context {
     std::vector<items::socket_plugs::Rule> socketPlugRuleScratch{};
     std::vector<items::socket_plugs::Pool> socketPlugPoolScratch{};
     std::vector<items::socket_plugs::Member> socketPlugMemberScratch{};
+    std::vector<items::catalysts::Definition> exoticCatalystScratch{};
     std::vector<inventory::buckets::Descriptor> inventoryBucketScratch{};
     std::vector<socket_entry_lists::Definition> socketEntryListScratch{};
     std::vector<socket_entry_lists::EntryTable> socketEntryTableScratch{};
@@ -56,6 +86,8 @@ struct Context {
     core::path::Buffer cacheDirectory;
     core::path::Buffer cachePath;
     BuildIdentity buildIdentity{};
+    /** Last catalyst derivation error for this build. */
+    items::catalysts::Error catalystError{items::catalysts::Error::none};
     bool enabled{};
     bool persisted{};
     bool replaceStaleCache{};
@@ -63,9 +95,6 @@ struct Context {
 
 /** @return The process-wide persistence context, shared by lifecycle and writer code. */
 [[nodiscard]] Context& context() noexcept;
-
-/** @return True when every generated domain is complete in State. */
-[[nodiscard]] bool all_domains_ready() noexcept;
 
 /**
  * Clears fixed cache paths, identity, flags, and snapshot storage.
@@ -93,10 +122,11 @@ void release_scratch_locked(Context& state) noexcept;
 occupied_domains(Context& state, const cache::records::DomainCounts& counts) noexcept;
 
 /**
- * Saves one complete canonical snapshot when every domain is ready.
+ * Saves one canonical snapshot when all domains required by its build are ready.
  * @param state Its lock must already be held exclusively.
- * @return True when no write is due, or the complete State is on disk.
+ * @param catalystRequired True when the snapshot must contain the catalyst catalog.
+ * @return True when no write is due, or the required State is on disk.
  */
-[[nodiscard]] bool persist_if_complete_locked(Context& state) noexcept;
+[[nodiscard]] bool persist_if_ready_locked(Context& state, bool catalystRequired) noexcept;
 
 } // namespace sunrise::state::build_data::runtime::persistence

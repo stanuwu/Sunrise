@@ -8,6 +8,7 @@
 #include "../../collectibles/collectible_catalog.h"
 #include "../../hash_names/definition.h"
 #include "../../inventory/buckets/definition.h"
+#include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
@@ -31,6 +32,7 @@ struct DomainCounts {
     std::size_t socketPlugRules{};
     std::size_t socketPlugPools{};
     std::size_t socketPlugMembers{};
+    std::size_t exoticCatalysts{};
     std::size_t inventoryBuckets{};
     std::size_t socketEntryLists{};
     std::size_t socketEntryTables{};
@@ -60,6 +62,7 @@ struct MutableDomains {
     std::span<items::socket_plugs::Rule> socketPlugRules;
     std::span<items::socket_plugs::Pool> socketPlugPools;
     std::span<items::socket_plugs::Member> socketPlugMembers;
+    std::span<items::catalysts::Definition> exoticCatalysts;
     std::span<inventory::buckets::Descriptor> inventoryBuckets;
     std::span<socket_entry_lists::Definition> socketEntryLists;
     std::span<socket_entry_lists::EntryTable> socketEntryTables;
@@ -88,6 +91,7 @@ struct Domains {
     std::span<const items::socket_plugs::Rule> socketPlugRules;
     std::span<const items::socket_plugs::Pool> socketPlugPools;
     std::span<const items::socket_plugs::Member> socketPlugMembers;
+    std::span<const items::catalysts::Definition> exoticCatalysts;
     std::span<const inventory::buckets::Descriptor> inventoryBuckets;
     std::span<const socket_entry_lists::Definition> socketEntryLists;
     std::span<const socket_entry_lists::EntryTable> socketEntryTables;

@@ -12,6 +12,7 @@
 #include "constants/investment_constant_catalog.h"
 #include "hash_names/hash_name_catalog.h"
 #include "inventory/buckets/inventory_bucket_catalog.h"
+#include "items/catalysts/exotic_catalyst_catalog.h"
 #include "items/details/item_detail_catalog.h"
 #include "items/socket_plugs/socket_plug_catalog.h"
 #include "material_requirements/material_requirement_catalog.h"
@@ -90,6 +91,11 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     } else {
         detailsReplaced = items::details::replace(domains.itemDetails);
     }
+    // An unsupported executable has a checked cache with no catalyst rows. Other domains still
+    // publish from that cache, while the catalyst catalog stays unavailable.
+    const bool catalystCatalogAvailable = !domains.exoticCatalysts.empty();
+    const bool catalystsReplaced =
+        !catalystCatalogAvailable || items::catalysts::replace(domains.exoticCatalysts);
     const constants::InvestmentConstants cachedConstants{
         domains.constants.extracted != 0,
         domains.constants.lightStatRow,
@@ -106,7 +112,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         || !socket_entry_lists::replace_entry_tables(domains.socketEntryTables) || !detailsReplaced
         || !items::socket_plugs::replace(
             domains.socketPlugRules, domains.socketPlugPools, domains.socketPlugMembers)
-        || !abilities::replace(domains.abilityBuckets)
+        || !catalystsReplaced || !abilities::replace(domains.abilityBuckets)
         || !progressions::replace(domains.progressions)
         // The layouts are what activity message 1 reads. Without them a cache hit makes the
         // other domains ready, the package build skips itself, and every destination falls back.
@@ -133,6 +139,9 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     runtime::ability_buckets::publish();
     runtime::spawn_catalog::publish();
     runtime::name_catalog::publish();
+    persistenceState.catalystError = catalystCatalogAvailable
+                                         ? items::catalysts::Error::none
+                                         : items::catalysts::Error::unsupportedBuild;
     persistenceState.persisted = true;
     runtime::persistence::release_scratch_locked(persistenceState);
     ReleaseSRWLockExclusive(&persistenceState.lock);

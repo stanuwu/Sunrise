@@ -20,9 +20,6 @@ enum class ItemField : std::size_t {
     count,
 };
 
-/** The supported client exposes Locked and Tracked/Favorite as accumulated item-state bits. */
-constexpr std::uint32_t kSupportedItemStateMask = 0x3U;
-
 } // namespace
 
 /** Parses the optional equipment object with its fixed named slots. */
@@ -153,7 +150,8 @@ bool Parser::equipment_item(authored_inventory::Item& output) noexcept {
         } else if (key == "flags") {
             std::uint64_t flags = 0;
             if (!mark(ItemField::flags) || !unsigned_value(flags)
-                || flags > kSupportedItemStateMask) {
+                || flags > (std::numeric_limits<std::uint32_t>::max)()
+                || !authored_inventory::valid_item_state(static_cast<std::uint32_t>(flags))) {
                 return false;
             }
             parsed.flags = static_cast<std::uint32_t>(flags);

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+#include "../../definition.h"
 #include "../records/domains.h"
 #include "../records/format.h"
 
@@ -36,6 +37,7 @@ void clear(records::MutableDomains output) noexcept;
 /**
  * Reads, checksums, and checks every payload array.
  * @param file Open cache handle, positioned after its header.
+ * @param build Cache build identity.
  * @param constants Header constants, held until the whole load commits.
  * @param counts Checked row counts.
  * @param output Fixed caller storage for every domain.
@@ -43,6 +45,7 @@ void clear(records::MutableDomains output) noexcept;
  * @return True when all records decode and pass their checks together.
  */
 [[nodiscard]] bool read_payload(HANDLE file,
+                                const BuildIdentity& build,
                                 const records::InvestmentConstants& constants,
                                 const records::DomainCounts& counts,
                                 records::MutableDomains output,

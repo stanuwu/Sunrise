@@ -23,6 +23,7 @@
 #include "../../spawn_sets/spawn_set_build.h"
 #include "build.h"
 #include "internal.h"
+#include "package_socket_plug_build.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
@@ -41,7 +42,8 @@ namespace {
            && state::build_data::progression_definitions_ready()
            && state::build_data::scenario_layouts_ready() && state::build_data::spawn_sets_ready()
            && state::build_data::hash_names_ready()
-           && state::build_data::investment_constants_ready();
+           && state::build_data::investment_constants_ready()
+           && state::build_data::exotic_catalysts_ready();
 }
 
 /** @return True when every item and investment-root domain is published. */
@@ -56,7 +58,8 @@ namespace {
            && state::build_data::ability_buckets_ready()
            && state::build_data::socket_entry_buckets_ready()
            && state::build_data::progression_definitions_ready()
-           && state::build_data::investment_constants_ready();
+           && state::build_data::investment_constants_ready()
+           && state::build_data::exotic_catalysts_ready();
 }
 
 } // namespace
@@ -134,6 +137,22 @@ bool build() noexcept {
                     || !tables::find_array_at(std::span<const std::byte>{storage.plugSetTable},
                                               tables::kTableArrayDescriptor,
                                               plugSets)) {
+                    continue;
+                }
+            }
+            if (!state::build_data::exotic_catalysts_ready()) {
+                reason = "catalyst_gates";
+                if (!read_catalyst_acquisition_gates(source,
+                                                     storage.scratch,
+                                                     std::span<const std::byte>{storage.root},
+                                                     storage.child,
+                                                     storage.catalystAcquisitionGates)
+                    || !read_catalyst_objective_values(
+                        source,
+                        storage.scratch,
+                        std::span<const std::byte>{storage.root},
+                        storage.child,
+                        storage.catalystObjectiveValues)) {
                     continue;
                 }
             }

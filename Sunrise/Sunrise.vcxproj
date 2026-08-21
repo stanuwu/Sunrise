@@ -195,6 +195,7 @@
     <ClCompile Include="src\middleware\datagen\family4\loadout\subclass_socket_selection.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_socket_record_codec.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_socket_plug_record_codec.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_exotic_catalyst_record_codec.cpp" />
     <ClCompile Include="src\client\hooks\graphics\renderer\selection\graphics_swap_chain_selection.cpp" />
     <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\graphics\renderer\graphics_renderer_frame.cpp" />
@@ -463,6 +464,10 @@
     <ClCompile Include="src\state\build_data\items\details\item_detail_catalog.cpp" />
     <ClCompile Include="src\state\build_data\items\socket_plugs\socket_plug_catalog.cpp" />
     <ClCompile Include="src\state\build_data\items\socket_plugs\socket_plug_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_builder.cpp" />
+    <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_generated.cpp" />
+    <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\constants\investment_constant_catalog.cpp" />
     <ClCompile Include="src\state\build_data\abilities\ability_bucket_catalog.cpp" />
     <ClCompile Include="src\state\build_data\progressions\progression_catalog.cpp" />
@@ -625,6 +630,7 @@
     <ClCompile Include="src\client\content\items\packages\package_collectible_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_material_requirement_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_detail_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_catalyst_condition_reader.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_socket_plug_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_ability_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_subclass_build.cpp" />
@@ -1081,6 +1087,9 @@
     <ClInclude Include="src\state\build_data\items\details\item_detail_catalog.h" />
     <ClInclude Include="src\state\build_data\items\socket_plugs\definition.h" />
     <ClInclude Include="src\state\build_data\items\socket_plugs\socket_plug_catalog.h" />
+    <ClInclude Include="src\state\build_data\items\catalysts\definition.h" />
+    <ClInclude Include="src\state\build_data\items\catalysts\exotic_catalyst_builder.h" />
+    <ClInclude Include="src\state\build_data\items\catalysts\exotic_catalyst_catalog.h" />
     <ClInclude Include="src\client\content\items\packages\package_socket_plug_build.h" />
     <ClInclude Include="src\state\build_data\inventory\buckets\definition.h" />
     <ClInclude Include="src\state\build_data\inventory\buckets\inventory_bucket_catalog.h" />

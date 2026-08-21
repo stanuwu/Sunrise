@@ -93,7 +93,7 @@ void append_item_perks(const Equipped& equipped,
                        std::size_t& count) noexcept {
     append_perks(equipped.definitionIndex, bank, count);
     for (std::size_t lane = 0; lane < equipped.laneCount; ++lane) {
-        append_perks(equipped.plugs[lane], bank, count);
+        append_perks(resolve_effective_plug(equipped, lane), bank, count);
     }
 }
 
@@ -118,9 +118,10 @@ void apply_overflow_hashes(const family4::loadout::ResolvedInstances& instances,
         }
         for (std::size_t lane = 0; lane < equipped.laneCount && rankedCount < ranked.size();
              ++lane) {
+            const std::uint16_t effectivePlug = resolve_effective_plug(equipped, lane);
             details::Definition plug{};
-            if (equipped.plugs[lane] == details::kUnavailableItemIndex
-                || !state::build_data::find_configured_item_detail(equipped.plugs[lane], plug)) {
+            if (effectivePlug == details::kUnavailableItemIndex
+                || !state::build_data::find_configured_item_detail(effectivePlug, plug)) {
                 continue;
             }
             ranked[rankedCount++] = {priority_of(detail.socketTypes[lane]),

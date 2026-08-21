@@ -162,6 +162,14 @@ bool resolve_item(const authored_inventory::Item& authored,
                                      candidate.item.instance.ordinarySockets)) {
         return false;
     }
+    std::uint32_t completedFlags = candidate.item.flags;
+    auto completedPlugs = candidate.item.instance.ordinarySockets.plugs;
+    if (state::build_data::complete_exotic_catalyst(
+            itemDefinition.definitionIndex, completedFlags, completedPlugs)
+        == state::build_data::items::catalysts::ApplyResult::completed) {
+        candidate.item.flags = completedFlags;
+        candidate.item.instance.ordinarySockets.plugs = completedPlugs;
+    }
 
     candidate.item.instance.instanceSoid = authored.instanceSoid;
     candidate.item.instance.bounds.itemDefinitionCount =

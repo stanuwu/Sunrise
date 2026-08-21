@@ -6,6 +6,7 @@
 #include "../constants/investment_constant_catalog.h"
 #include "../hash_names/hash_name_catalog.h"
 #include "../inventory/buckets/inventory_bucket_catalog.h"
+#include "../items/catalysts/exotic_catalyst_catalog.h"
 #include "../items/details/item_detail_catalog.h"
 #include "../items/socket_plugs/socket_plug_catalog.h"
 #include "../material_requirements/material_requirement_catalog.h"
@@ -365,6 +366,7 @@ void clear_catalogs() noexcept {
     items::details::clear();
     details::clear();
     items::socket_plugs::clear();
+    items::catalysts::clear();
     inventory::buckets::clear();
     socket_entry_lists::clear();
     rollback_ability_publication();

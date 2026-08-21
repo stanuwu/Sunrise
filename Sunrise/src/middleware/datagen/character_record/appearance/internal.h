@@ -53,6 +53,15 @@ select_art_arrangement(const details::Definition& detail,
                                     details::Definition& detail,
                                     Equipped& equipped) noexcept;
 
+/**
+ * Resolves one socket lane to the definition that supplies its native perks and stat changes.
+ * @param equipped Equipped base item and its visible socket plugs.
+ * @param lane Zero-based ordinary socket lane.
+ * @return Effective plug definition, or the unavailable sentinel for an invalid lane.
+ */
+[[nodiscard]] std::uint16_t resolve_effective_plug(const Equipped& equipped,
+                                                   std::size_t lane) noexcept;
+
 /** Fills every empty-valued field with the sentinel its reader tests for. */
 void apply_sentinels(layout::Appearance& appearance) noexcept;
 

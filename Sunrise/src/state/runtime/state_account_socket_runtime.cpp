@@ -159,6 +159,9 @@ void report_socket_plug(std::string_view stage,
             targetDefinition.definitionIndex, socketLane, plugDefinitionIndex)) {
         return fail("definition_or_compatibility");
     }
+    if (build_data::is_exotic_catalyst_lane(targetDefinition.definitionIndex, socketLane)) {
+        return fail("catalyst_lane_requires_atomic_change");
+    }
 
     // Ownership only matters where the plug is a finite supply the account draws down. A shader is
     // one: pulled from Collections into a profile stack and spent on apply. An ornament is a
@@ -367,11 +370,8 @@ void report_socket_plug(std::string_view stage,
                                     std::uint32_t flags,
                                     PendingItemState& mutation) noexcept {
     mutation = {};
-    // Bits 0 and 1 are the two states the client sends. Any other bit is a request we cannot
-    // honour.
-    constexpr std::uint32_t kSupportedItemStateMask = 0x3U;
     if (!account::valid(snapshot) || characterIndex >= snapshot.characterCount
-        || targetInstanceSoid == 0 || (flags & ~kSupportedItemStateMask) != 0) {
+        || targetInstanceSoid == 0 || !authored_inventory::valid_item_state(flags)) {
         return false;
     }
     const CharacterState& before = snapshot.characters[characterIndex];

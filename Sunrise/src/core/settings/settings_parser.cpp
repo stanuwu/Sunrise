@@ -18,6 +18,7 @@ bool Parser::parse_root(Settings& output) noexcept {
         return at_end();
     }
     bool hasVersion = false;
+    bool hasCompleteExoticCatalysts = false;
     bool hasCore = false;
     bool hasClient = false;
     bool hasServer = false;
@@ -36,6 +37,11 @@ bool Parser::parse_root(Settings& output) noexcept {
             }
             output.version = static_cast<std::uint32_t>(value);
             hasVersion = true;
+        } else if (key == "complete_exotic_catalysts") {
+            if (hasCompleteExoticCatalysts || !boolean(output.completeExoticCatalysts)) {
+                return false;
+            }
+            hasCompleteExoticCatalysts = true;
         } else if (key == "core") {
             if (hasCore || !core(output)) {
                 return false;
@@ -183,6 +189,7 @@ Settings defaults() noexcept {
     // Named members, so adding one to Settings cannot silently shift the rest.
     return Settings{
         .version = kSettingsVersion,
+        .completeExoticCatalysts = true,
         .logging = log::defaults(),
         .server = server::Settings{state::entitlements::authored()},
         .initialActivityDefaults = state::activity::defaults::authored(),

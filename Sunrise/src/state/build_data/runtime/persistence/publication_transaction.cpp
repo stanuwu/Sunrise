@@ -36,7 +36,7 @@ bool Transaction::finish(bool published, Rollback& rollback) noexcept {
         return false;
     }
     bool result = published;
-    if (result && !persist_if_complete_locked(*state_)) {
+    if (result && !persist_if_ready_locked(*state_, true)) {
         // A failed write must not leave the candidate visible as a published domain.
         rollback();
         result = false;

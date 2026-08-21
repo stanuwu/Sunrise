@@ -1,5 +1,6 @@
 #include <algorithm>
 
+#include "../../items/catalysts/exotic_catalyst_builder.h"
 #include "../../items/details/item_detail_catalog.h"
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "validation.h"
@@ -107,6 +108,31 @@ bool valid_socket_plug_links(std::span<const items::socket_plugs::Rule> rules,
     return std::all_of(members.begin(), members.end(), [&itemDefinitions](const auto member) {
         return member < itemDefinitions.size();
     });
+}
+
+/** Checks each catalyst against its item, detail, pool, plug, and pinned release state. */
+bool valid_exotic_catalyst_links(const BuildIdentity& build, Domains domains) noexcept {
+    const items::catalysts::Facts facts = items::catalysts::generated_facts();
+    if (!items::catalysts::supports_build(build, facts)) {
+        return domains.exoticCatalysts.empty();
+    }
+    if (domains.items.empty() || domains.itemDetails.empty() || domains.exoticCatalysts.empty()
+        || !items::socket_plugs::valid(
+            domains.socketPlugRules, domains.socketPlugPools, domains.socketPlugMembers)) {
+        return false;
+    }
+    const items::catalysts::Source source{
+        build,
+        domains.items,
+        domains.itemDetails,
+        domains.socketPlugRules,
+        domains.socketPlugPools,
+        domains.socketPlugMembers,
+        {},
+        {},
+        {},
+    };
+    return items::catalysts::matches_cached(source, facts, domains.exoticCatalysts);
 }
 
 } // namespace sunrise::state::build_data::cache::records

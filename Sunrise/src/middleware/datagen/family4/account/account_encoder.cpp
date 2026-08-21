@@ -95,6 +95,9 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     object.acquiredFlags = unlocks.accountFlags;
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
+    if (!state::build_data::complete_exotic_catalyst_objectives(object.objectiveValues)) {
+        return false;
+    }
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {
         block.flags = unlocks.characterFlags;
     }

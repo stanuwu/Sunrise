@@ -152,6 +152,20 @@ bool resolve_equipped(const family4::loadout::SlottedInstance& slotted,
     return true;
 }
 
+/**
+ * Resolves one socketed plug to the item row that supplies its perks and stats.
+ * @param equipped Equipped base item and its visible socket plugs.
+ * @param lane Zero-based ordinary socket lane.
+ * @return Effective plug definition, or the unavailable sentinel for an invalid lane.
+ */
+std::uint16_t resolve_effective_plug(const Equipped& equipped, std::size_t lane) noexcept {
+    if (lane >= equipped.laneCount || lane >= equipped.plugs.size()) {
+        return details::kUnavailableItemIndex;
+    }
+    return state::build_data::resolve_exotic_catalyst_effect(
+        equipped.definitionIndex, static_cast<std::uint8_t>(lane), equipped.plugs[lane]);
+}
+
 /** Fills each equipped render row with its instance, definition, art and material pairs. */
 bool apply_render(const family4::loadout::ResolvedInstances& instances,
                   state::CharacterClass characterClass,

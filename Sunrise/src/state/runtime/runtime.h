@@ -456,7 +456,11 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 /** @return A copy of the active account state, read under the lock. */
 [[nodiscard]] AccountState account_snapshot() noexcept;
 
-/** @return A copy of the evaluated content state, read under the lock. */
-[[nodiscard]] InvestmentState investment_snapshot() noexcept;
+/**
+ * Copies the evaluated content state and adds build-derived catalyst completion overrides.
+ * @param output Receives one complete Family-5 snapshot on success.
+ * @return False when the fixed override banks cannot hold the complete state.
+ */
+[[nodiscard]] bool investment_snapshot(InvestmentState& output) noexcept;
 
 } // namespace sunrise::state
