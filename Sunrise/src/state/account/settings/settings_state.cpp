@@ -37,8 +37,8 @@ constexpr Range<std::int8_t> kAudioVolume{0, 10};
 constexpr Range<std::int8_t> kBrightness{0, 6};
 /** VSync stores the DXGI presentation interval from 0 to 4. */
 constexpr Range<std::uint8_t> kVerticalSyncInterval{0, 4};
-/** Field of view exposes the 55 through 105 degree range. */
-constexpr Range<std::int32_t> kFieldOfView{55, 105};
+/** Field of view accepts the game's full 55 through 155 degree range. */
+constexpr Range<std::int32_t> kFieldOfView{55, 155};
 /** The first unidentified calibration field uses the working renderer fallback. */
 constexpr float kCalibrationPrimary = 10000.0F;
 /** The second unidentified calibration field uses the working renderer alpha. */
