@@ -19,7 +19,7 @@ Destiny 2 Offline Exploration Mod
 
 ## WIP
 
-This mod is work in progress. Things might break or work in unexpected ways. There is also currently
+This mod is a work in progress. Things might break or work in unexpected ways. There is also currently
 a lack of documentation. This will improve over the coming weeks.
 
 ## Support Me
@@ -89,14 +89,14 @@ Pull Requests are welcome. Please follow these rules:
 
 - **No Copyrighted Data** - All game data should be extracted at runtime.
 - **Code Formatting** - Stick to the provided clang-format and clang-tidy configs.
-- **Clean Code** - Try to post readable high quality code, follow the projects existing style of
+- **Clean Code** - Try to post readable high-quality code, follow the project's existing style of
   comment and add docs.
 - **Provide Documentation** - Please explain what you changed, why you changed it and the effects it
   has in detail, it saves me a lot of work.
 - **Follow Up** - If something with the PR is not right, I will reply and ask you to fix it.
 - **One Feature** - Do not put multiple features into one PR.
-- **Complete Implementations** - Do not PR features that are not completed and/or have non functional parts.
-- **Server Focus** - For features that are intended to be part of the server, don't abuse client patches. Sometimes its needed but mostly everything should go through the right requests and pushes.
+- **Complete Implementations** - Do not PR features that are not completed and/or have non-functional parts.
+- **Server Focus** - For features that are intended to be part of the server, don't abuse client patches. Sometimes it's needed but mostly everything should go through the right requests and pushes.
 
 ## Credits
 
