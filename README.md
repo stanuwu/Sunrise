@@ -74,7 +74,7 @@ $ cd Sunrise
 
 2. Download Windows headers:
 ```bash
-$ xwin --accept-license splat --include-debug-libs --sdk-version 10.0.26100 --output .xwin-cache
+$ xwin --accept-license --sdk-version 10.0.26100 splat --include-debug-libs --output .xwin-cache
 ```
 
 3. Configure and build the project
