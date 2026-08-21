@@ -14,6 +14,8 @@ namespace sunrise::server::web_service {
 struct Outcome {
     bool hasSubscription{};
     middleware::queuez::Subscription subscription{};
+    /** A claim changed the account flag bank, so a fresh account image has to follow. */
+    bool hasRecordClaim{};
     /** An opcode-504 pick moved the selection and its Family-4 object still has to follow. */
     bool hasSelectedCharacter{};
     std::uint64_t selectedCharacterSoid{};

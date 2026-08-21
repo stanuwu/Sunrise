@@ -6,6 +6,8 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../middleware/web_service/messages/opcode1801.h"
+#include "../../state/record_claims/record_claims.h"
 #include "../../middleware/web_service/messages/opcode1820.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
 #include "../../middleware/web_service/messages/opcode402.h"
@@ -666,6 +668,37 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
                           kSingleQuantity);
 }
 
+/** Records opcode-1801 Triumphs claim requests and the record row each one names. */
+void report_record_claim(const middleware::web_service::Message& message,
+                         std::string_view result,
+                         std::string_view reason,
+                         std::uint32_t recordIndex,
+                         std::uint32_t completionFlagIndex,
+                         std::uint32_t scoreValue) noexcept {
+    std::array<char, core::log::kLineCapacity> line{};
+    const int count = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=ws1801 stage=claim result=%.*s reason=%.*s transaction=%u payload_bytes=%zu "
+        "record_index=%u completion_flag_index=%u score=%u total_score=%u claims=%zu",
+        static_cast<int>(result.size()),
+        result.data(),
+        static_cast<int>(reason.size()),
+        reason.data(),
+        static_cast<unsigned>(message.transactionId),
+        message.payload.size(),
+        recordIndex,
+        completionFlagIndex,
+        scoreValue,
+        state::record_claims::total_score(),
+        state::record_claims::count());
+    if (count > 0) {
+        core::log::write(core::log::Channel::server,
+                         result == "ok" ? core::log::Level::debug : core::log::Level::warn,
+                         {line.data(), static_cast<std::size_t>(count)});
+    }
+}
+
 /** Records strict opcode-1820 parsing, installed mapping, and State preparation outcomes. */
 void report_item_acquisition(const middleware::web_service::Message& message,
                              std::string_view result,
@@ -813,6 +846,56 @@ void acquire_item(const middleware::web_service::Message& message, Outcome& outc
                             itemDefinitionIndex,
                             definition.definitionHash,
                             mutation.acquiredInstanceSoid);
+}
+
+/** Decodes one opcode-1801 Triumphs claim and reports the record it names. */
+void claim_record(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
+    // Deliberately no mutation. The shared reply path answers an action that prepares nothing with
+    // the refusal status, so preparing a placeholder here would turn a silently-accepted claim into
+    // an explicitly rejected one. Attach the transition here once claimed state is identified.
+    namespace records = state::build_data::records;
+    middleware::web_service::messages::opcode1801::Request request{};
+    if (!middleware::web_service::messages::opcode1801::parse_request(message, request)) {
+        report_record_claim(message, "fail", "payload_bits", 0, records::kUnavailableFlagIndex, 0);
+        return;
+    }
+    records::Definition definition{};
+    if (!state::build_data::find_record_definition(request.recordIndex, definition)) {
+        report_record_claim(message,
+                            "fail",
+                            "record_definition",
+                            request.recordIndex,
+                            records::kUnavailableFlagIndex,
+                            0);
+        return;
+    }
+    if (definition.completionFlagIndex == records::kUnavailableFlagIndex) {
+        // The record carries no completion flag, or its slot has no row in the account bank.
+        report_record_claim(message,
+                            "fail",
+                            "no_completion_flag",
+                            request.recordIndex,
+                            records::kUnavailableFlagIndex,
+                            definition.scoreValue);
+        return;
+    }
+    if (!state::record_claims::claim(definition.completionFlagIndex, definition.scoreValue)) {
+        report_record_claim(message,
+                            "fail",
+                            "flag_index_range",
+                            request.recordIndex,
+                            definition.completionFlagIndex,
+                            definition.scoreValue);
+        return;
+    }
+    // The claim is already in the store, so the account image only has to be sent again.
+    outcome.hasRecordClaim = true;
+    report_record_claim(message,
+                        "ok",
+                        "claimed",
+                        request.recordIndex,
+                        definition.completionFlagIndex,
+                        definition.scoreValue);
 }
 
 } // namespace sunrise::server::web_service

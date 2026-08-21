@@ -1,3 +1,4 @@
+#include "../../../../state/build_data/nodes/node_persistence.h"
 #include <Windows.h>
 
 #include <array>
@@ -153,6 +154,34 @@ bool build() noexcept {
                                        progressionCount)) {
                     (void)state::build_data::publish_progression_definitions(
                         std::span(storage.progressionRows).first(progressionCount));
+                }
+            }
+            if (!state::build_data::node_definitions_ready()) {
+                std::size_t nodeCount = 0;
+                if (build_nodes(source,
+                                storage.scratch,
+                                std::span<const std::byte>{storage.root},
+                                storage.child,
+                                storage.nodeRows,
+                                nodeCount)) {
+                    if (state::build_data::publish_node_definitions(
+                            std::span(storage.nodeRows).first(nodeCount))) {
+                        // Kept in its own file, so the next start does not need this pass at all.
+                        (void)state::build_data::nodes::store(
+                            std::span(storage.nodeRows).first(nodeCount));
+                    }
+                }
+            }
+            if (!state::build_data::record_definitions_ready()) {
+                std::size_t recordCount = 0;
+                if (build_records(source,
+                                  storage.scratch,
+                                  std::span<const std::byte>{storage.root},
+                                  storage.child,
+                                  storage.recordRows,
+                                  recordCount)) {
+                    (void)state::build_data::publish_record_definitions(
+                        std::span(storage.recordRows).first(recordCount));
                 }
             }
             if (!state::build_data::investment_constants_ready()) {

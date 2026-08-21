@@ -13,6 +13,7 @@
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../progressions/definition.h"
+#include "../../records/definition.h"
 #include "../../scenarios/definition.h"
 #include "../../socket_entry_lists/definition.h"
 #include "../../spawn_sets/definition.h"
@@ -36,6 +37,7 @@ struct DomainCounts {
     std::size_t socketEntryTables{};
     std::size_t abilityBuckets{};
     std::size_t progressions{};
+    std::size_t records{};
     std::size_t scenarios{};
     std::size_t rosterGroups{};
     std::size_t spawnStems{};
@@ -65,6 +67,7 @@ struct MutableDomains {
     std::span<socket_entry_lists::EntryTable> socketEntryTables;
     std::span<abilities::Definition> abilityBuckets;
     std::span<progressions::Definition> progressions;
+    std::span<build_data::records::Definition> records;
     std::span<scenarios::Definition> scenarios;
     std::span<scenarios::RosterGroup> rosterGroups;
     std::span<spawn_sets::Stem> spawnStems;
@@ -93,6 +96,7 @@ struct Domains {
     std::span<const socket_entry_lists::EntryTable> socketEntryTables;
     std::span<const abilities::Definition> abilityBuckets;
     std::span<const progressions::Definition> progressions;
+    std::span<const build_data::records::Definition> records;
     std::span<const scenarios::Definition> scenarios;
     std::span<const scenarios::RosterGroup> rosterGroups;
     std::span<const spawn_sets::Stem> spawnStems;

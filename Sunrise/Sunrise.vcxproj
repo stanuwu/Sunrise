@@ -822,6 +822,15 @@
     <ClCompile Include="src\middleware\gameplay\group\migration_messages.cpp" />
     <ClCompile Include="src\middleware\gameplay\group\notice_messages.cpp" />
     <ClCompile Include="src\server\gameplay\group\group_migration_receipts.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_node_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_record_build.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode1801_codec.cpp" />
+    <ClCompile Include="src\state\build_data\nodes\node_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\nodes\node_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\nodes\node_persistence.cpp" />
+    <ClCompile Include="src\state\build_data\records\record_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\records\record_catalog.cpp" />
+    <ClCompile Include="src\state\record_claims\record_claims.cpp" />
   </ItemGroup>
   <ItemGroup Condition="'$(SunriseRunClangTidy)'=='true'">
     <ClCompile Remove="vendor\detours\detours.cpp" />
@@ -1421,6 +1430,19 @@
     <ClInclude Include="src\middleware\gameplay\group\migration_messages.h" />
     <ClInclude Include="src\middleware\gameplay\group\notice_messages.h" />
     <ClInclude Include="src\server\gameplay\group\group_migration_receipts.h" />
+    <ClInclude Include="src\core\settings\settings_upgrade.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\unlock_expression.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode1801.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode1820.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode402.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode403.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode406.h" />
+    <ClInclude Include="src\state\build_data\nodes\definition.h" />
+    <ClInclude Include="src\state\build_data\nodes\node_catalog.h" />
+    <ClInclude Include="src\state\build_data\nodes\node_persistence.h" />
+    <ClInclude Include="src\state\build_data\records\definition.h" />
+    <ClInclude Include="src\state\build_data\records\record_catalog.h" />
+    <ClInclude Include="src\state\record_claims\record_claims.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

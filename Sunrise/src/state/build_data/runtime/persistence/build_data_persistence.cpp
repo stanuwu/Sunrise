@@ -18,6 +18,7 @@
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../progressions/progression_catalog.h"
+#include "../../records/record_catalog.h"
 #include "../../runtime.h"
 #include "../../scenarios/scenario_catalog.h"
 #include "../../socket_entry_lists/socket_entry_list_catalog.h"
@@ -81,6 +82,7 @@ to_record(const constants::InvestmentConstants& value) noexcept {
                                                         counts.socketEntryTables)
            && abilities::snapshot(scratch.abilityBuckets, counts.abilityBuckets)
            && progressions::snapshot(scratch.progressions, counts.progressions)
+           && records::snapshot(scratch.records, counts.records)
            && scenarios::snapshot(scratch.scenarios, counts.scenarios)
            && scenarios::snapshot_groups(scratch.rosterGroups, counts.rosterGroups)
            && spawn_sets::snapshot(scratch.spawnStems, counts.spawnStems)
@@ -109,7 +111,8 @@ bool all_domains_ready() noexcept {
            && collectible_definitions_ready() && socket_plug_rules_ready()
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
-           && progression_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
+           && progression_definitions_ready() && record_definitions_ready()
+           && scenario_layouts_ready() && spawn_sets_ready()
            && hash_names_ready() && constants::find(published);
 }
 
@@ -153,6 +156,8 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
     const auto progressions =
         ensure_scratch<progressions::Definition, progressions::kDefinitionCapacity>(
             state.progressionScratch);
+    const auto recordRows = ensure_scratch<records::Definition, records::kDefinitionCapacity>(
+        state.recordScratch);
     const auto scenarios = ensure_scratch<scenarios::Definition, scenarios::kDefinitionCapacity>(
         state.scenarioScratch);
     const auto rosterGroups =
@@ -192,6 +197,7 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         socketEntryTables,
         abilityBuckets,
         progressions,
+        recordRows,
         scenarios,
         rosterGroups,
         spawnStems,
@@ -229,6 +235,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.socketEntryTableScratch);
     release_bank(state.abilityBucketScratch);
     release_bank(state.progressionScratch);
+    release_bank(state.recordScratch);
     release_bank(state.scenarioScratch);
     release_bank(state.rosterGroupScratch);
     release_bank(state.spawnStemScratch);
@@ -286,6 +293,7 @@ cache::records::Domains occupied_domains(Context& state,
                                                counts.abilityBuckets},
         std::span<const progressions::Definition>{state.progressionScratch.data(),
                                                   counts.progressions},
+        std::span<const records::Definition>{state.recordScratch.data(), counts.records},
         std::span<const scenarios::Definition>{state.scenarioScratch.data(), counts.scenarios},
         std::span<const scenarios::RosterGroup>{state.rosterGroupScratch.data(),
                                                 counts.rosterGroups},

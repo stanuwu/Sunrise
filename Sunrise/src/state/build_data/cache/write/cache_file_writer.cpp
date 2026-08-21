@@ -29,6 +29,7 @@ namespace {
            && domains.socketEntryTables.size() <= kMaximumCount
            && domains.abilityBuckets.size() <= kMaximumCount
            && domains.progressions.size() <= kMaximumCount
+           && domains.records.size() <= kMaximumCount
            && domains.scenarios.size() <= kMaximumCount
            && domains.rosterGroups.size() <= kMaximumCount
            && domains.vendorIndex.size() <= kMaximumCount

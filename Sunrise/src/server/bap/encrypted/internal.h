@@ -79,6 +79,8 @@ struct ItemDismantleTransaction {
 /** Optional side effect produced while decoding one authenticated service body. */
 struct ServiceOutcome {
     bool hasSubscription{};
+    /** A Triumph claim changed the account flag bank and its image has to follow. */
+    bool hasRecordClaim{};
     middleware::queuez::Subscription subscription{};
     bool hasUnsubscription{};
     middleware::bap::family_unsubscription::Request unsubscription{};

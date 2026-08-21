@@ -3,13 +3,13 @@
   "core": {
     "logging": {
       "debugger_sink": true,
-      "file_sink": false,
+      "file_sink": true,
       "levels": {
-        "core": "warn",
-        "client": "warn",
-        "state": "warn",
-        "server": "warn",
-        "middleware": "warn"
+        "core": "debug",
+        "client": "debug",
+        "state": "debug",
+        "server": "debug",
+        "middleware": "debug"
       }
     }
   },

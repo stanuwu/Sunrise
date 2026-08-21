@@ -17,6 +17,8 @@
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "progressions/definition.h"
+#include "nodes/definition.h"
+#include "records/definition.h"
 #include "scenarios/definition.h"
 #include "socket_entry_buckets/definition.h"
 #include "socket_entry_lists/definition.h"
@@ -206,6 +208,37 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
  */
 [[nodiscard]] bool is_consumed_on_apply(std::uint16_t itemDefinitionIndex,
                                         std::uint8_t bucketId) noexcept;
+
+/** @return True when the whole presentation node table is in State. */
+[[nodiscard]] bool node_definitions_ready() noexcept;
+
+/**
+ * Publishes the whole presentation node table in one step.
+ * @param definitions Complete dense rows in native node order.
+ * @return True when the rows pass the domain checks and fit fixed State storage.
+ */
+[[nodiscard]] bool
+publish_node_definitions(std::span<const nodes::Definition> definitions) noexcept;
+
+/** @return True when the whole record definition table is in State. */
+[[nodiscard]] bool record_definitions_ready() noexcept;
+
+/**
+ * Publishes the whole record definition table in one step.
+ * @param definitions Complete dense rows in native record order.
+ * @return True when the rows pass the domain checks and fit fixed State storage.
+ */
+[[nodiscard]] bool
+publish_record_definitions(std::span<const records::Definition> definitions) noexcept;
+
+/**
+ * Resolves the native record row an opcode-1801 claim names.
+ * @param definitionIndex Native record row carried by the claim.
+ * @param definition Receives the row, including its completion flag index, only on success.
+ * @return True when the table is complete and the row exists.
+ */
+[[nodiscard]] bool find_record_definition(std::uint16_t definitionIndex,
+                                          records::Definition& definition) noexcept;
 
 /** @return True when the whole progression definition table is in State. */
 [[nodiscard]] bool progression_definitions_ready() noexcept;

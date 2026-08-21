@@ -1,3 +1,6 @@
+#include <atomic>
+
+#include "../../../../state/build_data/nodes/node_catalog.h"
 #include "account_encoder.h"
 
 #include <algorithm>
@@ -5,6 +8,8 @@
 #include <limits>
 
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/build_data/records/definition.h"
+#include "../../../../state/record_claims/record_claims.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../progression/progression_bank_keys.h"
 #include "layout.h"
@@ -93,8 +98,23 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     // Acquired flags and objective progress are authored policy, published once per process.
     const state::unlocks::Table& unlocks = state::unlocks::get();
     object.acquiredFlags = unlocks.accountFlags;
+    // Claims arrive after boot, so they cannot be in the authored policy. Lay them over the
+    // bank here, which is the one place every Family-4 account image passes through.
+    (void)state::record_claims::apply(object.acquiredFlags);
+    // Lore book categories are gated on a flag they cannot set by being played: with no title shown
+    // there is nothing inside to claim, and nothing to claim leaves the gate shut.
+    (void)state::build_data::nodes::apply_visibility(object.acquiredFlags);
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
+    // Triumph Score is a plain replicated value the client never derives, so total the claims made
+    // this session over whatever the policy authored and publish the sum.
+    if (state::build_data::records::kTriumphScoreValueIndex < object.objectiveValues.size()) {
+        auto& score = object.objectiveValues[state::build_data::records::kTriumphScoreValueIndex];
+        score += static_cast<std::int32_t>(state::record_claims::total_score());
+    }
+    // A node's progress bar reads a value slot and shows whatever it holds, so the claimed children
+    // have to be counted into it here or the bar never moves.
+    (void)state::record_claims::apply_node_progress(object.objectiveValues);
     for (layout::CharacterUnlockBlock& block : object.characterUnlocks) {
         block.flags = unlocks.characterFlags;
     }

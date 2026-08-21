@@ -369,6 +369,16 @@ bool stage_service_outcome(Scratch& scratch,
         }
         middleware::secure_channel::advance_nonce(nonce);
         after = acquisition.after;
+    } else if (outcome.hasRecordClaim) {
+        // A claim rewrites one byte of the account flag bank and leaves the manifest alone, so a
+        // full account snapshot at the next version carries it with no other staging.
+        if (!push::append_account_resync_notification(
+                scratch, before, key, nonce, response, written, after)) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=ws1801 stage=queuez_resync result=fail");
+            return true;
+        }
     } else if (itemDismantle != nullptr) {
         // A dismantle removes exactly one resident while preserving the relative order of every
         // survivor. The character after-image and empty release descriptor must fit together or

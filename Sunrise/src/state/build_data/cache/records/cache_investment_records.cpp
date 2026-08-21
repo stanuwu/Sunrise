@@ -78,4 +78,27 @@ bool decode(const ProgressionRecord& record, progressions::Definition& value) no
     return true;
 }
 
+/** Encodes one record with its padding zeroed. */
+bool encode(const build_data::records::Definition& value,
+            RecordDefinitionRecord& record) noexcept {
+    record = {
+        value.definitionIndex,
+        value.completionFlagIndex,
+        value.scoreValue,
+        kReservedFieldValue,
+    };
+    return true;
+}
+
+/** Decodes one record after checking its padding. */
+bool decode(const RecordDefinitionRecord& record,
+            build_data::records::Definition& value) noexcept {
+    value = {};
+    if (record.reserved != kReservedFieldValue) {
+        return false;
+    }
+    value = {record.definitionIndex, record.completionFlagIndex, record.scoreValue};
+    return true;
+}
+
 } // namespace sunrise::state::build_data::cache::records

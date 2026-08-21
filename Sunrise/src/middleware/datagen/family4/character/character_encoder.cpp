@@ -1,3 +1,8 @@
+#include "../../../../state/record_claims/record_claims.h"
+#include "../../../../state/build_data/nodes/node_catalog.h"
+#include <atomic>
+
+#include "../../../../state/build_data/nodes/node_persistence.h"
 #include "character_encoder.h"
 
 #include <algorithm>
@@ -157,6 +162,23 @@ bool encode(const state::CharacterState& state,
             index < unlocks.characterObjectFlags.size() ? unlocks.characterObjectFlags[index]
                                                         : std::uint8_t{});
     }
+    // A character image is only built once a character is selected, which is later than any
+    // account or content path. The node table is published from here on a warm start, where the
+    // package pass is skipped and every earlier attempt is refused. Latches on success.
+    {
+        static std::atomic<bool> nodesPublished{false};
+        if (!nodesPublished.load(std::memory_order_relaxed)
+            && state::build_data::nodes::load_and_publish()) {
+            nodesPublished.store(true, std::memory_order_relaxed);
+        }
+    }
+
+    // One lore book counts in the character bank rather than the account one.
+    (void)state::record_claims::apply_character_node_progress(object.objectiveValues);
+
+    // One lore book's gate is character scoped rather than account scoped.
+    (void)state::build_data::nodes::apply_character_visibility(object.acquiredFlags);
+
     for (std::size_t index = 0; index < object.objectiveValues.size(); ++index) {
         object.objectiveValues[index] =
             index < unlocks.characterObjectValues.size() ? unlocks.characterObjectValues[index] : 0;

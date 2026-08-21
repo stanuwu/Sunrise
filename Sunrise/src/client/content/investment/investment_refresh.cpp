@@ -1,3 +1,6 @@
+#include <atomic>
+
+#include "../../../state/build_data/nodes/node_persistence.h"
 #include <Windows.h>
 
 #include "../../../core/ui/busy/busy.h"
@@ -44,6 +47,16 @@ bool requires_package_sweep() noexcept {
 
 /** Publishes every installed equipment mapping domain. */
 bool refresh() noexcept {
+    // The node table is kept in its own file and is not part of the build data cache. Publishing it
+    // here, before the gate below decides whether the package pass runs, is what lets a warm start
+    // count categories: the gate itself is left exactly as it was, so no pass can be made to repeat.
+    // Latches on success, not on the attempt: an early call is refused rather than failed, so
+    // giving up after one try is what left the table empty.
+    static std::atomic<bool> nodesPublished{false};
+    if (!nodesPublished.load(std::memory_order_relaxed)
+        && state::build_data::nodes::load_and_publish()) {
+        nodesPublished.store(true, std::memory_order_relaxed);
+    }
     if (ready()) {
         // The same lock as the extraction path. A cache write holds its own lock across file
         // calls, so a held thread stopped inside one would deadlock the freeze below.

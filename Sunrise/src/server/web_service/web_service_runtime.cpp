@@ -13,6 +13,7 @@
 #include "../../middleware/encoding/byte_order.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
 #include "../../middleware/web_service/messages/opcode205.h"
+#include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode206.h"
 #include "../../middleware/web_service/messages/opcode501_codec.h"
 #include "../../middleware/web_service/messages/opcode503.h"
@@ -273,6 +274,13 @@ bool consume(std::span<const std::byte> request,
     // The action runs before its reply is encoded, because the reply reports whether it worked.
     // An action fills the outcome only once it has prepared its whole transition, so an outcome
     // still empty afterwards is that action refusing the request. Nothing is published here.
+    // Decoded and reported outside the dispatch chain on purpose: a claim prepares no mutation
+    // yet, and any opcode inside the chain that prepares nothing is answered with the refusal
+    // status. Reporting here keeps the claim's existing successful reply intact.
+    if (message.opcode == middleware::web_service::messages::opcode1801::kOpcode) {
+        claim_record(message, outcome);
+    }
+
     bool dispatched = true;
     if (message.opcode == middleware::web_service::messages::opcode504::kOpcode) {
         select_character(message, outcome);

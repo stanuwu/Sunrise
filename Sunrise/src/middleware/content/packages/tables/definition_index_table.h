@@ -88,6 +88,68 @@ inline constexpr std::size_t kStatBlockOffset = 112;
 /** The investment root holds the constants blob at this slot. */
 inline constexpr std::size_t kInvestmentConstantsSlot = 11;
 /** The investment root holds the progression definition table at this slot. */
+/** Investment root slot of the records and lore table. */
+inline constexpr std::size_t kRecordTableSlot = 72;
+/** One record row, wider than any field this pass reads. */
+inline constexpr std::size_t kRecordRowStride = 216;
+/** Unlock slot of the record's completion flag, or a non-positive value when it has none. */
+inline constexpr std::size_t kRecordCompletionFlagOffset = 100;
+/** Points the record is worth. Zero for lore and for the interval records that score per step. */
+inline constexpr std::size_t kRecordScoreOffset = 92;
+/** A record names its category's value slot here. The record's own bar reads the next slot up. */
+inline constexpr std::size_t kRecordCategoryExpressionField = 120;
+/** A category's parent record reads the slot immediately above the category's own. */
+inline constexpr std::int32_t kNodeParentSlotStep = 1;
+
+/** Investment root slot of the presentation node table. */
+inline constexpr std::size_t kPresentationNodeTableSlot = 63;
+/** One node row. Measured from the spacing of four known node hashes, not divided out of the blob. */
+inline constexpr std::size_t kNodeRowStride = 168;
+/** A node's expression sits at one of these two fields, never both. */
+inline constexpr std::size_t kNodeExpressionFieldPrimary = 64;
+inline constexpr std::size_t kNodeExpressionFieldAlternate = 48;
+/** Records a node owns, four bytes each as a row then a gate. */
+inline constexpr std::size_t kNodeChildRecordField = 136;
+inline constexpr std::size_t kNodeChildRecordStride = 4;
+/**
+ * Upper bound on how many instructions a node expression may hold.
+ *
+ * This was thirty-two, which was a guess rather than a measurement, and it silently hid a real gate:
+ * one lore book carries fifty-nine instructions, so its expression was rejected before it was read
+ * and the category looked as though nothing gated it at all. The bound exists only to stop a wild
+ * count being walked as if it were an expression, so it is set well above anything observed.
+ */
+inline constexpr std::int64_t kNodeExpressionCapacity = 128;
+
+/** One unlock expression instruction: an opcode then its operand. */
+inline constexpr std::size_t kUnlockInstructionStride = 8;
+/** Opcodes run to fifteen; anything wider means the field is not an expression. */
+inline constexpr std::uint32_t kUnlockOpcodeCeiling = 20;
+/** The opcode that reads a value slot. */
+inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
+/** The opcode that tests a flag. */
+inline constexpr std::uint32_t kUnlockReadFlagOpcode = 1;
+/** Array payloads begin after a sixteen byte header. */
+inline constexpr std::size_t kHeaderSkip = 16;
+
+/** Investment root slot of the four unlock value mapping tables. */
+inline constexpr std::size_t kUnlockValueMapTableSlot = 113;
+/** Array descriptor of the account object's value mapping table. */
+inline constexpr std::size_t kAccountValueMapDescriptor = 8;
+/** Array descriptor of the character object's value mapping table, sized to that bank. */
+inline constexpr std::size_t kCharacterValueMapDescriptor = 24;
+
+/** Investment root slot of the five unlock flag mapping tables. */
+inline constexpr std::size_t kUnlockFlagMapTableSlot = 111;
+/** Array descriptor of the account object's flag mapping table, the bank flag runs author. */
+inline constexpr std::size_t kAccountFlagMapDescriptor = 8;
+/** Array descriptor of the character object's flag mapping table, sized to that bank. */
+inline constexpr std::size_t kCharacterFlagMapDescriptor = 40;
+/** One mapping row: the unlock hash, then the destination slot its object byte feeds. */
+inline constexpr std::size_t kUnlockMapRowStride = 8;
+/** Destination slot offset inside one mapping row. */
+inline constexpr std::size_t kUnlockMapDestinationSlotOffset = 4;
+
 inline constexpr std::size_t kProgressionTableSlot = 68;
 /** Element class of the progression definition table. */
 inline constexpr std::uint32_t kProgressionTableClass = 0x80807CDDU;

@@ -11,6 +11,7 @@
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../progressions/progression_catalog.h"
+#include "../../records/record_catalog.h"
 #include "../../scenarios/scenario_catalog.h"
 #include "../../socket_entry_lists/socket_entry_list_catalog.h"
 #include "../../spawn_sets/spawn_set_catalog.h"
@@ -145,6 +146,7 @@ template <typename Value, typename Less>
            && counts.socketEntryTables <= domains.socketEntryTables.size()
            && counts.abilityBuckets <= domains.abilityBuckets.size()
            && counts.progressions <= domains.progressions.size()
+           && counts.records <= domains.records.size()
            && counts.scenarios <= domains.scenarios.size()
            && counts.rosterGroups <= domains.rosterGroups.size()
            && counts.spawnStems <= domains.spawnStems.size()
@@ -217,6 +219,7 @@ bool valid_domains(Domains domains) noexcept {
         || !abilities::valid(domains.abilityBuckets)
         || !strictly_ordered(domains.abilityBuckets, ability_less)
         || !progressions::valid(domains.progressions)
+        || !build_data::records::valid(domains.records)
         || !scenarios::valid(domains.scenarios, domains.rosterGroups)
         // An empty catalog is complete. It is what a build with no installed spawn set means.
         // Both arrays must be empty together, because a stem names its hashes by range.

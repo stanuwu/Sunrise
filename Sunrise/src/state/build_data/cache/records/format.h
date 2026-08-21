@@ -16,6 +16,7 @@
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../progressions/definition.h"
+#include "../../records/definition.h"
 #include "../../scenarios/definition.h"
 #include "../../spawn_sets/definition.h"
 #include "../../vendors/definition.h"
@@ -29,7 +30,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Bump it when a stored shape changes, and when the extraction filling it changes what it writes.
  * A cached row survives a code change, so a corrected walk keeps publishing the old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 44;
+inline constexpr std::uint32_t kCacheFormatVersion = 45;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -78,6 +79,7 @@ struct Header {
     std::uint32_t socketEntryTableCount{};
     std::uint32_t abilityBucketCount{};
     std::uint32_t progressionCount{};
+    std::uint32_t recordCount{};
     std::uint32_t scenarioCount{};
     std::uint32_t rosterGroupCount{};
     std::uint32_t spawnStemCount{};
@@ -234,6 +236,15 @@ struct ProgressionRecord {
     std::uint8_t scope{};
     /** Must be zero, so the packed progression row always matches. */
     std::uint8_t reserved{};
+};
+
+/** Disk form of one record and the account flag bank row its claim sets. */
+struct RecordDefinitionRecord {
+    std::uint16_t definitionIndex{};
+    std::uint16_t completionFlagIndex{};
+    std::uint16_t scoreValue{};
+    /** Must be zero, so the packed record row always matches. */
+    std::uint16_t reserved{};
 };
 
 /** Disk form of one dense socket-entry-list definition. */
@@ -422,7 +433,7 @@ static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 26 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 27 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants));
 static_assert(sizeof(SpawnPointRecord)
               == spawn_sets::kPositionComponents * sizeof(float) + sizeof(std::uint32_t)
@@ -459,6 +470,7 @@ static_assert(sizeof(RosterGroupRecord)
                      + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
 static_assert(sizeof(ProgressionRecord) == sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+static_assert(sizeof(RecordDefinitionRecord) == 4 * sizeof(std::uint16_t));
 static_assert(sizeof(AbilityBucketRecord)
               == sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
                      + 2 * abilities::kBucketCapacity * sizeof(std::uint8_t)

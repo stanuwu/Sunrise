@@ -218,6 +218,22 @@ namespace sunrise::state::build_data::cache::records {
 /**
  * @param value Runtime row to pack.
  * @param record Receives the packed disk row.
+ * @return Always true.
+ */
+[[nodiscard]] bool encode(const build_data::records::Definition& value,
+                          RecordDefinitionRecord& record) noexcept;
+
+/**
+ * @param record Packed disk row.
+ * @param value Receives the runtime row.
+ * @return True when the disk row is in standard form.
+ */
+[[nodiscard]] bool decode(const RecordDefinitionRecord& record,
+                          build_data::records::Definition& value) noexcept;
+
+/**
+ * @param value Runtime row to pack.
+ * @param record Receives the packed disk row.
  * @return True when the row is valid.
  */
 [[nodiscard]] bool encode(const scenarios::Definition& value, ScenarioRecord& record) noexcept;

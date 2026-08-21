@@ -16,6 +16,7 @@
 #include "items/socket_plugs/socket_plug_catalog.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "progressions/progression_catalog.h"
+#include "records/record_catalog.h"
 #include "runtime.h"
 #include "runtime/build_data_catalog_runtime.h"
 #include "runtime/domain_markers.h"
@@ -108,6 +109,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
             domains.socketPlugRules, domains.socketPlugPools, domains.socketPlugMembers)
         || !abilities::replace(domains.abilityBuckets)
         || !progressions::replace(domains.progressions)
+        || !records::replace(domains.records)
         // The layouts are what activity message 1 reads. Without them a cache hit makes the
         // other domains ready, the package build skips itself, and every destination falls back.
         || !scenarios::replace(domains.scenarios, domains.rosterGroups)
