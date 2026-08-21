@@ -11,6 +11,8 @@
 #include "collectibles/collectible_catalog.h"
 #include "constants/investment_constant_catalog.h"
 #include "hash_names/hash_name_catalog.h"
+#include "hash_names/overlay/name_overlay_catalog.h"
+#include "hash_names/overlay/name_overlay_load.h"
 #include "inventory/buckets/inventory_bucket_catalog.h"
 #include "items/details/item_detail_catalog.h"
 #include "items/socket_plugs/socket_plug_catalog.h"
@@ -37,6 +39,7 @@ constexpr std::wstring_view kCacheFileSuffix = L"\\cache\\build_data.bin";
 
 /** Loads one full cache, or leaves every domain ready for first-boot extraction. */
 bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
+    (void)hash_names::overlay::load(module);
     runtime::persistence::Context& persistenceState = runtime::persistence::context();
     AcquireSRWLockExclusive(&persistenceState.lock);
     runtime::persistence::clear_locked(persistenceState);
@@ -141,6 +144,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
 
 /** Clears all generated build mappings and persistence paths. */
 void shutdown() noexcept {
+    hash_names::overlay::clear();
     runtime::persistence::Context& persistenceState = runtime::persistence::context();
     AcquireSRWLockExclusive(&persistenceState.lock);
     runtime::clear_catalogs();

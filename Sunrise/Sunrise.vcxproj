@@ -438,6 +438,8 @@
     <ClCompile Include="src\state\build_data\scenarios\scenario_catalog.cpp" />
     <ClCompile Include="src\state\build_data\spawn_sets\spawn_set_catalog.cpp" />
     <ClCompile Include="src\state\build_data\hash_names\hash_name_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\hash_names\overlay\name_overlay_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\hash_names\overlay\name_overlay_load.cpp" />
     <ClCompile Include="src\state\activity\forced\activity_forced_destination.cpp" />
     <ClCompile Include="src\state\build_data\runtime\build_data_roster_runtime.cpp" />
     <ClCompile Include="src\client\content\scenarios\scenario_build.cpp" />
@@ -1056,6 +1058,8 @@
     <ClInclude Include="src\state\build_data\spawn_sets\spawn_set_catalog.h" />
     <ClInclude Include="src\state\build_data\hash_names\hash_name_catalog.h" />
     <ClInclude Include="src\state\build_data\hash_names\definition.h" />
+    <ClInclude Include="src\state\build_data\hash_names\overlay\name_overlay_catalog.h" />
+    <ClInclude Include="src\state\build_data\hash_names\overlay\name_overlay_load.h" />
     <ClInclude Include="src\state\build_data\spawn_sets\definition.h" />
     <ClInclude Include="src\state\build_data\vendors\definition.h" />
     <ClInclude Include="src\state\build_data\vendors\vendor_catalog.h" />
