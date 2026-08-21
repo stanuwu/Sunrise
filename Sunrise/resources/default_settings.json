@@ -30,6 +30,7 @@
       "config_url": "https://127.0.0.1/config/",
       "config_guid": "d2legacy-0000-0000-0000-000000000001"
     },
+    "custom_bootflow_textures": true,
     "fade_release": true,
     "force_join_request_ready": true,
     "region_private": false,

@@ -245,6 +245,7 @@
     <ClCompile Include="src\client\hooks\external_server\external_server_route.cpp" />
     <ClCompile Include="src\client\hooks\external_server\external_server_setopt_guard.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\bootflow_hook_lifecycle.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\bootflow_texture_override.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\character_select_hold.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\composition_check.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\orbit_handoff.cpp" />
@@ -1242,6 +1243,7 @@
     <ClInclude Include="src\client\hooks\membership_probe\membership_probe.h" />
     <ClInclude Include="src\client\hooks\bootflow\internal.h" />
     <ClInclude Include="src\client\hooks\bootflow\bootflow_hook_lifecycle.h" />
+    <ClInclude Include="src\client\hooks\bootflow\bootflow_texture_override.h" />
     <ClInclude Include="src\client\hooks\bootflow\spawn\spawn_gate_record_dump.h" />
     <ClInclude Include="src\client\hooks\bootflow\spawn\probe.h" />
     <ClInclude Include="src\client\hooks\config_getter\config_getter_answers.h" />

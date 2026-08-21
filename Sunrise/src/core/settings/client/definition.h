@@ -18,6 +18,8 @@ struct Settings {
     ui::runtime::Settings userInterface;
     /** Points the Client at a server outside this process. Off answers everything in process. */
     external::Settings externalServer;
+    /** Replaces stock bootflow textures that have matching DDS assets embedded in Sunrise. */
+    bool customBootflowTextures{true};
     /**
      * Releases the world-transition fade channel at the in-world step.
      * The client only releases it on the player spawn, so this covers a spawn that never runs

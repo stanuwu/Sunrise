@@ -10,6 +10,7 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     client::Settings candidate = output;
     bool hasUserInterface = false;
     bool hasExternalServer = false;
+    bool hasCustomBootflowTextures = false;
     bool hasFadeRelease = false;
     bool hasForceJoinRequestReady = false;
     bool hasRegionPrivate = false;
@@ -34,6 +35,11 @@ bool Parser::client_settings(client::Settings& output) noexcept {
                 return false;
             }
             hasExternalServer = true;
+        } else if (key == "custom_bootflow_textures") {
+            if (hasCustomBootflowTextures || !boolean(candidate.customBootflowTextures)) {
+                return false;
+            }
+            hasCustomBootflowTextures = true;
         } else if (key == "fade_release") {
             if (hasFadeRelease || !boolean(candidate.fadeRelease)) {
                 return false;
