@@ -27,9 +27,15 @@ initializes layers in order and unwinds them in reverse in
 ## Coding conventions
 
 - Follow [`.clang-format`](.clang-format), [`.clang-tidy`](.clang-tidy), and
-  [`.editorconfig`](.editorconfig): C++20, four spaces, LF, UTF-8, and a 100-column limit.
-- Use the existing nested namespace convention, for example `sunrise::middleware::protobuf`; use
-  quoted project-root includes such as `"middleware/protobuf/codec.h"` when crossing directories.
+  [`.editorconfig`](.editorconfig): C++20, four spaces, LF, UTF-8, and a 100-column limit. Every
+  committed source file is stored with LF. The repository has no `.gitattributes`, so on Windows set
+  `core.autocrlf=false` (or `input`) to stop the checkout from writing CRLF back into commits.
+- Use the existing nested namespace convention, for example `sunrise::middleware::protobuf`.
+- Includes are path-relative to the including file, not project-root anchored. Use `"codec.h"` for a
+  sibling header, `"protobuf/codec.h"` for a header below the current directory, and
+  `"../../middleware/protobuf/codec.h"` when crossing layers. Root-anchored forms also compile
+  because `Sunrise/src` is on the include path, but they are rare (about 25 uses against about 1,600
+  relative uses), so match the relative convention.
 - Match adjacent code: public headers use `#pragma once`, APIs commonly use `[[nodiscard]]` and
   `noexcept`, and Doxygen-style comments document public behavior and failure contracts.
 - Protocol, hook, and fixed-buffer code must validate input and capacity before committing output.

@@ -4,31 +4,80 @@ This document describes the code layout, architectural layers, initialization or
 
 ## Architectural layers
 
-Sunrise separates responsibilities into seven distinct layers. Each layer has strict dependency boundaries. Higher layers depend on lower layers. Lower layers do not depend on higher layers.
+Sunrise separates responsibilities into seven directories under `Sunrise/src`. The directories mark
+ownership, not a strict acyclic dependency stack. The dependency graph contains cycles, so do not
+assume that a lower layer never includes a higher layer.
+
+The graph below shows the include edges between top-level directories. The number on each edge
+is the count of resolved `#include` directives that cross the directory boundary.
 
 ```mermaid
 graph TD
-    Client["Client Layer<br/>(Executable scans, hooks, game patches, client UI)"]
-    Server["Server Layer<br/>(BAP router, HTTP server, local gameplay host)"]
-    State["State Layer<br/>(Account, inventory, characters, unlocks, runtime)"]
-    Middleware["Middleware Layer<br/>(Protocols, BAP, codecs, package reader, crypto)"]
-    Core["Core Layer<br/>(Logging, settings, filesystem, UI orchestration)"]
-    Steam["Steam Compatibility Shim<br/>(steam_api64.dll exports)"]
-    Vendor["Vendor Layer<br/>(Detours, ImGui)"]
+    Main["dllmain.cpp<br/>(DLL entry point)"]
+    Client["client/<br/>(Executable scans, hooks, game patches, client UI)"]
+    Server["server/<br/>(BAP router, HTTP server, local gameplay host)"]
+    State["state/<br/>(Account, inventory, characters, unlocks, runtime)"]
+    Middleware["middleware/<br/>(Protocols, BAP, codecs, package reader, crypto)"]
+    Core["core/<br/>(Logging, settings, filesystem, UI orchestration, runtime)"]
+    Steam["steam/<br/>(steam_api64.dll exports)"]
+    Vendor["vendor/<br/>(Detours, ImGui)"]
 
-    Client --> Server
-    Client --> Steam
-    Client --> Vendor
-    Server --> State
-    Server --> Middleware
-    State --> Middleware
-    Middleware --> Core
-    Core --> Vendor
+    Main --> Core
+    Main --> Client
+    Main --> Steam
+
+    Core -->|22| State
+    Core -->|4| Middleware
+    Core -->|4| Server
+    Core -->|4| Client
+
+    Client -->|113| Core
+    Client -->|74| State
+    Client -->|38| Middleware
+
+    Server -->|188| Middleware
+    Server -->|102| State
+    Server -->|45| Core
+    Server -->|6| Client
+
+    State -->|21| Core
+    State -->|10| Middleware
+
+    Middleware -->|50| State
+    Middleware -->|4| Core
+
+    Steam -->|9| Core
+    Steam -->|6| Client
+    Steam -->|2| State
+    Steam -->|1| Server
+
+    Core -. imgui .-> Vendor
+    Client -. detours, imgui .-> Vendor
 ```
+
+Read the graph with these rules:
+
+- `core/` reaches upward into `state/`, `middleware/`, `server/`, and `client/`. Two places cause
+  this. `core/runtime/core_runtime.cpp` includes every layer runtime because Core drives startup and
+  shutdown. `core/settings/` includes the definition and validation headers of the layers whose
+  options it parses.
+- `core/` does not include `steam/`. The `core/settings/steam/` directory holds the Steam options
+  that Core parses, and it belongs to Core.
+- `middleware/` and `state/` depend on each other. Middleware codecs write into State record types,
+  and State reads package and content structures from Middleware.
+- `server/` includes `client/network/consumer.h` and a client content worker, so the server path is
+  not free of client code.
+- `steam/` is not a leaf. The shim starts and stops Client and Server work from the Steam
+  entry points.
+- `vendor/` is included through angle-bracket headers, for example `<imgui.h>` and `<detours.h>`,
+  not through the paths above.
+
+Because of the cycles, treat "keep code in the narrowest owning layer" as the rule that matters. Do
+not treat the directory order as a compile-time guarantee.
 
 ### Layer descriptions
 
-- `core/`: Owns settings, logging sinks, filesystem helpers, and shared Dear ImGui UI runtime. Core does not depend on any game logic or network protocols.
+- `core/`: Owns settings, logging sinks, filesystem helpers, shared Dear ImGui UI runtime, and the runtime that starts and stops every other layer. Core is not a pure leaf: settings parsing and lifecycle orchestration pull in Client, Server, State, and Middleware headers.
 - `middleware/`: Implements low-level protocol codecs, packet serialization, cryptography primitives, package file parsing, Oodle decompression, and bitstream encoding.
 - `state/`: Holds persistent in-memory data for accounts, characters, items, equipment, progressions, unlocks, entitlements, and activity configurations. State runs without a database engine.
 - `server/`: Implements the local service host. It routes BAP requests, processes HTTP endpoints, manages activity sessions, and simulates the logical gameplay world.
@@ -42,7 +91,7 @@ The Core runtime coordinates initialization in forward dependency order. When a 
 
 ### Initialization order
 
-1. `settings`: Reads `settings.json` from disk or loads compiled defaults.
+1. `settings`: Reads `settings.json` from the artifact directory or loads compiled defaults.
 2. `unlocks`: Publishes default unlock flags into State.
 3. `logging`: Starts log sinks and background snapshot views.
 4. `ui`: Starts the Dear ImGui renderer and input state.
@@ -84,9 +133,29 @@ Sunrise operates in a multithreaded game process. Subsystems apply these concurr
 
 ## Settings system
 
-Settings live in `settings.json` next to `steam_api64.dll`.
+Settings live in `settings.json` inside the Sunrise artifact directory, which is next to
+`steam_api64.dll`. `core::path::artifact_directory()` takes the directory of the loaded module,
+appends the `Sunrise` subdirectory, and creates it if it is missing. Every generated file goes below
+that subdirectory.
 
-- Schema version: Current layout version is 8 (`kSettingsVersion = 8`).
+For a DLL at `D:\Destiny2\bin\x64\steam_api64.dll`, the paths are:
+
+| File               | Path                                                     | Written by                                                  |
+| ------------------ | -------------------------------------------------------- | ----------------------------------------------------------- |
+| Settings           | `D:\Destiny2\bin\x64\Sunrise\settings.json`              | `core/settings/settings_runtime.cpp`                        |
+| Current log        | `D:\Destiny2\bin\x64\Sunrise\logs\sunrise.log`           | `core/logging/log.cpp`                                      |
+| Previous log       | `D:\Destiny2\bin\x64\Sunrise\logs\sunrise.log.old`       | `core/logging/log.cpp`                                      |
+| HUD layout         | `D:\Destiny2\bin\x64\Sunrise\hud.json`                   | `core/ui/hud/store/hud_settings_store.cpp`                  |
+| Player options     | `D:\Destiny2\bin\x64\Sunrise\player.json`                | `client/player/player_settings_store.cpp`                   |
+| Movement options   | `D:\Destiny2\bin\x64\Sunrise\movement.json`              | `client/movement/movement_settings_store.cpp`               |
+| Inactivity options | `D:\Destiny2\bin\x64\Sunrise\inactivity.json`            | `client/inactivity/inactivity_settings_store.cpp`           |
+| Build data cache   | `D:\Destiny2\bin\x64\Sunrise\cache\build_data.bin`       | `state/build_data/build_data_runtime.cpp`                   |
+| Manifest cache     | `D:\Destiny2\bin\x64\Sunrise\cache\content_manifest.bin` | `state/content_manifest/content_manifest_state_runtime.cpp` |
+
+- Schema version: Current layout version is 8. See `kSettingsVersion` in
+  [`Sunrise/src/core/settings/settings.h`](../Sunrise/src/core/settings/settings.h) and the
+  `"version"` key in
+  [`Sunrise/resources/default_settings.json`](../Sunrise/resources/default_settings.json).
 - Migration: Missing fields populate with default values. Unsupported structure versions trigger upgrade routines.
 - Top-level configuration keys:
   - `version`: Settings schema version.

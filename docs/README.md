@@ -16,7 +16,7 @@ graph TD
 ## Documentation index
 
 - [Project structure and architecture](project-structure.md)
-  Explains the layer layout, dependency boundaries, initialization and shutdown lifecycles, and configuration model.
+  Explains the directory layout, the cross-directory dependency graph, initialization and shutdown lifecycles, and the configuration model.
 
 - [Client integration and hooking](client-integration.md)
   Explains dynamic pattern scanning, Microsoft Detours integration, network redirection, and game engine hooks.
