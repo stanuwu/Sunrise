@@ -45,12 +45,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install LLVM toolchain and Ninja
-        # The toolchain file invokes the unsuffixed clang-cl / lld-link /
-        # llvm-lib / llvm-rc names, which Ubuntu only ships inside the
-        # versioned /usr/lib/llvm-*/bin directory — put it on PATH.
+        # The MSVC STL that xwin fetches static-asserts on Clang >= 19, and
+        # the project's warning flags need it too, so Ubuntu 24.04's stock
+        # clang-18 is not enough — install LLVM 20 from apt.llvm.org. The
+        # toolchain file invokes the unsuffixed clang-cl / lld-link /
+        # llvm-lib / llvm-rc names, which only exist inside the versioned
+        # /usr/lib/llvm-*/bin directory — put the newest one on PATH.
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld llvm ninja-build
+          sudo apt-get install -y --no-install-recommends ninja-build
+          curl -sL https://apt.llvm.org/llvm.sh | sudo bash -s -- 20
           LLVM_BIN=$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -1)
           echo "$LLVM_BIN" >> "$GITHUB_PATH"
           "$LLVM_BIN/clang-cl" --version
