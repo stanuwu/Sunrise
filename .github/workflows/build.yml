@@ -35,3 +35,52 @@ jobs:
             build/x64/Release/steam_api64.dll
             build/x64/Release/steam_api64.pdb
           if-no-files-found: error
+
+  linux-cross:
+    name: Linux cross-compile x64
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install LLVM toolchain and Ninja
+        # The toolchain file invokes the unsuffixed clang-cl / lld-link /
+        # llvm-lib / llvm-rc names, which Ubuntu only ships inside the
+        # versioned /usr/lib/llvm-*/bin directory — put it on PATH.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld llvm ninja-build
+          LLVM_BIN=$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -1)
+          echo "$LLVM_BIN" >> "$GITHUB_PATH"
+          "$LLVM_BIN/clang-cl" --version
+          cmake --version
+
+      - name: Cache the xwin Windows SDK
+        id: xwin-cache
+        uses: actions/cache@v4
+        with:
+          path: .xwin-cache
+          key: xwin-sdk-10.0.26100-splat-v1
+
+      - name: Download Windows SDK via xwin
+        if: steps.xwin-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -sL https://github.com/Jake-Shadle/xwin/releases/download/0.10.0/xwin-0.10.0-x86_64-unknown-linux-musl.tar.gz | tar xz
+          ./xwin-0.10.0-x86_64-unknown-linux-musl/xwin --sdk-version 10.0.26100 --accept-license splat --include-debug-libs --output .xwin-cache
+
+      - name: Configure
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_TOOLCHAIN_FILE=$PWD/linux-to-win-toolchain.cmake
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sunrise-Release-x64-linux-cross
+          path: build/steam_api64.dll
+          if-no-files-found: error
