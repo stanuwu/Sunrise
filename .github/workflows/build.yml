@@ -83,8 +83,9 @@ jobs:
         run: cmake --build build
 
       - name: Upload artifact
+        # CMakeLists routes outputs to build/x64/<CONFIG>, mirroring MSVC.
         uses: actions/upload-artifact@v4
         with:
           name: Sunrise-Release-x64-linux-cross
-          path: build/steam_api64.dll
+          path: build/x64/Release/steam_api64.dll
           if-no-files-found: error
