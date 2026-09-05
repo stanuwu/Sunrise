@@ -396,7 +396,6 @@ bool draw_main_page() noexcept {
 
 bool render(bool visible) noexcept {
     if (!internal::context_is_current()) return false;
-    if (!visible) deactivate();
     const auto* viewport = ImGui::GetMainViewport();
     const float dpi = scaling::dpi::current();
     if (!viewport || dpi <= 0 || viewport->WorkSize.x <= 0 || viewport->WorkSize.y <= 0) {
@@ -422,6 +421,15 @@ bool render(bool visible) noexcept {
             ids[count++] = module.stable_id();
     }
     workspace::reconcile(g_workspace, {ids.data(), count});
+
+    // Hiding the menu leaves World helpers active, as upstream does. Only losing the owning
+    // tool (including removal while hidden) relinquishes its presentation state here.
+    if (g_activeRendered && g_active.presentation() == modules::Presentation::workspaceTab) {
+        const auto* selected = find_tab(registry, g_workspace.selected.data());
+        if (!selected || g_active.stable_id() != selected->stable_id()
+            || g_active.frame_callback() != selected->frame_callback())
+            deactivate();
+    }
 
     const float progress = animation::transition::update(
         1, animation::transition::Lane::visibility, visible, {16, 14}, 0);
@@ -477,10 +485,6 @@ bool render(bool visible) noexcept {
             std::string_view(g_workspace.selected.data()) == workspace::kMainTabId;
         const auto* selectedTab =
             mainSelected ? nullptr : find_tab(registry, g_workspace.selected.data());
-        if (g_activeRendered && !mainSelected
-            && (!selectedTab || g_active.stable_id() != selectedTab->stable_id()
-                || g_active.frame_callback() != selectedTab->frame_callback() || !visible))
-            deactivate();
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{12 * dpi, 16 * dpi});
         ImGui::PushID(g_workspace.selected.data());
         if (ImGui::BeginChild("##workspace_content",
@@ -499,7 +503,7 @@ bool render(bool visible) noexcept {
         ImGui::PopStyleVar();
     }
     ImGui::End();
-    if (!pageRendered) deactivate();
+    if (visible && !pageRendered) deactivate();
     ImGui::PopStyleColor(2);
     ImGui::PopStyleVar(3);
     if (!ImGui::IsMouseDown(0) || !visible) persist();

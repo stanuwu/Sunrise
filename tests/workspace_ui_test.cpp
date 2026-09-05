@@ -482,9 +482,14 @@ int main(int argc, char** argv) {
     frame();
     assert(layout::g_workspace.restore.x > priorPosition.x);
 
-    for (int i = 0; i < 20; ++i)
+    const auto drawsBeforeHide = worldDraws;
+    const auto deactivationsBeforeHide = deactivations;
+    for (int i = 0; i < 20; ++i) {
         frame(false);
-    assert(!worldHelpers && !labels.contains("##workspace_menu"));
+        assert(worldHelpers && worldDraws == drawsBeforeHide
+               && deactivations == deactivationsBeforeHide);
+    }
+    assert(!labels.contains("##workspace_menu"));
     for (int i = 0; i < 20; ++i)
         frame();
     assert(worldHelpers);
@@ -538,8 +543,18 @@ int main(int argc, char** argv) {
     layout::open_workspace_tab("server.world");
     frame();
     assert(worldHelpers);
-    assert(modules::registry::unregister_module("server.world"));
+    for (int i = 0; i < 20; ++i)
+        frame(false);
+    layout::set_workspace_tab_open("server.world", false);
+    frame(false);
+    assert(!worldHelpers);
+    layout::open_workspace_tab("server.world");
     frame();
+    assert(worldHelpers);
+    for (int i = 0; i < 20; ++i)
+        frame(false);
+    assert(modules::registry::unregister_module("server.world"));
+    frame(false);
     assert(!worldHelpers && selected_tab() != "server.world");
     while (layout::g_workspace.tabCount > 1)
         layout::workspace::close(layout::g_workspace, 1);
