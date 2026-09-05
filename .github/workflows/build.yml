@@ -7,6 +7,23 @@ on:
   workflow_dispatch:
 
 jobs:
+  settings-upgrade:
+    name: Settings upgrade regressions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure tests
+        run: cmake -S tests/settings_upgrade -B build/settings-upgrade-tests -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build tests
+        run: cmake --build build/settings-upgrade-tests
+
+      - name: Run tests
+        run: ctest --test-dir build/settings-upgrade-tests --output-on-failure
+
   release:
     name: Release x64
     # The image carries Visual Studio 2026, so the project's own v145 toolset and its

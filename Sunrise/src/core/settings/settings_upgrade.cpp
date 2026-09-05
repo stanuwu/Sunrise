@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 
-#include "settings.h"
+#include "version.h"
 
 namespace sunrise::core::settings::upgrade {
 namespace {
@@ -307,10 +307,17 @@ bool apply(std::string_view document,
         if (root == std::string_view::npos) {
             return false;
         }
+        const std::size_t firstMember = document.find_first_not_of(" \t\r\n", root + 1);
+        if (firstMember == std::string_view::npos) {
+            return false;
+        }
+        // An empty root has no following member; a comma would make valid settings unparsable.
+        const bool emptyRoot = document[firstMember] == '}';
         const int length = std::snprintf(versionText.data(),
                                          versionText.size(),
-                                         "\"version\": %u,",
-                                         static_cast<unsigned>(kSettingsVersion));
+                                         "\"version\": %u%s",
+                                         static_cast<unsigned>(kSettingsVersion),
+                                         emptyRoot ? "" : ",");
         if (length <= 0) {
             return false;
         }

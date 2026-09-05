@@ -1219,6 +1219,7 @@
     <ClInclude Include="src\core\settings\rule_text.h" />
     <ClInclude Include="src\core\filesystem\temporary_sibling.h" />
     <ClInclude Include="src\core\settings\settings.h" />
+    <ClInclude Include="src\core\settings\version.h" />
     <ClInclude Include="src\core\settings\parser.h" />
     <ClInclude Include="src\core\settings\client\definition.h" />
     <ClInclude Include="src\core\settings\server\definition.h" />

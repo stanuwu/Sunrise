@@ -10,6 +10,7 @@
 #include "client/definition.h"
 #include "server/definition.h"
 #include "steam/definition.h"
+#include "version.h"
 
 namespace sunrise::core::settings {
 
@@ -20,13 +21,6 @@ struct ActivitySdkGenerationSettings final {
     /** Writes the sdk/lua declaration tree. On by default, and only runs when generation does. */
     bool luaDeclarations{true};
 };
-
-/**
- * Layout version of the settings file this build writes and expects.
- * Raise it when a key is renamed, removed, changes meaning, or must take a new default. Adding a
- * key needs no raise, because a missing key already takes its default.
- */
-inline constexpr std::uint32_t kSettingsVersion = 13;
 
 /** Parsed read-only process settings. */
 struct Settings {
