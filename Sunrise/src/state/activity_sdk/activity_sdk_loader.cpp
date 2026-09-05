@@ -6,11 +6,50 @@
 #include <string>
 
 #include "../../core/filesystem/path.h"
+#include "../../core/logging/log.h"
 #include "../../middleware/crypto/sha256.h"
 #include "internal.h"
 
 namespace sunrise::state::activity_sdk {
 namespace {
+
+/** @param stage SDK load boundary that must be visible even if the next call does not return. */
+void begin_load_stage(const char* stage) noexcept {
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::debug,
+                      "ev=activity_sdk_load stage=%s phase=begin",
+                      stage);
+}
+
+/**
+ * Names a refused pack check without logging its contents.
+ * @param stage Failed loader boundary.
+ * @param reason Stable check name or validation refusal.
+ * @return False for the caller's existing failure path.
+ */
+[[nodiscard]] bool refuse_load(const char* stage, const char* reason) noexcept {
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::warn,
+                      "ev=activity_sdk_load stage=%s result=fail reason=%s",
+                      stage,
+                      reason);
+    return false;
+}
+
+/**
+ * Reports an error captured immediately after a failed Win32 call, before logging or cleanup.
+ * @param stage Failed loader boundary.
+ * @param error The failing call's GetLastError value.
+ * @return False for the caller's existing failure path.
+ */
+[[nodiscard]] bool refuse_windows_load(const char* stage, DWORD error) noexcept {
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::warn,
+                      "ev=activity_sdk_load stage=%s result=fail win32_error=%lu",
+                      stage,
+                      static_cast<unsigned long>(error));
+    return false;
+}
 
 /** The SDK pack is installed beneath the module directory without creating it at read time. */
 constexpr std::wstring_view kPackSuffix = L"Sunrise\\activity_sdk.pack";
@@ -90,30 +129,37 @@ constexpr std::array<std::uint32_t, format::kSectionCount> kExpectedStrides{
         || header.headerSize != sizeof(format::Header) || header.fileSize != file.size()
         || header.sectionCount != format::kSectionCount || header.reserved != 0
         || !valid_sections(header)) {
-        return false;
+        return refuse_load("header", "layout_or_bounds");
     }
     if (header.sdkBuildSha256 != expected.sdkBuildSha256) {
         result = Status::wrongSdkBuild;
-        return false;
+        return refuse_load("header", "sdk_build_mismatch");
     }
     if (header.payloadSha256 != expected.payloadSha256
         || header.contentKeySha256 != expected.contentKeySha256
         || header.logicalIrSha256 != expected.logicalIrSha256) {
-        return false;
+        return refuse_load("header", "identity_mismatch");
     }
     middleware::crypto::sha256::Digest digest{};
     const auto payload = file.subspan(header.headerSize);
-    return middleware::crypto::sha256::hash(payload, digest) && digest == expected.payloadSha256;
+    begin_load_stage("payload_hash");
+    if (!middleware::crypto::sha256::hash(payload, digest)) {
+        return refuse_load("payload_hash", "hash_failed");
+    }
+    return digest == expected.payloadSha256 || refuse_load("payload_hash", "digest_mismatch");
 }
 
 /** Converts an exact Windows file size to process address space. */
 [[nodiscard]] bool mapped_size(HANDLE file, std::size_t& output) noexcept {
     output = 0;
     LARGE_INTEGER size{};
-    if (GetFileSizeEx(file, &size) == FALSE || size.QuadPart < sizeof(format::Header)
+    if (GetFileSizeEx(file, &size) == FALSE) {
+        return refuse_windows_load("file_size", GetLastError());
+    }
+    if (size.QuadPart < sizeof(format::Header)
         || static_cast<std::uint64_t>(size.QuadPart)
                > static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)())) {
-        return false;
+        return refuse_load("file_size", "invalid_size");
     }
     output = static_cast<std::size_t>(size.QuadPart);
     return true;
@@ -126,9 +172,12 @@ constexpr std::array<std::uint32_t, format::kSectionCount> kExpectedStrides{
     wchar_t* filePart = nullptr;
     const DWORD copied = GetFullPathNameW(
         path, static_cast<DWORD>(absolute.chars.size()), absolute.chars.data(), &filePart);
-    if (copied == 0 || copied >= absolute.chars.size() || filePart == nullptr
+    if (copied == 0) {
+        return refuse_windows_load("pack_directory", GetLastError());
+    }
+    if (copied >= absolute.chars.size() || filePart == nullptr
         || filePart <= absolute.chars.data()) {
-        return false;
+        return refuse_load("pack_directory", "invalid_path");
     }
     std::size_t length = static_cast<std::size_t>(filePart - absolute.chars.data());
     while (length != 0
@@ -136,14 +185,14 @@ constexpr std::array<std::uint32_t, format::kSectionCount> kExpectedStrides{
         --length;
     }
     if (length == 0) {
-        return false;
+        return refuse_load("pack_directory", "empty_directory");
     }
     try {
         output.assign(absolute.chars.data(), length);
         return true;
     } catch (...) {
         output.clear();
-        return false;
+        return refuse_load("pack_directory", "allocation_failed");
     }
 }
 
@@ -157,8 +206,9 @@ bool load_path_expected(const wchar_t* path,
     output.reset();
     result = Status::catalogInvalid;
     if (path == nullptr || path[0] == L'\0') {
-        return false;
+        return refuse_load("open", "invalid_path");
     }
+    begin_load_stage("open");
     const HANDLE file = CreateFileW(path,
                                     GENERIC_READ,
                                     FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -171,7 +221,13 @@ bool load_path_expected(const wchar_t* path,
         result = error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
                      ? Status::missing
                      : Status::catalogInvalid;
-        return false;
+        if (result == Status::missing) {
+            core::log::write(core::log::Channel::state,
+                             core::log::Level::info,
+                             "ev=activity_sdk_load stage=open result=missing");
+            return false;
+        }
+        return refuse_windows_load("open", error);
     }
 
     std::shared_ptr<Catalog> pending;
@@ -179,34 +235,49 @@ bool load_path_expected(const wchar_t* path,
         pending = std::make_shared<Catalog>();
     } catch (...) {
         CloseHandle(file);
-        return false;
+        return refuse_load("catalog_storage", "allocation_failed");
     }
     pending->file_ = file;
+    begin_load_stage("pack_directory");
     if (!pack_directory(path, pending->artifactDirectory_)) {
         return false;
     }
+    begin_load_stage("file_size");
     if (!mapped_size(file, pending->size_)) {
         return false;
     }
+    begin_load_stage("file_mapping");
     const HANDLE mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
     if (mapping == nullptr) {
-        return false;
+        return refuse_windows_load("file_mapping", GetLastError());
     }
     pending->mapping_ = mapping;
+    begin_load_stage("map_view");
     const void* const view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
     if (view == nullptr) {
-        return false;
+        return refuse_windows_load("map_view", GetLastError());
     }
     pending->view_ = static_cast<const std::byte*>(view);
     pending->header_ = reinterpret_cast<const format::Header*>(pending->view_);
     const std::span<const std::byte> bytes(pending->view_, pending->size_);
+    begin_load_stage("header");
     if (!identity::valid(expected.sdkBuildSha256) || !identity::valid(expected.payloadSha256)
-        || !identity::valid(expected.contentKeySha256) || !identity::valid(expected.logicalIrSha256)
-        || !valid_header(*pending->header_, bytes, expected, result) || !valid_catalog(*pending)) {
+        || !identity::valid(expected.contentKeySha256)
+        || !identity::valid(expected.logicalIrSha256)) {
+        return refuse_load("header", "expected_identity_unavailable");
+    }
+    if (!valid_header(*pending->header_, bytes, expected, result)) {
         return false;
+    }
+    begin_load_stage("catalog_validation");
+    if (!valid_catalog(*pending)) {
+        return refuse_load("catalog_validation", last_catalog_reason());
     }
     output = std::move(pending);
     result = Status::ready;
+    core::log::write(core::log::Channel::state,
+                     core::log::Level::info,
+                     "ev=activity_sdk_load stage=load phase=complete result=ready");
     return true;
 }
 

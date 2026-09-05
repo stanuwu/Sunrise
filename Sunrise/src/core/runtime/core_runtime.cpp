@@ -38,6 +38,48 @@ threading::SrwLock g_runtimeLock{};
 /** The installed public package headers live beside the game executable. */
 constexpr std::wstring_view kInstalledPackagesDirectory = L"packages";
 
+/**
+ * Marks a startup boundary before entering code that may never return to the failure handler.
+ * @tparam Initialize Callable that returns the existing step's success result.
+ * @param stage Stable initialization stage name.
+ * @param run Runs exactly one existing initialization step.
+ * @return The step's unmodified success result.
+ */
+template <typename Initialize>
+[[nodiscard]] bool initialize_stage(const char* stage, Initialize run) noexcept {
+    const std::uint64_t startedTick = GetTickCount64();
+    log::writef(log::Channel::core, log::Level::info, "ev=initialize stage=%s phase=begin", stage);
+    const bool complete = run();
+    log::writef(log::Channel::core,
+                log::Level::info,
+                "ev=initialize stage=%s phase=complete result=%s ms=%llu",
+                stage,
+                complete ? "ok" : "fail",
+                static_cast<unsigned long long>(GetTickCount64() - startedTick));
+    return complete;
+}
+
+/** @return Stable names for catalog outcomes, including expected first-boot absence. */
+[[nodiscard]] const char*
+catalog_status_name(state::activity_sdk::generated_world::manifest::LoadStatus status) noexcept {
+    using Status = state::activity_sdk::generated_world::manifest::LoadStatus;
+    switch (status) {
+    case Status::loaded:
+        return "loaded";
+    case Status::missing:
+        return "missing";
+    case Status::sourceMismatch:
+        return "source_mismatch";
+    case Status::sdkMismatch:
+        return "sdk_mismatch";
+    case Status::invalid:
+        return "invalid";
+    case Status::versionMismatch:
+        return "version_mismatch";
+    }
+    return "invalid";
+}
+
 /** Initializes the base State before content-authenticated generated artifacts are considered. */
 [[nodiscard]] bool initialize_state(void* module) noexcept {
     return state::initialize(
@@ -67,12 +109,22 @@ constexpr std::wstring_view kInstalledPackagesDirectory = L"packages";
     if (!state::content_manifest::visit_snapshot(&copy_content_fingerprint, &source)
         || !path::module_directory(module, catalogPath)
         || !path::append(catalogPath, L"Sunrise\\sdk\\catalog.bin")) {
+        log::write(log::Channel::core,
+                   log::Level::info,
+                   "ev=activity_sdk_load stage=identity result=unavailable reason=source_or_path");
         return false;
     }
     manifest::Catalog catalog{};
     manifest::LoadStatus status = manifest::LoadStatus::invalid;
-    return manifest::load(catalogPath.chars.data(), source, catalog, status)
-           && status == manifest::LoadStatus::loaded
+    log::write(log::Channel::core,
+               log::Level::info,
+               "ev=activity_sdk_load stage=catalog_manifest phase=begin");
+    const bool loaded = manifest::load(catalogPath.chars.data(), source, catalog, status);
+    log::writef(log::Channel::core,
+                log::Level::info,
+                "ev=activity_sdk_load stage=catalog_manifest phase=complete result=%s",
+                catalog_status_name(status));
+    return loaded && status == manifest::LoadStatus::loaded
            && state::activity_sdk::identity::derive(source, catalog.sdk.payloadSha256, output)
            && output.sdkBuildSha256 == catalog.sdk.buildSha256;
 }
@@ -80,8 +132,16 @@ constexpr std::wstring_view kInstalledPackagesDirectory = L"packages";
 /** Publishes the optional pack only through the authenticated catalog committed beside it. */
 void initialize_activity_sdk(void* module) noexcept {
     state::activity_sdk::ExpectedIdentity expected{};
-    (void)activity_sdk_identity(module, expected);
+    const bool authenticated = activity_sdk_identity(module, expected);
+    log::writef(log::Channel::core,
+                log::Level::info,
+                "ev=activity_sdk_load stage=pack phase=begin identity=%s",
+                authenticated ? "authenticated" : "unavailable");
     state::activity_sdk::initialize(module, expected);
+    log::writef(log::Channel::core,
+                log::Level::info,
+                "ev=activity_sdk_load stage=pack phase=complete result=%s",
+                state::activity_sdk::status_name(state::activity_sdk::status()));
     // The wire catalog borrows the published catalog's strings, so it follows every publish.
 }
 
@@ -158,24 +218,30 @@ bool initialize(void* module) noexcept {
         // The sinks exist only from here, so this is the earliest a begin marker can reach a
         // channel. The duration it pairs with still counts from function entry.
         log::write(log::Channel::core, log::Level::debug, "ev=initialize phase=begin");
-        if (!ui::runtime::initialize(settings::get().client.userInterface)) {
+        if (!initialize_stage("ui", [] {
+                return ui::runtime::initialize(settings::get().client.userInterface);
+            })) {
             stage = "ui";
-        } else if (!ui::modules::hud::initialize(module)) {
+        } else if (!initialize_stage("ui_hud",
+                                     [module] { return ui::modules::hud::initialize(module); })) {
             // Registered before logs, which is the order the menu lists the Core pages in.
             stage = "ui_hud";
-        } else if (!ui::modules::logs::initialize()) {
+        } else if (!initialize_stage("ui_logs", [] { return ui::modules::logs::initialize(); })) {
             stage = "ui_logs";
-        } else if (!state::entitlements::publish(settings::get().server.entitlements)) {
+        } else if (!initialize_stage("entitlements", [] {
+                       return state::entitlements::publish(settings::get().server.entitlements);
+                   })) {
             stage = "entitlements";
-        } else if (!initialize_state(module)) {
+        } else if (!initialize_stage("state", [module] { return initialize_state(module); })) {
             stage = "state";
-        } else if (!initialize_content_manifest(module)) {
+        } else if (!initialize_stage("content_manifest",
+                                     [module] { return initialize_content_manifest(module); })) {
             stage = "content_manifest";
-        } else if (!middleware::initialize()) {
+        } else if (!initialize_stage("middleware", [] { return middleware::initialize(); })) {
             stage = "middleware";
-        } else if (!server::initialize()) {
+        } else if (!initialize_stage("server", [] { return server::initialize(); })) {
             stage = "server";
-        } else if (!client::initialize(module)) {
+        } else if (!initialize_stage("client", [module] { return client::initialize(module); })) {
             stage = "client";
         }
     }
