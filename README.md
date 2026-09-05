@@ -187,3 +187,19 @@ responsible for the results it produces.
 ## Affiliation Disclaimer
 
 This project is not affiliated with Bungie or Sony in any way.
+
+## Workspace
+
+Sunrise keeps its standard module menu and settings panel in one compact workspace. Select the
+animated Sunrise mark to return to that main view. Tools that the main menu launches, including
+**World / SDK** and **Packets**, open beside it as lightweight workspace tabs. Opening one again
+focuses its existing tab; tabs can be reordered or closed.
+
+Drag the Sunrise mark or empty header space to move the workspace. Double-click empty header space
+to maximize or restore. The usual UI toggle hides the entire workspace. **Reset layout** is in the
+workspace menu and keeps launched tools open.
+
+World and Packets share Activity Host's instance selection. World helpers stop rendering when its
+tab is inactive, closed, or hidden, while the tab's page state remains ready if it is reopened.
+Window geometry, maximized state, launched-tool order, and the active view are saved in
+`Sunrise/workspace.json`; unavailable tools are discarded.

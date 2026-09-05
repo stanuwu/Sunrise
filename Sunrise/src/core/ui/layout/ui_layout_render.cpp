@@ -3,7 +3,6 @@
 #include <imgui.h>
 #include <string_view>
 
-#include "../../../../resources/resource.h"
 #include "../animation/transition/ui_transition_animation.h"
 #include "../components/card/ui_card_component.h"
 #include "../components/logo/ui_logo_component.h"
@@ -12,206 +11,538 @@
 #include "../scaling/dpi/ui_dpi_scaling.h"
 #include "navigation/ui_layout_navigation.h"
 #include "ui_layout_lifecycle.h"
+#include "workspace_state.h"
 
 namespace sunrise::core::ui::layout {
 namespace {
 
-/** The authored width leaves room for a narrow menu and a wide settings panel. */
-constexpr float kPreferredWindowWidth = 920.0F;
-/** The authored height fits a 720p viewport with game space left around it. */
-constexpr float kPreferredWindowHeight = 580.0F;
-/** A 420-pixel minimum keeps the two columns from overlapping. */
-constexpr float kMinimumWindowWidth = 420.0F;
-/** A 300-pixel minimum keeps the navigation list and credits footer. */
-constexpr float kMinimumWindowHeight = 300.0F;
-/** 24 pixels keep the centered surface away from viewport edges. */
-constexpr float kViewportMargin = 24.0F;
-/** Two margins hold the same space on opposite viewport edges. */
-constexpr float kViewportMarginCount = 2.0F;
-/** 180 pixels caps the narrow module navigation. */
-constexpr float kNavigationWidth = 180.0F;
-/** Zero width lets Dear ImGui fill the space left on the current row. */
-constexpr float kAutomaticWidth = 0.0F;
-/** A half-axis pivot centers the window on both viewport axes. */
-constexpr ImVec2 kCenterPivot{0.5F, 0.5F};
-/** The main surface has no title bar and is left out of saved Dear ImGui state. */
-constexpr ImGuiWindowFlags kMainWindowFlags =
-    ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings
-    | ImGuiWindowFlags_NoTitleBar;
-/** One trailing null byte turns a descriptor name into a component label. */
-constexpr std::size_t kLabelTerminatorBytes = 1;
-/** Fixed animation key. Every visibility-lane user needs its own, so keep these distinct. */
-constexpr ImGuiID kSurfaceAnimationId = 1;
-/** Response rates for opening and closing, in the same range as the other components. */
-constexpr animation::transition::Rates kVisibilityRates{16.0F, 14.0F};
-/** A closed surface has finished its transition and draws nothing. */
-constexpr float kClosedProgress = 0.0F;
-/** The surface grows from this fraction of its size while it opens. */
-constexpr float kOpeningScale = 0.96F;
-/** Full size, reached when the surface is fully open. */
-constexpr float kOpenScale = 1.0F;
-/** 34 authored pixels give the title logo presence without crowding the title row. */
-constexpr float kTitleLogoExtent = 34.0F;
-/** The title is drawn at this multiple of the body text, so it holds the logo's row. */
-constexpr float kTitleTextRatio = 1.5F;
-/** Half a difference centers one item against a taller one. */
-constexpr float kHalfExtent = 2.0F;
-/** The surface names the tool with the same wordmark the HUD card carries. */
-constexpr char kTitle[] = "SUNRISE";
+workspace::State g_workspace{}, g_lastAttempt{};
+bool g_loaded{};
+float g_tabScroll{};
+float g_lastScale{1};
+float g_lastTabRegion{};
+bool g_revealSelected{true};
+bool g_brandDragged{};
+modules::Descriptor g_active{};
+bool g_activeRendered{};
 
-/**
- * Copies one display name into null-terminated component storage.
- * @return Fixed label storage, always with a trailing null.
- */
-[[nodiscard]] std::array<char, modules::kDisplayNameCapacity + kLabelTerminatorBytes>
-component_label(const modules::Descriptor& descriptor) noexcept {
-    std::array<char, modules::kDisplayNameCapacity + kLabelTerminatorBytes> label{};
-    const std::string_view displayName = descriptor.display_name();
-    std::copy(displayName.begin(), displayName.end(), label.begin());
-    return label;
+constexpr float kStripHeight = 42;
+constexpr float kControlWidth = 36;
+constexpr float kBrandWidth = 132;
+constexpr float kTabPadding = 12;
+constexpr float kTabCloseWidth = 25;
+constexpr float kTabTextGap = 4;
+constexpr float kNavigationWidth = 180;
+constexpr float kAutomaticWidth = 0;
+constexpr auto kShell = IM_COL32(20, 22, 26, 255);
+constexpr auto kStrip = IM_COL32(18, 20, 23, 255);
+constexpr auto kAccent = IM_COL32(239, 125, 61, 255);
+
+void deactivate() noexcept {
+    if (g_activeRendered && g_active.deactivation_callback()) g_active.deactivation_callback()();
+    g_activeRendered = false;
+    g_active = {};
 }
 
-/**
- * Works out a centered size that fits the viewport and the authored minimums.
- * @param viewport Active Dear ImGui viewport.
- * @return Main window size, or zero axes when the viewport is not ready.
- */
-[[nodiscard]] ImVec2 window_size(const ImGuiViewport& viewport) noexcept {
-    if (viewport.Size.x <= 0.0F || viewport.Size.y <= 0.0F) {
-        return {};
+void persist() noexcept {
+    if (g_loaded && g_workspace.positioned && g_workspace != g_lastAttempt) {
+        (void)workspace::save(g_workspace);
+        g_lastAttempt = g_workspace;
     }
-    const float margin = scaling::dpi::pixels(kViewportMargin);
-    const float availableWidth = viewport.Size.x - (margin * kViewportMarginCount);
-    const float availableHeight = viewport.Size.y - (margin * kViewportMarginCount);
-    const float minimumWidth = scaling::dpi::pixels(kMinimumWindowWidth);
-    const float minimumHeight = scaling::dpi::pixels(kMinimumWindowHeight);
-    if (availableWidth < minimumWidth || availableHeight < minimumHeight) {
-        return {};
-    }
-    return {(std::min)(scaling::dpi::pixels(kPreferredWindowWidth), availableWidth),
-            (std::min)(scaling::dpi::pixels(kPreferredWindowHeight), availableHeight)};
 }
 
-/**
- * Draws the wide content panel and calls only the selected module's callback.
- * @param selected Descriptor copied from one registry snapshot.
- */
-void draw_content(const navigation::Selection& selected) noexcept {
-    if (!selected.moduleAvailable) {
-        ImGui::TextDisabled("No modules are registered.");
-        return;
-    }
-    const auto displayName = component_label(selected.descriptor);
-    components::section::header(displayName.data());
-    // One spacing height below the title row, so a module's first line never sits against it.
-    ImGui::Dummy({kAutomaticWidth, ImGui::GetStyle().ItemSpacing.y});
-    selected.descriptor.frame_callback()();
+const modules::Descriptor* find_tab(const modules::registry::RegistrySnapshot& registry,
+                                    std::string_view id) noexcept {
+    for (const auto& item : registry.entries())
+        if (item.stable_id() == id && item.presentation() == modules::Presentation::workspaceTab)
+            return &item;
+    return nullptr;
 }
 
-/** Draws optional module-owned companion windows after the main surface. */
-void draw_companion_windows() noexcept {
-    const modules::registry::RegistrySnapshot registrySnapshot = modules::registry::snapshot();
-    for (const modules::Descriptor& descriptor : registrySnapshot.entries()) {
-        const modules::FrameCallback callback = descriptor.companion_frame_callback();
-        if (callback != nullptr) {
-            callback();
+void activate(std::string_view id) noexcept {
+    if (workspace::open(g_workspace, id)) {
+        g_revealSelected = true;
+    }
+}
+
+enum class Icon { menu, close, left, right };
+
+bool icon(const char* id,
+          Icon shape,
+          float width,
+          float height,
+          const char* tooltip,
+          bool visible = true) noexcept {
+    const auto start = ImGui::GetCursorScreenPos();
+    const bool pressed = ImGui::InvisibleButton(id, {width, height});
+    auto* draw = ImGui::GetWindowDrawList();
+    const bool hovered = ImGui::IsItemHovered();
+    if (hovered) {
+        draw->AddRectFilled(start,
+                            {start.x + width, start.y + height},
+                            ImGui::GetColorU32(IM_COL32(36, 39, 45, 255)),
+                            scaling::dpi::pixels(3));
+        ImGui::SetTooltip("%s", tooltip);
+    }
+    if (!visible && !hovered) return pressed;
+    const ImVec2 center{start.x + width / 2, start.y + height / 2};
+    const float unit = scaling::dpi::pixels(4.5F);
+    const auto color = ImGui::GetColorU32(IM_COL32(160, 165, 175, 255));
+    const auto line = [&](ImVec2 from, ImVec2 to) {
+        draw->AddLine(from, to, color, scaling::dpi::pixels(1.3F));
+    };
+    if (shape == Icon::close) {
+        line({center.x - unit, center.y - unit}, {center.x + unit, center.y + unit});
+        line({center.x - unit, center.y + unit}, {center.x + unit, center.y - unit});
+    } else if (shape == Icon::menu) {
+        for (int n = -1; n <= 1; ++n)
+            draw->AddCircleFilled(
+                {center.x + n * unit, center.y}, scaling::dpi::pixels(1.2F), color);
+    } else {
+        const float direction = shape == Icon::left ? -1.0F : 1.0F;
+        line({center.x - direction * unit / 2, center.y - unit},
+             {center.x + direction * unit / 2, center.y});
+        line({center.x + direction * unit / 2, center.y},
+             {center.x - direction * unit / 2, center.y + unit});
+    }
+    return pressed;
+}
+
+void drag_strip(bool allowMaximize) noexcept {
+    if (allowMaximize && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+        g_workspace.maximized = !g_workspace.maximized;
+    }
+    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(0)) {
+        const auto delta = ImGui::GetIO().MouseDelta;
+        const float dpi = scaling::dpi::current();
+        if (!g_workspace.maximized) {
+            g_workspace.restore.x += delta.x / dpi;
+            g_workspace.restore.y += delta.y / dpi;
         }
     }
 }
 
-/** Draws the animated logo, then the name and version, on one title row. */
-void draw_title() noexcept {
-    const float extent = scaling::dpi::pixels(kTitleLogoExtent);
-    const bool logoDrawn = components::logo::draw(extent);
-    if (logoDrawn) {
-        ImGui::SameLine();
+void brand(const ImVec2& origin, float width, float height, float dpi) noexcept {
+    ImGui::SetCursorScreenPos({origin.x + 11 * dpi, origin.y + 9 * dpi});
+    (void)components::logo::draw(24 * dpi);
+    ImGui::SetCursorScreenPos(origin);
+    const bool pressed = ImGui::InvisibleButton("##sunrise_home", {width, height});
+    if (ImGui::IsItemActivated()) g_brandDragged = false;
+    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(0)) g_brandDragged = true;
+    if (pressed && !g_brandDragged) {
+        activate(workspace::kMainTabId);
+    }
+    drag_strip(false);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Sunrise home - drag to move");
+
+    auto* draw = ImGui::GetWindowDrawList();
+    const float titleY = origin.y + (height - ImGui::GetTextLineHeight()) / 2;
+    const bool home = std::string_view(g_workspace.selected.data()) == workspace::kMainTabId;
+    draw->AddText(
+        {origin.x + 43 * dpi, titleY},
+        ImGui::GetColorU32(home ? IM_COL32(235, 236, 239, 255) : IM_COL32(176, 180, 188, 255)),
+        "SUNRISE");
+    draw->AddLine({origin.x + width, origin.y + 9 * dpi},
+                  {origin.x + width, origin.y + height - 9 * dpi},
+                  ImGui::GetColorU32(IM_COL32(55, 58, 65, 255)),
+                  dpi);
+}
+
+void strip(const modules::registry::RegistrySnapshot& registry,
+           float logicalWidth,
+           float logicalHeight) noexcept {
+    const float dpi = scaling::dpi::current();
+    const float height = kStripHeight * dpi;
+    const float control = kControlWidth * dpi;
+    const float brandWidth = kBrandWidth * dpi;
+    const auto origin = ImGui::GetCursorScreenPos();
+    const float width = ImGui::GetContentRegionAvail().x;
+    const float remaining = (std::max)(1.0F, width - control - brandWidth);
+    std::array<float, workspace::kTabCapacity> tabWidths{};
+    float total{};
+    for (std::size_t i = 1; i < g_workspace.tabCount; ++i) {
+        const auto* module = find_tab(registry, g_workspace.tabs[i].data());
+        const auto label = module ? module->display_name() : std::string_view{};
+        tabWidths[i] = std::clamp(ImGui::CalcTextSize(label.data(), label.data() + label.size()).x
+                                      + (kTabPadding + kTabTextGap + kTabCloseWidth) * dpi,
+                                  76 * dpi,
+                                  156 * dpi);
+        total += tabWidths[i];
+    }
+    const bool overflow = total > remaining;
+    const float arrows = overflow ? 40 * dpi : 0;
+    const float tabRegion = (std::max)(1.0F, remaining - arrows);
+    if (tabRegion != g_lastTabRegion) {
+        g_revealSelected = true;
+        g_lastTabRegion = tabRegion;
+    }
+    if (g_revealSelected) {
+        float x{};
+        for (std::size_t i = 1; i < g_workspace.tabCount; ++i) {
+            if (g_workspace.tabs[i] == g_workspace.selected) {
+                if (x < g_tabScroll) g_tabScroll = x;
+                if (x + tabWidths[i] > g_tabScroll + tabRegion)
+                    g_tabScroll = x + tabWidths[i] - tabRegion;
+            }
+            x += tabWidths[i];
+        }
+        g_revealSelected = false;
+    }
+    g_tabScroll = std::clamp(g_tabScroll, 0.0F, (std::max)(0.0F, total - tabRegion));
+
+    brand(origin, brandWidth, height, dpi);
+    ImGui::SetCursorScreenPos({origin.x + brandWidth, origin.y});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{});
+    ImGui::BeginChild("##tabs",
+                      {tabRegion, height},
+                      ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
+                          | ImGuiWindowFlags_NoBackground);
+    if (ImGui::IsWindowHovered())
+        g_tabScroll = std::clamp(g_tabScroll - ImGui::GetIO().MouseWheel * 80 * dpi,
+                                 0.0F,
+                                 (std::max)(0.0F, total - tabRegion));
+    const auto tabsOrigin = ImGui::GetCursorScreenPos();
+    float x = -g_tabScroll;
+    std::size_t closeIndex = workspace::kTabCapacity;
+    workspace::TabId moving{};
+    std::size_t moveTarget = workspace::kTabCapacity;
+    for (std::size_t i = 1; i < g_workspace.tabCount; ++i) {
+        const auto* module = find_tab(registry, g_workspace.tabs[i].data());
+        if (!module) continue;
+        const auto label = module->display_name();
+        const bool active = g_workspace.tabs[i] == g_workspace.selected;
+        const ImVec2 position{tabsOrigin.x + x, tabsOrigin.y};
+        ImGui::SetCursorScreenPos(position);
+        ImGui::PushID(g_workspace.tabs[i].data());
+        if (ImGui::InvisibleButton("##tab", {tabWidths[i] - kTabCloseWidth * dpi, height}))
+            activate(module->stable_id());
+        const bool tabHovered = ImGui::IsItemHovered();
+        auto* draw = ImGui::GetWindowDrawList();
+        if (active || tabHovered) {
+            draw->AddRectFilled(
+                position,
+                {position.x + tabWidths[i], position.y + height},
+                ImGui::GetColorU32(active ? IM_COL32(25, 28, 32, 255) : IM_COL32(31, 34, 39, 255)));
+        }
+        if (active) {
+            draw->AddRectFilled({position.x + 12 * dpi, position.y + height - 2 * dpi},
+                                {position.x + tabWidths[i] - 12 * dpi, position.y + height},
+                                ImGui::GetColorU32(kAccent));
+        }
+        const float textY = position.y + (height - ImGui::GetTextLineHeight()) / 2;
+        // Truncate long tool names at character boundaries, with a visible ellipsis.
+        const float textRight = position.x + tabWidths[i] - (kTabCloseWidth + kTabTextGap) * dpi;
+        const float textLeft = position.x + kTabPadding * dpi;
+        const float ellipsisWidth = ImGui::CalcTextSize("...").x;
+        auto shown = label;
+        const bool truncated = ImGui::CalcTextSize(label.data(), label.data() + label.size()).x
+                               > textRight - textLeft + 0.5F;
+        while (truncated && !shown.empty()
+               && ImGui::CalcTextSize(shown.data(), shown.data() + shown.size()).x + ellipsisWidth
+                      > textRight - textLeft) {
+            auto end = shown.size() - 1;
+            while (end > 0 && (static_cast<unsigned char>(shown[end]) & 0xC0) == 0x80)
+                --end;
+            shown = shown.substr(0, end);
+        }
+        draw->PushClipRect(position, {textRight, position.y + height}, true);
+        const auto textColor = ImGui::GetColorU32(active ? IM_COL32(235, 232, 230, 255)
+                                                         : IM_COL32(157, 162, 172, 255));
+        draw->AddText({textLeft, textY}, textColor, shown.data(), shown.data() + shown.size());
+        if (truncated)
+            draw->AddText(
+                {textLeft + ImGui::CalcTextSize(shown.data(), shown.data() + shown.size()).x,
+                 textY},
+                textColor,
+                "...");
+        draw->PopClipRect();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%.*s", static_cast<int>(label.size()), label.data());
+        if (ImGui::BeginDragDropSource()) {
+            ImGui::SetDragDropPayload(
+                "SUNRISE_TAB", g_workspace.tabs[i].data(), sizeof(workspace::TabId));
+            ImGui::TextUnformatted(label.data(), label.data() + label.size());
+            ImGui::EndDragDropSource();
+        }
+        if (ImGui::BeginDragDropTarget()) {
+            if (const auto* payload = ImGui::AcceptDragDropPayload("SUNRISE_TAB")) {
+                if (payload->DataSize == sizeof(workspace::TabId)) {
+                    std::copy_n(
+                        static_cast<const char*>(payload->Data), moving.size(), moving.begin());
+                    moveTarget = i;
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+        ImGui::SetCursorScreenPos({position.x + tabWidths[i] - kTabCloseWidth * dpi, position.y});
+        if (icon("##close_tab",
+                 Icon::close,
+                 kTabCloseWidth * dpi,
+                 height,
+                 "Close tool",
+                 active || tabHovered))
+            closeIndex = i;
+        ImGui::PopID();
+        x += tabWidths[i];
+    }
+    if (total < tabRegion) {
+        ImGui::SetCursorScreenPos({tabsOrigin.x + total, tabsOrigin.y});
+        ImGui::InvisibleButton("##drag_strip", {(std::max)(1.0F, tabRegion - total), height});
+        drag_strip(true);
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar(2);
+
+    if (closeIndex != workspace::kTabCapacity) {
+        workspace::close(g_workspace, closeIndex);
+        g_revealSelected = true;
+    }
+    if (moveTarget != workspace::kTabCapacity) {
+        for (std::size_t i = 1; i < g_workspace.tabCount; ++i) {
+            if (g_workspace.tabs[i] == moving) {
+                workspace::move(g_workspace, i, moveTarget);
+                break;
+            }
+        }
     }
 
-    // The size is the authored one, because the style carries the display scale separately.
-    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * kTitleTextRatio);
-    const float titleHeight = ImGui::GetTextLineHeight();
-    const float rowY = ImGui::GetCursorPosY();
-    // The title is shorter than the logo, so it sits lower to stay level with it.
-    const float titleY =
-        logoDrawn ? rowY + ((std::max)(extent - titleHeight, 0.0F) / kHalfExtent) : rowY;
-    ImGui::SetCursorPosY(titleY);
-    ImGui::TextUnformatted(kTitle);
-    ImGui::PopFont();
+    ImGui::SetCursorScreenPos({origin.x + brandWidth + tabRegion, origin.y});
+    if (overflow) {
+        if (icon("##scroll_left", Icon::left, 20 * dpi, height, "Scroll tools left"))
+            g_tabScroll = (std::max)(0.0F, g_tabScroll - 140 * dpi);
+        ImGui::SetCursorScreenPos({origin.x + brandWidth + tabRegion + 20 * dpi, origin.y});
+        if (icon("##scroll_right", Icon::right, 20 * dpi, height, "Scroll tools right"))
+            g_tabScroll = (std::min)((std::max)(0.0F, total - tabRegion), g_tabScroll + 140 * dpi);
+    }
 
+    const float controlsX = origin.x + width - control;
+    ImGui::SetCursorScreenPos({controlsX, origin.y});
+    if (icon("##workspace_menu", Icon::menu, control, height, "Workspace options"))
+        ImGui::OpenPopup("##workspace_options");
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{12 * dpi, 10 * dpi});
+    if (ImGui::BeginPopup("##workspace_options")) {
+        ImGui::TextDisabled("WORKSPACE");
+        if (ImGui::Selectable(
+                "Sunrise", std::string_view(g_workspace.selected.data()) == workspace::kMainTabId))
+            activate(workspace::kMainTabId);
+        for (std::size_t i = 1; i < g_workspace.tabCount; ++i) {
+            if (const auto* module = find_tab(registry, g_workspace.tabs[i].data())) {
+                std::array<char, modules::kDisplayNameCapacity + 1> name{};
+                std::copy(
+                    module->display_name().begin(), module->display_name().end(), name.begin());
+                if (ImGui::Selectable(name.data(), g_workspace.tabs[i] == g_workspace.selected))
+                    activate(module->stable_id());
+            }
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Reset layout")) {
+            workspace::reset(g_workspace, logicalWidth, logicalHeight);
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleVar();
+    ImGui::SetCursorScreenPos({origin.x, origin.y + height});
+}
+
+[[nodiscard]] std::array<char, modules::kDisplayNameCapacity + 1>
+component_label(const modules::Descriptor& descriptor) noexcept {
+    std::array<char, modules::kDisplayNameCapacity + 1> label{};
+    std::copy(descriptor.display_name().begin(), descriptor.display_name().end(), label.begin());
+    return label;
+}
+
+void draw_active(const modules::Descriptor& descriptor) noexcept {
+    if (g_activeRendered
+        && (g_active.stable_id() != descriptor.stable_id()
+            || g_active.frame_callback() != descriptor.frame_callback()))
+        deactivate();
+    g_active = descriptor;
+    g_activeRendered = true;
+    descriptor.frame_callback()();
+}
+
+bool draw_main_page() noexcept {
+    navigation::Selection selected{};
+    const float panelHeight = ImGui::GetContentRegionAvail().y;
+    {
+        const components::card::Scope navigationCard(
+            "##navigation_card", ImVec2(scaling::dpi::pixels(kNavigationWidth), panelHeight));
+        if (navigationCard.visible()) selected = navigation::draw(snapshot());
+    }
     ImGui::SameLine();
-    // SameLine returns to the row the logo opened, so the version is placed against the title
-    // again, centered on it because it stays at body size.
-    ImGui::SetCursorPosY(
-        titleY + ((std::max)(titleHeight - ImGui::GetTextLineHeight(), 0.0F) / kHalfExtent));
-    ImGui::TextDisabled(SUNRISE_VER_STRING);
+    bool rendered{};
+    {
+        const components::card::Scope contentCard("##content_card",
+                                                  ImVec2(kAutomaticWidth, panelHeight));
+        if (contentCard.visible()) {
+            if (!selected.moduleAvailable) {
+                deactivate();
+                ImGui::TextDisabled("No main-menu modules are registered.");
+            } else {
+                const auto label = component_label(selected.descriptor);
+                components::section::header(label.data());
+                ImGui::Dummy({0, ImGui::GetStyle().ItemSpacing.y});
+                draw_active(selected.descriptor);
+                rendered = true;
+            }
+        }
+    }
+    return rendered;
 }
 
 } // namespace
 
-/** Draws the centered Sunrise surface inside the caller's active Dear ImGui frame. */
 bool render(bool visible) noexcept {
-    if (!internal::context_is_current()) {
+    if (!internal::context_is_current()) return false;
+    if (!visible) deactivate();
+    const auto* viewport = ImGui::GetMainViewport();
+    const float dpi = scaling::dpi::current();
+    if (!viewport || dpi <= 0 || viewport->WorkSize.x <= 0 || viewport->WorkSize.y <= 0) {
+        deactivate();
         return false;
     }
-    ImGuiViewport* viewport = ImGui::GetMainViewport();
-    if (viewport == nullptr) {
-        return false;
+    if (dpi != g_lastScale) {
+        g_tabScroll *= dpi / g_lastScale;
+        g_lastScale = dpi;
+        g_revealSelected = true;
     }
-    const ImVec2 size = window_size(*viewport);
-    if (size.x <= 0.0F || size.y <= 0.0F) {
-        return false;
+    if (!g_loaded) {
+        workspace::load(g_workspace);
+        g_lastAttempt = g_workspace;
+        g_loaded = true;
     }
-    // A new lane starts closed, so the surface animates open the first time it is asked for.
-    const float progress = animation::transition::update(kSurfaceAnimationId,
-                                                         animation::transition::Lane::visibility,
-                                                         visible,
-                                                         kVisibilityRates,
-                                                         kClosedProgress);
-    if (progress <= kClosedProgress) {
-        return false;
+    const auto registry = modules::registry::snapshot();
+    std::array<std::string_view, modules::registry::kModuleCapacity + 1> ids{};
+    std::size_t count{};
+    ids[count++] = workspace::kMainTabId;
+    for (const auto& module : registry.entries()) {
+        if (module.presentation() == modules::Presentation::workspaceTab)
+            ids[count++] = module.stable_id();
     }
+    workspace::reconcile(g_workspace, {ids.data(), count});
 
-    const float scale = kOpeningScale + ((kOpenScale - kOpeningScale) * progress);
-    const ImVec2 center = viewport->GetCenter();
-    if (visible && progress < 1.0F) {
-        // The opening zoom grows around the viewport centre. Only the settled window is movable.
-        ImGui::SetNextWindowPos(center, ImGuiCond_Always, kCenterPivot);
-    } else {
-        const ImVec2 centeredPosition{center.x - (size.x * kCenterPivot.x),
-                                      center.y - (size.y * kCenterPivot.y)};
-        ImGui::SetNextWindowPos(centeredPosition, ImGuiCond_FirstUseEver);
+    const float progress = animation::transition::update(
+        1, animation::transition::Lane::visibility, visible, {16, 14}, 0);
+    if (progress <= 0) {
+        persist();
+        return false;
     }
-    ImGui::SetNextWindowSize({size.x * scale, size.y * scale}, ImGuiCond_Always);
-    // One style alpha fades the surface and everything drawn inside it together.
+    const float logicalWidth = viewport->WorkSize.x / dpi;
+    const float logicalHeight = viewport->WorkSize.y / dpi;
+    const auto rectangle = workspace::display(g_workspace, logicalWidth, logicalHeight);
+    ImGui::SetNextWindowPos(
+        {viewport->WorkPos.x + rectangle.x * dpi, viewport->WorkPos.y + rectangle.y * dpi},
+        ImGuiCond_Always);
+    ImGui::SetNextWindowSize({rectangle.width * dpi, rectangle.height * dpi}, ImGuiCond_Always);
+    ImGui::SetNextWindowSizeConstraints(
+        {(std::min)(420.0F, logicalWidth) * dpi, (std::min)(300.0F, logicalHeight) * dpi},
+        viewport->WorkSize);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, progress);
-    const bool submitContents = ImGui::Begin("Sunrise", nullptr, kMainWindowFlags);
-    if (submitContents) {
-        draw_title();
-        ImGui::Separator();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 7 * dpi);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(kShell));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4{.19F, .20F, .23F, 1});
+    const auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse
+                       | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove
+                       | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
+                       | (g_workspace.maximized ? ImGuiWindowFlags_NoResize : 0)
+                       | (!visible ? ImGuiWindowFlags_NoInputs : 0);
+    bool pageRendered{};
+    if (ImGui::Begin("Sunrise", nullptr, flags)) {
+        if (!g_workspace.maximized) {
+            const auto position = ImGui::GetWindowPos();
+            const auto size = ImGui::GetWindowSize();
+            g_workspace.restore = {(position.x - viewport->WorkPos.x) / dpi,
+                                   (position.y - viewport->WorkPos.y) / dpi,
+                                   size.x / dpi,
+                                   size.y / dpi};
+        }
+        const auto origin = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            origin,
+            {origin.x + ImGui::GetWindowSize().x, origin.y + kStripHeight * dpi},
+            ImGui::GetColorU32(kStrip),
+            7 * dpi,
+            ImDrawFlags_RoundCornersTop);
+        ImGui::GetWindowDrawList()->AddLine(
+            {origin.x, origin.y + kStripHeight * dpi},
+            {origin.x + ImGui::GetWindowSize().x, origin.y + kStripHeight * dpi},
+            ImGui::GetColorU32(IM_COL32(50, 53, 60, 255)),
+            dpi);
+        strip(registry, logicalWidth, logicalHeight);
 
-        const StateSnapshot state = snapshot();
-        navigation::Selection selected{};
-        const float panelHeight = ImGui::GetContentRegionAvail().y;
-        {
-            const components::card::Scope navigationCard(
-                "##navigation_card", ImVec2(scaling::dpi::pixels(kNavigationWidth), panelHeight));
-            if (navigationCard.visible()) {
-                selected = navigation::draw(state);
+        const bool mainSelected =
+            std::string_view(g_workspace.selected.data()) == workspace::kMainTabId;
+        const auto* selectedTab =
+            mainSelected ? nullptr : find_tab(registry, g_workspace.selected.data());
+        if (g_activeRendered && !mainSelected
+            && (!selectedTab || g_active.stable_id() != selectedTab->stable_id()
+                || g_active.frame_callback() != selectedTab->frame_callback() || !visible))
+            deactivate();
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{12 * dpi, 16 * dpi});
+        ImGui::PushID(g_workspace.selected.data());
+        if (ImGui::BeginChild("##workspace_content",
+                              {0, 0},
+                              ImGuiChildFlags_AlwaysUseWindowPadding,
+                              ImGuiWindowFlags_NoSavedSettings)) {
+            if (mainSelected && visible) {
+                pageRendered = draw_main_page();
+            } else if (selectedTab && visible) {
+                draw_active(*selectedTab);
+                pageRendered = true;
             }
         }
-        ImGui::SameLine();
-        {
-            const components::card::Scope contentCard("##content_card",
-                                                      ImVec2(kAutomaticWidth, panelHeight));
-            if (contentCard.visible()) {
-                draw_content(selected);
-            }
-        }
+        ImGui::EndChild();
+        ImGui::PopID();
+        ImGui::PopStyleVar();
     }
     ImGui::End();
-    draw_companion_windows();
-    ImGui::PopStyleVar();
+    if (!pageRendered) deactivate();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(3);
+    if (!ImGui::IsMouseDown(0) || !visible) persist();
     return true;
 }
 
+void open_workspace_tab(std::string_view stableId) noexcept {
+    const auto registry = modules::registry::snapshot();
+    if (find_tab(registry, stableId) != nullptr) activate(stableId);
+}
+
+bool workspace_tab_open(std::string_view stableId) noexcept {
+    for (std::size_t index = 1; index < g_workspace.tabCount; ++index)
+        if (std::string_view(g_workspace.tabs[index].data()) == stableId) return true;
+    return false;
+}
+
+void set_workspace_tab_open(std::string_view stableId, bool open) noexcept {
+    if (open) {
+        open_workspace_tab(stableId);
+        return;
+    }
+    for (std::size_t index = 1; index < g_workspace.tabCount; ++index) {
+        if (std::string_view(g_workspace.tabs[index].data()) == stableId) {
+            workspace::close(g_workspace, index);
+            g_revealSelected = true;
+            return;
+        }
+    }
+}
+
+namespace internal {
+void reset_workspace() noexcept {
+    deactivate();
+    persist();
+    g_workspace = {};
+    g_lastAttempt = {};
+    g_loaded = false;
+    g_tabScroll = 0;
+    g_lastScale = 1;
+    g_lastTabRegion = 0;
+    g_revealSelected = true;
+    g_brandDragged = false;
+}
+} // namespace internal
 } // namespace sunrise::core::ui::layout

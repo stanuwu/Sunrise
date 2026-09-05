@@ -48,6 +48,10 @@ struct CurrentActivityLinkView final {
     bool publicTarget{};
 };
 
+/** Resolves the player's region host for world actions, including public citizen hosts. */
+[[nodiscard]] bool current_activity_host_link_view(std::int32_t localSliceSet,
+                                                   CurrentActivityLinkView& output) noexcept;
+
 /** Common-root inputs owned by one exact ActivityClient generation. */
 struct ActivityReplicationView final {
     state::activity::SessionBinding binding{};

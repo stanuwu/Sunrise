@@ -1,11 +1,9 @@
 #pragma once
-
 namespace sunrise::server::ui::activity_host {
-
-/** Draws the Activity Host diagnostics and typed state controls. */
+/** Main-menu launcher for Activity Host tools. */
 void draw() noexcept;
-
-/** Draws enabled companion windows while the main UI is visible. */
-void draw_windows() noexcept;
-
+/** Both launched tabs use the same validated Activity Host selection. */
+void draw_world() noexcept;
+void draw_packets() noexcept;
+void deactivate_world() noexcept;
 } // namespace sunrise::server::ui::activity_host

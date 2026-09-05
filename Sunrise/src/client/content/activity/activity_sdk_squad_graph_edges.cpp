@@ -457,9 +457,12 @@ template <typename Index> void canonicalize_scenarios(Index& index) {
                 exactTargets[{spawner.inlineRuleRow, source.objectIndex, source.slotIndex}];
             target.descriptors = {spawner.sourceDescriptorRow};
         }
+        // Each reference was already resolved to one exact logical target. Two authored
+        // references may name different rules; that does not make either edge ambiguous.
+        // Keep rejecting the whole spawner if either present reference failed resolution.
         const bool associationExact =
             spawner.sourceDescriptorStatus == SourceDescriptorStatus::exact && !hasAmbiguous
-            && !hasOther && exactTargets.size() == 1;
+            && !hasOther && !exactTargets.empty();
         if (spawner.sourceDescriptorRow == format::kAbsentIndex) {
             continue;
         }

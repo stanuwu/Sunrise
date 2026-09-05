@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <string_view>
 
 #include "../modules/ui_module_descriptor.h"
 
@@ -37,5 +38,14 @@ struct StateSnapshot {
 
 /** @return One copy of the init and module selection state, read under the lock. */
 [[nodiscard]] StateSnapshot snapshot() noexcept;
+
+/** Opens or focuses a registered launched-tool tab. Safe to call from a main-menu page. */
+void open_workspace_tab(std::string_view stableId) noexcept;
+
+/** @return True when a launched-tool tab is currently open. */
+[[nodiscard]] bool workspace_tab_open(std::string_view stableId) noexcept;
+
+/** Opens or closes one registered launched-tool tab. */
+void set_workspace_tab_open(std::string_view stableId, bool open) noexcept;
 
 } // namespace sunrise::core::ui::layout

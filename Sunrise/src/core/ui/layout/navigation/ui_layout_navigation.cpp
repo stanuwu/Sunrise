@@ -53,13 +53,20 @@ widget_label(const Descriptor& descriptor) noexcept {
 
     const std::string_view selectedId(state.selectedStableId.data(), state.selectedStableIdLength);
     for (const Descriptor& descriptor : entries) {
-        if (descriptor.stable_id() == selectedId) {
+        if (descriptor.presentation() == modules::Presentation::mainMenu
+            && descriptor.stable_id() == selectedId) {
             return {descriptor, true};
         }
     }
     // Registry removal falls back to the first module in menu order.
-    internal::select_module(entries.front().stable_id());
-    return {entries.front(), true};
+    for (const Descriptor& descriptor : entries) {
+        if (descriptor.presentation() == modules::Presentation::mainMenu) {
+            internal::select_module(descriptor.stable_id());
+            return {descriptor, true};
+        }
+    }
+    internal::select_module({});
+    return {};
 }
 
 /**
@@ -71,6 +78,9 @@ widget_label(const Descriptor& descriptor) noexcept {
 [[nodiscard]] Selection draw_module_choices(const RegistrySnapshot& registrySnapshot,
                                             Selection selected) noexcept {
     for (const Descriptor& descriptor : registrySnapshot.entries()) {
+        if (descriptor.presentation() != modules::Presentation::mainMenu) {
+            continue;
+        }
         const std::string_view stableId = descriptor.stable_id();
         ImGui::PushID(stableId.data(), stableId.data() + stableId.size());
         const auto label = widget_label(descriptor);

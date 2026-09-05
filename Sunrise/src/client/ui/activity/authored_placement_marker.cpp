@@ -49,8 +49,7 @@ constexpr float kLabelCoincidenceRadius = 16.0F;
 SRWLOCK g_lock{SRWLOCK_INIT};
 State g_state{};
 RenderDiagnostics g_renderDiagnostics{};
-int g_visibleFrame{-1};
-WorldPage g_worldPage{WorldPage::none};
+visibility_detail::Lease g_visibility{};
 
 /** Immutable drawable-row set published by one browser page. */
 struct PublishedRows final {
@@ -566,8 +565,7 @@ void initialize(void* module) noexcept {
     AcquireSRWLockExclusive(&g_lock);
     g_state = next;
     g_renderDiagnostics = {};
-    g_visibleFrame = -1;
-    g_worldPage = WorldPage::none;
+    g_visibility = {};
     g_publishedRows.reset();
     ReleaseSRWLockExclusive(&g_lock);
 }
@@ -577,8 +575,7 @@ void shutdown() noexcept {
     AcquireSRWLockExclusive(&g_lock);
     g_state = {};
     g_renderDiagnostics = {};
-    g_visibleFrame = -1;
-    g_worldPage = WorldPage::none;
+    g_visibility = {};
     g_publishedRows.reset();
     ReleaseSRWLockExclusive(&g_lock);
     settings_store::shutdown();
@@ -795,17 +792,21 @@ void preview_options(const Options& options) noexcept {
 /** Records that a marker-owning page is visible in the current ImGui frame. */
 void show_for_frame() noexcept {
     AcquireSRWLockExclusive(&g_lock);
-    g_visibleFrame = ImGui::GetFrameCount();
+    visibility_detail::show_for_frame(g_visibility, ImGui::GetFrameCount());
     ReleaseSRWLockExclusive(&g_lock);
 }
 
 /** Records the selected SDK page. The published set belongs to a page, so a change drops it. */
 void set_world_page(WorldPage page) noexcept {
     AcquireSRWLockExclusive(&g_lock);
-    if (g_worldPage != page) {
-        g_worldPage = page;
-        g_publishedRows.reset();
-    }
+    if (visibility_detail::set_page(g_visibility, page)) g_publishedRows.reset();
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+/** Hides the World-owned geometry while retaining the page's exact published-row identity. */
+void deactivate_world_page() noexcept {
+    AcquireSRWLockExclusive(&g_lock);
+    visibility_detail::deactivate(g_visibility);
     ReleaseSRWLockExclusive(&g_lock);
 }
 
@@ -881,8 +882,8 @@ bool render_set(RenderSet& output) noexcept {
     const State current = snapshot();
     const int frame = ImGui::GetFrameCount();
     AcquireSRWLockShared(&g_lock);
-    const WorldPage worldPage = g_worldPage;
-    const bool visible = worldPage != WorldPage::none || g_visibleFrame == frame;
+    const WorldPage worldPage = g_visibility.page;
+    const bool visible = visibility_detail::visible(g_visibility, frame);
     const DisplayScope displayScope = current.options.displayScope;
     ReleaseSRWLockShared(&g_lock);
     if (!visible || !current.options.enabled

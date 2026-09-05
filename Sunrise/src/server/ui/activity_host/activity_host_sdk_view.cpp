@@ -28,7 +28,6 @@
 #include "activity_host_sdk_squad_view.h"
 #include "activity_host_sdk_state_pages.h"
 #include "activity_host_table_layout.h"
-#include "activity_host_tool_window.h"
 
 namespace sunrise::server::ui::activity_host::sdk_view {
 namespace {
@@ -1407,24 +1406,12 @@ void draw_content(const host::InstanceSnapshot* instance) noexcept {
 
 } // namespace
 
-/** Draws the generated activity SDK and its proved Activity Host actions. */
-void draw(bool& open, const host::InstanceSnapshot* instance) noexcept {
-    if (!open) {
-        marker::set_world_page(marker::WorldPage::none);
-        return;
-    }
-    const bool visible = tool_window::begin(
-        "Activity Host - World###activity_host_sdk", open, {32.0F, 40.0F}, {940.0F, 680.0F});
-    if (visible) {
-        const card::Scope surface("##activity_host_sdk_card");
-        if (surface.visible()) {
-            draw_content(instance);
-        }
-    }
-    ImGui::End();
-    if (!open) {
-        marker::set_world_page(marker::WorldPage::none);
-    }
+/** Draws World content inside the Core-owned active tab. */
+void draw(const host::InstanceSnapshot* instance) noexcept {
+    draw_content(instance);
+}
+void deactivate() noexcept {
+    marker::deactivate_world_page();
 }
 
 } // namespace sunrise::server::ui::activity_host::sdk_view

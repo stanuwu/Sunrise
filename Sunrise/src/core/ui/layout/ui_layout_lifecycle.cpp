@@ -63,6 +63,7 @@ bool initialize() noexcept {
 
 /** Releases runtime fonts and destroys the context after both presentation backends stop. */
 bool shutdown() noexcept {
+    internal::reset_workspace();
     AcquireSRWLockExclusive(&g_layoutLock);
     credits::cancel_pending();
     if (!fonts::runtime::shutdown()) {

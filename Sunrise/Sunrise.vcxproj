@@ -189,6 +189,8 @@
     <ClCompile Include="src\core\ui\layout\ui_layout_lifecycle.cpp" />
     <ClCompile Include="src\core\ui\layout\navigation\ui_layout_navigation.cpp" />
     <ClCompile Include="src\core\ui\layout\ui_layout_render.cpp" />
+    <ClCompile Include="src\core\ui\layout\workspace_state.cpp" />
+    <ClCompile Include="src\core\ui\layout\workspace_store.cpp" />
     <ClCompile Include="src\core\ui\layout\credits\sunrise_credits_badge.cpp" />
     <ClCompile Include="src\client\runtime\client_hook_activation.cpp" />
     <ClCompile Include="src\client\runtime\client_platform_hook_activation.cpp" />
@@ -1280,6 +1282,7 @@
     <ClInclude Include="src\core\ui\theme\sunrise_ui_theme.h" />
     <ClInclude Include="src\core\ui\layout\layout.h" />
     <ClInclude Include="src\core\ui\layout\ui_layout_lifecycle.h" />
+    <ClInclude Include="src\core\ui\layout\workspace_state.h" />
     <ClInclude Include="src\core\ui\layout\navigation\ui_layout_navigation.h" />
     <ClInclude Include="src\core\ui\layout\credits\sunrise_credits_badge.h" />
     <ClInclude Include="src\client\runtime\runtime.h" />
@@ -1570,7 +1573,6 @@
     <ClInclude Include="src\server\ui\activity_host\activity_host_scriptable_labels.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_scriptable_browser.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_table_layout.h" />
-    <ClInclude Include="src\server\ui\activity_host\activity_host_tool_window.h" />
     <ClInclude Include="src\server\ui\activity_override\activity_override_panel.h" />
     <ClInclude Include="src\server\ui\activity_override\activity_override_lists.h" />
     <ClInclude Include="src\server\bap\runtime.h" />
@@ -1883,6 +1885,7 @@
     <ClInclude Include="src\client\content\activity\activity_sdk_tree_publication.h" />
     <ClInclude Include="src\client\content\activity\scriptable_catalog_worker.h" />
     <ClInclude Include="src\client\ui\activity\authored_placement_marker.h" />
+    <ClInclude Include="src\client\ui\activity\authored_placement_marker_visibility.h" />
     <ClInclude Include="src\client\ui\activity\authored_placement_marker_draw.h" />
     <ClInclude Include="src\client\ui\activity\authored_placement_marker_settings_store.h" />
     <ClInclude Include="src\client\ui\activity\authored_spatial_overlay.h" />

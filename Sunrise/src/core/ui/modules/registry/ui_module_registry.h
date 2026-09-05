@@ -73,14 +73,19 @@ public:
      * @param callback Module frame entry.
      * @param prepare Optional state reset, run under the slot lock before registering.
      * @param companionCallback Optional companion windows drawn on every visible UI frame.
-     * @return True when the slot holds a registration afterwards.
+     *
+     * @param presentation Main-menu page or launched workspace tool.
+     * @return True when the
+     * slot holds a registration afterwards.
      */
     [[nodiscard]] bool acquire(Owner owner,
                                std::string_view stableId,
                                std::string_view displayName,
                                FrameCallback callback,
                                void (*prepare)() noexcept = nullptr,
-                               FrameCallback companionCallback = nullptr) noexcept;
+                               FrameCallback companionCallback = nullptr,
+                               FrameCallback deactivate = nullptr,
+                               Presentation presentation = Presentation::mainMenu) noexcept;
 
     /**
      * Removes the page when the slot holds one.

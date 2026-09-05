@@ -15,7 +15,8 @@ namespace catalog = build_data::scriptables;
 /** Generated-world scenario-shard identity. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'G', 'W', 'S', 'H', 'R', 'D'};
 /** Shard schema. Increment for row-layout or extraction-semantic changes. */
-inline constexpr std::uint32_t kVersion = 13;
+// Invalidate cached graph edges carrying the former single-rule association result.
+inline constexpr std::uint32_t kVersion = 14;
 /** No extracted section may exceed the largest bounded package-derived catalog bank. */
 inline constexpr std::uint32_t kMaximumRowsPerSection = 1'048'576;
 /** A corrupt local shard cannot ask the loader for an unbounded allocation. */

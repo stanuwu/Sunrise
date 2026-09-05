@@ -14,7 +14,6 @@
 #include "../../activity/host_runtime.h"
 #include "activity_host_incident_editor.h"
 #include "activity_host_table_layout.h"
-#include "activity_host_tool_window.h"
 
 namespace sunrise::server::ui::activity_host::event_view {
 namespace {
@@ -499,39 +498,6 @@ void draw_client_messages(const state::activity::SessionBinding* selected,
     }
 }
 
-/** Counts ingress rows after the current generation, type, and epoch filters. */
-[[nodiscard]] std::size_t
-visible_client_message_count(const state::activity::SessionBinding* selected,
-                             const host::DiagnosticsSnapshot& snapshot) noexcept {
-    std::size_t count = 0;
-    bool hasPatchEpoch = false;
-    for (std::size_t index = 0; index < snapshot.clientMessageCount; ++index) {
-        const host::ClientMessageRecord& record = snapshot.clientMessages[index];
-        if (!client_message_visible(record, selected)) {
-            continue;
-        }
-        if (g_coalescePatchEpoch && record.messageType == 52) {
-            hasPatchEpoch = true;
-        } else {
-            ++count;
-        }
-    }
-    return count + (hasPatchEpoch ? 1U : 0U);
-}
-
-/** Counts host transitions for the selected exact generation. */
-[[nodiscard]] std::size_t visible_event_count(const state::activity::SessionBinding* selected,
-                                              const host::DiagnosticsSnapshot& snapshot) noexcept {
-    if (selected == nullptr) {
-        return 0;
-    }
-    std::size_t count = 0;
-    for (std::size_t index = 0; index < snapshot.eventCount; ++index) {
-        count += same_binding(snapshot.events[index].binding, *selected) ? 1U : 0U;
-    }
-    return count;
-}
-
 /** Draws recent events for the selected exact activity generation. */
 void draw_events(const state::activity::SessionBinding& selected,
                  const host::DiagnosticsSnapshot& snapshot) noexcept {
@@ -586,38 +552,17 @@ void draw_events(const state::activity::SessionBinding& selected,
 
 } // namespace
 
-/** Draws the movable packet, host-transition, and incident view. */
-void draw(bool& open,
-          const host::InstanceSnapshot* instance,
+/** Draws packet content inside the Core-owned active tab. */
+void draw(const host::InstanceSnapshot* instance,
           const host::DiagnosticsSnapshot& snapshot) noexcept {
-    if (!open) {
-        return;
-    }
-    const state::activity::SessionBinding* const selected =
-        instance != nullptr ? &instance->binding : nullptr;
-    const std::size_t clientRows = visible_client_message_count(selected, snapshot);
-    const std::size_t eventRows = visible_event_count(selected, snapshot);
-    const float rows = table_layout::authored_rows_height(clientRows, 16)
-                       + table_layout::authored_rows_height(eventRows, 16);
-    const float baseHeight = selected != nullptr ? 250.0F : 190.0F;
-    const ImVec2 windowSize{820.0F, (std::clamp)(baseHeight + rows, 240.0F, 680.0F)};
-    const bool visible = tool_window::begin(
-        "Activity Host - Packets###activity_host_events", open, {320.0F, 320.0F}, windowSize);
-    if (visible) {
-        const card::Scope surface("##activity_host_events_card");
-        if (surface.visible()) {
-            draw_client_messages(selected, snapshot);
-            if (instance != nullptr) {
-                ImGui::Spacing();
-                draw_events(instance->binding, snapshot);
-                ImGui::Spacing();
-                incident_editor::draw(instance->binding, *instance, snapshot);
-            } else {
-                ImGui::TextDisabled("No activity selected. Showing every packet.");
-            }
-        }
-    }
-    ImGui::End();
+    const auto* selected = instance != nullptr ? &instance->binding : nullptr;
+    draw_client_messages(selected, snapshot);
+    if (instance != nullptr) {
+        ImGui::Spacing();
+        draw_events(instance->binding, snapshot);
+        ImGui::Spacing();
+        incident_editor::draw(instance->binding, *instance, snapshot);
+    } else
+        ImGui::TextDisabled("No activity selected. Showing every packet.");
 }
-
 } // namespace sunrise::server::ui::activity_host::event_view

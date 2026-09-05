@@ -62,6 +62,25 @@ FrameCallback Descriptor::frame_callback() const noexcept {
     return frameCallback_;
 }
 
+Descriptor Descriptor::with_deactivation(FrameCallback callback) const noexcept {
+    Descriptor copy = *this;
+    copy.deactivationCallback_ = callback;
+    return copy;
+}
+FrameCallback Descriptor::deactivation_callback() const noexcept {
+    return deactivationCallback_;
+}
+
+Descriptor Descriptor::with_presentation(Presentation presentation) const noexcept {
+    Descriptor copy = *this;
+    copy.presentation_ = presentation;
+    return copy;
+}
+
+Presentation Descriptor::presentation() const noexcept {
+    return presentation_;
+}
+
 /** @return The optional companion-window entry called on every visible UI frame. */
 FrameCallback Descriptor::companion_frame_callback() const noexcept {
     return companionFrameCallback_;
@@ -110,7 +129,9 @@ bool create_descriptor(Owner owner,
 bool is_valid(const Descriptor& descriptor) noexcept {
     return is_valid_owner(descriptor.owner_) && is_valid_stable_id(descriptor.stable_id())
            && is_valid_display_name(descriptor.display_name())
-           && descriptor.frameCallback_ != nullptr;
+           && descriptor.frameCallback_ != nullptr
+           && (descriptor.presentation_ == Presentation::mainMenu
+               || descriptor.presentation_ == Presentation::workspaceTab);
 }
 
 } // namespace sunrise::core::ui::modules

@@ -14,6 +14,12 @@ enum class Owner : std::uint8_t {
     core,
 };
 
+/** Main-menu pages stay in the upstream sidebar; launched tools occupy workspace tabs. */
+enum class Presentation : std::uint8_t {
+    mainMenu,
+    workspaceTab,
+};
+
 /** 48 bytes fit a namespaced stable ID and keep every slot the same size. */
 inline constexpr std::size_t kStableIdCapacity = 48;
 /** 64 bytes hold one short menu label with no dynamic storage. */
@@ -42,6 +48,16 @@ public:
     /** @return The optional companion-window entry called on every visible UI frame. */
     [[nodiscard]] FrameCallback companion_frame_callback() const noexcept;
 
+    /** Copies the descriptor with a hook for relinquishing page-specific presentation state. */
+    [[nodiscard]] Descriptor with_deactivation(FrameCallback callback) const noexcept;
+    [[nodiscard]] FrameCallback deactivation_callback() const noexcept;
+
+    /** Copies the descriptor with its workspace placement. */
+    [[nodiscard]] Descriptor with_presentation(Presentation presentation) const noexcept;
+
+    /** @return Whether this page belongs to the main menu or a launched workspace tab. */
+    [[nodiscard]] Presentation presentation() const noexcept;
+
 private:
     friend bool create_descriptor(Owner owner,
                                   std::string_view stableId,
@@ -59,6 +75,8 @@ private:
     std::size_t displayNameLength_{};
     FrameCallback frameCallback_{};
     FrameCallback companionFrameCallback_{};
+    FrameCallback deactivationCallback_{};
+    Presentation presentation_{Presentation::mainMenu};
 };
 
 /**
