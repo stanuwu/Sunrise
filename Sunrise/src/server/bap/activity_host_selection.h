@@ -2,10 +2,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 
+#include "../../state/activity/definition.h"
+
 namespace sunrise::server::bap::host_selection {
+
+/** A connection has no activity binding before its first generation is assigned. */
+inline constexpr std::uint64_t kUnboundGeneration = 0;
 
 /** Binding identities and connection generation copied while the session lock is held. */
 struct Candidate {
@@ -14,19 +20,21 @@ struct Candidate {
     std::uint64_t sourceSession{};
     std::uint64_t sourceRevision{};
     std::uint64_t generation{};
-    std::int32_t region{-1};
+    std::int32_t region{state::activity::membership::kAbsentRegionIndex};
     bool publicTarget{};
 };
 
-inline constexpr std::size_t absent = static_cast<std::size_t>(-1);
+/** No candidate row was selected. */
+inline constexpr std::size_t absent = (std::numeric_limits<std::size_t>::max)();
 
-/** Returns the newest private binding's index, or absent if its generation is tied. */
+/** @return Index of the newest private binding, or absent when missing or tied. */
 inline std::size_t current_private(std::span<const Candidate> rows) noexcept {
     std::size_t selected = absent;
     bool ambiguous = false;
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const auto& row = rows[i];
-        if (row.publicTarget || row.session == 0 || row.generation == 0) {
+        if (row.publicTarget || row.session == state::activity::kAbsentSessionId
+            || row.generation == kUnboundGeneration) {
             continue;
         }
         if (selected == absent || row.generation > rows[selected].generation) {
@@ -39,7 +47,12 @@ inline std::size_t current_private(std::span<const Candidate> rows) noexcept {
     return ambiguous ? absent : selected;
 }
 
-/** Returns a unique region owner; public hosts must match the source session and revision. */
+/**
+ * Selects the private source or its public host for one region.
+ * Public hosts must match both the source session and its revision.
+ * @param privateRegion Authored publicity; an empty value rejects selection.
+ * @return Index of the unique region owner, or absent when no exact owner is available.
+ */
 inline std::size_t region_host(std::span<const Candidate> rows,
                                std::size_t source,
                                std::int32_t region,
@@ -54,7 +67,8 @@ inline std::size_t region_host(std::span<const Candidate> rows,
     std::size_t selected = absent;
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const auto& row = rows[i];
-        if (!row.publicTarget || row.generation == 0 || row.session == 0
+        if (!row.publicTarget || row.generation == kUnboundGeneration
+            || row.session == state::activity::kAbsentSessionId
             || row.region != region || row.sourceSession != rows[source].session
             || row.sourceRevision != rows[source].revision) {
             continue;

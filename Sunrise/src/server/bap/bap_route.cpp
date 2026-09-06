@@ -1246,7 +1246,7 @@ bool current_activity_host_link_view(std::int32_t localSliceSet,
     for (const Session& session : g_sessions) {
         if (session.id == 0 || !session.authenticated
             || session.activity.role == ActivityClientRole::none
-            || session.activity.bindingGeneration == 0
+            || session.activity.bindingGeneration == host_selection::kUnboundGeneration
             || !state::activity::binding_matches(session.activity.session)
             || !state::activity::binding_matches(session.activity.source)) {
             continue;
