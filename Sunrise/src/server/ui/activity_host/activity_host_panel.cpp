@@ -61,7 +61,7 @@ void instance_label(const state::activity::SessionBinding& binding,
     return nullptr;
 }
 
-/** Keeps the selection on a row that still exists, preferring an active linked one. */
+/** Follows the player's region host, or retains a valid manual selection when following is off. */
 void select_default() noexcept {
     if (g_followPlayer) {
         g_selected = {};

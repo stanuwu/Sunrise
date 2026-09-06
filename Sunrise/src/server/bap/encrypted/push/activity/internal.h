@@ -112,9 +112,9 @@ void commit_membership_body_record(const Session& session) noexcept;
 /** Same test for the connection's own activity session. */
 [[nodiscard]] bool private_region(const Session& session, std::int32_t region) noexcept;
 
-/** Returns false when region publicity cannot be resolved, without treating it as public. */
+/** Writes authored publicity to isPublic; false means the region could not be resolved. */
 [[nodiscard]] bool region_publicity(const Session& session, std::int32_t region,
-                                    bool& isPublic) noexcept;
+                                   bool& isPublic) noexcept;
 
 /**
  * Reads the authored publicity of every bubble from the installed packages.

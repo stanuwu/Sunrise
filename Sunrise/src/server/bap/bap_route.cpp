@@ -1232,11 +1232,13 @@ bool current_activity_link_view(std::int32_t localSliceSet,
     return selected != nullptr;
 }
 
-/** Resolves world actions through the current player's actual region owner. */
+/** Selects a region host from live bindings under the session lock. */
 bool current_activity_host_link_view(std::int32_t localSliceSet,
                                      CurrentActivityLinkView& output) noexcept {
     output = {};
-    if (localSliceSet < 0) return false;
+    if (localSliceSet < 0) {
+        return false;
+    }
     const std::shared_lock lock(g_lock);
     std::array<host_selection::Candidate, kSessionCount> candidates{};
     std::array<const Session*, kSessionCount> sessions{};
@@ -1246,25 +1248,34 @@ bool current_activity_host_link_view(std::int32_t localSliceSet,
             || session.activity.role == ActivityClientRole::none
             || session.activity.bindingGeneration == 0
             || !state::activity::binding_matches(session.activity.session)
-            || !state::activity::binding_matches(session.activity.source)) continue;
+            || !state::activity::binding_matches(session.activity.source)) {
+            continue;
+        }
         const auto& link = session.activity;
-        candidates[count] = {link.session.sessionId, link.session.createdRevision,
-                             link.source.sessionId, link.source.createdRevision,
-                             link.bindingGeneration, selected_region_locked(session).index,
+        candidates[count] = {link.session.sessionId,
+                             link.session.createdRevision,
+                             link.source.sessionId,
+                             link.source.createdRevision,
+                             link.bindingGeneration,
+                             selected_region_locked(session).index,
                              link.role == ActivityClientRole::publicTarget};
         sessions[count++] = &session;
     }
     output.activeLinks = count;
     const std::span<const host_selection::Candidate> rows(candidates.data(), count);
     const auto source = host_selection::current_private(rows);
-    if (source == host_selection::absent) return false;
+    if (source == host_selection::absent) {
+        return false;
+    }
     bool isPublic = false;
     std::optional<bool> privateRegion;
     if (encrypted::push::activity::region_publicity(*sessions[source], localSliceSet, isPublic)) {
         privateRegion = !isPublic;
     }
     const auto selected = host_selection::region_host(rows, source, localSliceSet, privateRegion);
-    if (selected == host_selection::absent) return false;
+    if (selected == host_selection::absent) {
+        return false;
+    }
     output.binding = sessions[selected]->activity.session;
     output.activityClientGeneration = rows[selected].generation;
     output.effectiveRegion = localSliceSet;

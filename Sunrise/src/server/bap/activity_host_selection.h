@@ -1,10 +1,13 @@
 #pragma once
+
 #include <cstddef>
 #include <cstdint>
-#include <span>
 #include <optional>
+#include <span>
 
 namespace sunrise::server::bap::host_selection {
+
+/** Binding identities and connection generation copied while the session lock is held. */
 struct Candidate {
     std::uint64_t session{};
     std::uint64_t revision{};
@@ -17,13 +20,15 @@ struct Candidate {
 
 inline constexpr std::size_t absent = static_cast<std::size_t>(-1);
 
-/** Establish the current player session before considering its region hosts. */
+/** Returns the newest private binding's index, or absent if its generation is tied. */
 inline std::size_t current_private(std::span<const Candidate> rows) noexcept {
     std::size_t selected = absent;
     bool ambiguous = false;
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const auto& row = rows[i];
-        if (row.publicTarget || row.session == 0 || row.generation == 0) continue;
+        if (row.publicTarget || row.session == 0 || row.generation == 0) {
+            continue;
+        }
         if (selected == absent || row.generation > rows[selected].generation) {
             selected = i;
             ambiguous = false;
@@ -34,21 +39,32 @@ inline std::size_t current_private(std::span<const Candidate> rows) noexcept {
     return ambiguous ? absent : selected;
 }
 
-/** Public regions belong to the joined public host, never the private directory link. */
-inline std::size_t region_host(std::span<const Candidate> rows, std::size_t source,
-                              std::int32_t region, std::optional<bool> privateRegion) noexcept {
+/** Returns a unique region owner; public hosts must match the source session and revision. */
+inline std::size_t region_host(std::span<const Candidate> rows,
+                               std::size_t source,
+                               std::int32_t region,
+                               std::optional<bool> privateRegion) noexcept {
     if (!privateRegion.has_value() || source >= rows.size() || region < 0
-        || rows[source].publicTarget) return absent;
-    if (*privateRegion) return rows[source].region == region ? source : absent;
+        || rows[source].publicTarget) {
+        return absent;
+    }
+    if (*privateRegion) {
+        return rows[source].region == region ? source : absent;
+    }
     std::size_t selected = absent;
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const auto& row = rows[i];
         if (!row.publicTarget || row.generation == 0 || row.session == 0
             || row.region != region || row.sourceSession != rows[source].session
-            || row.sourceRevision != rows[source].revision) continue;
-        if (selected != absent) return absent;
+            || row.sourceRevision != rows[source].revision) {
+            continue;
+        }
+        if (selected != absent) {
+            return absent;
+        }
         selected = i;
     }
     return selected;
 }
+
 } // namespace sunrise::server::bap::host_selection

@@ -48,9 +48,9 @@ struct CurrentActivityLinkView final {
     bool publicTarget{};
 };
 
-/** Resolves the player's region host for world actions, including public citizen hosts. */
+/** Returns false if the player's region has no unique host or its publicity is unknown. */
 [[nodiscard]] bool current_activity_host_link_view(std::int32_t localSliceSet,
-                                                   CurrentActivityLinkView& output) noexcept;
+                                                  CurrentActivityLinkView& output) noexcept;
 
 /** Common-root inputs owned by one exact ActivityClient generation. */
 struct ActivityReplicationView final {
