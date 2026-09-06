@@ -173,17 +173,18 @@ struct RefreshReport final {
 client_placement(const Session& session, const RefreshReport* refresh) noexcept;
 
 /**
- * Tests whether the client is in a live world: it holds the region it reported and no host
- * move is waiting for its arrival.
+ * Tests whether the client has reported arrival in its instantiated region: its WS-702 world
+ * state reached 8 while it holds the region it reported and no host move is waiting. This is
+ * the report that releases the native spawn gate.
  * @param session Connection whose activity session the client reports on.
  * @param refresh Refresh being answered, or null.
  */
 [[nodiscard]] bool client_in_world(const Session& session, const RefreshReport* refresh) noexcept;
 
 /**
- * Tests whether the client's destination region is instantiated far enough for the native spawn.
- * Unlike `client_in_world`, this deliberately does not require the post-spawn world-state 8
- * write-back: requiring that signal to release the spawn creates a circular wait.
+ * Tests whether the client's destination region is instantiated, before its arrival report.
+ * This permits the loading lifetime to advance, but does not release the native spawn gate:
+ * that also waits for `client_in_world` so the spawn follows the transition fade's final arm.
  * @param session Connection whose activity session the client reports on.
  * @param refresh Refresh being answered, or null.
  */

@@ -29,11 +29,17 @@ constexpr unsigned kByteBits = 8;
 /** Sequence the first packet to a peer carries, because the head advances before it is written. */
 constexpr std::uint16_t kFirstPacketSequence = 1;
 
-/** Fills the address blob that names this host on the direct path. */
-void local_address(std::array<std::byte, wire::kAddressBlobSize>& output) noexcept {
+/**
+ * Fills the address blob that names this host on the direct path.
+ * @param receivingPort Host pool port the request arrived on. Zero names the primary port, as it
+ * does on the transport's send path.
+ * @param output Receives the direct-path address blob.
+ */
+void local_address(std::uint16_t receivingPort,
+                   std::array<std::byte, wire::kAddressBlobSize>& output) noexcept {
     const gp::Endpoint advertised = endpoint::advertised();
     middleware::gameplay::descriptor::write_direct_net_addr(
-        advertised.address, advertised.port, output);
+        advertised.address, receivingPort != 0 ? receivingPort : advertised.port, output);
 }
 
 /** @return A random 32-bit sequence, or zero when Windows refused. */
@@ -98,7 +104,9 @@ void answer_connect(const gp::Endpoint& from,
     // The peer checks both echoed fields and closes the connection on a wrong sequence.
     response.remoteChannelId = request.channelId;
     response.remoteSequence = request.sequence;
-    local_address(response.address);
+    // The client locates its connecting channel by this address, so it must name the host pool
+    // port the request reached rather than always the primary port.
+    local_address(from.localPort, response.address);
     DisplacedExternals displaced{};
     std::size_t displacedCount = 0;
     std::array<std::uint64_t, gp::kSessionsPerLink> resetSessions{};

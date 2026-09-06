@@ -13,10 +13,13 @@
 
 namespace sunrise::core::settings {
 
-/** Boot policy for the optional full-estate activity SDK generator. */
+/** Boot policy for generating the activity SDK required by host roster construction. */
 struct ActivitySdkGenerationSettings final {
-    /** Allows generation work to be requested. Off unless the settings file opts in. */
-    bool enabled{false};
+    /**
+     * Allows generation work to be requested. On by default, matching the bundled settings, so a
+     * file that omits this block still generates the SDK the host roster needs.
+     */
+    bool enabled{true};
     /** Writes the sdk/lua declaration tree. On by default, and only runs when generation does. */
     bool luaDeclarations{true};
 };
@@ -26,7 +29,7 @@ struct ActivitySdkGenerationSettings final {
  * Raise it when a key is renamed, removed, changes meaning, or must take a new default. Adding a
  * key needs no raise, because a missing key already takes its default.
  */
-inline constexpr std::uint32_t kSettingsVersion = 13;
+inline constexpr std::uint32_t kSettingsVersion = 14;
 
 /** Parsed read-only process settings. */
 struct Settings {

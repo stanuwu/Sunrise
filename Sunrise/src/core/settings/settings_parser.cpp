@@ -117,7 +117,7 @@ bool Parser::core(Settings& output) noexcept {
     }
 }
 
-/** Parses the Core-owned, fail-closed activity SDK generation gate. */
+/** Parses the Core-owned activity SDK generation gate. Omitted members keep their defaults. */
 bool Parser::activity_sdk_generation_settings(ActivitySdkGenerationSettings& output) noexcept {
     if (!consume('{')) {
         return false;

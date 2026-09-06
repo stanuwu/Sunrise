@@ -291,8 +291,9 @@ bool append_roster_notification(
     const bool lifetimePending =
         hasScriptablePending && singleScriptableLink
         && scriptablePending.kind == server::activity::host::ScriptableOverrideKind::lifetime;
-    // The loading lifetime holds only until the destination region is instantiated. The stricter
-    // in-world state is reported after spawning and would make this field wait on its own result.
+    // The loading lifetime is the presentation, not the spawn hold: state 4 shows the loading
+    // screen and refuses the native spawn gate on its own, so it is released once the region is
+    // instantiated. `awaiting_client_sync` carries the hold on to the client's arrival report.
     // An explicit lifetime request still wins.
     const bool clientLoading = !client_region_ready(session, refresh);
     const bool bodyPending = hasScriptablePending && singleScriptableLink && !lifetimePending;

@@ -863,10 +863,10 @@ bool client_region_ready(const Session& session, const RefreshReport* refresh) n
     return !movePending && held >= 0;
 }
 
-/** Tests whether the client has completed spawning into its instantiated region. */
+/** Tests whether the client has reported arrival in its instantiated region. */
 bool client_in_world(const Session& session, const RefreshReport* refresh) noexcept {
-    // World-state 8 is a post-spawn signal. It remains the readiness boundary for gameplay work,
-    // but must not be used by the roster fields that decide whether the spawn itself may run.
+    // WS-702 world-state 8 follows the bootflow's arrival, independently of the player spawn.
+    // Holding a region alone can precede that report and the world-transition fade's final arm.
     const state::activity::membership::ClientPlacement placement =
         client_placement(session, refresh);
     return placement.entered && client_region_ready(session, refresh);
@@ -1373,10 +1373,11 @@ build_roster_snapshot(Session& session,
     // carries matches nothing.
     snapshot.playerKey = published_player_key(session);
     snapshot.lifetime = lifetimeState;
-    // The host orders the spawn. `awaiting_client_sync` holds the native spawn gate only until the
-    // region is instantiated. World-state 8 is written after spawning, so waiting for it here
-    // deadlocks the proper spawn path until the client's unavailable-state timeout fires.
-    snapshot.awaitClientSync = !client_region_ready(session, refresh);
+    // Keep the native spawn gate held until the client's arrival report. A region can be loaded
+    // before bootflow finishes and arms its fade; spawning then releases an inactive fade and
+    // leaves the later black overlay stuck. Arrival is independent of spawning, so this hold
+    // releases on WS-702 world-state 8 without a client patch or a load-duration timeout.
+    snapshot.awaitClientSync = !client_in_world(session, refresh);
     // Player_BindComponents walks every type-13 reference and the player datum can name any one of
     // them. So every participation record carries the same player key. Selecting the first slot
     // leaves the authored cinematic participant unbound whenever it names another record.
