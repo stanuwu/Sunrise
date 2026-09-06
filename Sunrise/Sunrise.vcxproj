@@ -1885,7 +1885,6 @@
     <ClInclude Include="src\client\content\activity\activity_sdk_tree_publication.h" />
     <ClInclude Include="src\client\content\activity\scriptable_catalog_worker.h" />
     <ClInclude Include="src\client\ui\activity\authored_placement_marker.h" />
-    <ClInclude Include="src\client\ui\activity\authored_placement_marker_visibility.h" />
     <ClInclude Include="src\client\ui\activity\authored_placement_marker_draw.h" />
     <ClInclude Include="src\client\ui\activity\authored_placement_marker_settings_store.h" />
     <ClInclude Include="src\client\ui\activity\authored_spatial_overlay.h" />

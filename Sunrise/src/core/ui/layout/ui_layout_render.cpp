@@ -25,6 +25,8 @@ bool g_revealSelected{true};
 bool g_brandDragged{};
 modules::Descriptor g_active{};
 bool g_activeRendered{};
+// Retain close callbacks for tools that have run, independently of the selected tab.
+std::array<modules::Descriptor, workspace::kTabCapacity> g_openTools{};
 
 constexpr float kStripHeight = 42;
 constexpr float kControlWidth = 36;
@@ -39,7 +41,9 @@ constexpr auto kStrip = IM_COL32(18, 20, 23, 255);
 constexpr auto kAccent = IM_COL32(239, 125, 61, 255);
 
 void deactivate() noexcept {
-    if (g_activeRendered && g_active.deactivation_callback()) g_active.deactivation_callback()();
+    if (g_activeRendered && g_active.presentation() == modules::Presentation::mainMenu
+        && g_active.deactivation_callback())
+        g_active.deactivation_callback()();
     g_activeRendered = false;
     g_active = {};
 }
@@ -57,6 +61,22 @@ const modules::Descriptor* find_tab(const modules::registry::RegistrySnapshot& r
         if (item.stable_id() == id && item.presentation() == modules::Presentation::workspaceTab)
             return &item;
     return nullptr;
+}
+
+void release_tool(modules::Descriptor& tool) noexcept {
+    if (tool.deactivation_callback()) tool.deactivation_callback()();
+    tool = {};
+}
+
+void reconcile_tools(const modules::registry::RegistrySnapshot& registry) noexcept {
+    for (auto& tool : g_openTools) {
+        if (!tool.frame_callback()) continue;
+        const auto* registered = find_tab(registry, tool.stable_id());
+        if (!workspace_tab_open(tool.stable_id()) || !registered
+            || registered->frame_callback() != tool.frame_callback()
+            || registered->deactivation_callback() != tool.deactivation_callback())
+            release_tool(tool);
+    }
 }
 
 void activate(std::string_view id) noexcept {
@@ -360,6 +380,17 @@ void draw_active(const modules::Descriptor& descriptor) noexcept {
         deactivate();
     g_active = descriptor;
     g_activeRendered = true;
+    if (descriptor.presentation() == modules::Presentation::workspaceTab
+        && descriptor.deactivation_callback()) {
+        auto found = std::find_if(g_openTools.begin(), g_openTools.end(), [&](const auto& tool) {
+            return tool.stable_id() == descriptor.stable_id();
+        });
+        if (found == g_openTools.end())
+            found = std::find_if(g_openTools.begin(), g_openTools.end(), [](const auto& tool) {
+                return !tool.frame_callback();
+            });
+        if (found != g_openTools.end()) *found = descriptor;
+    }
     descriptor.frame_callback()();
 }
 
@@ -396,17 +427,6 @@ bool draw_main_page() noexcept {
 
 bool render(bool visible) noexcept {
     if (!internal::context_is_current()) return false;
-    const auto* viewport = ImGui::GetMainViewport();
-    const float dpi = scaling::dpi::current();
-    if (!viewport || dpi <= 0 || viewport->WorkSize.x <= 0 || viewport->WorkSize.y <= 0) {
-        deactivate();
-        return false;
-    }
-    if (dpi != g_lastScale) {
-        g_tabScroll *= dpi / g_lastScale;
-        g_lastScale = dpi;
-        g_revealSelected = true;
-    }
     if (!g_loaded) {
         workspace::load(g_workspace);
         g_lastAttempt = g_workspace;
@@ -421,14 +441,18 @@ bool render(bool visible) noexcept {
             ids[count++] = module.stable_id();
     }
     workspace::reconcile(g_workspace, {ids.data(), count});
+    reconcile_tools(registry);
 
-    // Hiding the menu leaves World helpers active, as upstream does. Only losing the owning
-    // tool (including removal while hidden) relinquishes its presentation state here.
-    if (g_activeRendered && g_active.presentation() == modules::Presentation::workspaceTab) {
-        const auto* selected = find_tab(registry, g_workspace.selected.data());
-        if (!selected || g_active.stable_id() != selected->stable_id()
-            || g_active.frame_callback() != selected->frame_callback())
-            deactivate();
+    const auto* viewport = ImGui::GetMainViewport();
+    const float dpi = scaling::dpi::current();
+    if (!viewport || dpi <= 0 || viewport->WorkSize.x <= 0 || viewport->WorkSize.y <= 0) {
+        deactivate();
+        return false;
+    }
+    if (dpi != g_lastScale) {
+        g_tabScroll *= dpi / g_lastScale;
+        g_lastScale = dpi;
+        g_revealSelected = true;
     }
 
     const float progress = animation::transition::update(
@@ -503,6 +527,7 @@ bool render(bool visible) noexcept {
         ImGui::PopStyleVar();
     }
     ImGui::End();
+    reconcile_tools(registry);
     if (visible && !pageRendered) deactivate();
     ImGui::PopStyleColor(2);
     ImGui::PopStyleVar(3);
@@ -538,6 +563,8 @@ void set_workspace_tab_open(std::string_view stableId, bool open) noexcept {
 namespace internal {
 void reset_workspace() noexcept {
     deactivate();
+    for (auto& tool : g_openTools)
+        release_tool(tool);
     persist();
     g_workspace = {};
     g_lastAttempt = {};

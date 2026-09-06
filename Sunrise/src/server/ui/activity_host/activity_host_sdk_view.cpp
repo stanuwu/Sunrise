@@ -1411,7 +1411,7 @@ void draw(const host::InstanceSnapshot* instance) noexcept {
     draw_content(instance);
 }
 void deactivate() noexcept {
-    marker::deactivate_world_page();
+    marker::set_world_page(marker::WorldPage::none);
 }
 
 } // namespace sunrise::server::ui::activity_host::sdk_view

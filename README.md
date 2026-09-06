@@ -199,8 +199,8 @@ Drag the Sunrise mark or empty header space to move the workspace. Double-click 
 to maximize or restore. The usual UI toggle hides the entire workspace. **Reset layout** is in the
 workspace menu and keeps launched tools open.
 
-World and Packets share Activity Host's instance selection. Hiding the workspace with Insert keeps
-World helpers visible, matching upstream. Closing World or selecting another tool stops its helpers,
-while the tab's page state remains ready if it is reopened.
+World and Packets share Activity Host's instance selection. Enabled World helpers remain visible
+when switching tabs or hiding the workspace with Insert. Closing World clears its helpers and
+published geometry, matching upstream's window-close behavior.
 Window geometry, maximized state, launched-tool order, and the active view are saved in
 `Sunrise/workspace.json`; unavailable tools are discarded.

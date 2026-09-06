@@ -6,7 +6,6 @@
 #include <span>
 
 #include "../../../state/activity/definition.h"
-#include "authored_placement_marker_visibility.h"
 
 namespace sunrise::client::hooks::teleport {
 struct CameraPose;
@@ -63,6 +62,16 @@ enum class PublishedSource : std::uint8_t {
     authoredOnly,
     containerOnly,
     explicitRows,
+};
+
+/** SDK tab that owns the current world overlay. */
+enum class WorldPage : std::uint8_t {
+    none,
+    objects,
+    devices,
+    triggers,
+    positions,
+    squads,
 };
 
 /** One package-authored anchor selected independently of live objects and ClientRef rows. */
@@ -242,9 +251,6 @@ void show_for_frame() noexcept;
 
 /** Retains only the selected SDK tab's marker kinds while its window remains open. */
 void set_world_page(WorldPage page) noexcept;
-
-/** Revokes the World tab's render lease without discarding its selected page or published rows. */
-void deactivate_world_page() noexcept;
 
 /** Saves the current presentation choices without retaining any selected package rows. */
 void save_options() noexcept;

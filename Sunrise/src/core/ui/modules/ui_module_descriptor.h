@@ -48,7 +48,7 @@ public:
     /** @return The optional companion-window entry called on every visible UI frame. */
     [[nodiscard]] FrameCallback companion_frame_callback() const noexcept;
 
-    /** Copies the descriptor with a hook for relinquishing page-specific presentation state. */
+    /** Relinquishes state on main-menu deselection, or on a workspace tool's close/removal. */
     [[nodiscard]] Descriptor with_deactivation(FrameCallback callback) const noexcept;
     [[nodiscard]] FrameCallback deactivation_callback() const noexcept;
 

@@ -23,6 +23,7 @@ static layout::StateSnapshot selectionState{true};
 static layout::workspace::State saved{};
 static unsigned saves{}, worldDraws{}, deactivations{};
 static bool worldHelpers{};
+static bool otherHelpers{};
 static float displayScale = 1;
 static float packetLabelWidth{};
 static std::map<ImGuiID, ImRect> rectangles;
@@ -155,6 +156,12 @@ static ImGuiWindow* active_workspace_content() {
 static void on_deactivate() noexcept {
     worldHelpers = false;
     ++deactivations;
+}
+static void other_page() noexcept {
+    otherHelpers = true;
+}
+static void close_other() noexcept {
+    otherHelpers = false;
 }
 static void world_page() noexcept {
     ++worldDraws;
@@ -404,24 +411,59 @@ int main(int argc, char** argv) {
 
     ImGui::GetIO().DisplaySize = {0, 0};
     frame(false);
-    assert(!worldHelpers);
+    assert(worldHelpers);
     ImGui::GetIO().DisplaySize = {2048, 857};
     frame();
     frame();
     assert(worldHelpers);
     ImGui::GetIO().DisplaySize = {0, 0};
     frame(true);
+    assert(worldHelpers);
+    layout::set_workspace_tab_open("server.world", false);
+    frame(false);
     assert(!worldHelpers);
     ImGui::GetIO().DisplaySize = {2048, 857};
+    layout::open_workspace_tab("server.world");
     frame();
+    frame();
+    assert(worldHelpers);
+    ImGui::GetIO().DisplaySize = {0, 0};
+    assert(modules::registry::unregister_module("server.world"));
+    frame(false);
+    assert(!worldHelpers);
+    register_page("server.world", "World", world_page, true, on_deactivate);
+    ImGui::GetIO().DisplaySize = {2048, 857};
+    layout::open_workspace_tab("server.world");
     frame();
     assert(worldHelpers);
 
     click("##sunrise_home");
-    assert(selected_tab() == layout::workspace::kMainTabId && !worldHelpers);
+    assert(selected_tab() == layout::workspace::kMainTabId && worldHelpers);
     assert(selected_module() == "server.activity_host");
     click("Packets");
     assert(selected_tab() == "server.packets" && layout::g_workspace.tabCount == 3);
+    assert(worldHelpers);
+    const auto backgroundDraws = worldDraws;
+    for (int i = 0; i < 20; ++i)
+        frame();
+    assert(worldHelpers && worldDraws == backgroundDraws);
+    // Another helper-owning tool must not replace World's close callback.
+    register_page("test.other", "Other", other_page, true, close_other);
+    layout::open_workspace_tab("test.other");
+    frame();
+    assert(worldHelpers && otherHelpers);
+    layout::set_workspace_tab_open("server.world", false);
+    frame();
+    assert(!worldHelpers && otherHelpers);
+    layout::open_workspace_tab("server.world");
+    frame();
+    assert(worldHelpers && otherHelpers);
+    layout::set_workspace_tab_open("test.other", false);
+    frame();
+    assert(worldHelpers && !otherHelpers);
+    assert(modules::registry::unregister_module("test.other"));
+    layout::open_workspace_tab("server.packets");
+    frame();
     // The full text plus a visible gap must fit before the close button at every supported DPI.
     for (const float scale : {0.9F, 1.0F, 1.6875F, 2.5F}) {
         displayScale = scale;
@@ -452,7 +494,7 @@ int main(int argc, char** argv) {
     ImGui::GetIO().AddMouseButtonEvent(0, false);
     frame();
     frame();
-    assert(std::string(layout::g_workspace.tabs[2].data()) == "server.world");
+    assert(std::string(layout::g_workspace.tabs[1].data()) == "server.world");
     click_at(tab_rect("server.world", true).GetCenter());
     assert(selected_tab() == "server.packets" && !worldHelpers);
     click("##sunrise_home");
@@ -482,8 +524,9 @@ int main(int argc, char** argv) {
     frame();
     assert(layout::g_workspace.restore.x > priorPosition.x);
 
-    const auto drawsBeforeHide = worldDraws;
     const auto deactivationsBeforeHide = deactivations;
+    click("##sunrise_home");
+    const auto drawsBeforeHide = worldDraws;
     for (int i = 0; i < 20; ++i) {
         frame(false);
         assert(worldHelpers && worldDraws == drawsBeforeHide
@@ -493,8 +536,11 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 20; ++i)
         frame();
     assert(worldHelpers);
+    layout::open_workspace_tab("server.world");
+    frame();
     const auto remembered = layout::g_workspace;
     layout::internal::reset_workspace();
+    assert(!worldHelpers);
     frame();
     frame();
     assert(layout::g_workspace == remembered);
@@ -543,6 +589,7 @@ int main(int argc, char** argv) {
     layout::open_workspace_tab("server.world");
     frame();
     assert(worldHelpers);
+    layout::activate(layout::workspace::kMainTabId);
     for (int i = 0; i < 20; ++i)
         frame(false);
     layout::set_workspace_tab_open("server.world", false);
@@ -551,6 +598,7 @@ int main(int argc, char** argv) {
     layout::open_workspace_tab("server.world");
     frame();
     assert(worldHelpers);
+    layout::activate(layout::workspace::kMainTabId);
     for (int i = 0; i < 20; ++i)
         frame(false);
     assert(modules::registry::unregister_module("server.world"));

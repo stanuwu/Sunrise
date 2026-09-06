@@ -23,7 +23,6 @@ sunrise_test(activity_host_selection)
 sunrise_test(socket_row_relocation ARGS "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/socket_rows.hex")
 sunrise_test(lore_visibility)
 sunrise_test(workspace_state ../Sunrise/src/core/ui/layout/workspace_state.cpp)
-sunrise_test(world_marker_visibility)
 
 if(WIN32)
     sunrise_test(workspace_store
