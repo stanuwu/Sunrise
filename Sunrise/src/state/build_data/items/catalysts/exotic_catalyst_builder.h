@@ -34,6 +34,8 @@ struct Source {
     std::span<const AcquisitionGate> acquisitionGates;
     /** Dense objective-indexed completion values read from the installed objective table. */
     std::span<const std::int32_t> objectiveCompletionValues;
+    /** Package account-flag mapping; slot identities are not account array indices. */
+    std::span<const AccountFlagMapping> accountFlagMappings;
 };
 
 /** @return The generated facts pinned to Destiny 2 build 86657.20.08.23. */

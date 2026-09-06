@@ -1,9 +1,13 @@
 #include <array>
+#include <cstring>
 #include <span>
+#include <vector>
 
+#include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/build_data/items/catalysts/exotic_catalyst_builder.h"
 #include "../../../../state/build_data/items/details/item_detail_catalog.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/unlocks/definition.h"
 #include "internal.h"
 #include "package_socket_plug_build.h"
 
@@ -12,6 +16,35 @@ namespace {
 
 namespace build_details = state::build_data::items::details;
 namespace build_items = state::build_data::items;
+
+/** Reads the package's account flag-map table into its own blob, leaving the item blobs alone. */
+[[nodiscard]] bool read_catalyst_account_mappings(
+    const reader::Source& source,
+    Storage& storage,
+    std::vector<build_items::catalysts::AccountFlagMapping>& output) noexcept {
+    std::uint32_t tag = 0;
+    tables::Array rows{};
+    std::vector<std::byte> blob;
+    if (!tables::slot_tag(storage.root, tables::kUnlockFlagMapTableSlot, tag) || tag == 0
+        || tables::package_of(tag) == tables::kAbsentPackageId
+        || !reader::read_tag(source, storage.scratch, tag, blob)
+        || !tables::find_array_at(blob, tables::kAccountFlagMapDescriptor, rows) || rows.count == 0
+        || rows.count > state::unlocks::kAccountFlagCapacity || rows.dataOffset > blob.size()
+        || rows.count > (blob.size() - rows.dataOffset) / tables::kUnlockMapRowStride) {
+        return false;
+    }
+    output.clear();
+    for (std::size_t row = 0; row < rows.count; ++row) {
+        std::int16_t slot = -1;
+        const auto at = rows.dataOffset + row * tables::kUnlockMapRowStride
+                        + tables::kUnlockMapDestinationSlotOffset;
+        std::memcpy(&slot, blob.data() + at, sizeof slot);
+        if (slot >= 0) {
+            output.push_back({static_cast<std::uint16_t>(slot), static_cast<std::uint16_t>(row)});
+        }
+    }
+    return true;
+}
 
 /** @return True when one extracted detail can join the currently published numeric domains. */
 [[nodiscard]] bool publishable_detail(const build_details::Definition& detail) noexcept {
@@ -182,6 +215,12 @@ bool build_item_rows(const reader::Source& source,
             catalystRows{};
         std::size_t catalystCount = 0;
         state::build_data::items::catalysts::Report catalystReport{};
+        std::vector<state::build_data::items::catalysts::AccountFlagMapping> catalystMappings;
+        if (published && needCatalysts
+            && !read_catalyst_account_mappings(source, storage, catalystMappings)) {
+            reason = "catalyst_account_mapping";
+            return false;
+        }
         const state::build_data::items::catalysts::Source catalystSource{
             {},
             std::span(storage.rows).first(rowCount),
@@ -192,6 +231,7 @@ bool build_item_rows(const reader::Source& source,
             storage.catalystCompletionConditions,
             storage.catalystAcquisitionGates,
             storage.catalystObjectiveValues,
+            catalystMappings,
         };
         bool catalystBuilt = false;
         if (published && needCatalysts) {

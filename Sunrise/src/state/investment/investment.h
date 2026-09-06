@@ -6,8 +6,8 @@
 
 namespace sunrise::state {
 
-/** Fixed runtime capacity for safe account unlock overrides. */
-inline constexpr std::size_t kUnlockOverrideCapacity = 127;
+/** Native Family-5 storage holds 100 rows; the seven-bit wire count is not its capacity. */
+inline constexpr std::size_t kUnlockOverrideCapacity = 100;
 
 /** One logical unlock-flag value stored by slot. */
 struct UnlockFlagOverride {

@@ -106,6 +106,10 @@ bool complete_exotic_catalyst_investment(Family5State& family) noexcept {
     return items::catalysts::append_investment_overrides(family);
 }
 
+bool complete_exotic_catalyst_flags(std::span<std::uint8_t> flags) noexcept {
+    return items::catalysts::append_account_completions(flags);
+}
+
 bool complete_exotic_catalyst_objectives(std::span<std::int32_t> values) noexcept {
     return items::catalysts::append_objective_completions(values);
 }

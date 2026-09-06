@@ -245,7 +245,8 @@ complete_exotic_catalyst(std::uint16_t itemDefinitionIndex,
                          std::span<std::optional<std::uint16_t>> plugs) noexcept;
 
 /**
- * Adds all released catalyst acquisition and completion overrides to one Family-5 snapshot.
+ * Adds the released catalyst acquisition gates, the completion flags without an account mapping,
+ * and the completion values to one Family-5 snapshot.
  * @param family Candidate Family-5 state.
  * @return True when all overrides fit and the complete state commits.
  */
@@ -257,6 +258,13 @@ complete_exotic_catalyst(std::uint16_t itemDefinitionIndex,
  * @return True when all derived objectives fit and apply.
  */
 [[nodiscard]] bool complete_exotic_catalyst_objectives(std::span<std::int32_t> values) noexcept;
+
+/**
+ * Raises the account acquired flags that the package maps released catalyst completions to.
+ * @param flags Candidate account acquired-flag bank.
+ * @return True when completion is disabled or every mapped flag is inside the bank.
+ */
+[[nodiscard]] bool complete_exotic_catalyst_flags(std::span<std::uint8_t> flags) noexcept;
 
 /**
  * Resolves the item row that supplies one socketed catalyst's native perks and stat changes.

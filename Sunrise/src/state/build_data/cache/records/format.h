@@ -37,8 +37,9 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * 48: nodes and SObjects joined the unified cache, replacing their incomplete sidecar lifecycle.
  * 60: entity position profiles and object types joined the cache, with the position fingerprint
  * in the header.
+ * 61: catalyst completion flags retain their package-derived account bank indices.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 60;
+inline constexpr std::uint32_t kCacheFormatVersion = 61;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -244,6 +245,8 @@ struct ExoticCatalystRecord {
     std::uint16_t progressPlugDefinitionIndex{};
     std::uint16_t effectDefinitionIndex{};
     std::uint16_t acquisitionDefinitionIndex{};
+    std::array<std::uint16_t, items::catalysts::kCompletionFlagCapacity>
+        completionAccountFlagIndices{};
     std::array<std::uint16_t, items::catalysts::kCompletionFlagCapacity>
         completionFlagDefinitionIndices{};
     std::array<std::uint16_t, items::catalysts::kCompletionValueCapacity>
@@ -597,7 +600,7 @@ static_assert(sizeof(SocketPlugRuleRecord)
 static_assert(sizeof(SocketPlugPoolRecord) == 2 * sizeof(std::uint32_t));
 static_assert(sizeof(SocketPlugMemberRecord) == sizeof(std::uint16_t));
 static_assert(sizeof(ExoticCatalystRecord)
-              == 6 * sizeof(std::uint32_t) + 14 * sizeof(std::uint16_t)
+              == 6 * sizeof(std::uint32_t) + 18 * sizeof(std::uint16_t)
                      + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(InventoryBucketRecord)
               == 4 * sizeof(std::uint8_t) + 2 * sizeof(std::uint16_t));

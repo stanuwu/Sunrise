@@ -58,7 +58,7 @@ void shutdown() noexcept;
 [[nodiscard]] bool replace_artifact_mod_mask(std::uint32_t expected,
                                              std::uint32_t replacement) noexcept;
 
-/** Projects artifact counters and ownership into the global Family-5 override object. */
+/** Projects artifact counters and removes flags carried by the native character bank. */
 [[nodiscard]] bool apply_artifact_state(Family5State& family) noexcept;
 
 /** Projects artifact ownership and spent points into the live Family-4 character object. */

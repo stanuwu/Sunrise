@@ -112,6 +112,12 @@ enum class Error : std::uint8_t {
     return "unknown";
 }
 
+/** Native account acquired-flag row feeding an evaluated unlock slot. */
+struct AccountFlagMapping {
+    std::uint16_t slot{};
+    std::uint16_t accountIndex{};
+};
+
 /** One build-derived exotic weapon catalyst relation. */
 struct Definition {
     std::uint32_t itemDefinitionHash{};
@@ -124,6 +130,12 @@ struct Definition {
     std::uint16_t effectDefinitionIndex{};
     /** Family-5 acquired-state slot that makes the catalyst socket visible. */
     std::uint16_t acquisitionDefinitionIndex{kUnavailableAcquisitionIndex};
+    /** Account rows for the completion flags, or unavailable for override-only slots. */
+    std::array<std::uint16_t, kCompletionFlagCapacity> completionAccountFlagIndices{
+        kUnavailableCompletionFlagIndex,
+        kUnavailableCompletionFlagIndex,
+        kUnavailableCompletionFlagIndex,
+        kUnavailableCompletionFlagIndex};
     /** Family-5 terms required by the catalyst's active effect item. */
     CompletionRequirements completion{};
     /** Account objective referenced by a legacy progress plug, when present. */

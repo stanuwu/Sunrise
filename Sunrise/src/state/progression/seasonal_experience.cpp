@@ -114,21 +114,6 @@ static_assert(artifact_power_bonus_for(19'855'000) == 20);
 }
 
 [[nodiscard]] bool
-upsert_flag(Family5State& family, std::uint16_t slot, std::uint8_t value) noexcept {
-    for (std::size_t index = 0; index < family.flagCount; ++index) {
-        if (family.flags[index].slot == slot) {
-            family.flags[index].value = value;
-            return true;
-        }
-    }
-    if (family.flagCount >= family.flags.size()) {
-        return false;
-    }
-    family.flags[family.flagCount++] = UnlockFlagOverride{slot, value};
-    return true;
-}
-
-[[nodiscard]] bool
 upsert_value(Family5State& family, std::uint16_t slot, std::int32_t value) noexcept {
     for (std::size_t index = 0; index < family.valueCount; ++index) {
         if (family.values[index].slot == slot) {
@@ -144,16 +129,25 @@ upsert_value(Family5State& family, std::uint16_t slot, std::int32_t value) noexc
 }
 
 [[nodiscard]] bool project_artifact_state_locked(Family5State& family) noexcept {
-    for (std::uint16_t row = 0; row < kArtifactModFlags.size(); ++row) {
-        const std::uint16_t slot = kArtifactModFlags[row];
-        if (slot != 0
-            && !upsert_flag(family,
-                            slot,
-                            (g_artifactMods & (1U << row)) != 0 ? unlocks::kFlagSet
-                                                                : unlocks::kFlagClear)) {
-            return false;
+    // Mod flags already travel in the character acquired-flag bank, including purchases and
+    // resets. Do not spend 25 Family-5 rows repeating them. Remove authored copies too, so
+    // stale overrides cannot mask the current character projection.
+    std::size_t write = 0;
+    for (std::size_t index = 0; index < family.flagCount; ++index) {
+        const auto row = family.flags[index];
+        // The table marks the sale row without a flag with 0, which must not strip an authored
+        // slot-0 row.
+        if (row.slot != 0
+            && std::find(kArtifactModFlags.begin(), kArtifactModFlags.end(), row.slot)
+                   != kArtifactModFlags.end()) {
+            continue;
         }
+        family.flags[write++] = row;
     }
+    for (std::size_t index = write; index < family.flagCount; ++index) {
+        family.flags[index] = {};
+    }
+    family.flagCount = write;
     return upsert_value(family, kArtifactPowerBonusSlot, artifact_power_bonus_for(g_experience))
            && upsert_value(family, kArtifactPointsUsedSlot, artifact_points_used_locked())
            && upsert_value(family, kArtifactPointsEarnedSlot, artifact_points_earned_locked());
@@ -424,7 +418,15 @@ bool replace_artifact_mod_mask(std::uint32_t expected, std::uint32_t replacement
 
 bool apply_artifact_state(Family5State& family) noexcept {
     const std::lock_guard<std::mutex> guard(g_lock);
-    return project_artifact_state_locked(family);
+    if (family.flagCount > family.flags.size() || family.valueCount > family.values.size()) {
+        return false;
+    }
+    Family5State candidate = family;
+    if (!project_artifact_state_locked(candidate)) {
+        return false;
+    }
+    family = candidate;
+    return true;
 }
 
 bool apply_artifact_character_state(std::span<std::byte> acquiredFlags,
