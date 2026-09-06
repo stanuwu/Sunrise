@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 
+#include "../../../client/hooks/bootflow/bootflow_hook_lifecycle.h"
 #include "../../../core/ui/components/section/ui_section_component.h"
 #include "../../activity/host_runtime.h"
 #include "../../bap/runtime.h"
@@ -21,6 +22,7 @@ namespace section = core::ui::components::section;
 
 host::DiagnosticsSnapshot g_snapshot{};
 state::activity::SessionBinding g_selected{};
+bool g_followPlayer{true};
 bool g_showSdkWindow{};
 bool g_showEventsWindow{};
 
@@ -40,7 +42,7 @@ void instance_label(const state::activity::SessionBinding& binding,
                                 destination.packageNameLength);
     (void)std::snprintf(output.data(),
                         output.size(),
-                        "%.*s (%s, %s)##%llX.%llu",
+                        "%.*s (%s, %s) [%llX.%llu]",
                         static_cast<int>(name.size()),
                         name.data(),
                         active ? "active" : "inactive",
@@ -59,8 +61,33 @@ void instance_label(const state::activity::SessionBinding& binding,
     return nullptr;
 }
 
-/** Keeps the selection on a row that still exists, preferring an active linked one. */
+/** Follows the player's region host, or retains a valid manual selection when following is off. */
 void select_default() noexcept {
+    if (g_followPlayer) {
+        g_selected = {};
+        const auto local = client::hooks::bootflow::current_slice_set();
+        server::bap::CurrentActivityLinkView current{};
+        if (!local.present
+            || !server::bap::current_activity_host_link_view(local.index, current)
+            || current.effectiveRegion != local.index) {
+            return;
+        }
+        server::bap::ActivityLinkView exact{};
+        if (!server::bap::activity_link_view(current.binding, exact)
+            || exact.matchingLinks != 1
+            || exact.activityClientGeneration != current.activityClientGeneration
+            || exact.effectiveRegion != local.index) {
+            return;
+        }
+        for (std::size_t index = 0; index < g_snapshot.instanceCount; ++index) {
+            const host::InstanceSnapshot& instance = g_snapshot.instances[index];
+            if (instance.active && same_binding(instance.binding, current.binding)) {
+                g_selected = instance.binding;
+                return;
+            }
+        }
+        return;
+    }
     if (g_snapshot.instanceCount == 0) {
         g_selected = {};
         return;
@@ -84,6 +111,14 @@ void select_default() noexcept {
 
 /** Draws the exact Activity Host instance selector. */
 void draw_instance_selector() noexcept {
+    if (ImGui::Checkbox("Follow player", &g_followPlayer)) {
+        select_default();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Automatically targets the player's current Activity Host. "
+                         "Turn off to inspect another instance manually.");
+    }
+    ImGui::BeginDisabled(g_followPlayer);
     const host::InstanceSnapshot* current = selected_instance();
     std::array<char, 112> preview{};
     if (current != nullptr) {
@@ -95,6 +130,10 @@ void draw_instance_selector() noexcept {
         (void)std::snprintf(preview.data(), preview.size(), "no activity");
     }
     if (!ImGui::BeginCombo("Instance", preview.data())) {
+        ImGui::EndDisabled();
+        if (g_followPlayer && current == nullptr) {
+            ImGui::TextDisabled("Waiting for the player's current instance");
+        }
         return;
     }
     for (std::size_t index = 0; index < g_snapshot.instanceCount; ++index) {
@@ -115,6 +154,7 @@ void draw_instance_selector() noexcept {
         ImGui::PopID();
     }
     ImGui::EndCombo();
+    ImGui::EndDisabled();
 }
 
 /** Draws generated SDK data in its own movable window. */

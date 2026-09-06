@@ -457,9 +457,10 @@ template <typename Index> void canonicalize_scenarios(Index& index) {
                 exactTargets[{spawner.inlineRuleRow, source.objectIndex, source.slotIndex}];
             target.descriptors = {spawner.sourceDescriptorRow};
         }
+        // Distinct rule targets are valid when every present reference resolves uniquely.
         const bool associationExact =
             spawner.sourceDescriptorStatus == SourceDescriptorStatus::exact && !hasAmbiguous
-            && !hasOther && exactTargets.size() == 1;
+            && !hasOther && !exactTargets.empty();
         if (spawner.sourceDescriptorRow == format::kAbsentIndex) {
             continue;
         }

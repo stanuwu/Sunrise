@@ -48,6 +48,15 @@ struct CurrentActivityLinkView final {
     bool publicTarget{};
 };
 
+/**
+ * Resolves the player's region host from the newest private ActivityClient binding.
+ * @param localSliceSet Player's current slice-set index.
+ * @param output Receives the selected binding on success; cleared before lookup.
+ * @return False when publicity is unknown or no unique live region host is found.
+ */
+[[nodiscard]] bool current_activity_host_link_view(std::int32_t localSliceSet,
+                                                  CurrentActivityLinkView& output) noexcept;
+
 /** Common-root inputs owned by one exact ActivityClient generation. */
 struct ActivityReplicationView final {
     state::activity::SessionBinding binding{};

@@ -39,7 +39,8 @@ derive(const Digest& sourceFingerprint, const Digest& payloadSha256, Expected& o
         return false;
     }
     constexpr auto kLogicalDomain = std::to_array("sunrise-activity-sdk-logical-ir-v1");
-    constexpr auto kBuildDomain = std::to_array("sunrise-activity-sdk-build-v13");
+    // Match the shard schema so packs rebuild with the corrected squad associations.
+    constexpr auto kBuildDomain = std::to_array("sunrise-activity-sdk-build-v14");
     const auto logicalDomain = std::as_bytes(std::span(kLogicalDomain));
     const auto buildDomain = std::as_bytes(std::span(kBuildDomain));
     Digest logical{};

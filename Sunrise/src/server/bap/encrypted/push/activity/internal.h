@@ -113,6 +113,14 @@ void commit_membership_body_record(const Session& session) noexcept;
 [[nodiscard]] bool private_region(const Session& session, std::int32_t region) noexcept;
 
 /**
+ * Reads one region's authored publicity from the connection's generated world.
+ * @param isPublic Receives the publicity value; use only when the call succeeds.
+ * @return False when the region or generated world cannot be resolved.
+ */
+[[nodiscard]] bool region_publicity(const Session& session, std::int32_t region,
+                                   bool& isPublic) noexcept;
+
+/**
  * Reads the authored publicity of every bubble from the installed packages.
  * @param session Exact ActivityClient owner whose generated world is read.
  * @param mask Receives one bit per public bubble.

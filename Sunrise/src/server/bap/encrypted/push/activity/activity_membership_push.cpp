@@ -360,6 +360,13 @@ bool private_region(const Session& session, std::int32_t region) noexcept {
     return private_region(session.activity.session, session.activity.bindingGeneration, region);
 }
 
+bool region_publicity(const Session& session, std::int32_t region, bool& isPublic) noexcept {
+    isPublic = false;
+    sdk::generated_world::GeneratedWorldView worldView{};
+    return region >= 0 && resolve_generated_world(session, worldView)
+           && sdk::generated_world::region_is_public(worldView, region, isPublic);
+}
+
 /** Publicity is authored per bubble, so a bubble's state zero answers for all 8 of its states. */
 bool region_publicity_mask(const Session& session, std::uint64_t& mask) noexcept {
     mask = 0;
