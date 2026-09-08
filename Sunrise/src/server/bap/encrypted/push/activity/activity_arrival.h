@@ -28,7 +28,8 @@ namespace sunrise::server::bap::encrypted::push::activity {
 arrival_slice_set(const state::activity::defaults::DefaultDestination& defaults,
                   const state::activity::destination::DestinationSelection& selection,
                   std::string_view name,
-                  const state::build_data::scenarios::Definition& layout) noexcept;
+                  const state::build_data::scenarios::Definition& layout,
+                  std::uint64_t sessionId) noexcept;
 
 /** The region one session publishes, with the arrival slice set behind it. */
 struct EffectiveRegion final {

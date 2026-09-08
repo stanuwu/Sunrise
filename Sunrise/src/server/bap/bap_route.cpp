@@ -8,6 +8,7 @@
 #include <shared_mutex>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 
 #include "../../core/logging/log.h"
 #include "../../state/activity/membership/activity_membership_query.h"
@@ -38,6 +39,9 @@ Scratch g_scratch{};
 /** Client-owned investment effects. Empty until the Client registers, and after it shuts down. */
 std::atomic<InvestmentPublicationConsumer> g_investmentPublicationConsumer{};
 std::atomic<InvestmentSliceConsumer> g_investmentSliceConsumer{};
+
+std::unordered_map<std::uint64_t, std::int32_t> g_scriptSliceOverrides;
+SRWLOCK g_scriptSliceOverridesLock = SRWLOCK_INIT;
 
 /** Lifetime of the native item-acquisition flyout, which the hold must outlast. */
 constexpr std::uint64_t kAcquisitionPresentationHoldMs = 8'000;
@@ -542,7 +546,10 @@ select_activity_mission_seed(const state::activity::SessionBinding& binding,
             // A selection that replaces the world waits for the client's arrival there. One that
             // does not must close any window an earlier selection left open, because an open
             // window blocks publication and nothing else clears it.
+            const std::int32_t scriptInitialRegion = get_script_initial_slice_set(binding.sessionId);
+            const bool isInitialSelection = (scriptInitialRegion >= 0 && plan.effectiveRegion == static_cast<std::uint32_t>(scriptInitialRegion));
             if (lease.configured
+                && !isInitialSelection
                 && encrypted::push::activity::mission_seed_selection_needs_arrival(
                     lease.plan.effectiveRegion, plan.effectiveRegion, heldRegion)) {
                 lease.previousPlan = lease.plan;
@@ -685,6 +692,38 @@ bool session_channel(std::uint32_t connectionId,
     return armed;
 }
 #endif
+
+/**
+ * Registers a script-declared initial slice-set override for one activity session.
+ * Called by the mission script runtime when a program declares an `initial_state`.
+ * @param sessionId The exact joined activity session ID.
+ * @param sliceSet The effective region (slice-set index) declared by the script, or -1 to clear.
+ */
+
+void set_script_initial_slice_set(std::uint64_t sessionId, std::int32_t sliceSet) noexcept {
+    AcquireSRWLockExclusive(&g_scriptSliceOverridesLock);
+    if (sliceSet < 0) {
+        g_scriptSliceOverrides.erase(sessionId);
+    } else {
+        g_scriptSliceOverrides[sessionId] = sliceSet;
+    }
+    ReleaseSRWLockExclusive(&g_scriptSliceOverridesLock);
+}
+
+/**
+ * Reads the script-declared initial slice-set override for one activity session.
+ * Used by the transport layer to override the default arrival slice-set calculation.
+ * @param sessionId The exact joined activity session ID.
+ * @return The script-declared slice-set index, or -1 if no override is active.
+ */
+
+std::int32_t get_script_initial_slice_set(std::uint64_t sessionId) noexcept {
+    AcquireSRWLockShared(&g_scriptSliceOverridesLock);
+    auto it = g_scriptSliceOverrides.find(sessionId);
+    std::int32_t result = (it != g_scriptSliceOverrides.end()) ? it->second : -1;
+    ReleaseSRWLockShared(&g_scriptSliceOverridesLock);
+    return result;
+}
 
 /** Securely erases every connection-owned nonce and transform buffer. */
 void shutdown() noexcept {

@@ -385,6 +385,22 @@ cancel_activity_host_incident(const state::activity::SessionBinding& binding) no
                                    std::array<std::byte, state::kAesKeySize>& sessionKey) noexcept;
 #endif
 
+/**
+ * Registers a script-declared initial slice-set override for one activity session.
+ * Called by the mission script runtime when a program declares an `initial_state`.
+ * @param sessionId The exact joined activity session ID.
+ * @param sliceSet The effective region (slice-set index) declared by the script, or -1 to clear.
+ */
+void set_script_initial_slice_set(std::uint64_t sessionId, std::int32_t sliceSet) noexcept;
+
+/**
+ * Reads the script-declared initial slice-set override for one activity session.
+ * Used by the transport layer to override the default arrival slice-set calculation.
+ * @param sessionId The exact joined activity session ID.
+ * @return The script-declared slice-set index, or -1 if no override is active.
+ */
+[[nodiscard]] std::int32_t get_script_initial_slice_set(std::uint64_t sessionId) noexcept;
+
 /** Wipes every connection-owned nonce and transform buffer. */
 void shutdown() noexcept;
 

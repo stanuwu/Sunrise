@@ -551,6 +551,8 @@ enum class InitialStateGate : std::uint8_t {
         lua_vm::initial_state_region(instance.vm, instance.initialStateRegion);
     if (instance.initialStateDeclared) {
         instance.activeRegion = instance.initialStateRegion;
+        server::bap::set_script_initial_slice_set(
+            instance.view.binding.sessionId, instance.initialStateRegion);
     }
     if (!bind_mission_state(instance, now)) {
         instance.programStatus = ProgramStatus::programError;
