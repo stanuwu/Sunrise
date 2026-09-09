@@ -1050,10 +1050,6 @@ void snapshot(DiagnosticsSnapshot& output) noexcept;
 [[nodiscard]] bool instance_snapshot(const state::activity::SessionBinding& binding,
                                      InstanceSnapshot& output) noexcept;
 
-using InstanceActiveCallback = void(*)(const host::InstanceSnapshot&);
-/** Installs an optional callback invoked synchronously when a host instance becomes active. */
-void register_instance_active_callback(InstanceActiveCallback callback) noexcept;
-
 /** Reads the current feed position without replaying retained history. */
 [[nodiscard]] EventCursor current_event_cursor() noexcept;
 

@@ -96,6 +96,8 @@ void initialize() noexcept;
                                         std::span<char> output) noexcept;
 /** Runs one bounded event/reducer/output slice after Activity Host ingress. */
 void service(std::uint64_t now) noexcept;
+/** Probes the mission script for the activity to apply its initial_state slice-set override. */
+void apply_script_initial_state_override(state::activity::destination::DestinationSelection& selection) noexcept;
 /** Copies mission-program state without invoking Lua or changing delivery state. */
 void snapshot(DiagnosticsSnapshot& output) noexcept;
 /** Closes attached programs and reattaches them from disk on the next service slice. */

@@ -215,10 +215,15 @@ namespace sdk = state::activity_sdk;
         const std::size_t first = outputCount;
         std::size_t produced = 0;
         const auto available = std::span(scratch.rosterSceneSeeds).subspan(first);
-        if (sdk::materialize_authored_scene_seeds(catalog, object, available, produced)
-                != sdk::AuthoredSceneSeedStatus::ready
-            || produced > available.size()) {
-            return false;
+        const auto sceneStatus = sdk::materialize_authored_scene_seeds(catalog, object, available, produced);
+        // A scene seed that cannot be materialized (e.g. missing package resource in the SDK)
+        // is skipped rather than refusing the entire roster. The client can still load the
+        // region without it. This prevents one incomplete SDK entry from blocking the mission.
+        if (sceneStatus != sdk::AuthoredSceneSeedStatus::ready || produced > available.size()) {
+            core::log::writef(core::log::Channel::server, core::log::Level::warn,
+                "ev=activity stage=scene_seed_warning object_registry=%u object_tag=%u status=%d (skipping)",
+                object.objectKey, object.objectTag, static_cast<int>(sceneStatus));
+            continue;
         }
 
         std::size_t uniqueCount = first;

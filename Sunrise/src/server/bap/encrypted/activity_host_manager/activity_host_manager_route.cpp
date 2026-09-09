@@ -14,6 +14,7 @@ activity_manager_selection_parser.h"
 #include "../../../../state/activity/forced/activity_forced_destination.h"
 #include "../../../../state/activity/runtime.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../activity/mission/mission_script_runtime.h"
 
 namespace sunrise::server::bap::encrypted::activity_host_manager {
 namespace {
@@ -104,6 +105,7 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
         state::activity::destination::DestinationSelection forced{};
         if (state::activity::forced::apply(forced)) {
             report_forced(forced);
+            activity::mission::apply_script_initial_state_override(forced);
             return state::activity::prepare_session(forced, sessionId, allocation);
         }
         return state::activity::prepare_session(sessionId, allocation);
@@ -143,6 +145,7 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
     if (state::activity::forced::apply(destination)) {
         report_forced(destination);
     }
+    activity::mission::apply_script_initial_state_override(destination);
     return state::activity::prepare_session(destination, sessionId, allocation);
 }
 

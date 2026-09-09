@@ -35,7 +35,6 @@ std::uint64_t g_touch{};
 std::uint64_t g_droppedIngress{};
 std::uint64_t g_refusedControls{};
 std::uint64_t g_overwrittenEvents{};
-InstanceActiveCallback g_instanceActiveCallback = nullptr;
 
 /** @return True when the value stays inside the client's jump table. */
 [[nodiscard]] bool lifetime_allowed(std::uint8_t value) noexcept {
@@ -392,9 +391,6 @@ void service(std::uint64_t now) noexcept {
         if (instance != nullptr) {
             instance->view.active = true;
             touch(*instance);
-            if (g_instanceActiveCallback != nullptr) {
-                g_instanceActiveCallback(instance->view);
-            }
         }
     }
     while (g_pendingRead < g_pending.size()) {
@@ -469,11 +465,6 @@ bool instance_snapshot(const state::activity::SessionBinding& binding,
     }
     ReleaseSRWLockShared(&g_lock);
     return found;
-}
-
-/** Installs the optional callback invoked when a host instance becomes active. */
-void register_instance_active_callback(InstanceActiveCallback callback) noexcept {
-    g_instanceActiveCallback = callback;
 }
 
 /** Reads the current feed position without replaying retained history. */

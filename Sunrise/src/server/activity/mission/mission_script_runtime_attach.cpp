@@ -551,15 +551,6 @@ enum class InitialStateGate : std::uint8_t {
         lua_vm::initial_state_region(instance.vm, instance.initialStateRegion);
     if (instance.initialStateDeclared) {
         instance.activeRegion = instance.initialStateRegion;
-        if (!instance.publicTarget && instance.initialStateRegion >= 0) {
-            if (!state::activity::override_destination_slice_set(
-                    instance.view.binding.sessionId,
-                    static_cast<std::uint16_t>(instance.initialStateRegion))) {
-                log_line(core::log::Level::warn, &instance, "initial_state", "session_missing");
-                instance.programStatus = ProgramStatus::programError;
-                return AttachResult::programError;
-            }
-        }
     }
     if (!bind_mission_state(instance, now)) {
         instance.programStatus = ProgramStatus::programError;
@@ -777,6 +768,36 @@ void service_pending_starts(std::uint64_t now) noexcept {
             static_cast<void>(start_program(instance, now));
             break;
         }
+    }
+}
+
+/** Probes the mission script for the activity to apply its initial_state slice-set override. */
+void apply_script_initial_state_override(state::activity::destination::DestinationSelection& selection) noexcept {
+    if (selection.activityIndex < 0) {
+        return;
+    }
+    const sdk::Snapshot catalog = sdk::snapshot();
+    if (catalog == nullptr) {
+        return;
+    }
+    const format::Activity* activity = nullptr;
+    for (const auto& a : catalog->activities()) {
+        if (static_cast<std::int32_t>(a.activityIndex) == static_cast<std::int32_t>(selection.activityIndex)) {
+            activity = &a;
+            break;
+        }
+    }
+    if (activity == nullptr) {
+        return;
+    }
+    std::span<const char> source;
+    if (read_source(*catalog, *activity, source) != SourceStatus::ready) {
+        return;
+    }
+    const std::int32_t region = lua_vm::probe_initial_state_region(source, g_sdkLuaSearchPath.data());
+    if (region >= 0) {
+        selection.sliceSetOverride = static_cast<std::uint16_t>(region);
+        selection.hasSliceSetOverride = true;
     }
 }
 

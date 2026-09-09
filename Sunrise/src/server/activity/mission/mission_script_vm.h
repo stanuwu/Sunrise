@@ -517,6 +517,9 @@ void publish_peers(Vm& vm, std::span<const PeerSession> peers) noexcept;
                                           std::size_t& timerCount,
                                           std::uint64_t& nextTimerSequence,
                                           std::uint64_t& nextIntentKey) noexcept;
+/** Probes a mission script source for its declared initial_state region without a full VM attach. */
+[[nodiscard]] std::int32_t probe_initial_state_region(std::span<const char> source,
+                                                      std::string_view sdkLuaSearchPath) noexcept;
 /** Removes the oldest action after a native adapter accepted it. */
 void consume_intent(Vm& vm) noexcept;
 /** Discards every committed action after a terminal native-delivery failure. */

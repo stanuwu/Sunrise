@@ -700,6 +700,56 @@ bool snapshot_durable_state(const Vm& vm,
     return true;
 }
 
+/** Probes a mission script source for its declared initial_state region without a full VM attach. */
+std::int32_t probe_initial_state_region(std::span<const char> source,
+                                        std::string_view sdkLuaSearchPath) noexcept {
+    if (source.empty()) {
+        return -1;
+    }
+    lua_State* L = luaL_newstate();
+    if (L == nullptr) {
+        return -1;
+    }
+    luaL_requiref(L, "_G", luaopen_base, 1);
+    lua_pop(L, 1);
+    luaL_requiref(L, LUA_TABLIBNAME, luaopen_table, 1);
+    lua_pop(L, 1);
+    luaL_requiref(L, LUA_LOADLIBNAME, luaopen_package, 1);
+    lua_pop(L, 1);
+    if (!sdkLuaSearchPath.empty()) {
+        lua_getglobal(L, "package");
+        if (lua_istable(L, -1)) {
+            lua_pushlstring(L, sdkLuaSearchPath.data(), sdkLuaSearchPath.size());
+            lua_setfield(L, -2, "path");
+        }
+        lua_pop(L, 1);
+    }
+    if (luaL_loadbuffer(L, source.data(), source.size(), "mission_script_probe") != LUA_OK) {
+        lua_close(L);
+        return -1;
+    }
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+        lua_close(L);
+        return -1;
+    }
+    if (!lua_istable(L, -1)) {
+        lua_close(L);
+        return -1;
+    }
+    lua_getfield(L, -1, "initial_state");
+    if (!lua_istable(L, -1)) {
+        lua_close(L);
+        return -1;
+    }
+    lua_getfield(L, -1, "region_index");
+    std::int32_t region = -1;
+    if (lua_isinteger(L, -1)) {
+        region = static_cast<std::int32_t>(lua_tointeger(L, -1));
+    }
+    lua_close(L);
+    return region;
+}
+
 /** Drops the oldest unread action, and empties the outbox once every action has been read. */
 void consume_intent(Vm& vm) noexcept {
     Impl& impl = VmAccess::get(vm);
