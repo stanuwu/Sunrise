@@ -114,13 +114,7 @@ resolve_arrival_bubble(const state::activity::defaults::DefaultDestination& defa
 std::uint16_t arrival_slice_set(const state::activity::defaults::DefaultDestination& defaults,
                                 const state::activity::destination::DestinationSelection& selection,
                                 std::string_view name,
-                                const scenarios::Definition& layout,
-                                std::uint64_t sessionId) noexcept {
-    // Check if the mission script declared an initial state
-    const std::int32_t scriptOverride = get_script_initial_slice_set(sessionId);
-    if (scriptOverride >= 0) {
-        return static_cast<std::uint16_t>(scriptOverride);
-    }
+                                const scenarios::Definition& layout) noexcept {
     // A forced slice set is the whole point of forcing one, so nothing derived may replace it.
     if (selection.hasSliceSetOverride) {
         return selection.sliceSetOverride;

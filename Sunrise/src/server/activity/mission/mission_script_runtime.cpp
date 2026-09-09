@@ -67,6 +67,24 @@ snapshot_state_intents(const lua_vm::Vm& vm,
 
 } // namespace
 
+namespace {
+
+/** Called synchronously by the host runtime when an instance becomes active. */
+void on_host_instance_active(const host::InstanceSnapshot& hostInstance) noexcept {
+    const sdk::Snapshot catalog = sdk::snapshot();
+    if (catalog == nullptr) {
+        return;
+    }
+    const std::uint64_t now = GetTickCount64();
+    AcquireSRWLockExclusive(&g_lock);
+    if (g_enabled && g_pathReady && find_instance(hostInstance.binding) == nullptr) {
+        attach_instance(hostInstance, catalog, now);
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+} // namespace
+
 /**
  * Writes one bounded mission-script diagnostic line.
  * @param instance Binding the line reports, or null before one is bound.
@@ -578,6 +596,7 @@ void initialize() noexcept {
         ReleaseSRWLockExclusive(&g_lock);
         return;
     }
+    register_instance_active_callback(&on_host_instance_active);
     log_line(core::log::Level::info, nullptr, "initialize", "enabled");
     ReleaseSRWLockExclusive(&g_lock);
 }

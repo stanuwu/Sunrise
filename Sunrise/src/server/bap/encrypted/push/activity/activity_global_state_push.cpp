@@ -87,7 +87,7 @@ resolve_state(const state::activity::SessionBinding& binding,
             layout.bubbleStates.begin(), layout.bubbleStates.end(), output.bubbleStates.begin());
         output.hasSliceSet = true;
         output.sliceSetIndex =
-            arrival_slice_set(defaults.defaultDestination, selection, name, layout, binding.sessionId);
+            arrival_slice_set(defaults.defaultDestination, selection, name, layout);
         return true;
     }
     output.bubbleCount = fallback.bubbleCount;

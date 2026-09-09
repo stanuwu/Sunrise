@@ -142,4 +142,13 @@ struct SessionRosterRow final {
 /** Releases one retain only when the exact record generation still matches. */
 void release_binding(const SessionBinding& binding) noexcept;
 
+/**
+ * Applies a script-declared slice-set override to an active session's destination.
+ * @param sessionId The exact joined activity session ID.
+ * @param sliceSet The slice-set index declared by the mission script.
+ * @return True when the session exists and the override was applied.
+ */
+[[nodiscard]] bool override_destination_slice_set(std::uint64_t sessionId,
+                                                  std::uint16_t sliceSet) noexcept;
+
 } // namespace sunrise::state::activity

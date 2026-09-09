@@ -40,7 +40,7 @@ EffectiveRegion effective_region(const state::activity::SessionBinding& binding)
     // authored fallback index.
     layouts::Definition layout{};
     static_cast<void>(state::build_data::find_scenario_layout(name, layout));
-    region.arrival = arrival_slice_set(defaults.defaultDestination, selection, name, layout, binding.sessionId);
+    region.arrival = arrival_slice_set(defaults.defaultDestination, selection, name, layout);
     const std::int32_t reported = state::activity::membership::player_region(binding.sessionId);
     region.reported = reported >= 0;
     region.index = region.reported ? reported : static_cast<std::int32_t>(region.arrival);
@@ -342,15 +342,7 @@ build_roster_snapshot(Session& session,
         return RosterOutcome::noLayout;
     }
     const std::uint64_t hostedBubbles = hosted_bubble_mask(session);
-    std::uint64_t effectiveHostedBubbles = hostedBubbles;
-    const std::int32_t scriptSlice = server::bap::get_script_initial_slice_set(session.activity.session.sessionId);
-    if (scriptSlice >= 0) {
-        const std::uint32_t scriptBubble = static_cast<std::uint32_t>(scriptSlice) >> 3; 
-        if (scriptBubble < 64) {
-            effectiveHostedBubbles |= (1ULL << scriptBubble);
-        }
-    }
-    if (!fill_roster(layout, effectiveHostedBubbles, scratch, snapshot.roster)) {
+    if (!fill_roster(layout, hostedBubbles, scratch, snapshot.roster)) {
         return RosterOutcome::noGroups;
     }
 
@@ -359,7 +351,7 @@ build_roster_snapshot(Session& session,
     // One resolution serves this body and the citizen advertisement in message 12. Two would let
     // the join descriptor land in a region record the client is not pending on.
     const EffectiveRegion committedRegion = selected_effective_region(
-        session, arrival_slice_set(defaults.defaultDestination, selection, name, layout, session.activity.session.sessionId));
+        session, arrival_slice_set(defaults.defaultDestination, selection, name, layout));
     const EffectiveRegion region = exactRegion == nullptr ? committedRegion : *exactRegion;
     if (exactRegion != nullptr
         && (session.activity.role != ActivityClientRole::privateCurrent || !region.reported
@@ -379,7 +371,7 @@ build_roster_snapshot(Session& session,
                                     scratch,
                                     snapshot,
                                     static_cast<std::uint32_t>(region.index),
-                                    effectiveHostedBubbles,
+                                    hostedBubbles,
                                     canonicalGroupCount,
                                     refresh)
         == MissionSeedRosterResult::refused) {
