@@ -18,6 +18,7 @@
 #include "../../../state/runtime/runtime.h"
 #include "../../input/window_focus.h"
 #include "../../movement/movement_settings_store.h"
+#include "../../player/controlled_object.h"
 #include "../polled_input/runtime.h"
 #include "internal.h"
 #include "runtime.h"
@@ -60,7 +61,6 @@ std::atomic<std::byte*> g_playerComponent{nullptr};
 /** Frames left before the injected press is released. */
 std::atomic_uint32_t g_pressFrames{0};
 
-ControlledHandle g_controlledHandle{};
 CameraSingleton g_cameraSingleton{};
 
 /** Camera forward vector for the next physics tick. Every access holds g_cameraPoseLock. */
@@ -190,8 +190,7 @@ void end_press() noexcept {
  */
 [[nodiscard]] bool owns_player(std::byte* component) noexcept {
     std::uint32_t controlled = kInvalidHandle;
-    g_controlledHandle(&controlled);
-    if (controlled == kInvalidHandle) {
+    if (!client::player::controlled_object::current_handle(controlled)) {
         return false;
     }
     std::uint16_t owner = 0;
@@ -311,15 +310,13 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
 
 } // namespace
 
-/** Publishes the two functions the hooks call. */
-void publish_targets(ControlledHandle controlled, CameraSingleton singleton) noexcept {
-    g_controlledHandle = controlled;
+/** Publishes the camera accessor used by the teleport hook. */
+void publish_targets(CameraSingleton singleton) noexcept {
     g_cameraSingleton = singleton;
 }
 
-/** Drops those functions and every latched request. */
+/** Drops the camera accessor and every latched teleport request. */
 void clear_targets() noexcept {
-    g_controlledHandle = nullptr;
     g_cameraSingleton = nullptr;
     g_requested.store(false, std::memory_order_release);
     g_forwardValid.store(false, std::memory_order_release);
@@ -388,7 +385,7 @@ void poll_request() noexcept {
 /** Moves the local player if a request is pending and this component owns them. */
 void apply_pending(void* component) noexcept {
     if (!g_active.load(std::memory_order_relaxed) || component == nullptr
-        || g_controlledHandle == nullptr) {
+        || !client::player::controlled_object::available()) {
         return;
     }
     const bool requested = g_requested.load(std::memory_order_acquire);
@@ -418,7 +415,7 @@ void force_pending() noexcept {
     }
     std::byte* const physics = g_playerComponent.load(std::memory_order_relaxed);
     // The cached pointer outlives a destination change, so it is proved again before use.
-    if (physics == nullptr || g_controlledHandle == nullptr || !owns_player(physics)) {
+    if (physics == nullptr || !client::player::controlled_object::available() || !owns_player(physics)) {
         return;
     }
     g_requested.store(false, std::memory_order_release);
@@ -437,8 +434,7 @@ void* local_player_component() noexcept {
 
 /** @param component Candidate physics component. @return True when the local player drives it. */
 bool owns_local_player(void* component) noexcept {
-    return component != nullptr && g_controlledHandle != nullptr
-           && owns_player(static_cast<std::byte*>(component));
+    return component != nullptr && owns_player(static_cast<std::byte*>(component));
 }
 
 /** Reads the world position of the body a physics component drives. */

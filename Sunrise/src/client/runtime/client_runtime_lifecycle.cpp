@@ -27,8 +27,10 @@
 #include "../hooks/sense_chain_guard/sense_chain_guard.h"
 #include "../hooks/stall_probe/stall_probe.h"
 #include "../hooks/teleport/runtime.h"
+#include "../hooks/turn_back/turn_back.h"
 #include "../hooks/world_objects/world_object_registry.h"
 #include "../movement/movement_settings_store.h"
+#include "../player/controlled_object.h"
 #include "../player/player_settings_store.h"
 #include "../targets/game.h"
 #include "../targets/steam_targets.h"
@@ -62,6 +64,21 @@ bool shutdown() noexcept {
     }
     // Detached after presentation, so no later frame can apply the cursor policy.
     hooks::cursor::uninstall();
+    // Stop the movement callbacks before removing input and bootflow services they call.
+    if (!hooks::turn_back::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=turn_back result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
+    if (!hooks::teleport::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=teleport result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
     hooks::polled_input::uninstall();
     if (!hooks::world_objects::uninstall()) {
         core::log::write(core::log::Channel::client,
@@ -141,7 +158,6 @@ bool shutdown() noexcept {
     hooks::infinite_ammo::uninstall();
     hooks::inactivity::uninstall();
     hooks::noclip::uninstall();
-    hooks::teleport::uninstall();
     hooks::queuez::uninstall();
     if (!hooks::config_getter::uninstall()) {
         ReleaseSRWLockExclusive(&runtime::g_lock);
@@ -183,6 +199,7 @@ bool shutdown() noexcept {
     ui::runtime::shutdown();
     // The reverse of the order the stores initialize in.
     ui::activity::authored_placement_marker::shutdown();
+    player::controlled_object::clear();
     player::shutdown();
     movement::shutdown();
     core::log::write(core::log::Channel::client, core::log::Level::info, "ev=shutdown result=ok");

@@ -37,8 +37,10 @@
 #include "../hooks/sense_chain_guard/sense_chain_guard.h"
 #include "../hooks/stall_probe/stall_probe.h"
 #include "../hooks/teleport/runtime.h"
+#include "../hooks/turn_back/turn_back.h"
 #include "../hooks/world_objects/world_object_registry.h"
 #include "../patterns/registry.h"
+#include "../player/controlled_object.h"
 #include "../targets/game.h"
 #include "internal.h"
 #include "runtime.h"
@@ -190,9 +192,13 @@ void clear_game_targets() noexcept {
     (void)hooks::config_getter::install();
     // Boot-step fixes scan for their own single-site targets; each reports its own outcome.
     (void)hooks::bootflow::install();
+    // Resolve the shared player accessor independently of either hook.
+    (void)player::controlled_object::resolve();
     // The teleport hooks attach whether or not the feature is on, so the interface can enable it
     // without a restart. Both replacements return immediately while nothing is requested.
     (void)hooks::teleport::install();
+    // Optional and fail-closed: a changed game build must not make initialization fail.
+    (void)hooks::turn_back::install();
     // Noclip owns its Havok-step target, so a patch-specific miss cannot disable teleport.
     (void)hooks::noclip::install();
     // Attaches whether or not the feature is on, so the interface can enable it without a restart.

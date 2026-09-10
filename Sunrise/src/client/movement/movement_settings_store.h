@@ -33,6 +33,8 @@ struct Settings {
     std::uint32_t flyToggleKey{kNoKey};
     /** World units per second while a direction is pressed. */
     float flySpeed{kDefaultFlySpeed};
+    /** Keeps the client's out-of-bounds quarantine in its inactive branch. */
+    bool turnBackDisabled{false};
 };
 
 /**
@@ -46,6 +48,9 @@ void shutdown() noexcept;
 
 /** @return One lock-consistent copy of the current configuration. */
 [[nodiscard]] Settings get() noexcept;
+
+/** Reads the published Turn Back setting without taking the settings-store lock. */
+[[nodiscard]] bool turn_back_disabled() noexcept;
 
 /**
  * Publishes one configuration and writes it straight to disk.

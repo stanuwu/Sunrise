@@ -23,17 +23,11 @@ struct CameraPose final {
     float aspect{};
 };
 
-/** Writes the local player's controlled-object handle, or the invalid sentinel. */
-using ControlledHandle = std::uint32_t* (*)(std::uint32_t*);
 /** Returns the camera pose block array. The pointer in its global is obfuscated, so we call it. */
 using CameraSingleton = std::byte* (*)();
 
-/**
- * Publishes the two functions the hooks call.
- * @param controlled Writes the local player's object handle.
- * @param singleton Returns the camera pose block array.
- */
-void publish_targets(ControlledHandle controlled, CameraSingleton singleton) noexcept;
+/** Publishes the camera accessor after its target has been resolved. */
+void publish_targets(CameraSingleton singleton) noexcept;
 
 /** Drops those functions and every latched request. */
 void clear_targets() noexcept;
@@ -44,8 +38,8 @@ void clear_targets() noexcept;
  */
 [[nodiscard]] bool install() noexcept;
 
-/** Detaches both teleport hooks. */
-void uninstall() noexcept;
+/** Removes both detours, preserving runtime state when removal fails. */
+[[nodiscard]] bool uninstall() noexcept;
 
 /** Publishes the camera pose for the frame and the forward vector for the next physics tick. */
 void capture_camera_pose(std::uint32_t playerIndex) noexcept;

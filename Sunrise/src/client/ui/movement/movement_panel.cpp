@@ -13,6 +13,7 @@
 
 #include "../../../core/ui/components/label/ui_label_component.h"
 #include "../../../core/ui/components/toggle/ui_toggle_component.h"
+#include "../../hooks/turn_back/turn_back.h"
 #include "../../movement/movement_settings_store.h"
 
 namespace sunrise::client::ui::movement {
@@ -231,6 +232,28 @@ void draw() noexcept {
     changed =
         core::ui::components::toggle::control("Enabled##sword_skate", settings.swordSkateEnabled)
         || changed;
+
+    ImGui::Spacing();
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Turn Back");
+    ImGui::Separator();
+    ImGui::TextWrapped("Prevents the out-of-bounds warning and countdown from starting.");
+    ImGui::Spacing();
+
+    // Keep the saved preference separate from runtime availability.
+    const bool turnBackAvailable = client::hooks::turn_back::available();
+
+    ImGui::BeginDisabled(!turnBackAvailable);
+
+    changed =
+        core::ui::components::toggle::control("Disabled##turn_back", settings.turnBackDisabled)
+        || changed;
+
+    ImGui::EndDisabled();
+
+    if (!turnBackAvailable) {
+        ImGui::TextWrapped("Unavailable: the Turn Back hook is not ready. See the client log.");
+    }
 
     if (changed && !client::movement::publish(settings)) {
         ImGui::Spacing();

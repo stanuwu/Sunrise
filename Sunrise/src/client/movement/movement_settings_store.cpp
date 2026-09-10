@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -32,6 +33,8 @@ constexpr std::uint32_t kMaximumVirtualKey = 254;
 
 SRWLOCK g_lock{SRWLOCK_INIT};
 Settings g_settings{};
+std::atomic_bool g_turnBackDisabled{false};
+static_assert(std::atomic_bool::is_always_lock_free);
 core::path::Buffer g_path{};
 bool g_pathResolved{};
 
@@ -144,6 +147,9 @@ void parse(std::string_view text, Settings& output) noexcept {
         output.flySpeed =
             std::clamp(std::strtof(buffer.data(), nullptr), kMinimumFlySpeed, kMaximumFlySpeed);
     }
+    if (scalar_for(text, "\"turn_back_disabled\"", scalar)) {
+        output.turnBackDisabled = scalar.starts_with("true");
+    }
 }
 
 /**
@@ -166,7 +172,8 @@ void parse(std::string_view text, Settings& output) noexcept {
                                    "  \"sword_skate_enabled\": %s,\n"
                                    "  \"fly_enabled\": %s,\n"
                                    "  \"fly_toggle_key\": %u,\n"
-                                   "  \"fly_speed\": %.3f\n}\n",
+                                   "  \"fly_speed\": %.3f,\n"
+                                   "  \"turn_back_disabled\": %s\n}\n",
                                    settings.enabled ? "true" : "false",
                                    static_cast<double>(settings.distance),
                                    static_cast<unsigned>(settings.virtualKey),
@@ -175,7 +182,8 @@ void parse(std::string_view text, Settings& output) noexcept {
                                    settings.swordSkateEnabled ? "true" : "false",
                                    settings.flyEnabled ? "true" : "false",
                                    static_cast<unsigned>(settings.flyToggleKey),
-                                   static_cast<double>(settings.flySpeed));
+                                   static_cast<double>(settings.flySpeed),
+                                   settings.turnBackDisabled ? "true" : "false");
     if (size <= 0) {
         return false;
     }
@@ -240,6 +248,8 @@ void initialize(void* module) noexcept {
     } else {
         report_fail("path");
     }
+    // Publish the hook-facing value before releasing the exclusive settings lock.
+    g_turnBackDisabled.store(g_settings.turnBackDisabled, std::memory_order_release);
     ReleaseSRWLockExclusive(&g_lock);
 }
 
@@ -247,6 +257,7 @@ void initialize(void* module) noexcept {
 void shutdown() noexcept {
     AcquireSRWLockExclusive(&g_lock);
     g_settings = Settings{};
+    g_turnBackDisabled.store(g_settings.turnBackDisabled, std::memory_order_release);
     g_path = core::path::Buffer{};
     g_pathResolved = false;
     ReleaseSRWLockExclusive(&g_lock);
@@ -260,6 +271,11 @@ Settings get() noexcept {
     return snapshot;
 }
 
+/** Reads the published Turn Back setting without taking the settings-store lock. */
+bool turn_back_disabled() noexcept {
+    return g_turnBackDisabled.load(std::memory_order_acquire);
+}
+
 /** Publishes one configuration and writes it straight to disk. */
 bool publish(const Settings& settings) noexcept {
     if (!valid(settings)) {
@@ -267,6 +283,7 @@ bool publish(const Settings& settings) noexcept {
     }
     AcquireSRWLockExclusive(&g_lock);
     g_settings = settings;
+    g_turnBackDisabled.store(g_settings.turnBackDisabled, std::memory_order_release);
     const bool stored = store(settings);
     ReleaseSRWLockExclusive(&g_lock);
     if (!stored) {
