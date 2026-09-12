@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly app_id="1085660"
+
+usage() {
+    cat <<'EOF'
+Usage: sunrise-run --game-dir PATH [options]
+
+Launch Sunrise with Proton in an isolated compatibility prefix.
+
+Options:
+  --game-dir PATH   Directory containing destiny2.exe (required)
+  --proton PATH     Proton executable (auto-detected by default)
+  --steam-root PATH Steam installation root (auto-detected by default)
+  --prefix PATH     Compatibility data directory
+  --drive LETTER    Wine drive used for the game directory (default: d)
+  -h, --help        Show this help
+
+The same values can be supplied through SUNRISE_GAME_DIR, SUNRISE_PROTON,
+SUNRISE_STEAM_ROOT, SUNRISE_PREFIX and SUNRISE_DRIVE.
+EOF
+}
+
+fail() {
+    printf 'sunrise-run: %s\n' "$*" >&2
+    exit 1
+}
+
+game_dir="${SUNRISE_GAME_DIR:-}"
+proton="${SUNRISE_PROTON:-}"
+steam_root="${SUNRISE_STEAM_ROOT:-}"
+prefix="${SUNRISE_PREFIX:-${XDG_DATA_HOME:-$HOME/.local/share}/Sunrise/compatdata}"
+drive="${SUNRISE_DRIVE:-d}"
+
+while (($# > 0)); do
+    case "$1" in
+    --game-dir | --proton | --steam-root | --prefix | --drive)
+        (($# >= 2)) || fail "$1 requires a value"
+        case "$1" in
+        --game-dir) game_dir="$2" ;;
+        --proton) proton="$2" ;;
+        --steam-root) steam_root="$2" ;;
+        --prefix) prefix="$2" ;;
+        --drive) drive="$2" ;;
+        esac
+        shift 2
+        ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    *)
+        fail "unknown option: $1"
+        ;;
+    esac
+done
+
+[[ -n "$game_dir" ]] || fail "--game-dir is required"
+[[ "$drive" =~ ^[d-yD-Y]$ ]] || fail "--drive must be one letter from d through y"
+drive="${drive,,}"
+[[ "$drive" != "s" && "$drive" != "t" ]] \
+    || fail "Wine drives s: and t: are reserved by Proton"
+
+game_dir="$(realpath -e "$game_dir")" || fail "game directory does not exist"
+[[ -d "$game_dir" ]] || fail "game directory is not a directory: $game_dir"
+[[ -f "$game_dir/destiny2.exe" ]] || fail "destiny2.exe was not found in $game_dir"
+[[ -f "$game_dir/bin/x64/steam_api64.dll" ]] \
+    || fail "steam_api64.dll was not found; install the Sunrise DLL first"
+command -v flock >/dev/null 2>&1 || fail "flock is required (usually provided by util-linux)"
+
+runtime_directory="${XDG_RUNTIME_DIR:-/tmp}"
+lock_directory="$runtime_directory/sunrise-run-$UID"
+if ! mkdir -p -m 700 "$lock_directory" 2>/dev/null; then
+    lock_directory="/tmp/sunrise-run-$UID"
+    mkdir -p -m 700 "$lock_directory"
+fi
+[[ "$(stat -c %u "$lock_directory")" == "$UID" ]] \
+    || fail "launcher lock directory is owned by another user: $lock_directory"
+chmod 700 "$lock_directory"
+lock_key="$(printf '%s' "$game_dir" | cksum)"
+lock_key="${lock_key%% *}"
+exec 9>"$lock_directory/$lock_key.lock"
+flock -n 9 || fail "another Sunrise instance is already running for $game_dir"
+
+if [[ -z "$steam_root" ]]; then
+    steam_candidates=(
+        "$HOME/.local/share/Steam"
+        "$HOME/.steam/root"
+        "$HOME/.steam/steam"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
+    )
+    for candidate in "${steam_candidates[@]}"; do
+        if [[ -d "$candidate/steamapps" ]]; then
+            steam_root="$(realpath -e "$candidate")"
+            break
+        fi
+    done
+else
+    steam_root="$(realpath -e "$steam_root")" || fail "Steam root does not exist"
+fi
+[[ -n "$steam_root" ]] || fail "Steam was not found; specify --steam-root"
+
+if [[ -z "$proton" ]]; then
+    proton_candidates=(
+        "$steam_root/steamapps/common/Proton - Experimental/proton"
+        "$steam_root/steamapps/common/Proton Hotfix/proton"
+        "$steam_root/steamapps/common"/Proton*/proton
+        "$steam_root/compatibilitytools.d"/*/proton
+    )
+    for candidate in "${proton_candidates[@]}"; do
+        if [[ -x "$candidate" ]]; then
+            proton="$candidate"
+            break
+        fi
+    done
+else
+    proton="$(realpath -e "$proton")" || fail "Proton executable does not exist"
+fi
+[[ -x "$proton" ]] || fail "Proton was not found; specify --proton"
+
+mkdir -p "$prefix/pfx/dosdevices"
+prefix="$(realpath -e "$prefix")"
+
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$steam_root"
+export STEAM_COMPAT_DATA_PATH="$prefix"
+export SteamAppId="$app_id"
+export SteamGameId="$app_id"
+
+drive_link="$prefix/pfx/dosdevices/$drive:"
+if [[ -L "$drive_link" ]]; then
+    mapped_directory="$(realpath -e "$drive_link")" \
+        || fail "Wine drive $drive: has a broken mapping"
+    [[ "$mapped_directory" == "$game_dir" ]] \
+        || fail "Wine drive $drive: is already mapped to $mapped_directory"
+elif [[ -e "$drive_link" ]]; then
+    fail "Wine drive $drive: exists but is not a symbolic link"
+else
+    ln -s "$game_dir" "$drive_link"
+fi
+
+printf 'Launching Sunrise from %s:\\destiny2.exe\n' "${drive^^}"
+cd "$game_dir"
+exec "$proton" run "${drive^^}:\\destiny2.exe"
