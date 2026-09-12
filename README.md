@@ -8,6 +8,7 @@ Destiny 2 Offline Exploration Mod
 > Most gameplay features are not currently supported. (Missions, Enemies, NPCs, Quests, Persistent Saves, ...)
 
 - [Install Instructions](https://github.com/stanuwu/Sunrise/wiki/Installing)
+- [Experimental Linux/Proton Runtime](scripts/linux/README.md)
 - [FAQ](https://github.com/stanuwu/Sunrise/wiki/FAQ)
 - [Common Issues](https://github.com/stanuwu/Sunrise/wiki/Common-Issues)
 - [Discord](https://discord.gg/22JS6et5k9)
