@@ -1,5 +1,6 @@
 #include "activity_arrival.h"
 
+#include "../../../runtime.h"
 #include "../../../../../middleware/content/packages/tables/region_reader.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {

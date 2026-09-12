@@ -579,71 +579,6 @@ enum class InitialStateGate : std::uint8_t {
     return start_program(instance, now) ? AttachResult::ready : AttachResult::programError;
 }
 
-/** Binds one host instance to a free slot once its link, SDK view and world view all resolve. */
-void attach_instance(const host::InstanceSnapshot& hostInstance,
-                     const sdk::Snapshot& catalog,
-                     std::uint64_t now) noexcept {
-    if (find_instance(hostInstance.binding) != nullptr) {
-        return;
-    }
-    if (catalog == nullptr) {
-        report_attach_result(
-            hostInstance.binding, AttachResult::catalogUnavailable, "catalog_unavailable");
-        return;
-    }
-    server::bap::ActivityLinkView link{};
-    if (!server::bap::activity_link_view(hostInstance.binding, link)) {
-        report_attach_result(
-            hostInstance.binding, AttachResult::noActivityLink, "no_activity_link");
-        return;
-    }
-    if (!link.joined) {
-        report_attach_result(
-            hostInstance.binding, AttachResult::noActivityLink, "activity_join_pending");
-        return;
-    }
-    sdk::BoundView view{};
-    const sdk::Selection selection{
-        .binding = hostInstance.binding,
-        .matchingLinks = link.matchingLinks,
-        .activityClientGeneration = link.activityClientGeneration,
-    };
-    const sdk::Status status = sdk::resolve(catalog, selection, view);
-    if (status != sdk::Status::ready) {
-        report_attach_result(hostInstance.binding,
-                             AttachResult::sdkStatus,
-                             sdk::status_name(status),
-                             format::kAbsentIndex,
-                             status);
-        return;
-    }
-    generated::GeneratedWorldView worldView{};
-    const generated::BindStatus worldStatus = generated::resolve(view, worldView);
-    if (worldStatus != generated::BindStatus::ready) {
-        report_attach_result(hostInstance.binding,
-                             AttachResult::generatedWorldStatus,
-                             generated::status_name(worldStatus),
-                             view.activityRow,
-                             sdk::Status::notReady,
-                             worldStatus);
-        return;
-    }
-    RuntimeInstance* const instance = free_instance();
-    if (instance == nullptr) {
-        report_attach_result(
-            hostInstance.binding, AttachResult::capacity, "capacity", view.activityRow);
-        return;
-    }
-    instance->view = std::move(view);
-    instance->worldView = std::move(worldView);
-    instance->publicTarget = link.publicTarget;
-    instance->playerKey = link.playerKey;
-    instance->occupied = true;
-    const AttachResult opened = open_program(*instance, now);
-    report_attach_result(
-        hostInstance.binding, opened, attach_result_name(opened), instance->view.activityRow);
-}
-
 } // namespace
 
 bool controller_file_name(std::uint32_t oneBasedActivityRow, std::span<char> output) noexcept {
@@ -709,6 +644,71 @@ bool authorize_reload(const RuntimeInstance& instance) noexcept {
     return true;
 }
 
+/** Binds one host instance to a free slot once its link, SDK view and world view all resolve. */
+void attach_instance(const host::InstanceSnapshot& hostInstance,
+                     const sdk::Snapshot& catalog,
+                     std::uint64_t now) noexcept {
+    if (find_instance(hostInstance.binding) != nullptr) {
+        return;
+    }
+    if (catalog == nullptr) {
+        report_attach_result(
+            hostInstance.binding, AttachResult::catalogUnavailable, "catalog_unavailable");
+        return;
+    }
+    server::bap::ActivityLinkView link{};
+    if (!server::bap::activity_link_view(hostInstance.binding, link)) {
+        report_attach_result(
+            hostInstance.binding, AttachResult::noActivityLink, "no_activity_link");
+        return;
+    }
+    if (!link.joined) {
+        report_attach_result(
+            hostInstance.binding, AttachResult::noActivityLink, "activity_join_pending");
+        return;
+    }
+    sdk::BoundView view{};
+    const sdk::Selection selection{
+        .binding = hostInstance.binding,
+        .matchingLinks = link.matchingLinks,
+        .activityClientGeneration = link.activityClientGeneration,
+    };
+    const sdk::Status status = sdk::resolve(catalog, selection, view);
+    if (status != sdk::Status::ready) {
+        report_attach_result(hostInstance.binding,
+                             AttachResult::sdkStatus,
+                             sdk::status_name(status),
+                             format::kAbsentIndex,
+                             status);
+        return;
+    }
+    generated::GeneratedWorldView worldView{};
+    const generated::BindStatus worldStatus = generated::resolve(view, worldView);
+    if (worldStatus != generated::BindStatus::ready) {
+        report_attach_result(hostInstance.binding,
+                             AttachResult::generatedWorldStatus,
+                             generated::status_name(worldStatus),
+                             view.activityRow,
+                             sdk::Status::notReady,
+                             worldStatus);
+        return;
+    }
+    RuntimeInstance* const instance = free_instance();
+    if (instance == nullptr) {
+        report_attach_result(
+            hostInstance.binding, AttachResult::capacity, "capacity", view.activityRow);
+        return;
+    }
+    instance->view = std::move(view);
+    instance->worldView = std::move(worldView);
+    instance->publicTarget = link.publicTarget;
+    instance->playerKey = link.playerKey;
+    instance->occupied = true;
+    const AttachResult opened = open_program(*instance, now);
+    report_attach_result(
+        hostInstance.binding, opened, attach_result_name(opened), instance->view.activityRow);
+}
+
 /** Drops slots that no longer match, publishes the roster, and attaches active host instances. */
 void synchronize_instances(std::uint64_t now) noexcept {
     host::DiagnosticsSnapshot diagnostics{};
@@ -768,6 +768,36 @@ void service_pending_starts(std::uint64_t now) noexcept {
             static_cast<void>(start_program(instance, now));
             break;
         }
+    }
+}
+
+/** Probes the mission script for the activity to apply its initial_state slice-set override. */
+void apply_script_initial_state_override(state::activity::destination::DestinationSelection& selection) noexcept {
+    if (selection.activityIndex < 0) {
+        return;
+    }
+    const sdk::Snapshot catalog = sdk::snapshot();
+    if (catalog == nullptr) {
+        return;
+    }
+    const format::Activity* activity = nullptr;
+    for (const auto& a : catalog->activities()) {
+        if (static_cast<std::int32_t>(a.activityIndex) == static_cast<std::int32_t>(selection.activityIndex)) {
+            activity = &a;
+            break;
+        }
+    }
+    if (activity == nullptr) {
+        return;
+    }
+    std::span<const char> source;
+    if (read_source(*catalog, *activity, source) != SourceStatus::ready) {
+        return;
+    }
+    const std::int32_t region = lua_vm::probe_initial_state_region(source, g_sdkLuaSearchPath.data());
+    if (region >= 0) {
+        selection.sliceSetOverride = static_cast<std::uint16_t>(region);
+        selection.hasSliceSetOverride = true;
     }
 }
 

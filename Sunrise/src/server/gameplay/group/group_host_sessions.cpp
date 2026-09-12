@@ -7,6 +7,7 @@
 
 #include "../../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../../state/activity/runtime.h"
+#include "../../activity/mission/mission_script_runtime.h"
 #include "../endpoint/gameplay_endpoint.h"
 #include "../gameplay_log.h"
 
@@ -307,9 +308,13 @@ void allocate_claimed_host_sessions() noexcept {
 
         std::uint64_t sessionId = state::activity::kAbsentSessionId;
         state::activity::PendingAllocation allocation{};
+
+        state::activity::destination::DestinationSelection selection = pending.source.destination;
+        activity::mission::apply_script_initial_state_override(selection);
+
         // The commit compares one process-wide State revision, so a frame landing between the
         // prepare and the commit refuses this allocation. The next tick retries it.
-        if (!state::activity::prepare_session(pending.source.destination, sessionId, allocation)
+        if (!state::activity::prepare_session(selection, sessionId, allocation)
             || !state::activity::commit(allocation)) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,

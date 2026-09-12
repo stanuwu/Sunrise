@@ -439,6 +439,10 @@ void clear_script_paths() noexcept;
 [[nodiscard]] bool authorize_reload(const RuntimeInstance& instance) noexcept;
 /** Drops slots that no longer match, publishes the roster, and attaches active host instances. */
 void synchronize_instances(std::uint64_t now) noexcept;
+/** Binds one host instance to a free slot once its link, SDK view and world view all resolve. */
+void attach_instance(const host::InstanceSnapshot& hostInstance,
+                     const sdk::Snapshot& catalog,
+                     std::uint64_t now) noexcept;
 /** Advances fresh programs only when their declared state roster has reached transport output. */
 void service_pending_starts(std::uint64_t now) noexcept;
 
