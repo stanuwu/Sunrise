@@ -102,6 +102,7 @@
     <ClCompile Include="src\state\gameplay\external\entity_object_types.cpp" />
     <ClCompile Include="src\state\investment\investment_account_store.cpp" />
     <ClCompile Include="src\state\investment\investment_database.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\quest_initialization_reader.cpp" />
     <ClCompile Include="src\state\investment\investment_inventory_store.cpp" />
     <ClCompile Include="src\state\investment\investment_store_boot.cpp" />
     <ClCompile Include="src\state\investment\investment_unlock_store.cpp" />
@@ -885,8 +886,6 @@
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_behavior_view.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_scriptable_world_links.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_squad_actions.cpp" />
-    <ClCompile Include="src\server\ui\activity_override\activity_override_panel.cpp" />
-    <ClCompile Include="src\server\ui\activity_override\activity_override_lists.cpp" />
     <ClCompile Include="src\server\transport\bap_listener.cpp" />
     <ClCompile Include="src\server\bap\bap_route.cpp" />
     <ClCompile Include="src\server\bap\bap_activity_link_view.cpp" />
@@ -1606,8 +1605,6 @@
     <ClInclude Include="src\server\ui\activity_host\activity_host_sdk_behavior_view.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_scriptable_world_links.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_sdk_squad_actions.h" />
-    <ClInclude Include="src\server\ui\activity_override\activity_override_panel.h" />
-    <ClInclude Include="src\server\ui\activity_override\activity_override_lists.h" />
     <ClInclude Include="src\server\bap\runtime.h" />
     <ClInclude Include="src\server\bap\activity_mission_seed_lease.h" />
     <ClInclude Include="src\server\bap\internal.h" />
@@ -2168,6 +2165,31 @@
   <ItemGroup>
     <ClInclude Include="src\state\activity_sdk\actor_sequences.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_actor_sequences.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\client\ui\mission_launch\mission_launch_panel.cpp" />
+    <ClInclude Include="src\client\ui\mission_launch\mission_launch_panel.h" />
+    <ClInclude Include="src\client\ui\mission_launch\mission_launch_model.h" />
+    <ClInclude Include="src\client\ui\mission_launch\mission_launch_cards.h" />
+    <ClCompile Include="src\client\ui\mission_launch\mission_launch_art.cpp" />
+    <ClCompile Include="src\client\ui\mission_launch\mission_launch_lists.cpp" />
+    <ClInclude Include="src\client\ui\mission_launch\mission_launch_lists.h" />
+    <ClInclude Include="src\client\ui\mission_launch\mission_launch_art.h" />
+    <ClInclude Include="src\client\ui\mission_launch\mission_launch_manual.h" />
+    <ClInclude Include="src\client\ui\mission_launch\mission_launch_detail_style.h" />
+    <ClCompile Include="src\client\activity\mission_launch.cpp" />
+    <ClInclude Include="src\client\activity\mission_launch.h" />
+    <ClInclude Include="src\client\activity\mission_launch_options.h" />
+    <ClCompile Include="src\client\content\activity\activity_catalog_build.cpp" />
+    <ClInclude Include="src\client\content\activity\activity_catalog_build.h" />
+    <ClInclude Include="src\client\content\activity\activity_presentation_build.h" />
+    <ClInclude Include="src\client\content\activity\activity_menu_text_build.h" />
+    <ClCompile Include="src\state\build_data\activities\activity_catalog.cpp" />
+    <ClInclude Include="src\state\build_data\activities\activity_catalog.h" />
+    <ClInclude Include="src\state\build_data\activities\activity_artwork.h" />
+    <ClInclude Include="src\state\build_data\activities\activity_releases.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\activity_table.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\activity_presentation_table.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

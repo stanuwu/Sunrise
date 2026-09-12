@@ -74,5 +74,5 @@ ExtraArgsBefore:
   - -Wdocumentation
 FormatStyle: file
 CheckOptions:
-  portability-restrict-system-includes.Includes: '-*,Windows.h,WinSock2.h,WS2tcpip.h,MSWSock.h,WinDNS.h,TlHelp32.h,Shellapi.h,bcrypt.h,d3d11.h,d3d11_1.h,d3dcompiler.h,detours.h,dxgi.h,wincodec.h,imgui.h,imgui_impl_dx11.h,imgui_impl_win32.h,intrin.h,algorithm,array,atomic,bit,bitset,cctype,cerrno,charconv,chrono,climits,cmath,compare,concepts,cstdarg,cstddef,cstdint,cstdio,cstdlib,cstring,cwchar,deque,functional,initializer_list,iterator,limits,map,memory,mutex,new,numeric,optional,queue,set,shared_mutex,span,sstream,string,string_view,tuple,type_traits,unordered_map,unordered_set,utility,variant,vector'
+  portability-restrict-system-includes.Includes: '-*,Windows.h,WinSock2.h,WS2tcpip.h,MSWSock.h,WinDNS.h,TlHelp32.h,Shellapi.h,bcrypt.h,d3d11.h,d3d11_1.h,d3dcompiler.h,detours.h,dxgi.h,wincodec.h,imgui.h,imgui_impl_dx11.h,imgui_impl_win32.h,intrin.h,sqlite3.h,algorithm,array,atomic,bit,bitset,cctype,cerrno,charconv,chrono,climits,cmath,compare,concepts,cstdarg,cstddef,cstdint,cstdio,cstdlib,cstring,cwchar,deque,functional,initializer_list,iterator,limits,map,memory,mutex,new,numeric,optional,queue,set,shared_mutex,span,sstream,string,string_view,tuple,type_traits,unordered_map,unordered_set,utility,variant,vector'
 ...

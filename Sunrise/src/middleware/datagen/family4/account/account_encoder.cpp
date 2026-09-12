@@ -75,6 +75,20 @@ constexpr std::size_t kBucketIdentityCapacity = 256;
 
 /** Encodes a sentinel-correct account object from live State. */
 bool encode(const state::AccountState& state, std::span<std::byte> output) noexcept {
+    state::unlocks::Table unlocks;
+    return state::unlocks::snapshot(unlocks) && encode(state, output, unlocks);
+}
+
+/**
+ * Account-wide unlocks use the supplied snapshot; per-character flags still use saved state.
+ * @param state Account identity, roster, preferences, and inventory to encode.
+ * @param output Receives the account object; unchanged on failure.
+ * @param unlocks Account unlocks from the same live or prepared view as state.
+ * @return False when state, saved flags, mappings, or output bounds are invalid.
+ */
+bool encode(const state::AccountState& state,
+            std::span<std::byte> output,
+            const state::unlocks::Table& unlocks) noexcept {
     if (state.primarySoid == 0 || !state::account::valid(state)
         || output.size() < layout::kMinimumSize) {
         return false;
@@ -89,10 +103,6 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
         return false;
     }
 
-    state::unlocks::Table unlocks;
-    if (!state::unlocks::snapshot(unlocks)) {
-        return false;
-    }
     object.acquiredFlags = unlocks.accountFlags;
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;

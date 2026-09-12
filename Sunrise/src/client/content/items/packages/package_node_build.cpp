@@ -110,7 +110,13 @@ read_slot_map(std::span<const std::byte> blob, std::size_t descriptor, SlotMap& 
 
 } // namespace
 
-/** Reads both unlock mapping tables. A gate names a slot; the bank index is the row naming it. */
+/**
+ * A gate names a slot; its saved bank index is the mapping row that names that slot.
+ * @param source Borrowed package source.
+ * @param storage Receives four slot maps and retained value-map bytes; may be partial on failure.
+ * @param root Investment root bytes naming the flag and value mapping tables.
+ * @return True when both account maps read; a character map may remain unmapped.
+ */
 bool read_unlock_slot_maps(const reader::Source& source,
                            Storage& storage,
                            std::span<const std::byte> root) noexcept {
@@ -134,6 +140,7 @@ bool read_unlock_slot_maps(const reader::Source& source,
         return false;
     }
     const std::span<const std::byte> valueMap{storage.child};
+    storage.questValueMap = storage.child;
     const bool valueMapRead =
         read_slot_map(valueMap, tables::kAccountValueMapDescriptor, maps.accountValue);
     (void)read_slot_map(valueMap, tables::kCharacterValueMapDescriptor, maps.characterValue);

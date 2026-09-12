@@ -23,6 +23,39 @@ namespace family4_loadout = middleware::datagen::family4::loadout;
 
 namespace runtime::detail {
 
+using Quest = build_data::items::QuestInitialization;
+
+/**
+ * The plan must already be valid and nonempty before selecting a save bank.
+ * @param quest First-step plan with account or character scope.
+ * @return The persistent value bank for that scope.
+ */
+[[nodiscard]] investment::store::Bank quest_bank(const Quest& quest) noexcept {
+    return quest.scope == Quest::Scope::account ? investment::store::Bank::objectiveValues
+                                                : investment::store::Bank::characterObjectValues;
+}
+
+/**
+ * Hold investment::store::g_mutex and validate the selected character before this check.
+ * @param mutation Prepared acquisition with the prior saved quest value.
+ * @return True only while item metadata and the saved quest value still match.
+ */
+[[nodiscard]] bool quest_current(const PendingItemAcquisition& mutation) noexcept {
+    build_data::items::Definition definition{};
+    if (!build_data::find_item_definition_hash(mutation.acquiredDefinitionHash, definition)
+        || definition.questInitialization != mutation.questInitialization
+        || !build_data::items::valid(mutation.questInitialization)) {
+        return false;
+    }
+    if (mutation.questInitialization.scope == Quest::Scope::none) {
+        return mutation.previousQuestValue == build_data::items::kUnsetQuestValue;
+    }
+    std::int32_t current = 0;
+    return investment::store::read_unlock(
+               quest_bank(mutation.questInitialization), mutation.questInitialization.row, current)
+           && current == mutation.previousQuestValue;
+}
+
 /** @return The selected character's index, or the character count when none is selected. */
 [[nodiscard]] std::size_t selected_character_index(const AccountState& account) noexcept {
     const std::size_t count = (std::min)(account.characterCount, account.characters.size());
@@ -34,7 +67,16 @@ namespace runtime::detail {
     return account.characters.size();
 }
 
-/** Stages the common selected-character insertion path. */
+/**
+ * Hold investment::store::g_mutex while capturing inventory and quest state together.
+ * @param account State before any acquisition charge.
+ * @param chargedAccount State after the prepared material charge.
+ * @param definitionHash Item definition to grant.
+ * @param profileChanged Whether the charge changed profile inventory.
+ * @param source Grant identity and material requirements for commit checks.
+ * @param mutation Receives a pending grant; use only on success.
+ * @return False when the item, inventory, mapping, or saved quest state is invalid.
+ */
 [[nodiscard]] bool finalize_item_acquisition(const AccountState& account,
                                              const AccountState& chargedAccount,
                                              std::uint32_t definitionHash,
@@ -101,16 +143,35 @@ namespace runtime::detail {
     mutation.materialRequirementCount = source.materialRequirementCount;
     mutation.profileChanged = profileChanged;
     mutation.directGrant = source.direct;
+    build_data::items::Definition definition{};
+    if (!build_data::find_item_definition_hash(definitionHash, definition)
+        || !build_data::items::valid(definition.questInitialization)) {
+        return false;
+    }
+    mutation.questInitialization = definition.questInitialization;
+    if (mutation.questInitialization.scope != Quest::Scope::none
+        && !investment::store::read_unlock(quest_bank(mutation.questInitialization),
+                                           mutation.questInitialization.row,
+                                           mutation.previousQuestValue)) {
+        return false;
+    }
     mutation.prepared = true;
     return true;
 }
 
 } // namespace runtime::detail
 
-/** Prepares one native-row-checked selected-character inventory insertion. */
+/**
+ * Inventory and quest state must come from the same locked save view.
+ * @param collectibleIndex Collections row, or kNoCollectibleIndex for an item-only grant.
+ * @param definitionHash Item definition to grant.
+ * @param mutation Receives a pending grant; prepared is set only on success.
+ * @return False when identity, costs, capacity, or saved state prevent the grant.
+ */
 bool prepare_item_acquisition(std::uint16_t collectibleIndex,
                               std::uint32_t definitionHash,
                               PendingItemAcquisition& mutation) noexcept {
+    const std::lock_guard lock(investment::store::g_mutex);
     mutation = {};
     const AccountState account = account_snapshot();
     build_data::collectibles::Definition collectible{};
@@ -156,9 +217,15 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
         mutation);
 }
 
-/** Prepares one direct selected-character inventory grant, with no Collections row or charge. */
+/**
+ * Direct grants share quest-state checks but do not charge Collections materials.
+ * @param itemDefinitionIndex Item-table row to grant to the selected character.
+ * @param mutation Receives a pending grant; prepared is set only on success.
+ * @return False when the item, inventory, mapping, or saved quest state is invalid.
+ */
 bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
                                        PendingItemAcquisition& mutation) noexcept {
+    const std::lock_guard lock(investment::store::g_mutex);
     mutation = {};
     const AccountState account = account_snapshot();
     build_data::items::Definition grantedDefinition{};
@@ -349,14 +416,22 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
            && definition.definitionHash == mutation.acquiredDefinitionHash;
 }
 
-/** Applies one validated insertion over an exact current account without taking State locks. */
+/**
+ * Hold investment::store::g_mutex; the selected character and saved state must still match.
+ * @param current Current account from the locked save view.
+ * @param mutation Prepared inventory insertion and prior quest state.
+ * @param after Receives the candidate account; use only on success.
+ * @return False for stale state or an invalid resulting inventory.
+ */
 [[nodiscard]] bool materialize_item_acquisition(const AccountState& current,
                                                 const PendingItemAcquisition& mutation,
                                                 AccountState& after) noexcept {
     std::uint64_t nextSoid = 0;
     if (!valid_item_acquisition_source(mutation)
         || mutation.characterIndex >= current.characterCount
-        || current.primarySoid != mutation.accountSoid
+        || !current.characters[mutation.characterIndex].selected
+        || current.characters[mutation.characterIndex].soid != mutation.characterSoid
+        || !quest_current(mutation) || current.primarySoid != mutation.accountSoid
         || !same_character(current.characters[mutation.characterIndex], mutation.beforeCharacter)
         || !same_profile_inventory(
             current, mutation.beforeProfileItems, mutation.expectedProfileItemCount)
@@ -454,11 +529,32 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
 
 } // namespace runtime::detail
 
-/** Produces the full account after-image while a prepared character pull remains current. */
+/**
+ * Preview inventory and quest values together without changing the save.
+ * @param mutation Prepared acquisition checked against current saved state.
+ * @param after Receives the candidate account; use only on success.
+ * @param afterUnlocks Receives matching account and selected-character unlocks on success.
+ * @return False when the acquisition is stale or its saved unlocks cannot be read.
+ */
 bool preview_item_acquisition(const PendingItemAcquisition& mutation,
-                              AccountState& after) noexcept {
+                              AccountState& after,
+                              unlocks::Table& afterUnlocks) noexcept {
+    const std::lock_guard lock(investment::store::g_mutex);
     after = {};
-    return materialize_item_acquisition(account_snapshot(), mutation, after);
+    afterUnlocks = {};
+    if (!materialize_item_acquisition(account_snapshot(), mutation, after)
+        || !investment::store::read_unlocks(afterUnlocks,
+                                            static_cast<int>(mutation.characterIndex))) {
+        return false;
+    }
+    const auto& quest = mutation.questInitialization;
+    const auto value = build_data::items::initialized_value(quest, mutation.previousQuestValue);
+    if (quest.scope == Quest::Scope::account) {
+        afterUnlocks.objectiveValues[quest.row] = value;
+    } else if (quest.scope == Quest::Scope::character) {
+        afterUnlocks.characterObjectValues[quest.row] = value;
+    }
+    return true;
 }
 
 /** Produces the full account after-image while a prepared package remains current. */
@@ -468,22 +564,28 @@ bool preview_direct_item_bundle(const PendingDirectItemBundle& mutation,
     return materialize_direct_item_bundle(account_snapshot(), mutation, after);
 }
 
-/** Commits one prepared insertion only while its prepare-time loadout remains current. */
+/**
+ * Inventory and first-step state share one transaction; failure rolls both back.
+ * @param mutation Prepared grant consumed on either success or failure.
+ * @return True when both writes commit against the unchanged prepared state.
+ */
 bool commit_item_acquisition(PendingItemAcquisition& mutation) noexcept {
     const PendingItemAcquisition& prepared = mutation;
     const PendingConsumption consume{mutation};
-    investment::store::g_mutex.lock();
+    investment::store::Transaction transaction;
     AccountState candidate{};
-    const bool ready =
-        materialize_item_acquisition(investment::store::account(), prepared, candidate);
-    if (ready) {
-        if (!investment::store::write_account(candidate)) {
-            investment::store::g_mutex.unlock();
-            return false;
-        }
+    if (!transaction.ready()
+        || !materialize_item_acquisition(investment::store::account(), prepared, candidate)
+        || !investment::store::write_account(candidate)) {
+        return false;
     }
-    investment::store::g_mutex.unlock();
-    return ready;
+    const auto& quest = prepared.questInitialization;
+    if (quest.scope != Quest::Scope::none
+        && prepared.previousQuestValue == build_data::items::kUnsetQuestValue
+        && !investment::store::write_unlock(quest_bank(quest), quest.row, quest.value)) {
+        return false;
+    }
+    return transaction.commit();
 }
 
 namespace runtime::detail {

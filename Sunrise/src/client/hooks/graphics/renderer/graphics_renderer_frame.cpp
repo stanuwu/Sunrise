@@ -15,6 +15,7 @@
 #include "../../../../core/ui/theme/sunrise_ui_theme.h"
 #include "../../../ui/activity/authored_placement_marker.h"
 #include "../../../ui/activity/authored_spatial_overlay.h"
+#include "../../../ui/mission_launch/mission_launch_art.h"
 #include "../../teleport/runtime.h"
 #include "../input/input.h"
 #include "graphics_renderer_report.h"
@@ -141,6 +142,7 @@ void render_frame_locked() noexcept {
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
+    client::ui::mission_launch::art::prepare(g_resources.device);
     // A hidden surface still draws until its close animation ends, so the layout decides. The
     // HUD, running-work and notice overlays draw whether the surface is open or not. The HUD
     // goes first, so the surface stays above it when the two meet.

@@ -116,9 +116,14 @@ struct GrantSource {
 /** @return The selected character's index, or the character count when none is selected. */
 [[nodiscard]] std::size_t selected_character_index(const AccountState& account) noexcept;
 /**
- * Stages the common selected-character insertion path.
- * @param chargedAccount Account after any material cost, or account itself when nothing is charged.
- * @return False when the character has no free row or the after-image does not resolve.
+ * Hold investment::store::g_mutex while capturing inventory and quest state together.
+ * @param account State before any acquisition charge.
+ * @param chargedAccount State after the prepared material charge.
+ * @param definitionHash Item definition to grant.
+ * @param profileChanged Whether the charge changed profile inventory.
+ * @param source Grant identity and material requirements for commit checks.
+ * @param mutation Receives a pending grant; use only on success.
+ * @return False when the item, inventory, mapping, or saved quest state is invalid.
  */
 [[nodiscard]] bool finalize_item_acquisition(const AccountState& account,
                                              const AccountState& chargedAccount,
@@ -142,8 +147,11 @@ finalize_profile_item_acquisition(const AccountState& account,
                                   const GrantSource& source,
                                   PendingProfileItemAcquisition& mutation) noexcept;
 /**
- * Applies one validated insertion over an exact current account without taking State locks.
- * @return False when the account moved since the mutation was prepared.
+ * Hold investment::store::g_mutex; the selected character and saved state must still match.
+ * @param current Current account from the locked save view.
+ * @param mutation Prepared inventory insertion and prior quest state.
+ * @param after Receives the candidate account; use only on success.
+ * @return False for stale state or an invalid resulting inventory.
  */
 [[nodiscard]] bool materialize_item_acquisition(const AccountState& current,
                                                 const PendingItemAcquisition& mutation,

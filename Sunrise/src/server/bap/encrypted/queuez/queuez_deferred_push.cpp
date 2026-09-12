@@ -78,7 +78,7 @@ selected_character(const state::AccountState& account) noexcept {
                                         pending.accountSoid,
                                         pending.characterSoid,
                                         pending.acquiredInstanceSoid,
-                                        pending.profileChanged,
+                                        pending.updates_account(),
                                         acquisition)) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,

@@ -115,6 +115,8 @@ struct Storage {
     std::vector<std::byte> child{};
     std::vector<std::byte> root{};
     std::vector<std::byte> definition{};
+    std::vector<std::byte> questParentDefinition{};
+    std::vector<std::byte> questValueMap{};
     /** Shared reusable/randomized plug-set table read from investment-root slot 51. */
     std::vector<std::byte> plugSetTable{};
     /** Dense item-indexed catalyst completion expressions for this package pass. */

@@ -454,7 +454,7 @@ bool process(const ServiceRoute& route,
                                                    itemAcquisition->accountSoid,
                                                    itemAcquisition->characterSoid,
                                                    itemAcquisition->acquiredInstanceSoid,
-                                                   itemAcquisition->profileChanged,
+                                                   itemAcquisition->updates_account(),
                                                    transaction->update)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,

@@ -51,8 +51,8 @@ bool decode(const NamedRecord& record, content::Definition& value) noexcept {
 /**
  * Encodes one installed-build item mapping with its padding zeroed.
  * @param value Runtime row.
- * @param record Receives the packed disk row.
- * @return Always true, because an unknown bucket has its own unset value.
+ * @param record Receives the packed disk row; use only on success.
+ * @return True for empty quest state or a supported first-step value, scope, and bank row.
  */
 bool encode(const items::Definition& value, ItemRecord& record) noexcept {
     record = {
@@ -65,11 +65,19 @@ bool encode(const items::Definition& value, ItemRecord& record) noexcept {
         value.plugCategoryHash,
         value.rollSetIndex,
         value.linkedPlugIndex,
+        value.questInitialization.value,
+        value.questInitialization.row,
+        static_cast<std::uint8_t>(value.questInitialization.scope),
     };
-    return true;
+    return items::valid(value.questInitialization);
 }
 
-/** Decodes one installed-build item mapping. */
+/**
+ * Cached quest state must fit the same bank limits as freshly read item metadata.
+ * @param record Packed disk row.
+ * @param value Receives the runtime item mapping; use only on success.
+ * @return True for empty quest state or a supported first-step value, scope, and bank row.
+ */
 bool decode(const ItemRecord& record, items::Definition& value) noexcept {
     value = {record.definitionHash,
              record.definitionIndex,
@@ -79,8 +87,11 @@ bool decode(const ItemRecord& record, items::Definition& value) noexcept {
              record.tier,
              record.plugCategoryHash,
              record.rollSetIndex,
-             record.linkedPlugIndex};
-    return true;
+             record.linkedPlugIndex,
+             {record.questInitialValue,
+              record.questValueRow,
+              static_cast<items::QuestInitialization::Scope>(record.questValueScope)}};
+    return items::valid(value.questInitialization);
 }
 
 /** Encodes one collectible ordinal and its optional item link. */

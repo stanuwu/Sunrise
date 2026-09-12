@@ -10,6 +10,7 @@
 #include "../../core/ui/busy/busy.h"
 #include "../../core/ui/notice/ui_notice_overlay.h"
 #include "../../server/bap/runtime.h"
+#include "../activity/mission_launch.h"
 #include "../content/activity/scriptable_catalog_worker.h"
 #include "../content/bootstrap/bootstrap_token_publish.h"
 #include "../content/investment/worker.h"
@@ -190,6 +191,8 @@ void clear_game_targets() noexcept {
     (void)hooks::config_getter::install();
     // Boot-step fixes scan for their own single-site targets; each reports its own outcome.
     (void)hooks::bootflow::install();
+    // The launcher calls the Director's own selection entry points; nothing is detoured.
+    (void)activity::mission_launch::install();
     // The teleport hooks attach whether or not the feature is on, so the interface can enable it
     // without a restart. Both replacements return immediately while nothing is requested.
     (void)hooks::teleport::install();

@@ -6,6 +6,7 @@
 
 #include "../../../../core/ui/layout/layout.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
+#include "../../../ui/mission_launch/mission_launch_art.h"
 #include "../../cursor/runtime.h"
 #include "../../inactivity/inactivity_override.h"
 #include "../../polled_input/runtime.h"
@@ -249,6 +250,7 @@ void release_render_target(Resources& resources) noexcept {
 
 /** @param resources SDK resources freed in an order that respects their dependencies. */
 void release_resources(Resources& resources) noexcept {
+    client::ui::mission_launch::art::release();
     world_lines::release();
     release_render_target(resources);
     textures::release_logo_sheet(resources.logoSheet);

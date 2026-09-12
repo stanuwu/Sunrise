@@ -30,6 +30,8 @@ inline constexpr std::uint16_t kAbsentPackageId = 0xFFFFU;
 
 /** Element class of the item index table inside the investment container. */
 inline constexpr std::uint32_t kItemIndexTableClass = 0x80807BE8U;
+/** Serialized item definition class, distinct from the item index table class. */
+inline constexpr std::uint32_t kItemDefinitionClass = 0x80807BEAU;
 /** Investment root slot of the records and lore table. */
 inline constexpr std::size_t kRecordTableSlot = 72;
 /** One record row, wider than any field this pass reads. */

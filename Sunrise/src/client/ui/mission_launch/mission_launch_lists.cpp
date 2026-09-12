@@ -1,4 +1,4 @@
-#include "activity_override_lists.h"
+#include "mission_launch_lists.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -7,22 +7,16 @@
 #include "../../../middleware/content/packages/tables/component_container_reader.h"
 #include "../../../middleware/content/packages/tables/region_reader.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
-#include "../../../middleware/content/packages/tables/spawn_reader.h"
-#include "../../../state/activity/forced/definition.h"
-#include "../../../state/activity_sdk/runtime.h"
 #include "../../../state/build_data/runtime.h"
 
-namespace sunrise::server::ui::activity_override {
+namespace sunrise::client::ui::mission_launch::lists {
 namespace {
 
 namespace layouts = state::build_data::scenarios;
 namespace tables = middleware::content::packages::tables;
-namespace sdk = state::activity_sdk;
 
 /** A bubble's slice sets are spaced by this factor, so it also caps how many it can declare. */
 constexpr std::uint8_t kMaximumBubbleStates = tables::kSliceSetIndexFactor;
-
-Lists g_lists{};
 
 /** @return The destination row's name as a bounded view. */
 [[nodiscard]] std::string_view name_of(const layouts::Definition& row) noexcept {
@@ -38,19 +32,6 @@ Lists g_lists{};
 [[nodiscard]] bool name_less(const layouts::Definition& left,
                              const layouts::Definition& right) noexcept {
     return name_of(left) < name_of(right);
-}
-
-/**
- * Names one spawn set.
- * The packages carry no name table for these. Only the two hashes the client itself defines are
- * named, and every other set is shown by hash.
- * @return The name, or an empty view.
- */
-[[nodiscard]] std::string_view spawn_name(std::uint32_t hash) noexcept {
-    if (hash == tables::kDefaultSpawnNameHash) {
-        return "default";
-    }
-    return hash == tables::kUnnamedSpawnNameHash ? std::string_view("unnamed") : std::string_view();
 }
 
 /**
@@ -102,9 +83,6 @@ void clear_spawns(Lists& rows) noexcept {
     rows.spawnHashes = {};
     rows.spawnCount = 0;
     rows.spawnUnavailable = false;
-    rows.spawnNarrowed = false;
-    rows.spawnHidden = 0;
-    rows.spawnForeign = 0;
 }
 
 /** Clears every list that belongs to the selected destination. */
@@ -189,39 +167,27 @@ void build_spawns(Lists& rows, std::string_view stem, std::uint16_t mapIndex) no
         return;
     }
     const bool narrowing = mapIndex != tables::kAbsentMapBubbleIndex;
-    rows.spawnNarrowed = narrowing;
     for (std::size_t index = 0; index < count && rows.spawnCount < rows.spawns.size(); ++index) {
         const state::build_data::spawn_sets::NameHash& row = scratch[index];
         const std::uint32_t hash = row.value;
         const bool offered = !narrowing || tables::bubble_in_mask(row.bubbleMask, mapIndex);
         if (!offered && row.unbound == 0) {
-            ++rows.spawnHidden;
             continue;
         }
-        // The hash always. Its name is one of the two the client itself defines, else the
-        // extracted one, else nothing.
-        std::string_view named = spawn_name(hash);
+        // The hash always, then the extracted name where the packages produce one.
         state::build_data::hash_names::Name storage{};
-        if (named.empty()) {
-            named = resolve_name(hash, storage);
-        }
         Label name{};
-        name_column(named, name);
+        name_column(resolve_name(hash, storage), name);
         // A set reaching this bubble only because nothing binds it is marked, not hidden.
-        const char* const candidate = offered ? "" : "  (candidate)";
-        // A set this destination does not load is marked too. The bubble is right and the set
-        // still will not attach, which is what lands the player nowhere.
+        // A set this destination does not load is marked too: it will not attach.
         const bool loaded = loads_package(rows.selected, row);
-        if (!loaded) {
-            ++rows.spawnForeign;
-        }
         Label label{};
         const int written = std::snprintf(label.data(),
                                           label.size(),
                                           "0x%08X%s%s%s",
                                           hash,
                                           name.data(),
-                                          candidate,
+                                          offered ? "" : "  (candidate)",
                                           loaded ? "" : "  (not loaded)");
         if (written <= 0) {
             continue;
@@ -233,11 +199,6 @@ void build_spawns(Lists& rows, std::string_view stem, std::uint16_t mapIndex) no
 }
 
 } // namespace
-
-/** @return Process-lifetime picker rows, which no other module reads. */
-Lists& lists() noexcept {
-    return g_lists;
-}
 
 /** Rebuilds the destination rows when the published layout count has changed. */
 void refresh_activities(Lists& rows) noexcept {
@@ -262,49 +223,6 @@ void refresh_activities(Lists& rows) noexcept {
     for (const layouts::Definition& row : rowsRead) {
         assign(name_of(row), rows.activities[rows.activityCount]);
         ++rows.activityCount;
-    }
-}
-
-/** Rebuilds the definition rows for one destination, keeping the hidden count. */
-void refresh_definitions(Lists& rows, std::string_view destination) noexcept {
-    rows.definitions = {};
-    rows.definitionIndices = {};
-    rows.definitionCount = 0;
-    rows.definitionsHidden = 0;
-    const sdk::Snapshot catalog = sdk::snapshot();
-    rows.definitionsUnavailable = catalog == nullptr;
-    if (rows.definitionsUnavailable || destination.empty()) {
-        return;
-    }
-    const auto activities = catalog->activities();
-    for (std::size_t row = 0; row < activities.size(); ++row) {
-        const sdk::format::Activity& activity = activities[row];
-        if (catalog->string(activity.internalName) != destination
-            || activity.activityIndex > state::activity::forced::kMaximumActivityIndex) {
-            continue;
-        }
-        if (rows.definitionCount == rows.definitions.size()) {
-            ++rows.definitionsHidden;
-            continue;
-        }
-        const bool exact =
-            (activity.flags & sdk::format::kActivityExactMask) == sdk::format::kActivityExactMask;
-        const std::string_view display = catalog->string(activity.displayName);
-        std::array<char, kLabelCapacity> line{};
-        const int written = std::snprintf(line.data(),
-                                          line.size(),
-                                          "%u  %.*s%s",
-                                          static_cast<unsigned>(activity.activityIndex),
-                                          static_cast<int>(display.size()),
-                                          display.data(),
-                                          exact ? "" : "  not exact");
-        if (written <= 0) {
-            continue;
-        }
-        assign(std::string_view(line.data()), rows.definitions[rows.definitionCount]);
-        rows.definitionIndices[rows.definitionCount] =
-            static_cast<std::uint16_t>(activity.activityIndex);
-        ++rows.definitionCount;
     }
 }
 
@@ -347,4 +265,4 @@ void refresh_bubble(Lists& rows, std::uint8_t bubble) noexcept {
     }
 }
 
-} // namespace sunrise::server::ui::activity_override
+} // namespace sunrise::client::ui::mission_launch::lists

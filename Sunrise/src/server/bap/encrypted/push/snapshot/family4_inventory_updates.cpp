@@ -395,9 +395,8 @@ bool prepare_item_acquisition(
         || mutation.accountSoid == 0 || mutation.accountSoid != acquisition.accountSoid
         || mutation.characterSoid != acquisition.characterSoid
         || mutation.acquiredInstanceSoid != acquisition.acquiredInstanceSoid
-        // The account object may ride for reasons only the caller knows, but a profile change
-        // always has to publish it.
-        || (mutation.profileChanged && !acquisition.updatesAccount)
+        // Profile inventory and account-scoped quest values both require the account object.
+        || (mutation.updates_account() && !acquisition.updatesAccount)
         || acquisition.accountSoid != acquisition.after.family4RootSoid
         || acquisition.accountDefinitionId == 0 || acquisition.after.family4ResidentCount == 0
         || acquisition.after.family4Residents[acquisition.after.family4ResidentCount - 1U]
@@ -408,7 +407,8 @@ bool prepare_item_acquisition(
                != acquisition.itemInstanceDefinitionId) {
         return report_failure("acquire_mutation");
     }
-    if (!state::preview_item_acquisition(mutation, account)
+    state::unlocks::Table afterUnlocks;
+    if (!state::preview_item_acquisition(mutation, account, afterUnlocks)
         || mutation.characterIndex >= account.characterCount
         || account.primarySoid != acquisition.accountSoid
         || account.characters[mutation.characterIndex].soid != mutation.characterSoid) {
@@ -452,7 +452,8 @@ bool prepare_item_acquisition(
     if (!family4_datagen::character::encode(account.characters[mutation.characterIndex],
                                             selected.loadout,
                                             selected.lightEvaluation,
-                                            characterBytes)) {
+                                            characterBytes,
+                                            afterUnlocks)) {
         return report_failure("acquire_character_object");
     }
 
@@ -553,7 +554,7 @@ bool prepare_item_acquisition(
             return report_failure("acquire_account_storage");
         }
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes)
+        if (!family4_datagen::account::encode(account, accountBytes, afterUnlocks)
             || !append_object(scratch,
                               accountBytes,
                               acquisition.accountDefinitionId,

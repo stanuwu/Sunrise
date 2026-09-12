@@ -15,3 +15,5 @@
 # CMake build files
 /build/
 /out/
+/docs/
+/Sunrise/docs/
