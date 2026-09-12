@@ -628,6 +628,12 @@ link_text(const StringLinker& linker, const Text& input, format::StringRef& outp
         }
     }
 
+    for (const auto& entry : actorRsat.sequenceEntries) {
+        if (!linker.keep_extension(entry.id) || !linker.keep_extension(entry.name)
+            || !linker.keep_extension(entry.symbol) || !linker.keep_extension(entry.sourcePath)) {
+            return false;
+        }
+    }
     for (const actor_rsat_inventory::ActorClass& row : actorRsat.actorClasses) {
         if (!keep_legacy(linker, row.id)) {
             return false;
@@ -762,6 +768,9 @@ pack::Tables Storage::tables() const noexcept {
         sobjectRsatFieldBindings,
         runtimeTypeDefinitions,
         actorStateNames,
+        actorSequenceTables,
+        actorSequenceEntries,
+        actorSequenceBindings,
     };
 }
 

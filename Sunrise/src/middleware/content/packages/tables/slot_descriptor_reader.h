@@ -48,6 +48,8 @@ inline constexpr std::size_t kDescriptorSlotIndexOffset = 54;
 inline constexpr std::size_t kDescriptorBubbleIndexOffset = 56;
 inline constexpr std::size_t kDescriptorSenseSchemaOffset = 68;
 inline constexpr std::size_t kDescriptorAuthSchemaOffset = 72;
+/** Type 2 descriptors bind their authored squad through this ClientRef. */
+inline constexpr std::size_t kType2SquadReferenceOffset = 104;
 
 /** What one slot type resolves to. */
 struct SlotDescriptor {

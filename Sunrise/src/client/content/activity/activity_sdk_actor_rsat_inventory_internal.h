@@ -39,6 +39,14 @@ struct SchemaSource final {
     std::vector<RsatField> fields{};
 };
 
+/** One decoded ActorGroup source, or an unrelated component remembered as absent. */
+struct SequenceOwner final {
+    std::uint32_t sourceOffset{};
+    std::uint32_t globalTag{};
+    std::uint32_t localTag{};
+    bool present{};
+};
+
 /** State owned by one transactional build. */
 struct BuildState final {
     ReadTag readTag{};
@@ -49,6 +57,8 @@ struct BuildState final {
     std::vector<SchemaSource> schemaSources{};
     std::unordered_map<std::uint32_t, std::size_t> schemaIndexes{};
     std::unordered_set<std::uint32_t> rsatTags{};
+    std::unordered_map<std::uint32_t, std::uint32_t> sequenceTableIndexes{};
+    std::unordered_map<std::uint32_t, SequenceOwner> sequenceOwners{};
 };
 
 /** Actual reader callback context. */

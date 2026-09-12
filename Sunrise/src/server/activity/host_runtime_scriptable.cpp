@@ -21,25 +21,6 @@ using namespace detail;
 /** Authored-scene activation generations are positive signed 32-bit values. */
 constexpr std::uint32_t kMaximumAuthoredSceneGeneration = 0x7FFFFFFFU;
 
-/** Encodes the fixed type-43 body with no dependencies, scalar input, or events. */
-[[nodiscard]] bool encode_authored_scene(std::uint32_t generation,
-                                         std::span<std::byte> output,
-                                         std::size_t& written) noexcept {
-    written = 0;
-    if (generation == 0 || generation > kMaximumAuthoredSceneGeneration
-        || output.size() < scene::kAuthoredSceneAuthByteCount) {
-        return false;
-    }
-    const std::uint32_t wireGeneration = generation + 0x80000000U;
-    output[0] = static_cast<std::byte>(wireGeneration >> 24U);
-    output[1] = static_cast<std::byte>(wireGeneration >> 16U);
-    output[2] = static_cast<std::byte>(wireGeneration >> 8U);
-    output[3] = static_cast<std::byte>(wireGeneration);
-    std::fill(output.begin() + 4, output.begin() + scene::kAuthoredSceneAuthByteCount, std::byte{});
-    written = scene::kAuthoredSceneAuthByteCount;
-    return true;
-}
-
 /** @return True when both values name the same full ClientRef slot. */
 [[nodiscard]] bool same_target(const ScriptableTarget& left,
                                const ScriptableTarget& right) noexcept {
@@ -245,6 +226,26 @@ valid_state_local_group(const ScriptableTarget& target,
     return true;
 }
 
+/** A sequence needs the current client's delivered, enabled squad binding. */
+[[nodiscard]] const PendingScriptableOverride*
+retained_sequence_combatant(const Instance& instance, const ScriptableRequest& request) noexcept {
+    for (const auto& retained : instance.scriptableAuthEstate) {
+        if (!same_client_ref(retained.target, request.target)
+            || retained.expectedActivityClientGeneration != request.expectedActivityClientGeneration
+            || retained.byteCount > retained.body.size()) {
+            continue;
+        }
+        auth::Type2ProgramLayout layout{};
+        return auth::inspect_type2_program(
+                   std::span(retained.body).first(retained.byteCount), retained.bitCount, layout)
+                       && layout.enabled && (layout.bindingWire == 2 || layout.bindingWire == 4)
+                       && layout.generation < squad::kMaximumGeneration
+                   ? &retained
+                   : nullptr;
+    }
+    return nullptr;
+}
+
 /** Queues one validated scriptable request in the shared ordered control lane. */
 [[nodiscard]] bool enqueue_request(ScriptableRequest request,
                                    const ScriptableOutputReservation* reservation) noexcept {
@@ -267,7 +268,9 @@ valid_state_local_group(const ScriptableTarget& target,
         && instance->view.scriptableRevision + 1 == reservation->revision;
     const bool burst = request.burstMember && request.expectedRevision != 0
                        && tail_eligible(request.kind) && instance != nullptr;
-    if ((!burst && has_queued_control(request.binding))
+    if ((request.kind == ScriptableOverrideKind::combatantSequence
+         && (instance == nullptr || retained_sequence_combatant(*instance, request) == nullptr))
+        || (!burst && has_queued_control(request.binding))
         || (!burst && instance != nullptr && instance->view.outputPending)
         || (!burst && reservation != nullptr && !ownsReservation)
         || (!burst && reservation == nullptr && instance != nullptr
@@ -425,6 +428,22 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
             encoded = false;
         }
         pending.generation = revision;
+    } else if (encoded && request.kind == ScriptableOverrideKind::combatantSequence) {
+        const auto* const retained = retained_sequence_combatant(*instance, request);
+        std::size_t bits = 0;
+        std::uint32_t generation = 0;
+        encoded =
+            retained != nullptr
+            && auth::replace_type2_sequence(std::span(retained->body).first(retained->byteCount),
+                                            retained->bitCount,
+                                            request.sequenceHash,
+                                            candidate.type2AtomGeneration,
+                                            pending.body,
+                                            written,
+                                            bits,
+                                            generation);
+        pending.bitCount = static_cast<std::uint16_t>(bits);
+        pending.generation = generation;
     } else if (encoded && request.kind == ScriptableOverrideKind::object) {
         pending.bitCount = static_cast<std::uint16_t>(auth::kType4BitCount);
         std::int32_t generation = 0;
@@ -504,11 +523,37 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
                   && auth::encode_type38({generation}, candidate.type38, pending.body, written);
         pending.generation = static_cast<std::uint64_t>(generation);
     } else if (encoded && request.kind == ScriptableOverrideKind::authoredScene) {
-        pending.bitCount = scene::kAuthoredSceneAuthBitCount;
+        std::size_t bits = 0;
         std::uint32_t generation = 0;
         encoded = next_authored_scene_generation(candidate.authoredSceneGeneration, generation)
-                  && encode_authored_scene(generation, pending.body, written);
+                  && scene::encode_authored_scene_auth(
+                      generation, request.sceneDependencies, pending.body, written, bits);
+        pending.bitCount = static_cast<std::uint16_t>(bits);
         pending.generation = generation;
+    } else if (encoded
+               && (request.kind == ScriptableOverrideKind::authoredSceneEvent
+                   || request.kind == ScriptableOverrideKind::authoredSceneStop)) {
+        encoded = false;
+        for (const auto& retained : instance->scriptableAuthEstate) {
+            if (!same_client_ref(retained.target, request.target)) {
+                continue;
+            }
+            std::size_t bits = 0;
+            std::uint32_t generation = 0;
+            encoded = scene::update_authored_scene_auth(
+                          std::span(retained.body).first(retained.byteCount),
+                          retained.bitCount,
+                          request.sceneEventKey,
+                          request.kind == ScriptableOverrideKind::authoredSceneStop,
+                          pending.body,
+                          written,
+                          bits,
+                          generation)
+                      && generation == candidate.authoredSceneGeneration;
+            pending.bitCount = static_cast<std::uint16_t>(bits);
+            pending.generation = generation;
+            break;
+        }
     } else if (encoded && request.kind == ScriptableOverrideKind::dialogue) {
         pending.bitCount = static_cast<std::uint16_t>(auth::kType53BitCount);
         pending.dialogueCue = request.dialogueCue;

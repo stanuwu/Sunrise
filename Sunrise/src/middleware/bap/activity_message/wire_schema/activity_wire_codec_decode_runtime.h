@@ -345,7 +345,7 @@ private:
         return RuntimeWalkStatus::complete;
     }
 
-    /** Type 13 preserves raw floats or cell-profile quantized codes without a float round trip. */
+    /** Types 13 and 39 share raw floats and cell-profile quantized codes. */
     [[nodiscard]] RuntimeWalkStatus walk_vector3(const runtime::SchemaView& owner,
                                                  const runtime::FieldView& field,
                                                  std::uint32_t occurrence) noexcept {
@@ -581,6 +581,13 @@ private:
         if (primary != RuntimeWalkStatus::complete) {
             return primary;
         }
+        return walk_reference_value(owner, field, occurrence);
+    }
+
+    /** Types 27 and 43 share a nullable pair of tags followed by a sized index. */
+    [[nodiscard]] RuntimeWalkStatus walk_reference_value(const runtime::SchemaView& owner,
+                                                         const runtime::FieldView& field,
+                                                         std::uint32_t occurrence) noexcept {
         const std::uint32_t at = static_cast<std::uint32_t>(reader_.position());
         std::uint64_t valuePresent = 0;
         if (!reader_.read(1, valuePresent)) {
@@ -631,7 +638,7 @@ private:
         if (resolver_.canonicalType != nullptr) {
             field.typeCode = resolver_.canonicalType(resolver_.context, field.typeCode);
         }
-        if (field.typeCode == 13) {
+        if (field.typeCode == 13 || field.typeCode == 39) {
             return walk_vector3(owner, field, occurrence);
         }
         if (field.typeCode == 16) {
@@ -758,6 +765,9 @@ private:
         if (field.typeCode == 26) {
             return walk_nullable160(owner, field, occurrence);
         }
+        if (field.typeCode == 27) {
+            return walk_reference_value(owner, field, occurrence);
+        }
         if (field.typeCode == 43) {
             return walk_reference_value_variant(owner, field, occurrence);
         }
@@ -848,8 +858,9 @@ private:
         const bool custom = field.typeCode == 13 || field.typeCode == 14 || field.typeCode == 15
                             || field.typeCode == 16 || field.typeCode == 22 || field.typeCode == 19
                             || field.typeCode == 24 || field.typeCode == 25 || field.typeCode == 26
-                            || field.typeCode == 28 || field.typeCode == 40 || field.typeCode == 42
-                            || field.typeCode == 43 || field.typeCode == 44 || field.typeCode == 45;
+                            || field.typeCode == 27 || field.typeCode == 28 || field.typeCode == 39
+                            || field.typeCode == 40 || field.typeCode == 42 || field.typeCode == 43
+                            || field.typeCode == 44 || field.typeCode == 45;
         const bool raw64 = field.typeCode == 35;
         const bool zeroBit = resolver_.isZeroBitType != nullptr
                              && resolver_.isZeroBitType(resolver_.context, field.typeCode);

@@ -206,6 +206,9 @@ lua_source(const state::activity_sdk::identity::Expected& identity,
             storage.entityTypeDefinitions,
             storage.sobjectRsatFieldBindings,
             storage.actorStateNames,
+            storage.actorSequenceTables,
+            storage.actorSequenceEntries,
+            storage.actorSequenceBindings,
             worldSources};
 }
 

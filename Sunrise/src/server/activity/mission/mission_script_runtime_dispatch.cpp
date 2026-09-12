@@ -599,6 +599,32 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         }
         return;
     }
+    case lua_vm::IntentKind::playActorSequence: {
+        host::ScriptableOutputReservation reservation{};
+        if (!reserve_delivery(instance, reservation)) {
+            if (instance.programStatus == ProgramStatus::loaded) {
+                refuse_delivery(instance,
+                                "actor_sequence_refused",
+                                "host_reservation_unavailable",
+                                host::EffectOutcome::refused);
+            }
+            return;
+        }
+        const devices::Status status =
+            intent.firstRow == intent.sequenceOwner.slotRow
+                ? devices::play_combatant_sequence_reserved(
+                      instance.view, intent.sequenceOwner, intent.secondRow, reservation)
+                : devices::Status::invalidSlot;
+        if (status == devices::Status::queued) {
+            await_host_commit(instance, now, "actor_sequence_enqueued");
+        } else if (abandon_reserved_delivery(instance, reservation)) {
+            refuse_delivery(instance,
+                            "actor_sequence_refused",
+                            devices::status_name(status),
+                            host::EffectOutcome::refused);
+        }
+        return;
+    }
     case lua_vm::IntentKind::playPerformance: {
         host::ScriptableOutputReservation reservation{};
         if (!reserve_delivery(instance, reservation)) {
@@ -755,6 +781,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         }
         return;
     }
+    case lua_vm::IntentKind::stopAuthoredScene:
+    case lua_vm::IntentKind::signalAuthoredScene:
     case lua_vm::IntentKind::activateAuthoredScene: {
         host::ScriptableOutputReservation reservation{};
         if (!reserve_delivery(instance, reservation)) {
@@ -767,7 +795,12 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             return;
         }
         const scenes::SceneStatus status = scenes::activate_authored_scene_reserved(
-            instance.view, intent.firstRow, intent.secondRow, reservation);
+            instance.view,
+            intent.firstRow,
+            intent.secondRow,
+            reservation,
+            intent.sceneEventKey,
+            intent.kind == lua_vm::IntentKind::stopAuthoredScene);
         if (status == scenes::SceneStatus::queued) {
             await_host_commit(instance, now, "scene_enqueued");
         } else if (!abandon_reserved_delivery(instance, reservation)) {

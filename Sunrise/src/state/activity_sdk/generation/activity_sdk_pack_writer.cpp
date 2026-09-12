@@ -64,6 +64,9 @@ constexpr std::array<std::uint32_t, format::kSectionCount> kSectionStrides{
     sizeof(format::SobjectRsatFieldBinding),
     sizeof(format::RuntimeTypeDefinition),
     sizeof(format::ActorStateName),
+    sizeof(format::ActorSequenceTable),
+    sizeof(format::ActorSequenceEntry),
+    sizeof(format::ActorSequenceBinding),
 };
 /** Writer-owned siblings use the cleanup service's final.process.thread.sequence.tmp shape. */
 constexpr std::wstring_view kTemporarySuffix = L".%08lX.%08lX.%08lX.tmp";
@@ -168,6 +171,9 @@ raw_sections(const Tables& tables) noexcept {
         rows(tables.sobjectRsatFieldBindings),
         rows(tables.runtimeTypeDefinitions),
         rows(tables.actorStateNames),
+        rows(tables.actorSequenceTables),
+        rows(tables.actorSequenceEntries),
+        rows(tables.actorSequenceBindings),
     };
 }
 

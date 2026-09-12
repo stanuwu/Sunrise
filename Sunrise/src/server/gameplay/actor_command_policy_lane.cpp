@@ -9,6 +9,7 @@
 #include "../../middleware/gameplay/external/composite_entity_codec.h"
 #include "../../middleware/gameplay/external/simulation_event_runtime_codec.h"
 #include "../../state/activity_sdk/runtime.h"
+#include "../activity/mission/mission_script_runtime.h"
 #include "actor_command_policy.h"
 #include "actor_command_policy_internal.h"
 #include "actor_command_policy_session.h"
@@ -159,7 +160,14 @@ struct SquadClientRefLayout final {
         });
     if ((record.flags & external::entityRemove) != 0) {
         if (row != session.squads.end()) {
+            const auto prior = *row;
             *row = {};
+            for (std::size_t index = 0; index < prior.actorCount; ++index) {
+                std::uint32_t actorClass = format::kAbsentIndex;
+                if (!selected_entity_class(session, prior.actors[index], actorClass)) {
+                    remove_target_state(session, prior.actors[index]);
+                }
+            }
         }
         return true;
     }
@@ -186,6 +194,11 @@ struct SquadClientRefLayout final {
         }
     }
     const SquadEntityRow prior = *row;
+    std::array<bool, kSquadActorCapacity> priorSelected{};
+    for (std::size_t index = 0; index < candidate.actorCount; ++index) {
+        std::uint32_t actorClass = format::kAbsentIndex;
+        priorSelected[index] = selected_entity_class(session, candidate.actors[index], actorClass);
+    }
     *row = candidate;
     const bool selected = session.policyActive && selected_squad(session, candidate);
     report(core::log::Level::debug,
@@ -198,13 +211,20 @@ struct SquadClientRefLayout final {
            selected ? 1U : 0U,
            static_cast<unsigned>(record.flags));
     if (!selected) {
+        for (std::size_t index = 0; index < prior.actorCount; ++index) {
+            std::uint32_t actorClass = format::kAbsentIndex;
+            if (!selected_entity_class(session, prior.actors[index], actorClass)) {
+                remove_target_state(session, prior.actors[index]);
+            }
+        }
         return true;
     }
     std::array<external::EntityToken, kSquadActorCapacity> queued{};
     std::size_t queuedCount = 0;
     for (std::size_t index = 0; index < candidate.actorCount; ++index) {
         std::uint32_t actorClass = format::kAbsentIndex;
-        if (!selected_entity_class(session, candidate.actors[index], actorClass)) {
+        if (priorSelected[index]
+            || !selected_entity_class(session, candidate.actors[index], actorClass)) {
             continue;
         }
         if (!queue_command(session,
@@ -226,6 +246,12 @@ struct SquadClientRefLayout final {
             return false;
         }
         queued[queuedCount++] = candidate.actors[index];
+    }
+    for (std::size_t index = 0; index < prior.actorCount; ++index) {
+        std::uint32_t actorClass = format::kAbsentIndex;
+        if (!selected_entity_class(session, prior.actors[index], actorClass)) {
+            remove_target_state(session, prior.actors[index]);
+        }
     }
     return true;
 }
@@ -296,22 +322,50 @@ static bool accept_entity_record(std::uint64_t groupSessionId,
     const format::ActorClass* const priorClassData = session->actors.classData;
     const std::size_t priorClassCount = session->actors.classCount;
     const external::ActorEntitySlot priorSlot = session->actors.slots[record.token.slot];
+    const external::EntityToken priorToken{record.token.slot, priorSlot.incarnation};
+    std::uint32_t priorClass = format::kAbsentIndex;
+    const bool priorSelected =
+        session->policyActive && selected_entity_class(*session, priorToken, priorClass);
+    const auto priorSquad =
+        selected_entity_squad(*session, priorToken, session->selectedSquadCount);
     const external::ActorEntityApplyResult result =
         external::apply_actor_entity_record(session->actors, catalog, record);
     bool policyCommandQueued = false;
+    const OutputRow* queuedOutput = nullptr;
     bool accepted = result != external::ActorEntityApplyResult::invalid
                     && result != external::ActorEntityApplyResult::staleToken;
-    if (result == external::ActorEntityApplyResult::actorRemoved) {
-        remove_target_state(*session, record.token);
-    } else if (result == external::ActorEntityApplyResult::actorCreated && session->policyActive) {
-        std::uint32_t actorClassIndex = format::kAbsentIndex;
-        if (selected_entity_class(*session, record.token, actorClassIndex)) {
+    std::uint32_t actorClassIndex = format::kAbsentIndex;
+    const bool selected = accepted && session->policyActive
+                          && selected_entity_class(*session, record.token, actorClassIndex);
+    const auto selectedSquad =
+        selected_entity_squad(*session, record.token, session->selectedSquadCount);
+    if (selected
+        && (result == external::ActorEntityApplyResult::actorCreated || !priorSelected
+            || selectedSquad != priorSquad)) {
+        const auto empty = std::find_if(
+            session->outputs.begin(), session->outputs.end(), [](const OutputRow& output) {
+                return output.state == OutputState::empty;
+            });
+        if (empty != session->outputs.end()) {
+            queuedOutput = &*empty;
             policyCommandQueued = queue_command(*session,
                                                 actorClassIndex,
                                                 record.token,
                                                 session->policyValue,
                                                 OutputPurpose::policyCommand);
-            accepted = policyCommandQueued;
+        }
+        accepted = policyCommandQueued;
+    }
+    if (accepted) {
+        const bool replaced = result == external::ActorEntityApplyResult::actorCreated
+                              || result == external::ActorEntityApplyResult::nonActor
+                              || result == external::ActorEntityApplyResult::actorRemoved;
+        if (priorSlot.occupied && (replaced || (priorSelected && !selected))) {
+            remove_target_state(*session, priorToken, queuedOutput);
+        }
+        if (result == external::ActorEntityApplyResult::actorRemoved
+            || (!selected && session->actors.slots[record.token.slot].authoredSource.known)) {
+            remove_target_state(*session, record.token, queuedOutput);
         }
     }
     // The projection is all-or-nothing, so a refused command restores the whole slot.
@@ -335,11 +389,15 @@ static bool accept_entity_record(std::uint64_t groupSessionId,
 /** Policy projection visits every record after transport acceptance. */
 bool accept_entity_batch(std::uint64_t groupSessionId,
                          const external::EntityBatch& batch) noexcept {
-    if (groupSessionId == 0) {
+    if (groupSessionId == 0
+        || external::entity_record_count(batch) > external::kEntityBatchCapacity) {
         return false;
     }
     bool accepted = true;
     for (std::size_t index = 0; index < external::entity_record_count(batch); ++index) {
+        if (batch.ignoredRecordMask.test(index)) {
+            continue;
+        }
         accepted = accept_entity_record(groupSessionId, external::entity_record_at(batch, index))
                    && accepted;
     }
@@ -373,21 +431,65 @@ bool accept_lane0(std::uint64_t groupSessionId,
         return false;
     }
     bool accepted = true;
+    std::uint32_t eventTypes = 0;
     std::array<std::uint32_t, kReplayCapacity> createdReplays{};
     std::size_t createdReplayCount = 0;
+    std::array<std::size_t, kReplayCapacity> provokedSquads{};
+    std::size_t provokedCount = 0;
+    std::array<SelectedSquad, kReplayCapacity> notifications{};
+    std::array<OutputRow*, kOutputCapacity> stagedOutputs{};
+    std::size_t stagedCount = 0;
+    const auto binding = session->binding;
+    const auto sourceGeneration = session->activityClientGeneration;
+    const auto restore =
+        [&](std::uint32_t actorClass, external::EntityToken actor, std::uint32_t replayIndex) {
+            auto empty =
+                std::find_if(session->outputs.begin(), session->outputs.end(), [](const auto& row) {
+                    return row.state == OutputState::empty;
+                });
+            if (empty == session->outputs.end() || actorClass >= catalog.profiles.size()
+                || stagedCount == stagedOutputs.size()
+                || !queue_command(*session,
+                                  actorClass,
+                                  actor,
+                                  catalog.profiles[actorClass].defaultFaction,
+                                  OutputPurpose::restoreCommand,
+                                  replayIndex)) {
+                return false;
+            }
+            stagedOutputs[stagedCount++] = &*empty;
+            return true;
+        };
     for (std::size_t index = 0; index < batch.count; ++index) {
         external::DecodedRuntimeEvent event{};
         if (!internal::decode_event(catalog, batch, batch.records[index], event)) {
             accepted = false;
             break;
         }
+        if (batch.records[index].eventType <= external::kMaximumSimulationEventType) {
+            eventTypes |= std::uint32_t{1} << batch.records[index].eventType;
+        }
         if (event.identity.eventIndex != session->damageEventIndex) {
             continue;
         }
         external::EntityToken target{};
         std::uint32_t actorClassIndex = format::kAbsentIndex;
-        if (!internal::damage_target(event, target)
-            || !selected_entity_class(*session, target, actorClassIndex)) {
+        const bool targetPresent = internal::damage_target(event, target);
+        if (!targetPresent || !selected_entity_class(*session, target, actorClassIndex)) {
+            report(
+                core::log::Level::debug,
+                "ev=actor_policy stage=damage result=unselected target=%u slot=%u incarnation=%u",
+                targetPresent ? 1U : 0U,
+                static_cast<unsigned>(target.slot),
+                static_cast<unsigned>(target.incarnation));
+            continue;
+        }
+        const auto squad = selected_entity_squad(*session, target, session->selectedSquadCount);
+        if (squad >= session->selectedSquadCount || session->selectedSquads[squad].provoked
+            || std::find(provokedSquads.begin(),
+                         provokedSquads.begin() + static_cast<std::ptrdiff_t>(provokedCount),
+                         squad)
+                   != provokedSquads.begin() + static_cast<std::ptrdiff_t>(provokedCount)) {
             continue;
         }
         // One replay per target. A second hit on the same actor restores the same faction.
@@ -411,35 +513,75 @@ bool accept_lane0(std::uint64_t groupSessionId,
         const std::uint32_t replayIndex =
             static_cast<std::uint32_t>(emptyReplay - session->replays.begin());
         createdReplays[createdReplayCount++] = replayIndex;
-        const std::int32_t defaultFaction = catalog.profiles[actorClassIndex].defaultFaction;
-        if (!queue_command(*session,
-                           actorClassIndex,
-                           target,
-                           defaultFaction,
-                           OutputPurpose::restoreCommand,
-                           replayIndex)) {
+        if (!restore(actorClassIndex, target, replayIndex)) {
             *emptyReplay = {};
             accepted = false;
             break;
         }
+        for (std::size_t slot = 0; slot < session->actors.slots.size(); ++slot) {
+            const auto& actor = session->actors.slots[slot];
+            const external::EntityToken member{static_cast<std::uint16_t>(slot), actor.incarnation};
+            std::uint32_t memberClass = format::kAbsentIndex;
+            if (!actor.occupied || same_token(member, target)
+                || selected_entity_squad(*session, member, session->selectedSquadCount) != squad
+                || !selected_entity_class(*session, member, memberClass)) {
+                continue;
+            }
+            if (!restore(memberClass, member, format::kAbsentIndex)) {
+                accepted = false;
+                break;
+            }
+        }
+        if (!accepted) {
+            break;
+        }
+        provokedSquads[provokedCount++] = squad;
     }
     // The lane is accepted whole, so a refused event drops every replay this call created.
     if (!accepted) {
-        for (OutputRow& row : session->outputs) {
-            if (row.purpose != OutputPurpose::restoreCommand) {
-                continue;
-            }
-            const auto end =
-                createdReplays.begin() + static_cast<std::ptrdiff_t>(createdReplayCount);
-            if (std::find(createdReplays.begin(), end, row.replayIndex) != end) {
-                row = {};
-            }
+        for (std::size_t index = 0; index < stagedCount; ++index) {
+            *stagedOutputs[index] = {};
         }
         for (std::size_t index = 0; index < createdReplayCount; ++index) {
             session->replays[createdReplays[index]] = {};
         }
+    } else {
+        for (std::size_t index = 0; index < provokedCount; ++index) {
+            auto& squad = session->selectedSquads[provokedSquads[index]];
+            squad.provoked = true;
+            notifications[index] = squad;
+            for (auto& output : session->outputs) {
+                if (output.state != OutputState::empty
+                    && output.purpose == OutputPurpose::policyCommand
+                    && selected_entity_squad(*session, output.target, session->selectedSquadCount)
+                           == provokedSquads[index]) {
+                    output = {};
+                }
+            }
+        }
     }
     ReleaseSRWLockExclusive(&g_lock);
+    if (accepted) {
+        if (batch.count != 0) {
+            report(core::log::Level::debug,
+                   "ev=actor_policy stage=lane0 result=accepted events=%u types=0x%08X",
+                   static_cast<unsigned>(batch.count),
+                   eventTypes);
+        }
+        for (std::size_t index = 0; index < provokedCount; ++index) {
+            const auto& squad = notifications[index];
+            server::activity::mission::report_squad_provoked(
+                binding,
+                sourceGeneration,
+                squad.registryKey,
+                static_cast<std::uint16_t>(squad.slotIndex));
+            report(core::log::Level::info,
+                   "ev=actor_policy stage=provoked key=0x%08X type=%u index=%u",
+                   squad.registryKey,
+                   static_cast<unsigned>(squad.slotType),
+                   squad.slotIndex);
+        }
+    }
     return accepted;
 }
 

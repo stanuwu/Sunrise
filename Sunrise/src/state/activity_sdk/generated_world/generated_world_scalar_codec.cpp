@@ -173,15 +173,16 @@ void decode_scalars(const format::Scalars& value, catalog::Snapshot& snapshot) n
         container.complete != 0,
     };
     const auto& type23 = value.type23PlacementDiagnostics;
+    // This disk format does not store the scenario fallback count.
     snapshot.type23PlacementDiagnostics = {
-        type23.unreadIdentifiers,
-        type23.droppedLinks,
-        type23.droppedCandidates,
-        type23.zeroIdentityMatches,
-        type23.multipleIdentityMatches,
-        type23.zeroActiveCandidates,
-        type23.multipleActiveCandidates,
-        type23.complete != 0,
+        .unreadIdentifiers = type23.unreadIdentifiers,
+        .droppedLinks = type23.droppedLinks,
+        .droppedCandidates = type23.droppedCandidates,
+        .zeroIdentityMatches = type23.zeroIdentityMatches,
+        .multipleIdentityMatches = type23.multipleIdentityMatches,
+        .zeroActiveCandidates = type23.zeroActiveCandidates,
+        .multipleActiveCandidates = type23.multipleActiveCandidates,
+        .complete = type23.complete != 0,
     };
     const auto& embedded = value.embeddedPlacementDiagnostics;
     snapshot.embeddedPlacementDiagnostics = {

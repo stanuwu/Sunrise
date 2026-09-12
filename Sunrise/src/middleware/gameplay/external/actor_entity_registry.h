@@ -7,16 +7,24 @@
 #include <utility>
 
 #include "../../../state/activity_sdk/runtime.h"
+#include "../../../state/build_data/scriptables/definition.h"
 #include "external_entity_codec.h"
-#include "sobject_payload_codec.h"
 
 namespace sunrise::middleware::gameplay::external {
+
+/** Resolves only a Type 2 descriptor's exact authored squad reference. */
+[[nodiscard]] bool resolve_combatant_squad_source(
+    const state::build_data::scriptables::Snapshot& world,
+    const state::gameplay::entity_identity::ActorSourceReference& source,
+    state::gameplay::entity_identity::ActorSourceReference& output) noexcept;
 
 /** One registry slot mirrors the 13-bit simulation entity slot space. */
 struct ActorEntitySlot final {
     std::uint32_t actorClassIndex{state::activity_sdk::format::kAbsentIndex};
     std::uint32_t rsatTag{};
+    state::gameplay::entity_identity::ActorSourceReference authoredSource{};
     std::uint8_t incarnation{};
+    std::uint8_t allocationSequence{};
     bool occupied{};
 };
 
@@ -53,16 +61,20 @@ struct ActorEntityRegistry final {
 enum class ActorEntityApplyResult : std::uint8_t {
     actorCreated,
     actorRemoved,
+    membershipChanged,
     nonActor,
     unchanged,
     staleToken,
     invalid,
 };
 
-/** Applies one decoded channel-2 record without assigning authored-member identity. */
+/** Applies only membership carried by the decoded actor-source component. */
 [[nodiscard]] ActorEntityApplyResult apply_actor_entity_record(ActorEntityRegistry& registry,
                                                                const ActorEntityCatalog& catalog,
                                                                const EntityRecord& record) noexcept;
+
+/** Clears the registry in place without a full-table stack temporary. */
+void reset_actor_entity_registry(ActorEntityRegistry& registry) noexcept;
 
 /** Copies current entity tokens for one SDK actor class into caller-owned storage. */
 [[nodiscard]] bool actor_entity_targets(const ActorEntityRegistry& registry,

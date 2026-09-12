@@ -728,6 +728,7 @@
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_activities.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_artifacts.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_contract.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_lua_actor_sequences.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_catalog_contract.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_manifest_contract.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_world_contract.cpp" />
@@ -796,6 +797,7 @@
     <ClCompile Include="src\server\runtime\server_runtime.cpp" />
     <ClCompile Include="src\server\activity\activity_sdk_scriptable_route.cpp" />
     <ClCompile Include="src\server\activity\activity_sdk_device_runtime.cpp" />
+    <ClCompile Include="src\server\activity\activity_sdk_actor_sequences.cpp" />
     <ClCompile Include="src\server\activity\activity_sdk_lifetime_runtime.cpp" />
     <ClCompile Include="src\server\activity\activity_sdk_squad_runtime.cpp" />
     <ClCompile Include="src\server\activity\activity_sdk_mission_runtime.cpp" />
@@ -815,6 +817,7 @@
     <ClCompile Include="src\server\activity\mission\mission_script_lua_message_api.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_lua_peer_api.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_lua_slot_api.cpp" />
+    <ClCompile Include="src\server\activity\mission\mission_script_lua_actor_sequence_api.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_lua_value_api.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_lua_enum_api.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_lua_key_api.cpp" />
@@ -828,11 +831,14 @@
     <ClCompile Include="src\server\activity\mission\mission_script_message_catalog.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_edges.cpp" />
+    <ClCompile Include="src\server\activity\mission\mission_script_runtime_combatant_damage.cpp" />
+    <ClCompile Include="src\server\activity\mission\mission_script_runtime_device.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_cinematic.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_player_trigger.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_delivery.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_dispatch.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_sdk_bridge.cpp" />
+    <ClCompile Include="src\server\activity\mission\mission_script_actor_sequence_bridge.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_catalog_sdk_bridge.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_manifest_sdk_bridge.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_world_sdk_bridge.cpp" />
@@ -861,6 +867,7 @@
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_view.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_mission_view.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_state_pages.cpp" />
+    <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_actor_sequences.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_squad_view.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_authored_anchors.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_anchor_render_controls.cpp" />
@@ -1134,6 +1141,7 @@
     <ClCompile Include="src\middleware\gameplay\external\simulation_event_codec.cpp" />
     <ClCompile Include="src\middleware\gameplay\external\actor_command_runtime_codec.cpp" />
     <ClCompile Include="src\middleware\gameplay\external\actor_entity_registry.cpp" />
+    <ClCompile Include="src\middleware\gameplay\external\actor_entity_squad_source.cpp" />
     <ClCompile Include="src\middleware\gameplay\external\composite_entity_codec.cpp" />
     <ClCompile Include="src\middleware\gameplay\external\simulation_event_runtime_codec.cpp" />
     <ClCompile Include="src\server\gameplay\gameplay_log.cpp" />
@@ -2069,6 +2077,8 @@
     <ClInclude Include="src\server\activity\mission\mission_script_object_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_player_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_squad_sense.h" />
+    <ClInclude Include="src\server\activity\mission\mission_script_combatant_damage_sense.h" />
+    <ClInclude Include="src\server\activity\mission\mission_script_device_sense.h" />
     <ClInclude Include="src\server\activity\activity_sdk_behavior_scope.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\mission_seed_world_change.h" />
     <ClInclude Include="src\server\bap\encrypted\queuez\queuez_reward_staging.h" />
@@ -2154,6 +2164,10 @@
     <ClInclude Include="src\state\account\inventory\seen_state.h" />
     <None Include="resources\database\account_settings_schema.sql" />
     <None Include="resources\database\account_settings_defaults.sql" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\state\activity_sdk\actor_sequences.h" />
+    <ClInclude Include="src\client\content\activity\activity_sdk_actor_sequences.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

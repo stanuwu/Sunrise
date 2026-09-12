@@ -76,6 +76,23 @@ enum class IntentKind : std::uint8_t {
     actorCommand,
     playPerformance,
     restartCheckpoint,
+    signalAuthoredScene,
+    stopAuthoredScene,
+    playActorSequence,
+};
+
+/** Actor sequence values belong to one combatant and one SDK/client generation. */
+struct ActorSequenceOwner final {
+    std::array<std::byte, 32> sdkBuildSha256{};
+    std::array<std::byte, 32> sdkPayloadSha256{};
+    std::uint64_t activityClientGeneration{};
+    std::uint64_t sessionId{};
+    std::uint64_t sessionCreatedRevision{};
+    std::uint32_t activityRow{};
+    std::uint32_t scenarioRow{};
+    std::uint32_t slotRow{};
+    std::uint32_t actorClassRow{};
+    bool operator==(const ActorSequenceOwner&) const = default;
 };
 
 /** One object a mission omits, named the way a roster group is: its tag and its registry key. */
@@ -86,6 +103,7 @@ struct MissionSeedOmission final {
 
 /** Typed action with RAII-owned body bytes and no packet or native pointers. */
 struct TypedIntent final {
+    ActorSequenceOwner sequenceOwner{};
     std::array<std::int32_t, kSquadMemberCapacity> squadCounts{};
     /** Objects the mission leaves out of the state it selects. */
     std::array<MissionSeedOmission, kMissionSeedOmitCapacity> seedOmissions{};
@@ -101,6 +119,7 @@ struct TypedIntent final {
     IntentKind kind{IntentKind::placeSquad};
     std::uint32_t firstRow{};
     std::uint32_t secondRow{};
+    std::uint32_t sceneEventKey{};
     std::uint32_t objectTag{};
     std::uint32_t registryKey{};
     std::uint32_t authSchema{};

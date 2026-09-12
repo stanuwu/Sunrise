@@ -29,6 +29,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "triggerExited";
     case host::EventKind::squadState:
         return "squadState";
+    case host::EventKind::squadProvoked:
+        return "squadProvoked";
     case host::EventKind::entitySpawned:
         return "entitySpawned";
     case host::EventKind::entityDied:
@@ -57,6 +59,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "objectInteracted";
     case host::EventKind::damageState:
         return "damageState";
+    case host::EventKind::deviceState:
+        return "deviceState";
     case host::EventKind::objectState:
         return "objectState";
     case host::EventKind::ghostLinkState:
@@ -136,6 +140,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return kTriggerExitedEventMetatable;
     case host::EventKind::squadState:
         return kSquadStateEventMetatable;
+    case host::EventKind::squadProvoked:
+        return kSquadProvokedEventMetatable;
     case host::EventKind::entitySpawned:
         return kEntitySpawnedEventMetatable;
     case host::EventKind::entityDied:
@@ -164,10 +170,11 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
     case host::EventKind::actorPathState:
         return kActorPathEventMetatable;
     case host::EventKind::objectInteracted:
-        return kObjectInteractionEventMetatable;
     case host::EventKind::damageState:
     case host::EventKind::objectState:
         return kObjectInteractionEventMetatable;
+    case host::EventKind::deviceState:
+        return kDeviceStateEventMetatable;
     case host::EventKind::ghostLinkState:
         return kGhostLinkEventMetatable;
     }

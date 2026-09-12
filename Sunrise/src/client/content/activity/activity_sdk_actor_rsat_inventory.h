@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "../../../middleware/content/packages/reader/reader.h"
@@ -195,6 +196,21 @@ struct EntityTypeDefinition final {
     std::uint32_t flags{};
 };
 
+/** One complete installed definition selected by the sequence-table class scan. */
+struct SequenceTableSource final {
+    std::uint32_t definitionTag{};
+    std::uint32_t definitionClass{};
+};
+
+/** Strings remain owned until the immutable pack string table is linked. */
+struct SequenceEntry final {
+    state::activity_sdk::format::ActorSequenceEntry row{};
+    std::string id{};
+    std::string name{};
+    std::string symbol{};
+    std::string sourcePath{};
+};
+
 /** Complete native actor and RSAT inventory with unresolved string references. */
 struct Snapshot final {
     std::vector<ActorClass> actorClasses{};
@@ -214,6 +230,9 @@ struct Snapshot final {
     std::vector<SobjectRsatFieldBinding> sobjectRsatFieldBindings{};
     /** Sorted by actor class then authored ordinal; the group is always `state_machine`. */
     std::vector<ActorStateName> actorStateNames{};
+    std::vector<state::activity_sdk::format::ActorSequenceTable> sequenceTables{};
+    std::vector<SequenceEntry> sequenceEntries{};
+    std::vector<state::activity_sdk::format::ActorSequenceBinding> sequenceBindings{};
     bool complete{};
 };
 
@@ -238,13 +257,15 @@ using ReadTag = bool (*)(void* context,
                                    Snapshot& output) noexcept;
 
 /** Builds actor joins plus a complete caller-supplied installed RSAT tag set. */
-[[nodiscard]] bool build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
-                                             std::span<const std::uint32_t> rsatTags,
-                                             ReadTag readTag,
-                                             void* readContext,
-                                             CancelProbe cancel,
-                                             void* cancelContext,
-                                             Snapshot& output) noexcept;
+[[nodiscard]] bool
+build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
+                          std::span<const std::uint32_t> rsatTags,
+                          ReadTag readTag,
+                          void* readContext,
+                          CancelProbe cancel,
+                          void* cancelContext,
+                          Snapshot& output,
+                          std::span<const SequenceTableSource> sequenceTables = {}) noexcept;
 
 /** Builds a structurally complete installed inventory for an upstream exact actor tag set. */
 [[nodiscard]] bool build(const middleware::content::packages::reader::Source& source,

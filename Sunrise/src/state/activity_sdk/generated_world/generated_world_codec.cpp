@@ -113,16 +113,12 @@ private:
            && static_cast<std::size_t>(transferred) == size;
 }
 
-/** Loads one file after the public boundary has established exception handling. */
-[[nodiscard]] bool load_file(const wchar_t* path,
-                             std::uint32_t expectedScenarioTag,
-                             const Digest& expectedSourceFingerprint,
-                             catalog::Snapshot& snapshot,
-                             Digest& payloadSha256,
-                             LoadStatus& status) {
+/** Opens one shard for a bounded header read or complete load. */
+[[nodiscard]] HANDLE
+open_read(const wchar_t* path, std::uint32_t expectedScenarioTag, LoadStatus& status) noexcept {
     status = LoadStatus::invalid;
     if (path == nullptr || path[0] == L'\0' || expectedScenarioTag == 0) {
-        return false;
+        return INVALID_HANDLE_VALUE;
     }
     const HANDLE rawFile = CreateFileW(path,
                                        GENERIC_READ,
@@ -136,14 +132,28 @@ private:
         status = error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
                      ? LoadStatus::missing
                      : LoadStatus::invalid;
-        return false;
     }
-    FileHandle file(rawFile);
+    return rawFile;
+}
 
+/**
+ * Checks the file extent and every identity shared by header checks and full loads.
+ * @param file Read handle positioned at the file start.
+ * @param expectedScenarioTag Scenario required by the manifest.
+ * @param expectedSourceFingerprint Installed content identity.
+ * @param header Receives the validated header on success.
+ * @param status Receives the precise refusal on failure.
+ * @return True when the file can hold a current-format shard of that identity.
+ */
+[[nodiscard]] bool read_header(HANDLE file,
+                               std::uint32_t expectedScenarioTag,
+                               const Digest& expectedSourceFingerprint,
+                               format::Header& header,
+                               LoadStatus& status) noexcept {
+    status = LoadStatus::invalid;
     LARGE_INTEGER fileSize{};
-    format::Header header{};
-    bool complete = GetFileSizeEx(file.get(), &fileSize) != FALSE && fileSize.QuadPart >= 0
-                    && read_exact(file.get(), &header, sizeof header);
+    const bool complete = GetFileSizeEx(file, &fileSize) != FALSE && fileSize.QuadPart >= 0
+                          && read_exact(file, &header, sizeof header);
     if (!complete || header.magic != format::kMagic) {
         return false;
     }
@@ -162,10 +172,26 @@ private:
         status = LoadStatus::sourceMismatch;
         return false;
     }
+    return true;
+}
 
+/** Loads one file after the public boundary has established exception handling. */
+[[nodiscard]] bool load_file(const wchar_t* path,
+                             std::uint32_t expectedScenarioTag,
+                             const Digest& expectedSourceFingerprint,
+                             catalog::Snapshot& snapshot,
+                             Digest& payloadSha256,
+                             LoadStatus& status) {
+    FileHandle file(open_read(path, expectedScenarioTag, status));
+    format::Header header{};
+    if (file.get() == INVALID_HANDLE_VALUE
+        || !read_header(
+            file.get(), expectedScenarioTag, expectedSourceFingerprint, header, status)) {
+        return false;
+    }
     const std::size_t payloadSize = static_cast<std::size_t>(header.fileSize - header.headerSize);
     std::vector<std::byte> payload(payloadSize);
-    complete = read_exact(file.get(), payload.data(), payload.size());
+    bool complete = read_exact(file.get(), payload.data(), payload.size());
     complete = file.close() && complete;
     Digest digest{};
     if (!complete || !middleware::crypto::sha256::hash(std::span<const std::byte>(payload), digest)
@@ -311,6 +337,27 @@ bool write(const wchar_t* path,
     PreparedShard prepared{};
     return prepare(sourceFingerprint, snapshot, prepared)
            && publish(path, std::move(prepared), payloadSha256);
+}
+
+/**
+ * Checks the manifest-owned header before startup reuses a published estate.
+ * @param path Exact shard file.
+ * @param expectedScenarioTag Manifest scenario identity.
+ * @param expectedSourceFingerprint Installed content identity.
+ * @param expectedPayloadSha256 Digest declared by the authenticated manifest.
+ * @return True for a current header; full load still authenticates the payload.
+ */
+bool compatible_header(const wchar_t* path,
+                       std::uint32_t expectedScenarioTag,
+                       const Digest& expectedSourceFingerprint,
+                       const Digest& expectedPayloadSha256) noexcept {
+    LoadStatus status = LoadStatus::invalid;
+    FileHandle file(open_read(path, expectedScenarioTag, status));
+    format::Header header{};
+    return file.get() != INVALID_HANDLE_VALUE
+           && read_header(
+               file.get(), expectedScenarioTag, expectedSourceFingerprint, header, status)
+           && header.payloadSha256 == expectedPayloadSha256;
 }
 
 /** Loads and validates one scenario shard without partially replacing the caller's snapshot. */

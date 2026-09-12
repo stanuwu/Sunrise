@@ -622,8 +622,25 @@ void service() noexcept {
     }
     if (state::activity_sdk::status() == state::activity_sdk::Status::ready) {
         const state::activity_sdk::Snapshot loaded = state::activity_sdk::snapshot();
+        generated::Digest fingerprint{};
+        manifest::SdkIdentity identity{};
+        const bool hasIdentity =
+            loaded && loaded->sdk_build_sha256().size() == identity.buildSha256.size()
+            && loaded->payload_sha256().size() == identity.payloadSha256.size()
+            && state::content_manifest::visit_snapshot(&copy_fingerprint, &fingerprint);
+        if (hasIdentity) {
+            std::copy(loaded->sdk_build_sha256().begin(),
+                      loaded->sdk_build_sha256().end(),
+                      identity.buildSha256.begin());
+            std::copy(loaded->payload_sha256().begin(),
+                      loaded->payload_sha256().end(),
+                      identity.payloadSha256.begin());
+        }
         const bool current =
-            loaded && (!g_luaDeclarations || lua::is_current(g_sdkDirectory.c_str(), *loaded));
+            hasIdentity
+            && shard_store::compatible_catalog(
+                g_catalogPath.c_str(), g_scenarioDirectory, fingerprint, identity)
+            && (!g_luaDeclarations || lua::is_current(g_sdkDirectory.c_str(), *loaded));
         if (current) {
             g_started = true;
             publish_progress(state::activity_sdk::generation::Status::ready,

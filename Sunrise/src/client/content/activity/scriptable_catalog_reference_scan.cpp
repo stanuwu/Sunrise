@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
+#include "../../../state/activity_sdk/format.h"
 #include "../../../state/build_data/scenarios/definition.h"
 
 namespace sunrise::client::content::activity::scriptables::internal {
@@ -10,6 +12,8 @@ namespace {
 // Client references: the package class id and the fixed row stride.
 constexpr std::uint32_t kClientReferenceClass = 0x80809C42U;
 constexpr std::size_t kClientReferenceSize = 16;
+/** Native ClientRef uses the empty-name hash for an absent key. */
+constexpr std::uint32_t kAbsentClientReferenceKey = 0x811C9DC5U;
 
 /** Reads one bounded scalar without imposing alignment on package bytes. */
 template <typename T>
@@ -24,6 +28,48 @@ read_value(std::span<const std::byte> blob, std::size_t offset, T& value) noexce
 }
 
 } // namespace
+
+/**
+ * Reads the squad ClientRef owned by one exact Type 2 descriptor.
+ * @param blob Package config containing the descriptor.
+ * @param descriptor Validated slot descriptor.
+ * @param output Receives the exact source slot and squad target; cleared on failure.
+ * @return True when the descriptor and reference have the native shapes.
+ */
+bool read_type2_squad_reference(
+    std::span<const std::byte> blob,
+    const middleware::content::packages::tables::SlotDescriptor& descriptor,
+    RawReference& output) noexcept {
+    namespace auth = middleware::bap::activity_message::scriptable_auth;
+    namespace tables = middleware::content::packages::tables;
+    namespace format = state::activity_sdk::format;
+    output = {};
+    if (descriptor.slotType != auth::kType2SlotType
+        || descriptor.componentClass != auth::kType2ComponentClass
+        || descriptor.senseSchema != auth::kType2SenseSchema
+        || descriptor.authSchema != auth::kType2Schema
+        || descriptor.slotIndex > (std::numeric_limits<std::int16_t>::max)()) {
+        return false;
+    }
+    const std::size_t offset =
+        static_cast<std::size_t>(descriptor.descriptorOffset) + tables::kType2SquadReferenceOffset;
+    RawReference row{};
+    if (offset > (std::numeric_limits<std::uint32_t>::max)()
+        || !read_value(blob, offset, row.targetKey)
+        || !read_value(blob, offset + sizeof(row.targetKey), row.targetType)
+        || !read_value(
+            blob, offset + sizeof(row.targetKey) + sizeof(row.targetType), row.targetIndex)
+        || row.targetKey == 0 || row.targetKey == format::kAbsentIndex
+        || row.targetKey == kAbsentClientReferenceKey || row.targetType != format::kSquadSlotType
+        || row.targetIndex > (std::numeric_limits<std::int16_t>::max)()) {
+        return false;
+    }
+    row.configTag = descriptor.configTag;
+    row.offset = static_cast<std::uint32_t>(offset);
+    row.sourceIndex = descriptor.slotIndex;
+    output = row;
+    return true;
+}
 
 /** Retains aligned ClientRef records from one reached config blob. */
 void collect_typed_references(std::span<const std::byte> blob,

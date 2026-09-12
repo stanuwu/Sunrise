@@ -10,9 +10,7 @@
 #include "scriptable_auth_body.h"
 #include "squad_auth_body.h"
 
-// Type-1 squad Auth that assigns the squad to a native combat objective. Root .0 names the
-// objective, .13 carries the revision that invalidates its cost pass, .16 links a task group.
-// Counts, profile and spawn generation stay absent so the placement is untouched.
+// Objective updates preserve placement fields and may refresh player awareness once per revision.
 
 namespace sunrise::middleware::bap::activity_message::squad_objective {
 
@@ -21,9 +19,12 @@ namespace fields = auth_fields;
 inline constexpr std::uint32_t kSchema = squad_auth::kSchema;
 inline constexpr std::size_t kBits = 153;
 inline constexpr std::size_t kBytes = 20;
+/** Optional root .14 adds one 31-bit awareness revision. */
+inline constexpr std::size_t kMaximumBits = kBits + fields::kCounterWidth;
+inline constexpr std::size_t kMaximumBytes = (kMaximumBits + 7U) / 8U;
 /** Absent presence bits for fields .1 to .12. */
 inline constexpr std::uint8_t kAbsentMiddleFieldCount = 12;
-/** Root .15 is present and zero. Meaning unverified. */
+/** Root .15 carries the biased -1 sentinel; its role is unverified. */
 inline constexpr std::uint8_t kField15Width = 6;
 /** Root .16 task group: 5 bits with bias one, so -1 requests costs without a link. */
 inline constexpr std::uint8_t kTaskGroupWidth = 5;
@@ -44,15 +45,24 @@ struct Request final {
     std::uint16_t objectiveIndex{};
     std::int32_t taskGroup{kNoTaskGroup};
     bool reserved{};
+    bool refreshPlayerAwareness{};
 };
+
+[[nodiscard]] constexpr std::size_t bit_count(const Request& request) noexcept {
+    return request.refreshPlayerAwareness ? kMaximumBits : kBits;
+}
+
+[[nodiscard]] constexpr std::size_t byte_count(const Request& request) noexcept {
+    return (bit_count(request) + 7U) / 8U;
+}
 
 /**
  * Encodes the objective assignment.
- * @param output Exactly kBytes.
+ * @param output Exactly byte_count(request) bytes.
  * @return False on an out-of-range revision, index or task group.
  */
 [[nodiscard]] inline bool encode(const Request& request, std::span<std::byte> output) noexcept {
-    if (output.size() != kBytes || request.registryKey == 0 || request.revision == 0
+    if (output.size() != byte_count(request) || request.registryKey == 0 || request.revision == 0
         || request.revision > fields::kMaximumCounter
         || request.objectiveIndex > fields::kMaximumClientRefIndex
         || request.taskGroup < kNoTaskGroup || request.taskGroup >= kTaskGroupCount) {
@@ -62,11 +72,7 @@ struct Request final {
                                                                   : squad_auth::Mode::mode2);
     encoding::bits::Writer writer(output);
     std::size_t written = 0;
-    const std::array<fields::Field, 13> tail{{
-        {0, kAbsentMiddleFieldCount},
-        {1, fields::kPresenceWidth}, // .13 present
-        {request.revision, fields::kCounterWidth},
-        {0, fields::kPresenceWidth}, // .14 absent
+    const std::array<fields::Field, 9> tail{{
         {1, fields::kPresenceWidth}, // .15 present
         {0, kField15Width},
         {1, fields::kPresenceWidth}, // .16 present
@@ -80,8 +86,13 @@ struct Request final {
     return writer.write(1, fields::kPresenceWidth)
            && fields::write_client_ref(
                writer, request.registryKey, scriptable_auth::kType3SlotType, request.objectiveIndex)
+           && writer.write(0, kAbsentMiddleFieldCount) && writer.write(1, fields::kPresenceWidth)
+           && writer.write(request.revision, fields::kCounterWidth)
+           && writer.write(request.refreshPlayerAwareness, fields::kPresenceWidth)
+           && (!request.refreshPlayerAwareness
+               || writer.write(request.revision, fields::kCounterWidth))
            && fields::write_fields(writer, tail)
-           && fields::finish_exact(writer, kBits, kBytes, written);
+           && fields::finish_exact(writer, bit_count(request), byte_count(request), written);
 }
 
 } // namespace sunrise::middleware::bap::activity_message::squad_objective

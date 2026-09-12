@@ -83,6 +83,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::triggerEntered:
     case host::EventKind::triggerExited:
     case host::EventKind::squadState:
+    case host::EventKind::squadProvoked:
     case host::EventKind::entitySpawned:
     case host::EventKind::entityDied:
     case host::EventKind::sceneFinished:
@@ -95,6 +96,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::cinematicTerminated:
     case host::EventKind::actorPathState:
     case host::EventKind::damageState:
+    case host::EventKind::deviceState:
     case host::EventKind::objectState:
     case host::EventKind::fireteamState:
     case host::EventKind::objectInteracted:
@@ -122,6 +124,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
            || event.kind == host::EventKind::triggerEntered
            || event.kind == host::EventKind::triggerExited
            || event.kind == host::EventKind::squadState
+           || event.kind == host::EventKind::squadProvoked
            || event.kind == host::EventKind::entitySpawned
            || event.kind == host::EventKind::entityDied
            || event.kind == host::EventKind::sceneFinished
@@ -133,6 +136,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
            || event.kind == host::EventKind::cinematicStarted
            || event.kind == host::EventKind::actorPathState
            || event.kind == host::EventKind::damageState
+           || event.kind == host::EventKind::deviceState
            || event.kind == host::EventKind::objectState
            || event.kind == host::EventKind::fireteamState
            || event.kind == host::EventKind::objectInteracted
@@ -636,6 +640,8 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         push_damage_edges(instance, *sense);
         push_actor_path_edges(instance, *sense);
         push_squad_edges(instance, *sense);
+        push_combatant_damage_edges(instance, *sense);
+        push_device_edges(instance, *sense);
         push_scene_edges(instance, *sense);
         push_objective_edges(instance, *sense);
     }

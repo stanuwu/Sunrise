@@ -59,6 +59,9 @@ constexpr std::array<std::uint32_t, format::kSectionCount> kExpectedStrides{
     sizeof(format::SobjectRsatFieldBinding),
     sizeof(format::RuntimeTypeDefinition),
     sizeof(format::ActorStateName),
+    sizeof(format::ActorSequenceTable),
+    sizeof(format::ActorSequenceEntry),
+    sizeof(format::ActorSequenceBinding),
 };
 
 /** Checks all section bounds before any typed row pointer is formed. */

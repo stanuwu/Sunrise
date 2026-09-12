@@ -16,7 +16,7 @@ void draw_public_events(const state::activity_sdk::BoundView& view) noexcept;
 /** Draws the type-30 occupancy conditions, their filter slot and caller value. */
 void draw_occupancy(const state::activity_sdk::BoundView& view) noexcept;
 
-/** Draws the type-2 combatants, their squad binding and one retained channel. */
+/** Draws combatant bindings, retained channels and named sequence requests. */
 void draw_combatants(const state::activity_sdk::BoundView& view) noexcept;
 
 /** Draws the scenario's authored states and the host select action for one region. */

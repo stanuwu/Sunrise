@@ -54,6 +54,9 @@ bool validate_storage(const Inputs&,
         value.sobjectRsatFieldBindings.size(),
         value.runtimeTypeDefinitions.size(),
         value.actorStateNames.size(),
+        value.actorSequenceTables.size(),
+        value.actorSequenceEntries.size(),
+        value.actorSequenceBindings.size(),
     };
     const bool bounded = std::all_of(counts.begin(), counts.end(), [](std::size_t count) {
         return count <= (std::numeric_limits<std::uint32_t>::max)();

@@ -134,6 +134,10 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
             auth::next_type2_revision(candidate, revision) && revision == pending.generation;
         candidate.revision = revision;
         candidate.actorBinding = auth::Type2ActorBinding::squadMember;
+    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::combatantSequence) {
+        // A retained generic Auth program may be ahead of this typed guard.
+        nextCounter = pending.generation > guard->type2AtomGeneration
+                      && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::object) {
         std::int32_t next = 0;
         nextCounter = auth::next_type4_generation(guard->type4, next)
@@ -164,6 +168,11 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
         std::int32_t next = 0;
         nextCounter = auth::next_type38_generation(guard->type38, next)
                       && static_cast<std::uint64_t>(next) == pending.generation;
+    } else if (guard != nullptr
+               && (pending.kind == ScriptableOverrideKind::authoredSceneEvent
+                   || pending.kind == ScriptableOverrideKind::authoredSceneStop)) {
+        nextCounter =
+            pending.generation != 0 && pending.generation == guard->authoredSceneGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::authoredScene) {
         std::uint32_t next = 0;
         nextCounter = next_authored_scene_generation(guard->authoredSceneGeneration, next)
@@ -192,6 +201,8 @@ void advance_staged_guard(ScriptableGuard* guard,
     } else if (pending.kind == ScriptableOverrideKind::combatantBinding) {
         guard->type2.revision = static_cast<std::uint32_t>(pending.generation);
         guard->type2.actorBinding = auth::Type2ActorBinding::squadMember;
+    } else if (pending.kind == ScriptableOverrideKind::combatantSequence) {
+        guard->type2AtomGeneration = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::object) {
         guard->type4.last = static_cast<std::int32_t>(pending.generation);
         guard->type4.hasLast = true;

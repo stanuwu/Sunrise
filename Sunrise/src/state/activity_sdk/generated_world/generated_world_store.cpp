@@ -188,4 +188,36 @@ bool load_record(std::wstring_view scenarioDirectory,
     return true;
 }
 
+/**
+ * Checks published shard headers before startup reuses a loaded core catalog.
+ * @param manifestPath Published catalog file.
+ * @param scenarioDirectory Directory of its immutable shard files.
+ * @param expectedSourceFingerprint Installed content identity.
+ * @param expectedSdk Already-loaded core catalog identity.
+ * @return True when every declared shard has a compatible manifest-owned header.
+ */
+bool compatible_catalog(const wchar_t* manifestPath,
+                        std::wstring_view scenarioDirectory,
+                        const Digest& expectedSourceFingerprint,
+                        const manifest::SdkIdentity& expectedSdk) noexcept {
+    manifest::Catalog catalog{};
+    manifest::LoadStatus manifestStatus = manifest::LoadStatus::invalid;
+    if (!manifest::load(
+            manifestPath, expectedSourceFingerprint, expectedSdk, catalog, manifestStatus)
+        || catalog.records.empty()) {
+        return false;
+    }
+    for (const manifest::Record& record : catalog.records) {
+        core::path::Buffer path;
+        if (!shard_path(scenarioDirectory, record.scenarioTag, record.shardPayloadSha256, path)
+            || !generated_world::compatible_header(path.chars.data(),
+                                                   record.scenarioTag,
+                                                   expectedSourceFingerprint,
+                                                   record.shardPayloadSha256)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace sunrise::state::activity_sdk::generated_world::store

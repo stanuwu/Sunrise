@@ -145,11 +145,16 @@ inline constexpr std::array<const char*, host::kEventKindCount> kEventHandlerNam
     "on_event_fireteam_state",
     "on_event_object_state",
     "on_event_damage_state",
+    "on_event_squad_provoked",
+    "on_event_device_state",
 }};
 
 static_assert([] {
-    for (const auto* name : kEventHandlerNames)
-        if (name == nullptr) return false;
+    for (const auto* name : kEventHandlerNames) {
+        if (name == nullptr) {
+            return false;
+        }
+    }
     return true;
 }());
 

@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <string_view>
 
@@ -270,10 +271,13 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
 [[nodiscard]] int actor_path_index(lua_State* state) {
     const auto& event = check_event(state, 1);
     const auto key = lua_string_view(state, 2);
-    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key))
+    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key)) {
         return 1;
+    }
     if (event_surface_visible(state, event.kind)) {
-        if (push_slot_identity_member(state, event, key)) return 1;
+        if (push_slot_identity_member(state, event, key)) {
+            return 1;
+        }
         if (key == "generation") {
             lua_pushinteger(state, event.actorGeneration);
             return 1;
@@ -303,39 +307,85 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
     return 1;
 }
 
+/**
+ * Exposes reported device values without giving unknown fields a numeric default.
+ * @param state Lua call holding the device event and requested member name.
+ * @return One reported value, flag or nil.
+ */
+[[nodiscard]] int device_state_index(lua_State* state) {
+    const auto& event = check_event(state, 1);
+    const auto key = lua_string_view(state, 2);
+    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key)
+        || push_slot_identity_member(state, event, key)) {
+        return 1;
+    }
+    static constexpr std::array<std::string_view, 3> values{"position", "power", "lock"};
+    static constexpr std::array<std::string_view, 3> sequences{
+        "position_sequence", "power_sequence", "lock_sequence"};
+    for (std::size_t channel = 0; channel < values.size(); ++channel) {
+        if (key == values[channel]) {
+            if ((event.deviceValueMask & (1U << channel)) != 0) {
+                lua_pushnumber(state, event.deviceValues[channel]);
+            } else {
+                lua_pushnil(state);
+            }
+            return 1;
+        }
+        if (key == sequences[channel]) {
+            if ((event.deviceSequenceMask & (1U << channel)) != 0) {
+                lua_pushinteger(state, event.deviceSequences[channel]);
+            } else {
+                lua_pushnil(state);
+            }
+            return 1;
+        }
+    }
+    if (key == "first_report") {
+        lua_pushboolean(state, event.deviceFirstReport);
+    } else if (key == "reset") {
+        lua_pushboolean(state, event.deviceReset);
+    } else {
+        lua_pushnil(state);
+    }
+    return 1;
+}
+
 /** Lua index for one object interaction event: the common, slot and interaction members. */
 [[nodiscard]] int object_interaction_index(lua_State* state) {
     const host::Event& event = check_event(state, 1);
     const auto key = lua_string_view(state, 2);
     if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key)
         || (event_surface_visible(state, event.kind)
-            && push_slot_identity_member(state, event, key)))
-        return 1;
-    if (event.kind == host::EventKind::damageState) {
-        if (key == "health")
-            lua_pushnumber(state, event.damageHealth);
-        else if (key == "shield")
-            lua_pushnumber(state, event.damageShield);
-        else if (key == "revision")
-            lua_pushinteger(state, event.damageRevision);
-        else
-            lua_pushnil(state);
+            && push_slot_identity_member(state, event, key))) {
         return 1;
     }
-    if (key == "generation")
+    if (event.kind == host::EventKind::damageState) {
+        if (key == "health") {
+            lua_pushnumber(state, event.damageHealth);
+        } else if (key == "shield") {
+            lua_pushnumber(state, event.damageShield);
+        } else if (key == "revision") {
+            lua_pushinteger(state, event.damageRevision);
+        } else {
+            lua_pushnil(state);
+        }
+        return 1;
+    }
+    if (key == "generation") {
         lua_pushinteger(state, event.objectGeneration);
-    else if (key == "present")
+    } else if (key == "present") {
         lua_pushboolean(state, event.objectPresent);
-    else if (key == "alive")
+    } else if (key == "alive") {
         lua_pushboolean(state, event.objectAlive);
-    else if (key == "owner_known")
+    } else if (key == "owner_known") {
         lua_pushboolean(state, event.objectOwnerKnown);
-    else if (key == "has_owner")
+    } else if (key == "has_owner") {
         lua_pushboolean(state, event.objectHasOwner);
-    else if (key == "owner_key" && event.objectOwnerKey != 0)
+    } else if (key == "owner_key" && event.objectOwnerKey != 0) {
         push_u64_string(state, event.objectOwnerKey);
-    else
+    } else {
         lua_pushnil(state);
+    }
     return 1;
 }
 
@@ -343,10 +393,13 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
 [[nodiscard]] int ghost_link_index(lua_State* state) {
     const host::Event& event = check_event(state, 1);
     const std::string_view key = lua_string_view(state, 2);
-    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key))
+    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key)) {
         return 1;
+    }
     if (event_surface_visible(state, event.kind)) {
-        if (push_slot_identity_member(state, event, key)) return 1;
+        if (push_slot_identity_member(state, event, key)) {
+            return 1;
+        }
         if (key == "generation") {
             lua_pushinteger(state, event.ghostGeneration);
             return 1;
@@ -377,6 +430,25 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
         return 1;
     }
     lua_pushnil(state);
+    return 1;
+}
+
+/** A gameplay provocation carries the exact squad reference, not a native Sense body. */
+[[nodiscard]] int squad_provoked_index(lua_State* state) {
+    const auto& event = check_event(state, 1);
+    const auto key = lua_string_view(state, 2);
+    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key)) {
+        return 1;
+    }
+    if (key == "registry_key") {
+        lua_pushinteger(state, event.firstRegistryKey);
+    } else if (key == "slot_type") {
+        lua_pushinteger(state, event.firstSlotType);
+    } else if (key == "slot_index") {
+        lua_pushinteger(state, event.firstSlotIndex);
+    } else {
+        lua_pushnil(state);
+    }
     return 1;
 }
 
@@ -523,16 +595,18 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
 [[nodiscard]] int fireteam_state_index(lua_State* state) {
     const auto& event = check_event(state, 1);
     const auto key = lua_string_view(state, 2);
-    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key))
+    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key)) {
         return 1;
-    if (key == "alive_count")
+    }
+    if (key == "alive_count") {
         lua_pushinteger(state, event.fireteamAlive);
-    else if (key == "dead_count")
+    } else if (key == "dead_count") {
         lua_pushinteger(state, event.fireteamDead);
-    else if (key == "unknown_count")
+    } else if (key == "unknown_count") {
         lua_pushinteger(state, event.fireteamUnknown);
-    else
+    } else {
         lua_pushnil(state);
+    }
     return 1;
 }
 
@@ -544,6 +618,7 @@ void register_derived_event_metatables(lua_State* state) {
     register_metatable(state, kTriggerEnteredEventMetatable, &trigger_entered_index);
     register_metatable(state, kTriggerExitedEventMetatable, &trigger_exited_index);
     register_metatable(state, kSquadStateEventMetatable, &squad_state_index);
+    register_metatable(state, kSquadProvokedEventMetatable, &squad_provoked_index);
     register_metatable(state, kEntitySpawnedEventMetatable, &entity_spawned_index);
     register_metatable(state, kEntityDiedEventMetatable, &entity_died_index);
     register_metatable(state, kSceneFinishedEventMetatable, &scene_finished_index);
@@ -558,6 +633,7 @@ void register_derived_event_metatables(lua_State* state) {
     register_metatable(state, kCinematicTerminatedEventMetatable, &cinematic_terminated_index);
     register_metatable(state, kGhostLinkEventMetatable, &ghost_link_index);
     register_metatable(state, kObjectInteractionEventMetatable, &object_interaction_index);
+    register_metatable(state, kDeviceStateEventMetatable, &device_state_index);
     register_metatable(state, kActorPathEventMetatable, &actor_path_index);
 }
 

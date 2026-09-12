@@ -19,6 +19,7 @@
 #include "../../activity/activity_sdk_lifetime_runtime.h"
 #include "../../activity/activity_sdk_mission_runtime.h"
 #include "../../activity/host_runtime.h"
+#include "activity_host_sdk_actor_sequences.h"
 #include "activity_host_table_layout.h"
 
 namespace sunrise::server::ui::activity_host::sdk_state_pages {
@@ -71,7 +72,6 @@ int g_occupancyValue{};
 int g_lifetimeState{};
 std::array<char, 48> g_combatantChannel{};
 float g_combatantValue{};
-
 /** Last action result, so a refusal stays on screen after the frame that produced it. */
 std::array<char, 96> g_result{};
 
@@ -584,6 +584,7 @@ void draw_combatants(const sdk::BoundView& view) noexcept {
                                  view, g_combatantRow, hash, g_combatantValue)));
     }
     ImGui::TextDisabled("The value is kept for the next attach or restore.");
+    draw_actor_sequences(view, g_combatantRow);
     draw_result();
 }
 

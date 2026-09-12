@@ -25,6 +25,10 @@ struct IncidentRequest final {
 
 /** One queued typed ClientRef request; its counter is assigned by the reducer. */
 struct ScriptableRequest final {
+    middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies
+        sceneDependencies{};
+    std::uint32_t sceneEventKey{};
+    std::uint32_t sequenceHash{};
     state::gameplay::squad_entity_retirement::Eligibility squadRetirement{};
     state::activity::SessionBinding binding{};
     ScriptableTarget target{};
@@ -115,6 +119,7 @@ struct ScriptableGuard final {
     middleware::bap::activity_message::scriptable_auth::Type53SequenceGuard type53{};
     middleware::bap::activity_message::scriptable_auth::Type42GenerationGuard type42{};
     std::uint32_t authoredSceneGeneration{};
+    std::uint32_t type2AtomGeneration{};
     bool occupied{};
 };
 

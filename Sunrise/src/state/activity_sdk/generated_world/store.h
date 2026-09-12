@@ -27,6 +27,12 @@ enum class RecordLoadStatus : std::uint8_t {
 [[nodiscard]] const manifest::Record* find_record(std::span<const manifest::Record> records,
                                                   std::uint32_t scenarioTag) noexcept;
 
+/** Requires every manifest-owned shard to match the loaded SDK and current extraction format. */
+[[nodiscard]] bool compatible_catalog(const wchar_t* manifestPath,
+                                      std::wstring_view scenarioDirectory,
+                                      const Digest& expectedSourceFingerprint,
+                                      const manifest::SdkIdentity& expectedSdk) noexcept;
+
 /** Builds the content-addressed path owned by one exact manifest record. */
 [[nodiscard]] bool shard_path(std::wstring_view scenarioDirectory,
                               std::uint32_t scenarioTag,

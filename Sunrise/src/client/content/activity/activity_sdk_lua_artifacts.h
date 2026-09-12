@@ -73,6 +73,9 @@ struct Source final {
     std::span<const format::EntityTypeDefinition> entityTypeDefinitions{};
     std::span<const format::SobjectRsatFieldBinding> sobjectRsatFieldBindings{};
     std::span<const format::ActorStateName> actorStateNames{};
+    std::span<const format::ActorSequenceTable> actorSequenceTables{};
+    std::span<const format::ActorSequenceEntry> actorSequenceEntries{};
+    std::span<const format::ActorSequenceBinding> actorSequenceBindings{};
     std::span<const ScenarioWorldSource> scenarioWorldSources{};
 };
 

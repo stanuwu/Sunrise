@@ -106,6 +106,9 @@ struct Storage final {
     std::vector<format::EntityTypeDefinition> entityTypeDefinitions{};
     std::vector<format::SobjectRsatFieldBinding> sobjectRsatFieldBindings{};
     std::vector<format::ActorStateName> actorStateNames{};
+    std::vector<format::ActorSequenceTable> actorSequenceTables{};
+    std::vector<format::ActorSequenceEntry> actorSequenceEntries{};
+    std::vector<format::ActorSequenceBinding> actorSequenceBindings{};
 
     /** @return Borrowed sections in exact current format order. */
     [[nodiscard]] pack::Tables tables() const noexcept;

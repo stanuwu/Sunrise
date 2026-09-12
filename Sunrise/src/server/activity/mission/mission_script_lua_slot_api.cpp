@@ -702,13 +702,14 @@ constexpr std::int8_t kFilterModeInside = 1;
     namespace objective = middleware::bap::activity_message::squad_objective;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
-    static constexpr std::array<std::string_view, 4> kDeclared{
-        "objective", "revision", "task_group", "reserved"};
+    static constexpr std::array<std::string_view, 5> kDeclared{
+        "objective", "revision", "task_group", "reserved", "refresh_player_awareness"};
     refuse_unknown_arguments(state, kDeclared);
     const auto reference = checked_argument<SlotHandle>(state, "objective", kSlotMetatable);
     const lua_Integer revision = checked_integer_argument(state, "revision");
     const lua_Integer group = checked_integer_argument(state, "task_group");
     const bool reserved = optional_boolean_argument(state, "reserved", false);
+    const bool refresh = optional_boolean_argument(state, "refresh_player_awareness", false);
     SlotDefinition squad{};
     SlotDefinition target{};
     if (!current_slot(state, *handle, squad) || squad.slotType != format::kSquadSlotType
@@ -727,16 +728,19 @@ constexpr std::int8_t kFilterModeInside = 1;
         return luaL_error(state,
                           "combat objective revision, group or index is outside its native range");
     }
-    std::array<std::byte, objective::kBytes> body{};
-    if (!objective::encode({target.registryKey,
-                            static_cast<std::uint32_t>(revision),
-                            static_cast<std::uint16_t>(target.slotIndex),
-                            static_cast<std::int32_t>(group),
-                            reserved},
-                           body)) {
+    const objective::Request request{target.registryKey,
+                                     static_cast<std::uint32_t>(revision),
+                                     static_cast<std::uint16_t>(target.slotIndex),
+                                     static_cast<std::int32_t>(group),
+                                     reserved,
+                                     refresh};
+    std::array<std::byte, objective::kMaximumBytes> body{};
+    const auto encoded = std::span(body).first(objective::byte_count(request));
+    if (!objective::encode(request, encoded)) {
         return luaL_error(state, "combat objective encoder failed");
     }
-    return queue_slot_auth(state, squad, objective::kSchema, objective::kBits, body);
+    return queue_slot_auth(
+        state, squad, objective::kSchema, objective::bit_count(request), encoded);
 }
 
 /** Creates a named actor and starts one package-authored movement path. */
@@ -913,7 +917,11 @@ constexpr std::int8_t kFilterModeInside = 1;
     return queue_slot_auth(state, actor, combatant::kSchema, combatant::kRetireBits, body);
 }
 
-/** Binds one exact combatant to its package-authored squad member. */
+/**
+ * Arms one exact combatant for its scene's squad member spawn.
+ * @param state Lua call holding the slot and empty argument table.
+ * @return One request handle after the intent is retained.
+ */
 [[nodiscard]] int slot_bind_combatant_to_squad(lua_State* state) {
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
@@ -1377,7 +1385,11 @@ constexpr std::int8_t kFilterModeInside = 1;
     } else if (key == "fire_trigger") {
         lua_pushcfunction(state, &slot_fire_trigger);
     } else if (key == "play_sequence") {
-        lua_pushcfunction(state, &slot_play_sequence);
+        lua_pushcfunction(state,
+                          exact_combatant_slot(definition) ? &slot_play_actor_sequence
+                                                           : &slot_play_sequence);
+    } else if (key == "sequences") {
+        lua_pushcfunction(state, &slot_actor_sequences);
     } else if (key == "set_scene_events") {
         lua_pushcfunction(state, &slot_set_scene_events);
     } else if (key == "set_cinematic_active") {

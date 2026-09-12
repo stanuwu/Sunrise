@@ -221,6 +221,12 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
     case lua_vm::IntentKind::bindCombatantToSquad:
         result = "combatant_binding_staged";
         break;
+    case lua_vm::IntentKind::stopAuthoredScene:
+        result = "scene_stop_staged";
+        break;
+    case lua_vm::IntentKind::signalAuthoredScene:
+        result = "scene_event_staged";
+        break;
     case lua_vm::IntentKind::activateAuthoredScene:
         result = "scene_staged";
         break;
@@ -250,6 +256,9 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
         break;
     case lua_vm::IntentKind::playPerformance:
         result = "performance_staged";
+        break;
+    case lua_vm::IntentKind::playActorSequence:
+        result = "actor_sequence_staged";
         break;
     case lua_vm::IntentKind::resetObjectives:
         result = "objective_reset_staged";

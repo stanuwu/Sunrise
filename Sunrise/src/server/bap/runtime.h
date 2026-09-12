@@ -316,7 +316,10 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::int32_t expectedRegion,
     std::uint64_t expectedGeneration,
-    const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
+    const activity::host::ScriptableOutputReservation* reservation = nullptr,
+    const activity::host::AuthoredSceneDependencies& dependencies = {},
+    std::uint32_t eventKey = 0,
+    bool stop = false) noexcept;
 
 /** Queues one authored dialogue line only while its exact mission-seed state is live. */
 [[nodiscard]] bool request_activity_state_local_dialogue_override(

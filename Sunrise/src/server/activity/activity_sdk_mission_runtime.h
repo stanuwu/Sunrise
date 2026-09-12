@@ -228,7 +228,9 @@ play_dialogue_cue_slot_reserved(const state::activity_sdk::BoundView& view,
 activate_authored_scene_reserved(const state::activity_sdk::BoundView& view,
                                  std::uint32_t occurrenceRow,
                                  std::uint32_t slotRow,
-                                 const host::ScriptableOutputReservation& reservation) noexcept;
+                                 const host::ScriptableOutputReservation& reservation,
+                                 std::uint32_t eventKey = 0,
+                                 bool stop = false) noexcept;
 
 /** @return Stable concise text for one mission runtime result. */
 [[nodiscard]] const char* status_name(Status status) noexcept;

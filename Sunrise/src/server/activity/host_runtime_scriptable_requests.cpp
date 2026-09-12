@@ -96,6 +96,31 @@ bool request_state_local_type2_channel_override(
     return enqueue_request(request, reservation);
 }
 
+/** Queues only a sequence hash; the reducer owns the atom generation and retained body. */
+bool request_state_local_type2_sequence(
+    const state::activity::SessionBinding& binding,
+    const ScriptableTarget& target,
+    const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
+    std::uint32_t sequenceHash,
+    std::uint64_t expectedActivityClientGeneration,
+    const ScriptableOutputReservation* reservation) noexcept {
+    if (target.slotType != auth::kType2SlotType || target.authSchema != auth::kType2Schema
+        || !valid_state_local_group(target, stateLocalRosterGroup)
+        || sequenceHash == middleware::bap::activity_message::kEmptyNameHash
+        || sequenceHash == (std::numeric_limits<std::uint32_t>::max)()
+        || expectedActivityClientGeneration == 0) {
+        return false;
+    }
+    ScriptableRequest request{};
+    request.binding = binding;
+    request.target = target;
+    request.stateLocalRosterGroup = stateLocalRosterGroup;
+    request.sequenceHash = sequenceHash;
+    request.expectedActivityClientGeneration = expectedActivityClientGeneration;
+    request.kind = ScriptableOverrideKind::combatantSequence;
+    return enqueue_request(request, reservation);
+}
+
 /** Queues squad-member binding for one exact generated type-2 combatant. */
 bool request_state_local_type2_squad_binding(
     const state::activity::SessionBinding& binding,
@@ -295,10 +320,15 @@ bool request_state_local_authored_scene_override(
     const ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::uint64_t expectedActivityClientGeneration,
-    const ScriptableOutputReservation* reservation) noexcept {
+    const ScriptableOutputReservation* reservation,
+    const AuthoredSceneDependencies& dependencies,
+    std::uint32_t eventKey,
+    bool stop) noexcept {
     if (target.slotType != scene::kAuthoredSceneSlotType
         || target.authSchema != scene::kAuthoredSceneAuthSchema
         || !valid_state_local_group(target, stateLocalRosterGroup)
+        || !scene::valid_authored_scene_dependencies(dependencies)
+        || eventKey == (std::numeric_limits<std::uint32_t>::max)() || (stop && eventKey != 0)
         || expectedActivityClientGeneration == 0) {
         return false;
     }
@@ -307,7 +337,11 @@ bool request_state_local_authored_scene_override(
     request.target = target;
     request.stateLocalRosterGroup = stateLocalRosterGroup;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
-    request.kind = ScriptableOverrideKind::authoredScene;
+    request.kind = stop            ? ScriptableOverrideKind::authoredSceneStop
+                   : eventKey == 0 ? ScriptableOverrideKind::authoredScene
+                                   : ScriptableOverrideKind::authoredSceneEvent;
+    request.sceneEventKey = eventKey;
+    request.sceneDependencies = dependencies;
     return enqueue_request(request, reservation);
 }
 

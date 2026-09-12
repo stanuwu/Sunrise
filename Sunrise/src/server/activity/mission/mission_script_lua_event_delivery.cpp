@@ -38,6 +38,10 @@ push_incident_revision_member(lua_State* state, const host::Event& event, std::s
         return "squad.place";
     case ActionKind::activateAuthoredScene:
         return "scene.activate";
+    case ActionKind::stopAuthoredScene:
+        return "scene.stop";
+    case ActionKind::signalAuthoredScene:
+        return "scene.send_event";
     case ActionKind::setObjectActive:
         return "slot.set_object_active";
     case ActionKind::setDeviceChannel:
@@ -51,6 +55,7 @@ push_incident_revision_member(lua_State* state, const host::Event& event, std::s
     case ActionKind::fireTrigger:
         return "slot.fire_trigger";
     case ActionKind::playSequence:
+    case ActionKind::playActorSequence:
         return "slot.play_sequence";
     case ActionKind::setCinematicActive:
         return "slot.set_cinematic_active";

@@ -64,7 +64,23 @@ enum class Status : std::uint8_t {
                                            std::uint32_t channelHash,
                                            float value) noexcept;
 
-/** Binds one type-2 combatant to its authored squad member for an operator action. */
+/** Plays an extracted actor-owned sequence while preserving the combatant's Auth state. */
+[[nodiscard]] Status play_combatant_sequence(const state::activity_sdk::BoundView& view,
+                                             std::uint32_t slotRow,
+                                             std::uint32_t sequenceRow) noexcept;
+
+/** Queues an extracted sequence only on its captured owner and reserved Host revision. */
+[[nodiscard]] Status
+play_combatant_sequence_reserved(const state::activity_sdk::BoundView& view,
+                                 const state::activity::mission::ActorSequenceOwner& expected,
+                                 std::uint32_t sequenceRow,
+                                 const host::ScriptableOutputReservation& reservation) noexcept;
+
+/** Cancels the combatant's atom program without changing actor binding or control fields. */
+[[nodiscard]] Status stop_combatant_sequence(const state::activity_sdk::BoundView& view,
+                                             std::uint32_t slotRow) noexcept;
+
+/** Arms one combatant for its scene's squad member spawn. */
 [[nodiscard]] Status bind_combatant_to_squad(const state::activity_sdk::BoundView& view,
                                              std::uint32_t slotRow) noexcept;
 
@@ -111,7 +127,7 @@ set_combatant_channel_reserved(const state::activity_sdk::BoundView& view,
                                float value,
                                const host::ScriptableOutputReservation& reservation) noexcept;
 
-/** Binds one generated type-2 combatant to its authored squad member. */
+/** Arms one generated combatant for its scene's squad member spawn. */
 [[nodiscard]] Status
 bind_combatant_to_squad_reserved(const state::activity_sdk::BoundView& view,
                                  std::uint32_t slotRow,

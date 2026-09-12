@@ -48,6 +48,8 @@ const char* event_name(EventKind kind) noexcept {
         return "trigger volume exited";
     case EventKind::squadState:
         return "squad state changed";
+    case EventKind::squadProvoked:
+        return "squad provoked";
     case EventKind::entitySpawned:
         return "squad slot count rose";
     case EventKind::entityDied:
@@ -72,6 +74,8 @@ const char* event_name(EventKind kind) noexcept {
         return "fireteam state";
     case EventKind::damageState:
         return "damage state";
+    case EventKind::deviceState:
+        return "device state";
     case EventKind::objectState:
         return "object state";
     case EventKind::objectInteracted:

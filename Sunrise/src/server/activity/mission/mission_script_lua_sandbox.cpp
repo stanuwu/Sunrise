@@ -198,6 +198,7 @@ void configure_generated_require(lua_State* state, const ProgramIdentity& identi
     register_squad_metatables(state);
     register_scene_metatables(state);
     register_slot_metatables(state);
+    register_actor_sequence_metatables(state);
     register_peer_metatables(state);
     register_bap_metatables(state);
     register_value_metatables(state);

@@ -21,6 +21,14 @@ constexpr std::size_t kCommandHeaderValueCount = 7;
 constexpr std::uint8_t kMaximumCommandMode = 7;
 /** The default and target-reference fields are one bit each. */
 constexpr std::uint8_t kMaximumCommandBit = 1;
+/** Activity types 29 and 43 share the primary-reference and tag/index wire body. */
+constexpr std::uint8_t kReferenceValueType = 29;
+constexpr std::uint8_t kReferenceValuePairType = 43;
+
+/** Activity aliases must not change the raw reference forms used by other families. */
+[[nodiscard]] std::uint8_t sdk_canonical_type(const void*, std::uint8_t type) noexcept {
+    return type == kReferenceValueType ? kReferenceValuePairType : type;
+}
 
 /** Carries one selected message while delegating ordinary reflection. */
 struct ResolverContext final {
@@ -126,7 +134,7 @@ sdk_read_field(const void* raw, std::uint32_t rowIndex, wire::runtime::FieldView
               : dynamicArray ? 1
                              : bias,
               bits,
-              static_cast<std::uint8_t>(row.typeCode),
+              sdk_canonical_type(raw, static_cast<std::uint8_t>(row.typeCode)),
               static_cast<std::uint8_t>((row.flags & format::kRuntimeFieldPresenceBit) != 0),
               static_cast<std::uint8_t>(
                   row.codecParameters[2] <= kMaximumByteField ? row.codecParameters[2] : 0)};
@@ -283,15 +291,29 @@ resolve_payload(const void* raw, std::uint8_t selector, std::uint32_t& output) n
            && context->reflection.isZeroBitType(context->reflection.context, typeCode);
 }
 
-/** Overrides command selection while preserving ordinary reflection. */
+/** Delegates family-specific aliases through the borrowed reflection context. */
+[[nodiscard]] std::uint8_t canonical_type(const void* raw, std::uint8_t typeCode) noexcept {
+    const auto& context = *static_cast<const ResolverContext*>(raw);
+    return context.reflection.canonicalType != nullptr
+               ? context.reflection.canonicalType(context.reflection.context, typeCode)
+               : typeCode;
+}
+
+/**
+ * Overrides command selection while preserving ordinary reflection.
+ * @param context Borrowed message and reflection state, which must outlive the adapter.
+ * @return An adapter retaining the source codec's type aliases.
+ */
 [[nodiscard]] wire::RuntimeSchemaResolver resolver(ResolverContext& context) noexcept {
-    return {&context,
-            find_schema,
-            read_schema,
-            read_field,
-            resolve_payload,
-            validate_type,
-            zero_bit_type};
+    wire::RuntimeSchemaResolver output{&context,
+                                       find_schema,
+                                       read_schema,
+                                       read_field,
+                                       resolve_payload,
+                                       validate_type,
+                                       zero_bit_type};
+    output.canonicalType = canonical_type;
+    return output;
 }
 
 /** Finds the message schema's single dynamic actor-command field. */
@@ -325,16 +347,22 @@ identity(std::uint32_t messageIndex,
 
 } // namespace
 
-/** Builds the generic activity-family reflection adapter. */
+/**
+ * Builds the generic activity-family reflection adapter.
+ * @param catalog Borrowed SDK rows, which must outlive the adapter.
+ * @return An adapter using the activity family's field and union aliases.
+ */
 wire::RuntimeSchemaResolver
 actor_runtime_schema_resolver(const ActorCommandCatalog& catalog) noexcept {
-    return {&catalog,
-            sdk_find_schema,
-            sdk_read_schema,
-            sdk_read_field,
-            sdk_resolve_payload,
-            sdk_validate_type,
-            sdk_zero_bit_type};
+    wire::RuntimeSchemaResolver output{&catalog,
+                                       sdk_find_schema,
+                                       sdk_read_schema,
+                                       sdk_read_field,
+                                       sdk_resolve_payload,
+                                       sdk_validate_type,
+                                       sdk_zero_bit_type};
+    output.canonicalType = sdk_canonical_type;
+    return output;
 }
 
 /** Encodes one type-36 command and its selector-owned payload. */

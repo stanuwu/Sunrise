@@ -182,7 +182,7 @@ struct PageRow final {
 constexpr std::array<PageRow, 20> kPages{{
     {Page::squads, "Squads", "Place an authored squad.", marker::WorldPage::squads},
     {Page::idles, "Idles", "Start an actor's authored state.", marker::WorldPage::squads},
-    {Page::combatants, "Combatants", "Bind a combatant, retain a channel."},
+    {Page::combatants, "Combatants", "Bind actors, edit channels and try animation sequences."},
     {Page::devices, "Devices", "Drive a door, lift or switch.", marker::WorldPage::devices},
     {Page::triggers, "Triggers", "Fire an authored pulse.", marker::WorldPage::triggers},
     {Page::objects, "Objects", "Spawn or remove a placed object.", marker::WorldPage::objects},

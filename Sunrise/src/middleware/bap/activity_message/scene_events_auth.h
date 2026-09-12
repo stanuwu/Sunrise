@@ -6,6 +6,7 @@
 
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
+#include "sensor_auth_update.h"
 
 // Type-43 authored scene Auth in its event-only form: generation, no clear, no dependencies,
 // a zero scalar, then the cumulative event keys. The generation stays while events are added,
@@ -46,34 +47,9 @@ inline constexpr std::uint32_t kInvalidEventKey = 0xFFFFFFFFU;
                                  std::size_t& bits) noexcept {
     bytes = 0;
     bits = 0;
-    const std::size_t expectedBits = kHeaderBits + kEventKeyWidth * events.size();
-    if (generation <= 0 || events.size() > kMaximumEvents
-        || output.size() < (expectedBits + 7) / 8) {
-        return false;
-    }
-    for (std::size_t index = 0; index < events.size(); ++index) {
-        if (events[index] == 0 || events[index] == kInvalidEventKey) {
-            return false;
-        }
-        for (std::size_t prior = 0; prior < index; ++prior) {
-            if (events[index] == events[prior]) {
-                return false;
-            }
-        }
-    }
-    encoding::bits::Writer writer(output);
-    if (!writer.write(static_cast<std::uint32_t>(generation) + fields::kSigned32Bias, 32)
-        || !writer.write(0, fields::kBoolWidth) || !writer.write(0, kDependencyCountWidth)
-        || !writer.write(0, kScalarWidth) || !writer.write(events.size(), kEventCountWidth)) {
-        return false;
-    }
-    for (const std::uint32_t event : events) {
-        if (!writer.write(event, kEventKeyWidth)) {
-            return false;
-        }
-    }
-    bits = writer.bit_count();
-    return bits == expectedBits && writer.finish(bytes);
+    return generation > 0
+           && sensor_auth_update::encode_authored_scene_auth(
+               static_cast<std::uint32_t>(generation), {}, output, bytes, bits, events);
 }
 
 } // namespace sunrise::middleware::bap::activity_message::scene_events

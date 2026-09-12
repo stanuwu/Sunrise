@@ -332,7 +332,7 @@ struct EmbeddedPlacementDiagnostics final {
     bool complete{};
 };
 
-/** One aligned class-0x80809C42 typed reference from a reached config blob. */
+/** One typed ClientRef found directly or at a verified descriptor field. */
 struct TypedReference final {
     std::uint32_t sourceObjectRow{};
     std::uint32_t sourceSlotRow{kNoRow};

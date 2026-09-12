@@ -1,6 +1,9 @@
 #include <algorithm>
+#include <limits>
 
+#include "../../encoding/bit_reader.h"
 #include "roster_presence.h"
+#include "scene_events_auth.h"
 #include "sensor_auth_update.h"
 
 namespace sunrise::middleware::bap::activity_message::sensor_auth_update {
@@ -48,6 +51,184 @@ template <typename PackedBody>
 }
 
 } // namespace
+
+/**
+ * Checks the bounded scene dependency set before it enters the host queue.
+ * @param value Dependency set.
+ * @return True for bounded, unique references.
+ */
+bool valid_authored_scene_dependencies(const AuthoredSceneDependencies& value) noexcept {
+    if (value.count > value.references.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < value.count; ++index) {
+        const auto& ref = value.references[index];
+        if (ref.rosterKey == 0 || ref.rosterKey == kEmptyNameHash
+            || ref.rosterKey == (std::numeric_limits<std::uint32_t>::max)() || ref.slotType < 0
+            || ref.slotType > kMaximumSlotType || ref.slotIndex < 0) {
+            return false;
+        }
+        for (std::size_t prior = 0; prior < index; ++prior) {
+            const auto& other = value.references[prior];
+            if (ref.rosterKey == other.rosterKey && ref.slotType == other.slotType
+                && ref.slotIndex == other.slotIndex) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/**
+ * Encodes the Type 43 generation and authored spawn dependencies.
+ * @param generation Positive activation generation.
+ * @param dependencies Exact spawn dependencies.
+ * @param output Receives the packed Auth body.
+ * @param written Receives the byte count, or zero on failure.
+ * @param writtenBits Receives the bit count, or zero on failure.
+ * @return True when every field fits its native width.
+ */
+bool encode_authored_scene_auth(std::uint32_t generation,
+                                const AuthoredSceneDependencies& dependencies,
+                                std::span<std::byte> output,
+                                std::size_t& written,
+                                std::size_t& writtenBits,
+                                std::span<const std::uint32_t> events,
+                                std::uint32_t scalar,
+                                bool stop) noexcept {
+    /** Native signed generation uses a 32-bit bias. */
+    constexpr std::uint32_t generationBias = 0x80000000U;
+    /** Native dependency count, scalar and event count widths. */
+    constexpr std::uint8_t dependencyCountWidth = 4, scalarWidth = 31, eventCountWidth = 6;
+    written = 0;
+    writtenBits = 0;
+    if (generation == 0 || generation >= generationBias
+        || !valid_authored_scene_dependencies(dependencies)
+        || events.size() > kAuthoredSceneMaximumEventCount || scalar >= generationBias) {
+        return false;
+    }
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        const auto prior = events.first(index);
+        if (events[index] == 0 || events[index] == scene_events::kInvalidEventKey
+            || std::find(prior.begin(), prior.end(), events[index]) != prior.end()) {
+            return false;
+        }
+    }
+    bits::Writer writer(output);
+    bool encoded = writer.write(generation + generationBias, kKeyWidth)
+                   && writer.write(stop, kPresenceWidth)
+                   && writer.write(dependencies.count, dependencyCountWidth);
+    for (std::size_t index = 0; encoded && index < dependencies.count; ++index) {
+        const auto& ref = dependencies.references[index];
+        encoded = writer.write(ref.rosterKey, kKeyWidth)
+                  && writer.write(static_cast<std::uint32_t>(ref.slotType) + kSlotTypeBias,
+                                  kSlotTypeWidth)
+                  && writer.write(static_cast<std::uint32_t>(ref.slotIndex) + kSlotIndexBias,
+                                  kSlotIndexWidth);
+    }
+    encoded = encoded && writer.write(scalar, scalarWidth)
+              && writer.write(events.size(), eventCountWidth);
+    for (const std::uint32_t key : events) {
+        encoded = encoded && writer.write(key, kAuthoredSceneEventBitCount);
+    }
+    const auto expected = kAuthoredSceneBaseAuthBitCount
+                          + kAuthoredSceneDependencyBitCount * dependencies.count
+                          + kAuthoredSceneEventBitCount * events.size();
+    if (!encoded || writer.bit_count() != expected || !writer.finish(written)) {
+        written = 0;
+        return false;
+    }
+    writtenBits = expected;
+    return true;
+}
+
+/** Adds an event or stops a complete active scene body without changing its generation. */
+bool update_authored_scene_auth(std::span<const std::byte> previous,
+                                std::size_t previousBits,
+                                std::uint32_t eventKey,
+                                bool stop,
+                                std::span<std::byte> output,
+                                std::size_t& written,
+                                std::size_t& writtenBits,
+                                std::uint32_t& generation) noexcept {
+    written = 0;
+    writtenBits = 0;
+    generation = 0;
+    if (previousBits < kAuthoredSceneBaseAuthBitCount
+        || previousBits > kAuthoredSceneMaximumAuthBitCount
+        || previous.size() != (previousBits + 7U) / 8U || (stop ? eventKey != 0 : eventKey == 0)
+        || eventKey == scene_events::kInvalidEventKey) {
+        return false;
+    }
+    bits::Reader reader(previous);
+    std::uint64_t encodedGeneration = 0, clear = 0, count = 0, scalar = 0;
+    if (!reader.read(kKeyWidth, encodedGeneration) || !reader.read(kPresenceWidth, clear)
+        || clear != 0 || encodedGeneration <= auth_fields::kSigned32Bias
+        || !reader.read(scene_events::kDependencyCountWidth, count)
+        || count > kAuthoredSceneMaximumDependencyCount) {
+        return false;
+    }
+    AuthoredSceneDependencies dependencies{};
+    dependencies.count = static_cast<std::uint8_t>(count);
+    for (std::size_t index = 0; index < dependencies.count; ++index) {
+        std::uint64_t key = 0, type = 0, slot = 0;
+        if (!reader.read(kKeyWidth, key) || !reader.read(kSlotTypeWidth, type)
+            || !reader.read(kSlotIndexWidth, slot) || type < kSlotTypeBias
+            || slot < kSlotIndexBias) {
+            return false;
+        }
+        dependencies.references[index] = {static_cast<std::uint32_t>(key),
+                                          static_cast<std::int8_t>(type - kSlotTypeBias),
+                                          static_cast<std::int16_t>(slot - kSlotIndexBias)};
+    }
+    if (!valid_authored_scene_dependencies(dependencies)
+        || !reader.read(scene_events::kScalarWidth, scalar)
+        || !reader.read(scene_events::kEventCountWidth, count)
+        || count > kAuthoredSceneMaximumEventCount
+        || previousBits
+               != kAuthoredSceneBaseAuthBitCount
+                      + kAuthoredSceneDependencyBitCount * dependencies.count
+                      + kAuthoredSceneEventBitCount * count) {
+        return false;
+    }
+    std::array<std::uint32_t, kAuthoredSceneMaximumEventCount> events{};
+    bool found = stop;
+    for (std::size_t index = 0; index < count; ++index) {
+        std::uint64_t key = 0;
+        if (!reader.read(kAuthoredSceneEventBitCount, key) || key == 0
+            || key == scene_events::kInvalidEventKey) {
+            return false;
+        }
+        events[index] = static_cast<std::uint32_t>(key);
+        const auto prior = std::span(events).first(index);
+        if (std::find(prior.begin(), prior.end(), events[index]) != prior.end()) {
+            return false;
+        }
+        found = found || events[index] == eventKey;
+    }
+    std::uint64_t padding = 0;
+    if (!reader.read(static_cast<std::uint8_t>(previous.size() * 8U - previousBits), padding)
+        || padding != 0 || (!found && count == events.size())) {
+        return false;
+    }
+    if (!found) {
+        events[count++] = eventKey;
+    }
+    const auto retainedGeneration =
+        static_cast<std::uint32_t>(encodedGeneration) - auth_fields::kSigned32Bias;
+    if (!encode_authored_scene_auth(retainedGeneration,
+                                    dependencies,
+                                    output,
+                                    written,
+                                    writtenBits,
+                                    std::span(events).first(static_cast<std::size_t>(count)),
+                                    static_cast<std::uint32_t>(scalar),
+                                    stop)) {
+        return false;
+    }
+    generation = retainedGeneration;
+    return true;
+}
 
 /** Writes zero bits in chunks the writer accepts. */
 bool pad_bits(bits::Writer& writer, std::size_t count) noexcept {
@@ -143,8 +324,9 @@ group_state_sequence(const Roster& roster, std::uint32_t key, std::uint8_t fallb
         encoded = writer.write(block.keys[index], kKeyWidth);
     }
     encoded = encoded && writer.write(1, kPresenceWidth);
-    for (std::size_t word = 0; encoded && word < kBubbleMaskWords; ++word)
+    for (std::size_t word = 0; encoded && word < kBubbleMaskWords; ++word) {
         encoded = writer.write(presence_word(roster, block.keys, word), kChunkWidth);
+    }
     encoded = encoded && writer.write(1, kPresenceWidth) && writer.write(count, kBubbleCountWidth);
     for (std::size_t index = 0; encoded && index < keyCount; ++index) {
         encoded = writer.write(

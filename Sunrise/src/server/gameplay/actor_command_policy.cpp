@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <span>
 
 #include "../../middleware/gameplay/external/actor_command_runtime_codec.h"
@@ -54,8 +55,10 @@ struct PolicyPlan final {
     group::HostSessionBinding host{};
     peer::LinkIdentity linkIdentity{};
     state::activity_sdk::Snapshot snapshot{};
+    state::activity_sdk::generated_world::GeneratedWorldView worldView{};
     std::array<std::uint32_t, kSelectedActorClassCapacity> classes{};
     std::size_t classCount{};
+    std::uint64_t activityClientGeneration{};
     SelectedSquad squad{};
     std::uint32_t messageIndex{format::kAbsentIndex};
     std::uint32_t actorEventIndex{format::kAbsentIndex};
@@ -69,15 +72,20 @@ std::array<DeferredPolicyRow, kDeferredPolicyCapacity> g_deferredPolicies{};
  * Resolves the only gameplay host allowed to execute one mission policy.
  * @param binding Exact Activity Host generation that owns the policy.
  * @param output Receives the elected host only on success.
+ * @param sourceGeneration Receives the ActivityClient generation owning the policy.
  * @return True when the matching ActivityClient has an elected gameplay host.
  */
 [[nodiscard]] bool resolve_policy_host(const activity::SessionBinding& binding,
-                                       group::HostSessionBinding& output) noexcept {
+                                       group::HostSessionBinding& output,
+                                       std::uint64_t& sourceGeneration) noexcept {
     output = {};
+    sourceGeneration = 0;
     server::bap::ActivityLinkView activityLink{};
-    if (!server::bap::activity_link_view(binding, activityLink)) {
+    if (!server::bap::activity_link_view(binding, activityLink)
+        || activityLink.activityClientGeneration == 0) {
         return false;
     }
+    sourceGeneration = activityLink.activityClientGeneration;
     if (!activityLink.publicTarget) {
         // A private activity has one logical Bubble Host. A region host must never replace it.
         if (!server::gameplay::private_host_session(binding, output)
@@ -123,31 +131,11 @@ std::array<DeferredPolicyRow, kDeferredPolicyCapacity> g_deferredPolicies{};
     return contains(selected_classes(session), actorClassIndex);
 }
 
-/** @return True when one live squad matches a selected authored ClientRef. */
-[[nodiscard]] bool squad_selected(const SessionRow& session,
-                                  const SquadEntityRow& squad,
-                                  std::size_t selectedCount) noexcept {
-    selectedCount = (std::min)(selectedCount, session.selectedSquads.size());
-    return std::any_of(session.selectedSquads.begin(),
-                       session.selectedSquads.begin() + static_cast<std::ptrdiff_t>(selectedCount),
-                       [&squad](const SelectedSquad& selected) {
-                           return selected.registryKey == squad.registryKey
-                                  && selected.slotType == squad.slotType
-                                  && selected.slotIndex == squad.slotIndex;
-                       });
-}
-
 /** @return True when an exact token belongs to one selected live squad. */
 [[nodiscard]] bool token_selected(const SessionRow& session,
                                   const external::EntityToken& token,
                                   std::size_t selectedCount) noexcept {
-    return std::any_of(
-        session.squads.begin(), session.squads.end(), [&](const SquadEntityRow& row) {
-            return row.occupied && squad_selected(session, row, selectedCount)
-                   && std::any_of(row.actors.begin(),
-                                  row.actors.begin() + row.actorCount,
-                                  [&token](const auto& actor) { return same_token(actor, token); });
-        });
+    return selected_entity_member(session, token, selectedCount);
 }
 
 /** @return The first free output row, or null when the ledger is full. */
@@ -233,7 +221,7 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
     if (!activity::binding_matches(request.binding)) {
         return mission::ActorCommandPolicyStatus::refused;
     }
-    if (!resolve_policy_host(request.binding, output.host)) {
+    if (!resolve_policy_host(request.binding, output.host, output.activityClientGeneration)) {
         return mission::ActorCommandPolicyStatus::unavailable;
     }
     if (!same_binding(output.host.source, request.binding)) {
@@ -254,9 +242,20 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
         return mission::ActorCommandPolicyStatus::refused;
     }
     const format::Squad& squad = squads[request.squadRow];
+    state::activity_sdk::BoundView activityView{};
+    server::bap::ActivityLinkView activityLink{};
+    if (server::bap::activity_link_view(request.binding, activityLink)
+        && state::activity_sdk::resolve(
+               snapshot,
+               {request.binding, activityLink.matchingLinks, activityLink.activityClientGeneration},
+               activityView)
+               == state::activity_sdk::Status::ready
+        && activityView.scenarioRow == squad.scenarioIndex) {
+        static_cast<void>(
+            state::activity_sdk::generated_world::resolve(activityView, output.worldView));
+    }
     const format::ActorCommandDefinition& command = commands[request.commandRow];
-    if ((squad.flags & format::kSquadRunnableMask) != format::kSquadRunnableMask
-        || squad.objectIndex >= snapshot->objects().size()
+    if (!resolve_selected_squad(*snapshot, squad, output.squad)
         || command.flags != format::kActorCommandDefinitionExact
         || command.selector != request.commandSelector
         || command.effect != format::ActorCommandEffect::setFaction
@@ -278,9 +277,6 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
     if (message == nullptr || actorEvent == nullptr || damageEvent == nullptr || members.empty()) {
         return mission::ActorCommandPolicyStatus::refused;
     }
-    output.squad.registryKey = snapshot->objects()[squad.objectIndex].objectKey;
-    output.squad.slotType = static_cast<std::uint8_t>(format::kSquadSlotType);
-    output.squad.slotIndex = squad.slotIndex;
     for (const format::SquadMember& member : members) {
         if (member.actorClassIndex == format::kAbsentIndex
             || member.actorClassIndex >= snapshot->actor_classes().size()) {
@@ -306,6 +302,8 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
                                const PolicyPlan& plan) noexcept {
     return session.policyActive && session.bindingRetained
            && same_binding(session.binding, request.binding) && session.catalog == plan.snapshot
+           && session.worldView.generation_identity() == plan.worldView.generation_identity()
+           && session.activityClientGeneration == plan.activityClientGeneration
            && session.commandIndex == request.commandRow && session.policyValue == request.value
            && session.linkIdentityRetained == plan.linkPresent
            && (!plan.linkPresent || same_link(session.linkIdentity, plan.linkIdentity));
@@ -435,8 +433,10 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
     }
     session.binding = request.binding;
     session.catalog = plan.snapshot;
+    session.worldView = plan.worldView;
     session.groupSessionId = plan.host.groupSessionId;
     session.hostGeneration = plan.host.generation;
+    session.activityClientGeneration = plan.activityClientGeneration;
     session.linkIdentity = plan.linkIdentity;
     session.linkIdentityRetained = plan.linkPresent;
     session.actorClasses = plan.classes;
@@ -450,7 +450,7 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
     session.commandIndex = request.commandRow;
     session.policyValue = request.value;
     if (linkChanged) {
-        session.actors = {};
+        external::reset_actor_entity_registry(session.actors);
         session.squads = {};
     }
     session.outputs = {};
@@ -605,7 +605,7 @@ void service_deferred_policies() noexcept {
 void adopt_link_identity(SessionRow& session,
                          const peer::LinkIdentity& linkIdentity,
                          bool present) noexcept {
-    session.actors = {};
+    external::reset_actor_entity_registry(session.actors);
     session.squads = {};
     session.outputs = {};
     session.replays = {};
@@ -643,8 +643,10 @@ SRWLOCK g_lock = SRWLOCK_INIT;
 std::array<SessionRow, kSessionCapacity> g_sessions{};
 std::uint64_t g_serviceFrame{};
 
-bool same_token(const external::EntityToken& left, const external::EntityToken& right) noexcept {
-    return left.slot == right.slot && left.incarnation == right.incarnation;
+/** Reconstructs the large fixed row directly in its owned storage. */
+static void clear_session_row(SessionRow& row) noexcept {
+    std::destroy_at(&row);
+    std::construct_at(&row);
 }
 
 SessionRow* find_session(std::uint64_t groupSessionId) noexcept {
@@ -673,23 +675,6 @@ SessionRow* find_or_create_session(std::uint64_t groupSessionId) noexcept {
     return &*empty;
 }
 
-/** @return True when the policy selects the class, filling its row. */
-bool selected_entity_class(const SessionRow& session,
-                           const external::EntityToken& target,
-                           std::uint32_t& output) noexcept {
-    output = format::kAbsentIndex;
-    if (target.slot >= session.actors.slots.size()) {
-        return false;
-    }
-    const external::ActorEntitySlot& slot = session.actors.slots[target.slot];
-    if (!slot.occupied || slot.incarnation != target.incarnation) {
-        return false;
-    }
-    output = slot.actorClassIndex;
-    return class_selected(session, output)
-           && token_selected(session, target, session.selectedSquadCount);
-}
-
 /** Queues one command for the session. @return True when a queue slot was free. */
 bool queue_command(SessionRow& session,
                    std::uint32_t actorClassIndex,
@@ -702,6 +687,10 @@ bool queue_command(SessionRow& session,
     if (row == nullptr || !external::published_actor_command_catalog(session.catalog, catalog)) {
         return false;
     }
+    if (purpose == OutputPurpose::policyCommand
+        && !resolve_policy_faction(session, target, actorClassIndex, catalog.profiles, value)) {
+        return false;
+    }
     OutputRow candidate{};
     if (!encode_command(catalog, session, actorClassIndex, target, value, candidate.draft)) {
         return false;
@@ -712,20 +701,6 @@ bool queue_command(SessionRow& session,
     candidate.purpose = purpose;
     *row = candidate;
     return true;
-}
-
-/** Drops every queued command and output aimed at one target. */
-void remove_target_state(SessionRow& session, const external::EntityToken& target) noexcept {
-    for (OutputRow& row : session.outputs) {
-        if (row.state != OutputState::empty && same_token(row.target, target)) {
-            row = {};
-        }
-    }
-    for (ReplayRow& row : session.replays) {
-        if (row.occupied && same_token(row.target, target)) {
-            row = {};
-        }
-    }
 }
 
 /** Clears transient state but retains policy. */
@@ -755,7 +730,7 @@ void shutdown() noexcept {
         if (row.bindingRetained) {
             releases[releaseCount++] = row.binding;
         }
-        row = {};
+        clear_session_row(row);
     }
     for (DeferredPolicyRow& row : g_deferredPolicies) {
         if (row.bindingRetained) {
@@ -818,7 +793,7 @@ void service(std::uint64_t) noexcept {
             if (session->bindingRetained) {
                 releases[releaseCount++] = session->binding;
             }
-            *session = {};
+            clear_session_row(*session);
             continue;
         }
         const bool linkMoved = linkPresent[index]
@@ -848,7 +823,7 @@ void reset_group_session(std::uint64_t groupSessionId) noexcept {
     if (session != nullptr) {
         release = session->binding;
         retained = session->bindingRetained;
-        *session = {};
+        clear_session_row(*session);
     }
     ReleaseSRWLockExclusive(&g_lock);
     if (retained) {

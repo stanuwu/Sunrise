@@ -7,6 +7,7 @@
 #include "../../state/activity/runtime.h"
 #include "activity_sdk_behavior_scope.h"
 #include "activity_sdk_mission_internal.h"
+#include "activity_sdk_scene_dependencies.h"
 #include "activity_sdk_scriptable_route.h"
 
 namespace sunrise::server::activity::activity_sdk_mission::detail {
@@ -350,6 +351,12 @@ namespace {
         || resource.resourceFieldOffset
                != resource.descriptorOffset + sdk::format::kAuthoredSceneResourceRelativeOffset) {
         return SceneStatus::missingResource;
+    }
+
+    const SceneStatus dependencies =
+        scene_dependencies(catalog, slot, resource, output.sceneDependencies);
+    if (dependencies != SceneStatus::ready) {
+        return dependencies;
     }
 
     const SceneStatus lease = scene_lease_status(view, link, occurrence.stateIndex);

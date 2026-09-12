@@ -21,6 +21,9 @@
 
 namespace sunrise::server::activity::host {
 
+using AuthoredSceneDependencies =
+    middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies;
+
 /** Activity instances tracked by the diagnostic host. */
 inline constexpr std::size_t kInstanceCapacity = state::activity::kSessionCapacity;
 /** Recent normalized events retained for the panel and HUD. */
@@ -136,11 +139,15 @@ enum class EventKind : std::uint8_t {
     objectState = 36,
     /** A damage monitor published new health, shield or revision values. */
     damageState = 37,
+    /** A gameplay policy accepted the first damage to an exact selected squad. */
+    squadProvoked = 38,
+    /** A device reported changed current channel values or accepted sequences. */
+    deviceState = 39,
 };
 
 /** Kinds are numbered without gaps, so the last one plus one is the count. */
 inline constexpr std::size_t kEventKindCount =
-    static_cast<std::size_t>(EventKind::damageState) + 1U;
+    static_cast<std::size_t>(EventKind::deviceState) + 1U;
 
 /**
  * Terminal delivery outcome of one script-requested effect.
@@ -246,6 +253,9 @@ enum class ScriptableOverrideKind : std::uint8_t {
     lifetime,
     /** Type-42 performance start: one state name behind a rising per-slot generation. */
     performance,
+    authoredSceneEvent,
+    authoredSceneStop,
+    combatantSequence,
 };
 
 /** Current diagnostic state of one retained incident. */
@@ -481,6 +491,16 @@ struct Event final {
     float damageHealth{-1.0F};
     float damageShield{-1.0F};
     std::int32_t damageRevision{};
+    /** Current position, power and lock levels; masks distinguish unknown fields. */
+    std::array<float, middleware::bap::activity_message::scriptable_auth::kType23ChannelCount>
+        deviceValues{};
+    std::array<std::int32_t,
+               middleware::bap::activity_message::scriptable_auth::kType23ChannelCount>
+        deviceSequences{};
+    std::uint8_t deviceValueMask{};
+    std::uint8_t deviceSequenceMask{};
+    bool deviceFirstReport{};
+    bool deviceReset{};
     /** Object level, for objectState and objectInteracted events. */
     std::int32_t objectGeneration{};
     bool objectPresent{};
@@ -897,6 +917,15 @@ request_type23_override(const state::activity::SessionBinding& binding,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation = nullptr) noexcept;
 
+/** Queues a sequence on an enabled combatant without changing its actor binding. */
+[[nodiscard]] bool request_state_local_type2_sequence(
+    const state::activity::SessionBinding& binding,
+    const ScriptableTarget& target,
+    const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
+    std::uint32_t sequenceHash,
+    std::uint64_t expectedActivityClientGeneration,
+    const ScriptableOutputReservation* reservation = nullptr) noexcept;
+
 /** Queues squad-member binding for one exact generated type-2 combatant slot. */
 [[nodiscard]] bool request_state_local_type2_squad_binding(
     const state::activity::SessionBinding& binding,
@@ -978,7 +1007,10 @@ request_type31_override(const state::activity::SessionBinding& binding,
     const ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::uint64_t expectedActivityClientGeneration,
-    const ScriptableOutputReservation* reservation = nullptr) noexcept;
+    const ScriptableOutputReservation* reservation = nullptr,
+    const AuthoredSceneDependencies& dependencies = {},
+    std::uint32_t eventKey = 0,
+    bool stop = false) noexcept;
 
 /** Queues one authored dialogue line from the exact generated group in the mission seed. */
 [[nodiscard]] bool request_state_local_dialogue_override(

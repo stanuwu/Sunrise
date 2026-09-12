@@ -32,9 +32,9 @@ inline constexpr std::size_t kSquadMemberCapacity = 15;
 /** Script source is bounded before it reaches the parser. */
 inline constexpr std::size_t kSourceByteCapacity = 128U * 1024U;
 /** One callback is stopped after this many approximate VM instructions. */
-inline constexpr std::uint32_t kInstructionBudget = 100'000;
+inline constexpr std::uint32_t kInstructionBudget = 5'000'000;
 /** Generated mission modules are large declarations and execute only while a VM opens. */
-inline constexpr std::uint32_t kInitializationInstructionBudget = 2'000'000;
+inline constexpr std::uint32_t kInitializationInstructionBudget = 100'000'000;
 /** Stable storage holds everything but the arena block, which the open program owns. */
 inline constexpr std::size_t kVmStorageByteCapacity = 512U * 1024U;
 
@@ -128,6 +128,35 @@ struct PerformanceStateDefinition final {
     std::uint32_t nameHash{};
     /** Distinct state names every member of the target squad declares. */
     std::uint32_t stateCount{};
+};
+
+using ActorSequenceOwner = state::activity::mission::ActorSequenceOwner;
+
+/** One extracted sequence entry; unsupported native kinds remain readable. */
+struct ActorSequenceDefinition final {
+    std::string_view id{};
+    std::string_view name{};
+    std::string_view symbol{};
+    std::string_view sourcePath{};
+    std::uint32_t catalogRow{};
+    std::uint32_t keyHash{};
+    std::uint32_t kind{};
+    std::uint32_t resourceTag{};
+    std::uint32_t tableIndex{};
+    std::uint32_t ordinal{};
+    std::uint32_t sourceOffset{};
+    bool playable{};
+};
+
+/** These callbacks reread the exact actor owner before exposing or playing a value. */
+struct ActorSequenceApi final {
+    const void* context{};
+    bool (*owner)(const void*, std::uint32_t slotRow, ActorSequenceOwner&) noexcept {};
+    std::size_t (*count)(const void*, const ActorSequenceOwner&) noexcept {};
+    bool (*resolve)(const void*,
+                    const ActorSequenceOwner&,
+                    std::uint32_t ordinal,
+                    ActorSequenceDefinition&) noexcept {};
 };
 
 /** One peer session bound to this destination, as the roster currently holds it. */
@@ -351,6 +380,7 @@ struct DefinitionApi final {
     ResolveDirectiveElementRow resolveDirectiveElementRow{};
     ResolveDirectiveElement resolveDirectiveElement{};
     ResolvePerformanceState resolvePerformanceState{};
+    ActorSequenceApi actorSequences{};
     ResolveActivityMessageRow resolveActivityMessageRow{};
     ResolveActivityMessageId resolveActivityMessageId{};
     ResolveActivityMessageName resolveActivityMessageName{};

@@ -450,7 +450,10 @@ bool request_activity_state_local_authored_scene_override(
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::int32_t expectedRegion,
     std::uint64_t expectedGeneration,
-    const activity::host::ScriptableOutputReservation* reservation) noexcept {
+    const activity::host::ScriptableOutputReservation* reservation,
+    const activity::host::AuthoredSceneDependencies& dependencies,
+    std::uint32_t eventKey,
+    bool stop) noexcept {
     const std::lock_guard lock(session_lock());
     std::size_t linkCount = 0;
     const Session* const session = unique_activity_link_locked(binding, linkCount);
@@ -461,8 +464,14 @@ bool request_activity_state_local_authored_scene_override(
         && target.stateLocalRegion == expectedRegion
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_authored_scene_target(target, stateLocalRosterGroup)
-        && activity::host::request_state_local_authored_scene_override(
-            binding, target, stateLocalRosterGroup, expectedGeneration, reservation);
+        && activity::host::request_state_local_authored_scene_override(binding,
+                                                                       target,
+                                                                       stateLocalRosterGroup,
+                                                                       expectedGeneration,
+                                                                       reservation,
+                                                                       dependencies,
+                                                                       eventKey,
+                                                                       stop);
     return queued;
 }
 

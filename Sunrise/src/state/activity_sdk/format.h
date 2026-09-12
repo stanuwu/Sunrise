@@ -10,9 +10,9 @@ namespace sunrise::state::activity_sdk::format {
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
 /** Runtime-pack schema version accepted by this reader. */
-inline constexpr std::uint32_t kVersion = 37;
+inline constexpr std::uint32_t kVersion = 38;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
-inline constexpr std::uint32_t kSectionCount = 43;
+inline constexpr std::uint32_t kSectionCount = 46;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
 /** The runtime accepts only the checked generated SDK build. Each pin is a SHA-256 digest. */
 inline constexpr std::array<std::byte, 32> kExpectedSdkBuildDigest{
@@ -282,6 +282,17 @@ inline constexpr std::uint32_t kActorStateMachineDefinitionClass = 0x8080815FU;
 inline constexpr std::uint32_t kActorStateMachineGroupHash = 0xAFB11A12U;
 inline constexpr std::uint32_t kActorStateNameExact = 0x1U;
 inline constexpr std::uint32_t kActorStateNameFlagMask = kActorStateNameExact;
+/** Sequence metadata is exact package data; names additionally require a verified FNV-1 match. */
+inline constexpr std::uint32_t kActorSequenceExact = 1;
+inline constexpr std::uint32_t kActorSequenceNameVerified = 2;
+inline constexpr std::uint32_t kActorSequenceSymbolFromPath = 4;
+inline constexpr std::uint32_t kActorSequenceEntryFlagMask = 7;
+/** Native global and actor-local definition classes own these two action table fields. */
+inline constexpr std::uint32_t kActorSequenceGlobalDefinitionClass = 0x8080816CU;
+inline constexpr std::uint32_t kActorSequenceLocalDefinitionClass = 0x8080815FU;
+inline constexpr std::uint32_t kActorSequenceGlobalArrayOffset = 152;
+inline constexpr std::uint32_t kActorSequenceLocalArrayOffset = 16;
+inline constexpr std::uint32_t kActorSequenceOwnerSourceClass = 0x808082ECU;
 inline constexpr std::uint32_t kAuthoredSceneSquadBlockClassRelativeOffset = 0xA4U;
 inline constexpr std::uint32_t kAuthoredSceneSquadBlockClass = 0x80806262U;
 inline constexpr std::uint32_t kAuthoredSceneSquadReferenceRelativeOffset = 0xB0U;
@@ -356,7 +367,7 @@ inline constexpr std::int64_t kAbsentSignedValue = (-0x7FFFFFFFFFFFFFFFLL - 1);
 
 /** Fixed packed byte sizes make producer and consumer ABI drift fail at compile time. */
 inline constexpr std::size_t kSectionSize = 16;
-inline constexpr std::size_t kHeaderSize = 848;
+inline constexpr std::size_t kHeaderSize = 896;
 inline constexpr std::size_t kStringRefSize = 8;
 inline constexpr std::size_t kRangeSize = 8;
 inline constexpr std::size_t kActivitySize = 124;
@@ -401,6 +412,9 @@ inline constexpr std::size_t kSobjectRsatDescriptorSize = 72;
 inline constexpr std::size_t kEntityTypeDefinitionSize = 56;
 inline constexpr std::size_t kSobjectRsatFieldBindingSize = 40;
 inline constexpr std::size_t kActorStateNameSize = 24;
+inline constexpr std::size_t kActorSequenceTableSize = 24;
+inline constexpr std::size_t kActorSequenceEntrySize = 64;
+inline constexpr std::size_t kActorSequenceBindingSize = 32;
 inline constexpr std::size_t kRsatDescriptorRawRowSize = 32;
 inline constexpr std::size_t kRsatSchemaFieldRawRowSize = 40;
 
@@ -686,9 +700,12 @@ enum class SectionIndex : std::uint32_t {
     sobjectRsatFieldBindings,
     runtimeTypeDefinitions,
     actorStateNames,
+    actorSequenceTables,
+    actorSequenceEntries,
+    actorSequenceBindings,
 };
 
-static_assert(static_cast<std::uint32_t>(SectionIndex::actorStateNames) + 1 == kSectionCount);
+static_assert(static_cast<std::uint32_t>(SectionIndex::actorSequenceBindings) + 1 == kSectionCount);
 
 /** Exact activity-name/root join result retained for every activity row. */
 enum class ActivityJoinStatus : std::uint32_t {
@@ -1386,6 +1403,43 @@ struct ActorStateName final {
     std::uint32_t flags{};
 };
 
+/** One package action table shared by all actors that select it. */
+struct ActorSequenceTable final {
+    std::uint32_t definitionTag{};
+    std::uint32_t definitionClass{};
+    std::uint32_t arrayOffset{};
+    Range entries{};
+    std::uint32_t flags{};
+};
+
+/** One authored action key, including unsupported kinds and exact diagnostic source text. */
+struct ActorSequenceEntry final {
+    StringRef id{};
+    StringRef name{};
+    StringRef symbol{};
+    StringRef sourcePath{};
+    std::uint32_t tableIndex{};
+    std::uint32_t ordinal{};
+    std::uint32_t sourceOffset{};
+    std::uint32_t keyHash{};
+    std::uint32_t kind{};
+    std::uint32_t resourceTag{};
+    std::uint32_t flags{};
+    std::uint32_t reserved{};
+};
+
+/** One declared actor component chooses its global-first and local-fallback action tables. */
+struct ActorSequenceBinding final {
+    std::uint32_t actorClassIndex{};
+    std::uint32_t componentOrdinal{};
+    std::uint32_t configTag{};
+    std::uint32_t sourceOffset{};
+    std::uint32_t globalTableIndex{kAbsentIndex};
+    std::uint32_t localTableIndex{kAbsentIndex};
+    std::uint32_t sourceClass{};
+    std::uint32_t flags{};
+};
+
 #pragma pack(pop)
 
 static_assert(sizeof(Section) == kSectionSize);
@@ -1434,6 +1488,9 @@ static_assert(sizeof(SobjectRsatDescriptor) == kSobjectRsatDescriptorSize);
 static_assert(sizeof(EntityTypeDefinition) == kEntityTypeDefinitionSize);
 static_assert(sizeof(SobjectRsatFieldBinding) == kSobjectRsatFieldBindingSize);
 static_assert(sizeof(ActorStateName) == kActorStateNameSize);
+static_assert(sizeof(ActorSequenceTable) == kActorSequenceTableSize);
+static_assert(sizeof(ActorSequenceEntry) == kActorSequenceEntrySize);
+static_assert(sizeof(ActorSequenceBinding) == kActorSequenceBindingSize);
 static_assert(std::is_trivially_copyable_v<ActorStateName>
               && std::is_standard_layout_v<ActorStateName>);
 static_assert(offsetof(ActorStateName, actorClassIndex) == offset::kActorStateNameActorClassIndex);

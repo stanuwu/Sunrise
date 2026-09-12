@@ -38,7 +38,7 @@ struct TemperamentId final {
     [[nodiscard]] friend constexpr bool operator==(TemperamentId, TemperamentId) noexcept = default;
 };
 
-/** Selects whether Type 2 creates its own actor or binds one authored squad member. */
+/** Selects automatic actor creation or creation by an authored scene. */
 enum class Type2ActorBinding : std::int8_t {
     selfOwned = -1,
     squadMember = 1,
@@ -160,6 +160,36 @@ inline constexpr std::size_t kType2MaximumBodyBitCount =
     + kType2AtomCapacity * kType2AtomLaneMaximumBitCount;
 /** Same size padded up to whole bytes. */
 inline constexpr std::size_t kType2MaximumBodyByteCount = (kType2MaximumBodyBitCount + 7) / 8;
+
+/** Full Auth also permits spawn generation, eight keyed rows and eight manifest references. */
+inline constexpr std::size_t kType2FullMaximumBitCount =
+    kType2MaximumBodyBitCount + 31U + (1U + 8U * (1U + 32U + 1U + 31U) + 1U + 32U)
+    + (4U + 8U * 55U + 31U);
+inline constexpr std::size_t kType2FullMaximumByteCount = (kType2FullMaximumBitCount + 7U) / 8U;
+
+/** Exact retained spans around `.6`; all other root fields remain byte-for-byte unchanged. */
+struct Type2ProgramLayout final {
+    std::size_t programOffset{};
+    std::size_t programBits{};
+    std::uint32_t generation{};
+    std::uint8_t bindingWire{};
+    bool enabled{};
+};
+
+/** Reads every full-root field using native bounded arrays and finite atom-lane tags. */
+[[nodiscard]] bool inspect_type2_program(std::span<const std::byte> input,
+                                         std::size_t bitCount,
+                                         Type2ProgramLayout& output) noexcept;
+
+/** Replaces only `.6`; a zero hash cancels the program on the enabled squad-bound actor. */
+[[nodiscard]] bool replace_type2_sequence(std::span<const std::byte> previous,
+                                          std::size_t previousBits,
+                                          std::uint32_t sequenceHash,
+                                          std::uint32_t committedGeneration,
+                                          std::span<std::byte> output,
+                                          std::size_t& written,
+                                          std::size_t& writtenBits,
+                                          std::uint32_t& generation) noexcept;
 
 /** Encodes both keyed-lane tags and their selected native child schemas. */
 [[nodiscard]] bool encode_type2_keyed_lane(const Type2KeyedLane& lane,

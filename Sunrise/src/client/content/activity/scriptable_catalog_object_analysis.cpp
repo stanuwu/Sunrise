@@ -52,6 +52,10 @@ struct PlacedChainContext final {
         row.placementIdentifierRead = tables::type23_placement_identifier(
             context.config, descriptor, row.placementIdentifier);
         context.analysis->descriptors.push_back(row);
+        internal::RawReference reference{};
+        if (internal::read_type2_squad_reference(context.config, descriptor, reference)) {
+            context.analysis->references.push_back(reference);
+        }
     } catch (...) {
         return false;
     }
@@ -104,6 +108,7 @@ collect_placed_config(void* opaque, std::uint32_t tag, std::span<const std::byte
     if (!tables::visit_slot_descriptors(
             blob, tag, context.registryKey, &collect_descriptor, &descriptorContext)) {
         analysis.descriptors.resize(firstDescriptor);
+        analysis.references.resize(firstReference);
         return false;
     }
     try {

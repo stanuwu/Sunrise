@@ -46,6 +46,9 @@ bool render_contract_files(const Source& source, Bundle& output) noexcept {
                  {"entity_type_definitions", number(source.entityTypeDefinitions.size())},
                  {"sobject_rsat_field_bindings", number(source.sobjectRsatFieldBindings.size())},
                  {"actor_state_names", number(source.actorStateNames.size())},
+                 {"actor_sequence_tables", number(source.actorSequenceTables.size())},
+                 {"actor_sequence_entries", number(source.actorSequenceEntries.size())},
+                 {"actor_sequence_bindings", number(source.actorSequenceBindings.size())},
              })},
         });
         if (!render_json(manifest, 0, output.manifestJson)) {
@@ -94,6 +97,8 @@ local EventKind = {
     FIRETEAM_STATE = 35,
     OBJECT_STATE = 36,
     DAMAGE_STATE = 37,
+    SQUAD_PROVOKED = 38,
+    DEVICE_STATE = 39,
 }
 
 ---@class SunriseEvent
@@ -124,6 +129,20 @@ local EventKind = {
 ---@class SunriseEntitySlotsRequestedEvent: SunriseEvent
 ---@field requested_count integer
 
+---@class SunriseDeviceStateEvent: SunriseEvent
+---@field registry_key integer
+---@field object_tag integer
+---@field slot_type integer
+---@field slot_index integer
+---@field position number?
+---@field power number?
+---@field lock number?
+---@field position_sequence integer?
+---@field power_sequence integer?
+---@field lock_sequence integer?
+---@field first_report boolean
+---@field reset boolean
+
 ---@class SunriseProgram
 ---@field on_start? fun(context: any, state: SunriseState)
 ---@field on_load? fun(context: any, state: SunriseState)
@@ -148,6 +167,7 @@ local EventKind = {
 ---@field on_event_trigger_entered? SunriseEventHandler
 ---@field on_event_trigger_exited? SunriseEventHandler
 ---@field on_event_squad_state? SunriseEventHandler
+---@field on_event_device_state? fun(ctx: any, state: SunriseState, event: SunriseDeviceStateEvent)
 ---@field on_event_entity_spawned? fun(context: any, state: SunriseState, event: SunriseEvent)
 ---@field on_event_entity_died? fun(context: any, state: SunriseState, event: SunriseEvent)
 ---@field on_event_scene_finished? fun(context: any, state: SunriseState, event: SunriseEvent)
@@ -192,7 +212,8 @@ local EventKind = {
 ---@field auth_writable boolean|nil
 ---@field set_object_active fun(SunriseSlot, SunriseObjectArguments?): SunriseRequestKey
 ---@field assign_combat_objective fun(self: SunriseSlot, args: {objective: SunriseSlot, )lua"
-            R"lua(revision: integer, task_group: integer, reserved: boolean?}): SunriseRequestKey
+            R"lua(revision: integer, task_group: integer, reserved: boolean?, )lua"
+            R"lua(refresh_player_awareness: boolean?}): SunriseRequestKey
 ---@field play_actor_path fun(self: SunriseSlot, args: {generation: integer, )lua"
             R"lua(revision: integer, path: SunriseSlot}): SunriseRequestKey
 ---@field deliver_squads fun(self: SunriseSlot, args: {generation: integer, )lua"
@@ -220,7 +241,9 @@ local EventKind = {
 ---@field bind_combatant_to_squad fun(self: SunriseSlot): SunriseRequestKey
 ---@field transition fun(SunriseSlot, SunriseDeviceTransitionArguments): SunriseRequestKey
 ---@field fire_trigger fun(self: SunriseSlot): SunriseRequestKey
----@field play_sequence fun(self: SunriseSlot): SunriseRequestKey
+---@field sequences fun(self: SunriseSlot): SunriseActorSequences
+---@field play_sequence fun(self: SunriseSlot, args: {sequence: SunriseActorSequence}): )lua"
+            R"lua(SunriseRequestKey
 ---@field set_cinematic_active fun(SunriseSlot, SunriseCinematicArguments?): SunriseRequestKey
 ---@field reset_objectives fun(self: SunriseSlot): SunriseRequestKey
 ---@field advance_task fun(self: SunriseSlot): SunriseRequestKey
@@ -499,6 +522,7 @@ sdk.ObjectFilterPredicateSchema = {
 ---@field flag boolean
 
 )lua");
+        append_actor_sequence_contract(source, authTypes);
         output.activitySdkModule.insert(returnOffset, authTypes);
 
         output.behaviorModule =

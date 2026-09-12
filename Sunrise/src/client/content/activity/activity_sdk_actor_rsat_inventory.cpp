@@ -8,6 +8,7 @@
 
 #include "../../../middleware/content/packages/reader/parallel.h"
 #include "activity_sdk_actor_rsat_inventory_internal.h"
+#include "activity_sdk_actor_sequences.h"
 
 namespace sunrise::client::content::activity::sdk_generation::actor_rsat_inventory {
 namespace {
@@ -55,7 +56,8 @@ bool build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
                                void* readContext,
                                CancelProbe cancel,
                                void* cancelContext,
-                               Snapshot& output) noexcept {
+                               Snapshot& output,
+                               std::span<const SequenceTableSource> sequenceTables) noexcept {
     output = {};
     if (actorTags.empty() || readTag == nullptr || is_cancelled(cancel, cancelContext)) {
         return false;
@@ -85,6 +87,14 @@ bool build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
         state.rsatTags.reserve(actorTags.size());
         if (!add_engine_semantics(state.snapshot)) {
             return false;
+        }
+
+        for (const auto& source : sequenceTables) {
+            std::uint32_t table = format::kAbsentIndex;
+            if (is_absent_tag(source.definitionTag)
+                || !sequence_inventory::table(state, source, table)) {
+                return false;
+            }
         }
 
         for (std::size_t actorIndex = 0; actorIndex < actorTags.size(); ++actorIndex) {
@@ -142,7 +152,8 @@ bool build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
                 }
             }
             state.snapshot.behaviorProfiles.push_back(profile);
-            if (!collect_state_names(state, static_cast<std::uint32_t>(actorIndex), actorBlob)) {
+            if (!sequence_inventory::actor(state, static_cast<std::uint32_t>(actorIndex), actorBlob)
+                || !collect_state_names(state, static_cast<std::uint32_t>(actorIndex), actorBlob)) {
                 return false;
             }
             if (is_absent_tag(actor.rsatTag)) {
@@ -304,6 +315,9 @@ bool build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
             descriptor.schemaIndex = static_cast<std::uint32_t>(found->second);
         }
 
+        if (!sequence_inventory::finish_names(state.snapshot)) {
+            return false;
+        }
         state.snapshot.complete = true;
         if (!validate(state.snapshot)) {
             return false;
@@ -408,8 +422,18 @@ bool build_with_rsats(const reader::Source& source,
                 return false;
             }
         }
-        return build_from_tags_and_rsats(
-            actorTags, rsatTags, &package_read, &context, cancel, cancelContext, output);
+        std::vector<SequenceTableSource> sequenceTables;
+        if (!sequence_inventory::scan_tables(source, sequenceTables)) {
+            return false;
+        }
+        return build_from_tags_and_rsats(actorTags,
+                                         rsatTags,
+                                         &package_read,
+                                         &context,
+                                         cancel,
+                                         cancelContext,
+                                         output,
+                                         sequenceTables);
     } catch (...) {
         output = {};
         return false;

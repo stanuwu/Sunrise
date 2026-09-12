@@ -95,6 +95,12 @@ publish(const wchar_t* path, PreparedShard prepared, Digest& payloadSha256) noex
                          const build_data::scriptables::Snapshot& snapshot,
                          Digest& payloadSha256) noexcept;
 
+/** Checks current format and manifest identity without reading or trusting payload contents. */
+[[nodiscard]] bool compatible_header(const wchar_t* path,
+                                     std::uint32_t expectedScenarioTag,
+                                     const Digest& expectedSourceFingerprint,
+                                     const Digest& expectedPayloadSha256) noexcept;
+
 /**
  * Loads and validates one scenario shard without partially replacing the caller's snapshot.
  * @param path Null-terminated shard path selected by the caller.

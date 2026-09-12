@@ -424,6 +424,9 @@ bool is_current(const wchar_t* sdkDirectory, const state::activity_sdk::Catalog&
         source.entityTypeDefinitions = catalog.entity_type_definitions();
         source.sobjectRsatFieldBindings = catalog.sobject_rsat_field_bindings();
         source.actorStateNames = catalog.actor_state_names();
+        source.actorSequenceTables = catalog.actor_sequence_tables();
+        source.actorSequenceEntries = catalog.actor_sequence_entries();
+        source.actorSequenceBindings = catalog.actor_sequence_bindings();
         Bundle expected{};
         if (!internal::render_contract_files(source, expected)) {
             return false;

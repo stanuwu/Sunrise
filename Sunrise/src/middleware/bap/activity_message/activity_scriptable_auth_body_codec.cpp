@@ -2,6 +2,7 @@
 #include <bit>
 #include <cmath>
 
+#include "mission_auth_patch.h"
 #include "scriptable_auth_internal.h"
 
 // The two scriptable-auth bodies whose encoded width depends on the caller's values: the type-2
@@ -549,6 +550,139 @@ bool encode_type2_body(const Type2Body& body,
         return false;
     }
     writtenBits = bitCount;
+    return true;
+}
+
+/** Reads every optional root block before reporting the atom program span. */
+bool inspect_type2_program(std::span<const std::byte> input,
+                           std::size_t bitCount,
+                           Type2ProgramLayout& output) noexcept {
+    output = {};
+    if (bitCount < 11U || bitCount > kType2FullMaximumBitCount
+        || input.size() != (bitCount + 7U) / 8U) {
+        return false;
+    }
+    bits::Reader reader(input);
+    const auto optional = [&](std::size_t width) noexcept {
+        std::uint64_t present = 0;
+        return reader.read(1, present) && (present == 0 || reader.skip(width));
+    };
+    std::uint64_t value = 0, present = 0, count = 0;
+    Type2ProgramLayout candidate{};
+    if (!optional(31) || !reader.skip(2) || !reader.read(3, value)) {
+        return false;
+    }
+    candidate.bindingWire = static_cast<std::uint8_t>(value);
+    if (!reader.read(1, value)) {
+        return false;
+    }
+    candidate.enabled = value != 0;
+    if (!reader.read(1, present)) {
+        return false;
+    }
+    if (present != 0) {
+        if (!reader.read(1, present)) {
+            return false;
+        }
+        if (present != 0) {
+            for (std::size_t index = 0; index < 8; ++index) {
+                if (!optional(32) || !optional(31)) {
+                    return false;
+                }
+            }
+        }
+        if (!optional(32)) {
+            return false;
+        }
+    }
+    if (!reader.read(1, present)) {
+        return false;
+    }
+    if (present != 0) {
+        if (!reader.skip(31 + 6 + 6) || !reader.read(3, count) || count > kType2TemperamentCapacity
+            || !reader.skip(count * 32) || !reader.skip(55 + 32) || !reader.read(5, count)
+            || count > kType2ChannelCapacity || !reader.skip(count * 64)) {
+            return false;
+        }
+    }
+    candidate.programOffset = input.size() * 8U - reader.remaining_bits();
+    if (!reader.read(1, present)) {
+        return false;
+    }
+    if (present != 0) {
+        std::uint64_t progress = 0;
+        if (!reader.read(31, value) || !reader.read(6, progress) || !reader.read(6, count)
+            || count > kType2AtomCapacity || progress > count) {
+            return false;
+        }
+        candidate.generation = static_cast<std::uint32_t>(value);
+        for (std::size_t index = 0; index < count; ++index) {
+            if (!reader.read(1, present) || (present != 0 && !read_type2_lane(reader))) {
+                return false;
+            }
+        }
+    }
+    candidate.programBits = input.size() * 8U - reader.remaining_bits() - candidate.programOffset;
+    if (!reader.read(1, present)) {
+        return false;
+    }
+    if (present != 0 && (!reader.read(4, count) || count > 8 || !reader.skip(count * 55 + 31))) {
+        return false;
+    }
+    if (reader.remaining_bits() != input.size() * 8U - bitCount || !finish_padding(reader)) {
+        return false;
+    }
+    output = candidate;
+    return true;
+}
+
+/** Preserves all root fields except the new sequence program and its generation. */
+bool replace_type2_sequence(std::span<const std::byte> previous,
+                            std::size_t previousBits,
+                            std::uint32_t sequenceHash,
+                            std::uint32_t committedGeneration,
+                            std::span<std::byte> output,
+                            std::size_t& written,
+                            std::size_t& writtenBits,
+                            std::uint32_t& generation) noexcept {
+    written = 0;
+    writtenBits = 0;
+    generation = 0;
+    Type2ProgramLayout layout{};
+    if (sequenceHash == kClientRefAbsentKey
+        || sequenceHash == (std::numeric_limits<std::uint32_t>::max)()
+        || !inspect_type2_program(previous, previousBits, layout) || !layout.enabled
+        || (layout.bindingWire != 2 && layout.bindingWire != 4)) {
+        return false;
+    }
+    const auto last = (std::max)(committedGeneration, layout.generation);
+    if (last >= kMaximumRevision) {
+        return false;
+    }
+    const auto next = last + 1;
+    const bool play = sequenceHash != 0;
+    Type2KeyedLane lane{};
+    lane.primary = Type2LaneU32{sequenceHash};
+    lane.secondary = Type2LaneSecondaryEmpty::first;
+    std::array<std::byte, kType2FullMaximumByteCount> staged{};
+    bits::Writer writer(staged);
+    namespace patch = mission_auth_patch;
+    const auto tailOffset = layout.programOffset + layout.programBits;
+    if (!patch::copy_field(writer, previous, {0, layout.programOffset, true}) || !writer.write(1, 1)
+        || !writer.write(next, 31) || !writer.write(0, 6) || !writer.write(play ? 1 : 0, 6)
+        || (play && (!writer.write(1, 1) || !write_type2_lane(writer, lane)))
+        || !patch::copy_field(writer, previous, {tailOffset, previousBits - tailOffset, true})) {
+        return false;
+    }
+    const auto bitCount = writer.bit_count();
+    std::size_t byteCount = 0;
+    if (!writer.finish(byteCount) || byteCount > output.size()) {
+        return false;
+    }
+    std::copy_n(staged.begin(), byteCount, output.begin());
+    written = byteCount;
+    writtenBits = bitCount;
+    generation = next;
     return true;
 }
 

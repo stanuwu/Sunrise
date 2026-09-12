@@ -277,6 +277,19 @@ Catalog::sobject_rsat_field_bindings() const noexcept {
         header_, view_, format::SectionIndex::sobjectRsatFieldBindings);
 }
 
+std::span<const format::ActorSequenceTable> Catalog::actor_sequence_tables() const noexcept {
+    return rows<format::ActorSequenceTable>(
+        header_, view_, format::SectionIndex::actorSequenceTables);
+}
+std::span<const format::ActorSequenceEntry> Catalog::actor_sequence_entries() const noexcept {
+    return rows<format::ActorSequenceEntry>(
+        header_, view_, format::SectionIndex::actorSequenceEntries);
+}
+std::span<const format::ActorSequenceBinding> Catalog::actor_sequence_bindings() const noexcept {
+    return rows<format::ActorSequenceBinding>(
+        header_, view_, format::SectionIndex::actorSequenceBindings);
+}
+
 std::span<const format::ActorStateName> Catalog::actor_state_names() const noexcept {
     return rows<format::ActorStateName>(header_, view_, format::SectionIndex::actorStateNames);
 }

@@ -430,9 +430,11 @@ rebase_row(std::uint32_t local, std::uint32_t first, std::uint32_t& output) noex
         row.targetKey = source.targetKey;
         row.targetSlotType = source.targetType;
         row.targetSlotIndex = source.targetIndex;
-        std::uint16_t sourceIndex = 0;
-        if (descriptors_for_config(analysis, source.configTag, sourceIndex) == 1
-            && sourceIndex < analysis.slots.size()) {
+        std::uint16_t sourceIndex = source.sourceIndex;
+        const bool sourceKnown =
+            sourceIndex != internal::kUnresolvedReferenceSlot
+            || descriptors_for_config(analysis, source.configTag, sourceIndex) == 1;
+        if (sourceKnown && sourceIndex < analysis.slots.size()) {
             row.sourceSlotRow = firstSlot + sourceIndex;
         }
         output.references.push_back(row);

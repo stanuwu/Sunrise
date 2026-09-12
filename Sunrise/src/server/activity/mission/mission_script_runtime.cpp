@@ -220,6 +220,39 @@ void push_script_event(RuntimeInstance& instance, const host::Event& event) noex
     }
 }
 
+/**
+ * Queues an exact host-policy transition without consuming a client mission-input sequence.
+ * @param binding Activity generation that accepted the damage.
+ * @param sourceGeneration ActivityClient generation that owns the policy.
+ * @param registryKey Authored squad registry key.
+ * @param slotIndex Native squad slot index.
+ */
+void report_squad_provoked(const state::activity::SessionBinding& binding,
+                           std::uint64_t sourceGeneration,
+                           std::uint32_t registryKey,
+                           std::uint16_t slotIndex) noexcept {
+    if (sourceGeneration == 0 || registryKey == 0
+        || slotIndex > static_cast<std::uint16_t>((std::numeric_limits<std::int16_t>::max)())) {
+        return;
+    }
+    AcquireSRWLockExclusive(&g_lock);
+    auto* instance = find_instance(binding);
+    if (instance != nullptr && instance->view.activityClientGeneration == sourceGeneration) {
+        host::Event event{};
+        event.kind = host::EventKind::squadProvoked;
+        event.binding = binding;
+        event.sequence = instance->missionStateRevision;
+        event.missionSequence = instance->lastMissionSequence;
+        event.sourceGeneration = sourceGeneration;
+        event.tick = GetTickCount64();
+        event.firstRegistryKey = registryKey;
+        event.firstSlotType = sdk::format::kSquadSlotType;
+        event.firstSlotIndex = slotIndex;
+        push_script_event(*instance, event);
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
 /** Retains the last VM stage and status shown on the panel. */
 void note_vm_status(RuntimeInstance& instance,
                     std::string_view stage,
@@ -287,6 +320,8 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.ghostObservations = {};
     instance.actorPathObservations = {};
     instance.squadObservations = {};
+    instance.combatantDamageObservations = {};
+    instance.deviceObservations = {};
     instance.sceneObservations = {};
     instance.objectiveObservations = {};
     instance.sessionRoster = {};

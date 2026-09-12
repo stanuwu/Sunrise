@@ -95,6 +95,9 @@ void register_event_metatables(lua_State* state);
 void register_squad_metatables(lua_State* state);
 void register_scene_metatables(lua_State* state);
 void register_slot_metatables(lua_State* state);
+void register_actor_sequence_metatables(lua_State* state);
+[[nodiscard]] int slot_actor_sequences(lua_State* state);
+[[nodiscard]] int slot_play_actor_sequence(lua_State* state);
 
 // SDK definition readers, defined in mission_script_lua_definition_api.cpp.
 
@@ -128,6 +131,8 @@ void register_slot_metatables(lua_State* state);
 [[nodiscard]] int squad_actor_command(lua_State* state);
 [[nodiscard]] int scene_index(lua_State* state);
 [[nodiscard]] int scene_activate(lua_State* state);
+[[nodiscard]] int scene_send_event(lua_State* state);
+[[nodiscard]] int scene_stop(lua_State* state);
 [[nodiscard]] int lifetime_index(lua_State* state);
 [[nodiscard]] int lifetime_set(lua_State* state);
 

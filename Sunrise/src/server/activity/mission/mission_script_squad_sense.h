@@ -22,6 +22,9 @@ inline constexpr std::size_t kSquadConsumedSlotCapacity = 8;
 inline constexpr std::size_t kSquadObjectiveGroupCount = 24;
 /** Costs are saturated distances; the client never publishes more than this. */
 inline constexpr float kMaximumObjectiveCost = 2040.0F;
+/** The native schema initializes every cost to its unreachable value. */
+inline constexpr std::uint32_t kSquadObjectiveDefaultMask =
+    (std::uint32_t{1} << kSquadObjectiveGroupCount) - 1U;
 /** The alive count is six bits on the wire. */
 inline constexpr std::int64_t kMaximumAliveCount = 63;
 inline constexpr std::int64_t kMaximumCounter = 0x7FFFFFFF;
@@ -65,14 +68,25 @@ inline constexpr std::int64_t kMaximumCounter = 0x7FFFFFFF;
     return static_cast<std::uint8_t>(length);
 }
 
-/** Objective costs the client published for one squad, and the revision they answer. */
+/** Native defaults remain until a present cost delta replaces them. */
 struct SquadObjectiveCosts final {
-    std::array<float, kSquadObjectiveGroupCount> values{};
-    std::uint32_t known{};
+    std::array<float, kSquadObjectiveGroupCount> values = [] {
+        std::array<float, kSquadObjectiveGroupCount> defaults{};
+        defaults.fill(kMaximumObjectiveCost);
+        return defaults;
+    }();
+    std::uint32_t known{kSquadObjectiveDefaultMask};
     std::uint32_t revision{};
+    bool operator==(const SquadObjectiveCosts&) const = default;
 };
 
-/** Merges the cost fields of one body. @return True when a cost or the revision changed. */
+/**
+ * Merges present cost deltas over the retained native defaults.
+ * @param retained Current costs for this squad and source generation.
+ * @param values Accepted squad Sense fields.
+ * @param root Native schema identity.
+ * @return True when a cost or revision changed.
+ */
 [[nodiscard]] inline bool update_squad_objective_costs(
     SquadObjectiveCosts& retained,
     std::span<const middleware::bap::activity_message::sense_update::DecodedValue> values,

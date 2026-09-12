@@ -8,6 +8,7 @@
 #include "../../encoding/bit_writer.h"
 #include "activity_patch_epoch_parser.h"
 #include "definition.h"
+#include "sensor_message.h"
 #include "squad_auth_body.h"
 #include "squad_sense_state.h"
 
@@ -53,6 +54,35 @@ inline constexpr std::size_t kAuthoredSceneMaximumAuthByteCount =
 /** Complete baseline body: signed activation generation, clear bool, and empty collections. */
 inline constexpr std::uint16_t kAuthoredSceneAuthBitCount = kAuthoredSceneBaseAuthBitCount;
 inline constexpr std::uint8_t kAuthoredSceneAuthByteCount = (kAuthoredSceneAuthBitCount + 7U) / 8U;
+/** Authored scene dependencies are full ClientRefs, retained before the activation is queued. */
+struct AuthoredSceneDependencies final {
+    std::array<sensor_message::ClientReference, kAuthoredSceneMaximumDependencyCount> references{};
+    std::uint8_t count{};
+};
+
+/** Checks the native count and ClientRef ranges without changing the dependency set. */
+[[nodiscard]] bool
+valid_authored_scene_dependencies(const AuthoredSceneDependencies& value) noexcept;
+
+/** Encodes one activation with its exact dependencies, scalar and cumulative event keys. */
+[[nodiscard]] bool encode_authored_scene_auth(std::uint32_t generation,
+                                              const AuthoredSceneDependencies& dependencies,
+                                              std::span<std::byte> output,
+                                              std::size_t& written,
+                                              std::size_t& writtenBits,
+                                              std::span<const std::uint32_t> events = {},
+                                              std::uint32_t scalar = 0,
+                                              bool stop = false) noexcept;
+
+/** Updates event keys or stops a scene while retaining its complete transported body. */
+[[nodiscard]] bool update_authored_scene_auth(std::span<const std::byte> previous,
+                                              std::size_t previousBits,
+                                              std::uint32_t eventKey,
+                                              bool stop,
+                                              std::span<std::byte> output,
+                                              std::size_t& written,
+                                              std::size_t& writtenBits,
+                                              std::uint32_t& generation) noexcept;
 /** The widest statically bounded Auth body is type 19, at 53,150 bits. */
 inline constexpr std::size_t kAuthOverrideByteCapacity = (53'150U + 7U) / 8U;
 /** Lifetime states that pass the player-spawn gate. */

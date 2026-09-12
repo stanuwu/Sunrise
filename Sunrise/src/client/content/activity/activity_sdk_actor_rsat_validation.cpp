@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "activity_sdk_actor_rsat_inventory_internal.h"
+#include "activity_sdk_actor_sequences.h"
 
 namespace sunrise::client::content::activity::sdk_generation::actor_rsat_inventory {
 namespace {
@@ -203,6 +204,7 @@ bool add_engine_semantics(Snapshot& snapshot) {
 
 /** Validates every id, scalar, raw row, owner, range, order, join, and flag. */
 bool validate(const Snapshot& snapshot) noexcept {
+    if (!sequence_inventory::validate(snapshot)) return false;
     if (!snapshot.complete || snapshot.actorClasses.empty()) {
         return false;
     }

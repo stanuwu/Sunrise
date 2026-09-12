@@ -489,8 +489,7 @@ build_roster_snapshot(Session& session,
             return refuse_override("retained_auth_install");
         }
     }
-    // Message 5 resets every registered Auth slot before applying its bodies, so the complete
-    // latest-per-ClientRef estate is re-emitted and a later action cannot erase an earlier one.
+    // Each included Auth slot is replaced, so snapshots must carry its complete retained value.
     // Squads stay in their lease, which also owns group admission and per-group revisions.
     for (const server::activity::host::PendingScriptableOverride& retained : authEstate) {
         if (retained.kind == server::activity::host::ScriptableOverrideKind::squad

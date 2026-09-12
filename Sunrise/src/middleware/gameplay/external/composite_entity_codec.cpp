@@ -101,8 +101,10 @@ read_field(const void* raw, std::uint32_t rowIndex, wire::runtime::FieldView& ou
             }
             output.nestedSchemaRow = target.row;
         }
-        if (context->family == format::RuntimeCodecFamily::sobjectModeOne
-            && output.typeCode == 20) {
+        if ((context->family != format::RuntimeCodecFamily::sobjectModeZero
+             && output.typeCode == 30)
+            || (context->family == format::RuntimeCodecFamily::sobjectModeOne
+                && output.typeCode == 20)) {
             output.typeCode = 18;
         }
         if (context->family == format::RuntimeCodecFamily::sobjectModeOne
@@ -159,7 +161,9 @@ read_field(const void* raw, std::uint32_t rowIndex, wire::runtime::FieldView& ou
                                     ? 0
                                     : static_cast<std::int32_t>(row.bits);
     output.typeCode = static_cast<std::uint8_t>(row.typeCode);
-    if (context->family == format::RuntimeCodecFamily::sobjectModeOne && output.typeCode == 20) {
+    if ((context->family != format::RuntimeCodecFamily::sobjectModeZero && output.typeCode == 30)
+        || (context->family == format::RuntimeCodecFamily::sobjectModeOne
+            && output.typeCode == 20)) {
         output.typeCode = 18;
     }
     if (context->family == format::RuntimeCodecFamily::sobjectModeOne && output.typeCode == 29) {
@@ -221,6 +225,13 @@ static bool record_presence(const void* raw, std::uint32_t bit, bool present) no
 /** T11 reference aliases share wire forms without changing other codec families. */
 static std::uint8_t canonical_type(const void* raw, std::uint8_t type) noexcept {
     const auto& context = *static_cast<const detail::ResolverContext*>(raw);
+    // Mode zero uses a different raw reference body.
+    if (context.family == format::RuntimeCodecFamily::sobjectModeZero && type == 27) {
+        return 0;
+    }
+    if (context.family != format::RuntimeCodecFamily::sobjectModeZero && type == 30) {
+        return 18;
+    }
     if (context.family == format::RuntimeCodecFamily::sobjectModeOne) {
         if (type == 20) {
             return 18;

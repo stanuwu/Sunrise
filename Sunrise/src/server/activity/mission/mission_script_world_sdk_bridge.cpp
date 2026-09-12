@@ -7,6 +7,7 @@
 
 #include "../../../middleware/crypto/sha256.h"
 #include "../../../state/build_data/scriptables/coverage.h"
+#include "mission_script_actor_sequence_bridge.h"
 #include "mission_script_manifest_sdk_bridge.h"
 #include "mission_script_sdk_bridge.h"
 #include "mission_script_world_sdk_internal.h"
@@ -704,6 +705,7 @@ lua_vm::DefinitionApi definition_api(const sdk::BoundView& view,
         return output;
     }
     output.manifest = manifest_definition_api(world);
+    attach_actor_sequences(output, world);
     output.world = {
         .context = &world,
         .scenarioName = world.scenario_name(),

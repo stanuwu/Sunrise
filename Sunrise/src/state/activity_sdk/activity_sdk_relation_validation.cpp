@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdio>
 
+#include "actor_sequences.h"
 #include "internal.h"
 #include "validation_internal.h"
 
@@ -491,6 +492,10 @@ void remember_state_name(const Catalog& catalog, std::size_t refused) noexcept {
 
 /** Runs every cross-section relation check in order, remembering the first that refuses. */
 bool relations(const Catalog& catalog) {
+    if (!valid_actor_sequences(catalog)) {
+        remember("actor_sequences");
+        return false;
+    }
     std::size_t refused = 0;
     if (!actor_state_names(catalog, refused)) {
         remember_state_name(catalog, refused);

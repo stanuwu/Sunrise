@@ -16,6 +16,8 @@
 #include "../../../state/activity_sdk/runtime.h"
 #include "../host_runtime.h"
 #include "mission_script_actor_path_sense.h"
+#include "mission_script_combatant_damage_sense.h"
+#include "mission_script_device_sense.h"
 #include "mission_script_ghost_sense.h"
 #include "mission_script_object_sense.h"
 #include "mission_script_player_sense.h"
@@ -87,6 +89,8 @@ constexpr std::size_t kGhostObservationCapacity = 8;
 constexpr std::size_t kDamageObservationCapacity = 8;
 constexpr std::size_t kObjectInteractionObservationCapacity = 64;
 constexpr std::size_t kActorPathObservationCapacity = 64;
+/** Watched device levels retained per instance. */
+constexpr std::size_t kDeviceObservationCapacity = 128;
 /** One objective sensor carries this many objective blocks. */
 constexpr std::size_t kObjectiveCapacity = 24;
 /** One objective block carries this many task counters. */
@@ -122,6 +126,24 @@ struct DamageObservation final {
     std::int32_t revision{};
     float health{-1.0F};
     float shield{-1.0F};
+    bool used{};
+};
+
+/** Last damage-pool observation for one exact Type-2 source. */
+struct CombatantDamageObservation final {
+    CombatantDamageLevel level{};
+    std::uint32_t registryKey{};
+    std::uint32_t objectTag{};
+    std::uint16_t slotIndex{};
+    bool used{};
+};
+
+/** Last reported current values for one exact Type-23 source. */
+struct DeviceObservation final {
+    DeviceLevel level{};
+    std::uint32_t registryKey{};
+    std::uint32_t objectTag{};
+    std::uint16_t slotIndex{};
     bool used{};
 };
 
@@ -215,6 +237,8 @@ struct RuntimeInstance final {
     std::array<SquadObservation, kSquadObservationCapacity> squadObservations{};
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
+    std::array<CombatantDamageObservation, kSquadObservationCapacity> combatantDamageObservations{};
+    std::array<DeviceObservation, kDeviceObservationCapacity> deviceObservations{};
     std::array<ObjectInteractionObservation, kObjectInteractionObservationCapacity>
         objectInteractionObservations{};
     std::array<ActorPathObservation, kActorPathObservationCapacity> actorPathObservations{};
@@ -288,6 +312,12 @@ void push_actor_path_edges(RuntimeInstance& instance,
                            const host::SenseObservationSnapshot& sense) noexcept;
 /** Raises one event per damage monitor whose health, shield or revision changed. */
 void push_damage_edges(RuntimeInstance& instance,
+                       const host::SenseObservationSnapshot& sense) noexcept;
+/** Raises observed Type-2 damage pools and lifecycle resets without inferring damage. */
+void push_combatant_damage_edges(RuntimeInstance& instance,
+                                 const host::SenseObservationSnapshot& sense) noexcept;
+/** Raises current device values and sequence resets from accepted client reports. */
+void push_device_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;
 /** Raises object state and accepted interaction events per interactable object. */
 void push_object_interaction_edges(RuntimeInstance& instance,

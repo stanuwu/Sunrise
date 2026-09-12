@@ -14,6 +14,8 @@ namespace sunrise::server::activity::activity_sdk_mission::detail {
 struct PreparedScene final {
     host::ScriptableTarget target{};
     state::build_data::scenarios::RosterGroup rosterGroup{};
+    middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies
+        sceneDependencies{};
     std::uint64_t activityClientGeneration{};
     std::uint32_t scenarioRow{state::activity_sdk::format::kAbsentIndex};
     std::uint32_t stateRow{state::activity_sdk::format::kAbsentIndex};

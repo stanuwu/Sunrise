@@ -1,5 +1,10 @@
 #include "actor_entity_registry.h"
 
+#include "../../bap/activity_message/scriptable_auth_body.h"
+#include "../../content/packages/tables/slot_descriptor_reader.h"
+#include "composite_entity_codec.h"
+#include "entity_identity_metadata.h"
+
 namespace sunrise::middleware::gameplay::external {
 namespace {
 
@@ -57,7 +62,7 @@ void bind_catalog(ActorEntityRegistry& registry, const ActorEntityCatalog& catal
 } // namespace
 
 /**
- * Applies one decoded channel-2 record without assigning authored-member identity.
+ * Applies one accepted allocation and its exact decoded actor-source relation.
  * @param registry Slot table to update.
  * @param catalog Pinned actor-class rows.
  * @param record Decoded record.
@@ -70,39 +75,79 @@ ActorEntityApplyResult apply_actor_entity_record(ActorEntityRegistry& registry,
         || record.token.incarnation > kMaximumEntityIncarnation) {
         return ActorEntityApplyResult::invalid;
     }
-    bind_catalog(registry, catalog);
-    ActorEntitySlot& slot = registry.slots[record.token.slot];
-
-    if (record.flags == entityRemove) {
-        if (!same_token(slot, record.token)) {
+    const bool catalogChanged = registry.catalog != catalog.owner
+                                || registry.classData != catalog.classes.data()
+                                || registry.classCount != catalog.classes.size();
+    const ActorEntitySlot previous =
+        catalogChanged ? ActorEntitySlot{} : registry.slots[record.token.slot];
+    ActorEntitySlot candidate = previous;
+    const bool creating = (record.flags & entityCreate) != 0;
+    const bool removing = (record.flags & entityRemove) != 0;
+    if (removing && !creating) {
+        if (!same_token(previous, record.token)) {
             return ActorEntityApplyResult::staleToken;
         }
-        slot = {};
+        bind_catalog(registry, catalog);
+        registry.slots[record.token.slot] = {};
         return ActorEntityApplyResult::actorRemoved;
     }
-    if ((record.flags & entityCreate) != 0) {
+    bool fresh = false;
+    if (creating) {
         if (record.type != EntityType::sobject) {
-            slot = {};
+            bind_catalog(registry, catalog);
+            registry.slots[record.token.slot] = {};
             return ActorEntityApplyResult::nonActor;
         }
-        SobjectBaseline baseline{};
-        if (!load_sobject_baseline(record.baseline, baseline)) {
-            slot = {};
+        std::uint32_t rsatTag{};
+        if (!composite_sobject_rsat(record.baseline, rsatTag)) {
             return ActorEntityApplyResult::invalid;
         }
         std::uint32_t actorClassIndex = format::kAbsentIndex;
-        if (!resolve_actor_class(catalog, baseline.rsatTag, actorClassIndex)) {
-            slot = {};
+        if (!resolve_actor_class(catalog, rsatTag, actorClassIndex)) {
+            bind_catalog(registry, catalog);
+            registry.slots[record.token.slot] = {};
             return ActorEntityApplyResult::nonActor;
         }
-        slot.actorClassIndex = actorClassIndex;
-        slot.rsatTag = baseline.rsatTag;
-        slot.incarnation = record.token.incarnation;
-        slot.occupied = true;
-        return ActorEntityApplyResult::actorCreated;
+        fresh = !same_token(previous, record.token) || previous.rsatTag != rsatTag
+                || previous.actorClassIndex != actorClassIndex
+                || previous.allocationSequence != record.allocationSequence;
+        if (fresh) {
+            candidate = {};
+        }
+        candidate.actorClassIndex = actorClassIndex;
+        candidate.rsatTag = rsatTag;
+        candidate.incarnation = record.token.incarnation;
+        candidate.allocationSequence = record.allocationSequence;
+        candidate.occupied = true;
+    } else if (!same_token(previous, record.token)) {
+        return ActorEntityApplyResult::staleToken;
     }
-    return same_token(slot, record.token) ? ActorEntityApplyResult::unchanged
-                                          : ActorEntityApplyResult::staleToken;
+    if (removing) {
+        bind_catalog(registry, catalog);
+        registry.slots[record.token.slot] = {};
+        return ActorEntityApplyResult::actorRemoved;
+    }
+    state::gameplay::entity_identity::ActorSourceReference source{};
+    if ((record.flags & entityUpdate) != 0 && record.update.actorSource.known) {
+        if (!extract_actor_source_reference(record, source)) {
+            return ActorEntityApplyResult::invalid;
+        }
+        candidate.authoredSource = source;
+    }
+    const bool membershipChanged = candidate.authoredSource != previous.authoredSource;
+    bind_catalog(registry, catalog);
+    registry.slots[record.token.slot] = candidate;
+    return fresh ? ActorEntityApplyResult::actorCreated
+                 : (membershipChanged ? ActorEntityApplyResult::membershipChanged
+                                      : ActorEntityApplyResult::unchanged);
+}
+
+/** Catalog and source relations end with their exact peer view. */
+void reset_actor_entity_registry(ActorEntityRegistry& registry) noexcept {
+    registry.catalog.reset();
+    registry.classData = nullptr;
+    registry.classCount = 0;
+    registry.slots.fill({});
 }
 
 /**

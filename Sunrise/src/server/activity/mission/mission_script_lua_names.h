@@ -61,6 +61,7 @@ inline constexpr char kEffectResultEventMetatable[] = "sunrise.mission.event.eff
 inline constexpr char kTriggerEnteredEventMetatable[] = "sunrise.mission.event.trigger_entered";
 inline constexpr char kTriggerExitedEventMetatable[] = "sunrise.mission.event.trigger_exited";
 inline constexpr char kSquadStateEventMetatable[] = "sunrise.mission.event.squad_state";
+inline constexpr char kSquadProvokedEventMetatable[] = "sunrise.mission.event.squad_provoked";
 inline constexpr char kEntitySpawnedEventMetatable[] = "sunrise.mission.event.entity_spawned";
 inline constexpr char kEntityDiedEventMetatable[] = "sunrise.mission.event.entity_died";
 inline constexpr char kSceneFinishedEventMetatable[] = "sunrise.mission.event.scene_finished";
@@ -75,6 +76,7 @@ inline constexpr char kEntitySlotsRequestedEventMetatable[] =
 inline constexpr char kSessionJoinedEventMetatable[] = "sunrise.mission.event.session_joined";
 inline constexpr char kSessionLeftEventMetatable[] = "sunrise.mission.event.session_left";
 inline constexpr char kActorPathEventMetatable[] = "sunrise.mission.event.actor_path";
+inline constexpr char kDeviceStateEventMetatable[] = "sunrise.mission.event.device_state";
 inline constexpr char kObjectInteractionEventMetatable[] =
     "sunrise.mission.event.object_interaction";
 inline constexpr char kGhostLinkEventMetatable[] = "sunrise.mission.event.ghost_link";

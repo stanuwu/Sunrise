@@ -235,6 +235,12 @@ public:
     sobject_rsat_field_bindings() const noexcept;
     /** @return Every state-machine state name declared by an actor class, in actor-class order. */
     [[nodiscard]] std::span<const format::ActorStateName> actor_state_names() const noexcept;
+    [[nodiscard]] std::span<const format::ActorSequenceTable>
+    actor_sequence_tables() const noexcept;
+    [[nodiscard]] std::span<const format::ActorSequenceEntry>
+    actor_sequence_entries() const noexcept;
+    [[nodiscard]] std::span<const format::ActorSequenceBinding>
+    actor_sequence_bindings() const noexcept;
 
 private:
     friend bool load(void* module,
