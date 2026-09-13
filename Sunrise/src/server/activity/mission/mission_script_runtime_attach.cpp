@@ -47,6 +47,7 @@ struct ReloadAuthorization final {
     bool occupied{};
 };
 
+SRWLOCK g_sourceLock{SRWLOCK_INIT};
 std::array<ReloadAuthorization, host::kInstanceCapacity> g_reloadAuthorizations{};
 std::array<char, lua_vm::kSourceByteCapacity> g_source{};
 core::path::Buffer g_scriptRoot{};
@@ -248,8 +249,10 @@ reload_authorization(const state::activity::SessionBinding& binding) noexcept {
 [[nodiscard]] SourceStatus read_source(const sdk::Catalog& catalog,
                                        const format::Activity& activity,
                                        std::span<const char>& output) noexcept {
+    AcquireSRWLockExclusive(&g_sourceLock);
     std::array<char, 260> authoredName{};
     if (!controller_name(catalog, activity, authoredName)) {
+        ReleaseSRWLockExclusive(&g_sourceLock);
         return SourceStatus::fileError;
     }
     std::array<wchar_t, 260> wideName{};
@@ -262,10 +265,12 @@ reload_authorization(const state::activity::SessionBinding& binding) noexcept {
     core::path::Buffer authoredPath = g_scriptRoot;
     if (wideLength <= 1 || !core::path::append(authoredPath, L"\\")
         || !core::path::append(authoredPath, wideName.data())) {
+        ReleaseSRWLockExclusive(&g_sourceLock);
         return SourceStatus::fileError;
     }
     const SourceStatus authored = read_file(authoredPath, output);
     if (authored != SourceStatus::missing) {
+        ReleaseSRWLockExclusive(&g_sourceLock);
         return authored;
     }
 
@@ -280,8 +285,10 @@ reload_authorization(const state::activity::SessionBinding& binding) noexcept {
     if (generatedLength <= 0
         || !core::path::append(generatedPath,
                                {generatedName.data(), static_cast<std::size_t>(generatedLength)})) {
+        ReleaseSRWLockExclusive(&g_sourceLock);
         return SourceStatus::fileError;
     }
+    ReleaseSRWLockExclusive(&g_sourceLock);
     return read_file(generatedPath, output);
 }
 
@@ -782,10 +789,18 @@ void apply_script_initial_state_override(state::activity::destination::Destinati
     }
     const format::Activity* activity = nullptr;
     for (const auto& a : catalog->activities()) {
-        if (static_cast<std::int32_t>(a.activityIndex) == static_cast<std::int32_t>(selection.activityIndex)) {
-            activity = &a;
-            break;
+        if (static_cast<std::int32_t>(a.activityIndex) != static_cast<std::int32_t>(selection.activityIndex)) {
+            continue;
         }
+        if (candidate.definitionHash == 0) {
+            continue;
+        }
+        std::array<char, 260> controllerName{};
+        if (!controller_name(*catalog, candidate, controllerName)) {
+            continue;
+        }
+        activity = &candidate;
+        break;
     }
     if (activity == nullptr) {
         return;
@@ -798,6 +813,8 @@ void apply_script_initial_state_override(state::activity::destination::Destinati
     if (region >= 0) {
         selection.sliceSetOverride = static_cast<std::uint16_t>(region);
         selection.hasSliceSetOverride = true;
+    } else if (region == -1) {
+        log_line(core::log::Level::warn, nullptr, "probe_initial_state", "invalid");
     }
 }
 

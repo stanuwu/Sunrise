@@ -1,5 +1,6 @@
 #include <algorithm>
 
+#include "../../core/logging/log.h"
 #include "internal.h"
 #include "runtime.h"
 
@@ -329,7 +330,19 @@ AuthoredSceneSeedStatus materialize_authored_scene_seeds(const Catalog& catalog,
 
         const auto resources = slot_authored_scene_resources(catalog, slot);
         if (resources.empty()) {
-            return AuthoredSceneSeedStatus::missingResource;
+            // A missing scene resource is not unexpected
+            // Activities may contain ghost-slots where content was likely removed but the slot itself was not.
+            std::array<char, 80> line{};
+            const int written = std::snprintf(line.data(),
+                                              line.size(),
+                                              "ev=activity stage=mission_scene_seeds result=missing_resource slot=%d",
+                                              slot.slotIndex);
+            if (written > 0) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 {line.data(), static_cast<std::size_t>(written)});
+            }
+            continue;
         }
         if (resources.size() != 1) {
             return AuthoredSceneSeedStatus::ambiguousResource;

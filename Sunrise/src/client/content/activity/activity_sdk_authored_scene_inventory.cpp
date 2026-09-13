@@ -493,9 +493,15 @@ bool build(const topology::Snapshot& topology,
                 }
             }
 
-            const std::size_t blockClassField =
-                static_cast<std::size_t>(descriptor.descriptorOffset)
-                + format::kAuthoredSceneSquadBlockClassRelativeOffset;
+            std::uint32_t entryCount = 0;
+            const std::size_t countField = static_cast<std::size_t>(descriptor.descriptorOffset)
+                                           + format::kAuthoredSceneSquadBlockClassTableCountRelativeOffset;
+            if (!read_value(blob, countField, entryCount)) {
+                continue;
+            }
+            const std::size_t blockClassField = static_cast<std::size_t>(descriptor.descriptorOffset)
+                                                + format::kAuthoredSceneSquadBlockClassTableRelativeOffset
+                                                + static_cast<std::size_t>(entryCount) * 8;
             std::uint32_t blockClass = 0;
             if (!read_value(blob, blockClassField, blockClass)) {
                 continue;
@@ -503,8 +509,7 @@ bool build(const topology::Snapshot& topology,
             if (blockClass != format::kAuthoredSceneSquadBlockClass) {
                 continue;
             }
-            const std::size_t referenceField = static_cast<std::size_t>(descriptor.descriptorOffset)
-                                               + format::kAuthoredSceneSquadReferenceRelativeOffset;
+            const std::size_t referenceField = blockClassField + format::kAuthoredSceneSquadReferenceRelativeOffset;
             std::uint32_t targetObjectKey = 0;
             std::uint16_t targetSlotType = 0;
             std::uint16_t targetSlotIndex = 0;

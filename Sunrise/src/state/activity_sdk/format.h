@@ -282,9 +282,10 @@ inline constexpr std::uint32_t kActorStateMachineDefinitionClass = 0x8080815FU;
 inline constexpr std::uint32_t kActorStateMachineGroupHash = 0xAFB11A12U;
 inline constexpr std::uint32_t kActorStateNameExact = 0x1U;
 inline constexpr std::uint32_t kActorStateNameFlagMask = kActorStateNameExact;
-inline constexpr std::uint32_t kAuthoredSceneSquadBlockClassRelativeOffset = 0xA4U;
+inline constexpr std::uint32_t kAuthoredSceneSquadBlockClassTableCountRelativeOffset = 0x88U;
+inline constexpr std::uint32_t kAuthoredSceneSquadBlockClassTableRelativeOffset = 0x9CU;
 inline constexpr std::uint32_t kAuthoredSceneSquadBlockClass = 0x80806262U;
-inline constexpr std::uint32_t kAuthoredSceneSquadReferenceRelativeOffset = 0xB0U;
+inline constexpr std::uint32_t kAuthoredSceneSquadReferenceRelativeOffset = 0x0CU;
 /** Exact type-38 task edge to the authored type-3 objective component it mutates. */
 inline constexpr std::uint32_t kTaskSlotType = 38U;
 inline constexpr std::uint32_t kTaskComponentClass = 0x80807D87U;
