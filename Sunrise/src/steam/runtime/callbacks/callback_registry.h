@@ -18,8 +18,11 @@ inline constexpr std::size_t kCallbackCapacity = 256;
 inline constexpr std::size_t kCallResultCapacity = 256;
 /** One callback pump handles at most this many queued events. */
 inline constexpr std::size_t kEventCapacity = 64;
-/** The largest payload among the Steam callback structs used here. */
-inline constexpr std::size_t kEventPayloadCapacity = 32;
+/**
+ * The largest payload among the Steam callback structs used here:
+ * GameRichPresenceJoinRequested_t, a 64-bit Steam id followed by a 256-byte connect string.
+ */
+inline constexpr std::size_t kEventPayloadCapacity = 264;
 
 /** One regular callback registration. */
 struct CallbackEntry {

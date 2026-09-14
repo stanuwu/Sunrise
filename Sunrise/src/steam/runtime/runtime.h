@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace sunrise::steam {
 
@@ -54,6 +55,16 @@ void set_app_id(DWORD appId) noexcept;
  */
 [[nodiscard]] bool
 queue_callback(int callbackId, ApiCall call, const void* payload, std::size_t payloadSize) noexcept;
+
+struct CallbackDelivery {
+    int callbackId{};
+    ApiCall call{};
+    const void* payload{};
+    std::size_t payloadSize{};
+};
+/** Enqueues one ordered batch atomically; a refused batch leaves every event pending with its
+ * producer. */
+[[nodiscard]] bool queue_callbacks(std::span<const CallbackDelivery> deliveries) noexcept;
 
 /** @return The shim's single valid user handle. */
 [[nodiscard]] UserHandle user_handle() noexcept;

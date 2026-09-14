@@ -26,7 +26,6 @@
 #include "../../middleware/web_service/messages/opcode904/opcode904_codec.h"
 #include "../../middleware/web_service/web_service_envelope.h"
 #include "../../state/account/account_state.h"
-#include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/runtime/runtime.h"
 #include "opcode_routes.h"
@@ -79,34 +78,39 @@ std::uint64_t next_family5_clock() noexcept {
 /** Records the authoritative world state carried by the client's character write-back. */
 bool note_character_writeback(
     const middleware::web_service::Message& message,
-    std::span<const state::account::inventory::PresentedItemRow> presentation) noexcept {
+    std::span<const state::account::inventory::PresentedItemRow> presentation,
+    Outcome& outcome) noexcept {
+    if (state::bound_account() != state::kLocalAccount) {
+        return false;
+    }
     namespace writeback = middleware::web_service::messages::opcode702;
     writeback::Request request{};
     const bool parsed = writeback::parse_request(message, request);
     std::array<char, core::log::kLineCapacity> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
-                                      "ev=activity stage=writeback result=%s world_state=%u "
-                                      "activity=%d/%d/%d selector=%d",
+                                      "ev=activity stage=writeback result=%s join_lock_flags=%u",
                                       parsed ? "ok" : "unparsed",
-                                      static_cast<unsigned>(request.worldState),
-                                      static_cast<int>(request.activityBytes[0]),
-                                      static_cast<int>(request.activityBytes[1]),
-                                      static_cast<int>(request.activityBytes[2]),
-                                      static_cast<int>(request.activitySelector));
+                                      static_cast<unsigned>(request.joinLockFlags));
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          parsed ? core::log::Level::info : core::log::Level::warn,
                          {line.data(), static_cast<std::size_t>(written)});
     }
-    if (parsed && request.hasWorldState) {
-        state::activity::membership::note_client_writeback(request.worldState
-                                                           == writeback::kInWorld);
+    if (!parsed
+        || (request.newItems
+            && !state::account::inventory::record_character_seen(*request.newItems,
+                                                                 presentation))) {
+        return false;
     }
-    return parsed
-           && (!request.newItems
-               || state::account::inventory::record_character_seen(*request.newItems,
-                                                                   presentation));
+    auto account = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
+    if (!account || !state::account_snapshot(state::kLocalAccount, *account)) {
+        return false;
+    }
+    request.presence.characterSoid = state::account::selected_character_soid(*account);
+    outcome.nativePresence.reset(new (std::nothrow)
+                                     state::social::NativePresence(request.presence));
+    return outcome.nativePresence != nullptr;
 }
 
 /** @return True when a purchase names the seasonal artifact vendor, which is answered here. */
@@ -334,8 +338,9 @@ bool consume(std::span<const std::byte> request,
         return false;
     }
     if (message.opcode == middleware::web_service::messages::opcode702::kOpcode) {
-        // A write-back the server cannot read is still answered; no reply drops the connection.
-        static_cast<void>(note_character_writeback(message, presentation));
+        if (!note_character_writeback(message, presentation, outcome)) {
+            return false;
+        }
     }
     if (message.opcode == middleware::web_service::messages::opcode205::kOpcode) {
         state::InvestmentState investment{};

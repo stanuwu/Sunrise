@@ -41,6 +41,27 @@ struct SteamId {
     std::uint64_t value{};
 };
 
+#pragma pack(push, 1)
+struct FriendGameInfo {
+    std::uint64_t gameId{};
+    std::uint32_t gameIp{};
+    std::uint16_t gamePort{};
+    std::uint16_t queryPort{};
+    std::uint64_t lobbySteamId{};
+};
+struct PersonaStateChange {
+    std::uint64_t steamId{};
+    int changeFlags{};
+};
+struct GameRichPresenceJoinRequested {
+    std::uint64_t friendSteamId{};
+    char connect[256]{};
+};
+#pragma pack(pop)
+static_assert(sizeof(FriendGameInfo) == 24);
+static_assert(sizeof(PersonaStateChange) == 12);
+static_assert(sizeof(GameRichPresenceJoinRequested) == 264);
+
 namespace versions {
 
 /** Exact interface version strings the callers ask for. Only these are answered. */
@@ -81,6 +102,15 @@ namespace methods {
 ULONG_PTR unsupported(void*) noexcept;
 bool return_true(void*) noexcept;
 const char* persona_name(void*) noexcept;
+int friend_count(void*, int flags) noexcept;
+SteamId* friend_by_index(void*, SteamId* result, int index, int flags) noexcept;
+int friend_relationship(void*, std::uint64_t steamId) noexcept;
+int friend_persona_state(void*, std::uint64_t steamId) noexcept;
+const char* friend_persona_name(void*, std::uint64_t steamId) noexcept;
+bool friend_game_played(void*, std::uint64_t steamId, FriendGameInfo* info) noexcept;
+void service_friends() noexcept;
+void service_invites() noexcept;
+void reset_friends() noexcept;
 const char* language(void*) noexcept;
 const char* country(void*) noexcept;
 DWORD get_app_id(void*) noexcept;
@@ -111,6 +141,8 @@ InputMotionData input_motion_data(void*, std::uint64_t) noexcept;
 int filter_text(void*, char*, DWORD, const char*, bool) noexcept;
 ApiCall create_lobby(void*, int, int) noexcept;
 ApiCall join_lobby(void*, std::uint64_t) noexcept;
+void leave_lobby(void*, std::uint64_t) noexcept;
+void service_lobbies() noexcept;
 bool send_lobby_chat(void*, std::uint64_t, const void*, int) noexcept;
 int get_lobby_chat_entry(void*, std::uint64_t, int, std::uint64_t*, void*, int, int*) noexcept;
 void* get_generic_interface(void*, UserHandle, PipeHandle, const char*) noexcept;

@@ -3,6 +3,9 @@
 #include <span>
 
 #include "../../../core/logging/log.h"
+#include "../../../core/settings/settings.h"
+#include "../../../middleware/crypto/random_bytes.h"
+#include "../../../state/social/lobby_chat.h"
 #include "../../../state/steam/steam_state.h"
 #include "../internal.h"
 
@@ -10,6 +13,7 @@ namespace sunrise::steam::interfaces::methods {
 namespace {
 
 namespace lobby_state = sunrise::state::steam;
+namespace lobby_chat = sunrise::state::social::lobby;
 
 /** Steam callback id for a finished lobby entry. */
 constexpr int kLobbyEnterCallback = 504;
@@ -25,8 +29,6 @@ constexpr std::size_t kChatTypePadding = 3;
 constexpr std::size_t kLobbyChatMsgSize = 24;
 /** Steam lobby-entry response for a successful join. */
 constexpr DWORD kLobbyEnterSuccess = 1;
-/** Made-up lobby ids use Steam's chat-lobby account-type prefix. */
-constexpr std::uint64_t kLobbySteamIdPrefix = 0x0109000000000000ULL;
 /** Padding aligns the response field after the one-byte lock flag. */
 constexpr std::size_t kLobbyLockPadding = 3;
 /** Steam's lobby-entry callback is 24 bytes. */
@@ -66,21 +68,29 @@ static_assert(sizeof(LobbyChatMsg) == kLobbyChatMsgSize);
 } // namespace
 
 /**
- * Makes up a lobby, then queues the created and entered callbacks.
- * @return API call id, or zero when either callback cannot be queued.
+ * Creates a platform lobby and atomically queues its created and entered callbacks.
+ * @return API
+ * call id, or zero when either callback cannot be queued.
  */
 ApiCall create_lobby([[maybe_unused]] void* self,
                      [[maybe_unused]] int lobbyType,
                      [[maybe_unused]] int maxMembers) noexcept {
     const ApiCall call = next_api_call();
-    const std::uint64_t lobby = kLobbySteamIdPrefix | call;
-    const LobbyCreated created{kResultOk, 0, lobby};
-    const LobbyEnter entered{lobby, 0, false, {}, kLobbyEnterSuccess};
-    if (!queue_callback(kLobbyCreatedCallback, call, &created, sizeof(created))) {
+    std::uint64_t entropy{};
+    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&entropy, 1)))) {
         return 0;
     }
-    // Entry follows creation, so a reader sees a valid lobby first.
-    if (!queue_callback(kLobbyEnterCallback, 0, &entered, sizeof(entered))) {
+    const auto lobby = lobby_chat::kLobbyPrefix | (entropy & lobby_chat::kLobbyRandomMask);
+    if (!lobby_chat::valid_id(lobby) || lobby_chat::contains(lobby) || !lobby_chat::join(lobby)) {
+        return 0;
+    }
+    const LobbyCreated created{kResultOk, 0, lobby};
+    const LobbyEnter entered{lobby, 0, false, {}, kLobbyEnterSuccess};
+    const std::array deliveries{
+        CallbackDelivery{kLobbyCreatedCallback, call, &created, sizeof created},
+        CallbackDelivery{kLobbyEnterCallback, 0, &entered, sizeof entered}};
+    if (!queue_callbacks(deliveries)) {
+        lobby_chat::leave(lobby);
         return 0;
     }
     return call;
@@ -94,9 +104,25 @@ ApiCall join_lobby([[maybe_unused]] void* self, std::uint64_t lobby) noexcept {
     if (lobby == 0) {
         return 0;
     }
+    // Native activity joins also use an opaque hosted-session ID here. Keep their existing
+    // completion contract; only actual Steam lobby IDs enter the chat membership table.
+    const bool joiningChat = lobby_chat::valid_id(lobby) && !lobby_chat::contains(lobby);
+    if (joiningChat && !lobby_chat::join(lobby)) {
+        return 0;
+    }
     const ApiCall call = next_api_call();
     const LobbyEnter entered{lobby, 0, false, {}, kLobbyEnterSuccess};
-    return queue_callback(kLobbyEnterCallback, call, &entered, sizeof(entered)) ? call : 0;
+    if (queue_callback(kLobbyEnterCallback, call, &entered, sizeof(entered))) {
+        return call;
+    }
+    if (joiningChat) {
+        lobby_chat::leave(lobby);
+    }
+    return 0;
+}
+
+void leave_lobby([[maybe_unused]] void* self, std::uint64_t lobby) noexcept {
+    lobby_chat::leave(lobby);
 }
 
 /**
@@ -110,6 +136,11 @@ bool send_lobby_chat([[maybe_unused]] void* self,
                      std::uint64_t lobby,
                      const void* data,
                      int size) noexcept {
+    if (core::settings::multiplayer()) {
+        return data != nullptr && size > 0
+               && lobby_chat::send(
+                   lobby, {static_cast<const std::byte*>(data), static_cast<std::size_t>(size)});
+    }
     const std::uint64_t sender = local_steam_id();
     std::uint32_t chatId = 0;
     const bool retained =
@@ -156,6 +187,17 @@ int get_lobby_chat_entry([[maybe_unused]] void* self,
     if (data == nullptr || dataCapacity <= 0 || messageIndex < 0) {
         return 0;
     }
+    if (core::settings::multiplayer()) {
+        const auto size = lobby_chat::read(
+            lobby,
+            messageIndex,
+            {static_cast<std::byte*>(data), static_cast<std::size_t>(dataCapacity)},
+            sender);
+        if (size != 0 && entryType) {
+            *entryType = kChatEntryTypeMessage;
+        }
+        return size;
+    }
     lobby_state::ChatRecord record{};
     if (!lobby_state::chat_message(lobby, static_cast<std::uint32_t>(messageIndex), record)
         || record.size > static_cast<std::uint32_t>(dataCapacity)) {
@@ -169,6 +211,25 @@ int get_lobby_chat_entry([[maybe_unused]] void* self,
         *entryType = kChatEntryTypeMessage;
     }
     return static_cast<int>(record.size);
+}
+
+/** Receipt advances only after the actual platform callback can be queued. */
+void service_lobbies() noexcept {
+    if (!core::settings::multiplayer()) {
+        return;
+    }
+    lobby_chat::Message message{};
+    for (std::size_t i = 0; i < lobby_chat::kQueueCapacity && lobby_chat::pending(message); ++i) {
+        const LobbyChatMsg event{message.lobby,
+                                 message.sender,
+                                 kChatEntryTypeMessage,
+                                 {},
+                                 static_cast<std::uint32_t>(message.sequence)};
+        if (!queue_callback(kLobbyChatMsgCallback, 0, &event, sizeof event)) {
+            break;
+        }
+        lobby_chat::delivered(message.sequence);
+    }
 }
 
 } // namespace sunrise::steam::interfaces::methods

@@ -10,9 +10,6 @@ namespace {
 
 namespace presence = sunrise::state::steam;
 
-/** Bounds the connect string in a log line, well above the Client's 81-byte connect value. */
-constexpr int kLoggedConnectBytes = 256;
-
 } // namespace
 
 /**
@@ -57,30 +54,6 @@ int friend_rich_presence_key_count([[maybe_unused]] void* self, std::uint64_t st
 const char*
 friend_rich_presence_key([[maybe_unused]] void* self, std::uint64_t steamId, int index) noexcept {
     return steamId == local_steam_id() ? presence::rich_presence_key(index) : "";
-}
-
-/**
- * Refuses a game invite. This build has no friend service, so no friend can receive one and a
- * true return would report an invitation that was never sent.
- * @return False, always.
- */
-bool invite_user_to_game([[maybe_unused]] void* self,
-                         std::uint64_t steamId,
-                         const char* connectString) noexcept {
-    std::array<char, core::log::kLineCapacity> line{};
-    const int written =
-        std::snprintf(line.data(),
-                      line.size(),
-                      "ev=steam stage=friend_invite result=refuse target=0x%016llX connect=%.*s",
-                      static_cast<unsigned long long>(steamId),
-                      kLoggedConnectBytes,
-                      connectString != nullptr ? connectString : "");
-    if (written > 0) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::debug,
-                         {line.data(), static_cast<std::size_t>(written)});
-    }
-    return false;
 }
 
 } // namespace sunrise::steam::interfaces::methods

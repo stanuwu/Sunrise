@@ -15,10 +15,7 @@ constexpr std::uint8_t kByteBits = 8;
 constexpr std::uint8_t kShortBits = 16;
 constexpr std::uint8_t kWordBits = 32;
 constexpr std::uint8_t kLongBits = 64;
-constexpr std::uint8_t kWorldBits = 5;
-constexpr std::uint8_t kSelectorBits = 3;
-/** The activity block's bytes ride at bias 128. */
-constexpr int kByteBias = 128;
+constexpr std::uint8_t kJoinLockBits = 5;
 /** Fixed array lengths from the character writeback schema. */
 constexpr std::size_t kHeaderFloats = 3;
 constexpr std::size_t kSeenWords = 4;
@@ -53,39 +50,84 @@ bool read_header(Reader& reader) noexcept {
            && skip_optional(reader, kWordBits);
 }
 
-/** The five-byte activity block carries the world-state field without an inner presence bit. */
+/** The five-byte activity block carries join-lock flags without an inner presence bit. */
 bool read_activity(Reader& reader, Request& output) noexcept {
+    output.presence.hasGroup = true;
     const auto block = [&output](Reader& fields) noexcept {
-        // Three bytes at bias 128 and one three-bit selector at bias 1 precede the world state.
+        // Three biased bytes and one three-bit selector precede the join-lock flags.
+        constexpr std::size_t kPrefixBits = 3 * kByteBits + 3;
         std::uint64_t value = 0;
-        for (std::int8_t& byte : output.activityBytes) {
-            if (!fields.read(kByteBits, value)) {
-                return false;
-            }
-            byte = static_cast<std::int8_t>(static_cast<int>(value) - kByteBias);
-        }
-        if (!fields.read(kSelectorBits, value)) {
+        if (!fields.skip(kPrefixBits) || !fields.read(kJoinLockBits, value)) {
             return false;
         }
-        output.activitySelector = static_cast<std::int8_t>(static_cast<int>(value) - 1);
-        if (!fields.read(kWorldBits, value)) {
-            return false;
-        }
-        output.worldState = static_cast<std::uint8_t>(value);
-        output.hasWorldState = true;
+        output.joinLockFlags = static_cast<std::uint8_t>(value);
+        output.hasJoinLockFlags = true;
+        output.presence.joinLockFlags = output.joinLockFlags;
+        output.presence.hasJoinLockFlags = true;
         return true;
     };
-    return optional(reader, block) && skip_optional(reader, kWordBits)
-           && skip_optional(reader, kByteBits) && skip_optional(reader, kLongBits);
+    const auto groupKey = [&output](Reader& field) noexcept {
+        std::uint64_t value{};
+        if (!field.read(kWordBits, value)) {
+            return false;
+        }
+        output.presence.groupKey = static_cast<std::uint32_t>(value) ^ 0x80000000U;
+        return true;
+    };
+    const auto memberCount = [&output](Reader& field) noexcept {
+        std::uint64_t value{};
+        if (!field.read(kByteBits, value)) {
+            return false;
+        }
+        output.presence.memberCount =
+            static_cast<std::int8_t>(static_cast<std::uint8_t>(value) ^ 0x80U);
+        return true;
+    };
+    return optional(reader, block) && optional(reader, groupKey) && optional(reader, memberCount)
+           && skip_optional(reader, kLongBits);
 }
 
 /** The roster mirror has twenty records and seven trailing optional scalars. */
-bool read_roster(Reader& reader) noexcept {
-    const auto items = [](Reader& array) noexcept {
+bool read_roster(Reader& reader, Request& output) noexcept {
+    output.presence.hasFireteam = true;
+    const auto store =
+        [&output](std::size_t offset, std::size_t size, std::uint64_t value) noexcept {
+            for (std::size_t i = 0; i < size; ++i) {
+                output.presence.fireteam[offset + i] = static_cast<std::byte>(value & 0xFFU);
+                value >>= 8;
+            }
+        };
+    const auto scalar = [&store](Reader& field,
+                                 std::size_t offset,
+                                 std::size_t size,
+                                 std::uint8_t width,
+                                 std::uint64_t bias) noexcept {
+        return optional(field, [&](Reader& present) noexcept {
+            std::uint64_t value{};
+            if (!present.read(width, value)) {
+                return false;
+            }
+            store(offset, size, value - bias);
+            return true;
+        });
+    };
+    const auto items = [&scalar, &store](Reader& array) noexcept {
         for (std::size_t index = 0; index < kRosterItems; ++index) {
-            if (!skip_optional(array, kLongBits) || !skip_optional(array, kShortBits)
-                || !skip_optional(array, kShortBits)
-                || !skip_optional(array, kRosterPlugs * kShortBits) || !skip_optional(array, 4)) {
+            const auto row = index * 0x90;
+            const auto name = [&](Reader& units) noexcept {
+                for (std::size_t unit = 0; unit < kRosterPlugs; ++unit) {
+                    std::uint64_t value{};
+                    if (!units.read(kShortBits, value)) {
+                        return false;
+                    }
+                    store(row + 12 + unit * 2, 2, value - 0x8000);
+                }
+                return true;
+            };
+            if (!scalar(array, row, 8, kLongBits, 0)
+                || !scalar(array, row + 8, 2, kShortBits, 0x8000)
+                || !scalar(array, row + 10, 2, kShortBits, 0x8000) || !optional(array, name)
+                || !scalar(array, row + 0x8C, 1, 4, 0)) {
                 return false;
             }
         }
@@ -94,11 +136,15 @@ bool read_roster(Reader& reader) noexcept {
     // The roster tail carries these seven optional wire fields in order.
     constexpr std::array<std::uint8_t, 7> kTailWidths{
         kLongBits, kLongBits, kWordBits, kWordBits, kByteBits, kByteBits, 4};
+    constexpr std::array<std::size_t, 7> kTailOffsets{
+        0xB40, 0xB48, 0xB50, 0xB54, 0xB58, 0xB59, 0xB5A};
+    constexpr std::array<std::size_t, 7> kTailSizes{8, 8, 4, 4, 1, 1, 1};
+    constexpr std::array<std::uint64_t, 7> kTailBiases{0, 0, 0, 0, 0x80, 0x80, 1};
     if (!optional(reader, items)) {
         return false;
     }
-    for (const auto width : kTailWidths) {
-        if (!skip_optional(reader, width)) {
+    for (std::size_t i = 0; i < kTailWidths.size(); ++i) {
+        if (!scalar(reader, kTailOffsets[i], kTailSizes[i], kTailWidths[i], kTailBiases[i])) {
             return false;
         }
     }
@@ -106,11 +152,21 @@ bool read_roster(Reader& reader) noexcept {
 }
 
 /** The leading byte counts the payload bytes, up to the buffer's capacity. */
-bool read_opaque_state(Reader& reader) noexcept {
-    const auto buffer = [](Reader& fields) noexcept {
+bool read_opaque_state(Reader& reader, Request& output) noexcept {
+    const auto buffer = [&output](Reader& fields) noexcept {
         std::uint64_t count = 0;
-        return fields.read(kByteBits, count) && count <= kOpaqueBytes
-               && fields.skip(static_cast<std::size_t>(count) * kByteBits);
+        if (!fields.read(kByteBits, count) || count > kOpaqueBytes) {
+            return false;
+        }
+        output.presence.descriptorSize = static_cast<std::uint8_t>(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            std::uint64_t value{};
+            if (!fields.read(kByteBits, value)) {
+                return false;
+            }
+            output.presence.descriptor[i] = static_cast<std::byte>(value);
+        }
+        return true;
     };
     return optional(reader, buffer) && skip_optional(reader, kLongBits);
 }
@@ -149,7 +205,11 @@ bool read_body(Reader& reader, Request& output) noexcept {
     constexpr std::size_t kUnlockFlagBits = 3;
     return optional(reader,
                     [&output](Reader& group) noexcept { return read_activity(group, output); })
-           && optional(reader, read_roster) && optional(reader, read_opaque_state)
+           && optional(reader,
+                       [&output](Reader& group) noexcept { return read_roster(group, output); })
+           && optional(
+               reader,
+               [&output](Reader& group) noexcept { return read_opaque_state(group, output); })
            && skip_optional(reader, kWordBits)
            && optional(reader,
                        [&output](Reader& group) noexcept { return read_inventory(group, output); })
@@ -187,6 +247,7 @@ bool parse_request(const Message& message, Request& request) noexcept {
         || !zero_padding(reader)) {
         return false;
     }
+    candidate.presence.published = true;
     request = candidate;
     return true;
 }
