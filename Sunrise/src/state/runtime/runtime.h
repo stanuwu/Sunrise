@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 
+#include "../account/account_context.h"
 #include "../build_data/items/quest_initialization.h"
 #include "../build_data/records/definition.h"
 #include "../build_data/rewards/definition.h"
@@ -827,6 +828,8 @@ struct ProfileExchangePayout {
 
 /** @return A copy of the active account state, read under the lock. */
 [[nodiscard]] AccountState account_snapshot() noexcept;
+/** Publishes the actual local BAP listener port before any client signs on. */
+void publish_bap_port(std::uint16_t port) noexcept;
 
 /**
  * Copies the evaluated content state and adds build-derived catalyst completion overrides.

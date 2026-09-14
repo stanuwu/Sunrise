@@ -10,8 +10,11 @@ namespace sunrise::core::settings::parser {
 Parser::Parser(std::string_view input) noexcept : json::Reader(input) {}
 
 /** Reads the version without interpreting settings from an older schema. */
-bool Parser::parse_version(std::uint32_t& output) noexcept {
+bool Parser::parse_version(std::uint32_t& output, bool* compact) noexcept {
     output = 0;
+    if (compact) {
+        *compact = false;
+    }
     if (!consume('{')) {
         return false;
     }
@@ -32,8 +35,17 @@ bool Parser::parse_version(std::uint32_t& output) noexcept {
             }
             output = static_cast<std::uint32_t>(value);
             found = true;
-        } else if (!skip_value(0)) {
-            return false;
+        } else {
+            whitespace();
+            if (compact
+                && (key == "persona"
+                    || ((key == "server" || key == "host") && position_ < input_.size()
+                        && input_[position_] == '"'))) {
+                *compact = true;
+            }
+            if (!skip_value(0)) {
+                return false;
+            }
         }
         if (consume('}')) {
             return at_end();
@@ -55,9 +67,13 @@ bool Parser::parse_root(Settings& output) noexcept {
     bool hasVersion = false;
     bool hasCore = false;
     bool hasClient = false;
+    bool hasClientEndpoint = false;
     bool hasServer = false;
     bool hasSteam = false;
     bool hasState = false;
+    bool hasPersona = false;
+    bool hasMachineId = false;
+    bool hasCompleteExoticCatalysts = false;
     for (;;) {
         std::string_view key;
         if (!string(key) || !consume(':')) {
@@ -72,21 +88,57 @@ bool Parser::parse_root(Settings& output) noexcept {
             output.version = static_cast<std::uint32_t>(value);
             hasVersion = true;
         } else if (key == "complete_exotic_catalysts") {
-            if (!boolean(output.completeExoticCatalysts)) {
+            if (hasCompleteExoticCatalysts || !boolean(output.completeExoticCatalysts)) {
                 return false;
             }
+            hasCompleteExoticCatalysts = true;
+        } else if (key == "role") {
+            std::string_view value;
+            if (output.hasConfiguredRole || !string(value)
+                || !parse_role(value, output.configuredRole)) {
+                return false;
+            }
+            output.hasConfiguredRole = true;
+        } else if (key == "persona") {
+            if (hasPersona || !compact_persona(output.steam.user)) {
+                return false;
+            }
+            hasPersona = true;
+        } else if (key == "machine_id") {
+            if (hasMachineId || !unsigned_integer(output.client.machineId)
+                || output.client.machineId == (std::numeric_limits<std::uint64_t>::max)()) {
+                return false;
+            }
+            hasMachineId = true;
         } else if (key == "core") {
             if (hasCore || !core(output)) {
                 return false;
             }
             hasCore = true;
         } else if (key == "client") {
-            if (hasClient || !client_settings(output.client)) {
+            if (hasClient || !client_settings(output.client, hasClientEndpoint)) {
                 return false;
             }
             hasClient = true;
+        } else if (key == "host") {
+            if (hasServer || !compact_endpoint(output.client.serverEndpoint)
+                || output.client.serverEndpoint.address[0] == 0
+                || output.client.serverEndpoint.address[0] >= 224) {
+                return false;
+            }
+            output.compactHost = true;
+            hasServer = true;
         } else if (key == "server") {
-            if (hasServer || !server_settings(output.server)) {
+            if (hasServer) {
+                return false;
+            }
+            whitespace();
+            if (position_ < input_.size() && input_[position_] == '"') {
+                if (!compact_endpoint(output.client.serverEndpoint)) {
+                    return false;
+                }
+                output.compactClient = true;
+            } else if (!server_settings(output.server)) {
                 return false;
             }
             hasServer = true;
@@ -104,6 +156,16 @@ bool Parser::parse_root(Settings& output) noexcept {
             return false;
         }
         if (consume('}')) {
+            const bool simpleEndpoint = output.compactClient || output.compactHost;
+            if (hasPersona && (!simpleEndpoint || hasSteam)) {
+                return false;
+            }
+            if (simpleEndpoint
+                && (output.hasConfiguredRole || hasClientEndpoint
+                    || output.client.externalServer.enabled
+                    || (hasVersion && output.version != kSettingsVersion))) {
+                return false;
+            }
             return at_end();
         }
         if (!consume(',')) {

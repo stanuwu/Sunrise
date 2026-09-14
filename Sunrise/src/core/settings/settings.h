@@ -8,6 +8,7 @@
 #include "../../state/unlocks/definition.h"
 #include "../logging/log.h"
 #include "client/definition.h"
+#include "role.h"
 #include "server/definition.h"
 #include "steam/definition.h"
 
@@ -33,6 +34,10 @@ struct Settings {
      * every file written before versioning. Checked against kSettingsVersion at load.
      */
     std::uint32_t version{};
+    bool compactClient{};
+    bool compactHost{};
+    Role configuredRole{Role::embedded};
+    bool hasConfiguredRole{};
     /**
      * Completes released exotic weapon catalysts while resolving client item state.
      */
@@ -79,5 +84,10 @@ void shutdown() noexcept;
 
 /** @return Active read-only Core settings. */
 [[nodiscard]] const Settings& get() noexcept;
+
+/** Native multiplayer adapters serve both the playing host and joining clients. */
+[[nodiscard]] inline bool multiplayer() noexcept {
+    return role() == Role::host || get().server.upstream.enabled;
+}
 
 } // namespace sunrise::core::settings

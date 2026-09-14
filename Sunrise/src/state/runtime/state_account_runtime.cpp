@@ -8,6 +8,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
+#include "../account/public_profiles.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "runtime.h"
@@ -245,8 +246,11 @@ bool set_selected_character(std::uint64_t characterSoid, bool& moved, bool& perk
         investment::store::g_session.selected[index] = candidate.characters[index].selected;
     }
     investment::store::g_mutex.unlock();
-    moved = changes;
-    (void)seed_seasonal_progression(perksEarned);
+    (void)seed_seasonal_progression();
+    changed = !alreadySelected;
+    if (changed) {
+        account::profiles::local_changed();
+    }
     return true;
 }
 
@@ -283,6 +287,63 @@ bool set_selected_title(std::uint16_t recordIndex,
         investment::store::g_mutex.unlock();
         return false;
     }
+    investment::store::g_mutex.unlock();
+    return true;
+}
+
+/** Prepares the selected character's current activity without changing account State. */
+bool prepare_current_activity(std::uint16_t activityIndex,
+                              PendingCurrentActivity& mutation) noexcept {
+    mutation = {};
+    const AccountState snapshot = account_snapshot();
+    if (!account::valid(snapshot)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < snapshot.characterCount; ++index) {
+        const CharacterState& character = snapshot.characters[index];
+        if (!character.selected) {
+            continue;
+        }
+        if (character.currentActivityIndex == activityIndex) {
+            return false;
+        }
+        mutation.beforeCharacter = character;
+        mutation.afterCharacter = character;
+        mutation.afterCharacter.currentActivityIndex = activityIndex;
+        mutation.characterSoid = character.soid;
+        mutation.characterIndex = index;
+        mutation.activityIndex = activityIndex;
+        mutation.prepared = true;
+        return true;
+    }
+    return false;
+}
+
+/** Commits one prepared current-activity change behind an exact character staleness guard. */
+bool commit_current_activity(PendingCurrentActivity& mutation) noexcept {
+    const PendingCurrentActivity prepared = mutation;
+    mutation = {};
+    if (!prepared.prepared || prepared.characterSoid == 0
+        || prepared.characterIndex >= kCharacterCapacity
+        || prepared.beforeCharacter.soid != prepared.characterSoid
+        || prepared.afterCharacter.soid != prepared.characterSoid) {
+        return false;
+    }
+    investment::store::g_mutex.lock();
+    AccountState candidate = investment::store::account();
+    if (prepared.characterIndex >= candidate.characterCount
+        || !same_character(candidate.characters[prepared.characterIndex],
+                           prepared.beforeCharacter)) {
+        investment::store::g_mutex.unlock();
+        return false;
+    }
+    candidate.characters[prepared.characterIndex] = prepared.afterCharacter;
+    if (!account::valid(candidate)) {
+        investment::store::g_mutex.unlock();
+        return false;
+    }
+    investment::store::g_session.activities[prepared.characterIndex] = prepared.activityIndex;
+    account::profiles::local_changed();
     investment::store::g_mutex.unlock();
     return true;
 }
@@ -572,10 +633,7 @@ bool commit_equipment_swap(PendingEquipmentSwap& mutation) noexcept {
 
 /** @return A copy of the active account state, read under the lock. */
 AccountState account_snapshot() noexcept {
-    investment::store::g_mutex.lock();
-    const AccountState snapshot = investment::store::account();
-    investment::store::g_mutex.unlock();
-    return snapshot;
+    return account_snapshot(bound_account());
 }
 
 /** Grants each character the other 2 subclasses of its equipped subclass's class. */

@@ -18,17 +18,7 @@ bool Parser::activation_settings(server::activation::Settings& output) noexcept 
             return false;
         }
         bool value = false;
-        if (key == "default_client_activation") {
-            if (!boolean(value)) {
-                return false;
-            }
-            candidate.defaultClientActivation = value;
-        } else if (key == "activity_public_membership") {
-            if (!boolean(value)) {
-                return false;
-            }
-            candidate.activityPublicMembership = value;
-        } else if (key == "prevent_ownerless_channel_close") {
+        if (key == "prevent_ownerless_channel_close") {
             if (!boolean(value)) {
                 return false;
             }

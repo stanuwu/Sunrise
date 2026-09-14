@@ -24,23 +24,28 @@ public:
     [[nodiscard]] bool parse_root(Settings& output) noexcept;
 
     /** Reads only the root version; a missing version is zero. */
-    [[nodiscard]] bool parse_version(std::uint32_t& output) noexcept;
+    [[nodiscard]] bool parse_version(std::uint32_t& output, bool* compact = nullptr) noexcept;
 
 private:
+    [[nodiscard]] bool bap_endpoint(std::array<char, 16>& host,
+                                    std::array<unsigned char, 4>& address,
+                                    std::uint16_t& port) noexcept;
+    [[nodiscard]] bool compact_endpoint(client::server_endpoint::Settings& output) noexcept;
+    [[nodiscard]] bool compact_persona(steam::User& output) noexcept;
     /** Parses the Core settings object. */
     [[nodiscard]] bool core(Settings& output) noexcept;
     /** Parses the activity SDK generation block. `lua_declarations` must be unique and boolean. */
     [[nodiscard]] bool
     activity_sdk_generation_settings(ActivitySdkGenerationSettings& output) noexcept;
     /** Parses Client settings. Each supported object may appear at most once. */
-    [[nodiscard]] bool client_settings(client::Settings& output) noexcept;
+    [[nodiscard]] bool client_settings(client::Settings& output, bool& endpointConfigured) noexcept;
     /** Parses the in-game UI boot and input policy. Keys must name a Windows key. */
     [[nodiscard]] bool client_ui_settings(ui::runtime::Settings& output) noexcept;
     /** Parses the startup export switches. Each key may appear once and must be boolean. */
     [[nodiscard]] bool client_exports_settings(client::Exports& output) noexcept;
     /** Parses the external-server block. Each supported key may appear at most once. */
     [[nodiscard]] bool client_external_settings(client::external::Settings& output) noexcept;
-    /** Parses the standalone Server settings object. */
+    /** Parses the shared service settings object. */
     [[nodiscard]] bool server_settings(server::Settings& output) noexcept;
     /** Parses the activation gate block. Every supported key carries a boolean. */
     [[nodiscard]] bool activation_settings(server::activation::Settings& output) noexcept;

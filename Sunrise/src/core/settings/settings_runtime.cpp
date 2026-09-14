@@ -14,7 +14,7 @@
 #include "../logging/log.h"
 #include "parser.h"
 #include "settings.h"
-#include "settings_upgrade.h"
+#include "steam/platform_identity.h"
 
 namespace sunrise::core::settings {
 namespace {
@@ -151,6 +151,9 @@ void report_upgrade(std::uint32_t fileVersion) noexcept {
 
 /** Loads the settings file from the owned folder, or creates the default one. */
 bool initialize(void* module) noexcept {
+    if (!configure_role(Role::embedded, false)) {
+        return fail("role");
+    }
     path::Buffer configPath;
     if (!path::artifact_directory(module, configPath)
         || !path::append(configPath, kSettingsFileSuffix)) {
@@ -213,19 +216,11 @@ bool initialize(void* module) noexcept {
     }
     std::string_view document = without_byte_order_mark(std::string_view(buffer->data(), read));
     std::uint32_t version = 0;
-    if (!parser::Parser(document).parse_version(version)) {
+    bool compact = false;
+    if (!parser::Parser(document).parse_version(version, &compact)) {
         return fail("version");
     }
-    // Holds the upgraded text; `document` points into it after an upgrade.
-    std::string upgraded;
-    if (version < kSettingsVersion && upgrade::to_current(document, version, upgraded)) {
-        if (!path::replace_file(std::wstring_view(configPath.chars.data(), configPath.length),
-                                upgraded)) {
-            return fail("write_upgrade");
-        }
-        report_upgrade(version);
-        document = upgraded;
-    } else if (version < kSettingsVersion) {
+    if (!compact && version < kSettingsVersion) {
         if (!DeleteFileW(configPath.chars.data())) {
             return fail("delete_old");
         }
@@ -236,6 +231,62 @@ bool initialize(void* module) noexcept {
     Settings parsed;
     if (!parse(document, parsed)) {
         return fail("parse");
+    }
+    if (parsed.compactClient || parsed.compactHost) {
+        const auto selectedRole = parsed.compactHost ? Role::host : Role::client;
+        if (!configure_role(selectedRole, true)) {
+            return fail("compact_role");
+        }
+        if (!parsed.steam.user.hasConfiguredSteamId
+            && !steam::platform_identity::load_or_create(parsed.steam.user.steamId)) {
+            return fail("identity_cache");
+        }
+        parsed.version = kSettingsVersion;
+        parsed.configuredRole = selectedRole;
+        parsed.client.externalServer.enabled = false;
+        if (parsed.compactHost) {
+            parsed.server.bapBind = {0, 0, 0, 0};
+            parsed.server.bapPort = parsed.client.serverEndpoint.bapPort;
+            parsed.server.gameplay.bindAddress = {0, 0, 0, 0};
+            parsed.server.gameplay.advertisedAddress = parsed.client.serverEndpoint.address;
+            parsed.server.gameplay.transportAddress = parsed.client.serverEndpoint.address;
+        } else {
+            parsed.server.upstream.enabled = true;
+            parsed.server.upstream.host = parsed.client.serverEndpoint.host;
+            parsed.server.upstream.address = parsed.client.serverEndpoint.address;
+            parsed.server.upstream.bapPort = parsed.client.serverEndpoint.bapPort;
+            parsed.server.bapPort = 0;
+        }
+    } else if (!configure_role(parsed.configuredRole, parsed.hasConfiguredRole)) {
+        return fail("configured_role");
+    }
+    if (role() == Role::client && !parsed.client.externalServer.enabled) {
+        if (!parsed.server.upstream.enabled) {
+            parsed.server.upstream.enabled = true;
+            parsed.server.upstream.host = parsed.client.serverEndpoint.host;
+            parsed.server.upstream.address = parsed.client.serverEndpoint.address;
+            parsed.server.upstream.bapPort = parsed.client.serverEndpoint.bapPort;
+        }
+        parsed.server.bapPort = 0;
+    }
+    if (hosts_session() && parsed.server.upstream.enabled) {
+        return fail("host_upstream");
+    }
+    if (role() == Role::host) {
+        if (parsed.client.externalServer.enabled) {
+            return fail("host_external");
+        }
+        if (parsed.server.bapPort == 0
+            || (parsed.server.bapBind != std::array<unsigned char, 4>{0, 0, 0, 0}
+                && parsed.server.bapBind != std::array<unsigned char, 4>{127, 0, 0, 1})) {
+            return fail("host_local_listener");
+        }
+        if (parsed.server.gameplay.topology != server::gameplay::Topology::embedded) {
+            return fail("host_gameplay");
+        }
+    }
+    for (std::size_t i = 0; i < parsed.server.upstream.host.size(); ++i) {
+        parsed.server.upstream.hostWide[i] = static_cast<wchar_t>(parsed.server.upstream.host[i]);
     }
     report_version(parsed.version);
     g_settings = parsed;

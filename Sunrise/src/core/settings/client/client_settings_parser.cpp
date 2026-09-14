@@ -1,9 +1,11 @@
+#include <limits>
+
 #include "../parser.h"
 
 namespace sunrise::core::settings::parser {
 
 /** Parses Client-owned configuration over deterministic defaults. */
-bool Parser::client_settings(client::Settings& output) noexcept {
+bool Parser::client_settings(client::Settings& output, bool& endpointConfigured) noexcept {
     if (!consume('{')) {
         return false;
     }
@@ -13,8 +15,11 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     bool hasCustomBootflowTextures = false;
     bool hasSocketMenuRouting = false;
     bool hasRevealLoreBooks = false;
-    bool hasCheats = false;
-    bool hasExports = false;
+    bool hasRegionPrivate = false;
+    bool hasSkipOrbitCinematicWait = false;
+    bool hasServerEndpoint = false;
+    bool hasMachineId = false;
+    bool hasPinReplicatedRecord = false;
     if (consume('}')) {
         return true;
     }
@@ -23,7 +28,20 @@ bool Parser::client_settings(client::Settings& output) noexcept {
         if (!string(key) || !consume(':')) {
             return false;
         }
-        if (key == "ui") {
+        if (key == "server_endpoint") {
+            auto& endpoint = candidate.serverEndpoint;
+            if (hasServerEndpoint
+                || !bap_endpoint(endpoint.host, endpoint.address, endpoint.bapPort)) {
+                return false;
+            }
+            hasServerEndpoint = true;
+        } else if (key == "machine_id") {
+            if (hasMachineId || !unsigned_integer(candidate.machineId)
+                || candidate.machineId == (std::numeric_limits<std::uint64_t>::max)()) {
+                return false;
+            }
+            hasMachineId = true;
+        } else if (key == "ui") {
             if (hasUserInterface || !client_ui_settings(candidate.userInterface)) {
                 return false;
             }
@@ -103,6 +121,7 @@ bool Parser::client_exports_settings(client::Exports& output) noexcept {
         }
         if (consume('}')) {
             output = candidate;
+            endpointConfigured = hasServerEndpoint;
             return true;
         }
         if (!consume(',')) {

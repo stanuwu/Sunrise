@@ -1,3 +1,5 @@
+#include "../account/account_context.h"
+#include "../account/public_profiles.h"
 #include "store_internal.h"
 
 namespace sunrise::state::investment::store {
@@ -152,6 +154,7 @@ bool write_account(const AccountState& value) noexcept {
         g_session.selected[index] = value.characters[index].selected;
         g_session.activities[index] = value.characters[index].currentActivityIndex;
     }
+    account::profiles::local_changed();
     return true;
 }
 
@@ -238,7 +241,14 @@ bool remove_character_rows(std::size_t slot) noexcept {
 /** A sign-in timestamp belongs only to the current connection lifetime. */
 void set_sign_in_time(std::uint64_t seconds) noexcept {
     const std::lock_guard lock(g_mutex);
+    if (!local_account_access()) {
+        return;
+    }
+    if (g_session.signInSeconds == seconds) {
+        return;
+    }
     g_session.signInSeconds = seconds;
+    account::profiles::local_changed();
 }
 
 } // namespace sunrise::state::investment::store
