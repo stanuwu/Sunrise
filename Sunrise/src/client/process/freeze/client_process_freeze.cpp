@@ -68,7 +68,7 @@ SRWLOCK g_exclusiveLock{SRWLOCK_INIT};
  * @param held Receives the loader cookie and both ownership flags.
  * @return True when this thread owns both locks.
  */
-[[nodiscard]] bool take_locks(Held& held) noexcept {
+[[nodiscard]] bool take_locks(ProcessLocks& held) noexcept {
     ULONG state = 0;
     ULONG_PTR cookie = 0;
     if (loader().lock(kBlockingLoaderLock, &state, &cookie) != kStatusSuccess) {
@@ -86,7 +86,7 @@ SRWLOCK g_exclusiveLock{SRWLOCK_INIT};
 }
 
 /** @param held Lock ownership to drop, innermost first. */
-void drop_locks(Held& held) noexcept {
+void drop_locks(ProcessLocks& held) noexcept {
     if (held.heapLocked) {
         held.heapLocked = false;
         (void)HeapUnlock(GetProcessHeap());
@@ -216,6 +216,20 @@ hold_snapshot(Held& held, const diagnostics::ModuleRange& range, bool& foundUnse
 }
 
 } // namespace
+
+/** Resolves lock entry points while all threads still run, then takes the process locks. */
+bool acquire_process_locks(ProcessLocks& locks) noexcept {
+    if (locks.loaderLocked || locks.heapLocked || loader().lock == nullptr
+        || loader().unlock == nullptr) {
+        return false;
+    }
+    return take_locks(locks);
+}
+
+/** Releases the heap before the loader, matching the inverse acquisition order. */
+void release_process_locks(ProcessLocks& locks) noexcept {
+    drop_locks(locks);
+}
 
 /** Suspends every other thread in the process. */
 bool hold(Held& held) noexcept {
