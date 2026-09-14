@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <limits>
+#include <memory>
 #include <new>
 #include <vector>
 
@@ -21,7 +22,7 @@ namespace sunrise::server::activity::host {
 namespace detail {
 
 SRWLOCK g_lock{SRWLOCK_INIT};
-std::array<Instance, kInstanceCapacity> g_instances{};
+std::array<std::unique_ptr<Instance>, kInstanceCapacity> g_instances{};
 std::vector<PendingInput> g_pending{};
 std::array<Event, kEventCapacity> g_events{};
 std::size_t g_pendingRead{};
@@ -50,7 +51,11 @@ std::uint64_t g_overwrittenEvents{};
 
 /** Finds one exact instance while the runtime lock is held. */
 [[nodiscard]] Instance* find_instance(const state::activity::SessionBinding& binding) noexcept {
-    for (Instance& instance : g_instances) {
+    for (auto& owned : g_instances) {
+        if (!owned) {
+            continue;
+        }
+        Instance& instance = *owned;
         if (instance.occupied && same_binding(instance.view.binding, binding)) {
             return &instance;
         }
@@ -144,7 +149,17 @@ bool append_pending(const PendingInput& pending) noexcept {
         return current;
     }
     Instance* selected = nullptr;
-    for (Instance& instance : g_instances) {
+    for (auto& owned : g_instances) {
+        if (!owned) {
+            owned.reset(new (std::nothrow) Instance{});
+            if (!owned) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::error,
+                                 "ev=activity stage=instance result=no_memory");
+                break;
+            }
+        }
+        Instance& instance = *owned;
         if (!instance.occupied) {
             selected = &instance;
             break;
@@ -399,7 +414,11 @@ void service(std::uint64_t now) noexcept {
     static_cast<void>(state::activity::snapshot_retained_bindings(bindings, bindingCount));
 
     AcquireSRWLockExclusive(&g_lock);
-    for (Instance& instance : g_instances) {
+    for (auto& owned : g_instances) {
+        if (!owned) {
+            continue;
+        }
+        Instance& instance = *owned;
         bool active = false;
         for (std::size_t index = 0; index < bindingCount; ++index) {
             if (same_binding(instance.view.binding, bindings[index])) {
@@ -464,9 +483,15 @@ void service(std::uint64_t now) noexcept {
 
 /** Copies the latest complete diagnostic view. */
 void snapshot(DiagnosticsSnapshot& output) noexcept {
-    output = {};
+    // The server-wide snapshot is too large for a temporary on a native game thread.
+    std::destroy_at(&output);
+    std::construct_at(&output);
     AcquireSRWLockShared(&g_lock);
-    for (const Instance& instance : g_instances) {
+    for (const auto& owned : g_instances) {
+        if (!owned) {
+            continue;
+        }
+        const Instance& instance = *owned;
         if (instance.occupied && output.instanceCount < output.instances.size()) {
             output.instances[output.instanceCount] = instance.view;
             ++output.instanceCount;
@@ -657,8 +682,8 @@ void note_auth_transport_staged(const state::activity::SessionBinding& binding,
 void reset() noexcept {
     AcquireSRWLockExclusive(&g_lock);
     g_eventGeneration = next_nonzero(g_eventGeneration);
-    for (Instance& instance : g_instances) {
-        clear_instance(instance);
+    for (auto& owned : g_instances) {
+        owned.reset();
     }
     std::vector<PendingInput>{}.swap(g_pending);
     for (Event& event : g_events) {

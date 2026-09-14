@@ -12,6 +12,7 @@
 #include "../../../../middleware/bap/activity_message/activity_join_request_parser.h"
 #include "../../../../middleware/bap/activity_message/activity_message_request_parser.h"
 #include "../../../../middleware/bap/activity_message/entity_slots.h"
+#include "../../../../middleware/bap/activity_message/peer_ledger.h"
 #include "../../../../middleware/bap/activity_message/wire_schema/activity_communication_route.h"
 #include "../../../../middleware/crypto/hmac.h"
 #include "../../../../middleware/crypto/random_bytes.h"
@@ -19,6 +20,7 @@
 #include "../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../state/activity/receipts/activity_receipts.h"
 #include "../../../../state/activity/runtime.h"
+#include "../../../../state/activity/shared_target.h"
 #include "../../../../state/activity_sdk/runtime.h"
 #include "../../../activity/host_runtime.h"
 #include "../../../gameplay/gameplay_advertisement.h"
@@ -26,7 +28,9 @@
 #include "../push/activity/internal.h"
 #include "activity_message_route_internal.h"
 #include "membership/activity_membership_route.h"
+#include "membership/activity_reservations_route.h"
 #include "middleware/bap/activity_message/activity_entity_slot_request_parser.h"
+#include "native_member_identity.h"
 #include "patch_epoch/activity_patch_epoch_route.h"
 #include "receipts/activity_message_receipts.h"
 
@@ -35,9 +39,6 @@ namespace {
 
 namespace activity_sdk = state::activity_sdk;
 
-/** Asks for the membership snapshot as it stands, naming no bubble. */
-constexpr std::uint32_t kCurrentRevision = 0;
-constexpr std::int32_t kNoBubble = -1;
 /** Process-private HMAC key width used only for run-local diagnostic correlation. */
 constexpr std::size_t kFingerprintKeySize = 32;
 /** Domain prefix keeps this diagnostic use separate from protocol authentication. */
@@ -112,6 +113,28 @@ void report_arrival(const service::Request& request) noexcept {
     }
 }
 
+/**
+ * Names a retract the host declined, because a member the client believes it dropped but the
+ * host still carries reads exactly like a lost message otherwise.
+ */
+void report_release_refusal(const service::Request& request,
+                            const membership::ReleaseRefusalReport& refusal) noexcept {
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=activity stage=reservation_release result=%s soid=0x%llX peer=0x%llX",
+        refusal.refusal == state::activity::reservations::ReleaseRefusal::hostRow ? "host_row"
+                                                                                  : "lease_held",
+        static_cast<unsigned long long>(request.sessionId),
+        static_cast<unsigned long long>(refusal.peerKey));
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
 /** Tests whether a retained link binding still names its exact State and host generations. */
 [[nodiscard]] bool binding_is_current(const ActivityClientBinding& binding) noexcept {
     if (binding.role == ActivityClientRole::privateCurrent) {
@@ -163,6 +186,8 @@ void report_arrival(const service::Request& request) noexcept {
         || parsed.sessionId != request.sessionId) {
         return false;
     }
+    const auto identity = native_member_identity(parsed.identity);
+    const bool shared = core::settings::hosts_session();
     if (binding_is_current(binding) && parsed.sessionId == binding.session.sessionId) {
         plan.bindingIntent = BindingIntent::preserveCurrent;
         plan.targetBinding = binding.session;
@@ -178,11 +203,19 @@ void report_arrival(const service::Request& request) noexcept {
             } else {
                 server::gameplay::complete_host_session(binding.session, arrival);
             }
+        } else {
+            server::gameplay::complete_host_session(
+                binding.session,
+                arrival,
+                push::activity::public_region(binding.session, binding.bindingGeneration, arrival));
         }
     } else if (server::gameplay::group::host_session_for_activity(parsed.sessionId, plan.publicHost)
                && state::activity::binding_matches(plan.publicHost.target)) {
         plan.bindingIntent = BindingIntent::publicTarget;
         plan.targetBinding = plan.publicHost.target;
+    } else if (shared
+               && state::activity::shared_target(parsed.sessionId, identity, plan.targetBinding)) {
+        plan.bindingIntent = BindingIntent::sharedTarget;
     } else {
         return false;
     }
@@ -191,8 +224,32 @@ void report_arrival(const service::Request& request) noexcept {
         core::settings::get().server.gameplay;
     const std::size_t reserve = core::settings::server::gameplay::effective_reserve(gameplay);
     const std::size_t granted = core::settings::server::gameplay::join_grant(gameplay);
-    if (!state::activity::entity_slots::prepare_join(
-            parsed.sessionId, parsed.memberKey, granted, reserve, plan.entitySlotMutation)) {
+    bool prepared = false;
+    if (shared && plan.bindingIntent == BindingIntent::publicTarget) {
+        std::array<state::activity::SessionBinding, state::activity::kSessionCapacity> sources{};
+        std::size_t count{};
+        server::gameplay::group::host_session_sources(plan.publicHost.generation, sources, count);
+        // A pooled public host accepts only a player authorized by a live source that advertised
+        // it. prepare_join and commit recheck the bound account, selected character and generation.
+        for (std::size_t index = 0; index < count && !prepared; ++index) {
+            prepared = state::activity::entity_slots::prepare_join(parsed.sessionId,
+                                                                   parsed.memberKey,
+                                                                   granted,
+                                                                   reserve,
+                                                                   plan.entitySlotMutation,
+                                                                   &identity,
+                                                                   &sources[index]);
+        }
+    } else {
+        prepared = state::activity::entity_slots::prepare_join(parsed.sessionId,
+                                                               parsed.memberKey,
+                                                               granted,
+                                                               reserve,
+                                                               plan.entitySlotMutation,
+                                                               shared ? &identity : nullptr,
+                                                               nullptr);
+    }
+    if (!prepared) {
         return false;
     }
     plan.correlation = parsed.correlation;
@@ -200,21 +257,18 @@ void report_arrival(const service::Request& request) noexcept {
     plan.joinCharacterSoid = parsed.characterSoid;
     plan.delivery = Delivery::joinNotifications;
     plan.mutationDomain = MutationDomain::entitySlots;
-    // Read, never committed: the domain above is what the commit acts on, so this cannot move the
-    // private session's membership revision. The body is that session's member table, sent
-    // verbatim, because only it names a member the client recognises as the local player.
-    const state::activity::SessionBinding* source = nullptr;
-    if (plan.bindingIntent == BindingIntent::publicTarget) {
-        source = &plan.publicHost.source;
-    } else if (binding.role == ActivityClientRole::publicTarget) {
-        source = &binding.source;
-    }
-    if (source != nullptr && state::activity::binding_matches(*source)) {
-        plan.joinMembershipBody = JoinMembershipBody::publicSource;
-        static_cast<void>(state::activity::membership::prepare_refresh(
-            source->sessionId, kCurrentRevision, kNoBubble, plan.membershipMutation));
-    } else if (plan.bindingIntent == BindingIntent::preserveCurrent
-               && binding.role == ActivityClientRole::privateCurrent) {
+    // Read, never committed: the domain above is what the commit acts on. Every shared join --
+    // public target included -- takes its body from THIS join's own mutation, so the member the
+    // client recognises as the local player is its own row in the session the envelope names, and
+    // the peers are the ones that session has admitted. A public target copying the private
+    // source's table published that table's revision under the target's name and named members the
+    // recipient's own session had not admitted.
+    if (shared) {
+        if (!state::activity::membership::prepare_join_snapshot(plan.entitySlotMutation,
+                                                                plan.membershipMutation)) {
+            return false;
+        }
+    } else if (plan.bindingIntent == BindingIntent::preserveCurrent) {
         // A private join's burst carries the seed membership; the commit lands the same seed.
         plan.joinMembershipBody = JoinMembershipBody::privateSeed;
         static_cast<void>(
@@ -403,6 +457,29 @@ bool process(const ActivityClientBinding& binding,
     }
     bool prepared = false;
     switch (adapter) {
+    case IngressAdapter::connectivityFailure: {
+        service::peer_ledger::ConnectivityFailure failure{};
+        std::size_t consumed = 0;
+        plan.hasRelayConnectivityFailure =
+            service::peer_ledger::parse_connectivity_failure(request.payload, failure, consumed);
+        return frame_only(binding, rosterDecode, adapter, request);
+    }
+    case IngressAdapter::reservationRequest:
+        prepared = membership::prepare_reservations(request, plan);
+        break;
+    case IngressAdapter::reservationRelease: {
+        membership::ReleaseRefusalReport refusedRelease{};
+        prepared = membership::prepare_reservation_release(request, plan, refusedRelease);
+        // A retract the host declines to act on is a complete, well-formed message that changes
+        // nothing. Framing it says so; the malformed prepare path below would not.
+        if (!prepared
+            && refusedRelease.refusal != state::activity::reservations::ReleaseRefusal::none) {
+            plan = {};
+            report_release_refusal(request, refusedRelease);
+            return frame_only(binding, rosterDecode, adapter, request);
+        }
+        break;
+    }
     case IngressAdapter::patchEpochStateEpoch:
         prepared = patch_epoch::prepare(binding.session.sessionId, request, plan);
         break;
@@ -423,25 +500,17 @@ bool process(const ActivityClientBinding& binding,
         break;
     case IngressAdapter::clientAuthoritativeDataMembership:
         prepared = membership::prepare_authoritative(request, plan);
+        if (prepared) {
+            plan.transportBindingGeneration = binding.bindingGeneration;
+        }
         break;
     case IngressAdapter::membershipAcknowledgement:
         prepared = membership::prepare_acknowledgement(request, plan);
         break;
     case IngressAdapter::startActivityOptionalStateRefresh:
-        // Off, the request is framed and recorded but no transition policy runs on it.
-        if (!core::settings::get().server.activation.defaultClientActivation) {
-            const receipts::Framed framed = receipts::frame_start_activity(request);
-            DiagnosticBody diagnostic{};
-            diagnostic.consumedBits = framed.consumedBits;
-            diagnostic.status = diagnostic_status(framed, false);
-            static_cast<void>(record(request,
-                                     framed.verdict,
-                                     framed.consumedBits,
-                                     &binding.session,
-                                     binding.bindingGeneration,
-                                     diagnostic));
-            return true;
-        }
+        // The transition policy is compiled in. The release owns no runtime switch that answers a
+        // start-activity request with nothing; deployment settings cover accounts, endpoints,
+        // personas and profiles only.
         prepared = membership::prepare_start_activity(request, plan);
         break;
     case IngressAdapter::authorityResetAcknowledgement:

@@ -204,7 +204,9 @@ bool stage_notifications(Session& session,
         const auto& purge = activity.authorityPurge;
         if (!purge.pending || purge.sourceGeneration != session.activity.bindingGeneration
             || activity.sessionId != session.activity.session.sessionId
-            || activity_link_count_locked(session.activity.session) != 1
+            || activity_link_count_locked(session.activity.session,
+                                          session.activity.bindingGeneration)
+                   != 1
             || purge.body.epoch
                    != static_cast<std::uint8_t>(session.activity.replicationEpoch + 1U)) {
             return false;

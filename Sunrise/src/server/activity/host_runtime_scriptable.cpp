@@ -126,6 +126,8 @@ void clear_reservation(Instance& instance) noexcept {
     return instance.view.outputPending && tail_eligible(request.kind)
            && instance.view.outputKind == OutputKind::scriptableOverride
            && tail_eligible(instance.pendingScriptable.kind)
+           && instance.pendingScriptable.expectedActivityClientGeneration
+                  == request.expectedActivityClientGeneration
            && instance.pendingScriptableTailCount < instance.pendingScriptableTail.size()
            && !pending_holds_target(instance, request.target);
 }

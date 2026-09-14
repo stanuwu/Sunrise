@@ -56,6 +56,7 @@ struct Identity final {
     std::uint64_t opaqueSoid{};
     /** The role of this second type-23 scalar is not verified. */
     std::uint64_t secondaryOpaque{};
+    bool operator==(const Identity&) const noexcept = default;
 };
 
 /** Spawn state kept for the current activity host, in no wire form. */
@@ -188,18 +189,16 @@ struct MembershipState final {
     /** Set once the client has reported each leg, so message 12 mirrors only reported legs. */
     bool currentReported{};
     bool pendingReported{};
+    /** Distinguish native reports from host-owned initial fallback tokens. */
+    bool transitionReported{};
+    std::uint8_t nativeTransitionToken{};
+    bool teleportReported{};
     /** Bubble the client's last message-18 refresh named as current; -1 before one arrives. */
     std::int32_t bubble{kMinimumRefreshBubble};
     /** Membership revision that refresh said the client had applied. */
     std::uint32_t bubbleRevision{kAbsentRevision};
-    /** The client's last character write-back (ws 702) reported the in-world state. */
-    bool clientInWorld{};
-    /** Region the attached mission program declared as its initial state; -1 when none. */
-    std::int32_t declaredInitialRegion{kAbsentRegionIndex};
-    /** Spawn set the attached mission program declared with that state; zero when none. */
-    std::uint32_t declaredSpawnSetHash{};
-    /** The mission program holds the spawn: the player has no body until it releases. */
-    bool programSpawnHold{};
+    /** The owning client's native current-region leg reports a held region. */
+    bool entered{};
     std::uint32_t revision{};
     /** Stable within one session; a world replacement changes it to clear the client table. */
     std::uint32_t epoch{kStableEpoch};

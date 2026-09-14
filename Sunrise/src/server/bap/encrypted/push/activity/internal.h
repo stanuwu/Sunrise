@@ -94,8 +94,15 @@ void discard_roster_body_record(const Session& session) noexcept;
 [[nodiscard]] bool repeats_delivered_membership_body(const Session& session,
                                                      std::span<const std::byte> body) noexcept;
 
-/** Keeps one staged membership body until its frame outcome is known. */
-void stage_membership_body_record(const Session& session, std::span<const std::byte> body) noexcept;
+/**
+ * Keeps one staged membership body until its frame outcome is known.
+ * @param sessionId Activity session whose membership revision this body carries.
+ * @param revision Membership revision encoded in the body.
+ */
+void stage_membership_body_record(const Session& session,
+                                  std::span<const std::byte> body,
+                                  std::uint64_t sessionId,
+                                  std::uint32_t revision) noexcept;
 
 /** Promotes the staged membership body to the delivered record. */
 void commit_membership_body_record(const Session& session) noexcept;
@@ -116,6 +123,37 @@ void report_roster_deferral(const Session& session,
                             std::uint64_t scriptableRevision) noexcept;
 
 /**
+ * Tests whether this connection has itself delivered one membership revision.
+ * The client applies one membership update per revision and the acknowledgement is stored on the
+ * member row, so a revision another link of the same member acknowledged would otherwise close the
+ * publish trigger for a link that never carried it.
+ * @param session Connection to test.
+ * @param sessionId Activity session the revision belongs to.
+ * @param revision Current membership revision of that session.
+ * @return True when this connection still owes the revision.
+ */
+[[nodiscard]] bool connection_owes_membership(const Session& session,
+                                              std::uint64_t sessionId,
+                                              std::uint32_t revision) noexcept;
+
+/**
+ * Records this recipient's receipt for the membership body this connection delivered.
+ * Multiple connections can share one member row, whose acknowledgement covers the session.
+ * This receipt records the connection's own answer for its delivered body. It ignores a revision
+ * this connection did not itself deliver on the current binding.
+ * @param session Connection the acknowledgement arrived on.
+ * @param revision Membership revision the client says it applied.
+ */
+void note_membership_acknowledgement(const Session& session, std::uint32_t revision) noexcept;
+
+/**
+ * Tests whether this connection's last delivered membership body has been acknowledged.
+ * @param session Connection to test.
+ * @return True when this recipient answered for the exact body this link delivered.
+ */
+[[nodiscard]] bool connection_membership_acknowledged(const Session& session) noexcept;
+
+/**
  * Tests whether the installed packages author one region as private.
  * @param source Exact activity session the generated world is resolved for.
  * @param bindingGeneration Connection generation that binds it.
@@ -127,6 +165,11 @@ void report_roster_deferral(const Session& session,
 
 /** Same test for the connection's own activity session. */
 [[nodiscard]] bool private_region(const Session& session, std::int32_t region) noexcept;
+
+/** True only for an authored public region in this exact activity selection. */
+[[nodiscard]] bool public_region(const state::activity::SessionBinding& source,
+                                 std::uint64_t bindingGeneration,
+                                 std::int32_t region) noexcept;
 
 /**
  * Reads the authored publicity of every bubble from the installed packages.
@@ -340,7 +383,8 @@ find_existing_group(const state::build_data::scenarios::RosterGroup& candidate,
                                std::uint64_t hostedBubbles,
                                bool publishTopLevel,
                                Scratch& scratch,
-                               message::Roster& roster) noexcept;
+                               message::Roster& roster,
+                               bool includeTopLevel = true) noexcept;
 
 /** Appends one selected-state group and registers its key in its exact authored bubble. */
 [[nodiscard]] bool

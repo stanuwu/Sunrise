@@ -5,6 +5,7 @@
 #include <span>
 
 #include "../../encoding/bit_reader.h"
+#include "transport_report.h"
 
 namespace sunrise::middleware::bap::activity_message::client_authoritative_data {
 
@@ -62,6 +63,7 @@ struct RegionState final {
  * `region` is the pending leg: what it is loading, or what is behind it after a z-leg switch.
  */
 struct ClientAuthoritativeData final {
+    TransportReport transport{};
     SpawnState spawn{};
     TeleportState teleport{};
     RegionState currentRegion{};
@@ -107,6 +109,9 @@ inline constexpr std::size_t kMaximumEncodedSize = 10'833;
  * @return True when every present field and the required tail fit.
  */
 [[nodiscard]] bool skip_opaque_root_branch(encoding::bits::Reader& reader) noexcept;
+/** Reads the native transport fields while validating the entire B2 branch. */
+[[nodiscard]] bool read_transport_branch(encoding::bits::Reader& reader,
+                                         TransportReport& report) noexcept;
 
 /**
  * Reads the D4 branch and keeps its optional transition token and both region legs.

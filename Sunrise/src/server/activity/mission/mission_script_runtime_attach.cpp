@@ -34,7 +34,8 @@ namespace {
 [[nodiscard]] bool still_exact(const RuntimeInstance& instance) noexcept {
     server::bap::ActivityLinkView link{};
     lua_vm::WorldGenerationIdentity worldGeneration{};
-    return server::bap::activity_link_view(instance.view.binding, link)
+    return server::bap::activity_link_view(
+               instance.view.binding, instance.view.activityClientGeneration, link)
            && link.publicTarget == instance.publicTarget
            && sdk::revalidate(instance.view,
                               instance.view.binding,

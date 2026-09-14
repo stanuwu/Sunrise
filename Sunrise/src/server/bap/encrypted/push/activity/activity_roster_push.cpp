@@ -54,15 +54,49 @@ host_output_status(RosterOutcome outcome) noexcept {
     return Status::frameRefused;
 }
 
-/** @return True when the body writes the participation record, the only field with the hold. */
-[[nodiscard]] bool carries_participation(const message::Roster& roster) noexcept {
-    for (std::size_t index = 0; index < roster.groupCount; ++index) {
-        const message::Group& group = roster.groups[index];
-        if (!group.retired && group.key == roster.playerKeyGroup) {
-            return true;
-        }
-    }
-    return false;
+/** One outbound body kept for the byte-identical repeat check. */
+struct BodyRecord final {
+    std::array<std::byte, kBodyRecordCapacity> bytes{};
+    std::uint64_t bindingGeneration{};
+    std::uint32_t size{};
+    bool valid{};
+};
+
+/**
+ * Activity session and membership revision one body carries.
+ * The acknowledgement lives on the member row, so a member holding two links to one activity
+ * host would otherwise see the trigger closed by the link that did receive the revision.
+ */
+struct MembershipCursor final {
+    std::uint64_t sessionId{};
+    std::uint32_t revision{};
+};
+
+/** Per-connection last-body records for the byte-identical repeat check. */
+struct ConnectionRecord final {
+    BodyRecord rosterSent{};
+    BodyRecord rosterStaged{};
+    BodyRecord membershipSent{};
+    BodyRecord membershipStaged{};
+    MembershipCursor membershipSentCursor{};
+    MembershipCursor membershipStagedCursor{};
+    /**
+     * The delivered membership this recipient has answered for, kept against the link that carried
+     * the body. The member row holds the receipt for the session as a whole; this one speaks for
+     * the connection, which matters when one member holds two links to the same session.
+     */
+    MembershipCursor membershipAckedCursor{};
+    std::uint64_t membershipAckedGeneration{};
+};
+
+// All access runs under the BAP lock, like the Session fields these records extend.
+std::array<ConnectionRecord, kSessionCount> g_connectionRecords{};
+
+/** @return This connection's record, or null for an out-of-range connection id. */
+[[nodiscard]] ConnectionRecord* connection_record(const Session& session) noexcept {
+    return session.id != 0 && session.id <= g_connectionRecords.size()
+               ? &g_connectionRecords[session.id - 1]
+               : nullptr;
 }
 
 /**
@@ -115,6 +149,125 @@ void refuse_roster_outputs(Session& session,
 }
 
 } // namespace
+
+/** @return True when this body equals the last roster body delivered on this connection. */
+bool repeats_delivered_roster_body(const Session& session,
+                                   std::span<const std::byte> body) noexcept {
+    const ConnectionRecord* const record = connection_record(session);
+    return record != nullptr
+           && matches_record(record->rosterSent, session.activity.bindingGeneration, body);
+}
+
+/** Keeps one staged roster body until its frame outcome is known. */
+void stage_roster_body_record(const Session& session, std::span<const std::byte> body) noexcept {
+    ConnectionRecord* const record = connection_record(session);
+    if (record != nullptr) {
+        fill_record(record->rosterStaged, session.activity.bindingGeneration, body);
+    }
+}
+
+/** Promotes the staged roster body to the delivered record. */
+void commit_roster_body_record(const Session& session) noexcept {
+    ConnectionRecord* const record = connection_record(session);
+    if (record != nullptr) {
+        promote_record(
+            record->rosterStaged, record->rosterSent, session.activity.bindingGeneration);
+    }
+}
+
+/** Drops the staged roster body of a discarded frame. */
+void discard_roster_body_record(const Session& session) noexcept {
+    ConnectionRecord* const record = connection_record(session);
+    if (record != nullptr) {
+        record->rosterStaged.valid = false;
+    }
+}
+
+/** @return True when this body equals the last membership body delivered on this connection. */
+bool repeats_delivered_membership_body(const Session& session,
+                                       std::span<const std::byte> body) noexcept {
+    const ConnectionRecord* const record = connection_record(session);
+    return record != nullptr
+           && matches_record(record->membershipSent, session.activity.bindingGeneration, body);
+}
+
+/** Keeps one staged membership body until its frame outcome is known. */
+void stage_membership_body_record(const Session& session,
+                                  std::span<const std::byte> body,
+                                  std::uint64_t sessionId,
+                                  std::uint32_t revision) noexcept {
+    ConnectionRecord* const record = connection_record(session);
+    if (record != nullptr) {
+        fill_record(record->membershipStaged, session.activity.bindingGeneration, body);
+        record->membershipStagedCursor = {sessionId, revision};
+    }
+}
+
+/** Promotes the staged membership body to the delivered record. */
+void commit_membership_body_record(const Session& session) noexcept {
+    ConnectionRecord* const record = connection_record(session);
+    if (record != nullptr) {
+        // The cursor moves on the same rule as the body record: a body the client never received
+        // was never delivered down this link, so it stays owed.
+        if (record->membershipStaged.valid
+            && record->membershipStaged.bindingGeneration == session.activity.bindingGeneration) {
+            record->membershipSentCursor = record->membershipStagedCursor;
+        }
+        promote_record(
+            record->membershipStaged, record->membershipSent, session.activity.bindingGeneration);
+    }
+}
+
+/** @return True when this connection has not itself delivered this membership revision. */
+bool connection_owes_membership(const Session& session,
+                                std::uint64_t sessionId,
+                                std::uint32_t revision) noexcept {
+    if (sessionId == state::activity::kAbsentSessionId
+        || revision == state::activity::membership::kAbsentRevision) {
+        return false;
+    }
+    const ConnectionRecord* const record = connection_record(session);
+    return record == nullptr || !record->membershipSent.valid
+           || record->membershipSent.bindingGeneration != session.activity.bindingGeneration
+           || record->membershipSentCursor.sessionId != sessionId
+           || record->membershipSentCursor.revision != revision;
+}
+
+/** Records this recipient's receipt for the membership body this connection delivered. */
+void note_membership_acknowledgement(const Session& session, std::uint32_t revision) noexcept {
+    ConnectionRecord* const record = connection_record(session);
+    if (record == nullptr || revision == state::activity::membership::kAbsentRevision
+        || !record->membershipSent.valid
+        || record->membershipSent.bindingGeneration != session.activity.bindingGeneration
+        || record->membershipSentCursor.revision != revision) {
+        return;
+    }
+    record->membershipAckedCursor = record->membershipSentCursor;
+    record->membershipAckedGeneration = session.activity.bindingGeneration;
+}
+
+/** @return True when this connection's last delivered membership body has been acknowledged. */
+bool connection_membership_acknowledged(const Session& session) noexcept {
+    const ConnectionRecord* const record = connection_record(session);
+    return record != nullptr && record->membershipSent.valid
+           && record->membershipSent.bindingGeneration == session.activity.bindingGeneration
+           && record->membershipAckedGeneration == session.activity.bindingGeneration
+           && record->membershipAckedCursor.sessionId == record->membershipSentCursor.sessionId
+           && record->membershipAckedCursor.revision == record->membershipSentCursor.revision;
+}
+
+/** Adopts the join burst's staged membership body under the connection's new generation. */
+void adopt_join_membership_record(const Session& session) noexcept {
+    ConnectionRecord* const record = connection_record(session);
+    if (record == nullptr || !record->membershipStaged.valid) {
+        return;
+    }
+    // The body was staged before the join commit reserved this generation.
+    record->membershipStaged.bindingGeneration = session.activity.bindingGeneration;
+    record->membershipSentCursor = record->membershipStagedCursor;
+    promote_record(
+        record->membershipStaged, record->membershipSent, session.activity.bindingGeneration);
+}
 
 /** Copies the decode identities from one complete, already-encoded msg-5 roster snapshot. */
 bool build_roster_decode_map(const message::Roster& roster,
@@ -181,11 +334,9 @@ bool append_roster_notification(
         server::activity::host::pending_scriptable_override_for_activity_client(
             session.activity.session, session.activity.bindingGeneration, scriptablePending);
     const bool singleScriptableLink =
-        !hasScriptablePending || activity_link_count_locked(session.activity.session) == 1;
-    // A leave delta retires every group, so it carries no host state and no typed body. Both stay
-    // owed and neither is spent on it.
-    const bool ownsPending = hasScriptablePending && singleScriptableLink && !peerLeave;
-    const bool ownsHostState = hostStatePending && !peerLeave;
+        !hasScriptablePending
+        || activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
+               == 1;
     const bool squadPending =
         ownsPending
         && scriptablePending.kind == server::activity::host::ScriptableOverrideKind::squad;

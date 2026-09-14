@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "host_runtime.h"
@@ -222,7 +223,8 @@ inline void clear_instance(Instance& instance) noexcept {
 }
 
 extern SRWLOCK g_lock;
-extern std::array<Instance, kInstanceCapacity> g_instances;
+/** Allocate each large host record only when its native binding is retained. */
+extern std::array<std::unique_ptr<Instance>, kInstanceCapacity> g_instances;
 /** Ordered reducer work grows with real input and fails only when allocation fails. */
 extern std::vector<PendingInput> g_pending;
 extern std::size_t g_pendingRead;

@@ -290,13 +290,15 @@ same_retained_scope(const RetainedSquadGroup& group,
  * this link registers none of them.
  * @param scratch Lock-owned roster group storage the spans point into.
  * @param roster Receives the groups and the group that binds the player.
- * @return True when every named group was found and one of them binds the player.
+ * @param includeTopLevel Only the private activity owns the destination-wide groups.
+ * @return True when every owned group was found and the private roster binds the player.
  */
 [[nodiscard]] bool fill_roster(const layouts::Definition& layout,
                                std::uint64_t hostedBubbles,
                                bool publishTopLevel,
                                Scratch& scratch,
-                               message::Roster& roster) noexcept {
+                               message::Roster& roster,
+                               bool includeTopLevel) noexcept {
     roster = {};
     const std::size_t groupCount =
         std::size_t{layout.rosterGroupCount} + std::size_t{layout.bubbleGroupCount};
@@ -306,9 +308,9 @@ same_retained_scope(const RetainedSquadGroup& group,
         || groupCount > scratch.rosterGroups.size() || groupCount > roster.groups.size()) {
         return false;
     }
-    const auto append = [&](std::uint16_t tableIndex, std::size_t& position) {
-        layouts::RosterGroup candidate{};
-        if (!state::build_data::find_roster_group(tableIndex, candidate)) {
+    const std::size_t topLevelCount = includeTopLevel ? layout.rosterGroupCount : 0;
+    for (std::size_t index = 0; index < topLevelCount; ++index) {
+        if (!fill_group(layout.rosterGroups[index], scratch, index, roster)) {
             return false;
         }
         const ExistingGroup existing = find_existing_group(candidate, scratch, roster, position);
@@ -341,8 +343,8 @@ same_retained_scope(const RetainedSquadGroup& group,
         if (mask == 0) {
             continue;
         }
-        std::size_t position = 0;
-        if (!append(layout.bubbleGroups[index], position)) {
+        if (!fill_group(
+                layout.bubbleGroups[index], scratch, topLevelCount + bubbleGroupCount, roster)) {
             return false;
         }
         // A global registration already covers every bubble and keeps its original link owner.
@@ -350,6 +352,8 @@ same_retained_scope(const RetainedSquadGroup& group,
             bubbleMasks[position - roster.topLevelGroupCount] |= mask;
         }
     }
+    roster.topLevelGroupCount = topLevelCount;
+    roster.groupCount = topLevelCount + bubbleGroupCount;
     roster.bubbleSubBlocks =
         fill_sub_blocks(std::span(bubbleMasks).first(roster.groupCount - roster.topLevelGroupCount),
                         scratch,
@@ -366,7 +370,10 @@ same_retained_scope(const RetainedSquadGroup& group,
             }
         }
     }
-    return roster.playerKeyGroup != 0;
+    // Public updates apply through their own sync pool. Republishing a private top-level
+    // group there registers another instance and dirties private records that the public
+    // apply pass does not visit (native 4D7470 versus 4D8AB0/4D6430).
+    return !includeTopLevel || roster.playerKeyGroup != 0;
 }
 
 /** Appends one selected-state group and registers its key in its exact authored bubble. */
@@ -663,4 +670,96 @@ make_auth_override(const server::activity::host::PendingScriptableOverride& reta
     return true;
 }
 
+/**
+ * Advances the epoch once per bubble the client holds, so every group re-registers there.
+ * @param refresh Refresh being answered, which stands in for its uncommitted bubble, or null.
+ */
+void advance_region_epoch(Session& session, const RefreshReport* refresh) noexcept {
+    const std::int32_t held =
+        state::activity::membership::instantiated_region(client_placement(session, refresh));
+    if (held < 0) {
+        return;
+    }
+    const std::int32_t bubble =
+        held
+        / static_cast<std::int32_t>(middleware::content::packages::tables::kSliceSetIndexFactor);
+    if (bubble == session.activityRosterRegionBubble) {
+        return;
+    }
+    const std::int32_t previous = session.activityRosterRegionBubble;
+    // The first bubble registers every group as a new key, so it needs no move.
+    if (previous >= 0) {
+        session.activityRosterRegionEpoch =
+            static_cast<std::uint8_t>(session.activityRosterRegionEpoch + 1U);
+    }
+    session.activityRosterRegionBubble = bubble;
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=roster_state result=region_moved "
+                                      "bubble=%d from=%d region=%d epoch=%u",
+                                      bubble,
+                                      previous,
+                                      held,
+                                      static_cast<unsigned>(session.activityRosterRegionEpoch));
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
+/**
+ * Stamps every group's revision from its lease: stable while the group's identity holds,
+ * advanced only for a new key or a changed identity. The wire carries one byte per key, and the
+ * client rebuilds only the groups whose byte moved, so an unrelated change replays nothing.
+ */
+void stamp_group_sequences(Session& session, message::Roster& roster) noexcept {
+    static_assert(kRosterGroupLeaseCapacity >= message::kPublishedGroupCapacity);
+    for (std::size_t index = 0; index < roster.groupCount; ++index) {
+        message::Group& group = roster.groups[index];
+        const std::uint32_t folded = group_identity_fold(group, session.activityRosterRegionEpoch);
+        RosterGroupLease* lease = nullptr;
+        RosterGroupLease* freeSlot = nullptr;
+        for (RosterGroupLease& candidate : session.activityRosterGroupLeases) {
+            if (candidate.used && candidate.key == group.key) {
+                lease = &candidate;
+                break;
+            }
+            if (!candidate.used && freeSlot == nullptr) {
+                freeSlot = &candidate;
+            }
+        }
+        const bool newKey = lease == nullptr;
+        if (newKey || lease->identityFold != folded) {
+            session.activityRosterState =
+                static_cast<std::uint8_t>((session.activityRosterState + 1) % kStateSequenceWrap);
+            if (lease == nullptr) {
+                lease = freeSlot;
+            }
+            if (lease != nullptr) {
+                lease->key = group.key;
+                lease->identityFold = folded;
+                lease->sequence = session.activityRosterState;
+                lease->used = true;
+            }
+            std::array<char, core::log::kLineCapacity> line{};
+            const int written =
+                std::snprintf(line.data(),
+                              line.size(),
+                              "ev=activity stage=roster_state result=group_moved key=0x%08X "
+                              "seq=%u new=%d",
+                              group.key,
+                              session.activityRosterState,
+                              newKey ? 1 : 0);
+            if (written > 0) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::debug,
+                                 {line.data(), static_cast<std::size_t>(written)});
+            }
+        }
+        group.stateSequence = lease != nullptr ? lease->sequence : session.activityRosterState;
+        group.hasStateSequence = true;
+    }
+}
 } // namespace sunrise::server::bap::encrypted::push::activity

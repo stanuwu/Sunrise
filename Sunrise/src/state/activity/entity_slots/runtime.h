@@ -9,6 +9,18 @@ namespace sunrise::state::activity::entity_slots {
 
 /** Mask and revision data for one deferred lease change. */
 struct PendingMutation final {
+    membership::Identity identity{};
+    membership::Identity identityGuard{};
+    std::uint32_t profileGeneration{};
+    /** A public ActivityClient may join the native host advertised by its admitted source party. */
+    SessionBinding sourceBinding{};
+    std::uint64_t expectedSourceRevision{};
+    reservations::Roster peerReservationsAfter{};
+    bool sourceAuthorized{};
+    /** An authenticated native join can replace its own previous ActivityClient key. */
+    std::uint64_t replacesMemberKey{};
+    MemberLeasePlan memberLease{};
+    std::size_t memberRow{kMemberLeaseRowCount};
     LeaseMask mask{};
     /** Kept only to recompute a release under the write lock. */
     LeaseMask returnedMask{};
@@ -27,6 +39,7 @@ struct PendingMutation final {
     std::size_t targetSlot{kInvalidSessionSlot};
     MutationKind kind{};
     bool prepared{};
+    bool shared{};
 };
 
 /**
@@ -44,7 +57,9 @@ struct PendingMutation final {
                                 std::uint64_t memberKey,
                                 std::size_t grantCount,
                                 std::size_t serverReserveCount,
-                                PendingMutation& mutation) noexcept;
+                                PendingMutation& mutation,
+                                const membership::Identity* identity = nullptr,
+                                const SessionBinding* source = nullptr) noexcept;
 
 /**
  * Prepares up to the requested number of free low-index slots.

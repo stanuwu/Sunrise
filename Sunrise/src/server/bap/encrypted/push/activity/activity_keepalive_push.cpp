@@ -25,6 +25,7 @@
 #include "activity_authority_reset_push.h"
 #include "activity_global_state_push.h"
 #include "activity_incident_push.h"
+#include "activity_member_departure_push.h"
 #include "activity_membership_push.h"
 #include "activity_notification_frame.h"
 #include "activity_roster_push.h"
@@ -204,6 +205,12 @@ bool consume_activity_keepalive(Session& session,
                                 std::size_t& written,
                                 bool& touchesScratch) noexcept {
     written = 0;
+    if (consume_member_departure(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (consume_member_rejoin(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
     const std::uint64_t now = GetTickCount64();
     const bool keepaliveDue = now >= session.activityKeepaliveDueTick;
     // A region change cannot wait for the keepalive, because the client claims the next region at
@@ -213,6 +220,16 @@ bool consume_activity_keepalive(Session& session,
                         && session.activityJoinGeneration == session.activity.bindingGeneration
                         && state::activity::binding_matches(session.activity.session)
                         && state::activity::binding_matches(session.activity.source);
+    // State advances recipient revisions for real peer/transport changes. Do not leave that
+    // delivery debt behind the idle keepalive or another connection's acknowledgement.
+    const auto& membershipBinding = session.activity.session;
+    const auto membershipRevision =
+        active && now >= session.activityMembershipRetryDueTick
+            ? state::activity::membership::current_revision(membershipBinding)
+            : state::activity::membership::kAbsentRevision;
+    const bool membershipDue =
+        active
+        && connection_owes_membership(session, membershipBinding.sessionId, membershipRevision);
     if (active) {
         static_cast<void>(authority_reset::expire(
             session.activityAuthorityReset, session.activity.bindingGeneration, now));
@@ -254,11 +271,17 @@ bool consume_activity_keepalive(Session& session,
                               && hostState.revision != session.activityHostStateRevision;
     server::activity::host::PendingScriptableOverride pendingScriptable{};
     const bool scriptableDue =
-        rosterOpen && activity_link_count_locked(session.activity.session) == 1
-        && server::activity::host::pending_scriptable_override(session.activity.session,
-                                                               pendingScriptable);
-    // An operator incident waits for the arrival report. Its body always fits an empty frame, so a
-    // refused attempt only lost its slot and the next push carries it.
+        active && session.activityPatchEpoch.seen
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
+        && now >= session.activityRosterDueTick
+        && activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
+               == 1
+        && server::activity::host::pending_scriptable_override_for_activity_client(
+            session.activity.session, session.activity.bindingGeneration, pendingScriptable);
+    server::activity::host::PendingIncident pendingIncident{};
+    const bool hasPendingIncident =
+        active
+        && server::activity::host::pending_incident(session.activity.session, pendingIncident);
     const bool incidentClientReady = client_in_world(session, nullptr);
     server::activity::host::PendingIncident pendingIncident{};
     const bool incidentDue =
@@ -343,32 +366,23 @@ bool consume_activity_keepalive(Session& session,
             || state::activity::membership::hard_wipe_start_unseen(
                 session.activity.session.sessionId))
         && state::activity::membership::acknowledged(session.activity.session.sessionId);
-    const bool retirementReady =
-        rosterOpen && !hostRefused && activity_link_count_locked(session.activity.session) == 1;
-    bool retirementDue = retirementReady && placedPurgeReady;
-    if (retirementReady && !placedPending) {
-        const auto region = effective_region(session.activity.session);
-        const auto bubble =
-            region.index >= 0
-                ? region.index >> state::activity::bubble_authority::kSliceSetToBubbleShift
-                : -1;
-        if (bubble >= 0 && bubble != session.activityRosterRegionBubble) {
-            server::gameplay::squad_entity_retirement::RetirementPlan retirement{};
-            retirementDue = server::gameplay::squad_entity_retirement::prepare_retirement(
-                                session.activity.session,
-                                session.activity.bindingGeneration,
-                                static_cast<std::uint8_t>(bubble),
-                                retirement)
-                            && retirement.pending;
-        }
-    }
+    const bool placedRetirementDue =
+        active && session.activityPatchEpoch.seen
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
+        && activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
+               == 1
+        && server::gameplay::squad_entity_retirement::placed_transition_pending(
+            session.activity.session, session.activity.bindingGeneration);
     if (!active
-        || (!keepaliveDue && !regionChanged && !hostStateDue && !scriptableDue && !incidentDue
-            && !authorityResetDue && !authorityQueryDue && !hostTeleportDue && !retirementDue
-            && !arrivalDue && !missionSeedDue)) {
+        || (!burstDue && !keepaliveDue && !regionChanged && !hostStateDue && !scriptableDue
+            && !incidentDue && !authorityResetDue && !authorityQueryDue && !hostTeleportDue
+            && !placedRetirementDue && !membershipDue)) {
         return false;
     }
     touchesScratch = true;
+    if (membershipDue) {
+        session.activityMembershipRetryDueTick = now + kMembershipRetryIntervalMs;
+    }
 
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;
@@ -377,11 +391,13 @@ bool consume_activity_keepalive(Session& session,
     // Held until the frame reaches the caller. Encoding alone does not spend the region trigger.
     std::int32_t stagedAdvertisedRegion = -1;
     bool stagedAdvertisedPrivate = false;
-    // Only a changed Host value or mission state, retirement or the arrival answer can publish a
-    // standalone roster.
-    if (!keepaliveDue && !regionChanged && !hostTeleportDue) {
-        if (hostStateDue || scriptableDue || retirementDue || arrivalDue || missionSeedDue) {
-            published = append_roster_notification(
+    // A standalone roster carries a load burst or one pending Activity Host state revision. An
+    // armed host teleport takes the full path below instead, because it commits a membership
+    // republish.
+    if (!keepaliveDue && !regionChanged && !hostTeleportDue && !membershipDue) {
+        bool appendedRoster = false;
+        if (burstDue || hostStateDue || scriptableDue || placedRetirementDue) {
+            appendedRoster = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
         }
         const bool appendedIncident =
@@ -430,36 +446,41 @@ bool consume_activity_keepalive(Session& session,
     published = appendedAuthorityQuery || published;
     if (session.activity.role == ActivityClientRole::publicTarget) {
         // The target owns its epoch and roster but advertises no target. Msg 12 must bind its world
-        // container before a grant reaches it. Send once per binding: it has no acknowledgement or
-        // region report to close another gate.
+        // container before a grant reaches it. It has no acknowledgement and no region report, so
+        // the per-connection cursor is the only gate: this link owes every membership revision of
+        // its own table it has not itself delivered. A cursor scoped to the binding sent the
+        // body once, and a peer that joined or published its transport afterwards never arrived.
         state::activity::membership::PendingMutation staged{};
         bool appended = false;
+        // The recipient's OWN session: the one this link joined and every envelope on it names.
+        // Its member row carries this client's machine and character identity, its own revision,
+        // and the members IT has admitted. The private source's table belongs to the private link;
+        // publishing it here put that table's revision under this session's name and named members
+        // this recipient's session had not admitted.
+        const std::uint64_t ownSessionId = session.activity.session.sessionId;
+        // Non-zero once the join committed this client's identity into that row. It proves only
+        // that there is a member table to publish.
+        const bool identityPublished =
+            ownSessionId != state::activity::kAbsentSessionId
+            && state::activity::membership::join_identity(ownSessionId) != 0;
+        const bool hasSnapshot = identityPublished
+                                 && state::activity::membership::prepare_refresh(
+                                     ownSessionId, kCurrentRevision, kNoBubble, staged)
+                                 && staged.hasSnapshot;
+        // Foreign membership is always published once it is owed; there is deliberately no
+        // setting to disable it, because turning it off would silently remove the other client's
+        // player create and destroy source.
         const bool owesMembership =
-            core::settings::get().server.activation.activityPublicMembership
-            && session.activityMembershipSentGeneration != session.activity.bindingGeneration;
+            hasSnapshot
+            && connection_owes_membership(session, ownSessionId, staged.snapshot.revision);
         if (owesMembership) {
-            // Copy the private source table: only it carries local machine and character identity.
-            // This target cannot advance that table, so capture it without committing and use the
-            // exact source binding rather than whichever private session is newest.
-            const std::uint64_t privateSessionId = session.activity.source.sessionId;
-            // Non-zero from the private link's own seed, which lands before the client sends its
-            // identity message. It proves only that there is a member table to copy.
-            const bool identityPublished =
-                privateSessionId != state::activity::kAbsentSessionId
-                && state::activity::membership::join_identity(privateSessionId) != 0;
-            const bool hasSnapshot = identityPublished
-                                     && state::activity::membership::prepare_refresh(
-                                         privateSessionId, kCurrentRevision, kNoBubble, staged)
-                                     && staged.hasSnapshot;
-            if (hasSnapshot) {
-                activity_message::ActivityPlan plan{};
-                plan.sessionId = session.activity.session.sessionId;
-                plan.membershipMutation = staged;
-                appended = append_membership_notification(
-                    scratch, session, plan, key, nextSendNonce, scratch.framed, framedSize);
-                published = appended || published;
-                SecureZeroMemory(&plan, sizeof plan);
-            }
+            activity_message::ActivityPlan plan{};
+            plan.sessionId = session.activity.session.sessionId;
+            plan.membershipMutation = staged;
+            appended = append_membership_notification(
+                scratch, session, plan, key, nextSendNonce, scratch.framed, framedSize);
+            published = appended || published;
+            SecureZeroMemory(&plan, sizeof plan);
         }
         if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue
             || missionSeedDue) {
@@ -478,14 +499,22 @@ bool consume_activity_keepalive(Session& session,
         if (delivered) {
             // Latched here, not at encode. An encoded body the client never saw is not a send.
             if (appended) {
+                // Only the first body of a binding can be the one the join burst owed. Every
+                // later one carries a revision this link had not delivered, which is the cursor
+                // doing its job and not a miss.
+                const bool firstOnBinding =
+                    session.activityMembershipSentGeneration != session.activity.bindingGeneration;
                 note_activity_membership_delivery(session);
                 commit_membership_body_record(session);
-                // The join burst owns this body. Reaching here means it had no snapshot to send,
-                // and this copy lands mid-transition instead.
-                core::log::write(
-                    core::log::Channel::server,
-                    core::log::Level::warn,
-                    "ev=activity stage=membership result=late reason=join_burst_empty");
+                session.activityMembershipRetryDueTick = 0;
+                if (firstOnBinding) {
+                    // The join burst owns that body. Reaching here means it had no snapshot to
+                    // send, and this copy lands mid-transition instead.
+                    core::log::write(
+                        core::log::Channel::server,
+                        core::log::Level::warn,
+                        "ev=activity stage=membership result=late reason=join_burst_empty");
+                }
             }
             session.activityKeepaliveDueTick = now + kActivityKeepaliveIntervalMs;
         }
@@ -493,7 +522,7 @@ bool consume_activity_keepalive(Session& session,
     }
 
     // Republish only when a real advertisement changes the acknowledged membership revision.
-    // Membership becomes publishable after identity arrives, so it rides the keepalive.
+    // Membership becomes publishable after identity arrives; owed revisions also reach this path.
     state::activity::membership::PendingMutation refresh{};
     state::activity::membership::PendingMutation stagedMembership{};
     const bool advertisedRegionReady = regionChanged
@@ -540,9 +569,15 @@ bool consume_activity_keepalive(Session& session,
     // A prepared republish must reach the wire even when nothing else changed. It carries the
     // armed host teleport at a new revision. Without this it is staged and then dropped, so the
     // client never receives the move and the transition never starts.
+    // The case the per-connection cursor exists for: the member row says applied, nothing else
+    // forces a push, and THIS link has never carried this revision. The acknowledgement is stored
+    // on the member row, so a second link of the same member closes the trigger for the first.
+    const bool connectionOwesMembership =
+        hasMembership
+        && connection_owes_membership(session, refresh.sessionId, refresh.snapshot.revision);
     const bool publishesMembership =
         hasMembership
-        && (commitsMembership || owesIdentityReflection || regionChanged
+        && (commitsMembership || owesIdentityReflection || regionChanged || connectionOwesMembership
             || !state::activity::membership::acknowledged(session.activity.session.sessionId));
     // Resolved the way the body resolves it: the pending leg the client reported, else the
     // current one, else the arrival slice set. A hold decided on any other region lets the body
@@ -671,6 +706,7 @@ bool consume_activity_keepalive(Session& session,
     if (delivered && appendedMembership) {
         note_activity_membership_delivery(session);
         commit_membership_body_record(session);
+        session.activityMembershipRetryDueTick = 0;
     }
     // A body the client never saw must advertise its region again on the next poll.
     if (delivered && stagedAdvertisedRegion >= 0) {

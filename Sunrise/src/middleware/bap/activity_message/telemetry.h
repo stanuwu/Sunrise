@@ -5,6 +5,10 @@
 #include <cstdint>
 #include <span>
 
+namespace sunrise::middleware::encoding::bits {
+class Reader;
+}
+
 namespace sunrise::middleware::bap::activity_message::telemetry {
 
 /** The client asks the host to reserve membership rows for peers. */
@@ -66,6 +70,10 @@ struct ReservationRecord {
     std::int64_t characterSoid{};
     std::uint64_t groupMemberQword{};
 };
+
+/** Shared native BC record reader; startup collections carry adjacent, unpadded records. */
+[[nodiscard]] bool read_reservation_identity(encoding::bits::Reader& reader,
+                                             ReservationRecord& record) noexcept;
 
 /** One complete peer-reservation request. */
 struct ReservationRequest {

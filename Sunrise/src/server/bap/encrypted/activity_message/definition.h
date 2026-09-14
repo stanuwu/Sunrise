@@ -5,6 +5,7 @@
 #include "../../../../middleware/bap/activity_message/activity_host_control.h"
 #include "../../../../middleware/bap/activity_message/activity_patch_epoch_parser.h"
 #include "../../../../middleware/bap/activity_message/entity_authority.h"
+#include "../../../../middleware/bap/activity_message/transport_report.h"
 #include "../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../state/activity/runtime.h"
 #include "../../../gameplay/group/group_host_sessions.h"
@@ -44,6 +45,7 @@ enum class MutationDomain : std::uint8_t {
     none,
     entitySlots,
     membership,
+    reservations,
     /** The patch epoch is kept on the connection and changes no State. */
     patchEpoch,
     /** Query answers are retained only by their exact connection generation. */
@@ -59,6 +61,7 @@ enum class BindingIntent : std::uint8_t {
     none,
     preserveCurrent,
     publicTarget,
+    sharedTarget,
 };
 
 /** Which membership body a join burst carries. */
@@ -129,12 +132,16 @@ struct AuthorityPurgeIngress final {
 
 /** Scalar and mask data kept after the sensitive svc8 payload view expires. */
 struct ActivityPlan final {
+    bool hasRelayConnectivityFailure{};
+    middleware::bap::activity_message::TransportReport transportReport{};
+    std::uint64_t transportBindingGeneration{};
     std::uint32_t correlation{};
     std::uint64_t sessionId{};
     state::activity::entity_slots::PendingMutation entitySlotMutation{};
     state::activity::bubble_authority::EntitySlotMask returnedEntitySlots{};
     bool hasReturnedEntitySlots{};
     state::activity::membership::PendingMutation membershipMutation{};
+    state::activity::reservations::PendingMutation reservationMutation{};
     JoinIngressDiagnostic joinIngress{};
     ClientStateIngress clientState{};
     EntitySlotsRequestedIngress entitySlotsRequested{};

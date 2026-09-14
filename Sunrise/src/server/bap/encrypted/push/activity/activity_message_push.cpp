@@ -112,9 +112,8 @@ bool append_join_notifications(Scratch& scratch,
     // Retail answers a join with one burst: result, grant mask, then membership. A private
     // link's body carries the join descriptor, so it is held only while that row is missing.
     if (encoded && activity.membershipMutation.hasSnapshot) {
-        const bool publicJoin =
-            activity.joinMembershipBody == activity_message::JoinMembershipBody::publicSource;
-        if (publicJoin) {
+        if (activity.bindingIntent == activity_message::BindingIntent::publicTarget
+            || activity.bindingIntent == activity_message::BindingIntent::sharedTarget) {
             encoded = append_join_membership_notification(
                 scratch, session, activity, key, nonce, response, written);
             session.activityJoinMembershipStaged = encoded;

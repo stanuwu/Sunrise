@@ -5,10 +5,12 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "../../core/network_capacity.h"
+
 namespace sunrise::state::matchmaking {
 
-/** 4 slots cover every local backend channel open at once, with no heap storage. */
-inline constexpr std::size_t kContextCapacity = 4;
+/** Shared-service channels retain independent contexts across all connection slots. */
+inline constexpr std::size_t kContextCapacity = core::network_capacity::kConnections;
 /**
  * Sunrise keeps 16 variants as headroom over the current valid ones.
  * This is not a protocol limit. It makes eviction fixed and heap-free.

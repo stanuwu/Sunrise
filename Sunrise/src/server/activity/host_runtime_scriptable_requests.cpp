@@ -354,16 +354,17 @@ bool request_state_local_type23_override(
 /** Queues one type-31 pulse for an exact package-derived ClientRef. */
 bool request_type31_override(const state::activity::SessionBinding& binding,
                              const ScriptableTarget& target,
-                             const ScriptableOutputReservation* reservation,
-                             bool enabled) noexcept {
-    if (target.slotType != auth::kType31SlotType || target.authSchema != auth::kType31Schema) {
+                             std::uint64_t expectedActivityClientGeneration,
+                             const ScriptableOutputReservation* reservation) noexcept {
+    if (target.slotType != auth::kType31SlotType || target.authSchema != auth::kType31Schema
+        || expectedActivityClientGeneration == 0) {
         return false;
     }
     ScriptableRequest request{};
     request.binding = binding;
     request.target = target;
     request.kind = ScriptableOverrideKind::type31;
-    request.triggerEnabled = enabled;
+    request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     return enqueue_request(request, reservation);
 }
 

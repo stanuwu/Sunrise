@@ -1,6 +1,9 @@
 #include "activity_join_result_encoder.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
+#include <string_view>
 
 #include "../../encoding/byte_order.h"
 #include "definition.h"
@@ -90,19 +93,26 @@ void write_bits(std::span<std::byte> output,
 }
 
 /**
- * Writes the logical empty string into one fixed bias-128 text array.
+ * Writes one text into a fixed bias-128 array, terminated and filled to its declared width.
  * @param output Whole join-result body, already zeroed.
  * @param bitOffset First bit of the array's first element.
  * @param byteCount Elements the array declares.
+ * @param text Characters stored ahead of the terminator; an empty one is the logical empty string.
  */
-void write_empty_text(std::span<std::byte> output,
-                      std::size_t bitOffset,
-                      std::size_t byteCount) noexcept {
+void write_text(std::span<std::byte> output,
+                std::size_t bitOffset,
+                std::size_t byteCount,
+                std::string_view text) noexcept {
     for (std::size_t index = 0; index < byteCount; ++index) {
+        // The last element is always the terminator, so a text that would fill the array is cut.
+        const std::uint32_t character =
+            index + 1 < byteCount && index < text.size()
+                ? static_cast<std::uint32_t>(static_cast<unsigned char>(text[index]))
+                : 0;
         write_bits(output,
                    bitOffset + index * encoding::kBitsPerByte,
                    encoding::kBitsPerByte,
-                   kTextNulElement);
+                   (character + kTextNulElement) & 0xFFU);
     }
 }
 
@@ -132,9 +142,24 @@ bool encode_join_result(std::uint32_t correlation,
     // The biased fields below have no host value yet, so they carry their logical zero. Leaving
     // them at raw zero sends 0x80 text filler and a return code of INT32_MIN.
     write_bits(body, kOopahReturnCodeBitOffset, kOopahReturnCodeBitCount, kSignedZero);
-    write_empty_text(body, kHostSessionTextBitOffset, kHostSessionTextByteCount);
-    write_empty_text(body, kSpareTextBitOffset, kSpareTextByteCount);
-    write_empty_text(body, kWorkspaceTextBitOffset, kWorkspaceTextByteCount);
+    // The client binds its ActivityClient to the name in this field, so an empty one leaves that
+    // bind nameless. It is the same text service 7 publishes for this session in its opaque
+    // activity data (server/bap/encrypted/activity_host_manager/activity_establish_response.h),
+    // built from the same id, so the establish answer and the join result name one host.
+    std::array<char, kHostSessionTextByteCount> hostSession{};
+    const int nameLength = std::snprintf(hostSession.data(),
+                                         hostSession.size(),
+                                         "%08X:%08X@sunrise-activity-host",
+                                         static_cast<unsigned>(sessionId >> 32),
+                                         static_cast<unsigned>(sessionId & 0xFFFFFFFFULL));
+    write_text(body,
+               kHostSessionTextBitOffset,
+               kHostSessionTextByteCount,
+               nameLength > 0 && static_cast<std::size_t>(nameLength) < hostSession.size()
+                   ? std::string_view{hostSession.data(), static_cast<std::size_t>(nameLength)}
+                   : std::string_view{});
+    write_text(body, kSpareTextBitOffset, kSpareTextByteCount, {});
+    write_text(body, kWorkspaceTextBitOffset, kWorkspaceTextByteCount, {});
     written = kEncodedSize;
     return true;
 }
