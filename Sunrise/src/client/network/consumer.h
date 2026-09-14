@@ -5,6 +5,8 @@
 #include <span>
 #include <string_view>
 
+#include "../../core/network_capacity.h"
+
 namespace sunrise::client::network {
 
 /** The largest svc8 frame is a 0x7D800-byte activity payload plus 49 wire bytes. */
@@ -14,8 +16,10 @@ inline constexpr std::size_t kBapFrameCapacity = 0x7D800 + 49;
  * Fixed BAP connection slots shared by the transport and the Server.
  * A crossing holds the old and the new activity link at once, so a lobby plus three activity
  * links is reachable. Below that the accept is refused and the connect stalls.
+ * The shared
+ * listener allows these overlaps independently for several real players.
  */
-inline constexpr std::size_t kBapConnectionCount = 8;
+inline constexpr std::size_t kBapConnectionCount = core::network_capacity::kConnections;
 
 /** HTTP request view passed from Client hooks to Server. Every span carries its size. */
 struct HttpRequest {
@@ -46,11 +50,19 @@ struct BapRequest {
     std::uint32_t connectionId{};
     std::span<const std::byte> frame{};
     std::span<std::byte> response{};
+    /** Host-order IPv4 source, captured by accept rather than a client frame. */
+    std::uint32_t remoteAddress{};
 };
 
 /** BAP completion fields written by the Server consumer. */
 struct BapResponse {
     std::size_t size{};
+    /** The transport closes after the consumer has released its session lock. */
+    bool closeConnection{};
+    /** The complete inbound frame stays buffered until ordered reply capacity is available. */
+    bool deferFrame{};
+    /** The owning session completed its hello; transport timeouts never infer this from bytes. */
+    bool authenticated{};
 };
 
 /** In-process HTTP route with caller-owned request and response storage. */

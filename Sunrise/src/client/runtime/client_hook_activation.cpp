@@ -19,6 +19,7 @@
 #include "../content/items/packages/build.h"
 #include "../diagnostics/test_input/test_input.h"
 #include "../executable/image.h"
+#include "../hooks/account_registration/account_registration.h"
 #include "../hooks/assert_handler/assert_handler_lifecycle.h"
 #include "../hooks/async_io/async_io_lifetime_guard.h"
 #include "../hooks/bootflow/bootflow_hook_lifecycle.h"
@@ -30,11 +31,19 @@
 #include "../hooks/hitch_probe/hitch_probe.h"
 #include "../hooks/inactivity/inactivity_override.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
+#include "../hooks/instance_mutex/instance_mutex_release.h"
+#include "../hooks/machine_id/machine_id_override.h"
+#include "../hooks/membership_probe/membership_probe.h"
+#include "../hooks/network/investment/investment_derived_rebuild.h"
+#include "../hooks/network/presence_publication.h"
+#include "../hooks/network/reliable_request_admission.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_path/package_path_redirect.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
 #include "../hooks/polled_input/runtime.h"
+#include "../hooks/queuez/queuez_hook_lifecycle.h"
+#include "../hooks/replication/replication_budget.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
 #include "../hooks/stall_probe/stall_probe.h"
 #include "../hooks/teleport/runtime.h"
@@ -165,6 +174,56 @@ void clear_game_targets() noexcept {
         return false;
     }
 
+    if (core::settings::multiplayer()) {
+        const auto rollbackAdapters = []() noexcept {
+            // Each uninstall retains its native ownership when an in-flight call prevents removal.
+            bool removed = hooks::presence_publication::uninstall();
+            removed = hooks::reliable_requests::uninstall() && removed;
+            removed = hooks::replication_budget::uninstall() && removed;
+            removed = hooks::instance_mutex::uninstall() && removed;
+            removed = hooks::machine_id::uninstall() && removed;
+            removed = hooks::account_registration::uninstall() && removed;
+            if (!removed) {
+                core::log::write(core::log::Channel::client,
+                                 core::log::Level::warn,
+                                 "ev=activate stage=adapter_rollback result=pending");
+            }
+            // Game-network hooks still own their resolved targets until normal shutdown.
+        };
+        if (!hooks::account_registration::install()) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::error,
+                             "ev=activate stage=account_registration result=fail");
+            rollbackAdapters();
+            return false;
+        }
+        if (!hooks::machine_id::install(GetModuleHandleW(nullptr))) {
+            rollbackAdapters();
+            return false;
+        }
+        (void)hooks::instance_mutex::install(GetModuleHandleW(nullptr));
+        if (!hooks::replication_budget::install()) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::error,
+                             "ev=activate stage=replication_budget result=fail");
+            rollbackAdapters();
+            return false;
+        }
+        if (!hooks::reliable_requests::install()) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::error,
+                             "ev=activate stage=reliable_requests result=fail");
+            rollbackAdapters();
+            return false;
+        }
+        if (!hooks::presence_publication::install()) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::error,
+                             "ev=activate stage=presence_publication result=fail");
+            rollbackAdapters();
+            return false;
+        }
+    }
     core::log::write(core::log::Channel::client,
                      core::log::Level::info,
                      "ev=activate stage=game_network result=ok");
