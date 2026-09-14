@@ -44,7 +44,9 @@
     }
   },
   "server": {
+    "max_players": 32,
     "bap_port": 30974,
+    "bap_bind": "127.0.0.1",
     "gameplay": {
       "topology": "embedded",
       "bind_address": "127.0.0.1",
@@ -55,8 +57,6 @@
       "client_join_grant_count": 8192
     },
     "activation": {
-      "default_client_activation": true,
-      "activity_public_membership": true,
       "prevent_ownerless_channel_close": false,
       "mission_scripting": true
     }
