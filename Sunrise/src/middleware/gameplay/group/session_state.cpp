@@ -1,5 +1,7 @@
 ﻿#include "session_state.h"
 
+#include <algorithm>
+
 #include "../../crypto/lookup3.h"
 
 namespace sunrise::middleware::gameplay::group {
@@ -89,18 +91,19 @@ constexpr std::size_t kPlayerClearedSecondOffset = 264;
 constexpr std::uint64_t kPlayerCleared = 0xFFFFFFFF;
 
 // --- Profile group ----------------------------------------------------------------------------
-// A published profile overwrites both all-ones words. The kind lands on the first, and the
-// 136-byte delta that always follows the profile writes zeros over the second.
+// A published profile writes its kind over the first word. The complete 136-byte delta
+// writes four minus-one scalar bytes over the second word.
 
 /** The 32-bit value the profile group leads with. */
 constexpr std::size_t kPlayerProfileValueOffset = 0;
 /** The player kind, stored as a word over the first cleared word. */
 constexpr std::size_t kPlayerProfileKindOffset = 28;
-/** Account soid. The 232-byte block starts at `+32`, so this is its `+192` field. */
-constexpr std::size_t kPlayerAccountSoidOffset = 224;
-/** Character soid, the same field's second half. */
-constexpr std::size_t kPlayerCharacterSoidOffset = 232;
-
+constexpr std::size_t kPlayerProfileNameOffset = 0x20;
+constexpr std::size_t kPlayerProfileSubANameOffset = 0x10C;
+constexpr std::size_t kPlayerProfileTailWordOffset = 0x190;
+constexpr std::size_t kPlayerProfileTailFiveOffset = 0x19C;
+constexpr std::size_t kPlayerProfileTailTwoOffset = 0x19D;
+constexpr std::size_t kPlayerProfileTailOneOffset = 0x19E;
 /** Length the consumer requires of a member NetAddr. */
 constexpr std::uint64_t kAddressLength = 86;
 /** Length the consumer requires of a member machine id. */
@@ -211,18 +214,37 @@ void build_session_state(const MembershipUpdate& body, SessionState& output) noe
                 output, entry + kPlayerClearedSecondOffset, kPlayerCleared, sizeof(std::uint32_t));
             continue;
         }
-        // Only the fields the published block marks present. Every other profile, delta and tail
-        // byte stays zero, which is what the cleared row already holds.
         write_integer(
             output, entry + kPlayerProfileValueOffset, player.profileValue, sizeof(std::uint32_t));
         write_integer(
             output, entry + kPlayerProfileKindOffset, player.profileKind, sizeof(std::uint32_t));
         write_integer(
-            output, entry + kPlayerAccountSoidOffset, player.accountSoid, sizeof(std::uint64_t));
-        write_integer(output,
-                      entry + kPlayerCharacterSoidOffset,
-                      player.characterSoid,
-                      sizeof(std::uint64_t));
+            output, entry + kPlayerClearedSecondOffset, kPlayerCleared, sizeof(std::uint32_t));
+        NativePlayerProfile profile = player.nativeProfile;
+        profile.soids = {true, player.accountSoid, player.characterSoid};
+        NativePlayerProfileState decoded;
+        build_native_player_profile_state(profile, decoded);
+        std::copy(decoded.begin(),
+                  decoded.end(),
+                  output.begin() + static_cast<std::ptrdiff_t>(entry + kPlayerProfileNameOffset));
+        // The native add initializes A scalars to -1 (177820E);
+        // A's display-name copy is taken from this player's own decoded B name.
+        std::copy_n(decoded.begin(),
+                    kNativePlayerNameCapacity * sizeof(char16_t),
+                    output.begin()
+                        + static_cast<std::ptrdiff_t>(entry + kPlayerProfileSubANameOffset));
+        for (std::size_t word = 0; word < profile.tailWords.size(); ++word) {
+            write_integer(output,
+                          entry + kPlayerProfileTailWordOffset + word * 4,
+                          profile.tailWords[word],
+                          4);
+        }
+        write_integer(output, entry + kPlayerProfileTailFiveOffset, profile.tailFlags, 1);
+        write_integer(output, entry + kPlayerProfileTailTwoOffset, profile.tailKind, 1);
+        write_integer(output, entry + kPlayerProfileTailOneOffset, profile.tailFlag ? 1U : 0U, 1);
+        if (profile.tailFlags & 0x10) {
+            write_integer(output, entry + 0x1A0, profile.tailIndex, 4);
+        }
     }
     write_integer(output, kPlayerCountOffset, body.players.size(), sizeof(std::uint32_t));
     write_integer(output, kPlayerMaskOffset, playerMask, sizeof(std::uint32_t));

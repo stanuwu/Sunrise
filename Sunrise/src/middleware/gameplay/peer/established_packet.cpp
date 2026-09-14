@@ -3,6 +3,7 @@
 #include <array>
 
 #include "../../encoding/bit_raw.h"
+#include "outbound_window.h"
 #include "peer_container.h"
 
 namespace sunrise::middleware::gameplay::peer {
@@ -391,13 +392,14 @@ bool write_empty_queue(bits::Writer& writer) noexcept {
 
 /** Writes one reliable queue and every fragment it owes. */
 bool write_queue(bits::Writer& writer, const state::gameplay::OutboundQueue& queue) noexcept {
-    if (queue.count == 0) {
+    const auto count = outbound_window::count(queue);
+    if (count == 0) {
         return write_empty_queue(writer);
     }
     if (!writer.write(1, kFlagWidth)) {
         return false;
     }
-    for (std::size_t index = 0; index < queue.count; ++index) {
+    for (std::size_t index = 0; index < count; ++index) {
         const state::gameplay::OutboundFragment& fragment = queue.fragments[index];
         if (!writer.write(kSelectorAbsolute, kSelectorWidth)
             || !writer.write(fragment.sequence, kAbsoluteSequenceWidth)
@@ -436,7 +438,7 @@ bool enqueue_message(state::gameplay::OutboundQueue& queue,
         return false;
     }
     // The inner header precedes the body, so the message is staged once and then split.
-    std::array<std::byte, state::gameplay::kReassemblyCapacity> staged{};
+    std::array<std::byte, state::gameplay::kOutboundMessageCapacity> staged{};
     bits::Writer writer(staged);
     if (!writer.write(id, kMessageIdWidth) || !writer.write(declaredSize, kMessageSizeWidth)) {
         return false;

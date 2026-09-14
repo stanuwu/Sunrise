@@ -3,6 +3,7 @@
 #include "../../../../../core/logging/log.h"
 #include "../../internal.h"
 #include "../../policy/policy.h"
+#include "../single_port.h"
 
 namespace sunrise::client::hooks::egress::winsock::reception {
 namespace {
@@ -22,6 +23,9 @@ constexpr std::string_view kReceiveDeny = "ev=egress stage=receive target=unveri
 
 /** @return Original recv result, or SOCKET_ERROR with WSAEACCES before publication. */
 int WSAAPI receive_bytes(SOCKET socket, char* buffer, int length, int flags) noexcept {
+    if (single_port::enabled(socket)) {
+        return single_port::unsupported();
+    }
     const auto call = original<decltype(&::recv)>(HookSlot::recv);
     return allow_receive(call != nullptr) ? call(socket, buffer, length, flags)
                                           : policy::deny_socket_call();
@@ -35,6 +39,9 @@ int WSAAPI receive_buffers(SOCKET socket,
                            LPDWORD flags,
                            LPWSAOVERLAPPED overlapped,
                            LPWSAOVERLAPPED_COMPLETION_ROUTINE completion) noexcept {
+    if (single_port::enabled(socket)) {
+        return single_port::unsupported();
+    }
     const auto call = original<decltype(&::WSARecv)>(HookSlot::wsaRecv);
     return allow_receive(call != nullptr)
                ? call(socket, buffers, bufferCount, bytesReceived, flags, overlapped, completion)
@@ -48,6 +55,9 @@ int WSAAPI receive_bytes_from(SOCKET socket,
                               int flags,
                               sockaddr* source,
                               int* sourceLength) noexcept {
+    if (single_port::enabled(socket)) {
+        return single_port::receive(socket, buffer, length, flags, source, sourceLength);
+    }
     const auto call = original<decltype(&::recvfrom)>(HookSlot::recvFrom);
     return allow_receive(call != nullptr)
                ? call(socket, buffer, length, flags, source, sourceLength)
@@ -64,6 +74,9 @@ int WSAAPI receive_buffers_from(SOCKET socket,
                                 LPINT sourceLength,
                                 LPWSAOVERLAPPED overlapped,
                                 LPWSAOVERLAPPED_COMPLETION_ROUTINE completion) noexcept {
+    if (single_port::enabled(socket)) {
+        return single_port::unsupported();
+    }
     const auto call = original<decltype(&::WSARecvFrom)>(HookSlot::wsaRecvFrom);
     return allow_receive(call != nullptr) ? call(socket,
                                                  buffers,

@@ -1,6 +1,7 @@
 #include "gameplay_advertisement.h"
 
 #include <atomic>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 
@@ -29,9 +30,18 @@ constexpr std::uint64_t kRegionStride = 0x9E3779B97F4A7C15ULL;
     return derived == 0 ? kRegionStride : derived;
 }
 
-/** @return Group-session key carried by one region's descriptor. */
-[[nodiscard]] std::uint64_t region_machine_id(std::int32_t regionIndex) noexcept {
-    return region_identity(endpoint::identity().machineId, regionIndex);
+/** Host rows retain an exact source generation, so their identities must use that scope too. */
+[[nodiscard]] std::uint64_t
+source_identity(std::uint64_t base, const state::activity::SessionBinding& source) noexcept {
+    const auto derived =
+        base ^ (source.sessionId * kRegionStride) ^ std::rotl(source.createdRevision, 17);
+    return derived == 0 ? kRegionStride : derived;
+}
+
+/** @return Group-session key carried by one source generation's regional descriptor. */
+[[nodiscard]] std::uint64_t region_machine_id(const state::activity::SessionBinding& source,
+                                              std::int32_t regionIndex) noexcept {
+    return region_identity(source_identity(endpoint::identity().machineId, source), regionIndex);
 }
 
 /** No outcome packs to this, so the first advertisement always reports. */
@@ -102,7 +112,7 @@ void report_outcome(Skip skip,
 
 /** @return Encodable ambassador slot that differs from the joining client's slot. */
 [[nodiscard]] std::uint8_t ambassador_slot(std::uint8_t localMemberSlot) noexcept {
-    return localMemberSlot == 0 ? 1 : 0;
+    return localMemberSlot == 1 ? 0 : 1;
 }
 
 /** Encodes one already allocated host row for the region its member currently serves. */
@@ -141,7 +151,8 @@ void report_outcome(Skip skip,
                                    std::int32_t regionIndex,
                                    std::uint8_t localMemberSlot,
                                    message::CitizenAdvertisement& candidate,
-                                   std::uint64_t& hostGeneration) noexcept {
+                                   std::uint64_t& hostGeneration,
+                                   bool publicRegion) noexcept {
     candidate = {};
     hostGeneration = 0;
     if (!endpoint::ready()) {
@@ -156,8 +167,8 @@ void report_outcome(Skip skip,
 
     const endpoint::Identity identity = endpoint::identity();
     group::HostSessionBinding host{};
-    switch (
-        group::request_host_session(region_machine_id(regionIndex), source, regionIndex, host)) {
+    switch (group::request_host_session(
+        region_machine_id(source, regionIndex), source, regionIndex, host, publicRegion)) {
     case group::HostSessionState::ready:
         break;
     case group::HostSessionState::pending:
@@ -170,12 +181,13 @@ void report_outcome(Skip skip,
     default:
         return Skip::noSource;
     }
-    if (!encode_candidate(host,
-                          region_identity(identity.onlineSessionId, regionIndex),
-                          regionIndex,
-                          localMemberSlot,
-                          candidate,
-                          hostGeneration)) {
+    if (!encode_candidate(
+            host,
+            region_identity(source_identity(identity.onlineSessionId, host.source), regionIndex),
+            regionIndex,
+            localMemberSlot,
+            candidate,
+            hostGeneration)) {
         return Skip::noHostSession;
     }
     return Skip::none;
@@ -189,8 +201,10 @@ void build_advertisement(const state::activity::SessionBinding& source,
                          RegionSource regionSource,
                          std::uint8_t localMemberSlot,
                          message::CitizenAdvertisement& output,
-                         std::uint64_t& hostGeneration) noexcept {
-    const Skip skip = build_candidate(source, regionIndex, localMemberSlot, output, hostGeneration);
+                         std::uint64_t& hostGeneration,
+                         bool publicRegion) noexcept {
+    const Skip skip =
+        build_candidate(source, regionIndex, localMemberSlot, output, hostGeneration, publicRegion);
     report_outcome(skip, regionIndex, regionSource, output.ambassadorSlot);
 }
 
@@ -199,18 +213,20 @@ void build_directory_entry(const state::activity::SessionBinding& source,
                            std::int32_t regionIndex,
                            std::uint8_t localMemberSlot,
                            message::CitizenAdvertisement& output,
-                           std::uint64_t& hostGeneration) noexcept {
-    static_cast<void>(
-        build_candidate(source, regionIndex, localMemberSlot, output, hostGeneration));
+                           std::uint64_t& hostGeneration,
+                           bool publicRegion) noexcept {
+    static_cast<void>(build_candidate(
+        source, regionIndex, localMemberSlot, output, hostGeneration, publicRegion));
 }
 
 /** Claims a missing host row and reports whether its advertisement is ready. */
 AdvertisementState advertisement_state(const state::activity::SessionBinding& source,
-                                       std::int32_t regionIndex) noexcept {
+                                       std::int32_t regionIndex,
+                                       bool publicRegion) noexcept {
     message::CitizenAdvertisement candidate{};
     std::uint64_t generation = 0;
-    const Skip skip =
-        build_candidate(source, regionIndex, kQueriedMemberSlot, candidate, generation);
+    const Skip skip = build_candidate(
+        source, regionIndex, kQueriedMemberSlot, candidate, generation, publicRegion);
     if (generation != 0) {
         group::release_host_session(generation);
     }
@@ -226,8 +242,9 @@ AdvertisementState advertisement_state(const state::activity::SessionBinding& so
 
 /** Claims the region's host row and completes a pending allocation at once. */
 void complete_host_session(const state::activity::SessionBinding& source,
-                           std::int32_t regionIndex) noexcept {
-    if (advertisement_state(source, regionIndex) == AdvertisementState::pending) {
+                           std::int32_t regionIndex,
+                           bool publicRegion) noexcept {
+    if (advertisement_state(source, regionIndex, publicRegion) == AdvertisementState::pending) {
         group::allocate_claimed_host_sessions();
     }
 }
@@ -240,8 +257,8 @@ bool complete_private_host_session(const state::activity::SessionBinding& source
         return false;
     }
     group::HostSessionBinding host{};
-    const group::HostSessionState state =
-        group::request_host_session(identity.machineId, source, initialRegion, host);
+    const group::HostSessionState state = group::request_host_session(
+        source_identity(identity.machineId, source), source, initialRegion, host);
     if (state == group::HostSessionState::pending) {
         group::allocate_claimed_host_sessions();
     } else if (state != group::HostSessionState::ready) {
@@ -260,7 +277,8 @@ bool claim_private_host_session(const state::activity::SessionBinding& source,
     group::HostSessionBinding host{};
     // A claimed row stays pending until the pump service allocates it, so a pending claim is not
     // an error: the next advertisement finds the row ready.
-    return group::request_host_session(identity.machineId, source, initialRegion, host)
+    return group::request_host_session(
+               source_identity(identity.machineId, source), source, initialRegion, host)
                == group::HostSessionState::ready
            && private_host_session(source, host);
 }
@@ -270,7 +288,8 @@ bool private_host_session(const state::activity::SessionBinding& source,
                           group::HostSessionBinding& output) noexcept {
     const endpoint::Identity identity = endpoint::identity();
     return identity.machineId != 0
-           && group::host_session_for_source_group(source, identity.machineId, output);
+           && group::host_session_for_source_group(
+               source, source_identity(identity.machineId, source), output);
 }
 
 /** Builds the private logical host's remote-member descriptor for its current region. */
@@ -285,8 +304,12 @@ void build_private_host_advertisement(const state::activity::SessionBinding& sou
     group::HostSessionBinding host{};
     if (!endpoint::ready() || regionIndex < 0 || localMemberSlot > kMaximumMemberSlot
         || identity.onlineSessionId == 0 || !private_host_session(source, host)
-        || !encode_candidate(
-            host, identity.onlineSessionId, regionIndex, localMemberSlot, output, hostGeneration)) {
+        || !encode_candidate(host,
+                             source_identity(identity.onlineSessionId, source),
+                             regionIndex,
+                             localMemberSlot,
+                             output,
+                             hostGeneration)) {
         return;
     }
 }

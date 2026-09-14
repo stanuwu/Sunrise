@@ -1,0 +1,49 @@
+#pragma once
+
+#include <array>
+
+#include "player_block.h"
+
+namespace sunrise::middleware::gameplay::group {
+inline constexpr std::size_t kNativePlayerNameCapacity = 64;
+inline constexpr std::size_t kNativePlayerIdentitySize = 36;
+/** Fields published by this player through native player-add/player-properties messages. */
+struct NativePlayerProfile final {
+    std::array<char16_t, kNativePlayerNameCapacity> name{};
+    std::array<std::byte, kNativePlayerIdentitySize> identity{};
+    PlayerBlockSoids soids{};
+    std::uint8_t nameLength{};
+    bool hasName{};
+    bool hasIdentity{};
+    /** Native B mask for Q3/Q4/Q5/Q6/Q8/Q9; name, identity and soids have their own presence. */
+    std::uint16_t fields{};
+    std::uint8_t q3{}, q4{}, q5{};
+    std::array<std::int16_t, 2> q6{};
+    std::uint32_t q8Handle{};
+    std::array<std::uint16_t, 4> q8Slots{};
+    std::uint8_t q8Tail{};
+    std::uint32_t q9{};
+    std::array<std::uint32_t, 3> tailWords{};
+    std::uint8_t tailFlags{}, tailKind{};
+    bool tailFlag{}, hasTail{};
+    std::uint32_t tailIndex{};
+};
+/** Reads all nine optional B fields, including the content-schema signed-short Q8 slots. */
+[[nodiscard]] bool read_native_player_profile(encoding::bits::Reader& reader,
+                                              NativePlayerProfile& output) noexcept;
+/** Writes exactly the retained B fields; never fills an absent field with a default. */
+[[nodiscard]] bool write_native_player_profile(encoding::bits::Writer& writer,
+                                               const NativePlayerProfile& profile) noexcept;
+[[nodiscard]] bool valid_native_player_profile(const NativePlayerProfile& profile) noexcept;
+[[nodiscard]] bool complete_native_player_profile(const NativePlayerProfile& profile) noexcept;
+[[nodiscard]] bool read_native_player_tail(encoding::bits::Reader& reader,
+                                           NativePlayerProfile& profile) noexcept;
+[[nodiscard]] bool write_native_player_tail(encoding::bits::Writer& writer,
+                                            const NativePlayerProfile& profile) noexcept;
+void merge_native_player_profile(NativePlayerProfile& target,
+                                 const NativePlayerProfile& update) noexcept;
+/** Native decoded B image, used both by the membership mirror and the native baseline checksum. */
+using NativePlayerProfileState = std::array<std::byte, 0xE8>;
+void build_native_player_profile_state(const NativePlayerProfile& profile,
+                                       NativePlayerProfileState& output) noexcept;
+} // namespace sunrise::middleware::gameplay::group

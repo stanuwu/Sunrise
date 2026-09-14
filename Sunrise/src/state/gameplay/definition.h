@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../core/network_capacity.h"
 #include "../activity/definition.h"
 #include "external/definition.h"
 #include "external/replication_common_reconciler.h"
@@ -20,7 +21,7 @@ inline constexpr std::size_t kNonceSeedSize = 12;
 /** Direct gameplay packets carry a two-byte proxy-address trailer. */
 inline constexpr std::size_t kAddressTrailerSize = 2;
 /** One public activity holds few direct associations, and every slot is fixed storage. */
-inline constexpr std::size_t kAssociationCapacity = 4;
+inline constexpr std::size_t kAssociationCapacity = core::network_capacity::kConnections;
 /** An offer that never completes is torn down after this many milliseconds. */
 inline constexpr std::uint64_t kAssociationTimeoutMs = 10'000;
 
@@ -128,11 +129,11 @@ enum class PeerStage : std::uint8_t {
 /** Reliable message sequences unwrap modulo 8,192. */
 inline constexpr std::uint16_t kMessageSequenceModulus = 8192;
 /** One queue buffers this many out-of-order fragments before it drops the newest. */
-inline constexpr std::size_t kReliableSlots = 32;
+inline constexpr std::size_t kReliableSlots = 64;
 /** The larger reliable queue carries 32-byte fragments, which bounds one slot. */
 inline constexpr std::size_t kReliableFragmentBytes = 32;
-/** Reassembly is capped well below the engine's own limit because no message here is large. */
-inline constexpr std::size_t kReassemblyCapacity = 1024;
+/** Complete native group messages include the inner header in this bound. */
+inline constexpr std::size_t kReassemblyCapacity = 8704;
 
 /** One buffered reliable fragment. */
 struct ReliableFragment {
@@ -148,14 +149,21 @@ struct ReliableFragment {
 struct ReliableQueue {
     std::array<ReliableFragment, kReliableSlots> fragments{};
     std::uint16_t nextSequence{};
+    /** Contiguous fragments retire into this bounded message across packet acknowledgements. */
+    std::array<std::byte, kReassemblyCapacity> assembly{};
+    std::size_t assemblyBits{};
+    /** Oversized or malformed runs are consumed through their terminator. */
+    bool discarding{};
     /** False until the first record arrives, which is what fixes the starting sequence. */
     bool started{};
 };
 
-/** Fragments waiting to be written into the next outgoing packet.
- *  A join overruns this, so a sender that must not be dropped has to retry rather than assume room.
- *  The whole queue goes into one packet, so the reply buffer has to grow before this does. */
-inline constexpr std::size_t kOutboundSlots = 24;
+/** Complete native group messages may wait across multiple reliable packets. */
+inline constexpr std::size_t kOutboundSlots = 512;
+/** A packet carries this many fragments, leaving room for its external handlers. */
+inline constexpr std::size_t kOutboundSendWindow = 8;
+/** Outgoing staging includes the inner header; receive assembly keeps its own bound. */
+inline constexpr std::size_t kOutboundMessageCapacity = 8704;
 
 /** One reliable fragment this host owes the peer. */
 struct OutboundFragment {
@@ -182,7 +190,9 @@ struct OutboundQueue {
     /** Sequence the next enqueued fragment takes. The peer refuses a first record that is not 1. */
     std::uint16_t nextSequence{kFirstMessageSequence};
     std::size_t count{};
-    /** Packet sequence the current contents were first written into. A resend keeps it. */
+    /** First fragments awaiting acknowledgement; later enqueues are outside this run. */
+    std::size_t carriedCount{};
+    /** Packet sequence the carried run was first written into. A resend keeps it. */
     std::uint16_t sentInPacket{};
     /** True while that packet is unacknowledged, which is what drives the resend. */
     bool awaitingAcknowledgement{};
@@ -242,6 +252,8 @@ struct PeerLink {
     std::uint64_t nextExternalTransmission{};
     /** True while a received packet still has to be acknowledged. */
     bool acknowledgementOwed{};
+    /** The first reliable record of this channel incarnation has been queued. */
+    bool establishQueued{};
     std::uint64_t lastTick{};
     /** Tick the last packet left at. The resend is paced against it. */
     std::uint64_t lastSend{};
