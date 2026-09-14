@@ -10,6 +10,7 @@
 #include "../../middleware/bap/activity_message/activity_patch_epoch_parser.h"
 #include "../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
+#include "../../middleware/bap/activity_message/transport_report.h"
 #include "../../middleware/bap/frame.h"
 #include "../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../state/activity/bubble_authority/definition.h"
@@ -22,7 +23,11 @@
 #include "../activity/host_runtime.h"
 #include "activity_authority_query_owner.h"
 #include "activity_authority_reset_owner.h"
+#include "activity_link_selection.h"
+#include "encrypted/activity_host_manager/activity_startup_reservations.h"
 #include "encrypted/queuez/definition.h"
+#include "encrypted/queuez/public_subscriptions.h"
+#include "nat_relay_service.h"
 #include "runtime.h"
 
 namespace sunrise::state::investment::store {
@@ -33,6 +38,7 @@ namespace sunrise::server::bap {
 
 /** One session per transport peer slot, so a connection id indexes this array directly. */
 inline constexpr std::size_t kSessionCount = client::network::kBapConnectionCount;
+static_assert(state::matchmaking::kContextCapacity >= kSessionCount);
 /**
  * A delivered activity frame defers the next silence-prevention write.
  * This is the host's own period. It is not the floor handed to the client, which is a separate
@@ -43,6 +49,9 @@ inline constexpr std::uint64_t kActivityKeepaliveIntervalMs = 2'000;
 /** Counts matching authenticated links while the caller already owns the BAP lock. */
 [[nodiscard]] std::size_t
 activity_link_count_locked(const state::activity::SessionBinding& binding) noexcept;
+/** Counts the exact authenticated recipient generation for read-only content projection. */
+[[nodiscard]] std::size_t activity_link_count_locked(const state::activity::SessionBinding& binding,
+                                                     std::uint64_t recipientGeneration) noexcept;
 
 // Top-level groups the client can hold; the largest installed scenario has 78 in every state.
 inline constexpr std::size_t kScenarioWideGroupCapacity =
@@ -351,6 +360,11 @@ enum class CharacterRefreshScope : std::uint8_t { none, records, recordsAndRoste
 
 /** Mutable transport state owned by one BAP connection. */
 struct Session {
+    /** Actual BAP TCP source; never accepted from published native address bytes. */
+    std::uint32_t remoteAddress{};
+    nat_relay::State relay{};
+    state::AccountHandle accountHandle{state::kInvalidAccount};
+    std::uint64_t activityAdvertisementHostGeneration{};
     std::uint64_t acquisitionPresentationUntilTick{};
     std::array<encrypted::queuez::AcquisitionPresentationRow,
                encrypted::queuez::kAcquisitionPresentationRowCapacity>
@@ -376,10 +390,28 @@ struct Session {
     ActivityClientBinding activity{};
     /** Tick count after which the activity link owes its next keepalive write. */
     std::uint64_t activityKeepaliveDueTick{};
+    /** Backoff for an owed membership body whose complete frame could not be published. */
+    std::uint64_t activityMembershipRetryDueTick{};
     /** Client member key from the join request. It seeds the membership id. */
     std::uint64_t activityMemberKey{};
+    /** Sparse native transport report owned by this exact activity binding. */
+    middleware::bap::activity_message::TransportReport activityTransport{};
+    encrypted::activity_host_manager::PendingStartupReservations activityStartupReservations{};
     /** Binding generation whose entity-slot join committed, including a zero member key. */
     std::uint64_t activityJoinGeneration{};
+    /** Original native join correlation used for member-set rejoin notifications. */
+    std::uint32_t activityJoinCorrelation{};
+    std::array<std::uint64_t, state::activity::entity_slots::kMemberLeaseRowCount>
+        activityMemberSet{};
+    /** Exact changed set whose membership receipt the pending rejoin is waiting for. */
+    std::array<std::uint64_t, state::activity::entity_slots::kMemberLeaseRowCount>
+        activityRejoinMemberSet{};
+    /**
+     * Tick count after which an owed rejoin replay stops waiting for this recipient's membership
+     * receipt and goes out unacknowledged. Zero while nothing is owed.
+     */
+    std::uint64_t activityRejoinDeadlineTick{};
+    std::uint8_t activityRejoinSends{};
     /**
      * Character the join request named, or zero when it carried none.
      * The roster's participation key must be the character the client signed in on. The client
@@ -467,6 +499,7 @@ struct Session {
     MissionSeedLease activityMissionSeed{};
     /** Queuez versions and residents published only through this authenticated peer. */
     encrypted::queuez::SessionState queuez{};
+    encrypted::public_queuez::Subscriptions publicSubscriptions{};
     /** Tick count after which the owed Family-4 re-push may go out. */
     std::uint64_t family4RepushDueTick{};
     /** Root the owed re-push must use. */

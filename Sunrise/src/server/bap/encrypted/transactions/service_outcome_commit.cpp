@@ -5,6 +5,7 @@
 
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/bap/activity_message/activity_join_result_encoder.h"
+#include "../../../../state/activity/reservations/runtime.h"
 #include "../../../../state/activity/runtime.h"
 #include "../../../../state/matchmaking/matchmaking_state.h"
 #include "../../../../state/runtime/runtime.h"
@@ -143,6 +144,7 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     reason = "none";
     if (auto* allocation = transaction_if<state::activity::PendingAllocation>(outcome)) {
         const std::uint64_t sessionId = allocation->sessionId;
+        const bool reused = allocation->reused;
         std::uint64_t bindingGeneration = 0;
         if (sessionId == state::activity::kAbsentSessionId
             || !reserve_activity_binding_generation(bindingGeneration)
@@ -151,7 +153,9 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
             return false;
         }
         if (!retain_private(sessionId, publication)) {
-            static_cast<void>(state::activity::release_session(sessionId));
+            if (!reused) {
+                static_cast<void>(state::activity::release_session(sessionId));
+            }
             reason = "retain_private";
             return false;
         }
@@ -163,7 +167,8 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
             const bool joins = plan->delivery == activity_message::Delivery::joinNotifications;
             const bool validJoinIntent =
                 plan->bindingIntent == activity_message::BindingIntent::preserveCurrent
-                || plan->bindingIntent == activity_message::BindingIntent::publicTarget;
+                || plan->bindingIntent == activity_message::BindingIntent::publicTarget
+                || plan->bindingIntent == activity_message::BindingIntent::sharedTarget;
             if (joins && !validJoinIntent) {
                 reason = "join_intent";
                 return false;
@@ -176,6 +181,12 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
             if (joins && plan->bindingIntent == activity_message::BindingIntent::publicTarget
                 && !retain_public(*plan, publication)) {
                 reason = "retain_public";
+                return false;
+            }
+            if (joins && plan->bindingIntent == activity_message::BindingIntent::sharedTarget
+                && (!state::activity::binding_matches(plan->targetBinding)
+                    || !retain_private(plan->sessionId, publication))) {
+                reason = "retain_shared";
                 return false;
             }
             // The commit consumes the plan, so the counts are taken from a copy of it.
@@ -193,7 +204,9 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
                 publication.hasActivitySessionBinding = true;
                 if (plan->bindingIntent == activity_message::BindingIntent::preserveCurrent) {
                     publication.preservesActivitySessionBinding = true;
-                } else if (plan->bindingIntent != activity_message::BindingIntent::publicTarget) {
+                } else if (plan->bindingIntent != activity_message::BindingIntent::publicTarget
+                           && plan->bindingIntent
+                                  != activity_message::BindingIntent::sharedTarget) {
                     discard_activity_publication(publication);
                     reason = "bind_intent";
                     return false;
@@ -206,6 +219,10 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
             reason = "membership";
             return state::activity::membership::commit(plan->membershipMutation,
                                                        &publication.clientState);
+        }
+        if (plan->mutationDomain == activity_message::MutationDomain::reservations) {
+            reason = "reservations";
+            return state::activity::reservations::commit(plan->reservationMutation);
         }
         if (plan->mutationDomain == activity_message::MutationDomain::authorityQuery) {
             reason = "authority_query";

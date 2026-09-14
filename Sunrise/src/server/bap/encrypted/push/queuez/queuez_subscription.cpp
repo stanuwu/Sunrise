@@ -74,6 +74,7 @@ bool append_account_resync_notification(
     std::span<std::byte> response,
     std::size_t& written,
     queuez::SessionState& after) noexcept {
+    const state::ScopedAccount accountScope(state::account_for_public_root(before.family4RootSoid));
     after = before;
     ensure_account_canonical();
     if (!queuez::valid(before) || !before.family4Active || before.family4RootSoid == 0
@@ -121,7 +122,13 @@ void append_queuez_notification(Scratch& scratch,
                                 std::size_t& written,
                                 queuez::SessionState& after,
                                 bool& armsRepush,
-                                bool ownSnapshotAnswered) noexcept {
+                                bool& armsBannerRepush) noexcept {
+    const auto accountHandle = subscription.familyType == queuez::kBannerFamilyType
+                                       || subscription.familyType == queuez::kRosterFamilyType
+                                       || subscription.familyType == queuez::kAccountFamilyType
+                                   ? state::account_for_public_root(subscription.familyRootSoid)
+                                   : state::bound_account();
+    const state::ScopedAccount accountScope(accountHandle);
     after = before;
     armsRepush = false;
     // Runs ahead of the dispatch below; inside one family's builder it would leave the other

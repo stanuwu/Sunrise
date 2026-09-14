@@ -15,7 +15,7 @@
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
-#include "queuez_family_repush.h"
+#include "../push/activity/nat_relay_push.h"
 #include "queuez_state_validation.h"
 #include "state/investment/store_internal.h"
 
@@ -651,6 +651,14 @@ bool consume_deferred(Session& session,
     written = 0;
     if (!session.authenticated) {
         return false;
+    }
+    if (push::activity::consume_relay_notifications(
+            session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (public_queuez::poll(
+            session, scratch, response, written, touchesScratch, GetTickCount64())) {
+        return true;
     }
     // The overrides go first: they are what the purchased mod unlocks, and the Family-4
     // companion waits on its own delay.

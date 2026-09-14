@@ -49,6 +49,38 @@ bool parse_frame(std::span<const std::byte> input, OuterFrame& frame) noexcept {
     return true;
 }
 
+/** Extracts one bounded frame from an arbitrary TCP prefix. */
+StreamFrameResult parse_stream_frame(std::span<const std::byte> input,
+                                     std::size_t maximumFrameSize,
+                                     OuterFrame& frame,
+                                     std::size_t& consumed) noexcept {
+    frame = {};
+    consumed = 0;
+    if (maximumFrameSize < kOuterHeaderSize || (!input.empty() && input[0] != kMagic)) {
+        return StreamFrameResult::invalid;
+    }
+    if (input.size() < kOuterHeaderSize) {
+        return StreamFrameResult::incomplete;
+    }
+    const auto type =
+        static_cast<FrameType>(std::to_integer<std::uint8_t>(input[kOuterTypeOffset]));
+    const std::size_t payload =
+        encoding::read_u32_be(input.subspan<kOuterLengthOffset, encoding::kU32Size>());
+    if ((!is_plaintext(type) && type != FrameType::encrypted)
+        || payload > maximumFrameSize - kOuterHeaderSize) {
+        return StreamFrameResult::invalid;
+    }
+    const auto size = kOuterHeaderSize + payload;
+    if (input.size() < size) {
+        return StreamFrameResult::incomplete;
+    }
+    if (!parse_frame(input.first(size), frame)) {
+        return StreamFrameResult::invalid;
+    }
+    consumed = size;
+    return StreamFrameResult::complete;
+}
+
 /** Parses a decrypted or plaintext BAP request payload. */
 bool parse_request_payload(std::span<const std::byte> input,
                            FrameType frameType,
@@ -72,6 +104,37 @@ bool parse_request(std::span<const std::byte> input, RequestFrame& request) noex
         return false;
     }
     return parse_request_payload(outer.payload, outer.frameType, request);
+}
+
+/** Reads the correlation and status without interpreting service-specific response bodies. */
+bool parse_response_payload(std::span<const std::byte> input, ResponseFrame& response) noexcept {
+    response = {};
+    if (input.size() < kResponseHeaderSize) {
+        return false;
+    }
+    response.serviceId = encoding::read_u16_be(input.subspan<kServiceOffset, encoding::kU16Size>());
+    response.taskId = encoding::read_u32_be(input.subspan<kTaskOffset, encoding::kU32Size>());
+    response.status = encoding::read_u16_be(input.subspan<kStatusOffset, encoding::kU16Size>());
+    response.body = input.subspan(kResponseHeaderSize);
+    return true;
+}
+
+bool encode_request_payload(RequestService service,
+                            std::uint32_t taskId,
+                            std::span<const std::byte> body,
+                            std::span<std::byte> output,
+                            std::size_t& written) noexcept {
+    written = 0;
+    if (body.size() > std::numeric_limits<std::uint32_t>::max() - kRequestHeaderSize
+        || output.size() < kRequestHeaderSize + body.size()) {
+        return false;
+    }
+    encoding::write_u16_be(output.subspan<kServiceOffset, encoding::kU16Size>(),
+                           static_cast<std::uint16_t>(service));
+    encoding::write_u32_be(output.subspan<kTaskOffset, encoding::kU32Size>(), taskId);
+    std::copy(body.begin(), body.end(), output.begin() + kRequestHeaderSize);
+    written = kRequestHeaderSize + body.size();
+    return true;
 }
 
 /** Encodes one status-200 BAP response header and body. */

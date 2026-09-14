@@ -6,7 +6,9 @@
 #include <cstdio>
 
 #include "../../core/logging/log.h"
+#include "../../core/network_service_socket.h"
 #include "../../core/settings/settings.h"
+#include "../../state/runtime/runtime.h"
 #include "../activity/host_runtime.h"
 #include "bap_frame_batch.h"
 #include "core/threading/data_mutex.h"
@@ -39,8 +41,11 @@ core::threading::DataMutex<Listener> g_listener;
  * @param listener Listener holding the acceptor and the peer slots.
  * @param slot Peer slot already checked to be free.
  */
-void accept_peer(Listener& listener, std::size_t slot) noexcept {
-    const SOCKET accepted = accept(listener.acceptor, nullptr, nullptr);
+void accept_peer(Listener& listener, std::size_t slot, std::uint64_t now) noexcept {
+    sockaddr_in remote{};
+    int remoteSize = sizeof remote;
+    const SOCKET accepted =
+        accept(listener.acceptor, reinterpret_cast<sockaddr*>(&remote), &remoteSize);
     if (accepted == INVALID_SOCKET) {
         return;
     }
@@ -54,6 +59,11 @@ void accept_peer(Listener& listener, std::size_t slot) noexcept {
     peer.outputOffset = 0;
     peer.outputSize = 0;
     peer.connectionId = connection_id(slot);
+    peer.remoteAddress = ntohl(remote.sin_addr.s_addr);
+    peer.inputDeferred = false;
+    peer.authenticated = false;
+    peer.acceptedTick = peer.serviceTick = now;
+    peer.inputStartedTick = peer.outputProgressTick = now;
 
     std::array<char, core::log::kLineCapacity> line{};
     const int written = std::snprintf(
@@ -83,6 +93,9 @@ void receive_peer(Peer& peer) noexcept {
                               static_cast<int>(free),
                               0);
     if (received > 0) {
+        if (peer.streamSize == 0) {
+            peer.inputStartedTick = peer.serviceTick;
+        }
         peer.streamSize += static_cast<std::size_t>(received);
         return;
     }
@@ -101,6 +114,7 @@ void receive_peer(Peer& peer) noexcept {
         return true;
     }
     const std::size_t remaining = peer.outputSize - peer.outputOffset;
+    const core::network::ServiceSocketScope replySocket(peer.socket);
     const int sent = send(peer.socket,
                           reinterpret_cast<const char*>(peer.output.data() + peer.outputOffset),
                           static_cast<int>(remaining),
@@ -114,22 +128,22 @@ void receive_peer(Peer& peer) noexcept {
 /**
  * Services one peer with one read, a bounded frame batch and one due poll.
  * @param peer Live peer.
- * @param readable Ready-read set from select.
- * @param writable Ready-write set from select.
- * @param wasPending True when select saw output.
+ * @param readable Read readiness from WSAPoll.
+ * @param writable Write readiness from WSAPoll.
+ * @param wasPending True when polling began with output.
  * @param pollDue True on a poll tick.
  */
 void service_peer(
-    Peer& peer, fd_set& readable, fd_set& writable, bool wasPending, bool pollDue) noexcept {
+    Peer& peer, bool readable, bool writable, bool wasPending, bool pollDue) noexcept {
     bool sent = false;
-    if (wasPending && FD_ISSET(peer.socket, &writable)) {
+    if (wasPending && writable) {
         sent = true;
         if (!flush_peer(peer)) {
             close_peer(peer);
             return;
         }
     }
-    if (peer.socket != INVALID_SOCKET && FD_ISSET(peer.socket, &readable)) {
+    if (peer.socket != INVALID_SOCKET && readable) {
         receive_peer(peer);
     }
     if (peer.socket == INVALID_SOCKET) {
@@ -173,14 +187,22 @@ void service_peer(
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    BOOL reuse = TRUE;
-    (void)setsockopt(listener.acceptor,
-                     SOL_SOCKET,
-                     SO_REUSEADDR,
-                     reinterpret_cast<const char*>(&reuse),
-                     sizeof reuse);
-    if (!make_nonblocking(listener.acceptor)
+    std::uint32_t bindAddress = INADDR_LOOPBACK;
+    if (core::settings::hosts_session()) {
+        bindAddress = 0;
+        for (const auto octet : core::settings::get().server.bapBind) {
+            bindAddress = (bindAddress << 8U) | octet;
+        }
+    }
+    address.sin_addr.s_addr = htonl(bindAddress);
+    BOOL exclusive = TRUE;
+    if (setsockopt(listener.acceptor,
+                   SOL_SOCKET,
+                   SO_EXCLUSIVEADDRUSE,
+                   reinterpret_cast<const char*>(&exclusive),
+                   sizeof exclusive)
+            == SOCKET_ERROR
+        || !make_nonblocking(listener.acceptor)
         || bind(listener.acceptor, reinterpret_cast<const sockaddr*>(&address), sizeof address)
                == SOCKET_ERROR
         || listen(listener.acceptor, static_cast<int>(listener.peers.size())) == SOCKET_ERROR) {
@@ -191,6 +213,18 @@ void service_peer(
         return false;
     }
     listener.active = true;
+    int addressSize = sizeof address;
+    if (getsockname(listener.acceptor, reinterpret_cast<sockaddr*>(&address), &addressSize)
+        == SOCKET_ERROR) {
+        closesocket(listener.acceptor);
+        listener.acceptor = INVALID_SOCKET;
+        listener.active = false;
+        WSACleanup();
+        listener.winsockOwned = false;
+        return false;
+    }
+    port = ntohs(address.sin_port);
+    state::publish_bap_port(port);
     listener.nextPollTick = 0;
     std::array<char, 64> line{};
     const int written = std::snprintf(line.data(),
@@ -224,10 +258,22 @@ void service(std::uint64_t now) noexcept {
             return;
         }
 
-        fd_set readable;
-        fd_set writable;
-        FD_ZERO(&readable);
-        FD_ZERO(&writable);
+        for (auto& peer : listener.peers) {
+            if (peer.socket == INVALID_SOCKET) {
+                continue;
+            }
+            peer.serviceTick = now;
+            if (expired(peer, now)) {
+                close_peer(peer);
+            }
+        }
+
+        // Winsock fd_set defaults to 64 entries; each player owns several sockets.
+        // Poll every active slot so later players cannot silently lose read/write service.
+        std::array<WSAPOLLFD, client::network::kBapConnectionCount + 1> poll{};
+        for (auto& entry : poll) {
+            entry.fd = INVALID_SOCKET;
+        }
         std::array<bool, client::network::kBapConnectionCount> wasPending{};
         const std::size_t accepting = free_slot(listener);
         // With no free slot the acceptor is left out of the set, so a connect waits in the backlog
@@ -248,23 +294,24 @@ void service(std::uint64_t now) noexcept {
             }
         }
         if (!full) {
-            FD_SET(listener.acceptor, &readable);
+            poll[0] = {listener.acceptor, POLLRDNORM, 0};
         }
         for (std::size_t slot = 0; slot < listener.peers.size(); ++slot) {
             const Peer& peer = listener.peers[slot];
             if (peer.socket == INVALID_SOCKET) {
                 continue;
             }
+            auto& entry = poll[slot + 1];
+            entry.fd = peer.socket;
             if (peer.streamSize < kStreamCapacity) {
-                FD_SET(peer.socket, &readable);
+                entry.events |= POLLRDNORM;
             }
             if (peer.outputSize != 0) {
-                FD_SET(peer.socket, &writable);
+                entry.events |= POLLWRNORM;
                 wasPending[slot] = true;
             }
         }
-        timeval timeout{};
-        if (select(0, &readable, &writable, nullptr, &timeout) == SOCKET_ERROR) {
+        if (WSAPoll(poll.data(), static_cast<ULONG>(poll.size()), 0) == SOCKET_ERROR) {
             return;
         }
 
@@ -275,13 +322,24 @@ void service(std::uint64_t now) noexcept {
         // The poll is what lets a committed answer out. Holding one for the rest of the
         // interval costs every queued mission action a full interval of its own.
         const bool pollDue = timedPoll || activity::host::any_output_pending();
-        if (!full && FD_ISSET(listener.acceptor, &readable)) {
-            accept_peer(listener, accepting);
+        if (!full && (poll[0].revents & POLLRDNORM)) {
+            accept_peer(listener, accepting, now);
         }
         for (std::size_t slot = 0; slot < listener.peers.size(); ++slot) {
             Peer& peer = listener.peers[slot];
-            if (peer.socket != INVALID_SOCKET) {
-                service_peer(peer, readable, writable, wasPending[slot], pollDue);
+            // A socket accepted above did not participate in this poll. Its previously
+            // unused entry may carry POLLNVAL, so service it only after the next poll.
+            if (peer.socket != INVALID_SOCKET && poll[slot + 1].fd == peer.socket) {
+                const auto events = poll[slot + 1].revents;
+                if (events & (POLLERR | POLLNVAL)) {
+                    close_peer(peer);
+                    continue;
+                }
+                service_peer(peer,
+                             (events & (POLLRDNORM | POLLHUP)) != 0,
+                             (events & POLLWRNORM) != 0,
+                             wasPending[slot],
+                             pollDue);
             }
         }
     });

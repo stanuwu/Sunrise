@@ -66,8 +66,12 @@ enum class RequestService : std::uint16_t {
     registerSubscriber = 121,
     /** Carries a large one-way client notification with no response service. */
     notification171 = 171,
+    /** Publishes the client's public account projection to the shared session service. */
+    accountProjection = 200,
     /** Keeps an authenticated connection active. */
     echo = 250,
+    /** Introduces the native peer address without a status reply. */
+    initiateRelayConnection = 300,
     /** Registers the client with the relay service. */
     registerRelayClient = 302,
     /** Wraps the client-owned Steam certificate for the response. */
@@ -120,6 +124,8 @@ enum class ResponseService : std::uint16_t {
     clan = 45,
     /** Acknowledges notification subscriber registration. */
     registerSubscriber = 122,
+    /** Confirms that the shared service accepted a public account projection. */
+    accountProjection = 201,
     /** Acknowledges an authenticated keepalive. */
     echo = 251,
     /** Acknowledges relay registration. */
@@ -132,6 +138,8 @@ enum class ResponseService : std::uint16_t {
 
 /** Server-initiated services emitted without a response status field. */
 enum class NotificationService : std::uint16_t {
+    /** Publishes a paired native relay endpoint and the remote client's secure address. */
+    requestRelayConnection = 301,
     /** Publishes one uncorrelated activity-host message. */
     activityMessage = 9,
     /** Publishes one or more queuez family updates. */
@@ -152,6 +160,21 @@ struct OuterFrame {
     std::span<const std::byte> payload{};
 };
 
+struct ResponseFrame {
+    std::uint16_t serviceId{};
+    std::uint32_t taskId{};
+    std::uint16_t status{};
+    std::span<const std::byte> body{};
+};
+
+[[nodiscard]] bool parse_response_payload(std::span<const std::byte> input,
+                                          ResponseFrame& response) noexcept;
+[[nodiscard]] bool encode_request_payload(RequestService service,
+                                          std::uint32_t taskId,
+                                          std::span<const std::byte> body,
+                                          std::span<std::byte> output,
+                                          std::size_t& written) noexcept;
+
 /**
  * Reads one whole BAP outer frame and borrows the payload its length names.
  * @param input Exactly one frame: magic 1, the six-byte header, and the bytes it declares.
@@ -159,6 +182,13 @@ struct OuterFrame {
  * @return True when the magic matches and the input holds no byte past the declared payload.
  */
 [[nodiscard]] bool parse_frame(std::span<const std::byte> input, OuterFrame& frame) noexcept;
+
+enum class StreamFrameResult : std::uint8_t { incomplete, complete, invalid };
+/** Borrows the first complete frame in a TCP buffer, leaving subsequent frames unconsumed. */
+[[nodiscard]] StreamFrameResult parse_stream_frame(std::span<const std::byte> input,
+                                                   std::size_t maximumFrameSize,
+                                                   OuterFrame& frame,
+                                                   std::size_t& consumed) noexcept;
 
 /** Parses one decrypted or plaintext BAP request payload. */
 [[nodiscard]] bool parse_request_payload(std::span<const std::byte> input,

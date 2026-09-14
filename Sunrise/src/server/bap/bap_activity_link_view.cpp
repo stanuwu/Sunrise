@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <shared_mutex>
 
+#include "../../state/account/account_context.h"
+#include "../../state/activity/member_context.h"
 #include "../../state/activity/runtime.h"
 #include "encrypted/push/activity/internal.h"
 #include "internal.h"
@@ -27,18 +29,30 @@ same_destination_package(const state::activity::destination::DestinationSelectio
 /** Resolves the region used by this exact connection's msg-5 builder. */
 [[nodiscard]] encrypted::push::activity::EffectiveRegion
 selected_region_locked(const Session& session) noexcept {
+    const state::ScopedAccount accountScope(session.accountHandle);
+    const state::activity::ScopedMemberContext memberScope(session.activity.session.sessionId,
+                                                           session.activityMemberKey);
     const auto base = encrypted::push::activity::effective_region(session.activity.session);
     return encrypted::push::activity::selected_effective_region(session, base.arrival);
 }
 
-/** Copies one selected link's common-root inputs. */
-void copy_replication_view(const Session& session, ActivityReplicationView& output) noexcept {
-    output.binding = session.activity.session;
-    output.patchEpoch = session.activityPatchEpoch.value;
+/** Reads reports in the selected native member's scope, including callers outside the BAP pump. */
+void fill_link_view(const Session& session, ActivityLinkView& output) noexcept {
+    const state::ScopedAccount accountScope(session.accountHandle);
+    const state::activity::ScopedMemberContext memberScope(session.activity.session.sessionId,
+                                                           session.activityMemberKey);
+    const auto region = selected_region_locked(session);
     output.activityClientGeneration = session.activity.bindingGeneration;
-    output.groupSessionId = session.activity.groupSessionId;
-    output.memberId = session.activityMemberKey;
-    output.replicationEpoch = session.activity.replicationEpoch;
+    output.effectiveRegion = region.index;
+    output.sliceSetIndex =
+        state::activity::membership::reported_slice_set(session.activity.session.sessionId);
+    output.arrivalSliceSetIndex = static_cast<std::int32_t>(region.arrival);
+    output.effectiveRegionReported = region.reported;
+    output.joined = session.activity.role == ActivityClientRole::publicTarget
+                    || session.activityJoinGeneration == session.activity.bindingGeneration;
+    output.publicTarget = session.activity.role == ActivityClientRole::publicTarget;
+    output.rosterReason = session.activityRosterReason;
+    output.playerKey = encrypted::push::activity::published_player_key(session);
 }
 
 } // namespace
@@ -56,6 +70,14 @@ std::size_t activity_link_count_locked(const state::activity::SessionBinding& bi
 }
 
 /** Counts authenticated BAP links that currently own one exact activity generation. */
+std::size_t activity_link_count_locked(const state::activity::SessionBinding& binding,
+                                       std::uint64_t recipientGeneration) noexcept {
+    std::size_t count{};
+    static_cast<void>(activity_link_for_generation_locked(binding, recipientGeneration, count));
+    return count;
+}
+
+/** Counts authenticated BAP links that currently own one exact activity generation. */
 std::size_t activity_link_count(const state::activity::SessionBinding& binding) noexcept {
     const std::shared_lock lock(session_lock());
     const std::size_t count = activity_link_count_locked(binding);
@@ -69,18 +91,20 @@ bool activity_link_view(const state::activity::SessionBinding& binding,
     const std::shared_lock lock(session_lock());
     const Session* const session = unique_activity_link_locked(binding, output.matchingLinks);
     if (session != nullptr) {
-        const auto region = selected_region_locked(*session);
-        output.activityClientGeneration = session->activity.bindingGeneration;
-        output.effectiveRegion = region.index;
-        output.sliceSetIndex =
-            state::activity::membership::reported_slice_set(session->activity.session.sessionId);
-        output.arrivalSliceSetIndex = static_cast<std::int32_t>(region.arrival);
-        output.effectiveRegionReported = region.reported;
-        output.joined = session->activity.role == ActivityClientRole::publicTarget
-                        || session->activityJoinGeneration == session->activity.bindingGeneration;
-        output.publicTarget = session->activity.role == ActivityClientRole::publicTarget;
-        output.rosterReason = session->activityRosterReason;
-        output.playerKey = encrypted::push::activity::published_player_key(*session);
+        fill_link_view(*session, output);
+    }
+    return session != nullptr;
+}
+
+bool activity_link_view(const state::activity::SessionBinding& binding,
+                        std::uint64_t generation,
+                        ActivityLinkView& output) noexcept {
+    output = {};
+    const std::shared_lock lock(session_lock());
+    const auto* session =
+        activity_link_for_generation_locked(binding, generation, output.matchingLinks);
+    if (session != nullptr) {
+        fill_link_view(*session, output);
     }
     return session != nullptr;
 }
@@ -208,6 +232,61 @@ bool activity_replication_view_for_group(std::uint64_t groupSessionId,
         copy_replication_view(*selected, output);
     }
     return count == 1;
+}
+
+namespace {
+bool owned_replication_view(std::uint64_t id,
+                            bool group,
+                            std::uint64_t accountSoid,
+                            std::uint64_t characterSoid,
+                            ActivityReplicationView& output) noexcept {
+    output = {};
+    if (!id || !accountSoid || !characterSoid) {
+        return false;
+    }
+    const std::shared_lock lock(session_lock());
+    const Session* selected = nullptr;
+    for (const Session& session : sessions()) {
+        if (!session.id || !session.authenticated
+            || session.activity.role == ActivityClientRole::none
+            || !session.activity.bindingGeneration || !session.activityPatchEpoch.seen
+            || session.activityPatchEpoch.bindingGeneration != session.activity.bindingGeneration
+            || (group ? session.activity.groupSessionId : session.activity.session.sessionId) != id
+            || state::account_primary_soid(session.accountHandle) != accountSoid
+            || session.activityCharacterSoid != characterSoid
+            || !state::activity::binding_matches(session.activity.session)) {
+            continue;
+        }
+        if (selected != nullptr) {
+            return false;
+        }
+        selected = &session;
+    }
+    if (selected == nullptr) {
+        return false;
+    }
+    output.binding = selected->activity.session;
+    output.patchEpoch = selected->activityPatchEpoch.value;
+    output.activityClientGeneration = selected->activity.bindingGeneration;
+    output.groupSessionId = selected->activity.groupSessionId;
+    output.memberId = selected->activityMemberKey;
+    output.replicationEpoch = selected->activity.replicationEpoch;
+    return true;
+}
+} // namespace
+
+bool activity_replication_view_for_session(std::uint64_t id,
+                                           std::uint64_t accountSoid,
+                                           std::uint64_t characterSoid,
+                                           ActivityReplicationView& output) noexcept {
+    return owned_replication_view(id, false, accountSoid, characterSoid, output);
+}
+
+bool activity_replication_view_for_group(std::uint64_t id,
+                                         std::uint64_t accountSoid,
+                                         std::uint64_t characterSoid,
+                                         ActivityReplicationView& output) noexcept {
+    return owned_replication_view(id, true, accountSoid, characterSoid, output);
 }
 
 } // namespace sunrise::server::bap

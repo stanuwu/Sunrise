@@ -4,24 +4,30 @@
 #include <array>
 #include <bit>
 #include <cstdio>
+#include <optional>
 
 #include "../../../core/logging/log.h"
 #include "../../../middleware/encoding/byte_order.h"
 #include "../../../middleware/secure_channel/runtime.h"
-#include "../../../middleware/web_service/messages/opcode206.h"
+#include "../../../state/account/public_profiles.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
+#include "../../../state/activity/fireteam.h"
 #include "../../../state/runtime/runtime.h"
+#include "../../../state/social/social_feed.h"
 #include "../../activity/host_runtime.h"
 #include "../../gameplay/peer/peer_transport.h"
 #include "../../gameplay/squad_entity_retirement.h"
 #include "../activity_authority_query_owner.h"
 #include "../activity_authority_reset_owner.h"
 #include "../internal.h"
+#include "../proxy/proxy_runtime.h"
+#include "account_projection_route.h"
 #include "activity_transaction/activity_transaction_notifications.h"
 #include "bap_connection_publication.h"
 #include "internal.h"
 #include "push/activity/activity_roster_push.h"
 #include "queuez/queuez_outcome_staging.h"
+#include "social_feed_route.h"
 #include "state/investment/store_internal.h"
 #include "transactions/service_outcome_commit.h"
 
@@ -242,18 +248,43 @@ bool consume(Session& session,
     middleware::secure_channel::advance_nonce(session.receiveNonce);
 
     middleware::bap::RequestFrame frame;
+    if (!middleware::bap::parse_request_payload(std::span(scratch.plaintext).first(plaintextSize),
+                                                middleware::bap::FrameType::encrypted,
+                                                frame)) {
+        return false;
+    }
+    if (frame.serviceId
+        == static_cast<std::uint16_t>(middleware::bap::RequestService::accountProjection)) {
+        return consume_account_projection(session, scratch, frame, response, written);
+    }
+    if (frame.serviceId == state::social::feed::kSyncRequest) {
+        return consume_social_feed(session, scratch, frame, response, written);
+    }
     ServiceRoute route;
+    const bool routed = routing::resolve(frame.serviceId, route);
+    if (proxy::classify(frame.serviceId, frame.body) == proxy::Plane::upstream) {
+        return route.responseMode == ResponseMode::reply
+                   ? proxy::forward_request(session.id,
+                                            frame.serviceId,
+                                            static_cast<std::uint16_t>(route.response),
+                                            frame.taskId,
+                                            frame.body,
+                                            session.sendNonce)
+                   : proxy::forward_uncorrelated(
+                         session.id, frame.serviceId, frame.taskId, frame.body);
+    }
+    const auto publicResult =
+        public_queuez::consume(session, scratch, frame, response, written, GetTickCount64());
+    if (publicResult != public_queuez::Result::notHandled) {
+        return publicResult == public_queuez::Result::success;
+    }
     std::size_t responseBodySize = 0;
     std::size_t framedSize = 0;
     ServiceOutcome outcome{};
     transactions::Publication publication{};
     queuez::SessionState nextQueuez = session.queuez;
     bool publishesQueuez = false;
-    bool handled =
-        middleware::bap::parse_request_payload(std::span(scratch.plaintext).first(plaintextSize),
-                                               middleware::bap::FrameType::encrypted,
-                                               frame)
-        && routing::resolve(frame.serviceId, route);
+    bool handled = routed;
     if (!handled) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
@@ -274,9 +305,12 @@ bool consume(Session& session,
                          core::log::Level::warn,
                          "ev=bap stage=web_service result=refuse reason=stale_manifest");
     }
-    state::investment::store::Transaction investmentTransaction;
-    if (!investmentTransaction.ready()) {
-        return false;
+    std::optional<state::investment::store::Transaction> investmentTransaction;
+    if (session.accountHandle == state::kLocalAccount) {
+        investmentTransaction.emplace();
+        if (!investmentTransaction->ready()) {
+            return false;
+        }
     }
     std::array<state::account::inventory::PresentedItemRow,
                queuez::kAcquisitionPresentationRowCapacity>
@@ -414,6 +448,9 @@ bool consume(Session& session,
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr;
+    if (mutatesAccount && session.accountHandle != state::kLocalAccount) {
+        handled = false;
+    }
     const bool invalidatesAcquisitionPresentation =
         outcome.hasChangeCharacter || outcome.hasSelectCharacter || outcome.hasArtifactReset
         || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
@@ -434,7 +471,7 @@ bool consume(Session& session,
         }
         handled = fits && retirementValid
                   && transactions::commit(outcome, publication, commitReason)
-                  && investmentTransaction.commit();
+                  && (!investmentTransaction || investmentTransaction->commit());
         if (!handled) {
             diagnostics::report_failure(
                 frame.serviceId, "commit", fits ? commitReason : "frame_capacity");
@@ -442,6 +479,17 @@ bool consume(Session& session,
         if (handled) {
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
             written = framedSize;
+            if (outcome.nativePresence) {
+                const auto& native = *outcome.nativePresence;
+                const auto previousNative = state::account::profiles::local_presence();
+                if (state::account::profiles::publish_local_presence(session.accountHandle,
+                                                                     native)) {
+                    const auto account = state::account_primary_soid(session.accountHandle);
+                    if (state::activity::fireteam::native_solo_split(previousNative, native)) {
+                        static_cast<void>(state::activity::fireteam::depart(account));
+                    }
+                }
+            }
             entityLease.release();
             // The caller copy finishes before connection fields are published.
             session.sendNonce = nextSendNonce;
@@ -466,6 +514,15 @@ bool consume(Session& session,
             }
             publish_connection_fields(session, publication, connection);
             record_committed_join(session, connection);
+            if (outcome.hasRelayRegistration) {
+                nat_relay::register_client(session);
+            }
+            if (outcome.relayInitiate) {
+                nat_relay::initiate(session, *outcome.relayInitiate);
+            }
+            if (outcome.hasRelayConnectivityFailure) {
+                nat_relay::connectivity_failure(session);
+            }
             // The caller copy is done, so what the staged roster body owes is settled here.
             push::activity::commit_staged_roster(session);
             commit_staged_advertisement(session);
@@ -558,6 +615,7 @@ bool consume(Session& session,
             bap::arm_account_resync_everywhere();
         }
         // The staged body is dropped, so its grant and its state byte go back for the next push.
+        session.activityJoinMembershipStaged = false;
         push::activity::discard_staged_roster(session);
         discard_staged_advertisement(session);
     }
