@@ -87,6 +87,8 @@ bool prepare_roster(Scratch& scratch,
                     std::uint32_t objectId,
                     const Reservation& reservation,
                     Prepared& prepared) noexcept {
+    const state::ScopedAccount accountScope(
+        state::account_for_public_root(subscription.familyRootSoid));
     const state::AccountState account = state::account_snapshot();
     if (reservation.rawWriteOffset > scratch.plaintext.size()) {
         return report_roster_failure("reservation");

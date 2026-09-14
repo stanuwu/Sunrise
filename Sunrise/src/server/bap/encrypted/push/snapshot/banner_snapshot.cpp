@@ -23,6 +23,7 @@ bool prepare_banner(Scratch& scratch,
                     std::int32_t version,
                     std::uint64_t previousCharacter,
                     Prepared& prepared) noexcept {
+    const state::ScopedAccount accountScope(state::account_for_public_root(familyRootSoid));
     const Reservation reservation = reserve_prior(scratch, prepared);
     const state::AccountState account = state::account_snapshot();
     if (reservation.rawWriteOffset > scratch.plaintext.size()) {

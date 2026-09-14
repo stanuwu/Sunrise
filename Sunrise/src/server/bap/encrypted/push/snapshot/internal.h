@@ -14,6 +14,21 @@
 
 namespace sunrise::server::bap::encrypted::push::snapshot {
 
+[[nodiscard]] bool prepare_join_descriptor(Scratch& scratch,
+                                           const middleware::queuez::Subscription& subscription,
+                                           const Reservation& reservation,
+                                           Prepared& prepared) noexcept;
+
+[[nodiscard]] bool prepare_fireteam(Scratch& scratch,
+                                    const middleware::queuez::Subscription& subscription,
+                                    const Reservation& reservation,
+                                    Prepared& prepared) noexcept;
+
+[[nodiscard]] bool prepare_inspection(Scratch& scratch,
+                                      const middleware::queuez::Subscription& subscription,
+                                      const Reservation& reservation,
+                                      Prepared& prepared) noexcept;
+
 /** Initial family snapshots start at version zero. */
 inline constexpr std::int32_t kInitialFamilyVersion = 0;
 /** Family three carries the account roster selected by Web Service subscription. */

@@ -5,8 +5,10 @@
 
 namespace sunrise::middleware::datagen {
 
-/** An empty item slot is this sentinel; a 0 would assert definition index 0, a real item. */
-inline constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFFU;
+/** Native inspection family and its account/character object schemas. */
+inline constexpr std::uint32_t kInspectionFamily = 1;
+inline constexpr std::uint32_t kInspectionRootObjectId = 0xC47D63DBU;
+inline constexpr std::uint32_t kInspectionCharacterObjectId = 0x1A10412DU;
 
 /** Object id the client matches against the family-three roster slot. */
 inline constexpr std::uint32_t kRosterObjectId = 0x1C35451DU;
@@ -32,6 +34,10 @@ inline constexpr std::uint64_t kUnlockSentinelSoid = 0x7FFFFFFFFFFFFFFFULL;
 inline constexpr std::uint32_t kSocialRosterDirectoryObjectId = 0xDA277CE4U;
 /** Object id for the family-two social roster member slot. */
 inline constexpr std::uint32_t kSocialRosterMemberObjectId = 0x811115CEU;
+inline constexpr std::uint32_t kFireteamDirectoryObjectId = 0xBF49D4F0U;
+inline constexpr std::uint32_t kFireteamDescriptorObjectId = 0xE40CA32AU;
+inline constexpr std::uint32_t kJoinDirectoryObjectId = 0x05D07598U;
+inline constexpr std::uint32_t kJoinDescriptorObjectId = 0x722C6528U;
 
 /** Sizes the family-two slot descriptors declare, in bytes. */
 inline constexpr std::size_t kSocialRosterDirectorySize = 96;
@@ -43,6 +49,8 @@ inline constexpr std::uint32_t kSocialRosterFamily = 2;
 inline constexpr std::uint32_t kRosterFamily = 3;
 inline constexpr std::uint32_t kAccountFamily = 4;
 inline constexpr std::uint32_t kUnlockFamily = 5;
+inline constexpr std::uint32_t kFireteamFamily = 6;
+inline constexpr std::uint32_t kJoinFamily = 7;
 
 /** Slots those objects occupy. */
 inline constexpr std::uint32_t kRosterSlot = 0;
@@ -62,10 +70,24 @@ inline constexpr std::uint32_t kItemInstanceSlot = 3;
 [[nodiscard]] constexpr bool
 object_id(std::uint32_t familyType, std::uint32_t slotIndex, std::uint32_t& objectId) noexcept {
     objectId = 0;
-    if (familyType == kSocialRosterFamily && slotIndex == kSocialRosterDirectorySlot) {
+    if (familyType == kInspectionFamily && slotIndex == kAccountSlot) {
+        objectId = kInspectionRootObjectId;
+    } else if (familyType == kInspectionFamily && slotIndex == kCharacterSlot) {
+        objectId = kInspectionCharacterObjectId;
+    } else if (familyType == kInspectionFamily && slotIndex == kItemInstanceSlot) {
+        objectId = kItemInstanceObjectId;
+    } else if (familyType == kSocialRosterFamily && slotIndex == kSocialRosterDirectorySlot) {
         objectId = kSocialRosterDirectoryObjectId;
     } else if (familyType == kSocialRosterFamily && slotIndex == kSocialRosterMemberSlot) {
         objectId = kSocialRosterMemberObjectId;
+    } else if (familyType == kFireteamFamily && slotIndex == 0) {
+        objectId = kFireteamDirectoryObjectId;
+    } else if (familyType == kFireteamFamily && slotIndex == 1) {
+        objectId = kFireteamDescriptorObjectId;
+    } else if (familyType == kJoinFamily && slotIndex == 0) {
+        objectId = kJoinDirectoryObjectId;
+    } else if (familyType == kJoinFamily && slotIndex == 1) {
+        objectId = kJoinDescriptorObjectId;
     } else if (familyType == kRosterFamily && slotIndex == kRosterSlot) {
         objectId = kRosterObjectId;
     } else if (familyType == kAccountFamily && slotIndex == kAccountSlot) {
