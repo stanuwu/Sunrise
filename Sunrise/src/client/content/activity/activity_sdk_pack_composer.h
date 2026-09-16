@@ -109,6 +109,7 @@ struct Storage final {
     std::vector<format::ActorSequenceTable> actorSequenceTables{};
     std::vector<format::ActorSequenceEntry> actorSequenceEntries{};
     std::vector<format::ActorSequenceBinding> actorSequenceBindings{};
+    std::vector<format::AuthoredSceneEventKey> authoredSceneEventKeys{};
 
     /** @return Borrowed sections in exact current format order. */
     [[nodiscard]] pack::Tables tables() const noexcept;

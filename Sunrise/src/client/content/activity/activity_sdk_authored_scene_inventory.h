@@ -37,6 +37,19 @@ struct Resource final {
     std::uint32_t reserved{};
 };
 
+/** One event gate of a scene's graph before its ID is linked. */
+struct EventKey final {
+    Text id{};
+    std::uint32_t slotIndex{};
+    std::uint32_t resourceTag{};
+    std::uint32_t graphTag{};
+    std::uint32_t gateOffset{};
+    std::int32_t ordinal{};
+    std::uint32_t key{};
+    std::uint32_t flags{};
+    std::uint32_t reserved{};
+};
+
 /** One exact format-v12 same-object scene-to-squad edge before its ID is linked. */
 struct SquadEdge final {
     Text id{};
@@ -101,6 +114,8 @@ struct Facts final {
 /** Canonical section-19 and section-22 rows with unresolved string references. */
 struct Snapshot final {
     std::vector<Resource> resources{};
+    /** Every gate of every resourced scene, in slot then gate order. */
+    std::vector<EventKey> eventKeys{};
     std::vector<SquadEdge> squadEdges{};
     std::vector<TaskTarget> taskTargets{};
     std::vector<DialogueCueText> dialogueCueTexts{};

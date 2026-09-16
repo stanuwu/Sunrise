@@ -391,6 +391,19 @@ bool render_mission(const Source& source,
             append_hex(output, scene.configTag);
             output.append(", resource_tag = ");
             append_hex(output, scene.resourceTag);
+            // The graph's gates in order: what set_scene_events publishes to run the scene.
+            bool anyKey = false;
+            for (const format::AuthoredSceneEventKey& gate : source.authoredSceneEventKeys) {
+                if (gate.sceneSlotIndex != slotRow) {
+                    continue;
+                }
+                output.append(anyKey ? ", " : ", event_keys = { ");
+                append_hex(output, gate.key);
+                anyKey = true;
+            }
+            if (anyKey) {
+                output.append(" }");
+            }
             output.append(" },\n");
             sceneConstants.append("    ");
             sceneConstants.append(key);

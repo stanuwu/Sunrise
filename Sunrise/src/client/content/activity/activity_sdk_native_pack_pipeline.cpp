@@ -209,6 +209,7 @@ lua_source(const state::activity_sdk::identity::Expected& identity,
             storage.actorSequenceTables,
             storage.actorSequenceEntries,
             storage.actorSequenceBindings,
+            storage.authoredSceneEventKeys,
             worldSources};
 }
 

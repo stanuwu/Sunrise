@@ -629,6 +629,23 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         }
     }
 
+    output.authoredSceneEventKeys.resize(authoredScenes.eventKeys.size());
+    for (std::size_t index = 0; index < authoredScenes.eventKeys.size(); ++index) {
+        const authored_scene_inventory::EventKey& input = authoredScenes.eventKeys[index];
+        format::AuthoredSceneEventKey& target = output.authoredSceneEventKeys[index];
+        target.sceneSlotIndex = input.slotIndex;
+        target.resourceTag = input.resourceTag;
+        target.graphTag = input.graphTag;
+        target.gateOffset = input.gateOffset;
+        target.ordinal = input.ordinal;
+        target.key = input.key;
+        target.flags = input.flags;
+        target.reserved = input.reserved;
+        if (!link_text(linker, input.id, target.id)) {
+            return false;
+        }
+    }
+
     output.authoredSceneSquadEdges.resize(authoredScenes.squadEdges.size());
     for (std::size_t index = 0; index < authoredScenes.squadEdges.size(); ++index) {
         const authored_scene_inventory::SquadEdge& input = authoredScenes.squadEdges[index];
