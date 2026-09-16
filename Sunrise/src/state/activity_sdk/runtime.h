@@ -241,6 +241,8 @@ public:
     actor_sequence_entries() const noexcept;
     [[nodiscard]] std::span<const format::ActorSequenceBinding>
     actor_sequence_bindings() const noexcept;
+    [[nodiscard]] std::span<const format::AuthoredSceneEventKey>
+    authored_scene_event_keys() const noexcept;
 
 private:
     friend bool load(void* module,
@@ -489,6 +491,9 @@ slot_authored_scene_resources(const Catalog& catalog, const format::Slot& slot) 
 /** Returns all exact same-object squad edges owned by one type-43 slot. */
 [[nodiscard]] std::span<const format::AuthoredSceneSquadEdge>
 slot_authored_scene_squad_edges(const Catalog& catalog, const format::Slot& slot) noexcept;
+/** Returns the event keys of one type-43 slot's graph, in gate order. */
+[[nodiscard]] std::span<const format::AuthoredSceneEventKey>
+slot_authored_scene_event_keys(const Catalog& catalog, const format::Slot& slot) noexcept;
 /** Resolves one validated scene edge to its exact type-1 target slot. */
 [[nodiscard]] const format::Slot*
 authored_scene_linked_squad_slot(const Catalog& catalog,

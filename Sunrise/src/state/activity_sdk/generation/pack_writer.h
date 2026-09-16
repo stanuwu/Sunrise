@@ -68,6 +68,7 @@ struct Tables final {
     std::span<const format::ActorSequenceTable> actorSequenceTables{};
     std::span<const format::ActorSequenceEntry> actorSequenceEntries{};
     std::span<const format::ActorSequenceBinding> actorSequenceBindings{};
+    std::span<const format::AuthoredSceneEventKey> authoredSceneEventKeys{};
 };
 
 /** Canonical pack build and publication outcomes. */
