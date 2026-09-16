@@ -455,6 +455,8 @@ bool consume(Session& session,
         }
     }
     const bool artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome) != nullptr;
+    const bool vendorReputation =
+        transaction_if<state::PendingVendorReputation>(outcome) != nullptr;
     const bool mutatesAccount =
         outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasStoreSync
         || outcome.hasArtifactReset
@@ -468,9 +470,7 @@ bool consume(Session& session,
         || transaction_if<ItemDismantleTransaction>(outcome) != nullptr
         || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr
-        || transaction_if<state::PendingSettingsUpdate>(outcome) != nullptr;
-    // A grant with no reward row, such as a turn-in that pays only XP, shows no flyout to hold.
-    const auto* rewardGrant = transaction_if<RecordRewardGrantTransaction>(outcome);
+        || transaction_if<state::PendingSettingsUpdate>(outcome) != nullptr || vendorReputation;
     const bool presentsAcquisition =
         transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
@@ -624,7 +624,7 @@ bool consume(Session& session,
                 session.activityKeepaliveDueTick = GetTickCount64() + kActivityKeepaliveIntervalMs;
             }
             const bool resyncsCommittedAccount =
-                hasPrecommittedAccountAction && !queuezPublication.hasState;
+                vendorReputation || (hasPrecommittedAccountAction && !queuezPublication.hasState);
             if (resyncsCommittedAccount) {
                 bap::arm_account_resync_everywhere();
             }

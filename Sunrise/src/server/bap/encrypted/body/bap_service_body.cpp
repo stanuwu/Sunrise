@@ -427,33 +427,25 @@ bool process(const ServiceRoute& route,
                 return refuse_web_action(message, output, written);
             }
         }
-        if (postmasterClaim != nullptr) {
-            auto* transaction = emplace_transaction<PostmasterClaimTransaction>(outcome);
-            if (transaction == nullptr
-                || !queuez::stage_record_reward_grant(
-                    queuezState, postmasterClaim->grant, transaction->update)) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::warn,
-                                 "ev=ws405 stage=queuez_preflight result=fail");
-                clear_transaction(outcome);
+        const auto* reputation =
+            web_service::mutation_if<state::PendingVendorReputation>(webOutcome);
+        if (reputation != nullptr) {
+            if (!queuezState.family4Active || queuezState.family4RootSoid != reputation->accountSoid
+                || queuezState.family4Version == (std::numeric_limits<std::int32_t>::max)()
+                || emplace_transaction<state::PendingVendorReputation>(outcome, *reputation)
+                       == nullptr) {
                 return refuse_web_action(message, output, written);
             }
+            // The next account image carries both the material debit and character progression.
             middleware::web_service::StatusResponse status{};
-            status.value = transaction->update.after.family4Version;
+            status.value = queuezState.family4Version + 1;
+            middleware::web_service::ResponseShape shape{};
+            web_service::resolve_response_shape(message.opcode, shape);
             if (!middleware::web_service::encode_response(
-                    message,
-                    middleware::web_service::ResponseShape::statusPair,
-                    status,
-                    output,
-                    written)) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::warn,
-                                 "ev=ws405 stage=response result=fail");
+                    message, shape, status, output, written)) {
                 clear_transaction(outcome);
                 return refuse_web_action(message, output, written);
             }
-            transaction->pending =
-                web_service::take_mutation<state::PendingPostmasterClaim>(webOutcome);
         }
         if (equipmentSwap != nullptr) {
             // Promise the Family-4 revision carrying this optimistic equip.
