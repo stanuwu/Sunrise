@@ -3,6 +3,7 @@
 #include <limits>
 #include <string>
 
+#include "middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "state/build_data/runtime.h"
 #include "state/build_data/vendors/vendor_catalog.h"
 #include "state/investment/store_internal.h"
@@ -39,6 +40,17 @@ std::uint32_t g_cost = kCost;
 std::uint16_t g_progression = kGunsmithProgression;
 bool g_characterScope = true;
 bool g_materialAvailable = true;
+/** Build-86657 owned faction engrams, separate from the turn-in placeholders. */
+constexpr std::uint32_t kVanguardEngram = 3578462974U, kCrucibleEngram = 1368565477U,
+                        kGunsmithEngram = 3531414277U;
+/** Synthetic item selector for the currently tested reward. */
+constexpr std::uint16_t kRewardIndex = 5;
+/** Build-86657 Gunsmith's repeating rank costs 3000 XP. */
+constexpr std::int32_t kGunsmithRankCost = 3000;
+/** Build-86657 engram bucket has ten character inventory slots. */
+constexpr std::size_t kEngramCapacity = 10;
+std::size_t g_rewardCapacity = kEngramCapacity;
+bool g_rewardAvailable = true;
 
 /** @param passed Check result. @param label Failure description. */
 void check(bool passed, const char* label) {
@@ -76,6 +88,8 @@ void reset() {
     g_progression = kGunsmithProgression;
     g_characterScope = true;
     g_materialAvailable = true;
+    g_rewardCapacity = kEngramCapacity;
+    g_rewardAvailable = true;
     state::AccountState account{};
     account.primarySoid = kAccount;
     account.characterCount = 2;
@@ -246,6 +260,121 @@ void verify() {
                      == kCost * kVanguardXpPerToken,
           "Vanguard token rate, not Gunsmith rate");
 }
+
+/** Exercises real grants and SQLite transactions with controlled content and loadout resolution. */
+void verify_rank_rewards() {
+    /** Build-86657 vendor mappings; each ladder repeats its fixed XP cost. */
+    struct RankCase {
+        std::uint32_t vendor, placeholder, material, reward;
+        std::uint16_t progression;
+        std::int32_t rankCost, rate;
+    };
+    constexpr std::array<RankCase, 3> cases{{
+        {kBanshee, kGunsmithRewards, kGunsmithMaterials, kGunsmithEngram, 55, 3000, 30},
+        {kZavala, kVanguardRewards, kVanguardToken, kVanguardEngram, 62, 2000, 100},
+        {3603221665U, 265113466U, 183980811U, kCrucibleEngram, 49, 2000, 100},
+    }};
+    state::PendingVendorReputation pending{};
+    for (const auto& entry : cases) {
+        reset();
+        g_vendorHash = entry.vendor;
+        g_soldHash = entry.placeholder;
+        g_costHash = entry.material;
+        g_progression = entry.progression;
+        auto account = store::account();
+        account.profileItems[0].definitionHash = entry.material;
+        check(store::write_account(account)
+                  && store::write_unlock(store::Bank::characterProgressions,
+                                         entry.progression,
+                                         entry.rankCost - kCost * entry.rate),
+              "seed exact-threshold turn-in");
+        check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared
+                  && store::account().characters[0].inventory.count == 0,
+              "prepare rank grant without writes");
+        auto duplicate = pending;
+        check(state::commit_vendor_reputation(pending), "commit rank reward");
+        const auto& inventory = store::account().characters[0].inventory;
+        check(inventory.count == 1 && inventory.values[0].definitionHash == entry.reward
+                  && inventory.values[0].quantity == 1 && inventory.values[0].instanceSoid != 0
+                  && store::account().characters[1].inventory.count == 0,
+              "one owned reward for selected character");
+        check(!state::commit_vendor_reputation(duplicate)
+                  && store::account().characters[0].inventory.count == 1,
+              "duplicate cannot grant again");
+        check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared
+                  && state::commit_vendor_reputation(pending)
+                  && store::account().characters[0].inventory.count == 1,
+              "below next threshold does not grant again");
+    }
+    reset();
+    check(store::write_unlock(
+              store::Bank::characterProgressions, kGunsmithProgression, kGunsmithRankCost - kAward),
+          "seed crossing");
+    g_rewardCapacity = 0;
+    check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::refused
+              && store::account().profileItems[0].quantity == kInitialQuantity
+              && gunsmith()[0] == kGunsmithRankCost - kAward,
+          "full bucket refuses before charging");
+    g_rewardCapacity = kEngramCapacity;
+    g_rewardAvailable = false;
+    check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::refused,
+          "missing reward content refused");
+    g_rewardAvailable = true;
+    check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared,
+          "prepare before capacity change");
+    g_rewardCapacity = 0;
+    check(!state::commit_vendor_reputation(pending)
+              && store::account().profileItems[0].quantity == kInitialQuantity,
+          "commit rechecks capacity without charging");
+    g_rewardCapacity = kEngramCapacity;
+    {
+        store::Transaction outer;
+        check(outer.ready()
+                  && state::prepare_vendor_reputation(kVendor, kSale, pending)
+                         == Disposition::prepared
+                  && state::commit_vendor_reputation(pending),
+              "stage reward inside response");
+    }
+    check(store::account().characters[0].inventory.count == 0
+              && store::account().profileItems[0].quantity == kInitialQuantity
+              && gunsmith()[0] == kGunsmithRankCost - kAward,
+          "abandoned response rolls back reward, XP and payment");
+    check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared
+              && store::execute("CREATE TEMP TRIGGER reject_rank BEFORE INSERT ON unlocks "
+                                "BEGIN SELECT RAISE(ABORT,'fixture'); END"),
+          "inject rank write failure");
+    check(!state::commit_vendor_reputation(pending)
+              && store::account().characters[0].inventory.count == 0
+              && store::account().profileItems[0].quantity == kInitialQuantity
+              && gunsmith()[0] == kGunsmithRankCost - kAward,
+          "failed XP write rolls back grant and materials");
+    check(store::execute("DROP TRIGGER reject_rank"), "remove rank fault");
+    reset();
+    check(store::write_unlock(
+              store::Bank::characterProgressions, kGunsmithProgression, kGunsmithRankCost * 2)
+              && state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared
+              && state::commit_vendor_reputation(pending)
+              && store::account().characters[0].inventory.count == 0,
+          "historical ranks never backfilled");
+    reset();
+    auto account = store::account();
+    // Two complete Gunsmith ranks in one controlled payment exercise unique item allocation.
+    g_cost = static_cast<std::uint32_t>(kGunsmithRankCost * 2 / 30);
+    account.profileItems[0].quantity = static_cast<std::int32_t>(g_cost);
+    check(store::write_account(account), "seed multi-rank materials");
+    g_rewardCapacity = 1;
+    check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::refused
+              && store::account().characters[0].inventory.count == 0,
+          "partial multi-rank grant is not persisted");
+    g_rewardCapacity = kEngramCapacity;
+    check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared
+              && state::commit_vendor_reputation(pending),
+          "commit two earned ranks");
+    const auto& inventory = store::account().characters[0].inventory;
+    check(inventory.count == 2
+              && inventory.values[0].instanceSoid != inventory.values[1].instanceSoid,
+          "one unique item per crossed threshold");
+}
 } // namespace
 
 namespace sunrise::state::build_data::vendors {
@@ -269,6 +398,10 @@ bool sale_row(const Definition&, std::size_t row, SaleRow& output) noexcept {
 } // namespace sunrise::state::build_data::vendors
 
 namespace sunrise::state::build_data {
+/** Season bundles are not part of the faction grant under test. */
+bool find_season_pass_package(std::uint32_t, season_pass::Package&) noexcept {
+    return false;
+}
 /** Unrelated acquisition code shares the profile helper translation unit. */
 bool find_collectible_definition(std::uint16_t, collectibles::Definition&) noexcept {
     return false;
@@ -284,6 +417,13 @@ bool find_item_definition_index(std::uint16_t definitionIndex,
 }
 bool find_item_definition_hash(std::uint32_t definitionHash,
                                items::Definition& definition) noexcept {
+    if (definitionHash == kVanguardEngram || definitionHash == kCrucibleEngram
+        || definitionHash == kGunsmithEngram) {
+        definition = {};
+        definition.definitionHash = definitionHash;
+        definition.definitionIndex = kRewardIndex;
+        return g_rewardAvailable;
+    }
     return definitionHash == g_costHash && find_item_definition_index(kCostIndex, definition);
 }
 bool find_configured_item_detail(std::uint16_t definitionIndex,
@@ -333,16 +473,36 @@ AccountState account_snapshot() noexcept {
 } // namespace sunrise::state
 
 namespace sunrise::state::runtime::detail {
-/** Isolates character selection from the unrelated item acquisition implementation. */
-std::size_t selected_character_index(const AccountState& account) noexcept {
-    for (std::size_t index = 0; index < account.characterCount; ++index) {
-        if (account.characters[index].selected) {
-            return index;
-        }
-    }
-    return account.characterCount;
+/** Unused acquisition commit paths must not succeed through a fixture equality shortcut. */
+bool same_character(const CharacterState&, const CharacterState&) noexcept {
+    return false;
 }
 } // namespace sunrise::state::runtime::detail
+
+namespace sunrise::middleware::datagen::family4::loadout {
+/**
+ * Models bucket capacity without installed game content; acquisition and persistence are real.
+ * @param account Candidate account.
+ * @param selectedCharacterIndex Character whose items must fit.
+ * @param output Receives synthetic inventory positions.
+ * @return False when the fixture bucket has insufficient space.
+ */
+bool resolve(const state::AccountState& account,
+             std::size_t selectedCharacterIndex,
+             ResolvedLoadout& output) noexcept {
+    output = {};
+    const auto& inventory = account.characters[selectedCharacterIndex].inventory;
+    if (inventory.count > g_rewardCapacity) {
+        return false;
+    }
+    for (std::size_t index = 0; index < inventory.count; ++index) {
+        auto& item = output.items[output.itemCount++];
+        item.inventoryRow = static_cast<std::uint16_t>(index);
+        item.instance.instanceSoid = inventory.values[index].instanceSoid;
+    }
+    return true;
+}
+} // namespace sunrise::middleware::datagen::family4::loadout
 
 /**
  * Runs against disposable SQLite only, then checks persistence by closing and reopening it.
@@ -360,6 +520,7 @@ int main(int argc, char** argv) {
                       read_text(root + "/account_settings_defaults.sql")),
           "open disposable store");
     verify();
+    verify_rank_rewards();
     store::shutdown();
     check(store::open(argv[2],
                       read_text(root + "/investment_schema.sql"),
@@ -368,15 +529,21 @@ int main(int argc, char** argv) {
                       read_text(root + "/account_settings_defaults.sql")),
           "open disposable disk store");
     reset();
+    check(store::write_unlock(
+              store::Bank::characterProgressions, kGunsmithProgression, kGunsmithRankCost - kAward),
+          "seed persistent rank crossing");
     state::PendingVendorReputation pending{};
     check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared
               && state::commit_vendor_reputation(pending),
           "commit before closing store");
     store::shutdown();
     check(store::open(argv[2], {}, {}, {}, {}), "reopen saved store without seeding");
-    check(gunsmith()[0] == kInitialProgression[0] + kAward
-              && store::account().profileItems[0].quantity == kInitialQuantity - kCost,
-          "material debit and XP survive reopening database");
+    check(gunsmith()[0] == kGunsmithRankCost
+              && store::account().profileItems[0].quantity == kInitialQuantity - kCost
+              && store::account().characters[0].inventory.count == 1
+              && store::account().characters[0].inventory.values[0].definitionHash
+                     == kGunsmithEngram,
+          "material debit, XP and reward survive reopening database");
     store::shutdown();
     std::puts("PASS: reputation transaction, exact debit/credit, refusal, staleness and rollback");
 }

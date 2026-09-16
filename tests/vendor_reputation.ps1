@@ -12,6 +12,8 @@ $repSources = @(
     'tests/vendor_reputation.cpp',
     'Sunrise/src/state/runtime/state_vendor_reputation_runtime.cpp',
     'Sunrise/src/state/runtime/state_account_profile_runtime.cpp',
+    'Sunrise/src/state/runtime/state_account_acquisition_runtime.cpp',
+    'Sunrise/src/state/runtime/state_account_identity_runtime.cpp',
     'Sunrise/src/state/account/account_state.cpp',
     'Sunrise/src/state/account/inventory/inventory_state.cpp',
     'Sunrise/src/state/account/settings/settings_state.cpp',

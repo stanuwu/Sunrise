@@ -17,18 +17,28 @@ struct ReputationRule {
     std::uint32_t costHash;
     std::uint16_t progressionIndex;
     std::int32_t experiencePerUnit;
+    std::uint32_t rewardHash{};
+    std::int32_t rankCost{};
 };
+
+/** Build-86657 faction rewardItemHash values identify owned engrams, not sale placeholders. */
+constexpr std::uint32_t kVanguardEngram = 3578462974U, kCrucibleEngram = 1368565477U,
+                        kGunsmithEngram = 3531414277U;
+/** Build-86657 Vanguard and Crucible use 2000-XP steps and repeat the last step. */
+constexpr std::int32_t kTokenRankCost = 2000;
+/** Build-86657 Gunsmith uses 3000-XP steps and repeats the last step. */
+constexpr std::int32_t kGunsmithRankCost = 3000;
 
 /** Vendor/item hashes, character progression indices and XP per unit from build 86657. */
 constexpr std::array<ReputationRule, 7> kReputationRules{{
     // Banshee: Gunsmith Rewards charges Gunsmith Materials for Gunsmith progression.
-    {672118013U, 3831705402U, 685157383U, 55, 30},
+    {672118013U, 3831705402U, 685157383U, 55, 30, kGunsmithEngram, kGunsmithRankCost},
     // Banshee: the same placeholder also accepts Weapon Telemetry at its own XP rate.
-    {672118013U, 3831705402U, 685157381U, 55, 25},
+    {672118013U, 3831705402U, 685157381U, 55, 25, kGunsmithEngram, kGunsmithRankCost},
     // Zavala: Vanguard Tactician Rewards charges Vanguard Tactician Tokens.
-    {69482069U, 3987308529U, 3899548068U, 62, 100},
+    {69482069U, 3987308529U, 3899548068U, 62, 100, kVanguardEngram, kTokenRankCost},
     // Shaxx: Crucible Rewards charges Crucible Tokens, not Valor or Glory points.
-    {3603221665U, 265113466U, 183980811U, 49, 100},
+    {3603221665U, 265113466U, 183980811U, 49, 100, kCrucibleEngram, kTokenRankCost},
     // Devrim: EDZ token turn-ins use a different placeholder from destination materials.
     {396892126U, 61430328U, 2640973641U, 52, 100},
     // Devrim: destination-material turn-ins accept Dusklight Shards.
@@ -90,7 +100,9 @@ VendorReputationDisposition resolve_award(std::uint16_t vendorIndex,
         award = {cost.definitionHash,
                  sale.costQuantity,
                  static_cast<std::int32_t>(experience),
-                 rule.progressionIndex};
+                 rule.progressionIndex,
+                 rule.rewardHash,
+                 rule.rankCost};
         return VendorReputationDisposition::prepared;
     }
     return recognized ? VendorReputationDisposition::refused
@@ -126,6 +138,49 @@ bool charge_materials(AccountState& account, const VendorReputationAward& award)
     account.profileItemCount = write;
     return remaining == 0 && account::valid(account)
            && runtime::detail::valid_profile_inventory(account);
+}
+
+/**
+ * Hold the store lock; discard the candidate if any earned engram does not fit.
+ * @param account Candidate after charging materials; no saved state is written here.
+ * @param award Build-matched turn-in and repeating rank rule.
+ * @param beforeExperience Nonnegative XP before this turn-in.
+ * @return False when the reward definition or inventory cannot support the complete grant.
+ */
+bool grant_rank_rewards(AccountState& account,
+                        const VendorReputationAward& award,
+                        std::int32_t beforeExperience) noexcept {
+    if (award.rewardHash == 0) {
+        return true;
+    }
+    if (award.rankCost <= 0 || beforeExperience < 0 || award.experience <= 0) {
+        return false;
+    }
+    const auto afterExperience = static_cast<std::int64_t>(beforeExperience) + award.experience;
+    // Only thresholds crossed by this payment earn items; existing XP is never backfilled.
+    const auto count = static_cast<std::size_t>(afterExperience / award.rankCost
+                                                - beforeExperience / award.rankCost);
+    if (count == 0) {
+        return true;
+    }
+    const auto selected = runtime::detail::selected_character_index(account);
+    build_data::items::Definition reward{};
+    if (selected >= account.characterCount
+        || !build_data::find_item_definition_hash(award.rewardHash, reward)
+        || reward.questInitialization.scope != build_data::items::QuestInitialization::Scope::none
+        || count > account.characters[selected].inventory.values.size()
+                       - account.characters[selected].inventory.count) {
+        return false;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        PendingItemAcquisition grant{};
+        if (!runtime::detail::finalize_item_acquisition(
+                account, account, award.rewardHash, false, {.direct = true}, grant)) {
+            return false;
+        }
+        account.characters[selected] = grant.afterCharacter;
+    }
+    return true;
 }
 
 } // namespace
@@ -165,7 +220,8 @@ VendorReputationDisposition prepare_vendor_reputation(std::uint16_t vendorIndex,
         return VendorReputationDisposition::refused;
     }
     AccountState after = account;
-    if (!charge_materials(after, award)) {
+    if (!charge_materials(after, award)
+        || !grant_rank_rewards(after, award, before[kExperienceLane])) {
         return VendorReputationDisposition::refused;
     }
     mutation.beforeItems = account.profileItems;
@@ -182,9 +238,9 @@ VendorReputationDisposition prepare_vendor_reputation(std::uint16_t vendorIndex,
 }
 
 /**
- * Debits materials and credits character XP within the caller's response transaction.
+ * Materials, XP and earned engrams share the caller's response transaction.
  * @param mutation Before-image to consume, including on refusal.
- * @return False for stale state, changed content or any failed write; neither change is kept.
+ * @return False for stale state, changed content or any failed grant/write; all changes roll back.
  */
 bool commit_vendor_reputation(PendingVendorReputation& mutation) noexcept {
     const runtime::detail::PendingConsumption consume(mutation);
@@ -213,7 +269,8 @@ bool commit_vendor_reputation(PendingVendorReputation& mutation) noexcept {
     if (progression != mutation.beforeProgression || progression[kExperienceLane] < 0
         || progression[kExperienceLane]
                > (std::numeric_limits<std::int32_t>::max)() - award.experience
-        || !charge_materials(account, award)) {
+        || !charge_materials(account, award)
+        || !grant_rank_rewards(account, award, progression[kExperienceLane])) {
         return false;
     }
     progression[kExperienceLane] += award.experience;

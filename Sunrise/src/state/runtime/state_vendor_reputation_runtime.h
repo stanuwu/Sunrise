@@ -14,10 +14,13 @@ struct VendorReputationAward {
     std::uint32_t costQuantity{};
     std::int32_t experience{};
     std::uint16_t progressionIndex{};
+    /** Zero preserves XP-only handling for factions without a supported reward rule. */
+    std::uint32_t rewardHash{};
+    std::int32_t rankCost{};
     bool operator==(const VendorReputationAward&) const = default;
 };
 
-/** Captured payment and character state; no inventory item is granted by this transaction. */
+/** Captured payment and XP; rank rewards commit with the same turn-in. */
 struct PendingVendorReputation {
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         beforeItems{};
