@@ -13,7 +13,7 @@
 namespace sunrise::middleware::profile {
 namespace {
 constexpr std::uint32_t kMagic = 0x53505246;
-constexpr std::uint16_t kVersion = 5;
+constexpr std::uint16_t kVersion = 6;
 
 class Encoder {
 public:
@@ -180,7 +180,7 @@ bool character_fields(Archive& archive, Character& character) noexcept {
             return false;
         }
     }
-    // Only equipment is public; the private bag has no field in version 5.
+    // Only equipment is public; the private bag has no field in this layout.
     return true;
 }
 
@@ -191,8 +191,6 @@ bool native_presence_fields(Archive& archive, Presence& presence) noexcept {
                         presence.hasGroup,
                         presence.groupKey,
                         presence.memberCount,
-                        presence.hasJoinLockFlags,
-                        presence.joinLockFlags,
                         presence.hasFireteam,
                         presence.descriptorSize)
         || presence.descriptorSize > presence.descriptor.size()) {

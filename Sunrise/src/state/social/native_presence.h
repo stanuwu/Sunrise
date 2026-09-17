@@ -18,9 +18,6 @@ struct NativePresence {
     bool hasGroup{};
     std::uint32_t groupKey{};
     std::int8_t memberCount{};
-    /** Native user_join_controls lock mask; this is not a per-player loading state. */
-    bool hasJoinLockFlags{};
-    std::uint8_t joinLockFlags{};
     bool hasFireteam{};
     std::array<std::byte, kNativeFireteamSize> fireteam{};
     std::uint8_t descriptorSize{};
@@ -34,7 +31,6 @@ struct NativePresence {
         return value == NativePresence{};
     }
     if ((!value.hasGroup && (value.groupKey != 0 || value.memberCount != 0))
-        || (!value.hasJoinLockFlags && value.joinLockFlags != 0) || value.joinLockFlags > 31
         || value.descriptorSize > value.descriptor.size()) {
         return false;
     }

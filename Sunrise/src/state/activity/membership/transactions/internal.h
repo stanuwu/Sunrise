@@ -107,9 +107,6 @@ inline MembershipState merge(const MembershipState& state,
     if (update.hasCurrentRegion) {
         merged.currentRegion = update.currentRegion;
         merged.currentReported = true;
-        // The owning client's committed leg is its native region-arrival report. Fireteam
-        // join-control flags in ws-702 describe joinability, not this member's world state.
-        merged.entered = update.currentRegion.index >= 0;
     }
     if (update.hasRegion) {
         merged.region = update.region;

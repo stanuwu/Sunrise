@@ -18,12 +18,6 @@ inline constexpr std::size_t kPayloadSize = 4800;
 
 /** Supported fields from the character writeback. */
 struct Request {
-    /**
-     * Native fireteam join-lock mask at objB `+12068`, schema path `.0.11.1.0.0.4`.
-     * The native presence publisher copies user_join_controls[7]; bit 3 closes activity joins.
-     */
-    std::uint8_t joinLockFlags{};
-    bool hasJoinLockFlags{};
     std::optional<state::account::inventory::CharacterNewItems> newItems;
     state::social::NativePresence presence{};
 };

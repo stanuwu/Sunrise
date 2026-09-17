@@ -50,22 +50,12 @@ bool read_header(Reader& reader) noexcept {
            && skip_optional(reader, kWordBits);
 }
 
-/** The five-byte activity block carries join-lock flags without an inner presence bit. */
+/** The five-byte activity block packs its fields without inner presence bits. */
 bool read_activity(Reader& reader, Request& output) noexcept {
     output.presence.hasGroup = true;
-    const auto block = [&output](Reader& fields) noexcept {
-        // Three biased bytes and one three-bit selector precede the join-lock flags.
-        constexpr std::size_t kPrefixBits = 3 * kByteBits + 3;
-        std::uint64_t value = 0;
-        if (!fields.skip(kPrefixBits) || !fields.read(kJoinLockBits, value)) {
-            return false;
-        }
-        output.joinLockFlags = static_cast<std::uint8_t>(value);
-        output.hasJoinLockFlags = true;
-        output.presence.joinLockFlags = output.joinLockFlags;
-        output.presence.hasJoinLockFlags = true;
-        return true;
-    };
+    // Three biased bytes and one three-bit selector precede the fireteam join-lock mask
+    // (class 0x808079C6 ordinal 4, five bits, no bias), which nothing here consumes.
+    constexpr std::size_t kBlockBits = 3 * kByteBits + 3 + kJoinLockBits;
     const auto groupKey = [&output](Reader& field) noexcept {
         std::uint64_t value{};
         if (!field.read(kWordBits, value)) {
@@ -83,8 +73,8 @@ bool read_activity(Reader& reader, Request& output) noexcept {
             static_cast<std::int8_t>(static_cast<std::uint8_t>(value) ^ 0x80U);
         return true;
     };
-    return optional(reader, block) && optional(reader, groupKey) && optional(reader, memberCount)
-           && skip_optional(reader, kLongBits);
+    return skip_optional(reader, kBlockBits) && optional(reader, groupKey)
+           && optional(reader, memberCount) && skip_optional(reader, kLongBits);
 }
 
 /** The roster mirror has twenty records and seven trailing optional scalars. */

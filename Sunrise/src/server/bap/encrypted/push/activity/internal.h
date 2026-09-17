@@ -232,17 +232,9 @@ struct RefreshReport final {
 client_placement(const Session& session, const RefreshReport* refresh) noexcept;
 
 /**
- * Tests whether the client holds its reported region and no host move is waiting.
- * This ActivityClient report releases the spawn gate. The ws-702 five-bit field is a
- * fireteam join-lock mask and does not report arrival.
- * @param session Connection whose activity session the client reports on.
- * @param refresh Refresh being answered, or null.
- */
-[[nodiscard]] bool client_in_world(const Session& session, const RefreshReport* refresh) noexcept;
-
-/**
- * Tests whether the client's destination region is instantiated, before its arrival report.
- * This advances the loading lifetime. The spawn gate itself waits for `client_in_world`.
+ * Tests whether the client holds the region it reported and no host move is waiting.
+ * This committed-region report is the client's arrival fact; it releases the spawn gate and
+ * advances the loading lifetime.
  * @param session Connection whose activity session the client reports on.
  * @param refresh Refresh being answered, or null.
  */

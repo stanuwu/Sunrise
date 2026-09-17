@@ -377,7 +377,6 @@ ClientPlacement reported_placement(std::uint64_t sessionId) noexcept {
         placement.currentRegion = membership.currentRegion.index;
         placement.bubble = membership.bubble;
         placement.bubbleRevision = membership.bubbleRevision;
-        placement.clientInWorld = membership.clientInWorld;
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return placement;

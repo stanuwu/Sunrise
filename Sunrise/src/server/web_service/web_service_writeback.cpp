@@ -21,9 +21,8 @@ bool note_character_writeback(
     std::array<char, core::log::kLineCapacity> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
-                                      "ev=activity stage=writeback result=%s join_lock_flags=%u",
-                                      parsed ? "ok" : "unparsed",
-                                      static_cast<unsigned>(request.joinLockFlags));
+                                      "ev=activity stage=writeback result=%s",
+                                      parsed ? "ok" : "unparsed");
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,

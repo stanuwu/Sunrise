@@ -213,8 +213,6 @@ struct ClientPlacement final {
     std::int32_t bubble{kMinimumRefreshBubble};
     /** Membership revision the refresh that named the bubble had applied. */
     std::uint32_t bubbleRevision{kAbsentRevision};
-    /** The owning client has reported a committed region. */
-    bool entered{};
 };
 
 /**

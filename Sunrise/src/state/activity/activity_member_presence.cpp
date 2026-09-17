@@ -28,7 +28,6 @@ void copy(const membership::MembershipState& state, membership::ClientPlacement&
     output.currentRegion = state.currentRegion.index;
     output.bubble = state.bubble;
     output.bubbleRevision = state.bubbleRevision;
-    output.entered = state.entered;
 }
 } // namespace
 

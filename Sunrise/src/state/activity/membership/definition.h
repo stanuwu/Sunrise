@@ -197,8 +197,6 @@ struct MembershipState final {
     std::int32_t bubble{kMinimumRefreshBubble};
     /** Membership revision that refresh said the client had applied. */
     std::uint32_t bubbleRevision{kAbsentRevision};
-    /** The owning client's native current-region leg reports a held region. */
-    bool entered{};
     std::uint32_t revision{};
     /** Stable within one session; a world replacement changes it to clear the client table. */
     std::uint32_t epoch{kStableEpoch};

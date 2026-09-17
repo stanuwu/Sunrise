@@ -46,7 +46,6 @@ namespace {
     return false;
 }
 
-/** Tests whether the client holds a slice set and no host move is due. */
 bool client_region_ready(const Session& session, const RefreshReport* refresh) noexcept {
     const state::activity::membership::ClientPlacement placement =
         client_placement(session, refresh);
@@ -60,13 +59,6 @@ bool client_region_ready(const Session& session, const RefreshReport* refresh) n
                              && lease.regionArrivalPending
                              && static_cast<std::int64_t>(lease.plan.effectiveRegion) != held;
     return !movePending && held >= 0;
-}
-
-/** Tests whether the client has reported arrival in its instantiated region. */
-bool client_in_world(const Session& session, const RefreshReport* refresh) noexcept {
-    // The current region is reported by this ActivityClient. The ws-702 five-bit field is
-    // instead the fireteam's join-lock mask; an activity that allows joining clears bit 3.
-    return client_region_ready(session, refresh);
 }
 
 /** Merges one staged squad body after the complete cumulative frame reached transport output. */
@@ -518,7 +510,7 @@ build_roster_snapshot(Session& session,
     snapshot.lifetime = lifetimeState;
     // Wait for this client's committed region. Its native participation and spawn predicates
     // retain the local loading and reported-region checks.
-    snapshot.awaitClientSync = !client_in_world(session, refresh);
+    snapshot.awaitClientSync = !client_region_ready(session, refresh);
     // Player_BindComponents walks every type-13 reference and the player datum can name any one of
     // them. So every participation record carries the same player key. Selecting the first slot
     // leaves the authored cinematic participant unbound whenever it names another record.
