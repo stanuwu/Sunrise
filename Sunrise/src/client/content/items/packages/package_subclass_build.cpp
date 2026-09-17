@@ -124,6 +124,8 @@ bool build_character_abilities(
                              std::uint16_t socketEntryListIndex,
                              const domain::Selection& selection) noexcept {
         if (count >= output.size()) {
+            // A dropped row leaves that subclass and selection with no published abilities.
+            report_ability_failure("capacity", character, socketEntryListIndex, output.size());
             return;
         }
         domain::Definition row{};
