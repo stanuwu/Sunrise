@@ -1116,6 +1116,7 @@
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\snapshot_storage.cpp" />
     <ClCompile Include="src\server\web_service\opcode_routes.cpp" />
     <ClCompile Include="src\server\web_service\web_service_runtime.cpp" />
+    <ClCompile Include="src\server\web_service\web_service_writeback.cpp" />
     <ClCompile Include="src\server\web_service\web_service_actions.cpp" />
     <ClCompile Include="src\server\web_service\web_service_vendor_actions.cpp" />
     <ClCompile Include="src\server\web_service\web_service_record_actions.cpp" />

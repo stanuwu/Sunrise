@@ -132,6 +132,11 @@ std::uint64_t account_primary_soid(AccountHandle handle) noexcept {
     return account::profiles::primary_soid(handle);
 }
 
+bool local_selected_character_soid(std::uint64_t& output) noexcept {
+    output = 0;
+    return local_account_access() && investment::store::read_selected_character(output);
+}
+
 bool local_account_snapshot(AccountState& output) noexcept {
     if (!local_account_access() || !investment::store::read_account(output)) {
         output = {};

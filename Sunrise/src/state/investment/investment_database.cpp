@@ -4,6 +4,7 @@
 namespace sunrise::state::investment::store {
 
 sqlite3* g_database{};
+// Transactions hold this across nested store/statement operations, so the lock must be recursive.
 std::recursive_mutex g_mutex;
 Session g_session;
 std::uint64_t g_failureSerial{};

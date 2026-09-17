@@ -20,6 +20,7 @@
 #include "../../state/build_data/scenarios/definition.h"
 #include "../../state/gameplay/external/squad_entity_retirement.h"
 #include "../../state/runtime/runtime.h"
+#include "../../state/social/steam_roster.h"
 #include "../activity/host_runtime.h"
 #include "activity_authority_query_owner.h"
 #include "activity_authority_reset_owner.h"
@@ -59,6 +60,11 @@ inline constexpr std::size_t kScenarioWideGroupCapacity =
 
 /** Fixed scratch storage owned by the lock, kept off the Client thread's stack. */
 struct Scratch {
+    /** Reused account image and distinct decode staging; callers hold the BAP session lock. */
+    state::AccountState accountImage{};
+    state::AccountState accountDecode{};
+    /** Copy the live directory before mutation and commit only after the reply fits. */
+    state::social::Hub socialDirectory{};
     std::array<std::byte, client::network::kBapFrameCapacity> plaintext{};
     std::array<std::byte, client::network::kBapFrameCapacity> responseBody{};
     std::array<std::byte, client::network::kBapFrameCapacity> responsePayload{};

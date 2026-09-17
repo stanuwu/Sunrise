@@ -113,6 +113,49 @@ bool owns_account_root(std::uint64_t rootSoid) noexcept {
            && row.step() == SQLITE_DONE && owned != 0;
 }
 
+bool read_selected_character(std::uint64_t& output) noexcept {
+    output = 0;
+    if (!local_account_access()) {
+        return false;
+    }
+    Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
+    }
+    Statement owner("SELECT soid FROM account WHERE id=1");
+    std::uint64_t primary{};
+    if (owner.step() != SQLITE_ROW || !owner.column(0, primary) || primary == 0
+        || owner.step() != SQLITE_DONE) {
+        return false;
+    }
+    // Selection belongs to the process-local session; SQLite supplies only slot identities.
+    Statement rows("SELECT slot,soid FROM characters ORDER BY slot");
+    std::size_t count{};
+    std::uint64_t selected{};
+    int result = rows.step();
+    while (result == SQLITE_ROW) {
+        std::size_t slot{};
+        std::uint64_t character{};
+        if (!rows.columns(slot, character) || slot != count || slot >= kCharacterCapacity
+            || character == 0) {
+            return false;
+        }
+        if (g_session.selected[slot]) {
+            if (selected != 0) {
+                return false;
+            }
+            selected = character;
+        }
+        ++count;
+        result = rows.step();
+    }
+    if (result != SQLITE_DONE || !transaction.commit()) {
+        return false;
+    }
+    output = selected;
+    return true;
+}
+
 /** A read returns one complete account or an empty output on failure. */
 bool read_account(AccountState& output) noexcept {
     Transaction transaction;

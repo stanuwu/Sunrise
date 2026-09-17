@@ -36,7 +36,7 @@ find(Subscriptions& subscriptions, std::uint32_t family, std::uint64_t root) noe
     return nullptr;
 }
 
-std::uint32_t generation(const Subscription& subscription) noexcept {
+std::uint32_t generation(Scratch& scratch, const Subscription& subscription) noexcept {
     const auto own = profiles::generation(state::account_for_public_root(subscription.root));
     if (own == 0) {
         return own;
@@ -48,7 +48,7 @@ std::uint32_t generation(const Subscription& subscription) noexcept {
         // The roster row also carries the served account's seat and fireteam, and neither of
         // those moves the projected profile. Folding them in is what refreshes the row on
         // seating instead of leaving it stale until the owner's profile happens to change.
-        const auto mixed = own ^ snapshot::social_roster_revision(subscription.root);
+        const auto mixed = own ^ snapshot::social_roster_revision(scratch, subscription.root);
         return mixed != 0 ? mixed : 1U;
     }
     return own;
@@ -150,7 +150,7 @@ Result consume(Session& session,
     if (first) {
         snapshot::Prepared prepared;
         std::uint64_t character{};
-        const auto current = generation(staged);
+        const auto current = generation(scratch, staged);
         if (!prepare(scratch, staged, 0, prepared, character)) {
             return Result::failure;
         }
@@ -209,7 +209,7 @@ bool poll(Session& session,
         if (entry.root == 0 || now < entry.nextAttemptTick) {
             continue;
         }
-        const auto current = generation(entry);
+        const auto current = generation(scratch, entry);
         if (current == 0 || (!entry.replayPending && current == entry.generation)) {
             continue;
         }

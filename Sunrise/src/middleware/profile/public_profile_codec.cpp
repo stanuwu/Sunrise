@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <bit>
 #include <memory>
-#include <new>
 #include <optional>
 #include <type_traits>
 
@@ -250,22 +249,23 @@ bool encode(const state::AccountState& account,
            && archive.finish(written);
 }
 
-bool decode(std::span<const std::byte> input, state::AccountState& output) noexcept {
-    if (input.size() > kMaximumEncodedSize) {
+bool decode(std::span<const std::byte> input,
+            state::AccountState& output,
+            state::AccountState& staging) noexcept {
+    if (input.size() > kMaximumEncodedSize || &output == &staging) {
         return false;
     }
-    auto candidate = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
-    if (!candidate) {
-        return false;
-    }
+    // Reinitialize the caller's storage directly; no account-sized stack temporary is needed.
+    std::destroy_at(&staging);
+    std::construct_at(&staging);
     Decoder archive(input);
     std::uint32_t magic{};
     std::uint16_t version{};
     if (!archive.values(magic, version) || magic != kMagic || version != kVersion
-        || !account_fields(archive, *candidate) || !archive.complete() || !valid(*candidate)) {
+        || !account_fields(archive, staging) || !archive.complete() || !valid(staging)) {
         return false;
     }
-    output = *candidate;
+    output = staging;
     return true;
 }
 

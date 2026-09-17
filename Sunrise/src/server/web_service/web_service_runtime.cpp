@@ -75,44 +75,6 @@ std::uint64_t next_family5_clock() noexcept {
     return next;
 }
 
-/** Records the authoritative world state carried by the client's character write-back. */
-bool note_character_writeback(
-    const middleware::web_service::Message& message,
-    std::span<const state::account::inventory::PresentedItemRow> presentation,
-    Outcome& outcome) noexcept {
-    if (state::bound_account() != state::kLocalAccount) {
-        return false;
-    }
-    namespace writeback = middleware::web_service::messages::opcode702;
-    writeback::Request request{};
-    const bool parsed = writeback::parse_request(message, request);
-    std::array<char, core::log::kLineCapacity> line{};
-    const int written = std::snprintf(line.data(),
-                                      line.size(),
-                                      "ev=activity stage=writeback result=%s join_lock_flags=%u",
-                                      parsed ? "ok" : "unparsed",
-                                      static_cast<unsigned>(request.joinLockFlags));
-    if (written > 0) {
-        core::log::write(core::log::Channel::server,
-                         parsed ? core::log::Level::info : core::log::Level::warn,
-                         {line.data(), static_cast<std::size_t>(written)});
-    }
-    if (!parsed
-        || (request.newItems
-            && !state::account::inventory::record_character_seen(*request.newItems,
-                                                                 presentation))) {
-        return false;
-    }
-    auto account = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
-    if (!account || !state::local_account_snapshot(*account)) {
-        return false;
-    }
-    request.presence.characterSoid = state::account::selected_character_soid(*account);
-    outcome.nativePresence.reset(new (std::nothrow)
-                                     state::social::NativePresence(request.presence));
-    return outcome.nativePresence != nullptr;
-}
-
 /** @return True when a purchase names the seasonal artifact vendor, which is answered here. */
 [[nodiscard]] bool names_artifact_vendor(const middleware::web_service::Message& message) noexcept {
     namespace purchase_codec = middleware::web_service::messages::opcode901;

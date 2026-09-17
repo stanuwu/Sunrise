@@ -9,8 +9,6 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
-#include <memory>
-#include <new>
 #include <span>
 
 #include "../../../../../core/logging/log.h"
@@ -159,13 +157,12 @@ bool prepare_social_roster(Scratch& scratch,
                            Prepared& prepared) noexcept {
     // Both slot ids are resolved here, so the caller's single id is not used.
     (void)objectId;
-    auto owned = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
+    auto& account = scratch.accountImage;
     const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
     const state::ScopedAccountView bind(handle);
-    if (!owned || !state::bound_account_snapshot(*owned)) {
+    if (!state::bound_account_snapshot(account)) {
         return report_failure("social_roster_state");
     }
-    const auto& account = *owned;
     if (account.primarySoid == 0 || account.primarySoid != subscription.familyRootSoid
         || reservation.rawWriteOffset > scratch.plaintext.size()) {
         return report_failure("social_roster_state");
@@ -302,15 +299,15 @@ bool prepare_social_roster(Scratch& scratch,
 }
 
 /** Folds the family-two member fields the projected profile does not carry. */
-std::uint32_t social_roster_revision(std::uint64_t familyRootSoid) noexcept {
-    auto owned = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
+std::uint32_t social_roster_revision(Scratch& scratch, std::uint64_t familyRootSoid) noexcept {
+    auto& account = scratch.accountImage;
     const auto handle = state::account_for_subscription_root(familyRootSoid);
     const state::ScopedAccountView bind(handle);
-    if (!owned || !state::bound_account_snapshot(*owned)) {
+    if (!state::bound_account_snapshot(account)) {
         return 0;
     }
     MemberFacts facts{};
-    resolve_member_facts(*owned, state::account::selected_character_soid(*owned), facts);
+    resolve_member_facts(account, state::account::selected_character_soid(account), facts);
     // A pure function of the served values, so it settles by itself and never repushes a body
     // the subscriber already holds.
     std::uint32_t key = fold(2166136261U, facts.groupKey);

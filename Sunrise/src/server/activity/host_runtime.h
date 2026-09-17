@@ -1239,7 +1239,11 @@ withdraw_scriptable_output(const state::activity::SessionBinding& binding,
                            std::uint64_t intentSequence,
                            std::uint64_t expectedRevision) noexcept;
 
-/** Applies queued client and operator events on the server service slice. */
+/**
+ * Applies queued client and operator events after admitting every retained activity's storage.
+
+ * * Record allocation/capacity failure leaves the ordered input queue intact for a later slice.
+ */
 void service(std::uint64_t now) noexcept;
 
 /** Copies the latest complete diagnostic view. */

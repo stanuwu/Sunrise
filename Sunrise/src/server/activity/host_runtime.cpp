@@ -143,7 +143,7 @@ bool append_pending(const PendingInput& pending) noexcept {
     return true;
 }
 
-/** Allocates one diagnostic instance without evicting a binding active in this service slice. */
+/** Reuses a safe inactive record before admitting a new lifetime-owned activity record. */
 [[nodiscard]] Instance* ensure_instance(const state::activity::SessionBinding& binding) noexcept {
     if (Instance* const current = find_instance(binding); current != nullptr) {
         return current;
@@ -151,13 +151,7 @@ bool append_pending(const PendingInput& pending) noexcept {
     Instance* selected = nullptr;
     for (auto& owned : g_instances) {
         if (!owned) {
-            owned.reset(new (std::nothrow) Instance{});
-            if (!owned) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::error,
-                                 "ev=activity stage=instance result=no_memory");
-                break;
-            }
+            continue;
         }
         Instance& instance = *owned;
         if (!instance.occupied) {
@@ -170,10 +164,27 @@ bool append_pending(const PendingInput& pending) noexcept {
             selected = &instance;
         }
     }
-    if (selected == nullptr) {
-        return nullptr;
+    if (selected != nullptr) {
+        clear_instance(*selected);
+    } else {
+        for (auto& owned : g_instances) {
+            if (owned) {
+                continue;
+            }
+            owned.reset(new (std::nothrow) Instance{});
+            if (!owned) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::error,
+                                 "ev=activity stage=instance result=no_memory");
+                return nullptr;
+            }
+            selected = owned.get();
+            break;
+        }
+        if (selected == nullptr) {
+            return nullptr;
+        }
     }
-    clear_instance(*selected);
     selected->occupied = true;
     selected->view.binding = binding;
     selected->view.lifetimeState = kDefaultLifetimeState;
@@ -439,10 +450,13 @@ void service(std::uint64_t now) noexcept {
     }
     for (std::size_t index = 0; index < bindingCount; ++index) {
         Instance* const instance = ensure_instance(bindings[index]);
-        if (instance != nullptr) {
-            instance->view.active = true;
-            touch(*instance);
+        if (instance == nullptr) {
+            // Preserve accepted input and its ordering until every retained owner has storage.
+            ReleaseSRWLockExclusive(&g_lock);
+            return;
         }
+        instance->view.active = true;
+        touch(*instance);
     }
     while (g_pendingRead < g_pending.size()) {
         const PendingInput pending = g_pending[g_pendingRead];
@@ -685,7 +699,8 @@ void reset() noexcept {
     for (auto& owned : g_instances) {
         owned.reset();
     }
-    std::vector<PendingInput>{}.swap(g_pending);
+    // Reuse the queue storage; constructing an empty vector may allocate Debug bookkeeping.
+    g_pending.clear();
     for (Event& event : g_events) {
         event = {};
     }

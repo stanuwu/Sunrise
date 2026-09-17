@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 
+#include "../../core/threading/srw_lock.h"
 #include "../../middleware/crypto/random_bytes.h"
 #include "../account/account_platform.h"
 
@@ -33,7 +34,8 @@ bool valid(const Invite& invite) noexcept {
 Hub directory;
 Client client;
 std::uint64_t localPrimary{};
-std::mutex clientMutex;
+// Release this mirror lock before entering lobby state or invoking client callbacks.
+core::threading::SrwLock clientMutex;
 } // namespace
 
 void Hub::opened(AccountHandle account) noexcept {

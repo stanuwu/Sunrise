@@ -62,6 +62,10 @@ private:
 /** Checks initialized local ownership without loading an account; false in public/remote scopes. */
 [[nodiscard]] bool local_account_owns_root(std::uint64_t objectSoid) noexcept;
 [[nodiscard]] std::uint64_t account_primary_soid(AccountHandle handle) noexcept;
+/** Reads only the installation's selected character; no selection is a successful zero.
+ * Denied
+ * scope or failed storage clears output and returns false. No banner fallback is used. */
+[[nodiscard]] bool local_selected_character_soid(std::uint64_t& output) noexcept;
 /** Reads private SQLite and local presence only in a local, non-public scope. Failure clears
  * output. */
 [[nodiscard]] bool local_account_snapshot(AccountState& output) noexcept;

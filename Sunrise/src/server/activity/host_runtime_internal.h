@@ -204,15 +204,18 @@ struct Instance final {
     bool occupied{};
 };
 
-/** Clears one instance member by member; a whole-value assignment puts 1 MiB on the stack. */
+/** Clears generation-owned data while retaining vector storage and avoiding a whole-record
+ * temporary. */
 inline void clear_instance(Instance& instance) noexcept {
     instance.view = {};
-    instance.senseObservations = {};
-    std::vector<SquadSenseRecord>{}.swap(instance.squadSense);
+    std::destroy_at(&instance.senseObservations);
+    std::construct_at(&instance.senseObservations);
+    instance.squadSense.clear();
     instance.squadSenseSourceGeneration = 0;
-    instance.sceneSenseTrace = {};
+    std::destroy_at(&instance.sceneSenseTrace);
+    std::construct_at(&instance.sceneSenseTrace);
     instance.scriptableGuards.fill({});
-    std::vector<PendingScriptableOverride>{}.swap(instance.scriptableAuthEstate);
+    instance.scriptableAuthEstate.clear();
     instance.pendingScriptable = {};
     instance.pendingScriptableTail.fill({});
     instance.pendingScriptableTailCount = 0;
@@ -223,7 +226,7 @@ inline void clear_instance(Instance& instance) noexcept {
 }
 
 extern SRWLOCK g_lock;
-/** Allocate each large host record only when its native binding is retained. */
+/** Lifetime-owned records, reused for inactive generations before allocating a new slot. */
 extern std::array<std::unique_ptr<Instance>, kInstanceCapacity> g_instances;
 /** Ordered reducer work grows with real input and fails only when allocation fails. */
 extern std::vector<PendingInput> g_pending;

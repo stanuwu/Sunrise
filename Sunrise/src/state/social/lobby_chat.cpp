@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 
+#include "../../core/threading/srw_lock.h"
 #include "../../middleware/crypto/random_bytes.h"
 
 namespace sunrise::state::social::lobby {
@@ -23,7 +24,8 @@ template <class A> bool member(const A& account, std::uint64_t id) noexcept {
                      id)
            != account.memberships.begin() + account.membershipCount;
 }
-std::mutex mutex;
+// Protects the bounded mirror; native callback invocation takes place after this lock is released.
+core::threading::SrwLock mutex;
 Hub hub;
 Client client;
 bool initialized = false;

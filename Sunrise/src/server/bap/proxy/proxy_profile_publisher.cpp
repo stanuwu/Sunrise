@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <memory>
-#include <new>
 
 #include "../../../core/settings/settings.h"
 #include "../../../middleware/bap/frame.h"
@@ -33,7 +31,10 @@ struct Publication {
 Publication g_publication;
 std::array<std::byte, middleware::profile::kMaximumEncodedSize> g_composed{};
 std::array<std::byte, middleware::profile::kMaximumEncodedSize> g_acknowledged{};
-std::unique_ptr<state::AccountState> g_snapshot;
+// The BAP session lock serializes this producer with incoming profile/directory commits.
+state::AccountState g_snapshot;
+state::AccountState g_decodeScratch;
+state::social::Hub g_directory;
 } // namespace
 
 void reset() noexcept {
@@ -83,19 +84,13 @@ void service(std::uint64_t now) noexcept {
         return;
     }
     g_publication.nextAttemptTick = now + kPublishIntervalMs;
-    if (!g_snapshot) {
-        g_snapshot.reset(new (std::nothrow) state::AccountState{});
-    }
-    if (!g_snapshot) {
-        return;
-    }
     const state::ScopedAccount local(state::kLocalAccount);
     std::size_t size = 0;
-    if (!state::local_account_snapshot(*g_snapshot)) {
+    if (!state::local_account_snapshot(g_snapshot)) {
         return;
     }
-    g_snapshot->presence.artifactPowerBonus = state::artifact_power_bonus();
-    if (!middleware::profile::encode(*g_snapshot, g_composed, size)) {
+    g_snapshot.presence.artifactPowerBonus = state::artifact_power_bonus();
+    if (!middleware::profile::encode(g_snapshot, g_composed, size)) {
         return;
     }
     // Private-only writes and repeated canonicalization do not publish identical public records.
@@ -107,33 +102,30 @@ void service(std::uint64_t now) noexcept {
         return;
     }
     if (localHost) {
-        // Use the same public wire projection as joining players. SQLite remains the owner.
-        if (!middleware::profile::decode(std::span(g_composed).first(size), *g_snapshot)) {
-            return;
-        }
         namespace social = state::social;
         namespace profiles = state::account::profiles;
-        auto directory = std::unique_ptr<social::Hub>(new (std::nothrow)
-                                                          social::Hub(social::session_directory()));
+        // The outgoing bytes are complete; reuse their source image to read the prior cache.
+        const bool hadPrevious = profiles::snapshot(state::kLocalAccount, g_snapshot);
+        const auto previousNative = g_snapshot.presence.native;
+        // Use the same public wire projection as joining players. SQLite remains the owner.
+        if (!middleware::profile::decode(
+                std::span(g_composed).first(size), g_snapshot, g_decodeScratch)) {
+            return;
+        }
+        g_directory = social::session_directory();
         social::RosterEntry row{};
-        row.primarySoid = g_snapshot->primarySoid;
-        row.steamId = g_snapshot->presence.platformId;
-        row.personaName = g_snapshot->presence.personaName;
+        row.primarySoid = g_snapshot.primarySoid;
+        row.steamId = g_snapshot.presence.platformId;
+        row.personaName = g_snapshot.presence.personaName;
         const auto membership = profiles::membership_generation(state::kLocalAccount);
-        auto previous =
-            std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
-        if (!previous) {
+        if (!g_directory.publish(state::kLocalAccount, row)
+            || !profiles::publish(state::kLocalAccount, g_snapshot)) {
             return;
         }
-        const bool hadPrevious = profiles::snapshot(state::kLocalAccount, *previous);
-        if (!directory || !directory->publish(state::kLocalAccount, row)
-            || !profiles::publish(state::kLocalAccount, *g_snapshot)) {
-            return;
-        }
-        social::session_directory() = *directory;
+        social::session_directory() = g_directory;
         if (hadPrevious
-            && state::activity::fireteam::native_solo_split(previous->presence.native,
-                                                            g_snapshot->presence.native)) {
+            && state::activity::fireteam::native_solo_split(previousNative,
+                                                            g_snapshot.presence.native)) {
             static_cast<void>(state::activity::fireteam::depart(row.primarySoid));
         }
         if (membership != profiles::membership_generation(state::kLocalAccount)) {

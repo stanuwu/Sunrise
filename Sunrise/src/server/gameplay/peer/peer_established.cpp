@@ -4,8 +4,10 @@
 #include <array>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <new>
 
+#include "../../../core/threading/srw_lock.h"
 #include "../../../middleware/encoding/bit_reader.h"
 #include "../../../middleware/encoding/bit_writer.h"
 #include "../../../middleware/gameplay/external/common_state.h"
@@ -29,6 +31,11 @@ namespace gp = state::gameplay;
 namespace wire = middleware::gameplay::peer;
 namespace bits = middleware::encoding::bits;
 namespace fragments = wire::packet_fragments;
+
+/** Serializes send staging without waiting on another slice or reentrant producer callback. */
+core::threading::SrwLock g_sendLock;
+/** One peer at a time is encoded outside g_lock; g_sendLock owns this reusable snapshot. */
+gp::PeerLink g_sendSnapshot{};
 
 /** Delay sentinel used until a round trip has been measured. */
 constexpr std::uint16_t kDelaySentinel = 1023;
@@ -779,26 +786,20 @@ void consume_established(const gp::Endpoint& from,
 
 /** Sends any owed acknowledgement. */
 void service(std::uint64_t now) noexcept {
-    struct SendScratch {
-        std::array<gp::PeerLink, gp::kAssociationCapacity> owed{};
-    };
-    // Queue growth must not consume the native callback thread's stack on every service slice.
-    thread_local std::unique_ptr<SendScratch> scratch;
-    if (!scratch) {
-        scratch.reset(new (std::nothrow) SendScratch{});
-    }
-    if (!scratch) {
+    std::unique_lock sendGuard(g_sendLock, std::try_to_lock);
+    if (!sendGuard.owns_lock()) {
         return;
     }
-    auto& owed = scratch->owed;
-    std::size_t count = 0;
-    AcquireSRWLockExclusive(&g_lock);
-    for (gp::PeerLink& peer : g_peers) {
+    const auto& owed = g_sendSnapshot;
+    for (std::size_t index = 0; index < g_peers.size(); ++index) {
+        AcquireSRWLockExclusive(&g_lock);
+        auto& peer = g_peers[index];
         // An unacknowledged send queue keeps the packet going out until the peer confirms it.
         // Every packet burns one sequence, so the resend is paced.
         const bool resendDue = peer.outbound.count != 0 && now - peer.lastSend >= kResendInterval;
         const bool due = peer.acknowledgementOwed || resendDue;
         if (peer.stage == gp::PeerStage::absent || !due) {
+            ReleaseSRWLockExclusive(&g_lock);
             continue;
         }
         middleware::gameplay::external::CommonState externalCommon{};
@@ -812,6 +813,7 @@ void service(std::uint64_t now) noexcept {
         if (external
             && peer.externalContributions[nextPacket % peer.externalContributions.size()]
                    .occupied) {
+            ReleaseSRWLockExclusive(&g_lock);
             continue;
         }
         peer.acknowledgementOwed = false;
@@ -837,30 +839,27 @@ void service(std::uint64_t now) noexcept {
             contribution.occupied = true;
         }
         peer.lastTick = now;
-        owed[count] = peer;
-        ++count;
-    }
-    ReleaseSRWLockExclusive(&g_lock);
-    for (std::size_t index = 0; index < count; ++index) {
-        if (send_acknowledgement(owed[index])) {
+        g_sendSnapshot = peer;
+        ReleaseSRWLockExclusive(&g_lock);
+        if (send_acknowledgement(owed)) {
             continue;
         }
         report(core::log::Level::debug, "ev=gameplay stage=ack result=fail");
         DisplacedExternals displaced{};
         std::size_t displacedCount = 0;
         AcquireSRWLockExclusive(&g_lock);
-        gp::PeerLink* const peer = find_locked(owed[index].endpoint);
-        if (peer != nullptr && peer->peerGeneration == owed[index].peerGeneration
-            && peer->channelGeneration == owed[index].channelGeneration
-            && peer->localConnectionSequence == owed[index].localConnectionSequence
-            && peer->remoteConnectionSequence == owed[index].remoteConnectionSequence) {
-            peer->acknowledgementOwed = true;
-            wire::outbound_window::send_failed(peer->outbound, owed[index].outboundHead);
-            auto& reserved = peer->externalContributions[owed[index].outboundHead
-                                                         % peer->externalContributions.size()];
+        gp::PeerLink* const current = find_locked(owed.endpoint);
+        if (current != nullptr && current->peerGeneration == owed.peerGeneration
+            && current->channelGeneration == owed.channelGeneration
+            && current->localConnectionSequence == owed.localConnectionSequence
+            && current->remoteConnectionSequence == owed.remoteConnectionSequence) {
+            current->acknowledgementOwed = true;
+            wire::outbound_window::send_failed(current->outbound, owed.outboundHead);
+            auto& reserved =
+                current->externalContributions[owed.outboundHead
+                                               % current->externalContributions.size()];
             // The packet never left, so the stake is displaced like any other lost contribution.
-            if (reserved.occupied
-                && reserved.transmissionId == owed[index].nextExternalTransmission) {
+            if (reserved.occupied && reserved.transmissionId == owed.nextExternalTransmission) {
                 displaced[displacedCount++] = {
                     reserved.groupSessionId, reserved.transmissionId, wire::AckOutcome::unresolved};
                 reserved = {};

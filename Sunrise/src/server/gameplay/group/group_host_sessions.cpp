@@ -4,9 +4,9 @@
 
 #include <array>
 #include <limits>
-#include <memory>
-#include <new>
+#include <mutex>
 
+#include "../../../core/threading/srw_lock.h"
 #include "../../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../../state/activity/destination/activity_destination_public.h"
 #include "../../../state/activity/runtime.h"
@@ -44,6 +44,11 @@ std::array<HostSessionBinding, kHostSessionCapacity> g_retired{};
 std::size_t g_retiredCount = 0;
 std::uint64_t g_useStamp = 0;
 std::uint64_t g_generation = 0;
+
+/** Owns release scratch across State calls. Order: release lock, then host table or State. */
+core::threading::SrwLock g_releaseLock;
+/** Reset can detach every current row plus a full deferred-retirement queue. */
+std::array<HostSessionBinding, kHostSessionCapacity * 2> g_released{};
 
 /** Public content compatibility excludes the launch's nonce and travel provenance. */
 [[nodiscard]] bool
@@ -147,22 +152,19 @@ void free_retired_host_sessions() noexcept {
     if (!pending) {
         return;
     }
-    using Retired = std::array<HostSessionBinding, kHostSessionCapacity>;
-    auto retired = std::unique_ptr<Retired>(new (std::nothrow) Retired{});
-    if (!retired) {
-        return; // Keep the owned queue intact for the next service slice.
-    }
+    std::lock_guard releaseGuard(g_releaseLock);
     std::size_t count = 0;
     AcquireSRWLockExclusive(&g_hostSessionLock);
-    *retired = g_retired;
     count = g_retiredCount;
-    for (auto& row : g_retired) {
-        row = {};
+    for (std::size_t index = 0; index < count; ++index) {
+        g_released[index] = g_retired[index];
+        g_retired[index] = {};
     }
     g_retiredCount = 0;
     ReleaseSRWLockExclusive(&g_hostSessionLock);
     for (std::size_t index = 0; index < count; ++index) {
-        release_retired((*retired)[index]);
+        release_retired(g_released[index]);
+        g_released[index] = {};
     }
 }
 
@@ -521,23 +523,17 @@ void allocate_claimed_host_sessions() noexcept {
 
 /** Returns every retained binding and allocated target to State, then clears the table. */
 void reset_host_sessions() noexcept {
-    using Released = std::array<HostSessionBinding, kHostSessionCapacity * 2>;
-    auto released = std::unique_ptr<Released>(new (std::nothrow) Released{});
-    if (!released) {
-        report(core::log::Level::error,
-               "ev=gameplay stage=activityhost result=reset_allocation_failed");
-        return;
-    }
+    std::lock_guard releaseGuard(g_releaseLock);
     std::size_t count = 0;
     AcquireSRWLockExclusive(&g_hostSessionLock);
     for (const HostSession& row : g_hostSessions) {
         if (row.occupied) {
-            (*released)[count] = row.binding;
+            g_released[count] = row.binding;
             ++count;
         }
     }
     for (std::size_t index = 0; index < g_retiredCount; ++index) {
-        (*released)[count] = g_retired[index];
+        g_released[count] = g_retired[index];
         ++count;
     }
     // Clearing the whole scaled table creates a large temporary on the game's stack.
@@ -551,7 +547,8 @@ void reset_host_sessions() noexcept {
     ReleaseSRWLockExclusive(&g_hostSessionLock);
 
     for (std::size_t index = 0; index < count; ++index) {
-        release_retired((*released)[index]);
+        release_retired(g_released[index]);
+        g_released[index] = {};
     }
 }
 

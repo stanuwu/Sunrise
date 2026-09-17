@@ -14,8 +14,16 @@ inline constexpr std::size_t kMaximumEncodedSize = 256 * 1024;
 [[nodiscard]] bool encode(const state::AccountState& account,
                           std::span<std::byte> output,
                           std::size_t& written) noexcept;
-/** Refuses unsupported versions, malformed fields and trailing bytes without changing output. */
-[[nodiscard]] bool decode(std::span<const std::byte> input, state::AccountState& output) noexcept;
+/**
+ * Decodes without allocation; rejection leaves output unchanged. The caller owns a distinct
+ *
+ * staging image, which may change on failure and must not overlap input. Aliased output/staging
+ *
+ * is refused. Separate staging permits concurrent decoders without a shared scratch lock.
+ */
+[[nodiscard]] bool decode(std::span<const std::byte> input,
+                          state::AccountState& output,
+                          state::AccountState& staging) noexcept;
 [[nodiscard]] bool valid(const state::AccountState& account) noexcept;
 
 } // namespace sunrise::middleware::profile

@@ -1,8 +1,6 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
-#include <memory>
-#include <new>
 
 #include "../../../../../middleware/datagen/definitions.h"
 #include "../../../../../middleware/gameplay/descriptor/net_addr.h"
@@ -81,33 +79,32 @@ bool prepare_join_descriptor(Scratch& scratch,
                              Prepared& prepared) noexcept {
     namespace datagen = middleware::datagen;
     constexpr std::size_t directorySize = 16, descriptorSize = 0x98;
-    auto account = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
+    auto& account = scratch.accountImage;
     const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
     const state::ScopedAccountView bind(handle);
-    if (subscription.familyType != datagen::kJoinFamily || !account
-        || !state::bound_account_snapshot(*account)
-        || account->primarySoid != subscription.familyRootSoid
+    if (subscription.familyType != datagen::kJoinFamily || !state::bound_account_snapshot(account)
+        || account.primarySoid != subscription.familyRootSoid
         || reservation.rawWriteOffset > scratch.plaintext.size()
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
         return false;
     }
     std::uint64_t silo{};
     std::array<std::byte, descriptor::kDescriptorSize> body{};
-    const bool published = native_descriptor(*account, silo, body);
+    const bool published = native_descriptor(account, silo, body);
     const auto rawSize = directorySize + (published ? descriptorSize : 0);
     if (scratch.plaintext.size() - reservation.rawWriteOffset < rawSize) {
         return false;
     }
     auto raw = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset, rawSize);
     std::fill(raw.begin(), raw.end(), std::byte{});
-    std::memcpy(raw.data(), &account->primarySoid, 8);
-    std::memcpy(raw.data() + 8, &account->primarySoid, 8);
+    std::memcpy(raw.data(), &account.primarySoid, 8);
+    std::memcpy(raw.data() + 8, &account.primarySoid, 8);
     Prepared staged{};
     std::size_t compressed = reservation.compressedWriteOffset, size{};
     if (!compress_object(scratch,
                          raw.first(directorySize),
                          datagen::kJoinDirectoryObjectId,
-                         account->primarySoid,
+                         account.primarySoid,
                          compressed,
                          staged.objects[0],
                          size)) {
@@ -118,14 +115,14 @@ bool prepare_join_descriptor(Scratch& scratch,
     if (published) {
         const auto record = raw.subspan(directorySize, descriptorSize);
         const auto length = static_cast<std::uint32_t>(descriptor::kDescriptorSize);
-        std::memcpy(record.data(), &account->primarySoid, 8);
+        std::memcpy(record.data(), &account.primarySoid, 8);
         std::memcpy(record.data() + 8, &length, 4);
         std::copy(body.begin(), body.end(), record.begin() + 12);
         std::memcpy(record.data() + 0x90, &silo, 8);
         if (!compress_object(scratch,
                              record,
                              datagen::kJoinDescriptorObjectId,
-                             account->primarySoid,
+                             account.primarySoid,
                              compressed,
                              staged.objects[1],
                              size)) {
@@ -138,7 +135,7 @@ bool prepare_join_descriptor(Scratch& scratch,
         (std::max)(reservation.rawClearSize, reservation.rawWriteOffset + rawSize);
     staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressed);
     staged.family = {datagen::kJoinFamily,
-                     account->primarySoid,
+                     account.primarySoid,
                      kInitialFamilyVersion,
                      middleware::queuez::kFullSnapshotFlag,
                      std::span(staged.objects).first(count)};

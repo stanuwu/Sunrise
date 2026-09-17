@@ -55,10 +55,12 @@ prepare_initial(Scratch& scratch,
  * The account's seat and its established fireteam both change without the owner's profile
  * moving, so the poll that refreshes a roster row cannot see them through the profile
  * generation alone.
+ * @param scratch Account scratch owned by the caller under the BAP session lock.
  * @param familyRootSoid Account root the subscription names.
  * @return A value that changes only when the served member record would change.
  */
-[[nodiscard]] std::uint32_t social_roster_revision(std::uint64_t familyRootSoid) noexcept;
+[[nodiscard]] std::uint32_t social_roster_revision(Scratch& scratch,
+                                                   std::uint64_t familyRootSoid) noexcept;
 
 /** Rebuilds the active account family at the peer's next version. */
 [[nodiscard]] bool prepare_family4_refresh(

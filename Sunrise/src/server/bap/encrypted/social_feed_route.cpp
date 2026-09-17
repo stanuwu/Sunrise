@@ -1,8 +1,6 @@
 #include "social_feed_route.h"
 
 #include <algorithm>
-#include <memory>
-#include <new>
 
 #include "../../../core/settings/settings.h"
 #include "../../../middleware/secure_channel/runtime.h"
@@ -31,8 +29,7 @@ void append_peer_routes(state::social::feed::Feed& feed, std::uint64_t primarySo
         middleware::bap::activity_message::TransportReport transport{};
         std::array<std::byte, descriptor::kNetAddrSize> chosen{};
         if (published_character_transport_locked(primarySoid, character, transport)) {
-            if (descriptor::normalize_net_addr_ipv4(
-                    transport.address, transport.alternate, chosen)
+            if (descriptor::normalize_net_addr_ipv4(transport.address, transport.alternate, chosen)
                 == descriptor::NetAddrNormalisation::unavailable) {
                 return;
             }
@@ -109,10 +106,10 @@ bool consume_social_feed(Session& session,
     if (!social::feed::decode_sync(request.body, sync)) {
         return false;
     }
-    auto staged =
-        std::unique_ptr<social::Hub>(new (std::nothrow) social::Hub(social::session_directory()));
+    auto& staged = scratch.socialDirectory;
+    staged = social::session_directory();
     social::feed::Feed feed{};
-    if (!staged || !staged->sync(session.accountHandle, sync, feed)) {
+    if (!staged.sync(session.accountHandle, sync, feed)) {
         return false;
     }
     peer_routes(feed);
@@ -136,7 +133,7 @@ bool consume_social_feed(Session& session,
         || framedSize > response.size()) {
         return false;
     }
-    social::session_directory() = *staged;
+    social::session_directory() = staged;
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
     middleware::secure_channel::advance_nonce(session.sendNonce);
     written = framedSize;

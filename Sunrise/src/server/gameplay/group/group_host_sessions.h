@@ -107,7 +107,13 @@ void snapshot_host_sessions(std::span<HostSessionRow> output, std::size_t& count
  */
 void allocate_claimed_host_sessions() noexcept;
 
-/** Returns every retained binding and allocated target to State, then clears the table. */
+/**
+ * Detaches every current and retired row, then returns their retains and allocated targets to
+ * State.
+ * Uses fixed release storage shared with deferred cleanup. The release lock serializes
+ * resets;
+ * State calls occur outside the host-table lock and must not reenter cleanup.
+ */
 void reset_host_sessions() noexcept;
 
 } // namespace sunrise::server::gameplay::group
