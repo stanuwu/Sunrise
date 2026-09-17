@@ -168,7 +168,6 @@
     <ClCompile Include="src\core\json\json_reader_structure.cpp" />
     <ClCompile Include="src\core\settings\settings_runtime.cpp" />
     <ClCompile Include="src\core\settings\role.cpp" />
-    <ClCompile Include="src\client\hooks\replication\replication_budget.cpp" />
     <ClCompile Include="src\client\hooks\network\presence_publication.cpp" />
     <ClCompile Include="src\core\settings\client\client_settings_parser.cpp" />
     <ClCompile Include="src\core\settings\client\client_ui_settings_parser.cpp" />
@@ -1437,7 +1436,6 @@
     <ClInclude Include="src\core\settings\settings.h" />
     <ClInclude Include="src\core\settings\role.h" />
     <ClInclude Include="src\core\network_service_socket.h" />
-    <ClInclude Include="src\client\hooks\replication\replication_budget.h" />
     <ClInclude Include="src\client\hooks\network\presence_publication.h" />
     <ClInclude Include="src\core\settings\parser.h" />
     <ClInclude Include="src\core\settings\client\definition.h" />

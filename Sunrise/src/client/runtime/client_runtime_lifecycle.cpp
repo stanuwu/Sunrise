@@ -28,7 +28,6 @@
 #include "../hooks/package_trust/package_trust_bypass.h"
 #include "../hooks/polled_input/runtime.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
-#include "../hooks/replication/replication_budget.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
 #include "../hooks/stall_probe/stall_probe.h"
 #include "../hooks/teleport/runtime.h"
@@ -92,13 +91,6 @@ bool shutdown() noexcept {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
                          "ev=shutdown stage=presence_publication result=fail");
-        ReleaseSRWLockExclusive(&runtime::g_lock);
-        return false;
-    }
-    if (!hooks::replication_budget::uninstall()) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::error,
-                         "ev=shutdown stage=replication_budget result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
