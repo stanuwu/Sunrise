@@ -6,6 +6,7 @@ namespace sunrise::state::network::peer_routes {
 using Endpoint = middleware::gameplay::descriptor::PeerEndpoint;
 inline constexpr std::size_t kCapacity =
     core::network_capacity::kPlayers * middleware::gameplay::descriptor::kPeerEndpointCount;
+/** The feed writes the route count as one byte, so every route must be expressible. */
 static_assert(kCapacity <= 255);
 
 /**

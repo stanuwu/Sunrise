@@ -142,13 +142,16 @@ bool read_transport_branch(encoding::bits::Reader& reader, TransportReport& repo
         }
         return true;
     };
+    // Each skip below is one B2 field at the width its schema declares, in declaration order.
+    // The `* 8` widths are byte-array fields; the bare ones are scalars.
+    constexpr std::size_t kAddressBits = gameplay::descriptor::kNetAddrSize * 8U;
     const bool walked =
         read_presence(reader, parsed.hasFlags) && (!parsed.hasFlags || reader.read(6, flags))
         && skip_optional(reader, 128U * 8U) && skip_optional(reader, 64)
         && skip_optional(reader, 64) && skip_optional(reader, 64) && skip_optional(reader, 64)
         && skip_optional(reader, 32) && skip_optional(reader, 32) && skip_optional(reader, 8U * 8U)
         && skip_optional(reader, 32) && address(parsed.alternate, parsed.hasAlternate)
-        && address(parsed.address, parsed.hasAddress) && skip_optional(reader, 86U * 8U)
+        && address(parsed.address, parsed.hasAddress) && skip_optional(reader, kAddressBits)
         && skip_optional(reader, 64U * 8U) && skip_large_array(reader) && reader.skip(1);
     if (!walked) {
         return false;

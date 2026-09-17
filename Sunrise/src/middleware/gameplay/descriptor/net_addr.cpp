@@ -7,6 +7,17 @@
 namespace sunrise::middleware::gameplay::descriptor {
 namespace {
 using Address = std::array<std::byte, kNetAddrSize>;
+// Native decoder (RVA 0x3EA350) reads a three-bit method into blob byte 0x55.
+constexpr std::uint8_t kLastMethod = 7;
+// That decoder reads 85 payload bytes for methods 6/7 and 41 for 0..5. Only the latter
+// carry the IPv4 candidate layout directly; normalize the wider form before routing it.
+constexpr std::uint8_t kFirstTextMethod = 6;
+// The byte the candidate list is followed by, holding the NAT type.
+constexpr std::size_t kNatType = 40;
+// "DRCT" then a four-byte host, two bytes the native writer leaves clear, and a two-byte port.
+constexpr std::size_t kDirectHost = 4;
+constexpr std::size_t kDirectPort = 10;
+constexpr std::size_t kDirectTail = 12;
 std::uint32_t network(std::span<const std::byte> bytes) noexcept {
     std::uint32_t value{};
     for (const auto byte : bytes) {
@@ -34,16 +45,16 @@ bool net_addr_is_steam_text(const Address& address) noexcept {
 }
 
 bool net_addr_endpoint(const Address& address, std::uint32_t& ipv4, std::uint16_t& port) noexcept {
-    if (net_addr_method(address) > 7 || net_addr_is_steam_text(address)) {
+    if (net_addr_method(address) > kLastMethod || net_addr_is_steam_text(address)) {
         return false;
     }
     const auto bytes = std::span(address);
     if (prefix(address, "DRCT")) {
-        if (net_addr_method(address) != 0 || !zero_tail(address, 12)) {
+        if (net_addr_method(address) != 0 || !zero_tail(address, kDirectTail)) {
             return false;
         }
-        const auto host = network(bytes.subspan(4, 4));
-        const auto service = static_cast<std::uint16_t>(network(bytes.subspan(10, 2)));
+        const auto host = network(bytes.subspan(kDirectHost, 4));
+        const auto service = static_cast<std::uint16_t>(network(bytes.subspan(kDirectPort, 2)));
         if (host == 0 || service == 0) {
             return false;
         }
@@ -52,10 +63,12 @@ bool net_addr_endpoint(const Address& address, std::uint32_t& ipv4, std::uint16_
         return true;
     }
     // Native discovery publishes open, moderate or strict NAT; none changes the carrier layout.
-    if (address[40] < std::byte{1} || address[40] > std::byte{3} || !zero_tail(address, 41)) {
+    if (address[kNatType] < std::byte{1} || address[kNatType] > std::byte{3}
+        || !zero_tail(address, kNatType + 1)) {
         return false;
     }
-    for (const std::size_t offset : {std::size_t{0}, std::size_t{30}}) {
+    // The first local candidate, then the public mapping. Either alone is enough to dial.
+    for (const std::size_t offset : {std::size_t{0}, kPublicEndpointOffset}) {
         const auto host = network(bytes.subspan(offset, 4));
         const auto service =
             static_cast<std::uint16_t>(std::to_integer<unsigned>(address[offset + 4])
@@ -88,7 +101,8 @@ std::size_t net_addr_endpoints(const Address& address, std::span<PeerEndpoint> o
     if (prefix(address, "DRCT")) {
         append({ipv4, port});
     } else {
-        for (std::size_t offset = 0; offset <= 30; offset += 6) {
+        for (std::size_t offset = 0; offset <= kPublicEndpointOffset;
+             offset += kPeerEndpointStride) {
             append({network(std::span(address).subspan(offset, 4)),
                     static_cast<std::uint16_t>(
                         std::to_integer<unsigned>(address[offset + 4])
@@ -103,11 +117,11 @@ NetAddrNormalisation normalize_net_addr_ipv4(const Address& primary,
                                              Address& output) noexcept {
     std::uint32_t ipv4{};
     std::uint16_t port{};
-    if (net_addr_method(primary) < 6 && net_addr_endpoint(primary, ipv4, port)) {
+    if (net_addr_method(primary) < kFirstTextMethod && net_addr_endpoint(primary, ipv4, port)) {
         output = primary;
         return NetAddrNormalisation::kept;
     }
-    if (net_addr_method(alternate) < 6 && net_addr_endpoint(alternate, ipv4, port)) {
+    if (net_addr_method(alternate) < kFirstTextMethod && net_addr_endpoint(alternate, ipv4, port)) {
         output = alternate;
         return NetAddrNormalisation::alternate;
     }

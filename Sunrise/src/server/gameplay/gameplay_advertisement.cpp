@@ -22,6 +22,8 @@ constexpr std::uint8_t kMaximumMemberSlot = 62;
 constexpr std::uint8_t kQueriedMemberSlot = 0;
 /** Odd multiplier that spreads one region index across the whole 64-bit space. */
 constexpr std::uint64_t kRegionStride = 0x9E3779B97F4A7C15ULL;
+/** Moves a small revision clear of the session-id product's low bits before they are combined. */
+constexpr int kRevisionRotation = 17;
 
 /** @return A stable nonzero region-specific copy of one process identity field. */
 [[nodiscard]] std::uint64_t region_identity(std::uint64_t base, std::int32_t regionIndex) noexcept {
@@ -33,8 +35,8 @@ constexpr std::uint64_t kRegionStride = 0x9E3779B97F4A7C15ULL;
 /** Host rows retain an exact source generation, so their identities must use that scope too. */
 [[nodiscard]] std::uint64_t
 source_identity(std::uint64_t base, const state::activity::SessionBinding& source) noexcept {
-    const auto derived =
-        base ^ (source.sessionId * kRegionStride) ^ std::rotl(source.createdRevision, 17);
+    const auto derived = base ^ (source.sessionId * kRegionStride)
+                         ^ std::rotl(source.createdRevision, kRevisionRotation);
     return derived == 0 ? kRegionStride : derived;
 }
 

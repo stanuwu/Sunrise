@@ -29,8 +29,11 @@ int fail(int error) noexcept {
 }
 } // namespace
 int unsupported() noexcept {
+    // Reports of an unsupported call per run. Enough to show the caller once without a repeat
+    // from every later call filling the log; the refusal itself is unconditional.
+    constexpr unsigned kMaxReports = 8;
     static std::atomic<unsigned> reports{};
-    if (reports.fetch_add(1) < 8) {
+    if (reports.fetch_add(1) < kMaxReports) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
                          "ev=single_port result=unsupported_udp_api");
@@ -94,7 +97,10 @@ int receive(
     }
     const auto hub = carrier();
     // Drain a bounded number of foreign/malformed packets, including when the caller peeks.
-    for (unsigned attempt = 0; attempt < 8; ++attempt) {
+    // Past the bound the call reports that nothing is readable, so the caller simply asks again
+    // on its next pass; nothing buffered is lost.
+    constexpr unsigned kDrainAttempts = 8;
+    for (unsigned attempt = 0; attempt < kDrainAttempts; ++attempt) {
         std::array<std::byte, wire::kCapacity> packet{};
         sockaddr_in sender{};
         int senderSize = sizeof sender;

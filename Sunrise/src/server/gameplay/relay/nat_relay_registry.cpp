@@ -9,11 +9,13 @@
 
 #include "../../../core/logging/log.h"
 #include "../../../middleware/encoding/byte_order.h"
+#include "../../../middleware/gameplay/nat/single_port_frame.h"
 #include "../endpoint/gameplay_endpoint.h"
 
 namespace sunrise::server::gameplay::relay {
 namespace {
-constexpr std::size_t kPendingCapacity = 1500;
+/** One buffered native datagram per unpaired member, at the same bound the carrier wraps. */
+constexpr std::size_t kPendingCapacity = middleware::gameplay::single_port::kPayload;
 struct Member {
     std::uint32_t connection{};
     state::gameplay::Endpoint endpoint{};

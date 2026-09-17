@@ -7,9 +7,14 @@
 
 namespace sunrise::core::settings::parser {
 
-bool Parser::bap_endpoint(std::array<char, 16>& host,
-                          std::array<unsigned char, 4>& address,
-                          std::uint16_t& port) noexcept {
+// One reader serves both endpoint settings, so the two must declare the same field widths.
+static_assert(client::server_endpoint::kHostCapacity == server::upstream::kHostCapacity);
+static_assert(client::server_endpoint::kAddressOctets == server::upstream::kAddressOctets);
+
+bool Parser::bap_endpoint(
+    std::array<char, client::server_endpoint::kHostCapacity>& host,
+    std::array<unsigned char, client::server_endpoint::kAddressOctets>& address,
+    std::uint16_t& port) noexcept {
     if (!consume('{')) {
         return false;
     }
@@ -73,8 +78,10 @@ bool Parser::compact_endpoint(client::server_endpoint::Settings& output) noexcep
         const auto port = value.substr(separator + 1);
         unsigned int parsed = 0;
         const auto result = std::from_chars(port.data(), port.data() + port.size(), parsed);
-        if (result.ec != std::errc{} || result.ptr != port.data() + port.size() || parsed == 0
-            || parsed > 65535) {
+        if (result.ec != std::errc{} || result.ptr != port.data() + port.size()
+            || parsed == 0
+            // A port is a 16-bit field and zero names no service.
+            || parsed > (std::numeric_limits<std::uint16_t>::max)()) {
             return false;
         }
         candidate.bapPort = static_cast<std::uint16_t>(parsed);

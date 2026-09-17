@@ -98,12 +98,20 @@ constexpr std::uint64_t kPlayerCleared = 0xFFFFFFFF;
 constexpr std::size_t kPlayerProfileValueOffset = 0;
 /** The player kind, stored as a word over the first cleared word. */
 constexpr std::size_t kPlayerProfileKindOffset = 28;
+/** The name payload, as code units, at the head of the profile group. */
 constexpr std::size_t kPlayerProfileNameOffset = 0x20;
+/** Sub-block A's own copy of that name, which the apply writes byte-identically. */
 constexpr std::size_t kPlayerProfileSubANameOffset = 0x10C;
+/** First of the three tail words, which the apply writes as one run. */
 constexpr std::size_t kPlayerProfileTailWordOffset = 0x190;
+/** The tail's five-bit flag field, stored as a byte. */
 constexpr std::size_t kPlayerProfileTailFiveOffset = 0x19C;
+/** The tail's two-bit kind field, stored as a byte. */
 constexpr std::size_t kPlayerProfileTailTwoOffset = 0x19D;
+/** The tail's one-bit flag, stored as a byte. */
 constexpr std::size_t kPlayerProfileTailOneOffset = 0x19E;
+/** The optional tail index, aligned to four bytes behind the three flag bytes above. */
+constexpr std::size_t kPlayerProfileTailIndexOffset = 0x1A0;
 /** Length the consumer requires of a member NetAddr. */
 constexpr std::uint64_t kAddressLength = 86;
 /** Length the consumer requires of a member machine id. */
@@ -242,8 +250,8 @@ void build_session_state(const MembershipUpdate& body, SessionState& output) noe
         write_integer(output, entry + kPlayerProfileTailFiveOffset, profile.tailFlags, 1);
         write_integer(output, entry + kPlayerProfileTailTwoOffset, profile.tailKind, 1);
         write_integer(output, entry + kPlayerProfileTailOneOffset, profile.tailFlag ? 1U : 0U, 1);
-        if (profile.tailFlags & 0x10) {
-            write_integer(output, entry + 0x1A0, profile.tailIndex, 4);
+        if (profile.tailFlags & kTailIndexPresent) {
+            write_integer(output, entry + kPlayerProfileTailIndexOffset, profile.tailIndex, 4);
         }
     }
     write_integer(output, kPlayerCountOffset, body.players.size(), sizeof(std::uint32_t));

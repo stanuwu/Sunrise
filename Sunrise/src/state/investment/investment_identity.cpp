@@ -11,6 +11,7 @@ bool bind_identity(std::uint64_t primarySoid) noexcept {
     // never been bound to an installation, so it is rebound to this player's identity once;
     // any other soid belongs to a different player and is refused.
     constexpr std::uint64_t kUpstreamSeedSoid = 0x9EAA300100100100ULL;
+    // A declared account SOID is its platform id raised one byte, so its own low byte is clear.
     if (primarySoid == 0 || (primarySoid & 0xFFULL) != 0) {
         return false;
     }

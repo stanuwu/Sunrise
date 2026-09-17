@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../../../state/social/native_presence.h"
 #include "../../hooking/detour.h"
 #include "../../patterns/image_scan.h"
 
@@ -24,10 +25,17 @@ Cache g_cache{};
 Publish g_publish{};
 const void* g_root{};
 
+// Offsets in the native presence cache record: the selected character, the fireteam block that
+// follows it, and the pending publication word further in. Every read below is under SEH because
+// the record is not guaranteed to exist when the hook runs.
+constexpr std::size_t kCacheCharacterOffset = 0xB18;
+constexpr std::size_t kCacheFireteamOffset = 0xB38;
+constexpr std::size_t kCachePendingOffset = 0x1FF0;
+
 struct Snapshot {
     const std::byte* cache{};
     std::uint64_t owner{}, character{}, pending{};
-    std::array<std::byte, 0xB60> members{};
+    std::array<std::byte, state::social::kNativeFireteamSize> members{};
 };
 
 bool snapshot(const std::uint64_t* owner, Snapshot& result) noexcept {
@@ -40,9 +48,11 @@ bool snapshot(const std::uint64_t* owner, Snapshot& result) noexcept {
         if (!result.cache) {
             return false;
         }
-        std::memcpy(&result.character, result.cache + 0xB18, sizeof result.character);
-        std::memcpy(result.members.data(), result.cache + 0xB38, result.members.size());
-        std::memcpy(&result.pending, result.cache + 0x1FF0, sizeof result.pending);
+        std::memcpy(
+            &result.character, result.cache + kCacheCharacterOffset, sizeof result.character);
+        std::memcpy(
+            result.members.data(), result.cache + kCacheFireteamOffset, result.members.size());
+        std::memcpy(&result.pending, result.cache + kCachePendingOffset, sizeof result.pending);
         return result.character != 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -99,6 +109,8 @@ bool install() noexcept {
     g_cache = reinterpret_cast<Cache>(cache);
     g_publish = reinterpret_cast<Publish>(publish);
     // LEA RCX in the matched publisher names the cache root it passes to the accessor.
+    // LEA RCX, [RIP + displacement] names the publisher's root object. The pair is that
+    // displacement's offset in the matched bytes and the next instruction it is relative to.
     g_root = resolve_relative(publish + 12, publish + 16);
     if (!hooking::detour::install({target, reinterpret_cast<void*>(&build)}, g_hook)) {
         return false;

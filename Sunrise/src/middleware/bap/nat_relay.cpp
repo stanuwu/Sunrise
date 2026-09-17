@@ -7,6 +7,8 @@
 namespace sunrise::middleware::bap::nat_relay {
 namespace {
 
+// Positions inside the 86-byte secure address: the family word the client tests a relayed peer
+// by, then the IPv4 and port the same blob carries in its last six bytes.
 constexpr std::size_t kFamilyOffset = 0x12;
 constexpr std::size_t kAddressOffset = 0x50;
 constexpr std::size_t kPortOffset = 0x54;

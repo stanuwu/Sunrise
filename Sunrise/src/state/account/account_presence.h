@@ -8,8 +8,11 @@
 
 namespace sunrise::state {
 
+/** ASCII bytes including NUL; each expands to one of the directory's 27 UTF-16 name units. */
 inline constexpr std::size_t kDisplayNameCapacity = 27;
+/** Four ASCII name-code characters plus NUL, expanded to UTF-16 in the directory record. */
 inline constexpr std::size_t kNameCodeCapacity = 5;
+/** The three low bits of that record's flag byte. A profile setting a higher bit is refused. */
 inline constexpr std::uint8_t kPresenceFlagsMask = 0x07;
 
 struct AccountPresence {

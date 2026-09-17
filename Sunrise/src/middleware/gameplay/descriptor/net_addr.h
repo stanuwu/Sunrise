@@ -13,13 +13,19 @@ struct PeerEndpoint {
     std::uint16_t port{};
     bool operator==(const PeerEndpoint&) const = default;
 };
+/** Five local candidates and one public mapping, retaining their actual ports. */
 inline constexpr std::size_t kPeerEndpointCount = 6;
-// Five local candidates and one public mapping, retaining their actual ports.
+/** One candidate is a four-byte IPv4 followed by a little-endian port. */
+inline constexpr std::size_t kPeerEndpointStride = 6;
+/** The last of those candidates is the peer's public mapping. */
+inline constexpr std::size_t kPublicEndpointOffset = kPeerEndpointStride * (kPeerEndpointCount - 1);
+/** First octet 224 and above is multicast or reserved, so no peer is reachable there. */
+inline constexpr std::uint32_t kFirstUnroutableOctet = 224;
 [[nodiscard]] std::size_t net_addr_endpoints(const std::array<std::byte, kNetAddrSize>& address,
                                              std::span<PeerEndpoint> output) noexcept;
 [[nodiscard]] inline constexpr bool unicast_endpoint(PeerEndpoint endpoint) noexcept {
     const auto first = endpoint.address >> 24U;
-    return endpoint.port != 0 && first != 0 && first < 224;
+    return endpoint.port != 0 && first != 0 && first < kFirstUnroutableOctet;
 }
 
 [[nodiscard]] bool

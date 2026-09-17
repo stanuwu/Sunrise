@@ -17,11 +17,25 @@
 namespace sunrise::steam::interfaces::methods {
 namespace {
 namespace social = state::social;
+// Steamworks enumerators, spelled out because the SDK headers are not linked here.
+// EFriendFlags: the caller asked for actual friends rather than any other list kind.
 constexpr int kImmediate = 4;
+// Callback ids of PersonaStateChange_t and GameRichPresenceJoinRequested_t.
 constexpr int kPersonaCallback = 304;
 constexpr int kJoinCallback = 337;
+// EPersonaChange bits: status and game-played, with come-online or gone-offline beside them.
 constexpr int kArrived = 0x04 | 0x02 | 0x10;
 constexpr int kDeparted = 0x08 | 0x02 | 0x10;
+// EFriendRelationship: a roster peer is a friend, anyone else has no relationship at all.
+constexpr int kRelationshipFriend = 3;
+constexpr int kRelationshipNone = 0;
+// EPersonaState: a roster peer is online, anyone else is offline.
+constexpr int kPersonaOnline = 1;
+constexpr int kPersonaOffline = 0;
+// CGameID carries the app id in its low 24 bits.
+constexpr std::uint64_t kGameIdAppMask = 0xFFFFFFULL;
+// Results one caller may hold at once, since each call returns a pointer into this store.
+constexpr std::size_t kPersonaNameSlots = 4;
 // A competing or reentrant pump skips this producer pass; no caller waits for ownership.
 std::atomic_flag producer = ATOMIC_FLAG_INIT;
 std::atomic<std::uint64_t> generation{1};
@@ -209,14 +223,15 @@ friend_by_index([[maybe_unused]] void* self, SteamId* result, int index, int fla
 }
 int friend_relationship([[maybe_unused]] void* self, std::uint64_t steamId) noexcept {
     social::RosterEntry row{};
-    return find(steamId, row) ? 3 : 0;
+    return find(steamId, row) ? kRelationshipFriend : kRelationshipNone;
 }
 int friend_persona_state([[maybe_unused]] void* self, std::uint64_t steamId) noexcept {
     social::RosterEntry row{};
-    return find(steamId, row) ? 1 : 0;
+    return find(steamId, row) ? kPersonaOnline : kPersonaOffline;
 }
 const char* friend_persona_name([[maybe_unused]] void* self, std::uint64_t steamId) noexcept {
-    thread_local std::array<std::array<char, social::feed::kNameCapacity>, 4> names{};
+    thread_local std::array<std::array<char, social::feed::kNameCapacity>, kPersonaNameSlots>
+        names{};
     thread_local std::size_t slot{};
     auto& output = names[slot];
     slot = (slot + 1) % names.size();
@@ -235,7 +250,7 @@ bool friend_game_played([[maybe_unused]] void* self,
     if (!find(steamId, row)) {
         return false;
     }
-    info->gameId = static_cast<std::uint64_t>(app_id()) & 0xFFFFFFULL;
+    info->gameId = static_cast<std::uint64_t>(app_id()) & kGameIdAppMask;
     return true;
 }
 

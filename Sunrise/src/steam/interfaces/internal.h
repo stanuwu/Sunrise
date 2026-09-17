@@ -55,9 +55,11 @@ struct PersonaStateChange {
 };
 struct GameRichPresenceJoinRequested {
     std::uint64_t friendSteamId{};
+    /** The connect string's own field width in the Steamworks callback struct. */
     char connect[256]{};
 };
 #pragma pack(pop)
+// Sizes the Steamworks callback structs declare; a caller copies each one by its own size.
 static_assert(sizeof(FriendGameInfo) == 24);
 static_assert(sizeof(PersonaStateChange) == 12);
 static_assert(sizeof(GameRichPresenceJoinRequested) == 264);

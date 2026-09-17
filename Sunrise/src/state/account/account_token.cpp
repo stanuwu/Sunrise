@@ -7,11 +7,15 @@
 namespace sunrise::state::account {
 namespace {
 
+// Two fixed fork markers, ASCII "SUNRISEA" and "SUNRISED". Neither is a retail value and neither
+// is secret; they only keep this generator's two streams apart.
 constexpr std::uint64_t kLegacySeed = 0x53554E5249534541ULL;
+/** The 64-bit golden-ratio odd multiplier, which spreads one soid across the whole word. */
 constexpr std::uint64_t kLegacyMultiplier = 0x9E3779B97F4A7C15ULL;
 constexpr std::uint64_t kKeyMask = 0x53554E5249534544ULL;
 constexpr unsigned kByteWidth = 8;
 
+/** One 13/7/17 xorshift64 step; bits 24-31 preserve the legacy token's byte selection. */
 [[nodiscard]] std::byte next_byte(std::uint64_t& x) noexcept {
     x ^= x << 13U;
     x ^= x >> 7U;

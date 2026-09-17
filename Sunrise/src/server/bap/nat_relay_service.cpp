@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "../../middleware/gameplay/descriptor/net_addr.h"
 #include "../../state/activity/member_presence.h"
 #include "../gameplay/endpoint/gameplay_endpoint.h"
 #include "../gameplay/group/group_host_admission.h"
@@ -25,18 +26,26 @@ std::uint64_t account(const Session& session) noexcept {
 }
 bool same_core(const Address& first, const Address& second) noexcept {
     // A shared LAN address is not a peer identity across different NATs. Prefer the
-    // native public endpoint, keeping the local endpoint as a legacy fallback.
+    // native public endpoint, keeping the local endpoint as a legacy fallback. Both are
+    // candidates of the NetAddr's own list: four address bytes then a two-byte port.
+    namespace descriptor = middleware::gameplay::descriptor;
+    constexpr auto kPublic = static_cast<std::ptrdiff_t>(descriptor::kPublicEndpointOffset);
+    constexpr auto kStride = static_cast<std::ptrdiff_t>(descriptor::kPeerEndpointStride);
+    constexpr std::ptrdiff_t kAddressBytes = 4;
     const auto hasPublic = [](const Address& address) {
-        return std::any_of(address.begin() + 30,
-                           address.begin() + 34,
+        return std::any_of(address.begin() + kPublic,
+                           address.begin() + kPublic + kAddressBytes,
                            [](std::byte value) { return value != std::byte{}; })
-               && (address[34] != std::byte{} || address[35] != std::byte{});
+               && (address[kPublic + kAddressBytes] != std::byte{}
+                   || address[kPublic + kAddressBytes + 1] != std::byte{});
     };
     if (hasPublic(first) || hasPublic(second)) {
         return hasPublic(first) && hasPublic(second)
-               && std::equal(first.begin() + 30, first.begin() + 36, second.begin() + 30);
+               && std::equal(first.begin() + kPublic,
+                             first.begin() + kPublic + kStride,
+                             second.begin() + kPublic);
     }
-    return std::equal(first.begin(), first.begin() + 6, second.begin());
+    return std::equal(first.begin(), first.begin() + kStride, second.begin());
 }
 bool native_address(const Session& session) noexcept {
     if (!session.id || !session.authenticated || !session.activity.bindingGeneration
@@ -46,11 +55,16 @@ bool native_address(const Session& session) noexcept {
         return false;
     }
     const auto& address = session.activityTransport.address;
-    if (std::all_of(
-            address.begin(), address.begin() + 6, [](std::byte b) { return b == std::byte{}; })
-        && std::all_of(address.begin() + 30, address.begin() + 36, [](std::byte b) {
-               return b == std::byte{};
-           })) {
+    // Neither the first local candidate nor the public mapping carries anything.
+    namespace descriptor = middleware::gameplay::descriptor;
+    constexpr auto kPublic = static_cast<std::ptrdiff_t>(descriptor::kPublicEndpointOffset);
+    constexpr auto kStride = static_cast<std::ptrdiff_t>(descriptor::kPeerEndpointStride);
+    if (std::all_of(address.begin(),
+                    address.begin() + kStride,
+                    [](std::byte b) { return b == std::byte{}; })
+        && std::all_of(address.begin() + kPublic,
+                       address.begin() + kPublic + kStride,
+                       [](std::byte b) { return b == std::byte{}; })) {
         return false;
     }
     // This is the native typed publication, never the reference's account-text fallback.

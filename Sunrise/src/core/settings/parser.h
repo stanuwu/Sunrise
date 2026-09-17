@@ -27,9 +27,11 @@ public:
     [[nodiscard]] bool parse_version(std::uint32_t& output, bool* compact = nullptr) noexcept;
 
 private:
-    [[nodiscard]] bool bap_endpoint(std::array<char, 16>& host,
-                                    std::array<unsigned char, 4>& address,
-                                    std::uint16_t& port) noexcept;
+    /** Host text, its dotted-quad octets and a port, at the widths both endpoints declare. */
+    [[nodiscard]] bool
+    bap_endpoint(std::array<char, client::server_endpoint::kHostCapacity>& host,
+                 std::array<unsigned char, client::server_endpoint::kAddressOctets>& address,
+                 std::uint16_t& port) noexcept;
     [[nodiscard]] bool compact_endpoint(client::server_endpoint::Settings& output) noexcept;
     [[nodiscard]] bool compact_persona(steam::User& output) noexcept;
     /** Parses the Core settings object. */

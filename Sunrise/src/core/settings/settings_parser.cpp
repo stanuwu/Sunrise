@@ -129,6 +129,7 @@ bool Parser::parse_root(Settings& output) noexcept {
         } else if (key == "host") {
             if (hasServer || !compact_endpoint(output.client.serverEndpoint)
                 || output.client.serverEndpoint.address[0] == 0
+                // A first octet of 224 or above is multicast or reserved, never a host.
                 || output.client.serverEndpoint.address[0] >= 224) {
                 return false;
             }

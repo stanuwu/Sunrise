@@ -127,6 +127,8 @@ std::size_t drain_ordered_replies(std::uint32_t id,
         return 0;
     }
     std::size_t written{};
+    // One framed and one sealed copy. The chosen 128-byte headroom exceeds the 16-byte GCM tag
+    // plus six-byte outer header; any service header is already part of the queued payload.
     static std::array<std::byte, kReplyEntryCapacity + 128> framed{}, sealed{};
     while (queue->count != 0) {
         auto& head = queue->entries[queue->head];

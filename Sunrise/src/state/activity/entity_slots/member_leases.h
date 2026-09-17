@@ -11,6 +11,7 @@ namespace sunrise::state::activity::entity_slots {
 inline constexpr std::size_t kMemberLeaseBlockCount = core::network_capacity::kActivityPlayers;
 /** Storage capacity does not override the activity's own native admission policy. */
 inline constexpr std::size_t kMemberLeaseRowCount = kMemberLeaseBlockCount;
+/** Block index no row can hold, which marks a member with no block of its own. */
 inline constexpr std::uint8_t kNoMemberLeaseBlock = 0xFF;
 
 /** Per-member ownership, separate from the aggregate mask used by the simulation service. */

@@ -8,7 +8,12 @@
 
 namespace sunrise::middleware::gameplay::single_port {
 // Sunrise transport framing, outside the unchanged native datagram. All fields are big endian.
+// Header: the four magic bytes, u8 kind, one clear byte, u16 payload length, u32 address,
+// u16 port, two clear bytes.
+inline constexpr std::array kMagic{std::byte{'S'}, std::byte{'R'}, std::byte{'U'}, std::byte{'1'}};
 inline constexpr std::size_t kHeader = 16;
+// Largest native datagram the carrier wraps, the same length the gameplay endpoint accepts on a
+// bound port. encode() refuses anything longer rather than truncating it.
 inline constexpr std::size_t kPayload = 1500;
 inline constexpr std::size_t kCapacity = kHeader + kPayload;
 enum class Kind : unsigned char { request = 1, delivery = 2 };
@@ -35,8 +40,7 @@ inline std::uint32_t get(std::span<const std::byte> in) noexcept {
         || !frame.port || frame.payload.size() > kPayload
         || out.size() < kHeader + frame.payload.size())
         return 0;
-    constexpr std::array magic{std::byte{'S'}, std::byte{'R'}, std::byte{'U'}, std::byte{'1'}};
-    std::copy(magic.begin(), magic.end(), out.begin());
+    std::copy(kMagic.begin(), kMagic.end(), out.begin());
     out[4] = static_cast<std::byte>(frame.kind);
     out[5] = out[14] = out[15] = std::byte{};
     put(out.subspan(6, 2), static_cast<std::uint32_t>(frame.payload.size()));
@@ -46,8 +50,9 @@ inline std::uint32_t get(std::span<const std::byte> in) noexcept {
     return kHeader + frame.payload.size();
 }
 [[nodiscard]] inline bool decode(std::span<const std::byte> in, Frame& out) noexcept {
-    if (in.size() < kHeader || in.size() > kCapacity || get(in.first(4)) != 0x53525531
-        || in[5] != std::byte{} || in[14] != std::byte{} || in[15] != std::byte{}
+    if (in.size() < kHeader || in.size() > kCapacity
+        || !std::equal(kMagic.begin(), kMagic.end(), in.begin()) || in[5] != std::byte{}
+        || in[14] != std::byte{} || in[15] != std::byte{}
         || get(in.subspan(6, 2)) != in.size() - kHeader)
         return false;
     const auto kind = static_cast<Kind>(in[4]);

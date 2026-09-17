@@ -16,7 +16,8 @@ bool prepare_fireteam(Scratch& scratch,
                       Prepared& prepared) noexcept {
     namespace datagen = middleware::datagen;
     namespace social = state::social;
-    constexpr std::size_t directorySize = 16;
+    // The family-six directory is this account's key and the link naming its descriptor.
+    constexpr std::size_t directorySize = 8 + 8;
     constexpr std::size_t descriptorSize = 8 + social::kNativeFireteamSize;
     static_assert(descriptorSize == 0xB68);
     auto& account = scratch.accountImage;

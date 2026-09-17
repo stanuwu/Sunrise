@@ -13,7 +13,9 @@ inline constexpr std::size_t kClientCapacity = core::network_capacity::kConnecti
 inline constexpr std::size_t kPairCapacity = core::network_capacity::kPlayers
                                              * (core::network_capacity::kPlayers - 1) / 2
                                              * core::network_capacity::kConnectionsPerPlayer;
+/** A relay pair is exactly the two endpoints it forwards between. */
 inline constexpr std::size_t kPairMemberCapacity = 2;
+/** Every relayed datagram opens with its four-byte session id. */
 inline constexpr std::size_t kFramingHeaderSize = 4;
 /** A native registration starts alone; only an authenticated introduction may pair it. */
 [[nodiscard]] std::uint32_t register_client(std::uint32_t connection,

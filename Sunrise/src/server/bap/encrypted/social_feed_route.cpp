@@ -39,7 +39,9 @@ void append_peer_routes(state::social::feed::Feed& feed, std::uint64_t primarySo
                 || native.descriptorSize != descriptor::kDescriptorSize) {
                 return;
             }
-            std::copy_n(native.descriptor.begin() + 8, chosen.size(), chosen.begin());
+            std::copy_n(native.descriptor.begin() + state::social::kNativeJoinAddressOffset,
+                        chosen.size(),
+                        chosen.begin());
         }
         count = descriptor::net_addr_endpoints(chosen, candidates);
     }

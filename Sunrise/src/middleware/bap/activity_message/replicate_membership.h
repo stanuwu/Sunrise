@@ -13,6 +13,12 @@ namespace sunrise::middleware::bap::activity_message::replicate_membership {
 
 /** Membership snapshots use activity message type 12. */
 inline constexpr std::uint32_t kMessageType = 12;
+/** Fixed member slots the native membership table holds, and the width of the masks below. */
+inline constexpr std::size_t kMemberSlotCount = 32;
+/** Slot one belongs to the service host, so no peer may claim it. */
+inline constexpr std::uint8_t kServiceHostSlot = 1;
+/** One serialized NetAddr, in bits, which is how every transport field is budgeted. */
+inline constexpr std::size_t kTransportAddressBitCount = gameplay::descriptor::kNetAddrSize * 8U;
 /** One local player and an explicit empty view mask use 30,085 meaningful bits. */
 inline constexpr std::size_t kMeaningfulBitCount = 30'085;
 /** The one-member snapshot has three zero padding bits. */
@@ -92,12 +98,14 @@ struct PeerMember final {
     std::uint8_t syncToken{};
     bool hasTransitionToken{};
     bool hasSyncToken{};
+    /** Reflected peer name, as code units. The writer appends the terminator after them. */
     std::array<std::uint16_t, 63> name{};
     std::uint8_t nameLength{};
     bool hasName{};
     bool present{};
 };
-inline constexpr std::size_t kPeerMemberCapacity = 30;
+/** Peers fill slots two through the last, leaving the table room for its owner and the host. */
+inline constexpr std::size_t kPeerMemberCapacity = kMemberSlotCount - 2;
 
 /** A present leg adds its five scalars and two clear presence bits. */
 inline constexpr std::size_t kRegionLegBitCount = 10 + 32 + 32 + 2 + 2 + 1 + 1;
@@ -182,10 +190,10 @@ inline constexpr std::uint32_t kRemoteMemberMask = 1U << 1U;
 /** @return Mask of the member slots this body fills. */
 [[nodiscard]] constexpr std::uint32_t
 occupied_member_mask(const MembershipSnapshot& snapshot) noexcept {
-    std::uint32_t mask = (snapshot.localSlot < 32 ? 1U << snapshot.localSlot : 0U)
+    std::uint32_t mask = (snapshot.localSlot < kMemberSlotCount ? 1U << snapshot.localSlot : 0U)
                          | (snapshot.remoteViewMember.present ? kRemoteMemberMask : 0U);
     for (std::size_t i = 0; i < snapshot.peers.size(); ++i) {
-        if (snapshot.peers[i].present && peer_slot(snapshot, i) < 32) {
+        if (snapshot.peers[i].present && peer_slot(snapshot, i) < kMemberSlotCount) {
             mask |= 1U << peer_slot(snapshot, i);
         }
     }
@@ -199,12 +207,24 @@ active_view_mask(const MembershipSnapshot& snapshot) noexcept {
     for (std::size_t i = 0; i < snapshot.peers.size(); ++i) {
         const auto& peer = snapshot.peers[i];
         if (peer.present && peer.transport.hasFlags && (peer.transport.flags & 0x10U)
-            && peer.transport.hasAddress && peer_slot(snapshot, i) < 32) {
+            && peer.transport.hasAddress && peer_slot(snapshot, i) < kMemberSlotCount) {
             mask |= 1U << peer_slot(snapshot, i);
         }
     }
     return mask;
 }
+
+/**
+ * Extra bits replacing an absent row in activity_membership_member_writer.cpp:
+ * 365 member prefix (presence, key, 10/32-bit indices, four SOIDs, two presence bits),
+ * 374 identity (15 presence bits, three SOIDs, 14-bit blob length, 19-byte blob, terminator),
+ * one absent transition bit and eight leave fields, less the three absent-row presence bits.
+ * Optional identity and transition payloads are added separately below.
+ */
+inline constexpr std::size_t kPeerMemberFixedBitCount =
+    (1 + 64 + 10 + 32 + 4 * 64 + 2) + (15 + 3 * 64 + 14 + 19 * 8 + 1) + 1 + 8 - 3;
+/** The player blob carries each name unit twice, so one character costs two 16-bit writes. */
+inline constexpr std::size_t kPeerNameUnitBitCount = 32;
 
 [[nodiscard]] constexpr std::size_t
 peer_member_bit_count(const MembershipSnapshot& snapshot) noexcept {
@@ -213,12 +233,15 @@ peer_member_bit_count(const MembershipSnapshot& snapshot) noexcept {
         if (!peer.present) {
             continue;
         }
-        bits += 745 + (has_peer_transition(peer) ? 5 : 0) + (peer.hasSyncToken ? 8 : 0)
-                + (peer.currentLeg.present ? kRegionLegBitCount : 0)
+        bits += kPeerMemberFixedBitCount + (has_peer_transition(peer) ? 5 : 0)
+                + (peer.hasSyncToken ? 8 : 0) + (peer.currentLeg.present ? kRegionLegBitCount : 0)
                 + (peer.pendingLeg.present ? kRegionLegBitCount : 0)
-                + (peer.transport.hasFlags ? 6 : 0) + (peer.transport.hasAddress ? 688 : 0)
-                + (peer.transport.hasAlternate ? 688 : 0)
-                + (peer.hasName ? 32 * (static_cast<std::size_t>(peer.nameLength) + 1) : 0);
+                + (peer.transport.hasFlags ? 6 : 0)
+                + (peer.transport.hasAddress ? kTransportAddressBitCount : 0)
+                + (peer.transport.hasAlternate ? kTransportAddressBitCount : 0)
+                + (peer.hasName
+                       ? kPeerNameUnitBitCount * (static_cast<std::size_t>(peer.nameLength) + 1)
+                       : 0);
     }
     return bits;
 }

@@ -32,12 +32,16 @@ bool native_descriptor(const state::AccountState& account,
     }
     std::uint64_t fireteamHash{}, session{};
     std::memcpy(&fireteamHash, native.descriptor.data(), sizeof fireteamHash);
-    std::memcpy(&session, native.descriptor.data() + 110, sizeof session);
+    std::memcpy(&session,
+                native.descriptor.data() + state::social::kNativeJoinSessionOffset,
+                sizeof session);
     if (fireteamHash == 0 || session == 0) {
         return false;
     }
     std::array<std::byte, descriptor::kNetAddrSize> own{}, chosen{};
-    std::copy_n(native.descriptor.begin() + 8, own.size(), own.begin());
+    std::copy_n(native.descriptor.begin() + state::social::kNativeJoinAddressOffset,
+                own.size(),
+                own.begin());
     body = native.descriptor;
     // The two blobs the SAME client published about itself, and the descriptor's own NetAddr.
     // A published carrier wins over the descriptor's own bytes, because the type-12 membership
@@ -68,7 +72,7 @@ bool native_descriptor(const state::AccountState& account,
         return false;
     }
     // Only the address changes. The client still owns fireteam/session IDs and opaque join keys.
-    std::copy(chosen.begin(), chosen.end(), body.begin() + 8);
+    std::copy(chosen.begin(), chosen.end(), body.begin() + state::social::kNativeJoinAddressOffset);
     return join_silo(silo);
 }
 } // namespace
@@ -78,7 +82,14 @@ bool prepare_join_descriptor(Scratch& scratch,
                              const Reservation& reservation,
                              Prepared& prepared) noexcept {
     namespace datagen = middleware::datagen;
-    constexpr std::size_t directorySize = 16, descriptorSize = 0x98;
+    // The family-seven directory is this account's key and the link naming its descriptor.
+    constexpr std::size_t directorySize = 8 + 8;
+    // Its descriptor is a u64 key, a u32 declared length, the join descriptor body, four bytes of
+    // alignment, and the u64 static join silo the client reads last.
+    constexpr std::size_t descriptorBodyOffset = 8 + 4;
+    constexpr std::size_t descriptorSiloOffset = 0x90;
+    constexpr std::size_t descriptorSize = descriptorSiloOffset + 8;
+    static_assert(descriptorBodyOffset + descriptor::kDescriptorSize <= descriptorSiloOffset);
     auto& account = scratch.accountImage;
     const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
     const state::ScopedAccountView bind(handle);
@@ -117,8 +128,8 @@ bool prepare_join_descriptor(Scratch& scratch,
         const auto length = static_cast<std::uint32_t>(descriptor::kDescriptorSize);
         std::memcpy(record.data(), &account.primarySoid, 8);
         std::memcpy(record.data() + 8, &length, 4);
-        std::copy(body.begin(), body.end(), record.begin() + 12);
-        std::memcpy(record.data() + 0x90, &silo, 8);
+        std::copy(body.begin(), body.end(), record.begin() + descriptorBodyOffset);
+        std::memcpy(record.data() + descriptorSiloOffset, &silo, 8);
         if (!compress_object(scratch,
                              record,
                              datagen::kJoinDescriptorObjectId,

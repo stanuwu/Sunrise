@@ -105,6 +105,8 @@ bool install() noexcept {
     if (!callback) {
         return false;
     }
+    // MOV RAX, [RIP + displacement] at the head of the match names the friends-manager global.
+    // The pair is that displacement's offset and the next instruction it is relative to.
     auto* manager = resolve_relative(callback + 7, callback + 11);
     if (!manager) {
         return false;

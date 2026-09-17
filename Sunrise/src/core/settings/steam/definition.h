@@ -6,6 +6,11 @@
 
 namespace sunrise::core::settings::steam {
 
+/**
+ * The identity this build falls back to when none is configured and none was created.
+ * Public universe, individual account type and desktop instance in the high dword, then one fixed
+ * account number. Created identities keep that shape and reuse its low byte.
+ */
 inline constexpr std::uint64_t kDefaultSteamId = 0x0110000130AA9EC5ULL;
 
 /** Steam persona policy allows at most 63 printable ASCII bytes. */

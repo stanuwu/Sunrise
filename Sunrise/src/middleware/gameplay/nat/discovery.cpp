@@ -5,18 +5,29 @@
 namespace sunrise::middleware::gameplay::nat::discovery {
 namespace {
 // Native NAT probes have four stages; IP-discovery messages use the 30-39 family.
+// A probe request is two big-endian u16, the type and the stage index.
 constexpr std::size_t kNatRequestSize = 4;
+// Its reply echoes both, then carries the masked address and masked port. The remaining bytes of
+// the fixed record stay clear.
 constexpr std::size_t kNatReplySize = 16;
 constexpr std::uint16_t kNatProbeType = 1;
 constexpr std::uint16_t kFirstProbeStage = 1;
 constexpr std::uint16_t kLastProbeStage = 4;
+// The obfuscation the native receiver undoes: it XORs the reported address with the full word and
+// the reported port with its low half.
 constexpr std::uint32_t kNatAddressMask = 0x76C3F6BCU;
 constexpr std::uint16_t kNatPortMask = 0xF6BCU;
+// An IP-discovery request is its type byte and two bytes this responder does not read.
 constexpr std::size_t kIpRequestSize = 3;
+// Its reply is the echoed type byte, a little-endian family, a big-endian address and a
+// little-endian port.
 constexpr std::size_t kIpReplySize = 9;
 constexpr unsigned kFirstIpDiscoveryType = 30;
 constexpr unsigned kLastIpDiscoveryType = 39;
+// AF_INET, the only family this responder reports.
 constexpr std::uint16_t kIpv4AddressFamily = 2;
+// reply() writes into a caller buffer sized by the header's bound, so it must cover both modes.
+static_assert(kReplyCapacity >= kNatReplySize && kReplyCapacity >= kIpReplySize);
 
 std::uint16_t big_u16(std::span<const std::byte> input, std::size_t offset) noexcept {
     return static_cast<std::uint16_t>(std::to_integer<unsigned>(input[offset]) << 8U)

@@ -36,18 +36,26 @@ struct PendingForward {
 /**
  * Concurrent correlations; additional requests stay in the bounded held-input queue. A slot is
  * one of four, which is why `kResponseTimeoutMs` bounds a correlation: an answer that never
- * arrives would otherwise hold its slot for the life of the link.
+ * arrives would otherwise hold its slot for the life of the link. Four is a chosen depth, and
+ * exceeding it defers a request rather than losing one.
  */
 inline constexpr std::size_t kPendingCapacity = 4;
 
 inline constexpr std::size_t kLinkFrameCapacity = client::network::kBapFrameCapacity;
+
+// Link scheduling. Each value bounds one local event of this link and is a chosen bound, not a
+// retail-observed interval: nothing on the wire declares any of them.
+/** Wait before redialling after a failed or closed link, so an absent server is not hammered. */
 inline constexpr std::uint64_t kRetryIntervalMs = 2000;
+/** Bounds one nonblocking connect, and then the hello it sends; a slower server is retried. */
 inline constexpr std::uint64_t kConnectTimeoutMs = 5000;
 inline constexpr std::uint64_t kHelloTimeoutMs = 5000;
 
 /** Idle period after which the link sends the protocol's own keepalive service, `echo`. */
 inline constexpr std::uint64_t kKeepaliveIntervalMs = 5000;
+/** Longest one correlation may hold a pending slot before the link is failed and redialled. */
 inline constexpr std::uint64_t kResponseTimeoutMs = 30'000;
+/** The high bit marks a task id this link minted, so it cannot collide with a client's own. */
 inline constexpr std::uint32_t kOriginatedTaskIdBase = 0x80000000U;
 
 struct UpstreamLink {

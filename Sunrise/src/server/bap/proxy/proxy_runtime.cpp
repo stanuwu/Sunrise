@@ -104,14 +104,14 @@ bool response(UpstreamLink& link,
     }
     if (forward.downstreamConnectionId == 0) {
         if (parsed.serviceId == state::social::feed::kFeedResponse) {
-            if (parsed.status != 200
+            if (parsed.status != middleware::bap::kStatusOk
                 || !social_feed::acknowledge(
                     link.downstreamConnectionId, forward.taskId, parsed.body)) {
                 fail_connection(link.downstreamConnectionId, "social_response");
             }
             return !failed(link.downstreamConnectionId);
         }
-        if (parsed.status != 200) {
+        if (parsed.status != middleware::bap::kStatusOk) {
             profile_publisher::reject(
                 link.downstreamConnectionId, forward.taskId, parsed.serviceId);
             return true;

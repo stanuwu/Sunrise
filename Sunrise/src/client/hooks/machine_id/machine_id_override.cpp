@@ -52,6 +52,8 @@ bool install() noexcept {
                                       "E8 ? ? ? ? C6 05 ? ? ? ? 01";
     constexpr auto pattern = signature<signature_length(text)>(text);
     if (auto* site = scan_main_image_unique(pattern, "machine_identity_cache")) {
+        // Every pair below is one instruction's RIP displacement and the next instruction it is
+        // relative to, counted from the first matched byte.
         // CMP and MOV must name the same validity byte. LEA RDX/RCX supply the ID/record;
         // the relative CALL supplies their native composer.
         auto* initialized = resolve_relative(site + 2, site + 7);

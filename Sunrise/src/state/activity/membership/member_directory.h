@@ -23,6 +23,7 @@ struct ObservedMember final {
 
 /** Recipient-relative view with stable slots inside one activity generation. */
 struct MemberDirectory final {
+    /** Thirty peers: the native 32-slot table less its owner and Bubble Host. */
     std::array<ObservedMember, 30> peers{};
     std::uint8_t localSlot{};
     bool valid{};

@@ -10,7 +10,7 @@ namespace {
 /** 8 elements, low byte first, encode a member or host key. */
 constexpr std::size_t kMemberKeyByteCount = 8;
 /** The membership table has 32 fixed member slots. */
-constexpr std::size_t kMemberCount = 32;
+constexpr std::size_t kMemberCount = kMemberSlotCount;
 /** Each absent member adds 3 clear presence bits. */
 constexpr std::uint8_t kAbsentMemberBitCount = 3;
 /**
@@ -19,6 +19,10 @@ constexpr std::uint8_t kAbsentMemberBitCount = 3;
  * the owner-backed manager, which waits on a session a bubble host never gets.
  */
 constexpr std::uint32_t kField1Bias = 1;
+/** Ten bits at that bias, so the field spans -1 through its largest positive value. */
+constexpr std::uint8_t kField1Width = 10;
+constexpr std::int32_t kField1Minimum = -1;
+constexpr std::int32_t kField1Maximum = (1 << kField1Width) - 2;
 /** Member field 2 uses the signed 32-bit midpoint as its bias. */
 constexpr std::uint32_t kField2Bias = 0x80000000U;
 /** The member transition block's synchronisation byte is a plain 8-bit field. */
@@ -32,6 +36,10 @@ constexpr std::uint8_t kLeaveReasonWire = 1;
 constexpr std::size_t kIdentityPresenceFieldCount = 15;
 /** The player blob includes the native partition field and three zero tail pad bits. */
 constexpr std::uint16_t kPlayerBlobByteCount = 19;
+/** Field 14 declares that blob's byte count in a 14-bit length. */
+constexpr std::uint8_t kPlayerBlobLengthWidth = 14;
+/** The blob writes the name twice, two bytes per unit, so one character adds four bytes. */
+constexpr std::uint32_t kPlayerBlobNameByteCount = 4;
 /** Native A.P2 uses a six-bit value at bias one; free-roam partition zero is wire one. */
 constexpr std::uint8_t kPlayerPartitionWire = 1;
 /** The remote member's player-state field zero carries the native-view gate. */
@@ -107,6 +115,9 @@ template <std::size_t Size>
         }
         return writer.write(0, 16);
     };
+    // Blob fields in write order: a 3-bit kind, one clear presence bit, the name, a set presence
+    // bit, the 6-bit partition, two clear bits, the name again, five clear bits, a set presence
+    // bit, the account and character SOIDs, and three zero tail pad bits.
     return writer.write(1, 3) && writer.write(0, 1) && name() && writer.write(1, 1)
            && writer.write(kPlayerPartitionWire, 6) && writer.write(0, 2) && name()
            && writer.write(0, 5) && writer.write(1, 1) && writer.write(identity.accountSoid, 64)
@@ -145,7 +156,7 @@ template <std::size_t Size>
             return false;
         }
         if (field == 0 && peer != nullptr && peer->transport.hasFlags
-            && !writer.write(peer->transport.flags, 6)) {
+            && !writer.write(peer->transport.flags, kRemoteViewGateWidth)) {
             return false;
         }
         if (field == 10 && peer != nullptr && peer->transport.hasAlternate
@@ -179,10 +190,11 @@ template <std::size_t Size>
             return false;
         }
         if (field == 14
-            && (!writer.write(
-                    kPlayerBlobByteCount
-                        + (peer != nullptr && peer->hasName ? 4U * (peer->nameLength + 1U) : 0U),
-                    14)
+            && (!writer.write(kPlayerBlobByteCount
+                                  + (peer != nullptr && peer->hasName
+                                         ? kPlayerBlobNameByteCount * (peer->nameLength + 1U)
+                                         : 0U),
+                              kPlayerBlobLengthWidth)
                 || !write_player_blob(writer, identity, peer))) {
             return false;
         }
@@ -324,7 +336,7 @@ template <std::size_t Size>
 /** Checks the fields that could otherwise encode outside their own wire width. */
 bool valid(const MembershipSnapshot& snapshot) noexcept {
     namespace authoritative = client_authoritative_data;
-    if (snapshot.localSlot >= 32 || snapshot.localSlot == 1) {
+    if (snapshot.localSlot >= kMemberCount || snapshot.localSlot == kServiceHostSlot) {
         return false;
     }
     for (std::size_t i = 0; i < snapshot.peers.size(); ++i) {
@@ -333,14 +345,15 @@ bool valid(const MembershipSnapshot& snapshot) noexcept {
             continue;
         }
         const auto slot = peer_slot(snapshot, i);
-        if (slot >= 32 || slot == 1 || slot == snapshot.localSlot || !valid_leg(peer.currentLeg)
-            || !valid_leg(peer.pendingLeg)) {
+        if (slot >= kMemberCount || slot == kServiceHostSlot || slot == snapshot.localSlot
+            || !valid_leg(peer.currentLeg) || !valid_leg(peer.pendingLeg)) {
             return false;
         }
         if (!peer.identity.memberKey || !peer.identity.accountSoid || !peer.identity.field5
-            || peer.identity.field1 < -1 || peer.identity.field1 > 1022
+            || peer.identity.field1 < kField1Minimum || peer.identity.field1 > kField1Maximum
             || peer.nameLength > peer.name.size()
-            || (peer.transport.hasFlags && peer.transport.flags > 63)
+            || (peer.transport.hasFlags
+                && peer.transport.flags > ((1U << kRemoteViewGateWidth) - 1U))
             || peer.identity.memberKey == snapshot.identity.memberKey
             || peer.identity.accountSoid == snapshot.identity.accountSoid
             || (snapshot.remoteViewMember.present

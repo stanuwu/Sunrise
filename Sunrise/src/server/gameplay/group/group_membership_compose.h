@@ -3,10 +3,12 @@
 #include <array>
 #include <span>
 
+#include "../../../core/network_capacity.h"
 #include "../../../middleware/gameplay/group/session_messages.h"
 
 namespace sunrise::server::gameplay::group::compose {
-inline constexpr std::size_t kPeerCapacity = 12;
+/** One composed membership carries the whole activity, so it inherits that limit. */
+inline constexpr std::size_t kPeerCapacity = core::network_capacity::kActivityPlayers;
 struct PeerInput final {
     middleware::gameplay::group::MembershipMember member{};
     middleware::gameplay::group::MembershipPlayer player{};

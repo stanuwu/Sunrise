@@ -29,7 +29,9 @@ struct PeerPublication {
             || native.descriptorSize != descriptor::kDescriptorSize)
             return;
         std::array<std::byte, descriptor::kNetAddrSize> address{};
-        std::copy_n(native.descriptor.begin() + 8, address.size(), address.begin());
+        std::copy_n(native.descriptor.begin() + social::kNativeJoinAddressOffset,
+                    address.size(),
+                    address.begin());
         std::array<Endpoint, descriptor::kPeerEndpointCount> candidate{};
         const auto size = descriptor::net_addr_endpoints(address, candidate);
         if (!size) return;

@@ -205,6 +205,9 @@ write_peer_delta(bits::Writer& writer, std::size_t index, const MembershipMember
            && writer.write(kEntryFieldAbsent, kFlagWidth);
 }
 
+// Widths the profile group declares on the wire: its leading 32-bit value, the 3-bit player
+// kind, one UTF-16 name unit, and sub-block A's remaining fields. The native record names none
+// of those last three, so they are numbered here by the order the codec reads them.
 constexpr std::uint8_t kProfileScalarWidth = 32;
 constexpr std::uint8_t kProfileSmallWidth = 3;
 constexpr std::uint8_t kProfileNameUnitWidth = 16;

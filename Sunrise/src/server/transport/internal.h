@@ -37,10 +37,15 @@ struct Peer {
     std::array<std::byte, client::network::kBapFrameCapacity> output{};
 };
 
-/** Bound unauthenticated occupancy, partial-frame assembly and stalled writes independently. */
+/**
+ * Bound unauthenticated occupancy, partial-frame assembly and stalled writes independently.
+ * One chosen deadline covers all three, long enough that a slow client is never mistaken for a
+ * stalled one. Reaching it closes that peer's socket; nothing else is affected.
+ */
 [[nodiscard]] inline bool expired(const Peer& peer, std::uint64_t now) noexcept {
+    constexpr std::uint64_t kDeadlineMs = 30'000;
     const auto overdue = [now](std::uint64_t start) {
-        return now >= start && now - start >= 30'000;
+        return now >= start && now - start >= kDeadlineMs;
     };
     return (!peer.authenticated && overdue(peer.acceptedTick))
            || (peer.streamSize != 0 && !peer.inputDeferred && overdue(peer.inputStartedTick))

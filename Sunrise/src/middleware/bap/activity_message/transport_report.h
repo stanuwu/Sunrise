@@ -4,12 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../gameplay/descriptor/join_descriptor.h"
+
 namespace sunrise::middleware::bap::activity_message {
 
 /** Client-authored B2 transport fields. Presence distinguishes omission from withdrawal. */
 struct TransportReport final {
-    std::array<std::byte, 86> address{};
-    std::array<std::byte, 86> alternate{};
+    std::array<std::byte, gameplay::descriptor::kNetAddrSize> address{};
+    std::array<std::byte, gameplay::descriptor::kNetAddrSize> alternate{};
     std::uint8_t flags{};
     bool hasFlags{};
     bool hasAddress{};

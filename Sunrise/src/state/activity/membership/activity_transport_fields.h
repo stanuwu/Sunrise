@@ -5,11 +5,12 @@
 #include <cstdint>
 
 #include "../../../core/network_capacity.h"
+#include "../../../middleware/gameplay/descriptor/join_descriptor.h"
 
 namespace sunrise::state::activity::membership {
 
 /** A peer NetAddr is exactly 86 bytes wherever it appears. */
-inline constexpr std::size_t kTransportAddressSize = 86;
+inline constexpr std::size_t kTransportAddressSize = middleware::gameplay::descriptor::kNetAddrSize;
 
 /** The client sets this transport flag once its own carrier is ready. */
 inline constexpr std::uint8_t kTransportReadyFlag = 0x10;

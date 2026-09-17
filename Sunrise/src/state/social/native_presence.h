@@ -5,9 +5,18 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../middleware/gameplay/descriptor/join_descriptor.h"
+
 namespace sunrise::state::social {
 
-inline constexpr std::size_t kNativeJoinDescriptorSize = 128;
+/** The join descriptor the family-seven record declares, which is its whole body. */
+inline constexpr std::size_t kNativeJoinDescriptorSize =
+    middleware::gameplay::descriptor::kDescriptorSize;
+/** Within it, an eight-byte fireteam hash, then this peer's own NetAddr. */
+inline constexpr std::size_t kNativeJoinAddressOffset = 8;
+/** And, further in, the online session id the same descriptor publishes. */
+inline constexpr std::size_t kNativeJoinSessionOffset = 110;
+/** The native fireteam payload struct the family-six descriptor carries behind its key. */
 inline constexpr std::size_t kNativeFireteamSize = 0xB60;
 
 /** Public fields decoded from the native character writeback, excluding inventory and unlocks. */

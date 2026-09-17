@@ -21,6 +21,15 @@ constexpr std::size_t kHeaderFloats = 3;
 constexpr std::size_t kSeenWords = 4;
 constexpr std::size_t kRosterItems = 20;
 constexpr std::size_t kRosterPlugs = 64;
+/** One roster row: a u64 key, two biased shorts, the plug name units, and a 4-bit tail. */
+constexpr std::size_t kRosterRowSize = 0x90;
+constexpr std::size_t kRosterRowFirstShort = 8;
+constexpr std::size_t kRosterRowSecondShort = 10;
+constexpr std::size_t kRosterRowName = 12;
+constexpr std::size_t kRosterRowTail = kRosterRowName + kRosterPlugs * 2;
+constexpr std::uint8_t kRosterRowTailBits = 4;
+/** Signed shorts reach the wire biased by the 16-bit midpoint. */
+constexpr std::uint64_t kShortBias = 0x8000;
 constexpr std::size_t kOpaqueBytes = 128;
 constexpr std::size_t kInventoryRows = 350;
 constexpr std::size_t kUnlockFlags = 768;
@@ -103,33 +112,43 @@ bool read_roster(Reader& reader, Request& output) noexcept {
     };
     const auto items = [&scalar, &store](Reader& array) noexcept {
         for (std::size_t index = 0; index < kRosterItems; ++index) {
-            const auto row = index * 0x90;
+            const auto row = index * kRosterRowSize;
             const auto name = [&](Reader& units) noexcept {
                 for (std::size_t unit = 0; unit < kRosterPlugs; ++unit) {
                     std::uint64_t value{};
                     if (!units.read(kShortBits, value)) {
                         return false;
                     }
-                    store(row + 12 + unit * 2, 2, value - 0x8000);
+                    store(row + kRosterRowName + unit * 2, 2, value - kShortBias);
                 }
                 return true;
             };
             if (!scalar(array, row, 8, kLongBits, 0)
-                || !scalar(array, row + 8, 2, kShortBits, 0x8000)
-                || !scalar(array, row + 10, 2, kShortBits, 0x8000) || !optional(array, name)
-                || !scalar(array, row + 0x8C, 1, 4, 0)) {
+                || !scalar(array, row + kRosterRowFirstShort, 2, kShortBits, kShortBias)
+                || !scalar(array, row + kRosterRowSecondShort, 2, kShortBits, kShortBias)
+                || !optional(array, name)
+                || !scalar(array, row + kRosterRowTail, 1, kRosterRowTailBits, 0)) {
                 return false;
             }
         }
         return true;
     };
-    // The roster tail carries these seven optional wire fields in order.
+    // The roster rows fill the record ahead of its tail, which is then two 64-bit ids, two
+    // quantized floats and three byte-wide enums. The two signed enums carry the 8-bit midpoint
+    // bias and the last is a 4-bit value at bias one.
+    constexpr std::size_t kTailBase = kRosterItems * kRosterRowSize;
+    constexpr std::uint64_t kByteBias = 0x80;
     constexpr std::array<std::uint8_t, 7> kTailWidths{
-        kLongBits, kLongBits, kWordBits, kWordBits, kByteBits, kByteBits, 4};
-    constexpr std::array<std::size_t, 7> kTailOffsets{
-        0xB40, 0xB48, 0xB50, 0xB54, 0xB58, 0xB59, 0xB5A};
+        kLongBits, kLongBits, kWordBits, kWordBits, kByteBits, kByteBits, kRosterRowTailBits};
+    constexpr std::array<std::size_t, 7> kTailOffsets{kTailBase,
+                                                      kTailBase + 8,
+                                                      kTailBase + 0x10,
+                                                      kTailBase + 0x14,
+                                                      kTailBase + 0x18,
+                                                      kTailBase + 0x19,
+                                                      kTailBase + 0x1A};
     constexpr std::array<std::size_t, 7> kTailSizes{8, 8, 4, 4, 1, 1, 1};
-    constexpr std::array<std::uint64_t, 7> kTailBiases{0, 0, 0, 0, 0x80, 0x80, 1};
+    constexpr std::array<std::uint64_t, 7> kTailBiases{0, 0, 0, 0, kByteBias, kByteBias, 1};
     if (!optional(reader, items)) {
         return false;
     }

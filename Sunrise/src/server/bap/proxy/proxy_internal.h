@@ -17,7 +17,10 @@ struct ReplyEntry {
     std::size_t payloadSize{};
 };
 
-/** Bounded burst storage; capacity pressure defers input until the socket drains. */
+/**
+ * Bounded burst storage; capacity pressure defers input until the socket drains.
+ * The depth is chosen rather than measured, so overflow is deferral and never a dropped reply.
+ */
 inline constexpr std::size_t kReplyQueueCapacity = 8;
 
 struct ReplyQueue {

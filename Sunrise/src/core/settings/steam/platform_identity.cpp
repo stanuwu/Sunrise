@@ -11,8 +11,11 @@
 
 namespace sunrise::core::settings::steam::platform_identity {
 namespace {
+/** ASCII "SID1", little endian: the marker this cache file opens with. */
+constexpr std::uint32_t kRecordMagic = 0x31444953;
+/** The record is read and written verbatim, so its layout may not shift under it. */
 struct IdentityRecord {
-    std::uint32_t magic{0x31444953};
+    std::uint32_t magic{kRecordMagic};
     std::uint32_t version{1};
     std::uint64_t token{};
     std::uint64_t inverse{};
@@ -42,7 +45,7 @@ bool load_or_create(std::uint64_t& token) noexcept {
             GetFileSizeEx(file, &length) && length.QuadPart == static_cast<LONGLONG>(sizeof record)
             && ReadFile(file, &record, sizeof record, &read, nullptr) && read == sizeof record;
         const bool closed = CloseHandle(file) != FALSE;
-        if (!okay || !closed || record.magic != 0x31444953 || record.version != 1
+        if (!okay || !closed || record.magic != kRecordMagic || record.version != 1
             || record.inverse != ~record.token || !state::account::platform::valid(record.token)) {
             return false;
         }
@@ -60,6 +63,8 @@ bool load_or_create(std::uint64_t& token) noexcept {
         < 0) {
         return false;
     }
+    // An all-zero draw would leave the shared low byte as the whole account number, so the
+    // smallest value that still occupies the random field is substituted.
     if ((random & 0xFFFFFF00U) == 0) {
         random = 0x100;
     }

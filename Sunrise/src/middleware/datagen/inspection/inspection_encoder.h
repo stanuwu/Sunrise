@@ -6,13 +6,17 @@
 #include <span>
 
 #include "../character_record/character_record_encoder.h"
+#include "../family4/character/layout.h"
 #include "../family4/inventory/layout.h"
 #include "../family4/progression/layout.h"
 
 namespace sunrise::middleware::datagen::inspection {
 
-inline constexpr std::size_t kEquipmentCapacity = 20;
-inline constexpr std::size_t kProgressionCapacity = 127;
+/** The inspected character projects the family-four character record's own two bank sizes. */
+inline constexpr std::size_t kEquipmentCapacity = family4::character::layout::kEquipmentCapacity;
+inline constexpr std::size_t kProgressionCapacity =
+    family4::character::layout::kProgressionCapacity;
+/** Sizes the two native classes named below declare; the assertions hold each struct to one. */
 inline constexpr std::size_t kRootSize = 0x800;
 inline constexpr std::size_t kCharacterSize = 0x1B48;
 
@@ -32,6 +36,8 @@ struct Character {
     std::uint32_t inventoryPadding{};
     std::array<family4::inventory::layout::Entry, kEquipmentCapacity> inventory{};
     std::array<std::uint64_t, kEquipmentCapacity> equippedSoids{};
+    // Native blocks kept at their declared extents. Their contents have no reader here, so the
+    // projection carries them clear rather than composing fields it cannot source.
     std::array<std::byte, 0xF4> changes{};
     std::array<std::byte, 4> changesPadding{};
     std::array<std::byte, 0x20> linkedRecord{};
@@ -43,6 +49,7 @@ struct Character {
 
 static_assert(sizeof(Root) == kRootSize);
 static_assert(sizeof(Character) == kCharacterSize);
+// Positions the native character class declares for the five blocks C++ packing could shift.
 static_assert(offsetof(Character, inventorySerial) == 0x820);
 static_assert(offsetof(Character, inventory) == 0x828);
 static_assert(offsetof(Character, equippedSoids) == 0xAA8);

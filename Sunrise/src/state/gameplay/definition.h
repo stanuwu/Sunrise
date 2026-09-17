@@ -128,12 +128,19 @@ enum class PeerStage : std::uint8_t {
 
 /** Reliable message sequences unwrap modulo 8,192. */
 inline constexpr std::uint16_t kMessageSequenceModulus = 8192;
-/** One queue buffers this many out-of-order fragments before it drops the newest. */
+/**
+ * One queue buffers this many out-of-order fragments before it drops the newest.
+ * The depth is a chosen bound, several send windows deep, and overflow drops rather than overruns.
+ */
 inline constexpr std::size_t kReliableSlots = 64;
 /** The larger reliable queue carries 32-byte fragments, which bounds one slot. */
 inline constexpr std::size_t kReliableFragmentBytes = 32;
-/** Complete native group messages include the inner header in this bound. */
-inline constexpr std::size_t kReassemblyCapacity = 8704;
+/** Local body ceiling for membership composition; encoding a larger snapshot fails. */
+inline constexpr std::size_t kGroupMessageCapacity = 8192;
+/** Chosen staging/receive headroom above that ceiling, including the inner message header. */
+inline constexpr std::size_t kGroupMessageHeaderRoom = 512;
+/** Local receive bound; an oversized fragment run is discarded through its terminator. */
+inline constexpr std::size_t kReassemblyCapacity = kGroupMessageCapacity + kGroupMessageHeaderRoom;
 
 /** One buffered reliable fragment. */
 struct ReliableFragment {
@@ -158,12 +165,15 @@ struct ReliableQueue {
     bool started{};
 };
 
-/** Complete native group messages may wait across multiple reliable packets. */
+/** Local burst storage; a message that cannot fit is refused without partially enqueueing it. */
 inline constexpr std::size_t kOutboundSlots = 512;
-/** A packet carries this many fragments, leaving room for its external handlers. */
+/** 16 KiB of fragment payload; headers and terminators also consume this space. */
+static_assert(kOutboundSlots * kReliableFragmentBytes == 2 * kGroupMessageCapacity);
+/** Local pacing choice: at most 256 bytes of queued fragments per packet, before wire headers. */
 inline constexpr std::size_t kOutboundSendWindow = 8;
 /** Outgoing staging includes the inner header; receive assembly keeps its own bound. */
-inline constexpr std::size_t kOutboundMessageCapacity = 8704;
+inline constexpr std::size_t kOutboundMessageCapacity =
+    kGroupMessageCapacity + kGroupMessageHeaderRoom;
 
 /** One reliable fragment this host owes the peer. */
 struct OutboundFragment {

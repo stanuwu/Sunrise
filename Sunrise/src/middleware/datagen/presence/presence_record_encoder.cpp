@@ -5,6 +5,15 @@
 
 namespace sunrise::middleware::datagen::presence {
 namespace {
+// Directory record field positions. Both names are UTF-16, two bytes per code unit, and the
+// display name is bounded by the name code that follows it.
+constexpr std::size_t kDirectoryAccountSoid = 0;
+constexpr std::size_t kDirectoryCharacterSoid = 8;
+constexpr std::size_t kDirectoryDisplayName = 0x10;
+constexpr std::size_t kDirectoryNameCode = 0x46;
+constexpr std::size_t kDirectoryFlags = 0x59;
+static_assert(state::kDisplayNameCapacity == (kDirectoryNameCode - kDirectoryDisplayName) / 2);
+
 template <typename T>
 void put(std::span<std::byte> output, std::size_t offset, const T& value) noexcept {
     std::memcpy(output.data() + offset, &value, sizeof value);
@@ -20,6 +29,7 @@ void text(std::span<std::byte> output,
 }
 } // namespace
 
+/** Native family-two directory schema. Every position above is one of its declared fields. */
 bool encode_directory(std::uint64_t accountSoid,
                       std::uint64_t characterSoid,
                       const state::AccountPresence& presence,
@@ -29,15 +39,18 @@ bool encode_directory(std::uint64_t accountSoid,
     }
     auto body = output.first(kDirectorySize);
     std::fill(body.begin(), body.end(), std::byte{});
-    put(body, 0, accountSoid);
-    put(body, 8, characterSoid);
-    text(body, 0x10, presence.displayName);
-    text(body, 0x46, presence.nameCode);
-    body[0x59] = static_cast<std::byte>(presence.flags & state::kPresenceFlagsMask);
+    put(body, kDirectoryAccountSoid, accountSoid);
+    put(body, kDirectoryCharacterSoid, characterSoid);
+    text(body, kDirectoryDisplayName, presence.displayName);
+    text(body, kDirectoryNameCode, presence.nameCode);
+    body[kDirectoryFlags] = static_cast<std::byte>(presence.flags & state::kPresenceFlagsMask);
     return true;
 }
 
-/** Native family-two member schema, adapted from the cleaned reference at ac0c939d. */
+/**
+ * Native family-two member schema, adapted from the cleaned reference at ac0c939d.
+ * Each offset below is that schema's own field position and each argument names the field.
+ */
 bool encode_member(const Member& member, std::span<std::byte> output) noexcept {
     if (member.characterSoid == 0 || output.size() < kMemberSize) {
         return false;

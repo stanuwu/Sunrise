@@ -5,12 +5,16 @@
 #include <span>
 
 #include "../../../state/account/account_presence.h"
+#include "../character_record/layout.h"
+#include "../definitions.h"
 
 namespace sunrise::middleware::datagen::presence {
 
-inline constexpr std::size_t kDirectorySize = 96;
-inline constexpr std::size_t kMemberSize = 80;
-inline constexpr std::uint16_t kAbsentDefinition = 0xFFFF;
+/** The two family-two slot descriptor sizes these encoders fill. */
+inline constexpr std::size_t kDirectorySize = kSocialRosterDirectorySize;
+inline constexpr std::size_t kMemberSize = kSocialRosterMemberSize;
+/** The sentinel every definition-index field carries when the member has no such entry. */
+inline constexpr std::uint16_t kAbsentDefinition = character_record::layout::kEmptyDefinitionIndex;
 
 /** Values supplied by this member's account and native presence publishers. */
 struct Member {

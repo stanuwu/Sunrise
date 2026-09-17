@@ -5,19 +5,26 @@
 #include <cstdint>
 #include <span>
 
+#include "../account/account_presence.h"
 #include "../network/peer_routes.h"
 #include "lobby_chat.h"
 
 namespace sunrise::state::social::feed {
 
-inline constexpr std::size_t kNameCapacity = 27;
+/** A row carries one account's persona name, in the same buffer the presence record uses. */
+inline constexpr std::size_t kNameCapacity = kDisplayNameCapacity;
 inline constexpr std::size_t kRowCapacity = core::network_capacity::kPlayers + 1;
+/** Local budget of eight outstanding invites per account; further sends are refused. */
 inline constexpr std::size_t kInviteCapacity = 8;
+/** The connect string's own field width in the Steam join-request callback struct. */
 inline constexpr std::size_t kConnectCapacity = 256;
 /** The one version byte both messages open with. A mismatch is refused, never guessed at. */
 inline constexpr std::uint8_t kVersion = 6;
 
-/** Request service the shim -- never the game client -- issues on its own BAP link. */
+/**
+ * Request service the shim -- never the game client -- issues on its own BAP link.
+ * The high bit is what keeps these three clear of every native service id.
+ */
 inline constexpr std::uint16_t kSyncRequest = 0x8001;
 inline constexpr std::uint16_t kFeedResponse = 0x8002;
 /**
@@ -87,15 +94,25 @@ encode_feed(const Feed& value, std::span<std::byte> output, std::size_t& written
                                  std::uint64_t& publication) noexcept;
 
 [[nodiscard]] constexpr std::size_t max_body_size() noexcept {
-
+    // Every addend below is one codec field, in the order encode_sync and encode_feed write them.
+    // One invite: sequence, target soid, inviter soid, connect length, connect text.
     constexpr std::size_t inviteBytes = kInviteCapacity * (8 + 8 + 8 + 2 + kConnectCapacity);
-    constexpr std::size_t syncBytes = 1 + 24 + 1 + inviteBytes;
+    // Sync: version, epoch, acceptedThrough, receivedThrough, invite count, the invites.
+    constexpr std::size_t syncBytes = 1 + 8 + 8 + 8 + 1 + inviteBytes;
+    // Feed: version, epoch, acceptedThrough, publication, receivedThrough, row count, the rows
+    // of two soids with a name length and its text, then the invite count and the invites.
     constexpr std::size_t feedBytes =
-        1 + 32 + 1 + kRowCapacity * (8 + 8 + 1 + kNameCapacity) + 1 + inviteBytes;
+        1 + 8 + 8 + 8 + 8 + 1 + kRowCapacity * (8 + 8 + 1 + kNameCapacity) + 1 + inviteBytes;
+    // The lobby half either body carries: epoch, membershipRevision, acceptedThrough,
+    // receivedThrough, membership count, the memberships, message count, then the messages of
+    // sequence, lobby, sender, size and payload.
     constexpr std::size_t lobbyBytes =
-        34 + lobby::kLobbyCapacity * 8 + lobby::kBatchCapacity * (26 + lobby::kPayloadCapacity);
+        8 + 8 + 8 + 8 + 1 + lobby::kLobbyCapacity * 8 + 1
+        + lobby::kBatchCapacity * (8 + 8 + 8 + 2 + lobby::kPayloadCapacity);
+    // The longer body, its lobby half, then the route count and the routes, each two halves of an
+    // address and a port.
     return (syncBytes > feedBytes ? syncBytes : feedBytes) + lobbyBytes + 1
-           + network::peer_routes::kCapacity * 6;
+           + network::peer_routes::kCapacity * (2 + 2 + 2);
 }
 
 } // namespace sunrise::state::social::feed

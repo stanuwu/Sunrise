@@ -98,12 +98,18 @@ bool draw_invitation(const steam::interfaces::methods::PendingInvitation& invita
     if (invitation.id == 0) {
         return false;
     }
+    // Horizontally centred and anchored above the middle of the work area, so the dialog does
+    // not sit over the crosshair, at a fixed width in device-independent pixels.
+    constexpr float kHorizontalAnchor = 0.5F;
+    constexpr float kVerticalAnchor = 0.3F;
+    constexpr float kDialogWidth = 390.0F;
     const auto* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos({viewport->WorkPos.x + viewport->WorkSize.x * 0.5F,
-                             viewport->WorkPos.y + viewport->WorkSize.y * 0.3F},
+    ImGui::SetNextWindowPos({viewport->WorkPos.x + viewport->WorkSize.x * kHorizontalAnchor,
+                             viewport->WorkPos.y + viewport->WorkSize.y * kVerticalAnchor},
                             ImGuiCond_Always,
-                            {0.5F, 0.0F});
-    ImGui::SetNextWindowSize({core::ui::scaling::dpi::pixels(390.0F), 0.0F}, ImGuiCond_Always);
+                            {kHorizontalAnchor, 0.0F});
+    ImGui::SetNextWindowSize({core::ui::scaling::dpi::pixels(kDialogWidth), 0.0F},
+                             ImGuiCond_Always);
     constexpr auto flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize
                            | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings
                            | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoNav;

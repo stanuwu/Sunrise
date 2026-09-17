@@ -248,6 +248,7 @@ bool consume(Session& session,
         enrollment.handle = accountHandle;
         enrollment.primary = state::account_primary_soid(accountHandle);
         if ((session.authenticated && accountHandle != session.accountHandle)
+            // 127.0.0.1 in host order: the local account may only be claimed from this machine.
             || (accountHandle == state::kLocalAccount && session.remoteAddress != 0x7F000001U)) {
             report_refusal(session, frame.serviceId, "account_scope");
             return false;

@@ -251,7 +251,7 @@ std::uint8_t player_count(const Admitted& recipient) noexcept {
 
 bool set_player(Admitted& record, const wire::PlayerAddRequest& request) noexcept {
     if (!record.occupied || record.sessionId != request.sessionId || !request.playerId
-        || request.kind > 3 || !wire::valid_native_player_profile(request.profile)
+        || request.kind > kMaximumPlayerKind || !wire::valid_native_player_profile(request.profile)
         || (request.soids.present
             && (!request.soids.accountSoid || !request.soids.characterSoid))) {
         return false;
@@ -272,14 +272,14 @@ bool set_player(Admitted& record, const wire::PlayerAddRequest& request) noexcep
     }
     if (!record.hasPlayer) {
         std::uint32_t slot = 0;
-        while (slot < 32 && (occupiedSlots & (1U << slot))) {
+        while (slot < kPlayerSlotCount && (occupiedSlots & (1U << slot))) {
             ++slot;
         }
-        if (slot == 32) {
+        if (slot == kPlayerSlotCount) {
             return false;
         }
         record.playerSlot = slot;
-        record.playerAddSequence = nextSequence & 0xFFFFFU;
+        record.playerAddSequence = nextSequence & kPlayerAddSequenceMask;
     }
     if (!record.hasPlayer || record.playerId != request.playerId
         || record.playerSoids.present != request.soids.present
@@ -300,7 +300,7 @@ bool set_player(Admitted& record, const wire::PlayerAddRequest& request) noexcep
 
 bool update_player(Admitted& record, const wire::PlayerPropertiesRequest& request) noexcept {
     if (!record.occupied || !record.hasPlayer || record.sessionId != request.sessionId
-        || request.kind > 3 || !wire::valid_native_player_profile(request.profile)
+        || request.kind > kMaximumPlayerKind || !wire::valid_native_player_profile(request.profile)
         || !request.profile.hasTail) {
         return false;
     }
@@ -330,7 +330,8 @@ bool update_player(Admitted& record, const wire::PlayerPropertiesRequest& reques
         // Native 17AF360 still merges on a baseline disagreement. Republish the complete
         // retained state to this endpoint, so a lost baseline does not discard the update.
         if (!wire::complete_native_player_profile(record.playerProfile)
-            || middleware::crypto::lookup3::hash_bytes(baseline, 0xDEADBFD6U)
+            // The seed native 17AF360 itself hashes that image with.
+            || middleware::crypto::lookup3::hash_bytes(baseline, kBaselineChecksumSeed)
                    != request.baselineChecksum) {
             record.publication = {};
         }

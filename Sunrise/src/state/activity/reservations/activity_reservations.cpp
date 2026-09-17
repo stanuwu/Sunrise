@@ -17,6 +17,7 @@ namespace profiles = account::profiles;
 bool known(const membership::Identity& identity, std::uint32_t& generation) noexcept {
     generation = 0;
     AccountHandle handle{};
+    // smallOpaque is ten bits at bias one, so -1 is its unset value and 1022 its largest.
     if (identity.memberKey == 0 || identity.accountSoid == 0 || identity.opaqueSoid == 0
         || identity.smallOpaque < -1 || identity.smallOpaque > 1022
         || !profiles::find(identity.accountSoid, handle)

@@ -134,6 +134,7 @@ bool commit_shared_allocation(const PendingAllocation& plan) noexcept {
             record.destination = plan.destination;
             record.sessionId = plan.sessionId;
             record.createdRevision = record.recordRevision = ++state.stateRevision;
+            // The record's time origin is in seconds, so the millisecond tick is scaled once.
             record.timeOrigin = GetTickCount64() / 1'000;
             record.launchParty = plan.launchParty;
             record.launchOwners[0] = {plan.launchParty.publisherAccount,

@@ -5,6 +5,9 @@
 
 namespace sunrise::server::bap::encrypted::push::activity {
 
+/** Wire slot type of the participation block, the one slot a joined member is seated in. */
+inline constexpr std::uint8_t kParticipationSlotType = 13;
+
 /** Projects only this activity's joined, region-reporting members onto registered native slots. */
 inline void
 fill_member_roster(middleware::bap::activity_message::sensor_auth_update::Snapshot& snapshot,
@@ -58,7 +61,8 @@ fill_member_roster(middleware::bap::activity_message::sensor_auth_update::Snapsh
             }
             snapshot.hasScoreboard =
                 snapshot.hasScoreboard || row.slotTypes[slot] == scoreboard::kSlotType;
-            if (row.key != snapshot.roster.playerKeyGroup || row.slotTypes[slot] != 13
+            if (row.key != snapshot.roster.playerKeyGroup
+                || row.slotTypes[slot] != kParticipationSlotType
                 || snapshot.participationSeatCount >= count) {
                 continue;
             }

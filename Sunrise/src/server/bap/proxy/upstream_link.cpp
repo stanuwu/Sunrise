@@ -95,13 +95,19 @@ bool enqueue_frame(UpstreamLink& link, std::span<const std::byte> frame) noexcep
 }
 
 bool send_hello(UpstreamLink& link) noexcept {
-    std::array<std::byte, 36> body{};
+    // Tag-and-length body: field 1 length-delimited carrying the sign-on token, then field 2 as
+    // a varint whose only accepted value is 1.
+    constexpr std::size_t kTokenSize = state::account::kSignOnTokenSize;
+    constexpr std::size_t kTokenStart = 2;
+    constexpr std::size_t kBodySize = kTokenStart + kTokenSize + 2;
+    std::array<std::byte, kBodySize> body{};
     body[0] = std::byte{0x0A};
-    body[1] = std::byte{0x20};
+    body[1] = static_cast<std::byte>(kTokenSize);
     state::account::signon_token(state::account_primary_soid(state::kLocalAccount),
-                                 std::span(body).subspan(2, 32));
-    body[34] = std::byte{0x10};
-    body[35] = std::byte{1};
+                                 std::span(body).subspan(kTokenStart, kTokenSize));
+    body[kBodySize - 2] = std::byte{0x10};
+    body[kBodySize - 1] = std::byte{1};
+    // Room for that body behind the six-byte request header, and again behind the outer header.
     std::array<std::byte, 64> payload{}, framed{};
     std::size_t payloadSize{}, framedSize{};
     link.helloTaskId = link.nextOriginatedTaskId++;
@@ -210,7 +216,7 @@ bool receive_hello(UpstreamLink& link,
     if ((outer.frameType != FrameType::plaintext0 && outer.frameType != FrameType::plaintext2)
         || !middleware::bap::parse_response_payload(outer.payload, response)
         || response.serviceId != static_cast<std::uint16_t>(ResponseService::serverHello)
-        || response.taskId != link.helloTaskId || response.status != 200
+        || response.taskId != link.helloTaskId || response.status != middleware::bap::kStatusOk
         || !middleware::secure_channel::decode_server_hello(
             state::account::shared_channel_material(), response.body, material)) {
         fail(link, "hello");

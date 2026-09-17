@@ -10,14 +10,28 @@
 namespace sunrise::state::social::lobby {
 
 // Platform-owned Steam lobby traffic. These records never enter a game protocol.
+/** The 4 KiB body Steam's lobby chat send documents. A longer send is refused, not truncated. */
 inline constexpr std::size_t kPayloadCapacity = 4096;
+/** Local policy: at most 128 bytes of lobby ids per account; further joins are refused. */
 inline constexpr std::size_t kLobbyCapacity = 16;
+/** Local wire budget: at most 8 KiB of chat payload per feed, plus metadata. Excess stays queued.
+ */
 inline constexpr std::size_t kBatchCapacity = 2;
+/**
+ * Local burst budget: 64 KiB of payload per queue, plus message metadata. A full sender queue
+ * refuses sends; a full recipient queue keeps existing messages and skips new deliveries.
+ */
 inline constexpr std::size_t kQueueCapacity = 16;
 inline constexpr std::size_t kAccountCapacity = core::network_capacity::kPlayers + 1;
+/**
+ * The fixed half of a Steam lobby id: universe 1 in bits 56-63, account type 8 (chat) in bits
+ * 52-55, and the lobby flag inside the 20-bit instance field below them.
+ */
 inline constexpr std::uint64_t kLobbyPrefix = 0x0184000000000000ULL;
+/** The bits a generated id may randomise, which is everything under that flag. */
 inline constexpr std::uint64_t kLobbyRandomMask = 0x0001FFFFFFFFFFFFULL;
 
+/** The same four fields, read back: public universe, chat type, lobby flag, nonzero account id. */
 [[nodiscard]] constexpr bool valid_id(std::uint64_t id) noexcept {
     return (id >> 56) == 1 && ((id >> 52) & 15) == 8 && ((id >> 32) & 0x40000) != 0
            && (id & 0xFFFFFFFFULL) != 0;
@@ -108,6 +122,8 @@ private:
     std::size_t outgoingCount_{};
     std::array<Message, kQueueCapacity> incoming_{};
     std::size_t incomingCount_{};
+    /** Local read-history budget: 256 KiB of payload plus metadata; oldest entries are overwritten.
+     */
     std::array<Message, 64> history_{};
     std::size_t historyNext_{};
 };

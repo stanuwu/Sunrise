@@ -38,12 +38,16 @@ bool remote(AccountHandle handle) noexcept {
     return handle != kLocalAccount && present(handle);
 }
 
+/** Printable ASCII, the range the native name fields accept; anything else is refused whole. */
+constexpr char kFirstPrintable = 32;
+constexpr char kLastPrintable = 126;
+
 template <std::size_t N> bool valid_text(const std::array<char, N>& value) noexcept {
     bool ended = false;
     for (const auto byte : value) {
         if (byte == '\0') {
             ended = true;
-        } else if (ended || byte < 32 || byte > 126) {
+        } else if (ended || byte < kFirstPrintable || byte > kLastPrintable) {
             return false;
         }
     }

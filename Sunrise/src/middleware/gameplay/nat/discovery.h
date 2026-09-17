@@ -6,8 +6,10 @@
 
 namespace sunrise::middleware::gameplay::nat::discovery {
 
+/** The two fixed native discovery ports; nothing else may bind them. */
 inline constexpr std::uint16_t kFirstPort = 3074;
 inline constexpr std::uint16_t kSecondPort = 3075;
+/** Bound on one reply, so the longer of the two reply records fits. */
 inline constexpr std::size_t kReplyCapacity = 16;
 
 enum class Request { none, natProbe, ipDiscovery };

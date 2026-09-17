@@ -14,7 +14,16 @@ namespace sunrise::server::gameplay::group::admission {
 namespace wire = middleware::gameplay::group;
 /** Every player may hold overlapping current and target public sessions. */
 inline constexpr std::size_t kAdmittedCapacity = core::network_capacity::kPlayers * 2;
+/** The same overlap seen from the session side: one current and one target. */
 inline constexpr std::size_t kPublicSessionCapacity = 2;
+/** Player slots the native session table holds, tracked as a 32-bit occupancy mask. */
+inline constexpr std::uint32_t kPlayerSlotCount = 32;
+/** The native player-add sequence field is twenty bits wide. */
+inline constexpr std::uint32_t kPlayerAddSequenceMask = 0xFFFFFU;
+/** Largest player kind the native player-add carries. */
+inline constexpr std::uint32_t kMaximumPlayerKind = 3;
+/** Seed the native baseline checksum hashes the decoded B image with. */
+inline constexpr std::uint32_t kBaselineChecksumSeed = 0xDEADBFD6U;
 /** One admitted peer and the player it asked this host to add. */
 struct Admitted {
     state::gameplay::Endpoint endpoint{};

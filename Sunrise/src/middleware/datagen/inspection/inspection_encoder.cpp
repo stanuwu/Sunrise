@@ -17,7 +17,7 @@ bool encode_root(std::uint64_t accountSoid,
     object.characterSoid = characterSoid;
     // Inspection is a public projection. Private progression banks have no producer here.
     for (auto& entry : object.progressions) {
-        entry.definitionIndex = 0xFFFF;
+        entry.definitionIndex = character_record::layout::kEmptyDefinitionIndex;
     }
     std::fill(output.begin(), output.end(), std::byte{});
     std::memcpy(output.data(), &object, sizeof object);
@@ -69,11 +69,14 @@ bool encode_character(const state::CharacterState& character,
         return false;
     }
     Character object{};
+    constexpr std::size_t appearanceOffset = character_record::layout::kIdentitySize;
+    constexpr std::size_t summaryOffset =
+        appearanceOffset + character_record::layout::kAppearanceSize;
     std::memcpy(&object.identity, banner.data(), sizeof object.identity);
-    std::memcpy(&object.appearance, banner.data() + 0x30, sizeof object.appearance);
-    std::memcpy(&object.summary, banner.data() + 0xED8, sizeof object.summary);
+    std::memcpy(&object.appearance, banner.data() + appearanceOffset, sizeof object.appearance);
+    std::memcpy(&object.summary, banner.data() + summaryOffset, sizeof object.summary);
     for (auto& entry : object.progressions) {
-        entry.definitionIndex = 0xFFFF;
+        entry.definitionIndex = character_record::layout::kEmptyDefinitionIndex;
     }
     object.inventorySerial = static_cast<std::int32_t>(loadout.nextInventorySerial);
     for (auto& row : object.inventory) {

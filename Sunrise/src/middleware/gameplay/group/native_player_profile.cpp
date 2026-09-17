@@ -6,7 +6,24 @@
 
 namespace sunrise::middleware::gameplay::group {
 namespace {
-constexpr std::uint16_t kExtraFields = 0x1DC;
+/** Every optional B field a complete profile carries. */
+constexpr std::uint16_t kExtraFields = field_bit::kQ3 | field_bit::kQ4 | field_bit::kQ5
+                                       | field_bit::kQ6 | field_bit::kQ8 | field_bit::kQ9;
+static_assert(kExtraFields == 0x1DC);
+/** Wire width of each optional B scalar. */
+constexpr std::uint8_t kQ3Width = 8;
+constexpr std::uint8_t kQ4Width = 6;
+constexpr std::uint8_t kQ5Width = 6;
+/** Accepted range of the Q4 and Q5 scalars, narrower than the six bits their fields span. */
+constexpr std::uint8_t kQScalarMaximum = 32;
+/** Tail widths: a flag set, a kind, then the index behind the flag set's own present bit. */
+constexpr std::uint8_t kTailFlagsWidth = 5;
+constexpr std::uint8_t kTailKindWidth = 2;
+constexpr std::uint8_t kTailIndexWidth = 5;
+/** Each tail field's largest value follows from the width it is written at. */
+constexpr std::uint8_t kTailFlagsMaximum = (1U << kTailFlagsWidth) - 1U;
+constexpr std::uint8_t kTailKindMaximum = (1U << kTailKindWidth) - 1U;
+constexpr std::uint32_t kTailIndexMaximum = (1U << kTailIndexWidth) - 1U;
 } // namespace
 
 bool read_native_player_profile(encoding::bits::Reader& reader,
@@ -55,12 +72,12 @@ bool read_native_player_profile(encoding::bits::Reader& reader,
         destination = static_cast<std::remove_reference_t<decltype(destination)>>(value);
         return true;
     };
-    if (!field(4, 8, profile.q3) || !field(8, 6, profile.q4) || !field(0x100, 6, profile.q5)
-        || !reader.read(1, present)) {
+    if (!field(field_bit::kQ3, kQ3Width, profile.q3) || !field(field_bit::kQ4, kQ4Width, profile.q4)
+        || !field(field_bit::kQ5, kQ5Width, profile.q5) || !reader.read(1, present)) {
         return false;
     }
     if (present) {
-        profile.fields |= 0x10;
+        profile.fields |= field_bit::kQ6;
         for (auto& word : profile.q6) {
             if (!reader.read(16, value)) {
                 return false;
@@ -81,7 +98,7 @@ bool read_native_player_profile(encoding::bits::Reader& reader,
         return false;
     }
     if (present) {
-        profile.fields |= 0x40;
+        profile.fields |= field_bit::kQ8;
         if (!reader.read(32, value)) {
             return false;
         }
@@ -90,14 +107,14 @@ bool read_native_player_profile(encoding::bits::Reader& reader,
             if (!reader.read(16, value)) {
                 return false;
             }
-            slot = static_cast<std::uint16_t>(value ^ 0x8000U);
+            slot = static_cast<std::uint16_t>(value ^ kQ8SlotBias);
         }
         if (!reader.read(8, value)) {
             return false;
         }
         profile.q8Tail = static_cast<std::uint8_t>(value);
     }
-    if (!field(0x80, 32, profile.q9) || !valid_native_player_profile(profile)) {
+    if (!field(field_bit::kQ9, 32, profile.q9) || !valid_native_player_profile(profile)) {
         return false;
     }
     output = profile;
@@ -113,9 +130,10 @@ bool valid_native_player_profile(const NativePlayerProfile& profile) noexcept {
             return false;
         }
     }
-    return !(profile.fields & ~kExtraFields) && profile.q4 <= 32 && profile.q5 <= 32
-           && profile.tailFlags <= 31 && profile.tailKind <= 3
-           && (!(profile.tailFlags & 0x10) || profile.tailIndex <= 31
+    return !(profile.fields & ~kExtraFields) && profile.q4 <= kQScalarMaximum
+           && profile.q5 <= kQScalarMaximum && profile.tailFlags <= kTailFlagsMaximum
+           && profile.tailKind <= kTailKindMaximum
+           && (!(profile.tailFlags & kTailIndexPresent) || profile.tailIndex <= kTailIndexMaximum
                || profile.tailIndex == UINT32_MAX);
 }
 
@@ -148,11 +166,12 @@ bool write_native_player_profile(encoding::bits::Writer& writer,
         return writer.write((profile.fields & mask) ? 1 : 0, 1)
                && (!(profile.fields & mask) || writer.write(value, width));
     };
-    if (!field(4, 8, profile.q3) || !field(8, 6, profile.q4) || !field(0x100, 6, profile.q5)
-        || !writer.write((profile.fields & 0x10) ? 1 : 0, 1)) {
+    if (!field(field_bit::kQ3, kQ3Width, profile.q3) || !field(field_bit::kQ4, kQ4Width, profile.q4)
+        || !field(field_bit::kQ5, kQ5Width, profile.q5)
+        || !writer.write((profile.fields & field_bit::kQ6) ? 1 : 0, 1)) {
         return false;
     }
-    if (profile.fields & 0x10) {
+    if (profile.fields & field_bit::kQ6) {
         for (const auto word : profile.q6) {
             if (!writer.write(static_cast<std::uint16_t>(word), 16)) {
                 return false;
@@ -167,15 +186,15 @@ bool write_native_player_profile(encoding::bits::Writer& writer,
             || !writer.write(profile.soids.characterSoid, 64))) {
         return false;
     }
-    if (!writer.write((profile.fields & 0x40) ? 1 : 0, 1)) {
+    if (!writer.write((profile.fields & field_bit::kQ8) ? 1 : 0, 1)) {
         return false;
     }
-    if (profile.fields & 0x40) {
+    if (profile.fields & field_bit::kQ8) {
         if (!writer.write(profile.q8Handle, 32)) {
             return false;
         }
         for (const auto slot : profile.q8Slots) {
-            if (!writer.write(slot ^ 0x8000U, 16)) {
+            if (!writer.write(slot ^ kQ8SlotBias, 16)) {
                 return false;
             }
         }
@@ -183,7 +202,7 @@ bool write_native_player_profile(encoding::bits::Writer& writer,
             return false;
         }
     }
-    return field(0x80, 32, profile.q9);
+    return field(field_bit::kQ9, 32, profile.q9);
 }
 
 bool complete_native_player_profile(const NativePlayerProfile& profile) noexcept {
@@ -201,11 +220,11 @@ bool read_native_player_tail(encoding::bits::Reader& reader,
         }
         word = static_cast<std::uint32_t>(value);
     }
-    if (!reader.read(5, value)) {
+    if (!reader.read(kTailFlagsWidth, value)) {
         return false;
     }
     candidate.tailFlags = static_cast<std::uint8_t>(value);
-    if (!reader.read(2, value)) {
+    if (!reader.read(kTailKindWidth, value)) {
         return false;
     }
     candidate.tailKind = static_cast<std::uint8_t>(value);
@@ -214,14 +233,14 @@ bool read_native_player_tail(encoding::bits::Reader& reader,
     }
     candidate.tailFlag = value != 0;
     candidate.tailIndex = 0;
-    if (candidate.tailFlags & 0x10) {
+    if (candidate.tailFlags & kTailIndexPresent) {
         if (!reader.read(1, value)) {
             return false;
         }
         if (value) {
             candidate.tailIndex = UINT32_MAX;
         } else {
-            if (!reader.read(5, value)) {
+            if (!reader.read(kTailIndexWidth, value)) {
                 return false;
             }
             candidate.tailIndex = static_cast<std::uint32_t>(value);
@@ -242,13 +261,15 @@ bool write_native_player_tail(encoding::bits::Writer& writer,
             return false;
         }
     }
-    if (!writer.write(profile.tailFlags, 5) || !writer.write(profile.tailKind, 2)
+    if (!writer.write(profile.tailFlags, kTailFlagsWidth)
+        || !writer.write(profile.tailKind, kTailKindWidth)
         || !writer.write(profile.tailFlag ? 1 : 0, 1)) {
         return false;
     }
-    return !(profile.tailFlags & 0x10)
+    return !(profile.tailFlags & kTailIndexPresent)
            || (writer.write(profile.tailIndex == UINT32_MAX ? 1 : 0, 1)
-               && (profile.tailIndex == UINT32_MAX || writer.write(profile.tailIndex, 5)));
+               && (profile.tailIndex == UINT32_MAX
+                   || writer.write(profile.tailIndex, kTailIndexWidth)));
 }
 
 void merge_native_player_profile(NativePlayerProfile& target,
@@ -265,24 +286,24 @@ void merge_native_player_profile(NativePlayerProfile& target,
     if (update.soids.present) {
         target.soids = update.soids;
     }
-    if (update.fields & 4) {
+    if (update.fields & field_bit::kQ3) {
         target.q3 = update.q3;
     }
-    if (update.fields & 8) {
+    if (update.fields & field_bit::kQ4) {
         target.q4 = update.q4;
     }
-    if (update.fields & 0x100) {
+    if (update.fields & field_bit::kQ5) {
         target.q5 = update.q5;
     }
-    if (update.fields & 0x10) {
+    if (update.fields & field_bit::kQ6) {
         target.q6 = update.q6;
     }
-    if (update.fields & 0x40) {
+    if (update.fields & field_bit::kQ8) {
         target.q8Handle = update.q8Handle;
         target.q8Slots = update.q8Slots;
         target.q8Tail = update.q8Tail;
     }
-    if (update.fields & 0x80) {
+    if (update.fields & field_bit::kQ9) {
         target.q9 = update.q9;
     }
     target.fields |= update.fields;
@@ -296,8 +317,18 @@ void merge_native_player_profile(NativePlayerProfile& target,
     }
 }
 
+/**
+ * Lays the profile out as the native decoder would, field by field.
+ * The name units go in obfuscated because that is the form the native record holds: the wire
+ * carries them plain and the native reader applies this same transform on the way in.
+ */
 void build_native_player_profile_state(const NativePlayerProfile& profile,
                                        NativePlayerProfileState& output) noexcept {
+    // Name units first, then the identity, then each B field at its own position in the image.
+    constexpr std::size_t kIdentity = kNativePlayerNameCapacity * 2;
+    constexpr std::uint32_t kNameKey = 0xC245B0C4;
+    constexpr std::uint32_t kNameMultiplier = 0x7B4F;
+    constexpr int kNameRotationModulus = 31;
     output = {};
     auto put = [&](std::size_t offset, std::uint64_t value, std::size_t width) {
         for (std::size_t i = 0; i < width; ++i) {
@@ -305,13 +336,14 @@ void build_native_player_profile_state(const NativePlayerProfile& profile,
         }
     };
     for (std::size_t i = 0; i <= profile.nameLength && i < profile.name.size(); ++i) {
-        const auto rotation = static_cast<int>(i % 31);
-        const std::uint32_t key = i ? std::rotl(std::uint32_t{0xC245B0C4}, rotation) : 0;
+        const auto rotation = static_cast<int>(i % kNameRotationModulus);
+        const std::uint32_t key = i ? std::rotl(kNameKey, rotation) : 0;
         const auto unit = i < profile.nameLength ? profile.name[i] : char16_t{};
-        put(i * 2, (unit * 0x7B4FU) ^ key, 2);
+        put(i * 2, (unit * kNameMultiplier) ^ key, 2);
     }
-    std::copy(profile.identity.begin(), profile.identity.end(), output.begin() + 0x80);
+    std::copy(profile.identity.begin(), profile.identity.end(), output.begin() + kIdentity);
     put(0xB0, profile.q3, 2);
+    // q4 and q5 are one-based on the wire and zero-based in the image.
     put(0xB2, static_cast<std::uint8_t>(profile.q4 - 1), 1);
     put(0xB3, static_cast<std::uint8_t>(profile.q5 - 1), 1);
     put(0xB8, static_cast<std::uint32_t>(profile.q6[0]), 4);

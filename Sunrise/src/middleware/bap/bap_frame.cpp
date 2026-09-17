@@ -20,8 +20,6 @@ constexpr std::size_t kTaskOffset = kServiceOffset + encoding::kU16Size;
 constexpr std::size_t kRequestHeaderSize = kTaskOffset + encoding::kU32Size;
 constexpr std::size_t kStatusOffset = kRequestHeaderSize;
 constexpr std::size_t kResponseHeaderSize = kStatusOffset + encoding::kU16Size;
-/** The BAP response status the Client reads as success. */
-constexpr std::uint16_t kStatusOk = 200;
 
 /** @return True for either plaintext BAP frame-type value. */
 [[nodiscard]] bool is_plaintext(FrameType frameType) noexcept {

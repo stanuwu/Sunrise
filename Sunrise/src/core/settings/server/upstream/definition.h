@@ -6,9 +6,11 @@
 
 namespace sunrise::core::settings::server::upstream {
 
+/** Longest dotted-quad host text plus its terminator. */
 inline constexpr std::size_t kHostCapacity = 16;
+/** An IPv4 address is four octets. */
 inline constexpr std::size_t kAddressOctets = 4;
-
+/** The fork's own default port, used for both the TCP control link and UDP discovery. */
 inline constexpr std::uint16_t kDefaultBapPort = 30974;
 
 struct Settings {

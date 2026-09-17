@@ -41,8 +41,11 @@ void attempt() noexcept {
             continue;
         }
         // A new handle can release only acquisitions belonging to this calling thread.
+        // The bound only stops a runaway recursion count; stopping early is harmless, because
+        // a mutex still held keeps the next launch out rather than corrupting anything.
+        constexpr unsigned kReleaseAttempts = 16;
         unsigned count = 0;
-        while (count < 16 && ReleaseMutex(mutex)) {
+        while (count < kReleaseAttempts && ReleaseMutex(mutex)) {
             ++count;
         }
         CloseHandle(mutex);
@@ -113,7 +116,8 @@ bool install_locked() noexcept {
     if (!site) {
         return false;
     }
-    // CALL [RIP + displacement] names the shared import used by the startup loop.
+    // CALL [RIP + displacement] names the shared import used by the startup loop. The pair is
+    // that displacement's offset in the matched bytes and the next instruction it is relative to.
     auto** location = reinterpret_cast<void**>(resolve_relative(site + 15, site + 19));
     void* current{};
     if (!read_slot(location, current) || !current) {

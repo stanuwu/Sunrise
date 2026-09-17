@@ -177,6 +177,9 @@ struct ResponseFrame {
     std::span<const std::byte> body{};
 };
 
+/** The BAP response status the Client reads as success. */
+inline constexpr std::uint16_t kStatusOk = 200;
+
 [[nodiscard]] bool parse_response_payload(std::span<const std::byte> input,
                                           ResponseFrame& response) noexcept;
 [[nodiscard]] bool encode_request_payload(RequestService service,

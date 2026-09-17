@@ -47,8 +47,8 @@ using admission::g_admittedLock;
 using admission::kAdmittedCapacity;
 using admission::owned_elsewhere;
 
-/** A membership snapshot is far larger than kBodyCapacity, and the reliable queue bounds it. */
-constexpr std::size_t kMembershipBodyCapacity = 8192;
+/** Local membership-body limit, separate from the reliable queue's fragment capacity. */
+constexpr std::size_t kMembershipBodyCapacity = state::gameplay::kGroupMessageCapacity;
 /** Only the low registry bits of a request bitmap name a parameter. */
 constexpr std::uint64_t kParameterMaskBits = (std::uint64_t{1} << wire::kParameterCount) - 1U;
 /** Registry index the join-latch update names. Any index would do; none is ever filled. */
