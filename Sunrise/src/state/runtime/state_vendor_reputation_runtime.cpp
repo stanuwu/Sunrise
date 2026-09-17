@@ -50,58 +50,74 @@ constexpr std::array<ReputationRule, 7> kReputationRules{{
 /** Native progression level walks read experience from lane zero. */
 constexpr std::size_t kExperienceLane = 0;
 
-/** Build-86657 vendor hashes, normal claim interactions and reward categories. */
+/** Checked build-86657 claim bindings; a missing pool leaves payout unsupported. */
 struct RewardRule {
     std::uint32_t vendorHash;
     std::uint16_t interaction;
     std::int32_t category;
+    std::uint16_t rewardValueRow;
+    std::uint16_t saleIndex{};
+    std::uint32_t packageHash{};
+    const vendor_rewards::Pool* pool{};
 };
-/** Only these build-86657 normal claim interactions own the mapped reward categories. */
+/** Vendor, interaction, category, saved counter, package sale and hash from build 86657. */
 constexpr std::array<RewardRule, 3> kRewardRules{{
-    {69482069U, 40, 3},    // Zavala: Accept Reward.
-    {3603221665U, 28, 10}, // Shaxx: Accept Reward; payout not yet supported.
-    {672118013U, 35, 8},   // Banshee: Accept Reward; payout not yet supported.
+    // Zavala's current package previews Vanguard gear.
+    {69482069U, 40, 3, kVanguardRewardValueRow, 93, 2746484552U, &vendor_rewards::kVanguardPool},
+    // Shaxx's current package previews Crucible gear.
+    {3603221665U, 28, 10, kCrucibleRewardValueRow, 96, 3289621657U, &vendor_rewards::kCruciblePool},
+    // Banshee's current package has no supported payout binding.
+    {672118013U, 35, 8, kGunsmithRewardValueRow},
 }};
-/** Only Zavala's current package has a supported payout binding. */
-constexpr std::uint32_t kZavalaHash = 69482069U;
-/** Build-86657 current Vanguard package occupies sale row 93. */
-constexpr std::uint16_t kVanguardPackageSale = 93;
-/** The package opens on acquisition and previews vendor 1016620613. */
-constexpr std::uint32_t kVanguardPackageHash = 2746484552U;
-/** Reply zero completes Zavala's normal reward interaction. */
+/** Reply zero completes the supported normal reward interactions. */
 constexpr std::uint16_t kAcceptRewardReply = 0;
-/** FLAG[5901] selects the supported Vanguard package instead of the older one. */
-constexpr std::uint16_t kVanguardPackageFlag = 5901;
+/** FLAG[5901] selects both supported current packages instead of their older variants. */
+constexpr std::uint16_t kCurrentPackageFlag = 5901;
 /** The normal reward interaction requires VALUE[465] >= 20. */
 constexpr std::uint16_t kRewardLevelSlot = 465;
 /** The normal reward interaction excludes levels below this content threshold. */
 constexpr std::int32_t kMinimumRewardLevel = 20;
 
 /**
- * Accept only the supported package and explicit evaluated gates; do not guess missing values.
+ * Resolves vendor identity independently of request selectors.
  * @param vendorIndex Installed vendor selector.
- * @return True when the saved evaluated gates and installed package binding agree.
+ * @return Checked binding, including unsupported payouts, or null for unrelated vendors.
  */
-bool reward_binding_current(std::uint16_t vendorIndex) noexcept {
+const RewardRule* reward_rule(std::uint16_t vendorIndex) noexcept {
+    build_data::vendors::IndexEntry entry{};
+    if (!build_data::vendors::find_index(vendorIndex, entry)) {
+        return nullptr;
+    }
+    const auto found =
+        std::find_if(kRewardRules.begin(), kRewardRules.end(), [&](const auto& rule) {
+            return rule.vendorHash == entry.definitionHash;
+        });
+    return found == kRewardRules.end() ? nullptr : &*found;
+}
+
+/**
+ * Accept only the supported package and explicit evaluated gates; do not guess missing values.
+ * @param rule Checked vendor binding.
+ * @param saleIndex Requested sale, retained for commit revalidation.
+ * @return True when saved gates and the installed package binding agree.
+ */
+bool reward_binding_current(const RewardRule& rule, std::uint16_t saleIndex) noexcept {
     namespace vendors = build_data::vendors;
-    vendors::IndexEntry entry{};
     vendors::Definition vendor{};
     vendors::SaleRow sale{};
     build_data::items::Definition package{};
     Family5State family{};
-    if (!vendors::find_index(vendorIndex, entry) || entry.definitionHash != kZavalaHash
-        || !vendors::find(entry.definitionHash, vendor)
-        || !vendors::sale_row(vendor, kVanguardPackageSale, sale)
-        || sale.categoryIndex != kRewardRules.front().category || sale.costQuantity != 0
+    if (rule.pool == nullptr || saleIndex != rule.saleIndex
+        || !vendors::find(rule.vendorHash, vendor) || !vendors::sale_row(vendor, saleIndex, sale)
+        || sale.categoryIndex != rule.category || sale.costQuantity != 0
         || !build_data::find_item_definition_index(sale.itemIndex, package)
-        || package.definitionHash != kVanguardPackageHash
-        || !investment::store::read_family5(family)) {
+        || package.definitionHash != rule.packageHash || !investment::store::read_family5(family)) {
         return false;
     }
     bool packageEnabled = false, levelMet = false;
     for (std::size_t index = 0; index < family.flagCount; ++index) {
         const auto& flag = family.flags[index];
-        if (flag.slot == kVanguardPackageFlag) {
+        if (flag.slot == kCurrentPackageFlag) {
             packageEnabled = flag.value == unlocks::kFlagSet;
         }
     }
@@ -364,13 +380,13 @@ bool is_vendor_reward_category(std::uint16_t vendorIndex, std::int32_t categoryI
 }
 
 /**
- * Reconstructs one gear claim without publishing inventory or consuming its credit yet.
+ * Resolves a supported rowless reply through the same settlement as its package sale.
  * @param vendorIndex Installed vendor selector.
  * @param interactionIndex Rowless interaction selector.
  * @param replyIndex Reply within that interaction.
- * @param random Server-generated selection value; never supplied by the client.
+ * @param random Server-generated selection value.
  * @param mutation Receives the prepared grant; cleared on refusal.
- * @return Recognized but unsupported or unaffordable claims are refused, never generic grants.
+ * @return Recognized but unsupported replies refuse rather than falling through to a free grant.
  */
 VendorReputationDisposition prepare_vendor_reward(std::uint16_t vendorIndex,
                                                   std::uint16_t interactionIndex,
@@ -378,26 +394,49 @@ VendorReputationDisposition prepare_vendor_reward(std::uint16_t vendorIndex,
                                                   std::uint32_t random,
                                                   PendingItemAcquisition& mutation) noexcept {
     mutation = {};
-    build_data::vendors::IndexEntry entry{};
-    if (!build_data::vendors::find_index(vendorIndex, entry)) {
+    const auto* rule = reward_rule(vendorIndex);
+    if (rule == nullptr || rule->interaction != interactionIndex) {
         return VendorReputationDisposition::notApplicable;
     }
-    const auto rule =
-        std::find_if(kRewardRules.begin(), kRewardRules.end(), [&](const auto& value) {
-            return value.vendorHash == entry.definitionHash
-                   && value.interaction == interactionIndex;
-        });
-    if (rule == kRewardRules.end()) {
+    if (replyIndex != kAcceptRewardReply || rule->pool == nullptr) {
+        return VendorReputationDisposition::refused;
+    }
+    return prepare_vendor_reward_sale(vendorIndex, rule->saleIndex, random, mutation);
+}
+
+/**
+ * A reward sale consumes its own faction credit only together with the granted gear.
+ * @param vendorIndex Installed vendor selector.
+ * @param saleIndex Requested package sale.
+ * @param random Server-generated selection value; never supplied by the client.
+ * @param mutation Receives the prepared grant; cleared on refusal.
+ * @return Unrelated sales are not applicable; unsupported or unaffordable rewards are refused.
+ */
+VendorReputationDisposition prepare_vendor_reward_sale(std::uint16_t vendorIndex,
+                                                       std::uint16_t saleIndex,
+                                                       std::uint32_t random,
+                                                       PendingItemAcquisition& mutation) noexcept {
+    mutation = {};
+    const auto* rule = reward_rule(vendorIndex);
+    build_data::vendors::Definition vendor{};
+    build_data::vendors::SaleRow sale{};
+    if (rule == nullptr) {
+        return VendorReputationDisposition::notApplicable;
+    }
+    if (!build_data::vendors::find(rule->vendorHash, vendor)
+        || !build_data::vendors::sale_row(vendor, saleIndex, sale)) {
+        return VendorReputationDisposition::refused;
+    }
+    if (sale.categoryIndex != rule->category) {
         return VendorReputationDisposition::notApplicable;
     }
     const std::lock_guard lock(investment::store::g_mutex);
     AccountState account{};
     std::int32_t credits = 0;
-    if (replyIndex != kAcceptRewardReply || !reward_binding_current(vendorIndex)
-        || !investment::store::read_account(account) || !account::valid(account)
-        || !runtime::detail::valid_profile_inventory(account)
+    if (!reward_binding_current(*rule, saleIndex) || !investment::store::read_account(account)
+        || !account::valid(account) || !runtime::detail::valid_profile_inventory(account)
         || !investment::store::read_unlock(
-            investment::store::Bank::characterObjectValues, kVanguardRewardValueRow, credits)
+            investment::store::Bank::characterObjectValues, rule->rewardValueRow, credits)
         || credits <= 0) {
         return VendorReputationDisposition::refused;
     }
@@ -405,13 +444,14 @@ VendorReputationDisposition prepare_vendor_reward(std::uint16_t vendorIndex,
     if (selected >= account.characterCount) {
         return VendorReputationDisposition::refused;
     }
-    const auto armour = vendor_rewards::armour(account.characters[selected].characterClass);
-    std::array<std::uint32_t,
-               vendor_rewards::kVanguardWeapons.size() + vendor_rewards::kVanguardTitan.size()>
-        candidates{};
+    const auto armour =
+        vendor_rewards::armour(*rule->pool, account.characters[selected].characterClass);
+    std::array<std::uint32_t, vendor_rewards::kCandidateCapacity> candidates{};
+    if (rule->pool->weapons.size() + armour.size() > candidates.size()) {
+        return VendorReputationDisposition::refused;
+    }
     std::size_t count = 0;
-    for (const auto pool :
-         {std::span<const std::uint32_t>(vendor_rewards::kVanguardWeapons), armour}) {
+    for (const auto pool : {rule->pool->weapons, armour}) {
         for (const auto hash : pool) {
             if (reward_item_supported(hash)) {
                 candidates[count++] = hash;
@@ -425,7 +465,7 @@ VendorReputationDisposition prepare_vendor_reward(std::uint16_t vendorIndex,
         mutation = {};
         return VendorReputationDisposition::refused;
     }
-    mutation.vendorReward = {credits, vendorIndex};
+    mutation.vendorReward = {credits, vendorIndex, saleIndex, rule->rewardValueRow};
     return VendorReputationDisposition::prepared;
 }
 
@@ -440,16 +480,19 @@ bool vendor_reward_current(const PendingItemAcquisition& mutation) noexcept {
         return true;
     }
     std::int32_t current = 0;
-    if (claim.beforeCredits < 0 || !mutation.directGrant
-        || !reward_binding_current(claim.vendorIndex)
+    const auto* rule = reward_rule(claim.vendorIndex);
+    if (claim.beforeCredits < 0 || !mutation.directGrant || rule == nullptr
+        || claim.rewardValueRow != rule->rewardValueRow
+        || !reward_binding_current(*rule, claim.saleIndex)
         || !investment::store::read_unlock(
-            investment::store::Bank::characterObjectValues, kVanguardRewardValueRow, current)
+            investment::store::Bank::characterObjectValues, claim.rewardValueRow, current)
         || current != claim.beforeCredits
         || !reward_item_supported(mutation.acquiredDefinitionHash)) {
         return false;
     }
-    const auto armour = vendor_rewards::armour(mutation.beforeCharacter.characterClass);
-    const auto& weapons = vendor_rewards::kVanguardWeapons;
+    const auto armour =
+        vendor_rewards::armour(*rule->pool, mutation.beforeCharacter.characterClass);
+    const auto weapons = rule->pool->weapons;
     return std::find(weapons.begin(), weapons.end(), mutation.acquiredDefinitionHash)
                != weapons.end()
            || std::find(armour.begin(), armour.end(), mutation.acquiredDefinitionHash)

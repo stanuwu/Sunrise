@@ -48,9 +48,17 @@ inline constexpr std::uint16_t kVanguardRewardValueRow = 55;
 struct VendorRewardClaim {
     std::int32_t beforeCredits{};
     std::uint16_t vendorIndex{};
+    std::uint16_t saleIndex{};
+    /** Rechecked against the vendor binding before preview or commit. */
+    std::uint16_t rewardValueRow{};
 };
 
 struct PendingItemAcquisition;
+[[nodiscard]] VendorReputationDisposition
+prepare_vendor_reward_sale(std::uint16_t vendorIndex,
+                           std::uint16_t saleIndex,
+                           std::uint32_t random,
+                           PendingItemAcquisition& mutation) noexcept;
 [[nodiscard]] VendorReputationDisposition
 prepare_vendor_reward(std::uint16_t vendorIndex,
                       std::uint16_t interactionIndex,

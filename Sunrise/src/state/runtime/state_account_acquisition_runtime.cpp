@@ -407,7 +407,7 @@ bool preview_item_acquisition(const PendingItemAcquisition& mutation,
         afterUnlocks.characterObjectValues[quest.row] = value;
     }
     if (mutation.vendorReward.beforeCredits > 0) {
-        afterUnlocks.characterObjectValues[kVanguardRewardValueRow] =
+        afterUnlocks.characterObjectValues[mutation.vendorReward.rewardValueRow] =
             mutation.vendorReward.beforeCredits - 1;
     }
     return true;
@@ -436,7 +436,7 @@ bool commit_item_acquisition(PendingItemAcquisition& mutation) noexcept {
     }
     if (prepared.vendorReward.beforeCredits > 0
         && !investment::store::write_unlock(investment::store::Bank::characterObjectValues,
-                                            kVanguardRewardValueRow,
+                                            prepared.vendorReward.rewardValueRow,
                                             prepared.vendorReward.beforeCredits - 1)) {
         return false;
     }

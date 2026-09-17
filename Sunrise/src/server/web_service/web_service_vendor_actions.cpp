@@ -677,12 +677,30 @@ void settle_vendor_row(const middleware::web_service::Message& message,
         return;
     }
     const std::span<const vendor_domain::SaleCost> price = vendor_domain::cost_entries(row);
-    // Rank rewards are claimed by interaction; a sale request must not bypass its credit debit.
+    // A recognized reward sale owns its credit debit and must never fall through to a free grant.
     if (vendorIndex >= 0 && vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
         && state::is_vendor_reward_category(static_cast<std::uint16_t>(vendorIndex),
                                             categoryIndex)) {
-        report_purchase(
-            opcode, "fail", "reward_requires_reply", vendorIndex, rowIndex, itemDefinitionIndex);
+        auto* reward = emplace_mutation<state::PendingItemAcquisition>(outcome);
+        std::array<std::byte, sizeof(std::uint32_t)> randomBytes{};
+        const bool prepared =
+            reward != nullptr && rowIndex >= 0
+            && rowIndex <= (std::numeric_limits<std::uint16_t>::max)()
+            && middleware::crypto::random::fill(randomBytes)
+            && state::prepare_vendor_reward_sale(static_cast<std::uint16_t>(vendorIndex),
+                                                 static_cast<std::uint16_t>(rowIndex),
+                                                 middleware::encoding::read_u32_le(randomBytes),
+                                                 *reward)
+                   == state::VendorReputationDisposition::prepared;
+        if (!prepared) {
+            clear_mutation(outcome);
+        }
+        report_purchase(opcode,
+                        prepared ? "ok" : "fail",
+                        "rank_reward",
+                        vendorIndex,
+                        rowIndex,
+                        itemDefinitionIndex);
         return;
     }
     if (vendorIndex >= 0 && rowIndex >= 0

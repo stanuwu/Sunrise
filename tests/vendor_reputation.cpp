@@ -52,6 +52,11 @@ constexpr std::uint32_t kPackageHash = 2746484552U;
 constexpr std::uint16_t kPackageSale = 93, kClaimInteraction = 40, kClaimCategory = 3,
                         kPackageFlag = 5901, kLevelSlot = 465;
 constexpr std::int32_t kMinimumLevel = 20;
+/** Build-86657 Shaxx package sale, claim category and character-object counter. */
+constexpr std::uint32_t kShaxxHash = 3603221665U, kCruciblePackageHash = 3289621657U;
+constexpr std::uint16_t kCruciblePackageSale = 96, kCrucibleCategory = 10, kCrucibleCreditRow = 45;
+std::uint32_t g_packageHash = kPackageHash, g_packageCost = 0;
+std::uint16_t g_packageSale = kPackageSale, g_packageCategory = kClaimCategory;
 /** Build-86657 Gunsmith reward counter and normal claim interaction. */
 constexpr std::uint16_t kGunsmithCreditRow = 49, kBansheeClaimInteraction = 35;
 
@@ -61,7 +66,10 @@ std::uint32_t gear_hash(std::size_t index) {
          {std::span<const std::uint32_t>(state::vendor_rewards::kVanguardWeapons),
           std::span<const std::uint32_t>(state::vendor_rewards::kVanguardTitan),
           std::span<const std::uint32_t>(state::vendor_rewards::kVanguardHunter),
-          std::span<const std::uint32_t>(state::vendor_rewards::kVanguardWarlock)}) {
+          std::span<const std::uint32_t>(state::vendor_rewards::kVanguardWarlock),
+          std::span<const std::uint32_t>(state::vendor_rewards::kCrucibleTitan),
+          std::span<const std::uint32_t>(state::vendor_rewards::kCrucibleHunter),
+          std::span<const std::uint32_t>(state::vendor_rewards::kCrucibleWarlock)}) {
         if (index < pool.size()) {
             return pool[index];
         }
@@ -105,6 +113,10 @@ std::string read_text(const std::string& path) {
 
 /** Resets only the disposable fixture and its controlled content catalogue. */
 void reset() {
+    g_packageHash = kPackageHash;
+    g_packageSale = kPackageSale;
+    g_packageCategory = kClaimCategory;
+    g_packageCost = 0;
     g_vendorHash = kBanshee;
     g_soldHash = kGunsmithRewards;
     g_costHash = kGunsmithMaterials;
@@ -410,7 +422,7 @@ void reset_claim() {
 void verify_claims() {
     state::PendingItemAcquisition grant{};
     reset_claim();
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
               == Disposition::prepared,
           "prepare claim");
     auto duplicate = grant;
@@ -437,7 +449,7 @@ void verify_claims() {
     {
         store::Transaction outer;
         check(outer.ready()
-                  && state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+                  && state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
                          == Disposition::prepared
                   && state::commit_item_acquisition(grant),
               "claim inside outer response");
@@ -445,7 +457,7 @@ void verify_claims() {
     check(credits(state::kVanguardRewardValueRow) == 2
               && store::account().characters[0].inventory.count == 0,
           "response failure rolls back item and credit");
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
                   == Disposition::prepared
               && store::execute("CREATE TEMP TRIGGER reject_claim BEFORE INSERT ON unlocks "
                                 "BEGIN SELECT RAISE(ABORT,'fixture'); END"),
@@ -470,34 +482,33 @@ void verify_claims() {
 
     reset_claim();
     g_rewardCapacity = 0;
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
-                  == Disposition::refused
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant) == Disposition::refused
               && credits(state::kVanguardRewardValueRow) == 2,
           "full inventory preserves credit");
     g_rewardCapacity = kEngramCapacity;
     g_rewardAvailable = false;
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
               == Disposition::refused,
           "missing gear refuses payout");
     reset_claim();
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
                   == Disposition::prepared
               && store::write_unlock(
                   store::Bank::characterObjectValues, state::kVanguardRewardValueRow, 1)
               && !state::commit_item_acquisition(grant),
           "stale credit refuses claim");
     check(store::write_unlock(store::Bank::characterObjectValues, state::kVanguardRewardValueRow, 0)
-              && state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+              && state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
                      == Disposition::refused,
           "no credit refuses claim");
     reset_claim();
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
               == Disposition::prepared,
           "prepare before gate change");
     check(store::write_family5({}) && !state::commit_item_acquisition(grant)
               && credits(state::kVanguardRewardValueRow) == 2,
           "changed or absent package gates cannot consume credit");
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
               == Disposition::refused,
           "missing evaluated gates refused");
 
@@ -506,18 +517,18 @@ void verify_claims() {
     check(store::read_family5(gates), "read fixture gates");
     gates.values[0].value = kMinimumLevel - 1;
     check(store::write_family5(gates)
-              && state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+              && state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
                      == Disposition::refused,
           "low-level claim refused");
     reset_claim();
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
               == Disposition::prepared,
           "prepare before capacity loss");
     g_rewardCapacity = 0;
     check(!state::commit_item_acquisition(grant) && credits(state::kVanguardRewardValueRow) == 2,
           "capacity lost after prepare preserves credit");
     reset_claim();
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
               == Disposition::prepared,
           "prepare before character change");
     auto changed = store::account();
@@ -535,7 +546,7 @@ void verify_claims() {
     inventory.values[0].quantity = 1;
     const auto savedSoid = inventory.values[0].instanceSoid;
     check(store::write_account(existing)
-              && state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+              && state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
                      == Disposition::prepared
               && state::commit_item_acquisition(grant),
           "claim alongside a previously saved experimental engram");
@@ -552,16 +563,95 @@ void verify_claims() {
         auto account = store::account();
         account.characters[0].characterClass = characterClass;
         check(store::write_account(account), "set fixture class");
-        const auto armour = state::vendor_rewards::armour(characterClass);
+        const auto armour =
+            state::vendor_rewards::armour(state::vendor_rewards::kVanguardPool, characterClass);
         for (std::size_t slot = 0; slot < armour.size(); ++slot) {
             const auto roll =
                 static_cast<std::uint32_t>(state::vendor_rewards::kVanguardWeapons.size() + slot);
-            check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, roll, grant)
+            check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, roll, grant)
                           == Disposition::prepared
                       && grant.acquiredDefinitionHash == armour[slot],
                   "armour selection matches class");
         }
     }
+}
+
+/** Both supported vendors use one sale transaction without sharing entitlement or armour. */
+void verify_shared_sales() {
+    state::PendingItemAcquisition grant{};
+    for (const bool crucible : {false, true}) {
+        for (const auto characterClass : {state::CharacterClass::titan,
+                                          state::CharacterClass::hunter,
+                                          state::CharacterClass::warlock}) {
+            reset_claim();
+            if (crucible) {
+                g_vendorHash = kShaxxHash;
+                g_packageHash = kCruciblePackageHash;
+                g_packageSale = kCruciblePackageSale;
+                g_packageCategory = kCrucibleCategory;
+            }
+            const auto row = crucible ? kCrucibleCreditRow : state::kVanguardRewardValueRow;
+            const auto otherRow = crucible ? state::kVanguardRewardValueRow : kCrucibleCreditRow;
+            const auto& pool = crucible ? state::vendor_rewards::kCruciblePool
+                                        : state::vendor_rewards::kVanguardPool;
+            auto account = store::account();
+            account.characters[0].characterClass = characterClass;
+            check(store::write_account(account)
+                      && store::write_unlock(store::Bank::characterObjectValues, row, 1)
+                      && store::write_unlock(store::Bank::characterObjectValues, otherRow, 2),
+                  "seed independent fixture faction credits");
+            const auto roll = static_cast<std::uint32_t>(pool.weapons.size());
+            check(state::prepare_vendor_reward_sale(kVendor, g_packageSale, roll, grant)
+                          == Disposition::prepared
+                      && grant.acquiredDefinitionHash
+                             == state::vendor_rewards::armour(pool, characterClass).front(),
+                  "sale chooses the vendor's own class armour");
+            state::AccountState after{};
+            state::unlocks::Table banks{};
+            check(state::preview_item_acquisition(grant, after, banks)
+                      && banks.characterObjectValues[row] == 0
+                      && banks.characterObjectValues[otherRow] == 2,
+                  "preview debits only the matching faction");
+            check(state::commit_item_acquisition(grant) && credits(row) == 0
+                      && credits(otherRow) == 2,
+                  "shared commit debits only the matching faction");
+            check(state::prepare_vendor_reward_sale(kVendor, g_packageSale, roll, grant)
+                      == Disposition::refused,
+                  "another faction's credit cannot authorize this sale");
+        }
+    }
+    reset_claim();
+    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, grant)
+                  == Disposition::prepared
+              && state::commit_item_acquisition(grant),
+          "rowless adapter retains the same guarded settlement");
+    check(state::prepare_vendor_reward_sale(kVendor, kSale, 0, grant) == Disposition::notApplicable,
+          "ordinary sale does not enter reward settlement");
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale + 1, 0, grant)
+              == Disposition::refused,
+          "missing sale cannot claim a package");
+    ++g_packageHash;
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
+              == Disposition::refused,
+          "wrong installed package is refused");
+    reset_claim();
+    g_packageCost = 1;
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
+              == Disposition::refused,
+          "nonzero material cost cannot be ignored");
+    reset_claim();
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
+              == Disposition::prepared,
+          "prepare row tamper check");
+    grant.vendorReward.rewardValueRow = kCrucibleCreditRow;
+    check(!state::commit_item_acquisition(grant) && credits(state::kVanguardRewardValueRow) == 2,
+          "altered saved counter rejected before indexing or writing");
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
+              == Disposition::prepared,
+          "prepare stale package check");
+    ++g_packageHash;
+    check(!state::commit_item_acquisition(grant) && credits(state::kVanguardRewardValueRow) == 2,
+          "changed package cannot consume credit");
 }
 
 } // namespace
@@ -587,10 +677,10 @@ bool sale_row(const Definition&, std::size_t row, SaleRow& output) noexcept {
     output.itemIndex = kSoldIndex;
     output.costItemIndex = kCostIndex;
     output.costQuantity = g_cost;
-    if (row == kPackageSale) {
+    if (row == g_packageSale) {
         output.itemIndex = kRewardIndex;
-        output.categoryIndex = kClaimCategory;
-        output.costQuantity = 0;
+        output.categoryIndex = g_packageCategory;
+        output.costQuantity = g_packageCost;
         output.costItemIndex = kAbsentCostItem;
         return true;
     }
@@ -615,7 +705,7 @@ bool find_item_definition_index(std::uint16_t definitionIndex,
     definition.definitionHash = definitionIndex == kSoldIndex ? g_soldHash : g_costHash;
     definition.bucketId = kBucket;
     if (definitionIndex == kRewardIndex) {
-        definition.definitionHash = kPackageHash;
+        definition.definitionHash = g_packageHash;
         return true;
     }
     if (definitionIndex >= kGearIndexBase) {
@@ -736,6 +826,7 @@ int main(int argc, char** argv) {
     verify();
     verify_rank_rewards();
     verify_claims();
+    verify_shared_sales();
     store::shutdown();
     check(store::open(argv[2],
                       read_text(root + "/investment_schema.sql"),
@@ -763,7 +854,7 @@ int main(int argc, char** argv) {
           "claim credit survives reopening database");
     reset_claim();
     state::PendingItemAcquisition claim{};
-    check(state::prepare_vendor_reward(kVendor, kClaimInteraction, 0, 0, claim)
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, claim)
                   == Disposition::prepared
               && state::commit_item_acquisition(claim),
           "commit persistent claim");

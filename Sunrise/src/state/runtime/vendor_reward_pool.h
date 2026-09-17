@@ -52,22 +52,41 @@ inline constexpr std::array<std::uint32_t, 5> kVanguardHunter{
 inline constexpr std::array<std::uint32_t, 5> kVanguardWarlock{
     1578461326U, 1108278178U, 332170995U, 3631862279U, 4086100104U};
 
+/** Preview vendor 1894103790 lists Titan-only Wing Discipline armour in this order. */
+inline constexpr std::array<std::uint32_t, 5> kCrucibleTitan{
+    657606375U, 2899275886U, 2389585538U, 687386728U, 1613581523U};
+/** The same preview lists Hunter-only Wing Contender armour in this order. */
+inline constexpr std::array<std::uint32_t, 5> kCrucibleHunter{
+    3153956825U, 3091776080U, 1914589560U, 3408834730U, 693067797U};
+/** The same preview lists Warlock-only Wing Theorem armour in this order. */
+inline constexpr std::array<std::uint32_t, 5> kCrucibleWarlock{
+    3684978064U, 3441081953U, 2286507447U, 641063251U, 119859462U};
+
+/** Checked package candidates; class ordinals are Titan, Hunter and Warlock. */
+struct Pool {
+    std::span<const std::uint32_t> weapons;
+    std::array<std::span<const std::uint32_t>, 3> classArmour;
+};
+/** Package 2746484552 uses preview 1016620613. */
+inline constexpr Pool kVanguardPool{kVanguardWeapons,
+                                    {kVanguardTitan, kVanguardHunter, kVanguardWarlock}};
+/** Package 3289621657 uses preview 1894103790, with the same weapons but its own armour. */
+inline constexpr Pool kCruciblePool{kVanguardWeapons,
+                                    {kCrucibleTitan, kCrucibleHunter, kCrucibleWarlock}};
+/** Supported previews contain at most thirty weapons and five eligible armour pieces. */
+inline constexpr std::size_t kCandidateCapacity = 35;
+
 /**
  * Class-specific armour must never enter another class's reward pool.
+ * @param pool Checked package preview candidates.
  * @param characterClass Selected character's class.
  * @return Matching armour hashes, or an empty span for an invalid class.
  */
-inline std::span<const std::uint32_t> armour(CharacterClass characterClass) noexcept {
-    switch (characterClass) {
-    case CharacterClass::titan:
-        return kVanguardTitan;
-    case CharacterClass::hunter:
-        return kVanguardHunter;
-    case CharacterClass::warlock:
-        return kVanguardWarlock;
-    default:
-        return {};
-    }
+inline std::span<const std::uint32_t> armour(const Pool& pool,
+                                             CharacterClass characterClass) noexcept {
+    const auto index = static_cast<std::size_t>(characterClass);
+    return index < pool.classArmour.size() ? pool.classArmour[index]
+                                           : std::span<const std::uint32_t>{};
 }
 
 } // namespace sunrise::state::vendor_rewards
