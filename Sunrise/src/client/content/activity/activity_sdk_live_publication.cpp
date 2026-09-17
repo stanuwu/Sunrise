@@ -72,54 +72,33 @@ struct Marker final {
     }
 }
 
-/** Which drive-path component, if any, is not an ordinary directory. */
-enum class Ancestry : std::uint8_t {
-    ready,
-    pathShape,
-    driveRoot,
-    ancestor,
-};
-
-/** A drive path is at least a letter, a colon and a separator. */
-constexpr std::size_t kDrivePrefixLength = 3;
-
-/** Reports the first drive-path component which is not an ordinary directory. */
-[[nodiscard]] Ancestry ordinary_ancestry(const std::wstring& directory) noexcept {
-    if (directory.size() < kDrivePrefixLength || directory[1] != L':' || directory[2] != L'\\') {
-        return Ancestry::pathShape;
+/** Requires every existing drive-path directory component to be ordinary, never a reparse point. */
+[[nodiscard]] bool ordinary_ancestry(const std::wstring& directory) noexcept {
+    if (directory.size() < 3U || directory[1] != L':' || directory[2] != L'\\') {
+        return false;
     }
-    const bool rootOrdinary = ordinary_directory(directory.substr(0, kDrivePrefixLength).c_str());
-    std::size_t cursor = kDrivePrefixLength;
+    if (!ordinary_directory(directory.substr(0, 3U).c_str())) {
+        return false;
+    }
+    std::size_t cursor = 3U;
     while (cursor < directory.size()) {
         const std::size_t separator = directory.find(L'\\', cursor);
         const std::size_t end = separator == std::wstring::npos ? directory.size() : separator;
         const std::wstring prefix = directory.substr(0, end);
         if (!ordinary_directory(prefix.c_str())) {
-            return Ancestry::ancestor;
+            return false;
         }
         if (separator == std::wstring::npos) {
             break;
         }
         cursor = separator + 1U;
     }
-    return rootOrdinary ? Ancestry::ready : Ancestry::driveRoot;
-}
-
-/** Wine maps its synthetic drive root as a reparse point; real path components stay checked. */
-[[nodiscard]] bool ordinary_ancestry_allowed(Ancestry ancestry) noexcept {
-    if (ancestry == Ancestry::ready) {
-        return true;
-    }
-    if (ancestry != Ancestry::driveRoot) {
-        return false;
-    }
-    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+    return true;
 }
 
 /** Resolves one existing ordinary directory and rejects reparse points in every ancestor. */
 [[nodiscard]] bool canonical_directory(const wchar_t* input, std::wstring& output) noexcept {
-    return full_path(input, output) && ordinary_ancestry_allowed(ordinary_ancestry(output));
+    return full_path(input, output) && ordinary_ancestry(output);
 }
 
 /** Compares two complete Windows path components without locale-sensitive folding. */
