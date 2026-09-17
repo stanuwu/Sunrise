@@ -5,7 +5,8 @@ namespace sunrise::server::bap {
 struct Session;
 struct Scratch;
 namespace encrypted {
-/** Caller owns the BAP lock, as for a remote social-feed request. Change-driven, never timed. */
+/** Caller owns the BAP lock. Change-driven route refresh continues without a local BAP link;
+ * the host's social mirror is applied only while locally connected. */
 void service_host_social() noexcept;
 /** Drops the host mirror's published stamp when the shared directory itself is reconstructed. */
 void reset_host_social() noexcept;

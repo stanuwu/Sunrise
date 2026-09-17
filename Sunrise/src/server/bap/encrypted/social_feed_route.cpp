@@ -66,7 +66,7 @@ void peer_routes(state::social::feed::Feed& feed) noexcept {
 void clear_prefix(std::span<std::byte> buffer, std::size_t size) noexcept {
     SecureZeroMemory(buffer.data(), (std::min)(buffer.size(), size));
 }
-/** Stamp of the mirror the host has already applied to itself. */
+/** Stamp applied to host routes and, while locally connected, to its social mirror. */
 state::social::Stamp g_hostStamp{};
 /** A refused local delivery retries this composed feed before composing another publication. */
 state::social::feed::Feed g_hostFeed{};
@@ -78,15 +78,30 @@ std::uint64_t g_nextSocialSerial{1};
 void service_host_social() noexcept {
     namespace social = state::social;
     namespace profiles = state::account::profiles;
-    if (core::settings::role() != core::settings::Role::host
-        || !social::initialize_client(state::account_primary_soid(state::kLocalAccount))) {
+    if (core::settings::role() != core::settings::Role::host) {
         return;
     }
     auto& directory = social::session_directory();
+    const auto routeGeneration = profiles::public_generation();
     if (directory.link_count(state::kLocalAccount) == 0) {
+        // The relay outlives local BAP links. Refresh remote authorization without applying a
+        // disconnected client's social feed; reopening its first link changes the directory stamp.
+        g_hostPending = false;
+        const auto stamp = directory.stamp(state::kLocalAccount, routeGeneration);
+        if (stamp != g_hostStamp) {
+            social::feed::Feed feed{};
+            directory.publish(state::kLocalAccount, feed);
+            peer_routes(feed);
+            if (state::network::peer_routes::replace(
+                    std::span(feed.routes).first(feed.routeCount))) {
+                g_hostStamp = stamp;
+            }
+        }
         return;
     }
-    const auto routeGeneration = profiles::public_generation();
+    if (!social::initialize_client(state::account_primary_soid(state::kLocalAccount))) {
+        return;
+    }
     if (g_hostPending
         && directory.stamp(state::kLocalAccount, routeGeneration) != g_hostPreparedStamp) {
         // A new publication supersedes refused work, including any withdrawn authorization.
