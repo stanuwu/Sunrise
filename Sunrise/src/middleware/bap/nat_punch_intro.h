@@ -43,6 +43,7 @@ inline constexpr std::size_t kPayload = 0x88;
 /** The record's tail past its last fixed field, so all one punch payload may occupy. */
 inline constexpr std::size_t kPayloadCapacity = kRecordSize - offset::kPayload;
 
+/** One parsed intro record: the target it names, its opaque punch payload, and the source tag. */
 struct IntroRecord final {
     std::array<std::byte, kAddressSize> targetAddress{};
     std::array<std::byte, kPayloadCapacity> payload{};
@@ -52,45 +53,70 @@ struct IntroRecord final {
     bool hasPayload{};
 };
 
+/**
+ * Parses one fixed-size intro record.
+ * @return False for a short buffer, a payload declared larger than `kPayloadCapacity`, or an
+ * address-size guard word other than `kAddressSize`.
+ */
 [[nodiscard]] bool parse(std::span<const std::byte> bytes, IntroRecord& record) noexcept;
 
+/** @return False when `record.payloadSize` exceeds `kPayloadCapacity`. */
 [[nodiscard]] bool compose(const IntroRecord& record,
                            std::array<std::byte, kRecordSize>& bytes) noexcept;
 
 namespace envelope {
 /** Header fields in order: u8 kind, big-endian u64 identifier, u32 tag, u32 length, then blob. */
 inline constexpr std::size_t kKind = 0x00;
+/** See kKind. */
 inline constexpr std::size_t kIdentifier = kKind + 1;
+/** See kKind. */
 inline constexpr std::size_t kTag = kIdentifier + 8;
+/** See kKind. */
 inline constexpr std::size_t kLength = kTag + 4;
+/** See kKind. */
 inline constexpr std::size_t kBlob = kLength + 4;
+/** See kKind. */
 inline constexpr std::size_t kHeaderSize = kBlob;
 /** Size of the scratch buffer the native emitter allocates for one intro blob. */
 inline constexpr std::size_t kBlobCapacity = 0x7D800;
 /** The only kind byte either side accepts. */
 inline constexpr std::uint8_t kKindValue = 1;
+/** True; the identifier crosses the wire big-endian, unlike the intro record's native fields. */
 inline constexpr bool kIdentifierIsBigEndian = true;
 } // namespace envelope
 
+/** One envelope's routing identifier and the source's per-intro tag. */
 struct EnvelopeHeader final {
     std::uint64_t identifier{};
     std::uint32_t tag{};
 };
 
+/**
+ * Parses one envelope header and the blob it wraps.
+ * @return False for a short buffer, a kind byte other than `kKindValue`, or a declared length
+ * exceeding `kBlobCapacity` or the bytes remaining after the header.
+ */
 [[nodiscard]] bool parse_envelope(std::span<const std::byte> bytes,
                                   EnvelopeHeader& header,
                                   std::span<const std::byte>& blob) noexcept;
 
+/** @return False when `blob` exceeds `kBlobCapacity` or `output` is too small for the result. */
 [[nodiscard]] bool compose_envelope(const EnvelopeHeader& header,
                                     std::span<const std::byte> blob,
                                     std::span<std::byte> output,
                                     std::size_t& written) noexcept;
 
+/**
+ * Parses `body`'s envelope and intro record, retargets it to `recipientAddress`, and recomposes
+ * both under the original identifier and tag.
+ * @return False when `body` fails to parse or `output` is too small for the result.
+ */
 [[nodiscard]] bool retarget_envelope(std::span<const std::byte> body,
                                      const std::array<std::byte, kAddressSize>& recipientAddress,
                                      std::span<std::byte> output,
                                      std::size_t& written) noexcept;
 
+/** Points `record` at `recipientAddress`, replacing its target address and marking it targeted. */
 void retarget(IntroRecord& record,
               const std::array<std::byte, kAddressSize>& recipientAddress) noexcept;
 

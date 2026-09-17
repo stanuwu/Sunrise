@@ -8,6 +8,7 @@ namespace sunrise::server::bap::proxy::profile_publisher {
 [[nodiscard]] bool acknowledge(std::uint32_t connectionId,
                                std::uint32_t taskId,
                                std::uint16_t responseService) noexcept;
+/** Clears the outstanding task only if it is still this one; otherwise a no-op. */
 void abandon(std::uint32_t connectionId,
              std::uint32_t taskId,
              std::uint16_t responseService) noexcept;
@@ -15,6 +16,7 @@ void abandon(std::uint32_t connectionId,
 void reject(std::uint32_t connectionId,
             std::uint32_t taskId,
             std::uint16_t responseService) noexcept;
+/** Clears publication state so service() retries a fresh image when its inputs/link are ready. */
 void reset() noexcept;
 /** Publishes changes without a time gate; retains prepared bytes across output pressure. */
 void service() noexcept;

@@ -237,10 +237,8 @@ void publish_connection_fields(Session& session,
     const bool deliveredJoinMembership =
         fields.joinsActivity && session.activityJoinMembershipStaged;
     if (deliveredJoinMembership || session.activityAdvertisementStaged.staged) {
-        // A public or shared target burst delivers its membership body here and nowhere else.
-        // Adopting it gives this connection the delivered-body record and the revision cursor the
-        // keepalive reads, so the first keepalive after a join does not repeat what the burst just
-        // sent. The private path above has already adopted, and a second adopt is a no-op.
+        // A public or shared target burst delivers its membership body here, so adopting it gives
+        // this connection the revision cursor the keepalive reads. A second adopt is a no-op.
         if (deliveredJoinMembership) {
             push::activity::adopt_join_membership_record(session);
         } else {

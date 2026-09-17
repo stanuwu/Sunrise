@@ -16,7 +16,7 @@ namespace descriptor = middleware::gameplay::descriptor;
 
 bool join_silo(std::uint64_t& silo) noexcept {
     state::build_data::BuildIdentity build{};
-    // The service now runs inside the game, whose image owns the native join silo.
+    // This service runs inside the game process, whose own image owns the native join silo.
     return state::build_data::cache::current_build_identity(0, build)
            && state::build_data::static_join_silo(build, silo);
 }
@@ -43,11 +43,11 @@ bool native_descriptor(const state::AccountState& account,
                 own.size(),
                 own.begin());
     body = native.descriptor;
-    // The two blobs the SAME client published about itself, and the descriptor's own NetAddr.
-    // A published carrier wins over the descriptor's own bytes, because the type-12 membership
-    // row and the group snapshot name this peer by that carrier. Two lanes naming one peer by
-    // different bytes make the client register a second security context for it, and one context
-    // that never reads READY clears the whole channel's security flag.
+    // The two blobs the same client published about itself, and the descriptor's own NetAddr.
+    // A published carrier wins over the descriptor's own bytes: the type-12 row and the group
+    // snapshot both name this peer by that carrier, and naming it by different bytes in each
+    // registers a second security context that clears the channel's security flag if it never
+    // becomes ready.
     middleware::bap::activity_message::TransportReport transport{};
     const bool hasPublishedTransport =
         published_character_transport_locked(account.primarySoid, character, transport);

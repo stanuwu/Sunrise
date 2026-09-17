@@ -9,6 +9,7 @@
 
 namespace sunrise::state::social::fireteams {
 
+/** Complete-graph edge count for every possible player pair; the table's fixed capacity. */
 inline constexpr std::size_t kEdgeCapacity =
     core::network_capacity::kPlayers * (core::network_capacity::kPlayers - 1) / 2;
 
@@ -39,6 +40,7 @@ public:
     [[nodiscard]] std::uint64_t revision() const noexcept {
         return revision_;
     }
+    /** @return Every recorded edge, pending and established alike. */
     [[nodiscard]] std::span<const Edge> edges() const noexcept {
         return edges_;
     }

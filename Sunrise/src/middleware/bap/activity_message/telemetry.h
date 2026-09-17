@@ -6,8 +6,9 @@
 #include <span>
 
 namespace sunrise::middleware::encoding::bits {
+/** Bit-level reader `read_reservation_identity` reads one record through. */
 class Reader;
-}
+} // namespace sunrise::middleware::encoding::bits
 
 namespace sunrise::middleware::bap::activity_message::telemetry {
 

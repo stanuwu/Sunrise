@@ -26,20 +26,29 @@ struct MemberLeases final {
     std::uint32_t joinedRows{};
     std::uint16_t blockWidth{};
     std::uint8_t nextBlock{};
+    /** Starts every row without an assigned block; zero is a valid block index. */
     constexpr MemberLeases() noexcept {
         blocks.fill(kNoMemberLeaseBlock);
     }
 };
 
+/** A prepared, not-yet-applied lease assignment for one member row. */
 struct MemberLeasePlan final {
     LeaseMask mask{};
     std::uint16_t blockWidth{};
     std::uint8_t block{kNoMemberLeaseBlock};
+    /** True when `block` is claimed from `nextBlock` rather than reused from a departed row. */
     bool fresh{};
+    /** True only when the fields above describe a prepared assignment. */
     bool valid{};
     bool operator==(const MemberLeasePlan&) const noexcept = default;
 };
 
+/**
+ * @return The mask for the `width`-wide slot range starting at `block`. Empty for a
+ * block past `kMemberLeaseBlockCount`, a zero width, or a width wider than one block's share
+ * of the slot table.
+ */
 [[nodiscard]] inline LeaseMask member_lease_block(std::size_t block, std::size_t width) noexcept {
     LeaseMask mask{};
     if (block >= kMemberLeaseBlockCount || width == 0
@@ -51,6 +60,10 @@ struct MemberLeasePlan final {
     return mask;
 }
 
+/**
+ * @return True when another joined row already claims `block`, or the block's slots overlap
+ * any row's retired-but-unacknowledged purge, so `exceptRow` cannot reuse it.
+ */
 [[nodiscard]] inline bool
 member_block_in_use(const MemberLeases& leases, std::size_t block, std::size_t exceptRow) noexcept {
     for (std::size_t row = 0; row < leases.blocks.size(); ++row)
@@ -112,7 +125,9 @@ assign_member_lease(MemberLeases& leases, std::size_t row, const MemberLeasePlan
     if (plan.fresh) leases.nextBlock = static_cast<std::uint8_t>(plan.block + 1);
 }
 
-/** Native member departure releases this member alone and preserves the record's high-water mark.
+/**
+ * Native member departure releases this member alone and preserves the record's high-water
+ * mark.
  */
 inline void depart_member_lease(MemberLeases& leases, std::size_t row) noexcept {
     if (row >= kMemberLeaseRowCount || !(leases.joinedRows & (1U << row))) return;
@@ -141,6 +156,7 @@ acknowledge_member_purge(MemberLeases& leases, std::size_t row, std::uint32_t re
     leases.purgeRevision[row] = 0;
 }
 
+/** @return The union of every row's held mask. */
 [[nodiscard]] inline LeaseMask aggregate_member_leases(const MemberLeases& leases) noexcept {
     LeaseMask result{};
     for (const auto& held : leases.held)

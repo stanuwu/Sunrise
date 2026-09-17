@@ -312,7 +312,7 @@ bool stage_service_outcome(Scratch& scratch,
         }
         middleware::secure_channel::advance_nonce(nonce);
         after = selection.after;
-        // Family zero and Family three no longer fit beside the enlarged upstream Family-four
+        // Family zero and Family three do not fit beside the enlarged upstream Family-four
         // selection notification in this bounded reply. Publish them through the already-proven
         // deferred refresh channel after the primary mutation commits.
         armsAbilityRefresh = true;

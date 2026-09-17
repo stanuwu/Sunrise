@@ -137,7 +137,6 @@ bool draw_invitation(const steam::interfaces::methods::PendingInvitation& invita
 
 /**
  * Draws Dear ImGui data, then puts back every output-merger target that was set before.
- *
  * @param drawData Completed frame draw data.
  */
 void draw_data(ImDrawData* drawData) noexcept {

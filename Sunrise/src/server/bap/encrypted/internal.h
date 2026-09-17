@@ -505,7 +505,8 @@ void append_queuez_notification(Scratch& scratch,
     std::size_t& written) noexcept;
 
 /**
- * Appends the family-zero banner pair once, after a family-three subscribe.
+ * Appends the family-zero banner pair as its own notification.
+ * Sent twice per boot at the same version, which is what survives the state-1 `declared` race.
  * `after` records the delivery, or a later 504 move cannot name the record it must release.
  * @param scratch Lock-owned transform buffers.
  * @param before Queuez state the pair is delivered against.

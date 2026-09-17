@@ -15,11 +15,17 @@ inline constexpr std::size_t kNativePlayerIdentitySize = 36;
  * those three carry their own presence flags in the struct below instead.
  */
 namespace field_bit {
+/** Presence bit for `q3`. */
 inline constexpr std::uint16_t kQ3 = 0x004;
+/** Presence bit for `q4`. */
 inline constexpr std::uint16_t kQ4 = 0x008;
+/** Presence bit for `q6`. */
 inline constexpr std::uint16_t kQ6 = 0x010;
+/** Presence bit for `q8Handle`, `q8Slots` and `q8Tail` together. */
 inline constexpr std::uint16_t kQ8 = 0x040;
+/** Presence bit for `q9`. */
 inline constexpr std::uint16_t kQ9 = 0x080;
+/** Presence bit for `q5`. */
 inline constexpr std::uint16_t kQ5 = 0x100;
 } // namespace field_bit
 /** Bit of `tailFlags` that says the optional tail index follows it. */
@@ -53,12 +59,20 @@ struct NativePlayerProfile final {
 /** Writes exactly the retained B fields; never fills an absent field with a default. */
 [[nodiscard]] bool write_native_player_profile(encoding::bits::Writer& writer,
                                                const NativePlayerProfile& profile) noexcept;
+/** @return True when every optional field, and the tail if present, fits its wire range. */
 [[nodiscard]] bool valid_native_player_profile(const NativePlayerProfile& profile) noexcept;
+/** @return True when `profile` carries every optional B field, the name, identity and tail. */
 [[nodiscard]] bool complete_native_player_profile(const NativePlayerProfile& profile) noexcept;
+/** @return False on a short read; `profile` is left unchanged until the whole tail is read. */
 [[nodiscard]] bool read_native_player_tail(encoding::bits::Reader& reader,
                                            NativePlayerProfile& profile) noexcept;
+/** @return False when `profile.hasTail` is unset or the profile itself fails validation. */
 [[nodiscard]] bool write_native_player_tail(encoding::bits::Writer& writer,
                                             const NativePlayerProfile& profile) noexcept;
+/**
+ * Merges an incoming update into `target`, field by field.
+ * @param update Fields it carries present replace `target`'s; absent fields leave it unchanged.
+ */
 void merge_native_player_profile(NativePlayerProfile& target,
                                  const NativePlayerProfile& update) noexcept;
 /**
@@ -66,6 +80,11 @@ void merge_native_player_profile(NativePlayerProfile& target,
  * Its extent is the one the checksum hashes, so it may not be trimmed to the fields written.
  */
 using NativePlayerProfileState = std::array<std::byte, 0xE8>;
+/**
+ * Lays `profile` out as the native decoder would, field by field.
+ * The name units go in obfuscated, because that is the form the native record holds: the wire
+ * carries them plain and the native reader applies this same transform on the way in.
+ */
 void build_native_player_profile_state(const NativePlayerProfile& profile,
                                        NativePlayerProfileState& output) noexcept;
 } // namespace sunrise::middleware::gameplay::group

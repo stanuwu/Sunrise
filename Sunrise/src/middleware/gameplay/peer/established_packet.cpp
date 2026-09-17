@@ -390,7 +390,6 @@ bool write_empty_queue(bits::Writer& writer) noexcept {
     return writer.write(0, kFlagWidth);
 }
 
-/** Writes one reliable queue and every fragment it owes. */
 bool write_queue(bits::Writer& writer, const state::gameplay::OutboundQueue& queue) noexcept {
     const auto count = outbound_window::count(queue);
     if (count == 0) {

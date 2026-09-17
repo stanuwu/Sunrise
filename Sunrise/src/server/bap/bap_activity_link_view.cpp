@@ -178,7 +178,27 @@ bool current_activity_link_view(std::int32_t localSliceSet,
     return selected != nullptr;
 }
 
-/** Reads the unique ActivityClient whose activity session is the supplied view token. */
+/** Reads one exact ActivityClient's common-root inputs. */
+bool activity_replication_view(const state::activity::SessionBinding& binding,
+                               ActivityReplicationView& output) noexcept {
+    output = {};
+    const std::shared_lock lock(session_lock());
+    std::size_t count = 0;
+    const Session* const session = unique_activity_link_locked(binding, count);
+    const bool ready =
+        session != nullptr && session->activityPatchEpoch.seen
+        && session->activityPatchEpoch.bindingGeneration == session->activity.bindingGeneration;
+    if (ready) {
+        output.binding = session->activity.session;
+        output.patchEpoch = session->activityPatchEpoch.value;
+        output.activityClientGeneration = session->activity.bindingGeneration;
+        output.groupSessionId = session->activity.groupSessionId;
+        output.memberId = session->activityMemberKey;
+        output.replicationEpoch = session->activity.replicationEpoch;
+    }
+    return ready;
+}
+
 bool activity_replication_view_for_session(std::uint64_t activitySessionId,
                                            ActivityReplicationView& output) noexcept {
     output = {};
@@ -207,7 +227,6 @@ bool activity_replication_view_for_session(std::uint64_t activitySessionId,
     return count == 1;
 }
 
-/** Reads the unique ActivityClient bound to one gameplay group session. */
 bool activity_replication_view_for_group(std::uint64_t groupSessionId,
                                          ActivityReplicationView& output) noexcept {
     output = {};

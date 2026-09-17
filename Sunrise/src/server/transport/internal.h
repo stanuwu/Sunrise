@@ -38,9 +38,9 @@ struct Peer {
 };
 
 /**
- * Bound unauthenticated occupancy, partial-frame assembly and stalled writes independently.
- * One chosen deadline covers all three, long enough that a slow client is never mistaken for a
- * stalled one. Reaching it closes that peer's socket; nothing else is affected.
+ * Applies a chosen 30-second resource limit independently to authentication, partial-frame
+ * assembly and writes without progress. Locally deferred input pauses the assembly check.
+ * Expiry closes the peer through ordinary session cleanup; it can also exclude a slow peer.
  */
 [[nodiscard]] inline bool expired(const Peer& peer, std::uint64_t now) noexcept {
     constexpr std::uint64_t kDeadlineMs = 30'000;

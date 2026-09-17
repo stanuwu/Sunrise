@@ -7,7 +7,6 @@
 #include "web_service_actions.h"
 
 namespace sunrise::server::web_service {
-/** Stages public joinability and native presence; the enclosing BAP request owns publication. */
 bool note_character_writeback(
     const middleware::web_service::Message& message,
     std::span<const state::account::inventory::PresentedItemRow> presentation,

@@ -47,7 +47,6 @@ bool parse_frame(std::span<const std::byte> input, OuterFrame& frame) noexcept {
     return true;
 }
 
-/** Extracts one bounded frame from an arbitrary TCP prefix. */
 StreamFrameResult parse_stream_frame(std::span<const std::byte> input,
                                      std::size_t maximumFrameSize,
                                      OuterFrame& frame,
@@ -104,7 +103,6 @@ bool parse_request(std::span<const std::byte> input, RequestFrame& request) noex
     return parse_request_payload(outer.payload, outer.frameType, request);
 }
 
-/** Reads the correlation and status without interpreting service-specific response bodies. */
 bool parse_response_payload(std::span<const std::byte> input, ResponseFrame& response) noexcept {
     response = {};
     if (input.size() < kResponseHeaderSize) {

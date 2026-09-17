@@ -6,6 +6,7 @@
 #include "../../state/social/social_feed.h"
 
 namespace sunrise::steam::interfaces::methods {
+/** One invitation offered for accept or decline through `pending_invitation`. */
 struct PendingInvitation {
     std::uint64_t id{};
     std::uint64_t inviterSteamId{};

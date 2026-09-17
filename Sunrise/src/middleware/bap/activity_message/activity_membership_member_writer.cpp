@@ -227,8 +227,7 @@ template <std::size_t Size>
 
 /**
  * Writes the member's transition block: the two region legs and the synchronisation byte.
- * Every slice-set transition blocks, with no timeout, until member-record `+10889` equals the
- * transition manager's token at `0x7FF742AE2250`.
+ * The client waits for the member's synchronization byte to match its transition-manager token.
  * @param writer Fixed-buffer writer sitting at the block's presence bit.
  * @param currentLeg The member's current region leg, present only for the local member.
  * @param pendingLeg The member's pending region leg, present only for the local member.

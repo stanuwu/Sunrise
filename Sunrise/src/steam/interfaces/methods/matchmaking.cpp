@@ -69,8 +69,7 @@ static_assert(sizeof(LobbyChatMsg) == kLobbyChatMsgSize);
 
 /**
  * Creates a platform lobby and atomically queues its created and entered callbacks.
- * @return API
- * call id, or zero when either callback cannot be queued.
+ * @return API call id, or zero when either callback cannot be queued.
  */
 ApiCall create_lobby([[maybe_unused]] void* self,
                      [[maybe_unused]] int lobbyType,
@@ -213,7 +212,6 @@ int get_lobby_chat_entry([[maybe_unused]] void* self,
     return static_cast<int>(record.size);
 }
 
-/** Receipt advances only after the actual platform callback can be queued. */
 void service_lobbies() noexcept {
     if (!core::settings::multiplayer()) {
         return;

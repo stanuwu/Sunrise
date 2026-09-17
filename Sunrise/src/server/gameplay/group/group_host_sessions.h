@@ -108,11 +108,10 @@ void snapshot_host_sessions(std::span<HostSessionRow> output, std::size_t& count
 void allocate_claimed_host_sessions() noexcept;
 
 /**
- * Detaches every current and retired row, then returns their retains and allocated targets to
- * State.
- * Uses fixed release storage shared with deferred cleanup. The release lock serializes
- * resets;
- * State calls occur outside the host-table lock and must not reenter cleanup.
+ * Detaches every current and retired row, then returns their retains and allocated targets
+ * to State. Uses fixed release storage shared with deferred cleanup; the release lock
+ * serializes resets. State calls occur outside the host-table lock and must not reenter
+ * cleanup.
  */
 void reset_host_sessions() noexcept;
 

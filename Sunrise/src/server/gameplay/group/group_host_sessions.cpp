@@ -16,6 +16,8 @@
 namespace sunrise::server::gameplay::group {
 
 namespace {
+// Local budget for two overlapping private source bindings per player; a full table refuses
+// further distinct sources until pruning releases a slot.
 constexpr std::size_t kSourceCapacity = core::network_capacity::kPlayers * 2;
 
 /** One source-bound activity-host row owned by the fixed table. */

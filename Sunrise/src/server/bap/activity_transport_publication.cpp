@@ -14,10 +14,11 @@
 namespace sunrise::server::bap {
 namespace {
 /**
- * Rebuilds the cross-lane mirror for one member key from every live connection that holds it.
- * The caller holds the BAP lock. A member with no live carrier, or whose live connections
- * disagree after normalisation, publishes nothing at all so every lane resolves the same
- * unambiguous carrier. This is the same rule `find_transport_locked` applies below.
+ * Rebuilds the published transport mirror for one member key from every live connection that
+ * holds it. The caller holds the BAP lock. A member with no live carrier, or whose live
+ * connections disagree after normalisation, publishes nothing at all so the type-12 row, the
+ * join descriptor and the group snapshot all resolve the same unambiguous carrier. This is the
+ * same rule `find_transport_locked` applies below.
  */
 void refresh_member_identity_locked(std::uint64_t memberKey) noexcept {
     namespace membership = state::activity::membership;
@@ -74,9 +75,7 @@ void refresh_member_identity_locked(std::uint64_t memberKey) noexcept {
                                               fields)) {
         return;
     }
-    // One line per change, not per push: this is the single producer every lane copies from, so
-    // these are the 86 bytes the type-12 row, the join descriptor and the group snapshot all
-    // name this peer by.
+    // One line per change, not per push.
     static constexpr char kDigits[] = "0123456789ABCDEF";
     std::array<char, descriptor::kNetAddrSize * 2 + 1> hex{};
     for (std::size_t index = 0; index < agreed.size(); ++index) {
@@ -111,8 +110,9 @@ void publish_activity_transport(
         return;
     }
     if (middleware::bap::activity_message::merge_transport(session.activityTransport, report)) {
-        // Every lane names this peer by the same 86 bytes, so the mirror is rebuilt from the
-        // retained reports and not from the sparse delta that changed one of them.
+        // The type-12 row, join descriptor and group snapshot all name this peer by the same 86
+        // bytes, so the mirror is rebuilt from the retained reports and not from the sparse
+        // delta that changed one of them.
         refresh_member_identity_locked(session.activityMemberKey);
         state::account::profiles::service_changed(session.accountHandle);
         state::activity::reservations::invalidate_owner(

@@ -70,8 +70,7 @@ static_assert(kJoinMemberState == wire::MemberState::ready,
 
 /**
  * Publishes this recipient's snapshot of the native peers admitted to its group.
- * The caller
- * holds the admitted lock.
+ * The caller holds the admitted lock.
  * @param record Admitted peer the snapshot names.
  * @return True when the snapshot was queued on the peer's reliable channel.
  */
@@ -89,7 +88,7 @@ static_assert(kJoinMemberState == wire::MemberState::ready,
     const auto hostPort = record.endpoint.localPort != 0 ? record.endpoint.localPort : host.port;
     descriptor::write_net_addr(host.address, hostPort, hostAddress);
     std::array<compose::PeerInput, compose::kPeerCapacity> peers{};
-    // Value-initialises to `unavailable`, so a peer with no published carrier reads as a fallback.
+    // A peer with no published carrier reads as a fallback.
     std::array<descriptor::NetAddrNormalisation, compose::kPeerCapacity> identityRule{};
     std::array<std::uint64_t, compose::kPeerCapacity> identityAccounts{};
     std::size_t count = 0;
@@ -105,16 +104,11 @@ static_assert(kJoinMemberState == wire::MemberState::ready,
         input.recipient = &row == &record;
         identityAccounts[slot] = row.playerSoids.present ? row.playerSoids.accountSoid : 0;
         // The carrier the peer published about itself outranks the address its connect request
-        // carried. The type-12 membership row and the family-7 join descriptor name it by that
-        // carrier, and a second, unreconciled address makes the recipient register a second
-        // security context for the same peer, which clears the channel's security flag for
-        // every packet in both directions.
-        //
-        // Keyed by the peer's account, not by `machineId`: the join request's machine id lives in
-        // the gameplay id space while the published carrier is keyed by the BAP member key. The
-        // account soid its player-add carried is the one identity both sides hold, and resolving
-        // it here needs no BAP lock, which this path could not take: the NAT relay service already
-        // takes the admitted lock while holding the BAP session lock.
+        // carried: a second, unreconciled address for the same peer makes the recipient register
+        // a second security context and clears the channel's security flag for every packet in
+        // both directions. Keyed by account, not `machineId`, because the join request's machine
+        // id and the published carrier live in different id spaces, and resolving the account
+        // needs no BAP lock, which this path cannot take while already holding the admitted lock.
         if (row.playerSoids.present && row.playerSoids.accountSoid != 0) {
             namespace membership = state::activity::membership;
             membership::TransportFields published{};
@@ -136,7 +130,7 @@ static_assert(kJoinMemberState == wire::MemberState::ready,
         if (identityRule[slot] == descriptor::NetAddrNormalisation::unavailable) {
             // A Steam text carrier names no routable IPv4, so a recipient handed one cannot open
             // a direct channel to that peer at all. The link's own endpoint is the routable
-            // identity, exactly as the cleaned tree's mesh_peer_family_ipv4 rule resolves it.
+            // identity.
             if (!peer::remote_address(row.endpoint, row.sessionId, input.member.address)
                 || descriptor::net_addr_is_steam_text(input.member.address)) {
                 descriptor::write_net_addr(
@@ -168,15 +162,15 @@ static_assert(kJoinMemberState == wire::MemberState::ready,
             record.sessionId, hostAddress, std::span(peers).first(count), revision, composed)) {
         return false;
     }
-    // The service has no native world controller to publish as a player host.
+    // Byte-identical content is not republished; only the revision would differ.
     const auto candidate = PublicationStamp::from(composed.update);
     if (record.publication.matches(candidate)) {
         record.rosterStale = false;
         return true;
     }
     // A peer named by its link endpoint instead of its published carrier is the one case where
-    // another lane can name it by different bytes, so only that case is reported, and only for
-    // a snapshot that actually goes on the wire.
+    // a different recipient's snapshot can name it by different bytes, so only that case is
+    // reported, and only for a snapshot that actually goes on the wire.
     for (std::size_t slot = 0; slot < count; ++slot) {
         if (identityAccounts[slot] != 0
             && identityRule[slot] == descriptor::NetAddrNormalisation::unavailable) {
@@ -424,8 +418,8 @@ void drop_session(const state::gameplay::Endpoint& from, std::uint64_t sessionId
            static_cast<unsigned>(mask),
            static_cast<unsigned>(header.modeFlag ? 1U : 0U),
            wire::parameter_names(mask, names.data(), names.size()));
-    // The selected bodies are walked before the answer goes out, so nothing is answered from a
-    // request that was only read as far as its header.
+    // Locate the selected bodies to determine whether the following container remains readable.
+    // An incomplete walk still permits the structural reply below, then stops container parsing.
     wire::ParameterRequestWalk walk{};
     const bool intact = wire::walk_parameter_request(reader, mask, walk);
     report(walk.complete ? core::log::Level::debug : core::log::Level::info,
@@ -462,7 +456,6 @@ void drop_session(const state::gameplay::Endpoint& from, std::uint64_t sessionId
     }
     // Retain identity only from this endpoint's own native player-add.
     AcquireSRWLockExclusive(&g_admittedLock);
-    // The body's session, for the same reason join-complete uses its own.
     Admitted* const record = find_owned(from, request.sessionId);
     bool published = false;
     const bool accepted = record != nullptr && admission::set_player(*record, request);

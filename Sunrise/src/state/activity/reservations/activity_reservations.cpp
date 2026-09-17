@@ -210,11 +210,10 @@ bool prepare_release(std::uint64_t sessionId,
             prepared.releasedMemberRow = row;
         }
     }
-    // A retract never unseats a live member. A departing client sends one retract per peer it is
-    // dropping, and it arrives while those peers are still playing: taking the record's own
-    // primary row, or any row still holding entity slots, evicts a player who never left. The
-    // fork answers both cases without changing state and leaves the removal to `depart_member`,
-    // the only path by which a member can leave its own row.
+    // A retract never unseats a live member. A departing client sends one retract per peer it
+    // is dropping, and those peers are still playing, so taking the primary row or any row
+    // still holding entity slots would evict a player who never left. Removal is
+    // `depart_member`'s, the only path by which a member can leave its own row.
     if (prepared.releasedMemberRow == 0) {
         if (refusal) {
             *refusal = ReleaseRefusal::hostRow;

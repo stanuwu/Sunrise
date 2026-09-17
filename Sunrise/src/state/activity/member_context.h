@@ -22,5 +22,6 @@ private:
     MemberContext previous_{};
 };
 
+/** Returns this thread's current scoped activity owner, or the empty default outside a scope. */
 [[nodiscard]] MemberContext member_context() noexcept;
 } // namespace sunrise::state::activity

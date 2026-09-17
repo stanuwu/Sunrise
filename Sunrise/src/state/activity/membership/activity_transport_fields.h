@@ -29,12 +29,12 @@ struct TransportFields final {
 };
 
 /**
- * Mirrors one connection's published carrier where every lane can read it.
- * The BAP connection owns these bytes; this table only republishes them under its own lock, so a
- * gameplay lane holding the admitted lock never has to reach into a BAP session to learn the one
- * address a peer must be named by.
- * @param memberKey Member key the peer is named by on every lane. Zero is refused.
- * @param accountSoid Owning account, so a lane holding only a soid can resolve the same bytes.
+ * Mirrors one connection's published carrier so any caller can read it under this table's own
+ * lock. The BAP connection owns these bytes; this table only republishes them, so gameplay code
+ * holding the admitted lock never has to reach into a BAP session to learn the one address a
+ * peer must be named by.
+ * @param memberKey Member key the peer is named by everywhere. Zero is refused.
+ * @param accountSoid Owning account, so a caller holding only a soid can resolve the same bytes.
  * @param characterSoid Selected character the carrier belongs to.
  * @param fields Complete image selected from the live connections, replacing all retained fields.
  * @return True when the retained record changed.
@@ -59,8 +59,8 @@ void forget_transport_fields(std::uint64_t memberKey) noexcept;
 
 /**
  * Reads the carrier published for one account's selected character.
- * Two live records that disagree refuse rather than pick, so no lane can publish an address
- * another lane would contradict.
+ * Two live records that disagree refuse rather than pick, so no caller can publish an address
+ * another caller would contradict.
  * @param characterSoid Selected character, or zero to accept any character of that account.
  * @return True when exactly one carrier answers.
  */

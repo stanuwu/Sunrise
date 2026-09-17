@@ -14,10 +14,9 @@ inline constexpr std::size_t kBapFrameCapacity = 0x7D800 + 49;
 
 /**
  * Fixed BAP connection slots shared by the transport and the Server.
- * A crossing holds the old and the new activity link at once, so a lobby plus three activity
- * links is reachable. Below that the accept is refused and the connect stalls.
- * The shared
- * listener allows these overlaps independently for several real players.
+ * A crossing holds the old and the new activity link at once, so each player needs a lobby
+ * plus three activity links. The shared listener grants that budget to every player
+ * independently; below it the accept is refused and the connect stalls.
  */
 inline constexpr std::size_t kBapConnectionCount = core::network_capacity::kConnections;
 

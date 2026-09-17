@@ -9,6 +9,7 @@ inline constexpr std::size_t kPlayers = 32;
 inline constexpr std::size_t kActivityPlayers = 12;
 /** Lobby plus overlapping current/target native activity connections for each player. */
 inline constexpr std::size_t kConnectionsPerPlayer = 4;
+/** Every player's connections, summed for tables sized to the whole server. */
 inline constexpr std::size_t kConnections = kPlayers * kConnectionsPerPlayer;
 /** Two complete eight-region directories per player, including travel overlap. */
 inline constexpr std::size_t kHostPorts = kPlayers * 16;

@@ -14,10 +14,12 @@ namespace sunrise::middleware::datagen::inspection {
 
 /** The inspected character projects the family-four character record's own two bank sizes. */
 inline constexpr std::size_t kEquipmentCapacity = family4::character::layout::kEquipmentCapacity;
+/** See kEquipmentCapacity. */
 inline constexpr std::size_t kProgressionCapacity =
     family4::character::layout::kProgressionCapacity;
 /** Sizes the two native classes named below declare; the assertions hold each struct to one. */
 inline constexpr std::size_t kRootSize = 0x800;
+/** See kRootSize. */
 inline constexpr std::size_t kCharacterSize = 0x1B48;
 
 #pragma pack(push, 1)
@@ -56,13 +58,25 @@ static_assert(offsetof(Character, equippedSoids) == 0xAA8);
 static_assert(offsetof(Character, appearance) == 0xC80);
 static_assert(offsetof(Character, summary) == 0x1B28);
 
+/** @return False for a zero account or character soid, or an `output` smaller than `kRootSize`. */
 [[nodiscard]] bool encode_root(std::uint64_t accountSoid,
                                std::uint64_t characterSoid,
                                std::span<std::byte> output) noexcept;
 
+/**
+ * Extracts and validates the loadout's equipped items, one per equipment slot.
+ * @return False for an invalid item count, a repeated or out-of-range equipment slot, a zero
+ * instance soid, or two equipped items sharing one instance.
+ */
 [[nodiscard]] bool equipped_instances(const family4::loadout::ResolvedLoadout& loadout,
                                       family4::loadout::ResolvedInstances& output) noexcept;
 
+/**
+ * Encodes one family-four character record.
+ * @param equipped Must be `equipped_instances`'s own result for `loadout`; any mismatch refuses.
+ * @return False when `output` is smaller than `kCharacterSize`, an item fails validation, or the
+ * family0 banner block fails to encode.
+ */
 [[nodiscard]] bool encode_character(const state::CharacterState& character,
                                     const family4::loadout::ResolvedLoadout& loadout,
                                     const family4::loadout::ResolvedInstances& equipped,

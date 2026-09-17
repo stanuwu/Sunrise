@@ -134,8 +134,8 @@ struct MembershipSnapshot final {
     client_authoritative_data::SpawnState spawn{};
     client_authoritative_data::TeleportState teleport{};
     /**
-     * Host directory. One entry per region we advertise a host for, in no particular order.
-     * Empty unless the gameplay channel is advertising an endpoint this run.
+     * Host directory. One entry per region this snapshot advertises a host for, in no
+     * particular order. Empty unless the gameplay channel is advertising an endpoint this run.
      */
     std::array<CitizenAdvertisement, kCitizenCapacity> citizens{};
     /** Filled entries at the front of the directory. */
@@ -174,6 +174,7 @@ inline constexpr std::uint32_t kRemoteMemberMask = 1U << 1U;
     return snapshot.peers[index].slot == 0xFF ? static_cast<std::uint8_t>(index + 2)
                                               : snapshot.peers[index].slot;
 }
+/** @return The present peer occupying `slot`, or null when no peer does. */
 [[nodiscard]] constexpr const PeerMember* peer_at_slot(const MembershipSnapshot& snapshot,
                                                        std::size_t slot) noexcept {
     for (std::size_t i = 0; i < snapshot.peers.size(); ++i) {
@@ -183,6 +184,7 @@ inline constexpr std::uint32_t kRemoteMemberMask = 1U << 1U;
     }
     return nullptr;
 }
+/** @return True when `peer` has a transition leg or sync token still to report. */
 [[nodiscard]] constexpr bool has_peer_transition(const PeerMember& peer) noexcept {
     return peer.currentLeg.present || peer.pendingLeg.present || peer.hasSyncToken;
 }
@@ -226,6 +228,7 @@ inline constexpr std::size_t kPeerMemberFixedBitCount =
 /** The player blob carries each name unit twice, so one character costs two 16-bit writes. */
 inline constexpr std::size_t kPeerNameUnitBitCount = 32;
 
+/** @return Bits every present peer row adds, including whichever optional fields it carries. */
 [[nodiscard]] constexpr std::size_t
 peer_member_bit_count(const MembershipSnapshot& snapshot) noexcept {
     std::size_t bits{};

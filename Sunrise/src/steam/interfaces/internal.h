@@ -42,6 +42,7 @@ struct SteamId {
 };
 
 #pragma pack(push, 1)
+/** Steamworks FriendGameInfo_t layout; `friend_game_played` fills only `gameId`. */
 struct FriendGameInfo {
     std::uint64_t gameId{};
     std::uint32_t gameIp{};
@@ -49,10 +50,12 @@ struct FriendGameInfo {
     std::uint16_t queryPort{};
     std::uint64_t lobbySteamId{};
 };
+/** Steamworks PersonaStateChange_t payload, queued under callback id 304. */
 struct PersonaStateChange {
     std::uint64_t steamId{};
     int changeFlags{};
 };
+/** Steamworks GameRichPresenceJoinRequested_t payload, queued under callback id 337. */
 struct GameRichPresenceJoinRequested {
     std::uint64_t friendSteamId{};
     /** The connect string's own field width in the Steamworks callback struct. */
@@ -104,16 +107,45 @@ namespace methods {
 ULONG_PTR unsupported(void*) noexcept;
 bool return_true(void*) noexcept;
 const char* persona_name(void*) noexcept;
+/** @return Immediate friend count from the roster; zero when `flags` excludes immediate friends. */
 int friend_count(void*, int flags) noexcept;
+/**
+ * @param result Filled with the immediate friend at `index`, or a zero id when `flags`
+ * excludes immediate friends or `index` is out of range.
+ * @return `result`.
+ */
 SteamId* friend_by_index(void*, SteamId* result, int index, int flags) noexcept;
+/** @return A relationship code: friend when `steamId` is in the roster, none otherwise. */
 int friend_relationship(void*, std::uint64_t steamId) noexcept;
+/** @return A persona-state code: online when `steamId` is in the roster, offline otherwise. */
 int friend_persona_state(void*, std::uint64_t steamId) noexcept;
+/** Returns a thread-local name (empty if absent), reused after four further calls on this thread.
+ */
 const char* friend_persona_name(void*, std::uint64_t steamId) noexcept;
+/**
+ * @param info Zeroed, then filled with this process's own app id when `steamId` is in the
+ * roster.
+ * @return False, with `info` left zeroed, when `steamId` is not in the roster.
+ */
 bool friend_game_played(void*, std::uint64_t steamId, FriendGameInfo* info) noexcept;
 /** Captured before callback-pump activation so shutdown can invalidate an entering pass. */
 [[nodiscard]] std::uint64_t friends_generation() noexcept;
+/**
+ * Diffs the friend roster since the last pass and queues arrival, departure, and
+ * name-change callbacks.
+ * @param expectedGeneration Generation to service; zero services the current one.
+ */
 void service_friends(std::uint64_t expectedGeneration = 0) noexcept;
+/**
+ * Applies a pending accept or decline, queues a join-request callback for an accepted
+ * invite, and admits new invitations from the roster's pending queue.
+ * @param expectedGeneration Generation to service; zero services the current one.
+ */
 void service_invites(std::uint64_t expectedGeneration = 0) noexcept;
+/**
+ * Bumps the generation; a queued or already-entering pass is dropped and state clears on
+ * the next service call.
+ */
 void reset_friends() noexcept;
 const char* language(void*) noexcept;
 const char* country(void*) noexcept;
@@ -145,7 +177,13 @@ InputMotionData input_motion_data(void*, std::uint64_t) noexcept;
 int filter_text(void*, char*, DWORD, const char*, bool) noexcept;
 ApiCall create_lobby(void*, int, int) noexcept;
 ApiCall join_lobby(void*, std::uint64_t) noexcept;
+/** Removes `lobby` from this process's chat membership. */
 void leave_lobby(void*, std::uint64_t) noexcept;
+/**
+ * Drains pending lobby chat messages into queued callbacks, only while multiplayer is
+ * enabled. A receipt advances only after its callback is queued, so a full queue leaves it
+ * for the next pass.
+ */
 void service_lobbies() noexcept;
 bool send_lobby_chat(void*, std::uint64_t, const void*, int) noexcept;
 int get_lobby_chat_entry(void*, std::uint64_t, int, std::uint64_t*, void*, int, int*) noexcept;

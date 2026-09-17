@@ -9,6 +9,7 @@ namespace sunrise::state::activity {
                                           const LaunchParty& party,
                                           std::uint64_t& sessionId,
                                           PendingAllocation& allocation) noexcept;
+/** Uses the default destination under the State lock; refusal clears both outputs. */
 [[nodiscard]] bool prepare_shared_session(const LaunchParty& party,
                                           std::uint64_t& sessionId,
                                           PendingAllocation& allocation) noexcept;

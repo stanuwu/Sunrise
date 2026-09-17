@@ -11,7 +11,7 @@
 
 namespace sunrise::server::bap::encrypted::push::activity {
 namespace {
-/** Single-bubble selector, the value the cleaned reference puts in every departure purge. */
+/** Single-bubble selector; a departure purge names one bubble. */
 constexpr std::uint8_t kDepartureBubbleSelector = 0;
 } // namespace
 
@@ -90,14 +90,8 @@ bool consume_member_departure(Session& session,
         return false;
     }
     namespace control = middleware::bap::activity_message::host_control;
-    // The message-25 byte between the reason and the mask is the bubble selector, and a departure
-    // notification carries the single-bubble value zero -- what the cleaned reference sends
-    // (`activity_rejoin_push.cpp:180-185`, `entity_slot_purge.h`'s `selector`) and what the
-    // accepted `purge-polarity-f1` boot witnessed. It is not this link's replication epoch: that
-    // counter belongs to the client-requested authority purge, whose senders and guards all carry
-    // `replicationEpoch + 1` (`activity_message_framing.cpp:295`,
-    // `activity_transaction_notifications.cpp:200-201`, `bap_route.cpp:676`) and commit it. A
-    // departure purge joins no epoch handshake, so it must not spend an epoch value either.
+    // Departure names one bubble with selector zero. Only a client-requested authority purge
+    // advances the replication epoch; this notification must not spend that handshake's value.
     const control::PurgeAuthorityBody body{pending.slots, kDepartureBubbleSelector, 0};
     std::array<std::byte, control::kPurgeAuthorityByteCount> bytes{};
     std::size_t bodySize{}, framedSize{};

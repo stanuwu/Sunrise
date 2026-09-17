@@ -280,13 +280,10 @@ struct LinkIdentity final {
 [[nodiscard]] bool link_identity(std::uint64_t sessionId, LinkIdentity& output) noexcept;
 
 /**
- * Sends any owed acknowledgement.
- * Without it the peer keeps retransmitting every reliable
- * message it has sent.
- * A concurrent or reentrant call returns without changing owed work. The
- * active slice owns
- * one reusable peer snapshot; sends still validate the live channel before
- * transmission.
+ * Sends any owed acknowledgement. Without it the peer keeps retransmitting every reliable
+ * message it has sent. A concurrent or reentrant call returns without changing owed work.
+ * The active slice owns one reusable peer snapshot; sends still validate the live channel
+ * before transmission.
  * @param now Monotonic tick count in milliseconds.
  */
 void service(std::uint64_t now) noexcept;

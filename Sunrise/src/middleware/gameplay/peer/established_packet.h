@@ -148,8 +148,8 @@ struct FillerTrailer {
 
 /**
  * Writes the current bounded fragment run of one reliable queue.
- * Each record names its sequence
- * absolutely. The delta forms desynchronise if a record is dropped.
+ * Each record names its sequence absolutely; the delta forms desynchronise if a record is
+ * dropped.
  * @param writer Writer positioned at that queue's payload.
  * @param queue Fragments to write, in sequence order.
  * @return True when the whole list and its terminator fit.

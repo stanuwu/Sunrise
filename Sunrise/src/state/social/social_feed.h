@@ -13,6 +13,7 @@ namespace sunrise::state::social::feed {
 
 /** A row carries one account's persona name, in the same buffer the presence record uses. */
 inline constexpr std::size_t kNameCapacity = kDisplayNameCapacity;
+/** Every player, plus one slot for the local installation's own account. */
 inline constexpr std::size_t kRowCapacity = core::network_capacity::kPlayers + 1;
 /** Local budget of eight outstanding invites per account; further sends are refused. */
 inline constexpr std::size_t kInviteCapacity = 8;
@@ -26,6 +27,7 @@ inline constexpr std::uint8_t kVersion = 6;
  * The high bit is what keeps these three clear of every native service id.
  */
 inline constexpr std::uint16_t kSyncRequest = 0x8001;
+/** Reply to a sync request, carrying this account's current feed body. */
 inline constexpr std::uint16_t kFeedResponse = 0x8002;
 /**
  * Host-initiated notice that this account's publication advanced; the guest then asks.
@@ -44,12 +46,14 @@ struct WireInvite {
     std::array<char, kConnectCapacity> connect{};
 };
 
+/** One roster row in the wire's own terms. */
 struct WireRow {
     std::uint64_t primarySoid{};
     std::uint64_t steamId{};
     std::array<char, kNameCapacity> personaName{};
 };
 
+/** The request body the shim sends: delivery cursors, outgoing invites, and the lobby sync. */
 struct Sync {
     lobby::Request lobby{};
     /** Process epoch and delivery acknowledgements; identity comes from the authenticated link. */
@@ -60,6 +64,7 @@ struct Sync {
     std::size_t inviteCount{};
 };
 
+/** The reply body the shim receives: roster rows, invites, routes, and delivery cursors. */
 struct Feed {
     lobby::Reply lobby{};
     std::uint64_t epoch{};
@@ -76,23 +81,36 @@ struct Feed {
     std::size_t routeCount{};
 };
 
+/**
+ * @return False when a count exceeds its wire capacity or `output` is too small; `written`
+ * is zero in that case.
+ */
 [[nodiscard]] bool
 encode_sync(const Sync& sync, std::span<std::byte> output, std::size_t& written) noexcept;
 
+/** @return False for the wrong version or a malformed body; `sync` is cleared in that case. */
 [[nodiscard]] bool decode_sync(std::span<const std::byte> body, Sync& sync) noexcept;
 
+/**
+ * @return False when a count exceeds its wire capacity or `output` is too small; `written`
+ * is zero in that case.
+ */
 [[nodiscard]] bool
 encode_feed(const Feed& value, std::span<std::byte> output, std::size_t& written) noexcept;
 
+/** @return False for the wrong version or a malformed body; `value` is cleared in that case. */
 [[nodiscard]] bool decode_feed(std::span<const std::byte> body, Feed& value) noexcept;
 
+/** @return False when `output` is too small; `written` is zero in that case. */
 [[nodiscard]] bool encode_notice(std::uint64_t publication,
                                  std::span<std::byte> output,
                                  std::size_t& written) noexcept;
 
+/** @return False for a malformed body; `publication` is zero in that case. */
 [[nodiscard]] bool decode_notice(std::span<const std::byte> body,
                                  std::uint64_t& publication) noexcept;
 
+/** @return Worst-case encoded size of any message this codec produces. */
 [[nodiscard]] constexpr std::size_t max_body_size() noexcept {
     // Every addend below is one codec field, in the order encode_sync and encode_feed write them.
     // One invite: sequence, target soid, inviter soid, connect length, connect text.

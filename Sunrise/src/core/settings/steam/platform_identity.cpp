@@ -24,7 +24,6 @@ static_assert(sizeof(IdentityRecord) == 24);
 
 } // namespace
 
-/** Create once; an existing invalid cache never silently becomes another account. */
 bool load_or_create(std::uint64_t& token) noexcept {
     path::Buffer filename;
     if (!path::artifact_file(L"cache\\platform_identity.bin", filename)) {
@@ -69,8 +68,7 @@ bool load_or_create(std::uint64_t& token) noexcept {
         random = 0x100;
     }
 
-    // Same shape as the default id: universe 1, individual account, instance 1 in the high
-    // dword, a random 24-bit account number, and the default id's low byte.
+    // The random draw fills bits 8-31; the literal folds in the fixed high dword and low byte.
     record.token = 0x0110000100000000ULL | (random & 0xFFFFFF00U) | 0xC5U;
     record.inverse = ~record.token;
     file = CreateFileW(filename.chars.data(),

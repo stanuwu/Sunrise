@@ -327,8 +327,8 @@ void service(std::uint64_t now) noexcept {
         }
         for (std::size_t slot = 0; slot < listener.peers.size(); ++slot) {
             Peer& peer = listener.peers[slot];
-            // A socket accepted above did not participate in this poll. Its previously
-            // unused entry may carry POLLNVAL, so service it only after the next poll.
+            // A socket accepted above did not participate in this poll: the slot's poll result
+            // predates the accept and may carry POLLNVAL, so service it only after the next poll.
             if (peer.socket != INVALID_SOCKET && poll[slot + 1].fd == peer.socket) {
                 const auto events = poll[slot + 1].revents;
                 if (events & (POLLERR | POLLNVAL)) {

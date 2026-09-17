@@ -3,6 +3,7 @@
 #include "host_runtime_internal.h"
 
 namespace sunrise::server::activity::host::ownership {
+/** True while the instance's view has an active, queued scriptable-override output. */
 [[nodiscard]] inline bool pending(const detail::Instance* instance) noexcept {
     return instance != nullptr && instance->view.active && instance->view.outputPending
            && instance->view.outputKind == OutputKind::scriptableOverride

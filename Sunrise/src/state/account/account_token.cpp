@@ -7,8 +7,8 @@
 namespace sunrise::state::account {
 namespace {
 
-// Two fixed fork markers, ASCII "SUNRISEA" and "SUNRISED". Neither is a retail value and neither
-// is secret; they only keep this generator's two streams apart.
+// Two fixed markers, ASCII "SUNRISEA" and "SUNRISED". Neither is a retail value and neither is
+// secret; they only keep this generator's two streams apart.
 constexpr std::uint64_t kLegacySeed = 0x53554E5249534541ULL;
 /** The 64-bit golden-ratio odd multiplier, which spreads one soid across the whole word. */
 constexpr std::uint64_t kLegacyMultiplier = 0x9E3779B97F4A7C15ULL;
@@ -45,8 +45,7 @@ void signon_token(std::uint64_t primarySoid, std::span<std::byte> output) noexce
         return;
     }
     legacy_session_token(primarySoid, output);
-    // The tail stays exactly the legacy derivation's, so it is a pure function of the key and
-    // checks the complete portable marker. This derivation is not credential authentication.
+    // The tail stays exactly the legacy derivation's; only the head below is overwritten.
     const std::uint64_t masked = primarySoid ^ kKeyMask;
     for (std::size_t index = 0; index < kSignOnTokenKeyBytes; ++index) {
         output[index] = static_cast<std::byte>((masked >> (index * kByteWidth)) & 0xFFULL);
@@ -68,8 +67,6 @@ std::uint64_t soid_from_signon_token(std::span<const std::byte> token) noexcept 
     }
     std::array<std::byte, kSignOnTokenSize> expected{};
     signon_token(candidate, expected);
-    // Whole-token comparison rather than tail-only: the head is a function of the candidate too,
-    // so a forged head can only agree with itself, and one comparison covers both halves.
     return std::equal(expected.begin(), expected.end(), token.begin()) ? candidate : 0;
 }
 

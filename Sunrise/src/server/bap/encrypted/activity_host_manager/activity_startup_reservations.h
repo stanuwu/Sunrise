@@ -17,6 +17,8 @@ struct PendingStartupReservations final {
     bool valid{};
 };
 
+/** Validates the requested batch and resolves the publisher's own identity within it.
+    `valid` is false on a malformed batch or when the publisher does not appear exactly once. */
 [[nodiscard]] PendingStartupReservations prepare_startup_reservations(
     const middleware::bap::activity_host_manager::request::selection::StartupReservations& parsed,
     std::uint64_t publisherAccount) noexcept;

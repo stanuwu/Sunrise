@@ -133,7 +133,8 @@ void Hub::delivery(AccountHandle account, std::uint32_t connection, std::uint64_
         return;
     }
     // A later registration simply replaces the earlier one; late frames on the old connection are
-    // consumed without changing current state because they no longer match this pair.
+    // consumed without changing current state because they do not match this account's current
+    // connection/serial pair.
     accounts_[account].deliveryConnection = connection;
     accounts_[account].deliverySerial = serial;
 }

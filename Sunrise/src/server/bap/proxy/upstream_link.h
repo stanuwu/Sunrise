@@ -13,6 +13,7 @@
 
 namespace sunrise::server::bap::proxy::upstream_link {
 
+/** Upstream connection lifecycle, advanced by service_link. */
 enum class LinkStage : std::uint8_t {
     idle,
     connecting,
@@ -22,6 +23,7 @@ enum class LinkStage : std::uint8_t {
     failed,
 };
 
+/** One request forwarded upstream, awaiting its correlated response. */
 struct PendingForward {
     std::uint32_t downstreamConnectionId{};
     std::uint32_t taskId{};
@@ -41,23 +43,30 @@ struct PendingForward {
  */
 inline constexpr std::size_t kPendingCapacity = 4;
 
+/** Matches the downstream frame capacity, so a downstream frame always forwards in one piece. */
 inline constexpr std::size_t kLinkFrameCapacity = client::network::kBapFrameCapacity;
 
 // Link scheduling. Each value bounds one local event of this link and is a chosen bound, not a
 // retail-observed interval: nothing on the wire declares any of them.
-/** Wait before redialling after a failed or closed link, so an absent server is not hammered. */
+/** Backoff between initial dial attempts; no redial after the first completed hello. */
 inline constexpr std::uint64_t kRetryIntervalMs = 2000;
-/** Bounds one nonblocking connect, and then the hello it sends; a slower server is retried. */
+/** Bounds one nonblocking connect; the hello has its own deadline. */
 inline constexpr std::uint64_t kConnectTimeoutMs = 5000;
+/** Bounds the hello reply once the connect above completes; a slower server is retried. */
 inline constexpr std::uint64_t kHelloTimeoutMs = 5000;
 
 /** Idle period after which the link sends the protocol's own keepalive service, `echo`. */
 inline constexpr std::uint64_t kKeepaliveIntervalMs = 5000;
-/** Longest one correlation may hold a pending slot before the link is failed and redialled. */
+/** Response deadline, paused under local backpressure; failure never redials an established link.
+ */
 inline constexpr std::uint64_t kResponseTimeoutMs = 30'000;
-/** The high bit marks a task id this link minted, so it cannot collide with a client's own. */
+/** Initial id for link-originated requests; admission separately rejects live collisions. */
 inline constexpr std::uint32_t kOriginatedTaskIdBase = 0x80000000U;
 
+/**
+ * One connection's upstream socket and its wire state, owned by the BAP service thread under
+ * the session lock.
+ */
 struct UpstreamLink {
     std::uint32_t downstreamConnectionId{};
     SOCKET socket{INVALID_SOCKET};
@@ -69,8 +78,8 @@ struct UpstreamLink {
     std::uint64_t lastActivityTick{};
     std::uint32_t helloTaskId{};
     /**
-     * Correlation counter for requests THIS link originates (pass-through forwards reuse the
-     * downstream client's own taskId instead and never touch this). Starts at
+     * Correlation counter for requests this link originates itself (pass-through forwards reuse
+     * the downstream client's own taskId instead and never touch this counter). Starts at
      * `kOriginatedTaskIdBase`; queue admission still refuses any live correlation collision.
      */
     std::uint32_t nextOriginatedTaskId{kOriginatedTaskIdBase};
@@ -88,6 +97,7 @@ struct UpstreamLink {
     std::array<PendingForward, kPendingCapacity> pending{};
 };
 
+/** Closes the socket and returns the link to idle, clearing keys, nonces and pending forwards. */
 void reset(UpstreamLink& link) noexcept;
 /** Retry only before the first completed hello; established native requests cannot be replayed. */
 [[nodiscard]] bool retry_initial(UpstreamLink& link, std::uint64_t now) noexcept;
@@ -110,6 +120,7 @@ void service_link(UpstreamLink& link,
                   bool (*onInternal)(UpstreamLink& link,
                                      std::span<const std::byte> plaintextPayload)) noexcept;
 
+/** Sends a request expecting a correlated response, occupying one of the link's pending slots. */
 [[nodiscard]] bool queue_forward(UpstreamLink& link,
                                  std::uint32_t downstreamConnectionId,
                                  std::uint16_t service,
@@ -117,6 +128,7 @@ void service_link(UpstreamLink& link,
                                  std::uint16_t expectedResponseService,
                                  std::span<const std::byte> body) noexcept;
 
+/** As queue_forward, but framed and sent unencrypted rather than through the secure channel. */
 [[nodiscard]] bool queue_forward_plaintext(UpstreamLink& link,
                                            std::uint32_t downstreamConnectionId,
                                            std::uint16_t service,
@@ -124,11 +136,13 @@ void service_link(UpstreamLink& link,
                                            std::uint16_t expectedResponseService,
                                            std::span<const std::byte> body) noexcept;
 
+/** Sends a request that expects no response and occupies no pending slot. */
 [[nodiscard]] bool send_fire_and_forget(UpstreamLink& link,
                                         std::uint16_t service,
                                         std::uint32_t taskId,
                                         std::span<const std::byte> body) noexcept;
 
+/** Fails every pending forward through `onAbandoned`, then reports and resets the link. */
 void close_link(UpstreamLink& link,
                 const char* reason,
                 void (*onAbandoned)(UpstreamLink& link, const PendingForward& forward)) noexcept;

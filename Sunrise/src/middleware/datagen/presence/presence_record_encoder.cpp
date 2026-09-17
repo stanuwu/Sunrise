@@ -48,8 +48,8 @@ bool encode_directory(std::uint64_t accountSoid,
 }
 
 /**
- * Native family-two member schema, adapted from the cleaned reference at ac0c939d.
- * Each offset below is that schema's own field position and each argument names the field.
+ * Native family-two member schema. Each offset below is that schema's own field position and
+ * each argument names the field.
  */
 bool encode_member(const Member& member, std::span<std::byte> output) noexcept {
     if (member.characterSoid == 0 || output.size() < kMemberSize) {

@@ -317,14 +317,11 @@ void merge_native_player_profile(NativePlayerProfile& target,
     }
 }
 
-/**
- * Lays the profile out as the native decoder would, field by field.
- * The name units go in obfuscated because that is the form the native record holds: the wire
- * carries them plain and the native reader applies this same transform on the way in.
- */
 void build_native_player_profile_state(const NativePlayerProfile& profile,
                                        NativePlayerProfileState& output) noexcept {
-    // Name units first, then the identity, then each B field at its own position in the image.
+    // Native decoder RVA 0x16D33C0 transforms name units below; RVA 0xBE7850 reverses it.
+    // Decoded B layout: name +0, identity +80, q3/q4/q5 +B0/B2/B3, q6 +B8/BC,
+    // SOIDs +C0/C8, q8 handle/slots/tail +D0/D4/DC, q9 +E0 (hex byte offsets).
     constexpr std::size_t kIdentity = kNativePlayerNameCapacity * 2;
     constexpr std::uint32_t kNameKey = 0xC245B0C4;
     constexpr std::uint32_t kNameMultiplier = 0x7B4F;

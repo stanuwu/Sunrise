@@ -7,7 +7,9 @@ namespace sunrise::middleware::datagen {
 
 /** Native inspection family and its account/character object schemas. */
 inline constexpr std::uint32_t kInspectionFamily = 1;
+/** Object id for the family-one account slot. */
 inline constexpr std::uint32_t kInspectionRootObjectId = 0xC47D63DBU;
+/** Object id for the family-one selected-character slot. */
 inline constexpr std::uint32_t kInspectionCharacterObjectId = 0x1A10412DU;
 
 /** Object id the client matches against the family-three roster slot. */
@@ -34,9 +36,13 @@ inline constexpr std::uint64_t kUnlockSentinelSoid = 0x7FFFFFFFFFFFFFFFULL;
 inline constexpr std::uint32_t kSocialRosterDirectoryObjectId = 0xDA277CE4U;
 /** Object id for the family-two social roster member slot. */
 inline constexpr std::uint32_t kSocialRosterMemberObjectId = 0x811115CEU;
+/** Object id for the family-six fireteam directory slot. */
 inline constexpr std::uint32_t kFireteamDirectoryObjectId = 0xBF49D4F0U;
+/** Object id for the family-six fireteam descriptor slot. */
 inline constexpr std::uint32_t kFireteamDescriptorObjectId = 0xE40CA32AU;
+/** Object id for the family-seven join directory slot. */
 inline constexpr std::uint32_t kJoinDirectoryObjectId = 0x05D07598U;
+/** Object id for the family-seven join descriptor slot. */
 inline constexpr std::uint32_t kJoinDescriptorObjectId = 0x722C6528U;
 
 /** Sizes the family-two slot descriptors declare, in bytes. */

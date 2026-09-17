@@ -6,12 +6,15 @@
 
 namespace sunrise::state::social {
 
+/** One roster entry `project_fireteam` searches by account. */
 struct NativePublication {
     std::uint64_t primarySoid{};
     NativePresence presence{};
 };
 
-/** Relays the requested account's native roster record without projecting membership or UI state.
+/**
+ * Relays the requested account's native roster record without projecting membership or UI
+ * state.
  */
 [[nodiscard]] bool project_fireteam(std::uint64_t accountSoid,
                                     std::span<const NativePublication> publications,

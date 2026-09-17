@@ -84,7 +84,6 @@ bool overlaps(const AccountState& candidate, const Entry& other) noexcept {
 
 /**
  * Re-derives one projected character's inventory row generations.
- *
  * The public record carries no private mutation journal, so the wire leaves every published row
  * at serial zero. The native character and inspection objects still publish a row generation per
  * row and one next-serial watermark, and the client orders a bucket's grid cells by them, so a

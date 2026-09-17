@@ -9,6 +9,10 @@ namespace encrypted {
 void service_host_social() noexcept;
 /** Drops the host mirror's published stamp when the shared directory itself is reconstructed. */
 void reset_host_social() noexcept;
+/**
+ * Applies a client's social sync request to the shared directory and answers with the
+ * resulting feed. False leaves the shared directory untouched.
+ */
 [[nodiscard]] bool consume_social_feed(Session& session,
                                        Scratch& scratch,
                                        const middleware::bap::RequestFrame& request,

@@ -42,7 +42,7 @@ namespace {
                          "ev=queuez stage=companion result=fail reason=prepare");
         return false;
     }
-    // The record is still state 1 DECLARED at this point, and only state 2 accepts a snapshot.
+    // The record is still state 1 `declared` at this point, and only state 2 accepts a snapshot.
     // The first copy is expected to be rejected and the delayed copy is the one that lands,
     // so a refused staging still sends the frame and still owes the re-push.
     queuez::SessionState staged = before;
@@ -138,7 +138,7 @@ void append_queuez_notification(Scratch& scratch,
     ensure_account_canonical();
     if (subscription.familyType == queuez::kAccountFamilyType && before.family4Active
         && before.family4Version != queuez::kInitialFamilyVersion) {
-        // Our mirror of the Client's records is an observation, not an authority on what may be
+        // This mirror of the Client's records is an observation, not an authority on what may be
         // sent. It reports and the frame still goes out. The Client owns the accept decision.
         queuez_report::subscription_state("session");
     }

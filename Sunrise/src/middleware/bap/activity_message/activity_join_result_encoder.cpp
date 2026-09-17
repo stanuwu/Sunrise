@@ -142,10 +142,9 @@ bool encode_join_result(std::uint32_t correlation,
     // The biased fields below have no host value yet, so they carry their logical zero. Leaving
     // them at raw zero sends 0x80 text filler and a return code of INT32_MIN.
     write_bits(body, kOopahReturnCodeBitOffset, kOopahReturnCodeBitCount, kSignedZero);
-    // The client binds its ActivityClient to the name in this field, so an empty one leaves that
-    // bind nameless. It is the same text service 7 publishes for this session in its opaque
-    // activity data (server/bap/encrypted/activity_host_manager/activity_establish_response.h),
-    // built from the same id, so the establish answer and the join result name one host.
+    // The client binds its ActivityClient to the name in this field, so an empty one leaves
+    // that bind nameless. Service 7 publishes the same text for this session, so both name one
+    // host.
     std::array<char, kHostSessionTextByteCount> hostSession{};
     const int nameLength = std::snprintf(hostSession.data(),
                                          hostSession.size(),

@@ -15,6 +15,11 @@ inline constexpr std::size_t kNameCodeCapacity = 5;
 /** The three low bits of that record's flag byte. A profile setting a higher bit is refused. */
 inline constexpr std::uint8_t kPresenceFlagsMask = 0x07;
 
+/**
+ * One account's published presence. `personaName` is the live platform name; `displayName`
+ * is the name last published and what staleness checks compare. A local snapshot sets them
+ * equal.
+ */
 struct AccountPresence {
     std::array<char, kDisplayNameCapacity> displayName{};
     std::array<char, kDisplayNameCapacity> personaName{};

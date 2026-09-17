@@ -261,12 +261,10 @@ void report_release_refusal(const service::Request& request,
     plan.joinCharacterSoid = parsed.characterSoid;
     plan.delivery = Delivery::joinNotifications;
     plan.mutationDomain = MutationDomain::entitySlots;
-    // Read, never committed: the domain above is what the commit acts on. Every shared join --
-    // public target included -- takes its body from THIS join's own mutation, so the member the
-    // client recognises as the local player is its own row in the session the envelope names, and
-    // the peers are the ones that session has admitted. A public target copying the private
-    // source's table published that table's revision under the target's name and named members the
-    // recipient's own session had not admitted.
+    // Read, never committed: the domain above is what the commit acts on. Every shared join
+    // takes its body from this join's own mutation, so the member the client recognises as the
+    // local player is its own row in the session the envelope names. Copying the private
+    // source's table would publish that table's revision under the target's name.
     if (shared) {
         if (!state::activity::membership::prepare_join_snapshot(plan.entitySlotMutation,
                                                                 plan.membershipMutation)) {

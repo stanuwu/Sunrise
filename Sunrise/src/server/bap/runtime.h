@@ -205,6 +205,7 @@ activity_type23_override_available(const state::activity::SessionBinding& bindin
                                                          std::uint64_t accountSoid,
                                                          std::uint64_t characterSoid,
                                                          ActivityReplicationView& output) noexcept;
+/** Exact native player ownership resolves a view when several accounts share its group. */
 [[nodiscard]] bool activity_replication_view_for_group(std::uint64_t groupSessionId,
                                                        std::uint64_t accountSoid,
                                                        std::uint64_t characterSoid,

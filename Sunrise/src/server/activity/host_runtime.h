@@ -1241,8 +1241,7 @@ withdraw_scriptable_output(const state::activity::SessionBinding& binding,
 
 /**
  * Applies queued client and operator events after admitting every retained activity's storage.
-
- * * Record allocation/capacity failure leaves the ordered input queue intact for a later slice.
+ * A record allocation or capacity failure leaves the ordered input queue intact for a later slice.
  */
 void service(std::uint64_t now) noexcept;
 

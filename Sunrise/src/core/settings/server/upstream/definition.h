@@ -10,11 +10,14 @@ namespace sunrise::core::settings::server::upstream {
 inline constexpr std::size_t kHostCapacity = 16;
 /** An IPv4 address is four octets. */
 inline constexpr std::size_t kAddressOctets = 4;
-/** The fork's own default port, used for both the TCP control link and UDP discovery. */
+/**
+ * Default port for the TCP control link. In single-port mode this is also the one UDP
+ * socket that carries discovery traffic.
+ */
 inline constexpr std::uint16_t kDefaultBapPort = 30974;
 
+/** Where this Server forwards BAP requests it does not handle locally. */
 struct Settings {
-
     bool enabled{false};
     std::array<char, kHostCapacity> host{"127.0.0.1"};
     std::array<wchar_t, kHostCapacity> hostWide{L"127.0.0.1"};

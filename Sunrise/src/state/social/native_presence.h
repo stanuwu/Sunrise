@@ -35,6 +35,11 @@ struct NativePresence {
     bool operator==(const NativePresence&) const = default;
 };
 
+/**
+ * @return True when an unpublished report is entirely default; a published one additionally
+ * needs consistent group flags, a descriptor within capacity with zeroed trailing bytes, and
+ * a zeroed fireteam buffer unless `hasFireteam` is set.
+ */
 [[nodiscard]] inline bool valid(const NativePresence& value) noexcept {
     if (!value.published) {
         return value == NativePresence{};

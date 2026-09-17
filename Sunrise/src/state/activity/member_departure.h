@@ -7,6 +7,7 @@ namespace sunrise::state::activity {
 struct JoinedMemberSet final {
     std::array<std::uint64_t, entity_slots::kMemberLeaseRowCount> keys{};
 };
+/** Copies joined keys for the bound account's exact shared member; refusal clears output. */
 [[nodiscard]] bool joined_member_set(const SessionBinding& binding,
                                      std::uint64_t memberKey,
                                      JoinedMemberSet& output) noexcept;
@@ -17,6 +18,7 @@ struct MemberPurge final {
     std::uint64_t accountSoid{};
     std::uint64_t memberKey{};
 };
+/** Copies the bound member's owed purge without consuming it; false clears output. */
 [[nodiscard]] bool pending_member_purge(const SessionBinding& binding,
                                         std::uint64_t memberKey,
                                         MemberPurge& output) noexcept;

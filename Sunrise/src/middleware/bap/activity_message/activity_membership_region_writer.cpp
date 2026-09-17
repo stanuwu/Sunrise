@@ -19,10 +19,9 @@ constexpr std::uint64_t kAmbassadorAssigned = 2;
 /** Member-slot fields are 6 bits at bias 1. */
 constexpr std::uint8_t kSlotBitWidth = 6;
 /**
- * Slot a record with no advertisement names. It is reserved: the session-slot allocator never
- * hands it to a real member, so it can never be the recipient's own and an unadvertised record
- * never revokes the recipient's claim on the region it is standing in. Naming the no-member
- * slot -1 there does revoke it, and the client then re-plans out of a region it is already in.
+ * Slot an unadvertised record names: reserved, so it can never be the recipient's own. The
+ * wire's actual no-member value would instead revoke the recipient's claim on whatever region
+ * it is standing in and force a re-plan, so an unadvertised record avoids it.
  */
 constexpr std::uint8_t kReservedAmbassadorSlot = 1;
 /** Region publicity is 2 bits at bias 1, so wire 1 is private and wire 2 is public. */

@@ -170,6 +170,7 @@ struct OuterFrame {
     std::span<const std::byte> payload{};
 };
 
+/** Parsed BAP response header and borrowed body. */
 struct ResponseFrame {
     std::uint16_t serviceId{};
     std::uint32_t taskId{};
@@ -180,8 +181,10 @@ struct ResponseFrame {
 /** The BAP response status the Client reads as success. */
 inline constexpr std::uint16_t kStatusOk = 200;
 
+/** Reads the correlation and status without interpreting service-specific response bodies. */
 [[nodiscard]] bool parse_response_payload(std::span<const std::byte> input,
                                           ResponseFrame& response) noexcept;
+/** @return False when `body` would overflow the length field or `output` is too small. */
 [[nodiscard]] bool encode_request_payload(RequestService service,
                                           std::uint32_t taskId,
                                           std::span<const std::byte> body,
@@ -196,6 +199,7 @@ inline constexpr std::uint16_t kStatusOk = 200;
  */
 [[nodiscard]] bool parse_frame(std::span<const std::byte> input, OuterFrame& frame) noexcept;
 
+/** Outcome of scanning a TCP prefix for one frame: not enough bytes yet, one frame, or garbage. */
 enum class StreamFrameResult : std::uint8_t { incomplete, complete, invalid };
 /** Borrows the first complete frame in a TCP buffer, leaving subsequent frames unconsumed. */
 [[nodiscard]] StreamFrameResult parse_stream_frame(std::span<const std::byte> input,

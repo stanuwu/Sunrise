@@ -10,6 +10,8 @@ struct ReleaseRefusalReport final {
     std::uint64_t peerKey{};
     state::activity::reservations::ReleaseRefusal refusal{};
 };
+/** Parses an admit request and stages its reservation mutation. False on a malformed body or a
+    peer-table epoch mismatch, clearing the reservation mutation without setting a domain. */
 [[nodiscard]] bool prepare_reservations(const middleware::bap::activity_message::Request& request,
                                         ActivityPlan& plan) noexcept;
 /**

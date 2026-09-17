@@ -12,10 +12,7 @@
 
 namespace sunrise::client::hooks::instance_mutex {
 namespace {
-// The game creates these named mutexes at startup and holds them for its lifetime; they
-// double as its single-instance guard, so a second client on the same PC parks on them
-// forever. Releasing them, from the owning thread only, lets two clients share one PC.
-// The native startup pacing loop calls this import on the mutex-owning thread.
+// The two named mutexes the game holds for its lifetime as its single-instance guard.
 constexpr std::array names{"$ IDA registry mutex $", "$ IDA trusted_idbs"};
 using Wait = DWORD(WINAPI*)(HANDLE, DWORD);
 using WaitEx = DWORD(WINAPI*)(HANDLE, DWORD, BOOL);
@@ -88,7 +85,7 @@ bool read_slot(void** location, void*& value) noexcept {
         return false;
     }
 }
-// Compare/exchange keeps ownership with a later importer if it replaced our slot.
+// Compare/exchange keeps ownership with a later importer if it already replaced the slot.
 bool exchange(void** location, void* expected, void* desired) noexcept {
     DWORD protection{};
     if (!VirtualProtect(location, sizeof(*location), PAGE_READWRITE, &protection)) {

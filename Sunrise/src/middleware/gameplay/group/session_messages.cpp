@@ -217,11 +217,8 @@ constexpr std::uint8_t kProfileSubA4SecondWidth = 6;
 
 /**
  * Writes one name payload: its code units in the clear, then the terminator.
- *
- * The wire carries PLAIN units: `0x16D33C0` reads them raw and applies `(wire * 0x7B4F) ^
- * ROL(0xC245B0C4, i % 31)` only on the way INTO the record, and `0xBE7850` undoes exactly that
- * when it reads the name back out. A host that ciphered here would publish the cipher and
- * every reader would draw mojibake.
+ * The wire carries plain units; only the native record's own copy is obfuscated on the way
+ * in, and restored the same way coming back out.
  */
 [[nodiscard]] bool write_profile_name(bits::Writer& writer,
                                       const NativePlayerProfile& profile) noexcept {
@@ -235,16 +232,10 @@ constexpr std::uint8_t kProfileSubA4SecondWidth = 6;
 }
 
 /**
- * Writes the COMPLETE profile block of one player row -- every field the consumer copies.
- *
- * Full presence is required at this call site. `0x1781800`
- * hands `0x17AF360` the LITERAL mask `0x1FF` (`0x1782450`), so the per-field merge `0x16D2FC0`
- * copies ALL NINE sub-block-B slices out of the parse struct whatever the wire said, and
- * `0x17AF2D0` copies sub-block A's 0x88 bytes UNCONDITIONALLY.
- *
- * SUB-BLOCK B's nine fields, in the order `0x16D33C0` reads them (own decompile: Q1 and Q6..Q9
- * are read only when its `param_3 == 0`, and the id-30 wrapper `0x16D3670` passes 0), with the
- * record offset each lands at and the image it leaves:
+ * Writes the complete profile block of one player row -- every field the consumer copies.
+ * `complete_native_player_profile` gates the call: every optional B field, the name, the
+ * identity and the tail must already be present. Sub-block A follows B unconditionally, its
+ * presence flags forced true and its fields zero except the name, which duplicates B's.
  */
 [[nodiscard]] bool write_player_profile(bits::Writer& writer,
                                         const NativePlayerProfile& profile,
@@ -260,9 +251,7 @@ constexpr std::uint8_t kProfileSubA4SecondWidth = 6;
     if (!write_native_player_profile(writer, profile)) {
         return false;
     }
-    // Sub-block A, in READ order. A1 carries the same name: `0x17AF2D0` copies A's whole 0x88
-    // bytes over record `+0x108..+0x18F` unconditionally, and the native records carry the name
-    // copy at `+0x10C` byte-identical to `+0x20`.
+    // Sub-block A's own name slot must byte-match the one just written for B.
     if (!writer.write(1U, kFlagWidth) || !write_profile_name(writer, profile)
         || !writer.write(1U, kFlagWidth) || !writer.write(kProfileSubAWire, kProfileSubA23Width)
         || !writer.write(1U, kFlagWidth) || !writer.write(kProfileSubAWire, kProfileSubA23Width)

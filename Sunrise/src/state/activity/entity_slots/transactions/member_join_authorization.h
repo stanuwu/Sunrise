@@ -4,8 +4,10 @@
 #include "../../transactions/internal.h"
 
 namespace sunrise::state::activity::entity_slots::transactions {
-/** A native host directory carries the exact source generation, whose admitted party owns this
- * join. */
+/**
+ * A native host directory carries the exact source generation, whose admitted party owns
+ * this join.
+ */
 [[nodiscard]] inline const SessionRecord*
 authorized_source(const ActivityState& state,
                   const SessionBinding& source,
@@ -40,7 +42,13 @@ authorized_source(const ActivityState& state,
     return nullptr;
 }
 
-/** Public-source admission records the actual destination ActivityClient identity at a stable slot.
+/**
+ * Records `identity` at `memberRow` in a copy of `record`'s peer reservations, without
+ * committing it. Row 0 clears the standing primary-slot reservation instead of writing a
+ * peer entry; elsewhere, a peer entry keyed by `identity.memberKey` or by `previousKey` (a
+ * lease hand-off) is reused only if its account and opaque ids still match.
+ * @return False when the identity conflicts with a differently-keyed peer or no peer slot is
+ * free; `after` is left as the unmodified original roster in that case.
  */
 [[nodiscard]] inline bool join_roster(const SessionRecord& record,
                                       const membership::Identity& identity,

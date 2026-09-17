@@ -3,14 +3,17 @@
 #include "definition.h"
 
 namespace sunrise::state::activity {
+/** Sentinel row past every real member slot; also the loop bound for scanning them. */
 inline constexpr std::size_t kInvalidMemberRow = entity_slots::kMemberLeaseRowCount;
 
+/** @return True when `row` is an occupied member slot; row 0 is the record's own primary. */
 [[nodiscard]] inline bool member_joined(const SessionRecord& record, std::size_t row) noexcept {
     if (row == 0) {
         return record.joined && (!record.sharedMembers || (record.memberLeases.joinedRows & 1U));
     }
     return row < kInvalidMemberRow && record.coMembers[row - 1].joined;
 }
+/** @return The row's identity, or null for a row that is not joined. */
 [[nodiscard]] inline const membership::Identity* member_identity(const SessionRecord& record,
                                                                  std::size_t row) noexcept {
     if (!member_joined(record, row)) {
@@ -18,6 +21,7 @@ inline constexpr std::size_t kInvalidMemberRow = entity_slots::kMemberLeaseRowCo
     }
     return row == 0 ? &record.primaryIdentity : &record.coMembers[row - 1].identity;
 }
+/** @return The row's membership state, or null for a row that is not joined. */
 [[nodiscard]] inline membership::MembershipState* member_state(SessionRecord& record,
                                                                std::size_t row) noexcept {
     if (!member_joined(record, row)) {
@@ -25,6 +29,7 @@ inline constexpr std::size_t kInvalidMemberRow = entity_slots::kMemberLeaseRowCo
     }
     return row == 0 ? &record.membership : &record.coMembers[row - 1].membership;
 }
+/** @return The row's membership state, or null for a row that is not joined. */
 [[nodiscard]] inline const membership::MembershipState* member_state(const SessionRecord& record,
                                                                      std::size_t row) noexcept {
     if (!member_joined(record, row)) {
@@ -49,7 +54,14 @@ member_row(const SessionRecord& record, std::uint64_t key, std::uint64_t account
     }
     return kInvalidMemberRow;
 }
-/** Additional clients need an already committed native reservation for this exact identity. */
+/**
+ * Which row `identity` may occupy. An un-joined record always grants row 0; a rejoin reuses
+ * the row already carrying the same member key or account, if the rest of the identity still
+ * matches. A free peer row is granted only when a peer reservation, a launch owner, or, as a
+ * last resort, `sourceAuthorized` names this identity.
+ * @return `kInvalidMemberRow` when the member key or account collides with a different
+ * identity anywhere in the record, or nothing grants a row.
+ */
 [[nodiscard]] inline std::size_t join_member_row(const SessionRecord& record,
                                                  const membership::Identity& identity,
                                                  bool sourceAuthorized = false) noexcept {

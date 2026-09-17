@@ -108,7 +108,6 @@ bool install() noexcept {
     }
     g_cache = reinterpret_cast<Cache>(cache);
     g_publish = reinterpret_cast<Publish>(publish);
-    // LEA RCX in the matched publisher names the cache root it passes to the accessor.
     // LEA RCX, [RIP + displacement] names the publisher's root object. The pair is that
     // displacement's offset in the matched bytes and the next instruction it is relative to.
     g_root = resolve_relative(publish + 12, publish + 16);

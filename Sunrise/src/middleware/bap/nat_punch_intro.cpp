@@ -30,10 +30,8 @@ bool parse(std::span<const std::byte> bytes, IntroRecord& record) noexcept {
     if (declared > kPayloadCapacity) {
         return false;
     }
-    // The size word at `+0x10` is the receiver's own guard: a value other than 0x56 makes it log
-    // "invalid transport secure address size" rather than treat the blob as an address. Refuse it
-    // here for the same reason -- an 86-byte compare against a differently sized blob is not a
-    // compare at all.
+    // Refused here too: comparing a differently sized blob against `kAddressSize` bytes would
+    // not be a comparison at all.
     if (read<std::uint64_t>(bytes, offset::kTargetSize) != kAddressSize) {
         return false;
     }

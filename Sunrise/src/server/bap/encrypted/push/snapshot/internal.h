@@ -14,16 +14,20 @@
 
 namespace sunrise::server::bap::encrypted::push::snapshot {
 
+/** Builds the family-seven join descriptor naming this account's directory key. */
 [[nodiscard]] bool prepare_join_descriptor(Scratch& scratch,
                                            const middleware::queuez::Subscription& subscription,
                                            const Reservation& reservation,
                                            Prepared& prepared) noexcept;
 
+/** Builds the family-six fireteam snapshot naming this account's fireteam directory key. */
 [[nodiscard]] bool prepare_fireteam(Scratch& scratch,
                                     const middleware::queuez::Subscription& subscription,
                                     const Reservation& reservation,
                                     Prepared& prepared) noexcept;
 
+/** Builds the family-one equipment inspection snapshot for the subscribed root account, not
+    the connection's own. */
 [[nodiscard]] bool prepare_inspection(Scratch& scratch,
                                       const middleware::queuez::Subscription& subscription,
                                       const Reservation& reservation,

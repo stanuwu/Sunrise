@@ -5,8 +5,15 @@
 #include <span>
 
 namespace sunrise::server::bap::proxy::social_feed {
+/** Clears the registration and withdraws this feed's route authorisation. */
 void reset() noexcept;
+/** Clears the outstanding task only if it is still `task` on `connection`; otherwise a no-op. */
 void abandon(std::uint32_t connection, std::uint32_t task) noexcept;
+/**
+ * Applies one accepted feed answer: replaces the peer route table and advances the publication
+ * high-water mark. False on a decode or apply failure leaves the outstanding task and routes
+ * untouched.
+ */
 [[nodiscard]] bool
 acknowledge(std::uint32_t connection, std::uint32_t task, std::span<const std::byte> body) noexcept;
 /** Absorbs one host publication notice. Internal: it never enters the downstream reply queue. */

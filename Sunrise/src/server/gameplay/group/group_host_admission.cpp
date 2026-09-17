@@ -8,9 +8,8 @@
 namespace sunrise::server::gameplay::group::admission {
 /** Stamps `Admitted::lastUse`. It only has to order the records, so it never has to be a clock. */
 std::atomic<std::uint64_t> g_admitClock{0};
-/** Guards the admitted table against the worker and the callback pump. */
 SRWLOCK g_admittedLock{SRWLOCK_INIT};
-/** Native joins claim endpoint-specific rows; departures release only the owning row. */
+// Native joins claim endpoint-specific rows; departures release only the owning row.
 std::array<Admitted, kAdmittedCapacity> g_admitted{};
 
 bool view_owner(const state::gameplay::Endpoint& peer,
@@ -65,11 +64,6 @@ bool accounts_coresident(std::uint64_t first, std::uint64_t second) noexcept {
     return found;
 }
 
-/**
- * Every occupied record carries a nonzero session, so a zero key matches nothing.
- * @param sessionId Group session the table is keyed by.
- * @return The unique record holding that session, or null. The caller holds the lock.
- */
 [[nodiscard]] Admitted* find_admitted(std::uint64_t sessionId) noexcept {
     Admitted* found = nullptr;
     for (Admitted& entry : g_admitted) {
@@ -92,13 +86,6 @@ Admitted* find(const state::gameplay::Endpoint& peer, std::uint64_t sessionId) n
     return nullptr;
 }
 
-/**
- * Finds or claims the record for one peer, and binds it to that peer's endpoint.
- * Different endpoints may join the same native session without replacing each other's rows.
- * @param peer Peer endpoint.
- * @param sessionId Group session the record is keyed by. Zero claims nothing.
- * @return Record for that session, or null when the table is full.
- */
 [[nodiscard]] Admitted* claim(const state::gameplay::Endpoint& peer,
                               std::uint64_t sessionId) noexcept {
     if (sessionId == 0 || peer.address == 0 || peer.port == 0) {
@@ -123,14 +110,6 @@ Admitted* find(const state::gameplay::Endpoint& peer, std::uint64_t sessionId) n
     return found;
 }
 
-/**
- * Finds the record for one session and proves the sender owns it.
- * Every later message names its own session, so without this a peer could move the state of a
- * session another endpoint was admitted for.
- * @param peer Peer endpoint the message arrived from.
- * @param sessionId Group session the message named.
- * @return Record for that session, or null when it is absent or owned by another endpoint.
- */
 [[nodiscard]] Admitted* find_owned(const state::gameplay::Endpoint& peer,
                                    std::uint64_t sessionId) noexcept {
     Admitted* const found = find(peer, sessionId);
@@ -141,14 +120,6 @@ Admitted* find(const state::gameplay::Endpoint& peer, std::uint64_t sessionId) n
     return found;
 }
 
-/**
- * Tests whether another endpoint was admitted for one session.
- * An absent record is not a conflict: a message may name a session before this host has a record
- * for it, and refusing that would strand the peer.
- * @param peer Peer endpoint the message arrived from.
- * @param sessionId Group session the message named.
- * @return True when a record holds that session for a different endpoint.
- */
 [[nodiscard]] bool owned_elsewhere(const state::gameplay::Endpoint& peer,
                                    std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&g_admittedLock);
@@ -162,11 +133,6 @@ Admitted* find(const state::gameplay::Endpoint& peer, std::uint64_t sessionId) n
     return conflict;
 }
 
-/**
- * Counts the players one session holds, which is what its free join slots are measured against.
- * @param sessionId Group session the message named.
- * @return Number of native player rows in the session.
- */
 [[nodiscard]] std::uint8_t session_player_count(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&g_admittedLock);
     std::uint8_t count = 0;
