@@ -427,7 +427,7 @@ bool reset_artifact(std::int32_t glimmerCost, ArtifactResetResult& result) noexc
     }
 
     const std::uint32_t previousMods = artifact_mod_mask();
-    const AccountState before = account_snapshot();
+    const AccountState before = bound_account_snapshot();
     if (previousMods == 0 || !account::valid(before)
         || !runtime::detail::valid_profile_inventory(before)) {
         return false;

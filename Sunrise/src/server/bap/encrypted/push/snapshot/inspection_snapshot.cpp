@@ -53,8 +53,8 @@ bool prepare_inspection(Scratch& scratch,
     if (!state::account_handle_for_soid(root, handle)) {
         return refuse("account_handle", root);
     }
-    const state::ScopedAccount bind{handle};
-    const state::AccountState account = state::account_snapshot();
+    const state::ScopedAccountView bind{handle};
+    const state::AccountState account = state::bound_account_snapshot();
     if (!state::account::valid_public(account)) {
         return refuse("account_public", root);
     }

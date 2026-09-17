@@ -91,7 +91,7 @@ void service(std::uint64_t now) noexcept {
     }
     const state::ScopedAccount local(state::kLocalAccount);
     std::size_t size = 0;
-    if (!state::account_snapshot(state::kLocalAccount, *g_snapshot)) {
+    if (!state::local_account_snapshot(*g_snapshot)) {
         return;
     }
     g_snapshot->presence.artifactPowerBonus = state::artifact_power_bonus();

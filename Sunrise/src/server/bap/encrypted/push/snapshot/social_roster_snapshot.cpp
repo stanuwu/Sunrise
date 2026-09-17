@@ -160,9 +160,9 @@ bool prepare_social_roster(Scratch& scratch,
     // Both slot ids are resolved here, so the caller's single id is not used.
     (void)objectId;
     auto owned = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
-    const auto handle = state::account_for_public_root(subscription.familyRootSoid);
-    const state::ScopedAccount bind(handle);
-    if (!owned || !state::account_snapshot(handle, *owned)) {
+    const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
+    const state::ScopedAccountView bind(handle);
+    if (!owned || !state::bound_account_snapshot(*owned)) {
         return report_failure("social_roster_state");
     }
     const auto& account = *owned;
@@ -304,9 +304,9 @@ bool prepare_social_roster(Scratch& scratch,
 /** Folds the family-two member fields the projected profile does not carry. */
 std::uint32_t social_roster_revision(std::uint64_t familyRootSoid) noexcept {
     auto owned = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
-    const auto handle = state::account_for_public_root(familyRootSoid);
-    const state::ScopedAccount bind(handle);
-    if (!owned || !state::account_snapshot(handle, *owned)) {
+    const auto handle = state::account_for_subscription_root(familyRootSoid);
+    const state::ScopedAccountView bind(handle);
+    if (!owned || !state::bound_account_snapshot(*owned)) {
         return 0;
     }
     MemberFacts facts{};

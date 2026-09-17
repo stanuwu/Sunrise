@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -8,11 +7,17 @@
 
 namespace sunrise::state::account::platform {
 
+/** A platform id's four fields: public universe, individual account type, desktop instance, id. */
 [[nodiscard]] constexpr bool valid(std::uint64_t id) noexcept {
     return (id >> 56U) == 1 && ((id >> 52U) & 0xFULL) == 1 && ((id >> 32U) & 0xFFFFFULL) == 1
            && (id & 0xFFFFFFFFULL) != 0;
 }
 
+/**
+ * The account SOID one platform id declares: that id byte-reversed, then raised one byte.
+ * Raising it drops the platform id's own lowest byte, which every generated id holds fixed, and
+ * leaves the SOID's lowest byte clear. The investment store's identity bind requires that form.
+ */
 [[nodiscard]] constexpr std::uint64_t declared_account_soid(std::uint64_t platformId) noexcept {
     std::uint64_t swapped = 0;
     for (std::size_t index = 0; index < sizeof platformId; ++index) {
@@ -21,17 +26,13 @@ namespace sunrise::state::account::platform {
     return swapped << 8U;
 }
 
+/**
+ * @return The presence's own platform id, or the local installation's id for the local
+ * player, else zero.
+ */
 [[nodiscard]] constexpr std::uint64_t
 resolve(const AccountPresence& presence, bool local, std::uint64_t localPlatformId) noexcept {
     return presence.platformId != 0 ? presence.platformId : local ? localPlatformId : 0;
-}
-
-[[nodiscard]] constexpr std::array<std::byte, 36> identity_blob(std::uint64_t platformId) noexcept {
-    std::array<std::byte, 36> output{};
-    for (std::size_t index = 0; index < sizeof platformId; ++index) {
-        output[index] = static_cast<std::byte>((platformId >> (index * 8U)) & 0xFFULL);
-    }
-    return output;
 }
 
 } // namespace sunrise::state::account::platform

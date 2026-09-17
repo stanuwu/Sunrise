@@ -58,8 +58,8 @@ bool prepare(Scratch& scratch,
              std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
              bool accountSelectionCleared,
              Prepared& prepared) noexcept {
-    const state::ScopedAccount accountScope(
-        state::account_for_public_root(subscription.familyRootSoid));
+    const state::ScopedAccountView accountScope(
+        state::account_for_subscription_root(subscription.familyRootSoid));
     const bool publicOnly = !state::local_account_access();
     if (reservation.rawWriteOffset > scratch.plaintext.size()
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
@@ -76,7 +76,7 @@ bool prepare(Scratch& scratch,
     }
     // Account canonicalization stays out of this builder. Families zero and three do not pass
     // through it, so push::ensure_account_canonical runs ahead of the whole dispatch.
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     if (!(publicOnly ? state::account::valid_public(account) : state::account::valid(account))) {
         return report_failure("account_state");
     }

@@ -1,8 +1,5 @@
 #include "proxy_routing.h"
 
-#include <memory>
-#include <new>
-
 #include "../../../core/settings/settings.h"
 #include "../../../middleware/bap/account_translation/account_translation_response.h"
 #include "../../../middleware/bap/family_subscription.h"
@@ -15,26 +12,7 @@
 namespace sunrise::server::bap::proxy {
 
 bool is_local_root(std::uint64_t soid) noexcept {
-    if (soid == 0) {
-        return false;
-    }
-    if (soid == state::account_primary_soid(state::kLocalAccount)) {
-        return true;
-    }
-    static std::unique_ptr<state::AccountState> local;
-    if (!local) {
-        local.reset(new (std::nothrow) state::AccountState{});
-    }
-    if (!local || !state::account_snapshot(state::kLocalAccount, *local)) {
-        return false;
-    }
-    for (std::size_t index = 0; index < local->characterCount && index < local->characters.size();
-         ++index) {
-        if (local->characters[index].soid == soid) {
-            return true;
-        }
-    }
-    return false;
+    return state::local_account_owns_root(soid);
 }
 
 Plane classify(std::uint16_t service, std::span<const std::byte> body) noexcept {

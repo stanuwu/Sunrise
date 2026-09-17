@@ -100,6 +100,19 @@ bool write_characters(const AccountState& value) noexcept {
 
 } // namespace
 
+bool owns_account_root(std::uint64_t rootSoid) noexcept {
+    const std::lock_guard lock(g_mutex);
+    if (!local_account_access() || rootSoid == 0) {
+        return false;
+    }
+    // One scalar query avoids loading equipment, preferences and inventory just to route a root.
+    Statement row("SELECT EXISTS(SELECT 1 FROM account WHERE id=1 AND soid=?1 "
+                  "UNION ALL SELECT 1 FROM characters WHERE soid=?1)");
+    int owned{};
+    return row.parameters(rootSoid) && row.step() == SQLITE_ROW && row.column(0, owned)
+           && row.step() == SQLITE_DONE && owned != 0;
+}
+
 /** A read returns one complete account or an empty output on failure. */
 bool read_account(AccountState& output) noexcept {
     Transaction transaction;

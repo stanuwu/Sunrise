@@ -22,9 +22,10 @@ bool prepare_fireteam(Scratch& scratch,
     constexpr std::size_t descriptorSize = 8 + social::kNativeFireteamSize;
     static_assert(descriptorSize == 0xB68);
     auto account = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
-    const auto handle = state::account_for_public_root(subscription.familyRootSoid);
+    const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
+    const state::ScopedAccountView bind(handle);
     if (subscription.familyType != datagen::kFireteamFamily || !account
-        || !state::account_snapshot(handle, *account)
+        || !state::bound_account_snapshot(*account)
         || account->primarySoid != subscription.familyRootSoid
         || reservation.rawWriteOffset > scratch.plaintext.size()
         || reservation.compressedWriteOffset > scratch.sealed.size()) {

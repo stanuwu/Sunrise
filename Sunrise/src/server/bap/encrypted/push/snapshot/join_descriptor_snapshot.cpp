@@ -82,9 +82,10 @@ bool prepare_join_descriptor(Scratch& scratch,
     namespace datagen = middleware::datagen;
     constexpr std::size_t directorySize = 16, descriptorSize = 0x98;
     auto account = std::unique_ptr<state::AccountState>(new (std::nothrow) state::AccountState{});
-    const auto handle = state::account_for_public_root(subscription.familyRootSoid);
+    const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
+    const state::ScopedAccountView bind(handle);
     if (subscription.familyType != datagen::kJoinFamily || !account
-        || !state::account_snapshot(handle, *account)
+        || !state::bound_account_snapshot(*account)
         || account->primarySoid != subscription.familyRootSoid
         || reservation.rawWriteOffset > scratch.plaintext.size()
         || reservation.compressedWriteOffset > scratch.sealed.size()) {

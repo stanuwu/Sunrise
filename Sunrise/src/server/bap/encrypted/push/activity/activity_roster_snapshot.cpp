@@ -517,7 +517,7 @@ build_roster_snapshot(Session& session,
     snapshot.playerKey = published_player_key(session);
     snapshot.lifetime = lifetimeState;
     // Wait for this client's committed region. Its native participation and spawn predicates
-    // retain the local loading, partition and world-state checks.
+    // retain the local loading and reported-region checks.
     snapshot.awaitClientSync = !client_in_world(session, refresh);
     // Player_BindComponents walks every type-13 reference and the player datum can name any one of
     // them. So every participation record carries the same player key. Selecting the first slot

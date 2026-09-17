@@ -37,6 +37,8 @@ enum class Bank : int {
 void shutdown() noexcept;
 /** Binds an upstream seed account once, preserving all slot-owned investment rows. */
 [[nodiscard]] bool bind_identity(std::uint64_t primarySoid) noexcept;
+/** Matches a persisted account or character root; requires private local access. */
+[[nodiscard]] bool owns_account_root(std::uint64_t rootSoid) noexcept;
 [[nodiscard]] bool read_account(AccountState& output) noexcept;
 [[nodiscard]] AccountState account() noexcept;
 [[nodiscard]] bool write_account(const AccountState& value) noexcept;

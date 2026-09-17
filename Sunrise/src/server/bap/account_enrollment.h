@@ -1,6 +1,4 @@
 #pragma once
-#include <algorithm>
-
 #include "../../core/settings/settings.h"
 #include "../../state/account/account_context.h"
 #include "../../state/account/account_token.h"
@@ -10,14 +8,14 @@
 
 namespace sunrise::server::bap {
 
-/** Serialized by the BAP lock. Offline profiles remain cached until enrollment needs their slot. */
+/** Serialized by the BAP lock. Reuses offline slots as needed; failure invalidates both outputs. */
 [[nodiscard]] inline bool enroll_account(std::span<const std::byte> token,
                                          state::AccountHandle& handle,
                                          bool& attachedNow) noexcept {
+    handle = state::kInvalidAccount;
     attachedNow = false;
     if (core::settings::role() == core::settings::Role::host
-        && token.size() == state::sign_on().sessionToken.size()
-        && std::equal(token.begin(), token.end(), state::sign_on().sessionToken.begin())) {
+        && state::is_local_account_token(token)) {
         handle = state::kLocalAccount;
         return true;
     }

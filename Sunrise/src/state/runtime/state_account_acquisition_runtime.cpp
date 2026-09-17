@@ -193,7 +193,7 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
                               PendingItemAcquisition& mutation) noexcept {
     const std::lock_guard lock(investment::store::g_mutex);
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     build_data::collectibles::Definition collectible{};
     build_data::items::Definition grantedDefinition{};
     // A vendor row may name an item with no collectible, so the collectible steps are skipped
@@ -249,7 +249,7 @@ bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
                                        PendingItemAcquisition& mutation) noexcept {
     const std::lock_guard lock(investment::store::g_mutex);
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     build_data::items::Definition grantedDefinition{};
     if (!account::valid(account) || !valid_profile_inventory(account)
         || !build_data::find_item_definition_index(itemDefinitionIndex, grantedDefinition)
@@ -259,6 +259,100 @@ bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
 
     return finalize_item_acquisition(
         account, account, grantedDefinition.definitionHash, false, {.direct = true}, mutation);
+}
+
+/** Prepares a fixed Season wrapper expansion without exposing a partial package. */
+bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
+                                std::span<const std::uint16_t> itemDefinitionIndices,
+                                PendingDirectItemBundle& mutation) noexcept {
+    mutation = {};
+    build_data::season_pass::Package package{};
+    if (!build_data::find_season_pass_package(sourceDefinitionHash, package)
+        || itemDefinitionIndices.size() != package.itemCount) {
+        return false;
+    }
+
+    std::array<std::uint32_t, build_data::season_pass::kPackageItemCapacity> hashes{};
+    for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
+        const std::uint16_t definitionIndex = itemDefinitionIndices[index];
+        build_data::items::Definition definition{};
+        item_details::Definition detail{};
+        inventory_buckets::Descriptor bucket{};
+        if (!build_data::find_item_definition_index(definitionIndex, definition)
+            || definition.definitionHash != package.items[index]
+            || !build_data::find_configured_item_detail(definitionIndex, detail)
+            || detail.definitionIndex != definition.definitionIndex
+            || detail.definitionHash != definition.definitionHash
+            || detail.bucketId != definition.bucketId
+            || detail.instancedDefinitionState != item_details::InstancedDefinitionState::instanced
+            || !detail.equipmentSlot.has_value()
+            || !build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)
+            || bucket.arraySelector != inventory_buckets::ArraySelector::character) {
+            return false;
+        }
+        hashes[index] = definition.definitionHash;
+    }
+
+    const AccountState account = bound_account_snapshot();
+    const std::size_t characterIndex = selected_character_index(account);
+    if (!account::valid(account) || characterIndex >= account.characterCount) {
+        return false;
+    }
+    const CharacterState& before = account.characters[characterIndex];
+    if (before.nextInventorySerial
+            > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())
+        || itemDefinitionIndices.size() > before.inventory.values.size() - before.inventory.count
+        || itemDefinitionIndices.size()
+               > static_cast<std::size_t>((std::numeric_limits<std::int32_t>::max)())
+                     - before.nextInventorySerial) {
+        return false;
+    }
+
+    std::uint64_t firstSoid = 0;
+    if (!next_item_instance_soid(account, firstSoid)
+        || itemDefinitionIndices.size() - 1U
+               > (std::numeric_limits<std::uint64_t>::max)() - firstSoid) {
+        return false;
+    }
+
+    CharacterState after = before;
+    const std::int32_t level = acquisition_level(before);
+    for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
+        authored_inventory::Item granted{};
+        granted.instanceSoid = firstSoid + index;
+        granted.definitionHash = hashes[index];
+        granted.level = level;
+        granted.quantity = 1;
+        granted.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
+        after.inventory.values[after.inventory.count++] = granted;
+    }
+
+    AccountState candidate = account;
+    candidate.characters[characterIndex] = after;
+    family4_loadout::ResolvedLoadout resolved{};
+    if (!account::valid(candidate)
+        || !family4_loadout::resolve(candidate, characterIndex, resolved)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
+        std::uint16_t row = 0;
+        std::uint8_t slot = 0;
+        if (!find_unequipped_row(resolved, firstSoid + index, row, slot)) {
+            return false;
+        }
+    }
+
+    mutation.beforeCharacter = before;
+    mutation.afterCharacter = after;
+    mutation.accountSoid = account.primarySoid;
+    mutation.characterSoid = before.soid;
+    mutation.firstInstanceSoid = firstSoid;
+    mutation.sourceDefinitionHash = sourceDefinitionHash;
+    mutation.characterIndex = characterIndex;
+    mutation.expectedInventoryCount = before.inventory.count;
+    mutation.itemCount = itemDefinitionIndices.size();
+    mutation.prepared = true;
+    return true;
 }
 
 /**
@@ -396,7 +490,7 @@ bool preview_item_acquisition(const PendingItemAcquisition& mutation,
     const std::lock_guard lock(investment::store::g_mutex);
     after = {};
     afterUnlocks = {};
-    if (!materialize_item_acquisition(account_snapshot(), mutation, after)
+    if (!materialize_item_acquisition(bound_account_snapshot(), mutation, after)
         || !investment::store::read_unlocks(afterUnlocks,
                                             static_cast<int>(mutation.characterIndex))) {
         return false;
@@ -409,6 +503,13 @@ bool preview_item_acquisition(const PendingItemAcquisition& mutation,
         afterUnlocks.characterObjectValues[quest.row] = value;
     }
     return true;
+}
+
+/** Produces the full account after-image while a prepared package remains current. */
+bool preview_direct_item_bundle(const PendingDirectItemBundle& mutation,
+                                AccountState& after) noexcept {
+    after = {};
+    return materialize_direct_item_bundle(bound_account_snapshot(), mutation, after);
 }
 
 /**
@@ -568,7 +669,7 @@ bool prepare_profile_item_acquisition(
     std::optional<std::span<const build_data::vendors::SaleCost>> price,
     PendingProfileItemAcquisition& mutation) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     build_data::collectibles::Definition collectible{};
     build_data::items::Definition item{};
     item_details::Definition detail{};
@@ -618,7 +719,7 @@ bool prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex
                                                std::int32_t quantity,
                                                PendingProfileItemAcquisition& mutation) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     build_data::items::Definition item{};
     item_details::Definition detail{};
     if (quantity <= 0 || !account::valid(account) || !valid_profile_inventory(account)
@@ -642,7 +743,7 @@ bool prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex
 bool preview_profile_item_acquisition(const PendingProfileItemAcquisition& mutation,
                                       AccountState& after) noexcept {
     after = {};
-    const AccountState current = account_snapshot();
+    const AccountState current = bound_account_snapshot();
     return materialize_profile_acquisition(current, mutation, after);
 }
 

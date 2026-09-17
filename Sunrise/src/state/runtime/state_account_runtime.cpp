@@ -295,7 +295,7 @@ bool set_selected_title(std::uint16_t recordIndex,
 bool prepare_current_activity(std::uint16_t activityIndex,
                               PendingCurrentActivity& mutation) noexcept {
     mutation = {};
-    const AccountState snapshot = account_snapshot();
+    const AccountState snapshot = bound_account_snapshot();
     if (!account::valid(snapshot)) {
         return false;
     }
@@ -352,7 +352,7 @@ bool commit_current_activity(PendingCurrentActivity& mutation) noexcept {
 bool prepare_equipment_swap(std::uint64_t requestedInstanceSoid,
                             PendingEquipmentSwap& mutation) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     if (requestedInstanceSoid == 0 || !account::valid(account)) {
         return false;
     }
@@ -476,7 +476,7 @@ bool prepare_equipment_swap(std::uint64_t requestedInstanceSoid,
 bool prepare_equipment_unequip(std::uint64_t requestedInstanceSoid,
                                PendingEquipmentSwap& mutation) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     if (requestedInstanceSoid == 0 || !account::valid(account)) {
         return false;
     }
@@ -631,9 +631,11 @@ bool commit_equipment_swap(PendingEquipmentSwap& mutation) noexcept {
     return true;
 }
 
-/** @return A copy of the active account state, read under the lock. */
-AccountState account_snapshot() noexcept {
-    return account_snapshot(bound_account());
+/** @return The bound account under its scope's visibility, or an empty account on failure. */
+AccountState bound_account_snapshot() noexcept {
+    AccountState output{};
+    (void)bound_account_snapshot(output);
+    return output;
 }
 
 /** Grants each character the other 2 subclasses of its equipped subclass's class. */

@@ -74,7 +74,8 @@ bool append_account_resync_notification(
     std::span<std::byte> response,
     std::size_t& written,
     queuez::SessionState& after) noexcept {
-    const state::ScopedAccount accountScope(state::account_for_public_root(before.family4RootSoid));
+    const state::ScopedAccountView accountScope(
+        state::account_for_subscription_root(before.family4RootSoid));
     after = before;
     ensure_account_canonical();
     if (!queuez::valid(before) || !before.family4Active || before.family4RootSoid == 0
@@ -123,12 +124,13 @@ void append_queuez_notification(Scratch& scratch,
                                 queuez::SessionState& after,
                                 bool& armsRepush,
                                 bool& armsBannerRepush) noexcept {
-    const auto accountHandle = subscription.familyType == queuez::kBannerFamilyType
-                                       || subscription.familyType == queuez::kRosterFamilyType
-                                       || subscription.familyType == queuez::kAccountFamilyType
-                                   ? state::account_for_public_root(subscription.familyRootSoid)
-                                   : state::bound_account();
-    const state::ScopedAccount accountScope(accountHandle);
+    const auto accountHandle =
+        subscription.familyType == queuez::kBannerFamilyType
+                || subscription.familyType == queuez::kRosterFamilyType
+                || subscription.familyType == queuez::kAccountFamilyType
+            ? state::account_for_subscription_root(subscription.familyRootSoid)
+            : state::bound_account();
+    const state::ScopedAccountView accountScope(accountHandle);
     after = before;
     armsRepush = false;
     // Runs ahead of the dispatch below; inside one family's builder it would leave the other
@@ -157,7 +159,7 @@ void append_queuez_notification(Scratch& scratch,
     if (subscription.familyType == queuez::kBannerFamilyType) {
         // Family zero's version and flags come from this peer's own ladder, so it is prepared
         // here instead of through the generic initial-snapshot path.
-        const state::AccountState account = state::account_snapshot();
+        const state::AccountState account = state::bound_account_snapshot();
         // The first character stands in before any pick. The record accepts a snapshot only in the
         // short window the subscribe opens, so holding the answer for the pick spends that window
         // and the subscription times out. The pick moves the pair afterwards.

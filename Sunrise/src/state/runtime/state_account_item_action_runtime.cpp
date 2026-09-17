@@ -24,7 +24,7 @@ bool prepare_socket_plug(std::uint64_t targetInstanceSoid,
                          std::uint16_t plugDefinitionIndex,
                          PendingSocketPlug& mutation) noexcept {
     mutation = {};
-    const AccountState snapshot = account_snapshot();
+    const AccountState snapshot = bound_account_snapshot();
     std::size_t characterIndex = snapshot.characterCount;
     if (targetInstanceSoid != 0 && account::valid(snapshot)) {
         for (std::size_t index = 0; index < snapshot.characterCount; ++index) {
@@ -76,7 +76,7 @@ bool prepare_equipped_socket_plug(std::uint64_t targetInstanceSoid,
                                   std::uint16_t plugDefinitionIndex,
                                   PendingSocketPlug& mutation) noexcept {
     mutation = {};
-    const AccountState snapshot = account_snapshot();
+    const AccountState snapshot = bound_account_snapshot();
     std::size_t characterIndex = snapshot.characterCount;
     if (account::valid(snapshot)) {
         for (std::size_t index = 0; index < snapshot.characterCount; ++index) {
@@ -205,7 +205,7 @@ bool preview_socket_plug(const PendingSocketPlug& mutation, AccountState& after)
         || mutation.afterProfileItemCount > authored_inventory::kProfileItemCapacity) {
         return false;
     }
-    const AccountState current = account_snapshot();
+    const AccountState current = bound_account_snapshot();
     if (mutation.characterIndex >= current.characterCount
         || current.primarySoid != mutation.accountSoid
         || !same_character(current.characters[mutation.characterIndex], mutation.beforeCharacter)
@@ -394,7 +394,7 @@ bool prepare_item_state(std::uint64_t targetInstanceSoid,
                         std::uint32_t flags,
                         PendingItemState& mutation) noexcept {
     mutation = {};
-    const AccountState snapshot = account_snapshot();
+    const AccountState snapshot = bound_account_snapshot();
     std::size_t characterIndex = snapshot.characterCount;
     if (account::valid(snapshot)) {
         for (std::size_t index = 0; index < snapshot.characterCount; ++index) {
@@ -522,7 +522,7 @@ bool prepare_subclass_selection(std::uint64_t subclassInstanceSoid,
                                 std::uint8_t requestedEntry,
                                 PendingSubclassSelection& mutation) noexcept {
     mutation = {};
-    const AccountState snapshot = account_snapshot();
+    const AccountState snapshot = bound_account_snapshot();
     std::size_t characterIndex = snapshot.characterCount;
     if (account::valid(snapshot)) {
         for (std::size_t index = 0; index < snapshot.characterCount; ++index) {
@@ -549,7 +549,7 @@ bool preview_subclass_selection(const PendingSubclassSelection& mutation,
         || mutation.subclassInstanceSoid == 0 || mutation.characterIndex >= kCharacterCapacity) {
         return false;
     }
-    const AccountState current = account_snapshot();
+    const AccountState current = bound_account_snapshot();
     if (mutation.characterIndex >= current.characterCount
         || current.primarySoid != mutation.accountSoid
         || !same_character(current.characters[mutation.characterIndex], mutation.beforeCharacter)) {

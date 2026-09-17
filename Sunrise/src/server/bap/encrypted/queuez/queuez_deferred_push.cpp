@@ -412,6 +412,59 @@ selected_character(const state::AccountState& account) noexcept {
     return true;
 }
 
+/** Sends the owed banner retry after its delay. */
+[[nodiscard]] bool consume_banner_repush(Session& session,
+                                         Scratch& scratch,
+                                         std::span<std::byte> response,
+                                         std::size_t& written,
+                                         bool& touchesScratch) noexcept {
+    if (!session.bannerRepushArmed || session.bannerRepushRoot == 0
+        || GetTickCount64() < session.bannerRepushDueTick) {
+        return false;
+    }
+    // Retain the arm until the account has a character to name.
+    if (state::account::banner_character_soid(state::bound_account_snapshot()) == 0) {
+        return false;
+    }
+    touchesScratch = true;
+
+    // Reuse the subscription path so its version and the host mirror stay aligned.
+    middleware::queuez::Subscription subscription{};
+    subscription.familyType = queuez::kBannerFamilyType;
+    subscription.familyRootSoid = session.bannerRepushRoot;
+
+    auto nextSendNonce = session.sendNonce;
+    std::size_t framedSize = 0;
+    queuez::SessionState bannerAfter{};
+    bool armsRepush = false;
+    bool armsBannerRepush = false;
+    push::append_queuez_notification(scratch,
+                                     session.queuez,
+                                     subscription,
+                                     session.sessionKey,
+                                     nextSendNonce,
+                                     scratch.framed,
+                                     framedSize,
+                                     bannerAfter,
+                                     armsRepush,
+                                     armsBannerRepush);
+    if (framedSize == 0 || framedSize > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=banner_repush result=fail");
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    session.sendNonce = nextSendNonce;
+    // The frame is committed here, so the recorded delivery and the arm are committed with it.
+    if (valid(bannerAfter)) {
+        session.queuez = bannerAfter;
+    }
+    session.bannerRepushArmed = false;
+    return true;
+}
+
 /**
  * Refreshes character records after an asynchronous ability-bucket rebuild.
  * @param session Auth, nonce, queuez state and the refresh arm owned by the connection.
@@ -543,7 +596,7 @@ selected_character(const state::AccountState& account) noexcept {
         || GetTickCount64() < session.artifactFamily4RefreshDueTick) {
         return false;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const state::CharacterState* selected = selected_character(account);
     if (selected == nullptr) {
         return false;
@@ -597,7 +650,7 @@ selected_character(const state::AccountState& account) noexcept {
         session.artifactResetRefreshCursor = 0;
         return false;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const state::CharacterState* selected = selected_character(account);
     if (selected == nullptr) {
         return false;
