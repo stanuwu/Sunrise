@@ -85,7 +85,7 @@ bool install() noexcept {
         "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 20 "
         "48 8B 59 10 48 8B F9 48 85 DB 0F 84 70 06 00 00";
     constexpr std::string_view publishText =
-        "40 53 48 83 EC 20 48 8B D9 48 8D 0D 58 5F 3D 01 E8 1B CF 3E 00 "
+        "40 53 48 83 EC 20 48 8B D9 48 8D 0D ? ? ? ? E8 ? ? ? ? "
         "48 85 C0 74 07 48 89 98 F0 1F 00 00 48 83 C4 20 5B C3";
     constexpr auto buildPattern = signature<signature_length(buildText)>(buildText);
     constexpr auto cachePattern = signature<signature_length(cacheText)>(cacheText);
@@ -93,18 +93,13 @@ bool install() noexcept {
     auto* target = scan_main_image_unique(buildPattern, "presence_member_build");
     auto* cache = scan_main_image_unique(cachePattern, "presence_write_cache");
     auto* publish = scan_main_image_unique(publishPattern, "presence_publish_changed");
-    // The scans must land on the supported executable's verified addresses; the member cache
-    // offsets below and the root global are only known for that build.
-    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
-    if (reinterpret_cast<std::uintptr_t>(target) != base + 0xBE8120U
-        || reinterpret_cast<std::uintptr_t>(cache) != base + 0xFCE5D0U
-        || reinterpret_cast<std::uintptr_t>(publish) != base + 0xBE16A0U) {
+    if (!target || !cache || !publish) {
         return false;
     }
     g_cache = reinterpret_cast<Cache>(cache);
     g_publish = reinterpret_cast<Publish>(publish);
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    g_root = reinterpret_cast<const void*>(base + 0x1FB7608U);
+    // LEA RCX in the matched publisher names the cache root it passes to the accessor.
+    g_root = resolve_relative(publish + 12, publish + 16);
     if (!hooking::detour::install({target, reinterpret_cast<void*>(&build)}, g_hook)) {
         return false;
     }

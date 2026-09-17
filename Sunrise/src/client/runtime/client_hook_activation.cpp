@@ -197,11 +197,11 @@ void clear_game_targets() noexcept {
             rollbackAdapters();
             return false;
         }
-        if (!hooks::machine_id::install(GetModuleHandleW(nullptr))) {
+        if (!hooks::machine_id::install()) {
             rollbackAdapters();
             return false;
         }
-        (void)hooks::instance_mutex::install(GetModuleHandleW(nullptr));
+        (void)hooks::instance_mutex::install();
         if (!hooks::replication_budget::install()) {
             core::log::write(core::log::Channel::client,
                              core::log::Level::error,

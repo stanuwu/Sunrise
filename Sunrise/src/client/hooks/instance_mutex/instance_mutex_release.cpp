@@ -8,6 +8,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../hooking/detour/transaction/detour_thread_transaction.h"
+#include "../../patterns/image_scan.h"
 
 namespace sunrise::client::hooks::instance_mutex {
 namespace {
@@ -15,7 +16,6 @@ namespace {
 // double as its single-instance guard, so a second client on the same PC parks on them
 // forever. Releasing them, from the owning thread only, lets two clients share one PC.
 // The native startup pacing loop calls this import on the mutex-owning thread.
-constexpr std::uintptr_t kWaitImportSlotRva = 0x3CC74B0;
 constexpr std::array names{"$ IDA registry mutex $", "$ IDA trusted_idbs"};
 using Wait = DWORD(WINAPI*)(HANDLE, DWORD);
 using WaitEx = DWORD(WINAPI*)(HANDLE, DWORD, BOOL);
@@ -100,16 +100,21 @@ bool exchange(void** location, void* expected, void* desired) noexcept {
     }
     return previous == expected;
 }
-bool install_locked(void* gameModule) noexcept {
+bool install_locked() noexcept {
     if (slot) {
         return true;
     }
-    if (!gameModule) {
+    using namespace patterns;
+    // Native wait-result wrapper: distinguish success, abandoned and I/O-completion results.
+    constexpr std::string_view text = "48 83 EC 28 48 85 C9 74 21 45 0F B6 C0 FF 15 ? ? ? ? "
+                                      "85 C0 74 13 2D 80 00 00 00 74 0C 83 E8 40 74 07";
+    constexpr auto pattern = signature<signature_length(text)>(text);
+    auto* site = scan_main_image_unique(pattern, "native_wait_import");
+    if (!site) {
         return false;
     }
-    const auto address = reinterpret_cast<std::uintptr_t>(gameModule) + kWaitImportSlotRva;
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    auto** location = reinterpret_cast<void**>(address);
+    // CALL [RIP + displacement] names the shared import used by the startup loop.
+    auto** location = reinterpret_cast<void**>(resolve_relative(site + 15, site + 19));
     void* current{};
     if (!read_slot(location, current) || !current) {
         return false;
@@ -173,9 +178,9 @@ bool uninstall_locked() noexcept {
     return true;
 }
 } // namespace
-bool install(void* gameModule) noexcept {
+bool install() noexcept {
     AcquireSRWLockExclusive(&lock);
-    const bool result = install_locked(gameModule);
+    const bool result = install_locked();
     ReleaseSRWLockExclusive(&lock);
     core::log::write(core::log::Channel::client,
                      result ? core::log::Level::info : core::log::Level::warn,

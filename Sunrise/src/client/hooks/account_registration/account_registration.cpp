@@ -93,10 +93,7 @@ bool install() noexcept {
                                       "4C 8B AC 24 70 01 00 00 41 83 CC FF";
     constexpr auto pattern = signature<signature_length(text)>(text);
     auto* target = scan_main_image_unique(pattern, "account_registration");
-    // Only the supported executable is known to have these layouts, so the unique scan must
-    // also land on its verified addresses; any other build refuses instead of detouring.
-    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
-    if (!target || reinterpret_cast<std::uintptr_t>(target) != base + 0xBE4D00U) {
+    if (!target) {
         return false;
     }
     constexpr std::string_view friendsText =
@@ -105,11 +102,11 @@ bool install() noexcept {
         "48 8B 5C 24 40 48 85 DB";
     constexpr auto friendsPattern = signature<signature_length(friendsText)>(friendsText);
     auto* callback = scan_main_image_unique(friendsPattern, "persona_callback");
-    if (!callback || reinterpret_cast<std::uintptr_t>(callback) != base + 0xA75E90U) {
+    if (!callback) {
         return false;
     }
     auto* manager = resolve_relative(callback + 7, callback + 11);
-    if (reinterpret_cast<std::uintptr_t>(manager) != base + 0x27C3DC0U) {
+    if (!manager) {
         return false;
     }
     registered.store(false, std::memory_order_release);

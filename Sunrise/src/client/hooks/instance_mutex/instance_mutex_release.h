@@ -1,7 +1,10 @@
 #pragma once
 
 namespace sunrise::client::hooks::instance_mutex {
-[[nodiscard]] bool install(void* gameModule) noexcept;
+/** Resolves the native wait import by unique signature and arranges release on its owner thread. */
+[[nodiscard]] bool install() noexcept;
+/** @return True after releasing import ownership; false retains it for a later retry. */
 [[nodiscard]] bool uninstall() noexcept;
+/** Attempts the single-instance release on this thread without waiting for another owner. */
 void release_once() noexcept;
 } // namespace sunrise::client::hooks::instance_mutex

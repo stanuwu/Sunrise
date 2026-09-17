@@ -6,6 +6,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../../core/settings/settings.h"
+#include "../../patterns/image_scan.h"
 #include "machine_id_cache.h"
 
 namespace sunrise::client::hooks::machine_id {
@@ -13,32 +14,10 @@ namespace {
 // The game derives one machine id per PC and peers key each other by it, so two clients on
 // the same PC would collide. An optional `client.machine_id` replaces the cached value; the
 // override is a no-op when the setting is absent.
-// The verified native call site names this cache, its validity byte and its composer.
-constexpr std::uintptr_t kFlagRva = 0x20D4A60;
-constexpr std::uintptr_t kRecordRva = 0x20D4A61;
-constexpr std::uintptr_t kIdRva = 0x20D4A67;
-constexpr std::uintptr_t kComposerRva = 0x3000C0;
-constexpr std::uintptr_t kSiteRva = 0x2FFDA1;
-constexpr std::array<std::uint8_t, 35> kSiteBytes{
-    0x80, 0x3D, 0xB8, 0x4C, 0xDD, 0x01, 0x00, 0x75, 0x1A, 0x48, 0x8D, 0x15,
-    0xB6, 0x4C, 0xDD, 0x01, 0x48, 0x8D, 0x0D, 0xA9, 0x4C, 0xDD, 0x01, 0xE8,
-    0x03, 0x03, 0x00, 0x00, 0xC6, 0x05, 0x9C, 0x4C, 0xDD, 0x01, 0x01};
 SRWLOCK g_lock = SRWLOCK_INIT;
 cache::Override g_override;
 bool g_reportedFailure{};
 
-bool matches(void* module) noexcept {
-    if (!module) {
-        return false;
-    }
-    __try {
-        return std::memcmp(
-                   static_cast<std::byte*>(module) + kSiteRva, kSiteBytes.data(), kSiteBytes.size())
-               == 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
 bool write(void* destination, const void* source, std::size_t size) noexcept {
     DWORD protection{};
     if (!VirtualProtect(destination, size, PAGE_READWRITE, &protection)) {
@@ -56,7 +35,7 @@ bool write(void* destination, const void* source, std::size_t size) noexcept {
 }
 } // namespace
 
-bool install(void* gameModule) noexcept {
+bool install() noexcept {
     const auto requested = core::settings::get().client.machineId;
     if (!requested) {
         return true;
@@ -68,15 +47,25 @@ bool install(void* gameModule) noexcept {
         return same;
     }
     bool installed = false;
-    if (matches(gameModule)) {
-        auto* base = static_cast<std::byte*>(gameModule);
-        const cache::Fields fields{
-            reinterpret_cast<std::uint8_t*>(base + kFlagRva), base + kRecordRva, base + kIdRva};
-        installed = cache::install(fields,
-                                   reinterpret_cast<cache::Compose>(base + kComposerRva),
-                                   &write,
-                                   requested,
-                                   g_override);
+    using namespace patterns;
+    constexpr std::string_view text = "80 3D ? ? ? ? 00 75 1A 48 8D 15 ? ? ? ? 48 8D 0D ? ? ? ? "
+                                      "E8 ? ? ? ? C6 05 ? ? ? ? 01";
+    constexpr auto pattern = signature<signature_length(text)>(text);
+    if (auto* site = scan_main_image_unique(pattern, "machine_identity_cache")) {
+        // CMP and MOV must name the same validity byte. LEA RDX/RCX supply the ID/record;
+        // the relative CALL supplies their native composer.
+        auto* initialized = resolve_relative(site + 2, site + 7);
+        if (initialized == resolve_relative(site + 30, site + 35)) {
+            const cache::Fields fields{reinterpret_cast<std::uint8_t*>(initialized),
+                                       resolve_relative(site + 19, site + 23),
+                                       resolve_relative(site + 12, site + 16)};
+            installed = cache::install(
+                fields,
+                reinterpret_cast<cache::Compose>(resolve_relative(site + 24, site + 28)),
+                &write,
+                requested,
+                g_override);
+        }
     }
     ReleaseSRWLockExclusive(&g_lock);
     core::log::write(core::log::Channel::client,
