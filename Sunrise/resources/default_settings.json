@@ -1,5 +1,6 @@
 {
-  "version": 19,
+  "version": 18,
+  "multiplayer_enabled": false,
   "core": {
     "logging": {
       "debugger_sink": true,

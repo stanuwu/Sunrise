@@ -65,6 +65,7 @@ bool Parser::parse_root(Settings& output) noexcept {
         return at_end();
     }
     bool hasVersion = false;
+    bool hasMultiplayer = false;
     bool hasCore = false;
     bool hasClient = false;
     bool hasClientEndpoint = false;
@@ -87,6 +88,11 @@ bool Parser::parse_root(Settings& output) noexcept {
             }
             output.version = static_cast<std::uint32_t>(value);
             hasVersion = true;
+        } else if (key == "multiplayer_enabled") {
+            if (hasMultiplayer || !boolean(output.multiplayerEnabled)) {
+                return false;
+            }
+            hasMultiplayer = true;
         } else if (key == "complete_exotic_catalysts") {
             if (hasCompleteExoticCatalysts || !boolean(output.completeExoticCatalysts)) {
                 return false;
@@ -162,8 +168,7 @@ bool Parser::parse_root(Settings& output) noexcept {
             }
             if (simpleEndpoint
                 && (output.hasConfiguredRole || hasClientEndpoint
-                    || output.client.externalServer.enabled
-                    || (hasVersion && output.version != kSettingsVersion))) {
+                    || output.client.externalServer.enabled)) {
                 return false;
             }
             return at_end();
@@ -384,6 +389,18 @@ bool parse(std::string_view json, Settings& output) noexcept {
     Settings parsed = defaults();
     parser::Parser parser(json);
     if (!parser.parse_root(parsed)) {
+        return false;
+    }
+    if (parsed.version < kOldestCompatibleSettingsVersion || parsed.version > kSettingsVersion) {
+        return false;
+    }
+    // An endpoint or role must never implicitly grant network access.
+    if (!parsed.multiplayerEnabled
+        && (parsed.compactClient || parsed.compactHost || parsed.configuredRole == Role::host
+            || parsed.configuredRole == Role::client || parsed.server.upstream.enabled
+            || parsed.client.externalServer.enabled
+            || parsed.server.bapBind != std::array<unsigned char, 4>{127, 0, 0, 1}
+            || parsed.server.gameplay.bindAddress != std::array<unsigned char, 4>{127, 0, 0, 1})) {
         return false;
     }
     output = parsed;

@@ -6,7 +6,9 @@
 
 namespace sunrise::client::hooks::egress::single_port {
 [[nodiscard]] inline bool enabled(SOCKET socket) noexcept {
-    if ((!core::settings::hosts_session() && core::settings::role() != core::settings::Role::client)
+    if (!core::settings::multiplayer()
+        || (!core::settings::hosts_session()
+            && core::settings::role() != core::settings::Role::client)
         || core::settings::get().client.externalServer.enabled
         || core::network::ServiceSocketScope::owns(socket)) {
         return false;

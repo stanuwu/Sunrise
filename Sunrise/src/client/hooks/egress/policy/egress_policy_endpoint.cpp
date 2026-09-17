@@ -49,6 +49,9 @@ bool local_account_peer(const sockaddr_in& endpoint, SOCKET socket, bool udp) no
 
 /** Reads the single address every redirected socket operation may reach. */
 std::array<unsigned char, 4> redirect_octets() noexcept {
+    if (!core::settings::get().multiplayerEnabled) {
+        return kLoopbackOctets;
+    }
     if (core::settings::role() == core::settings::Role::host) {
         return core::settings::get().server.gameplay.transportAddress;
     }
@@ -74,7 +77,8 @@ bool is_redirect_target(const sockaddr* address, int addressLength, SOCKET socke
     if (endpoint.sin_family != AF_INET) {
         return false;
     }
-    if (core::network::ServiceSocketScope::owns(socket)) {
+    if (core::settings::get().multiplayerEnabled
+        && core::network::ServiceSocketScope::owns(socket)) {
         return true;
     }
     const bool udp = datagram(socket);
@@ -102,7 +106,8 @@ bool redirect_ipv4(const sockaddr* address,
     if (redirected.sin_family != AF_INET) {
         return false;
     }
-    if (core::network::ServiceSocketScope::owns(socket)) {
+    if (core::settings::get().multiplayerEnabled
+        && core::network::ServiceSocketScope::owns(socket)) {
         return true;
     }
     const bool udp = datagram(socket);
