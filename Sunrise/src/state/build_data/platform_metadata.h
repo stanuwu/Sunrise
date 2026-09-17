@@ -18,8 +18,10 @@ inline constexpr std::uint64_t kSupportedStaticJoinSilo = 0x5C01;
 [[nodiscard]] constexpr bool static_join_silo(const BuildIdentity& build,
                                               std::uint64_t& silo) noexcept {
     silo = 0;
-    if (build.imageTimestamp != kSupportedImageTimestamp || build.imageSize != kSupportedImageSize)
+    if (build.imageTimestamp != kSupportedImageTimestamp
+        || build.imageSize != kSupportedImageSize) {
         return false;
+    }
     silo = kSupportedStaticJoinSilo;
     return true;
 }

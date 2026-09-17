@@ -44,11 +44,11 @@ constexpr std::size_t kDatagramCapacity = 1500;
 constexpr unsigned kMaxReceiveReports = 64;
 /** Traversal replies reported per run. The client repeats a request until the address resolves. */
 constexpr unsigned kMaxTraversalReports = 8;
-/** Wire mode 2 is native NAT stage 1; any accepted reply classifies NAT as open. */
+/** Wire stage 2 tests open NAT; any accepted reply classifies NAT as open. */
 constexpr unsigned kOpenNatProbe = 2;
-/** Wire mode 3 is native stage 2, which needs a different physical source port. */
+/** Wire stage 3 tests port filtering, which needs a different physical source port. */
 constexpr unsigned kPortFilterProbe = 3;
-/** Wire mode 4 is alternate stage 2, which compares mappings across destination ports. */
+/** Wire stage 4 tests mapping, which compares mappings across destination ports. */
 constexpr unsigned kMappingProbe = 4;
 
 /**
@@ -60,7 +60,8 @@ constexpr std::uint64_t kCarrierReportIntervalMs = 5000;
 /** Arrivals and traversal replies already reported, counted against the budgets above. */
 std::atomic<unsigned> g_reported{0};
 std::atomic<unsigned> g_traversalReported{0};
-std::atomic<unsigned> g_carrierReceived{}, g_carrierRelayed{}, g_carrierDenied{};
+std::atomic<unsigned> g_carrierReceived{}, g_carrierRelayed{}, g_carrierDenied{},
+    g_carrierDropped{};
 std::uint64_t g_carrierReportTick{};
 
 /** @return A pool with every slot unbound. Zero is a usable descriptor, so it cannot mark one. */
@@ -127,6 +128,7 @@ struct CarrierArrival {
 /**
  * Arrivals the receive thread may stage between two service slices. Each slice processes at most
  * one full ring's worth, matching the burst budget of the original polled carrier.
+ * The 128 entries occupy about 180 KiB of static storage; overflow drops the newest arrival.
  */
 constexpr std::size_t kCarrierArrivalCapacity = 128;
 SRWLOCK g_carrierLock{SRWLOCK_INIT};
@@ -292,20 +294,6 @@ bind_one(std::uint32_t bindAddress, std::uint16_t port, SOCKET& output) noexcept
                "ev=gameplay stage=relay result=bind_failed port=%u",
                static_cast<unsigned>(relayPort));
     }
-    if (core::settings::hosts_session()) {
-        for (std::size_t index = 0; index < 2; ++index) {
-            const auto port = static_cast<std::uint16_t>(
-                middleware::gameplay::nat::discovery::kFirstPort + index);
-            if (!bind_one(bindAddress, port, g_endpoint.sockets[kDiscoverySlot + index])) {
-                report(core::log::Level::error,
-                       "ev=gameplay stage=discovery result=bind_failed port=%u",
-                       static_cast<unsigned>(port));
-                close_locked();
-                return false;
-            }
-            g_endpoint.ports[kDiscoverySlot + index] = port;
-        }
-    }
     return true;
 }
 
@@ -402,14 +390,8 @@ void route_datagram(std::size_t logicalSlot,
             // A reply from this same endpoint cannot establish open NAT. The carrier's
             // logical ports also cannot test physical port filtering or mapping. Let
             // native traversal exhaust those tests and retain its conservative result.
-            if (mode == kOpenNatProbe
-                || (single_port() && (mode == kPortFilterProbe || mode == kMappingProbe))) {
+            if (mode == kOpenNatProbe || mode == kPortFilterProbe || mode == kMappingProbe) {
                 return;
-            }
-            if (mode == kPortFilterProbe) {
-                from.localPort = from.localPort == middleware::gameplay::nat::discovery::kFirstPort
-                                     ? middleware::gameplay::nat::discovery::kSecondPort
-                                     : middleware::gameplay::nat::discovery::kFirstPort;
             }
         }
         const auto replySize = middleware::gameplay::nat::discovery::reply(
@@ -470,6 +452,8 @@ void stage_arrival(const state::gameplay::Endpoint& from,
         arrival.size = payload.size();
         std::memcpy(arrival.payload.data(), payload.data(), payload.size());
         ++g_carrierCount;
+    } else {
+        ++g_carrierDropped;
     }
     ReleaseSRWLockExclusive(&g_carrierLock);
 }
@@ -705,10 +689,11 @@ void service(std::uint64_t now) noexcept {
     if (carrier && now - g_carrierReportTick >= kCarrierReportIntervalMs) {
         g_carrierReportTick = now;
         report(core::log::Level::info,
-               "ev=single_port stage=traffic received=%u relayed=%u denied=%u",
+               "ev=single_port stage=traffic received=%u relayed=%u denied=%u dropped=%u",
                g_carrierReceived.load(),
                g_carrierRelayed.load(),
-               g_carrierDenied.load());
+               g_carrierDenied.load(),
+               g_carrierDropped.load());
     }
 }
 

@@ -44,15 +44,17 @@ redirect_settings() noexcept {
 
 /** @return The redirect target as a numeric host, so the original cannot emit DNS. */
 [[nodiscard]] inline const char* redirect_host_a() noexcept {
-    if (core::settings::get().server.upstream.enabled)
+    if (core::settings::get().server.upstream.enabled) {
         return core::settings::get().server.upstream.host.data();
+    }
     return redirect_settings().host.data();
 }
 
 /** @return The redirect target as a wide numeric host. */
 [[nodiscard]] inline const wchar_t* redirect_host_w() noexcept {
-    if (core::settings::get().server.upstream.enabled)
+    if (core::settings::get().server.upstream.enabled) {
         return core::settings::get().server.upstream.hostWide.data();
+    }
     return redirect_settings().hostWide.data();
 }
 

@@ -9,7 +9,8 @@
 
 namespace sunrise::state {
 
-/** Binds account access for one request and restores the previous scope on exit. */
+/** Binds account access and restores the prior scope on exit; nested scopes cannot regain
+ * private access from a remote, invalid or public-only caller. */
 class ScopedAccount {
 public:
     explicit ScopedAccount(AccountHandle handle, bool publicOnly = false) noexcept;
@@ -75,11 +76,12 @@ private:
  * output.
  */
 [[nodiscard]] bool local_account_snapshot(AccountState& output) noexcept;
-/** Reads only the published cache, including for the host player. Failure clears output. */
+/** Reads the public cache. Before publication, returns false with only the enrolled primary SOID;
+ * invalid handles return false with empty output. */
 [[nodiscard]] bool public_account_snapshot(AccountHandle handle, AccountState& output) noexcept;
 /**
- * Reads the bound account with the scope's visibility; invalid or unpublished scopes clear
- * output.
+ * Reads the bound account with the scope's visibility. An unpublished public account retains
+ * only its enrolled primary SOID and returns false; an invalid scope clears output.
  */
 [[nodiscard]] bool bound_account_snapshot(AccountState& output) noexcept;
 /** Reads a character class without granting private access to a different account. */

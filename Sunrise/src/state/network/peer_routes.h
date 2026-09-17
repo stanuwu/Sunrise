@@ -15,10 +15,10 @@ static_assert(kCapacity <= 255);
  * Endpoints the accepted social feed currently authorises, withdrawn by lifecycle rather than by
  * age: an emptier feed, a peer's last link closing, a withdrawn native presence, an account
  * release, or the registered social link itself closing.
- * A host that goes silent without closing its socket is detected by the BAP link's own liveness
- * instead, so withdrawal there is bounded by the keepalive interval plus the response deadline
- * (`upstream_link.h`), not by a lease of this table's own. That is the one timer this
- * authorisation relies on.
+ * Guests detect a silent host through the upstream BAP keepalive and response deadline
+ * (`upstream_link.h`), paused while local output is blocked. Hosts enable TCP keepalive on every
+ * accepted connection: 30 seconds idle plus ten one-second unanswered probes on Windows.
+ * Transport cleanup withdraws a lost peer's authorization; healthy idle peers retain it.
  */
 [[nodiscard]] bool replace(std::span<const Endpoint> endpoints) noexcept;
 /** @return True while `endpoint` is in the currently accepted feed. */

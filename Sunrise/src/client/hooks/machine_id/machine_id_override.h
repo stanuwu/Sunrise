@@ -1,7 +1,7 @@
 #pragma once
 
 namespace sunrise::client::hooks::machine_id {
-/** Optional configured transport identity; zero leaves native composition unchanged. */
+/** Installs the configured transport identity override; succeeds without changes for a zero ID. */
 [[nodiscard]] bool install() noexcept;
 /** Reapplies the configured ID after the native producer rebuilds its cache. */
 void poll() noexcept;

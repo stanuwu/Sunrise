@@ -22,6 +22,11 @@ inline constexpr std::size_t kRootSize = 0x800;
 /** See kRootSize. */
 inline constexpr std::size_t kCharacterSize = 0x1B48;
 
+/** Opaque blocks in native class80807994, preserved at their declared byte extents. */
+inline constexpr std::size_t kChangesSize = 0xF4;
+inline constexpr std::size_t kLinkedRecordSize = 0x20;
+inline constexpr std::size_t kOptionalStateSize = 0x20;
+
 #pragma pack(push, 1)
 /** Native family1 slot0, class8080780C: inspected account and selected character. */
 struct Root {
@@ -40,10 +45,10 @@ struct Character {
     std::array<std::uint64_t, kEquipmentCapacity> equippedSoids{};
     // Native blocks kept at their declared extents. Their contents have no reader here, so the
     // projection carries them clear rather than composing fields it cannot source.
-    std::array<std::byte, 0xF4> changes{};
+    std::array<std::byte, kChangesSize> changes{};
     std::array<std::byte, 4> changesPadding{};
-    std::array<std::byte, 0x20> linkedRecord{};
-    std::array<std::byte, 0x20> optionalState{};
+    std::array<std::byte, kLinkedRecordSize> linkedRecord{};
+    std::array<std::byte, kOptionalStateSize> optionalState{};
     character_record::layout::Appearance appearance{};
     character_record::layout::Summary summary{};
 };

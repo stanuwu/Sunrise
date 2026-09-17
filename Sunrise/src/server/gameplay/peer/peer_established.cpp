@@ -289,11 +289,17 @@ read_external(std::span<const std::byte> payload,
               ParsedExternal& output) noexcept {
     output.commonPresent = false;
     bits::Reader reader(payload);
-    const std::unique_ptr<ParsedExternal> candidateStorage(new (std::nothrow) ParsedExternal{});
+    thread_local std::unique_ptr<ParsedExternal> candidateStorage;
+    if (!candidateStorage) {
+        candidateStorage.reset(new (std::nothrow) ParsedExternal{});
+    }
     if (!candidateStorage) {
         return ExternalReadResult::lane2;
     }
+    // Receive decoding does not re-enter on this thread. Reset its retained image per packet.
     ParsedExternal& candidate = *candidateStorage;
+    std::destroy_at(&candidate);
+    std::construct_at(&candidate);
     bool lanePresent = false;
     bool externalPresent = false;
     if (!reader.skip(bitOffset) || !read_flag(reader, externalPresent) || !externalPresent) {
@@ -493,11 +499,16 @@ void consume_established(const gp::Endpoint& from,
     bool externalExpected = false;
     bool externalValid = true;
     const char* externalFailure = "none";
-    const std::unique_ptr<ParsedExternal> externalStorage(new (std::nothrow) ParsedExternal{});
+    thread_local std::unique_ptr<ParsedExternal> externalStorage;
+    if (!externalStorage) {
+        externalStorage.reset(new (std::nothrow) ParsedExternal{});
+    }
     if (!externalStorage) {
         return;
     }
     ParsedExternal& external = *externalStorage;
+    std::destroy_at(&external);
+    std::construct_at(&external);
     state::activity::SessionBinding commonBinding{};
     std::uint64_t commonOwnerGeneration = 0;
     std::uint8_t commonRequestedGeneration = 0;
@@ -784,7 +795,6 @@ void consume_established(const gp::Endpoint& from,
            largeDropped);
 }
 
-/** Sends any owed acknowledgement. */
 void service(std::uint64_t now) noexcept {
     std::unique_lock sendGuard(g_sendLock, std::try_to_lock);
     if (!sendGuard.owns_lock()) {

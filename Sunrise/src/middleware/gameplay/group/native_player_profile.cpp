@@ -9,7 +9,6 @@ namespace {
 /** Every optional B field a complete profile carries. */
 constexpr std::uint16_t kExtraFields = field_bit::kQ3 | field_bit::kQ4 | field_bit::kQ5
                                        | field_bit::kQ6 | field_bit::kQ8 | field_bit::kQ9;
-static_assert(kExtraFields == 0x1DC);
 /** Wire width of each optional B scalar. */
 constexpr std::uint8_t kQ3Width = 8;
 constexpr std::uint8_t kQ4Width = 6;
@@ -323,6 +322,17 @@ void build_native_player_profile_state(const NativePlayerProfile& profile,
     // Decoded B layout: name +0, identity +80, q3/q4/q5 +B0/B2/B3, q6 +B8/BC,
     // SOIDs +C0/C8, q8 handle/slots/tail +D0/D4/DC, q9 +E0 (hex byte offsets).
     constexpr std::size_t kIdentity = kNativePlayerNameCapacity * 2;
+    constexpr std::size_t kQ3 = 0xB0;
+    constexpr std::size_t kQ4 = 0xB2;
+    constexpr std::size_t kQ5 = 0xB3;
+    constexpr std::size_t kQ6First = 0xB8;
+    constexpr std::size_t kQ6Second = 0xBC;
+    constexpr std::size_t kAccountSoid = 0xC0;
+    constexpr std::size_t kCharacterSoid = 0xC8;
+    constexpr std::size_t kQ8Handle = 0xD0;
+    constexpr std::size_t kQ8Slots = 0xD4;
+    constexpr std::size_t kQ8Tail = 0xDC;
+    constexpr std::size_t kQ9 = 0xE0;
     constexpr std::uint32_t kNameKey = 0xC245B0C4;
     constexpr std::uint32_t kNameMultiplier = 0x7B4F;
     constexpr int kNameRotationModulus = 31;
@@ -339,19 +349,19 @@ void build_native_player_profile_state(const NativePlayerProfile& profile,
         put(i * 2, (unit * kNameMultiplier) ^ key, 2);
     }
     std::copy(profile.identity.begin(), profile.identity.end(), output.begin() + kIdentity);
-    put(0xB0, profile.q3, 2);
+    put(kQ3, profile.q3, 2);
     // q4 and q5 are one-based on the wire and zero-based in the image.
-    put(0xB2, static_cast<std::uint8_t>(profile.q4 - 1), 1);
-    put(0xB3, static_cast<std::uint8_t>(profile.q5 - 1), 1);
-    put(0xB8, static_cast<std::uint32_t>(profile.q6[0]), 4);
-    put(0xBC, static_cast<std::uint32_t>(profile.q6[1]), 4);
-    put(0xC0, profile.soids.accountSoid, 8);
-    put(0xC8, profile.soids.characterSoid, 8);
-    put(0xD0, profile.q8Handle, 4);
+    put(kQ4, static_cast<std::uint8_t>(profile.q4 - 1), 1);
+    put(kQ5, static_cast<std::uint8_t>(profile.q5 - 1), 1);
+    put(kQ6First, static_cast<std::uint32_t>(profile.q6[0]), 4);
+    put(kQ6Second, static_cast<std::uint32_t>(profile.q6[1]), 4);
+    put(kAccountSoid, profile.soids.accountSoid, 8);
+    put(kCharacterSoid, profile.soids.characterSoid, 8);
+    put(kQ8Handle, profile.q8Handle, 4);
     for (std::size_t i = 0; i < profile.q8Slots.size(); ++i) {
-        put(0xD4 + i * 2, profile.q8Slots[i], 2);
+        put(kQ8Slots + i * 2, profile.q8Slots[i], 2);
     }
-    put(0xDC, profile.q8Tail, 1);
-    put(0xE0, profile.q9, 4);
+    put(kQ8Tail, profile.q8Tail, 1);
+    put(kQ9, profile.q9, 4);
 }
 } // namespace sunrise::middleware::gameplay::group

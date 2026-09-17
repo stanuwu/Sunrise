@@ -40,7 +40,9 @@ enum class Result { notHandled, success, failure };
 /**
  * Answers a subscribe, unsubscribe or explicit WS-206 family fetch against public profiles.
  *
- * Every subscribe/fetch returns a snapshot; failures commit neither nonce nor subscription.
+ * Every accepted subscribe/fetch returns a snapshot and retains a subscription until unsubscribe
+ * or disconnect. Refused WS-206 fetches receive a correlated status-only reply and add no root.
+ * Output-capacity failures commit neither nonce nor subscription.
  *
  * Publication versions are recipient/root scoped and never use the local investment ladder.
  */

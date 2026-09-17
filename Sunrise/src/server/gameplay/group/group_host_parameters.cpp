@@ -32,9 +32,6 @@ constexpr bool kHostMemberSelected = true;
     return std::uint64_t{1} << static_cast<std::uint8_t>(parameter);
 }
 
-/** Only the low registry bits name a parameter. The writer drops the rest of either mask. */
-constexpr std::uint64_t kParameterMaskBits = (std::uint64_t{1} << wire::kParameterCount) - 1U;
-
 /** The parameter bits this host carries in every group snapshot it publishes. */
 constexpr std::uint64_t kHostSelectedMask = parameter_mask(wire::Parameter::hostSelected);
 constexpr std::uint64_t kActivityHostMask = parameter_mask(wire::Parameter::activityHost);
@@ -120,7 +117,6 @@ void fill_previous_activity(wire::ParameterUpdate& update,
 
 } // namespace
 
-/** Sends one parameter update on the reliable channel of the session it names. */
 bool send_parameter_update(const wire::ParameterUpdate& update,
                            const state::gameplay::Endpoint& endpoint) noexcept {
     return send_reliable(
@@ -171,18 +167,12 @@ bool publish_activity_host(const state::gameplay::Endpoint& endpoint,
     return sent;
 }
 
-/**
- * Answers one parameter request with the parameters this host can encode.
- * A native peer repeats an unanswered request every rendered frame with no interval of its own, so
- * silence is an unbounded flood. The answer carries every requested parameter that has an encoder
- * and names every requested parameter that has none as released.
- */
 void answer_parameters(const state::gameplay::Endpoint& endpoint,
                        std::uint64_t sessionId,
                        std::uint64_t requested,
                        std::uint8_t playerCount,
                        std::uint32_t memberMask) noexcept {
-    const std::uint64_t selected = requested & kParameterMaskBits;
+    const std::uint64_t selected = requested & wire::kParameterMaskBits;
     std::uint64_t carried = selected & wire::kEncodableParameters;
     // Releasing an empty slot is a no-op on the peer, so a parameter with no encoder here is safe
     // to name. A parameter that has an encoder but no ready binding stays owed instead: releasing

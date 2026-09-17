@@ -298,7 +298,6 @@ bool prepare_social_roster(Scratch& scratch,
     return true;
 }
 
-/** Folds the family-two member fields the projected profile does not carry. */
 std::uint32_t social_roster_revision(Scratch& scratch, std::uint64_t familyRootSoid) noexcept {
     auto& account = scratch.accountImage;
     const auto handle = state::account_for_subscription_root(familyRootSoid);

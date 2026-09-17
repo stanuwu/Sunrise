@@ -16,7 +16,8 @@ void abandon(std::uint32_t connection, std::uint32_t task) noexcept;
  */
 [[nodiscard]] bool
 acknowledge(std::uint32_t connection, std::uint32_t task, std::span<const std::byte> body) noexcept;
-/** Absorbs one host publication notice. Internal: it never enters the downstream reply queue. */
+/** Absorbs an internal host notice without downstream delivery. A malformed notice fails its
+ * registered connection; false is terminal here, not temporary output pressure. */
 [[nodiscard]] bool notify(std::uint32_t connection, std::span<const std::byte> payload) noexcept;
 /** Withdraws the authorisation this link carried, even when another link survives. */
 void connection_closed(std::uint32_t connection) noexcept;

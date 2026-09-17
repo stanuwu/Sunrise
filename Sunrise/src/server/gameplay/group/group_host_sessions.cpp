@@ -523,7 +523,6 @@ void allocate_claimed_host_sessions() noexcept {
     }
 }
 
-/** Returns every retained binding and allocated target to State, then clears the table. */
 void reset_host_sessions() noexcept {
     std::lock_guard releaseGuard(g_releaseLock);
     std::size_t count = 0;

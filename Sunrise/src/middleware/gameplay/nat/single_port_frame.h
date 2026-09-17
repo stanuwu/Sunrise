@@ -45,16 +45,18 @@ inline void put(std::span<std::byte> out, std::uint32_t value) noexcept {
 /** @return `in` read as a big-endian unsigned integer. */
 inline std::uint32_t get(std::span<const std::byte> in) noexcept {
     std::uint32_t value{};
-    for (auto b : in)
+    for (auto b : in) {
         value = (value << 8) | std::to_integer<unsigned>(b);
+    }
     return value;
 }
 /** @return Bytes written, or zero for invalid kind/endpoint, oversized payload or small output. */
 [[nodiscard]] inline std::size_t encode(Frame frame, std::span<std::byte> out) noexcept {
     if ((frame.kind != Kind::request && frame.kind != Kind::delivery) || !frame.address
         || !frame.port || frame.payload.size() > kPayload
-        || out.size() < kHeader + frame.payload.size())
+        || out.size() < kHeader + frame.payload.size()) {
         return 0;
+    }
     std::copy(kMagic.begin(), kMagic.end(), out.begin());
     out[4] = static_cast<std::byte>(frame.kind);
     out[5] = out[14] = out[15] = std::byte{};
@@ -73,12 +75,15 @@ inline std::uint32_t get(std::span<const std::byte> in) noexcept {
     if (in.size() < kHeader || in.size() > kCapacity
         || !std::equal(kMagic.begin(), kMagic.end(), in.begin()) || in[5] != std::byte{}
         || in[14] != std::byte{} || in[15] != std::byte{}
-        || get(in.subspan(6, 2)) != in.size() - kHeader)
+        || get(in.subspan(6, 2)) != in.size() - kHeader) {
         return false;
+    }
     const auto kind = static_cast<Kind>(in[4]);
     const auto address = get(in.subspan(8, 4));
     const auto port = static_cast<std::uint16_t>(get(in.subspan(12, 2)));
-    if ((kind != Kind::request && kind != Kind::delivery) || !address || !port) return false;
+    if ((kind != Kind::request && kind != Kind::delivery) || !address || !port) {
+        return false;
+    }
     out = {kind, address, port, in.subspan(kHeader)};
     return true;
 }

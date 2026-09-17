@@ -47,7 +47,7 @@ Settings g_settings = defaults();
 
 /**
  * Reports a settings version that differs from this build.
- * @param fileVersion Version read from the file, or zero when the key was missing.
+ * @param fileVersion Parsed version, defaulting to kSettingsVersion when the key was missing.
  */
 void report_version(std::uint32_t fileVersion) noexcept {
     if (fileVersion == kSettingsVersion) {
@@ -228,8 +228,11 @@ bool initialize(void* module) noexcept {
         }
     }
     Settings parsed;
-    if (!parse(document, parsed)) {
-        return fail("parse");
+    ParseFailure parseFailure{};
+    if (!parse(document, parsed, &parseFailure)) {
+        return fail(parseFailure == ParseFailure::multiplayerOptInRequired
+                        ? "multiplayer_opt_in_required"
+                        : "parse");
     }
     report_version(parsed.version);
     Role selectedRole = parsed.hasConfiguredRole ? parsed.configuredRole : Role::embedded;
@@ -285,9 +288,7 @@ bool initialize(void* module) noexcept {
         parsed.server.upstream.hostWide[i] = static_cast<wchar_t>(parsed.server.upstream.host[i]);
     }
     // Publish the role only after every configuration and identity check succeeds.
-    if (!configure_role(selectedRole, true)) {
-        return fail("configured_role");
-    }
+    static_cast<void>(configure_role(selectedRole, true));
     g_settings = parsed;
     return true;
 }

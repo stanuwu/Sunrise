@@ -13,7 +13,7 @@ namespace {
 /** Access denied marks every outbound socket call blocked by policy. */
 constexpr int kBlockedSocketError = WSAEACCES;
 /** The policy accepts one exact IPv4 address, not a range. */
-constexpr std::array<unsigned char, 4> kLoopbackOctets{127, 0, 0, 1};
+using core::settings::kLoopbackOctets;
 
 bool datagram(SOCKET socket) noexcept {
     int type{};

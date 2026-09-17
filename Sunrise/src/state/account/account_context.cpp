@@ -20,7 +20,7 @@ thread_local bool g_publicOnly = false;
 ScopedAccount::ScopedAccount(AccountHandle handle, bool publicOnly) noexcept
     : previous_(g_boundAccount), previousPublicOnly_(g_publicOnly) {
     g_boundAccount = handle;
-    g_publicOnly = publicOnly || previousPublicOnly_;
+    g_publicOnly = publicOnly || previousPublicOnly_ || previous_ != kLocalAccount;
 }
 ScopedAccount::~ScopedAccount() noexcept {
     g_boundAccount = previous_;
@@ -156,7 +156,12 @@ bool local_account_snapshot(AccountState& output) noexcept {
 }
 
 bool public_account_snapshot(AccountHandle handle, AccountState& output) noexcept {
-    return account::profiles::snapshot(handle, output);
+    if (account::profiles::snapshot(handle, output)) {
+        return true;
+    }
+    // Sign-on reserves identity before the peer publishes its first public profile.
+    output.primarySoid = account::profiles::primary_soid(handle);
+    return false;
 }
 
 bool bound_account_snapshot(AccountState& output) noexcept {

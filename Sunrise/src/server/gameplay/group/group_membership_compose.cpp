@@ -64,9 +64,8 @@ bool membership(
     output.update.revision = revision;
     // Member 0 is this host, and it holds group-session parameter authority with it. Parameters 5
     // and 6 (`activity-selection` and `activity-selection-responses`) have no encoder here, and a
-    // peer's proposal only settles when the host echoes it back in an applied parameter-6 update,
-    // so authority over those two must stay on a client host: a Sunrise-hosted group session can
-    // never settle a peer activity-selection proposal.
+    // peer's proposal only settles when the host echoes an applied parameter-6 update. This host
+    // therefore cannot settle those proposals; it answers unsupported parameters as released.
     output.update.hostMemberIndex = output.update.successionIndex = 0;
     output.update.members = std::span(output.members).first(peers.size() + 1);
     output.update.players = std::span(output.players).first(playerCount);

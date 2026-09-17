@@ -297,10 +297,13 @@ void release_activity_connection(Session& session) noexcept {
             }
         }
         if (!retainedByPeer) {
-            static_cast<void>(
-                state::activity::depart_member(session.activity.session,
-                                               state::account_primary_soid(session.accountHandle),
-                                               session.activityMemberKey));
+            if (!state::activity::depart_member(session.activity.session,
+                                                state::account_primary_soid(session.accountHandle),
+                                                session.activityMemberKey)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=activity stage=disconnect_departure result=refused");
+            }
         }
     }
     clear_activity_transport(session);

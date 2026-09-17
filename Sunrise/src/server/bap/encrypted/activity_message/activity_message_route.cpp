@@ -272,7 +272,7 @@ void report_release_refusal(const service::Request& request,
         }
     } else if (plan.bindingIntent == BindingIntent::publicTarget
                && state::activity::binding_matches(plan.publicHost.source)) {
-        // Embedded solo retains upstream's local member table; only shared targets own peers.
+        // Embedded solo retains the local member table; only shared targets own peers.
         static_cast<void>(
             state::activity::membership::prepare_refresh(plan.publicHost.source.sessionId,
                                                          kCurrentRevision,

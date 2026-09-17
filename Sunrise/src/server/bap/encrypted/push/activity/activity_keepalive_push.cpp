@@ -450,7 +450,7 @@ bool consume_activity_keepalive(Session& session,
             session, scratch, key, nextSendNonce, scratch.framed, framedSize);
     published = appendedAuthorityQuery || published;
     if (session.activity.role == ActivityClientRole::publicTarget) {
-        // Shared targets publish each owed peer revision. Embedded solo keeps upstream's
+        // Shared targets publish each owed peer revision. Embedded solo keeps
         // one local membership copy per binding, sourced from its private activity.
         state::activity::membership::PendingMutation staged{};
         bool appended = false;

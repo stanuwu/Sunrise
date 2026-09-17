@@ -4,6 +4,7 @@
 
 #include "../../../state/account/account_context.h"
 #include "../../../state/social/steam_roster.h"
+#include "proxy_internal.h"
 #include "proxy_runtime.h"
 
 namespace sunrise::server::bap::proxy::social_feed {
@@ -56,10 +57,12 @@ bool notify(std::uint32_t connection, std::span<const std::byte> payload) noexce
         return true;
     }
     if (payload.size() != kNotificationHeaderSize + social::feed::kNoticeBodySize) {
+        fail_connection(connection, "social_notice_size");
         return false;
     }
     std::uint64_t publication{};
     if (!social::feed::decode_notice(payload.subspan(kNotificationHeaderSize), publication)) {
+        fail_connection(connection, "social_notice_decode");
         return false;
     }
     social::note_publication(publication);

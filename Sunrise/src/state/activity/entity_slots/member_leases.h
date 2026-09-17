@@ -52,11 +52,13 @@ struct MemberLeasePlan final {
 [[nodiscard]] inline LeaseMask member_lease_block(std::size_t block, std::size_t width) noexcept {
     LeaseMask mask{};
     if (block >= kMemberLeaseBlockCount || width == 0
-        || width > kSlotCount / kMemberLeaseBlockCount)
+        || width > kSlotCount / kMemberLeaseBlockCount) {
         return mask;
-    for (std::size_t slot = block * width; slot < (block + 1) * width; ++slot)
+    }
+    for (std::size_t slot = block * width; slot < (block + 1) * width; ++slot) {
         mask[slot / kSlotsPerByte] |=
             std::byte{static_cast<unsigned char>(1U << (slot % kSlotsPerByte))};
+    }
     return mask;
 }
 
@@ -66,13 +68,19 @@ struct MemberLeasePlan final {
  */
 [[nodiscard]] inline bool
 member_block_in_use(const MemberLeases& leases, std::size_t block, std::size_t exceptRow) noexcept {
-    for (std::size_t row = 0; row < leases.blocks.size(); ++row)
-        if (row != exceptRow && (leases.joinedRows & (1U << row)) && leases.blocks[row] == block)
+    for (std::size_t row = 0; row < leases.blocks.size(); ++row) {
+        if (row != exceptRow && (leases.joinedRows & (1U << row)) && leases.blocks[row] == block) {
             return true;
+        }
+    }
     const auto mask = member_lease_block(block, leases.blockWidth);
-    for (const auto& retired : leases.retired)
-        for (std::size_t index = 0; index < mask.size(); ++index)
-            if ((mask[index] & retired[index]) != std::byte{}) return true;
+    for (const auto& retired : leases.retired) {
+        for (std::size_t index = 0; index < mask.size(); ++index) {
+            if ((mask[index] & retired[index]) != std::byte{}) {
+                return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -82,10 +90,14 @@ member_block_in_use(const MemberLeases& leases, std::size_t block, std::size_t e
                                                        const LeaseMask& serverReserve,
                                                        std::size_t requested) noexcept {
     MemberLeasePlan plan{};
-    if (row >= kMemberLeaseRowCount || !requested) return plan;
+    if (row >= kMemberLeaseRowCount || !requested) {
+        return plan;
+    }
     const auto capacity = (kSlotCount - slot_count(serverReserve)) / kMemberLeaseBlockCount;
     const auto width = leases.blockWidth ? leases.blockWidth : (std::min)(requested, capacity);
-    if (!width || width > capacity || requested < width) return plan;
+    if (!width || width > capacity || requested < width) {
+        return plan;
+    }
     std::size_t block = kNoMemberLeaseBlock;
     if (leases.joinedRows & (1U << row)) {
         block = leases.blocks[row];
@@ -95,19 +107,26 @@ member_block_in_use(const MemberLeases& leases, std::size_t block, std::size_t e
     } else {
         // After a native departure, prefer that row's last block. Never alias another live row.
         const auto previous = leases.blocks[row];
-        if (previous < kMemberLeaseBlockCount && !member_block_in_use(leases, previous, row))
+        if (previous < kMemberLeaseBlockCount && !member_block_in_use(leases, previous, row)) {
             block = previous;
-        else
-            for (std::size_t candidate = 0; candidate < kMemberLeaseBlockCount; ++candidate)
+        } else {
+            for (std::size_t candidate = 0; candidate < kMemberLeaseBlockCount; ++candidate) {
                 if (!member_block_in_use(leases, candidate, row)) {
                     block = candidate;
                     break;
                 }
+            }
+        }
     }
-    if (block >= kMemberLeaseBlockCount || member_block_in_use(leases, block, row)) return {};
+    if (block >= kMemberLeaseBlockCount || member_block_in_use(leases, block, row)) {
+        return {};
+    }
     plan.mask = member_lease_block(block, width);
-    for (std::size_t i = 0; i < plan.mask.size(); ++i)
-        if ((plan.mask[i] & serverReserve[i]) != std::byte{}) return {};
+    for (std::size_t i = 0; i < plan.mask.size(); ++i) {
+        if ((plan.mask[i] & serverReserve[i]) != std::byte{}) {
+            return {};
+        }
+    }
     plan.blockWidth = static_cast<std::uint16_t>(width);
     plan.block = static_cast<std::uint8_t>(block);
     plan.valid = true;
@@ -117,12 +136,16 @@ member_block_in_use(const MemberLeases& leases, std::size_t block, std::size_t e
 /** The State transaction validates the complete plan before assigning it. */
 inline void
 assign_member_lease(MemberLeases& leases, std::size_t row, const MemberLeasePlan& plan) noexcept {
-    if (row >= kMemberLeaseRowCount || !plan.valid || plan.block >= kMemberLeaseBlockCount) return;
+    if (row >= kMemberLeaseRowCount || !plan.valid || plan.block >= kMemberLeaseBlockCount) {
+        return;
+    }
     leases.held[row] = plan.mask;
     leases.blocks[row] = plan.block;
     leases.blockWidth = plan.blockWidth;
     leases.joinedRows |= 1U << row;
-    if (plan.fresh) leases.nextBlock = static_cast<std::uint8_t>(plan.block + 1);
+    if (plan.fresh) {
+        leases.nextBlock = static_cast<std::uint8_t>(plan.block + 1);
+    }
 }
 
 /**
@@ -130,9 +153,13 @@ assign_member_lease(MemberLeases& leases, std::size_t row, const MemberLeasePlan
  * mark.
  */
 inline void depart_member_lease(MemberLeases& leases, std::size_t row) noexcept {
-    if (row >= kMemberLeaseRowCount || !(leases.joinedRows & (1U << row))) return;
+    if (row >= kMemberLeaseRowCount || !(leases.joinedRows & (1U << row))) {
+        return;
+    }
     for (std::size_t survivor = 0; survivor < kMemberLeaseRowCount; ++survivor) {
-        if (survivor == row || !(leases.joinedRows & (1U << survivor))) continue;
+        if (survivor == row || !(leases.joinedRows & (1U << survivor))) {
+            continue;
+        }
         for (std::size_t index = 0; index < leases.held[row].size(); ++index) {
             leases.purgeOwed[survivor][index] |= leases.held[row][index];
             leases.retired[survivor][index] |= leases.held[row][index];
@@ -150,8 +177,9 @@ inline void depart_member_lease(MemberLeases& leases, std::size_t row) noexcept 
 inline void
 acknowledge_member_purge(MemberLeases& leases, std::size_t row, std::uint32_t revision) noexcept {
     if (row >= kMemberLeaseRowCount || !leases.purgeRevision[row]
-        || revision < leases.purgeRevision[row] || slot_count(leases.purgeOwed[row]))
+        || revision < leases.purgeRevision[row] || slot_count(leases.purgeOwed[row])) {
         return;
+    }
     leases.retired[row] = {};
     leases.purgeRevision[row] = 0;
 }
@@ -159,9 +187,11 @@ acknowledge_member_purge(MemberLeases& leases, std::size_t row, std::uint32_t re
 /** @return The union of every row's held mask. */
 [[nodiscard]] inline LeaseMask aggregate_member_leases(const MemberLeases& leases) noexcept {
     LeaseMask result{};
-    for (const auto& held : leases.held)
-        for (std::size_t i = 0; i < result.size(); ++i)
+    for (const auto& held : leases.held) {
+        for (std::size_t i = 0; i < result.size(); ++i) {
             result[i] |= held[i];
+        }
+    }
     return result;
 }
 } // namespace sunrise::state::activity::entity_slots

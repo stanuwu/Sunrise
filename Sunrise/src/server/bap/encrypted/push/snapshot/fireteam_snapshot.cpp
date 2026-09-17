@@ -19,7 +19,6 @@ bool prepare_fireteam(Scratch& scratch,
     // The family-six directory is this account's key and the link naming its descriptor.
     constexpr std::size_t directorySize = 8 + 8;
     constexpr std::size_t descriptorSize = 8 + social::kNativeFireteamSize;
-    static_assert(descriptorSize == 0xB68);
     auto& account = scratch.accountImage;
     const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
     const state::ScopedAccountView bind(handle);

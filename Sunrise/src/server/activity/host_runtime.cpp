@@ -418,7 +418,6 @@ bool request_auth_state(const state::activity::SessionBinding& binding,
     return true;
 }
 
-/** Applies queued client and operator events on the server service slice. */
 void service(std::uint64_t now) noexcept {
     std::array<state::activity::SessionBinding, state::activity::kSessionCapacity> bindings{};
     std::size_t bindingCount = 0;

@@ -80,7 +80,8 @@ object_id(std::uint32_t familyType, std::uint32_t slotIndex, std::uint32_t& obje
         objectId = kInspectionRootObjectId;
     } else if (familyType == kInspectionFamily && slotIndex == kCharacterSlot) {
         objectId = kInspectionCharacterObjectId;
-    } else if (familyType == kInspectionFamily && slotIndex == kItemInstanceSlot) {
+    } else if ((familyType == kInspectionFamily || familyType == kAccountFamily)
+               && slotIndex == kItemInstanceSlot) {
         objectId = kItemInstanceObjectId;
     } else if (familyType == kSocialRosterFamily && slotIndex == kSocialRosterDirectorySlot) {
         objectId = kSocialRosterDirectoryObjectId;
@@ -100,8 +101,6 @@ object_id(std::uint32_t familyType, std::uint32_t slotIndex, std::uint32_t& obje
         objectId = kAccountObjectId;
     } else if (familyType == kAccountFamily && slotIndex == kCharacterSlot) {
         objectId = kCharacterObjectId;
-    } else if (familyType == kAccountFamily && slotIndex == kItemInstanceSlot) {
-        objectId = kItemInstanceObjectId;
     }
     return objectId != 0;
 }

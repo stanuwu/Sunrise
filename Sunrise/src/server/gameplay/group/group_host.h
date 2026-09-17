@@ -90,8 +90,7 @@ void release_endpoint(const state::gameplay::Endpoint& endpoint) noexcept;
 
 /**
  * Withdraws an account's native group rows, preserving other owners and shared hosts.
- * @pre
- * The caller holds the BAP lock and has closed the account's last authenticated link.
+ * @pre The caller holds the BAP lock and has closed the account's last authenticated link.
  */
 void release_account(std::uint64_t accountSoid) noexcept;
 

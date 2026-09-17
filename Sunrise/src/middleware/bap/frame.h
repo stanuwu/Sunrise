@@ -5,6 +5,9 @@
 #include <span>
 
 namespace sunrise::middleware::bap {
+/** Outer marker/type/length and inner service/task widths on the BAP wire. */
+inline constexpr std::size_t kOuterHeaderSize = 2 + sizeof(std::uint32_t);
+inline constexpr std::size_t kRequestHeaderSize = sizeof(std::uint16_t) + sizeof(std::uint32_t);
 
 /** Supported BAP outer-frame encodings. */
 enum class FrameType : std::uint8_t {

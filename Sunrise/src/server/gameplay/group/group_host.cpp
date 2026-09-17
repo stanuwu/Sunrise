@@ -49,8 +49,6 @@ using admission::owned_elsewhere;
 
 /** Local membership-body limit, separate from the reliable queue's fragment capacity. */
 constexpr std::size_t kMembershipBodyCapacity = state::gameplay::kGroupMessageCapacity;
-/** Only the low registry bits of a request bitmap name a parameter. */
-constexpr std::uint64_t kParameterMaskBits = (std::uint64_t{1} << wire::kParameterCount) - 1U;
 /** Registry index the join-latch update names. Any index would do; none is ever filled. */
 constexpr std::uint8_t kJoinLatchParameter = 0;
 /** Revision of the last published snapshot. The consumer refuses one that does not increase. */
@@ -411,7 +409,7 @@ void drop_session(const state::gameplay::Endpoint& from, std::uint64_t sessionId
     if (!wire::read_parameter_request(reader, header)) {
         return false;
     }
-    const std::uint64_t mask = header.requestedMask & kParameterMaskBits;
+    const std::uint64_t mask = header.requestedMask & wire::kParameterMaskBits;
     std::array<char, kParameterNameCapacity> names{};
     report(core::log::Level::info,
            "ev=gameplay stage=parameters result=request mask=0x%08X mode=%u names=%s",
@@ -505,7 +503,6 @@ void drop_session(const state::gameplay::Endpoint& from, std::uint64_t sessionId
 
 } // namespace
 
-/** Refreshes native memberships retained across a channel rebuild. */
 void refresh_endpoint(const state::gameplay::Endpoint& endpoint) noexcept {
     AcquireSRWLockExclusive(&g_admittedLock);
     admission::refresh_endpoint(endpoint);

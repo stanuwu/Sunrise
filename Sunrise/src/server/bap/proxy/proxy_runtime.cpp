@@ -19,8 +19,10 @@ using upstream_link::LinkStage;
 using upstream_link::PendingForward;
 using upstream_link::UpstreamLink;
 constexpr auto kConnectionCount = client::network::kBapConnectionCount;
-// Both the outer and request headers occupy 6 bytes; encrypted requests also carry a GCM tag.
-constexpr std::size_t kHeldBodyCapacity = upstream_link::kLinkFrameCapacity - 12;
+// Excludes both wire headers; hold() also subtracts the GCM tag for encrypted requests.
+constexpr std::size_t kHeldBodyCapacity = upstream_link::kLinkFrameCapacity
+                                          - middleware::bap::kOuterHeaderSize
+                                          - middleware::bap::kRequestHeaderSize;
 
 struct HeldForward {
     std::uint16_t service{};
@@ -114,7 +116,20 @@ bool response(UpstreamLink& link,
         if (parsed.status != middleware::bap::kStatusOk) {
             profile_publisher::reject(
                 link.downstreamConnectionId, forward.taskId, parsed.serviceId);
-            return true;
+            if (parsed.serviceId
+                != static_cast<std::uint16_t>(
+                    middleware::bap::ResponseService::accountProjection)) {
+                fail_connection(link.downstreamConnectionId, "internal_response");
+                return false;
+            }
+            // Every downstream channel waits on this account projection. A rejected projection
+            // cannot become ready through queue drainage, so close every dependent channel.
+            for (const auto& owned : g_links) {
+                if (owned) {
+                    fail_connection(owned->downstreamConnectionId, "profile_rejected");
+                }
+            }
+            return false;
         }
         if (profile_publisher::acknowledge(
                 link.downstreamConnectionId, forward.taskId, parsed.serviceId)) {

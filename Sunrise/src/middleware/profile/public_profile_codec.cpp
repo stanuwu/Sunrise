@@ -12,7 +12,7 @@
 
 namespace sunrise::middleware::profile {
 namespace {
-/** ASCII "SPRF": this fork's own container marker, never a value the game client produces. */
+/** ASCII "SPRF": the public-profile container marker, never a value the game client produces. */
 constexpr std::uint32_t kMagic = 0x53505246;
 /** Version 6 removes the two join-lock fields; older layouts must be refused before decoding. */
 constexpr std::uint16_t kVersion = 6;

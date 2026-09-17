@@ -631,7 +631,6 @@ bool commit_equipment_swap(PendingEquipmentSwap& mutation) noexcept {
     return true;
 }
 
-/** @return The bound account under its scope's visibility, or an empty account on failure. */
 AccountState bound_account_snapshot() noexcept {
     AccountState output{};
     (void)bound_account_snapshot(output);

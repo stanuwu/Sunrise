@@ -9,10 +9,8 @@ namespace sunrise::middleware::profile {
 
 /**
  * Local profile-body budget; oversized encoding or input is refused. Version 6 needs at most
- *
  * 8,015 bytes with three fully equipped characters and all native presence fields present.
- * The
- * retained 256 KiB ceiling also budgets each of the publisher's two fixed staging buffers.
+ * The retained 256 KiB ceiling also budgets each of the publisher's two fixed staging buffers.
  */
 inline constexpr std::size_t kMaximumEncodedSize = 256 * 1024;
 

@@ -826,7 +826,8 @@ struct ProfileExchangePayout {
                                            std::span<const ProfileExchangePayout> payouts,
                                            PendingProfileItemAcquisition& mutation) noexcept;
 
-/** @return The bound account under its scope's visibility, or an empty account on failure. */
+/** @return The bound account under its scope's visibility; before public profile arrival, only
+ * its enrolled primary SOID is populated. Invalid ownership returns an empty account. */
 [[nodiscard]] AccountState bound_account_snapshot() noexcept;
 /** Publishes the actual local BAP listener port before any client signs on. */
 void publish_bap_port(std::uint16_t port) noexcept;

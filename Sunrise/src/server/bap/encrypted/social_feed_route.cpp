@@ -11,6 +11,9 @@
 #include "internal.h"
 
 namespace sunrise::server::bap::encrypted {
+static_assert(
+    state::social::feed::kPublicationNotice
+    == static_cast<std::uint16_t>(middleware::bap::NotificationService::socialPublication));
 namespace {
 void append_peer_routes(state::social::feed::Feed& feed, std::uint64_t primarySoid) noexcept {
     namespace descriptor = middleware::gameplay::descriptor;
@@ -65,6 +68,10 @@ void clear_prefix(std::span<std::byte> buffer, std::size_t size) noexcept {
 }
 /** Stamp of the mirror the host has already applied to itself. */
 state::social::Stamp g_hostStamp{};
+/** A refused local delivery retries this composed feed before composing another publication. */
+state::social::feed::Feed g_hostFeed{};
+state::social::Stamp g_hostPreparedStamp{};
+bool g_hostPending{};
 /** Delivery token shared by feeds and notices; feeds also use it as their registration serial. */
 std::uint64_t g_nextSocialSerial{1};
 } // namespace
@@ -79,9 +86,23 @@ void service_host_social() noexcept {
     if (directory.link_count(state::kLocalAccount) == 0) {
         return;
     }
+    const auto routeGeneration = profiles::public_generation();
+    if (g_hostPending
+        && directory.stamp(state::kLocalAccount, routeGeneration) != g_hostPreparedStamp) {
+        // A new publication supersedes refused work, including any withdrawn authorization.
+        g_hostPending = false;
+    }
+    if (g_hostPending) {
+        if (social::apply_feed(g_hostFeed)
+            && state::network::peer_routes::replace(
+                std::span(g_hostFeed.routes).first(g_hostFeed.routeCount))) {
+            g_hostStamp = g_hostPreparedStamp;
+            g_hostPending = false;
+        }
+        return;
+    }
     // Sample the route generation before deriving from it: a change during composition leaves the
     // stamp behind the routes, which asks again, where the reverse would never ask.
-    const auto routeGeneration = profiles::public_generation();
     if (directory.stamp(state::kLocalAccount, routeGeneration) == g_hostStamp
         && !social::pending_local_work()) {
         return;
@@ -97,17 +118,22 @@ void service_host_social() noexcept {
     // Friends omit the local player, but the relay must authorize both native endpoints.
     // Resolve the playing host through the same published ownership as every other peer.
     append_peer_routes(feed, state::account_primary_soid(state::kLocalAccount));
-    if (social::apply_feed(feed)) {
-        static_cast<void>(
-            state::network::peer_routes::replace(std::span(feed.routes).first(feed.routeCount)));
+    // The directory apply advances its own stamp. Cache that exact composition on refusal.
+    g_hostPreparedStamp = directory.stamp(state::kLocalAccount, routeGeneration);
+    if (social::apply_feed(feed)
+        && state::network::peer_routes::replace(std::span(feed.routes).first(feed.routeCount))) {
+        g_hostStamp = g_hostPreparedStamp;
+    } else {
+        g_hostFeed = feed;
+        g_hostPending = true;
     }
-    // Read after the apply: the host's own request advances its own publication, so the pre-apply
-    // stamp would never match and this mirror would rebuild on every service pass.
-    g_hostStamp = directory.stamp(state::kLocalAccount, routeGeneration);
 }
 
 void reset_host_social() noexcept {
     g_hostStamp = {};
+    g_hostPreparedStamp = {};
+    g_hostFeed = {};
+    g_hostPending = false;
 }
 
 bool consume_social_feed(Session& session,

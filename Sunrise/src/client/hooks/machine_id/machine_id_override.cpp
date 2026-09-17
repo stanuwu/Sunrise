@@ -2,8 +2,6 @@
 
 #include <Windows.h>
 
-#include <array>
-
 #include "../../../core/logging/log.h"
 #include "../../../core/settings/settings.h"
 #include "../../patterns/image_scan.h"

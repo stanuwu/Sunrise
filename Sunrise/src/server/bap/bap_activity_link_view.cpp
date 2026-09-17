@@ -62,14 +62,12 @@ std::int32_t selected_region_index_locked(const Session& session) noexcept {
     return selected_region_locked(session).index;
 }
 
-/** Counts matching authenticated links while the caller already owns the BAP lock. */
 std::size_t activity_link_count_locked(const state::activity::SessionBinding& binding) noexcept {
     std::size_t count = 0;
     static_cast<void>(unique_activity_link_locked(binding, count));
     return count;
 }
 
-/** Counts authenticated BAP links that currently own one exact activity generation. */
 std::size_t activity_link_count_locked(const state::activity::SessionBinding& binding,
                                        std::uint64_t recipientGeneration) noexcept {
     std::size_t count{};

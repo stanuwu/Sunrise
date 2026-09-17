@@ -6,6 +6,7 @@
 
 #include "../../../state/account/account_platform.h"
 #include "../../filesystem/path.h"
+#include "definition.h"
 
 #pragma comment(lib, "bcrypt.lib")
 
@@ -68,8 +69,10 @@ bool load_or_create(std::uint64_t& token) noexcept {
         random = 0x100;
     }
 
-    // The random draw fills bits 8-31; the literal folds in the fixed high dword and low byte.
-    record.token = 0x0110000100000000ULL | (random & 0xFFFFFF00U) | 0xC5U;
+    // Preserve the default identity's universe/type/instance and shared low account byte.
+    // SOID conversion discards that byte; randomizing bits 8-31 gives distinct account SOIDs.
+    constexpr std::uint64_t kRandomAccountBits = 0xFFFFFF00ULL;
+    record.token = (kDefaultSteamId & ~kRandomAccountBits) | (random & kRandomAccountBits);
     record.inverse = ~record.token;
     file = CreateFileW(filename.chars.data(),
                        GENERIC_WRITE,

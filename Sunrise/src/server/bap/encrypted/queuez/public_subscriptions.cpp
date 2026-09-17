@@ -108,10 +108,45 @@ Result consume(Session& session,
         return Result::notHandled;
     }
     if (!session.authenticated || session.accountHandle == state::kInvalidAccount
-        || request.frameType != middleware::bap::FrameType::encrypted
-        || !(webRequest ? web::messages::opcode206::parse_request(message, selector)
-                        : middleware::bap::family_subscription::parse(request.body, selector))) {
+        || request.frameType != middleware::bap::FrameType::encrypted) {
         return Result::failure;
+    }
+    const auto refuse = [&]() {
+        written = 0;
+        if (!webRequest) {
+            return Result::failure;
+        }
+        const ServiceRoute route{ResponseMode::reply,
+                                 request.serviceId
+                                         == static_cast<std::uint16_t>(RequestService::webService)
+                                     ? middleware::bap::ResponseService::webService
+                                     : middleware::bap::ResponseService::webServiceServer,
+                                 BodyCodec::empty};
+        std::array<std::byte, web::kEnvelopeHeaderSize + 1> body{};
+        std::size_t bodySize{}, size{};
+        if (!web::encode_response(message,
+                                  web::ResponseShape::statusOnly,
+                                  {.code = web::kRefusedStatusCode},
+                                  body,
+                                  bodySize)
+            || !reply::encode(scratch,
+                              route,
+                              request.taskId,
+                              session.sessionKey,
+                              session.sendNonce,
+                              std::span(body).first(bodySize),
+                              size)
+            || size > response.size()) {
+            return Result::failure;
+        }
+        std::copy_n(scratch.framed.begin(), size, response.begin());
+        middleware::secure_channel::advance_nonce(session.sendNonce);
+        written = size;
+        return Result::success;
+    };
+    if (!(webRequest ? web::messages::opcode206::parse_request(message, selector)
+                     : middleware::bap::family_subscription::parse(request.body, selector))) {
+        return refuse();
     }
     if (!supported(selector.familyType)) {
         return Result::notHandled;
@@ -126,7 +161,7 @@ Result consume(Session& session,
     }
     written = 0;
     if (selector.familyRootSoid == 0) {
-        return Result::failure;
+        return refuse();
     }
     const bool removing =
         request.serviceId == static_cast<std::uint16_t>(RequestService::unsubscribeFamily);
@@ -139,7 +174,7 @@ Result consume(Session& session,
                               return value.root != 0 && value.family == selector.familyType;
                           });
         if (count >= kRootsPerFamily) {
-            return Result::failure;
+            return refuse();
         }
         for (auto& candidate : session.publicSubscriptions.entries) {
             if (candidate.root == 0) {
@@ -148,7 +183,7 @@ Result consume(Session& session,
             }
         }
         if (!entry) {
-            return Result::failure;
+            return refuse();
         }
     }
     Subscription staged = entry ? *entry : Subscription{};
@@ -191,11 +226,11 @@ Result consume(Session& session,
         const auto current = generation(scratch, staged);
         const bool changed = !first && current != 0 && current != staged.generation;
         if (changed && staged.version == (std::numeric_limits<std::int32_t>::max)()) {
-            return Result::failure;
+            return refuse();
         }
         const auto version = staged.version + (changed ? 1 : 0);
         if (!prepare(scratch, staged, version, prepared, character)) {
-            return Result::failure;
+            return refuse();
         }
         publishedJoin = staged.family == datagen::kJoinFamily && prepared.family.objects.size() > 1;
         const bool content = !prepared.family.objects.empty();
@@ -205,7 +240,7 @@ Result consume(Session& session,
         }
         staged.version = version;
         staged.character = content ? character : 0;
-        staged.generation = content ? current : 0;
+        staged.generation = current;
     }
     if (size > response.size()) {
         return Result::failure;
@@ -263,6 +298,7 @@ bool poll(Session& session,
             return false;
         }
         if (prepared.family.objects.empty()) {
+            entry.generation = current;
             push::queuez_frame::clear_object_storage(
                 scratch, prepared.rawClearSize, prepared.compressedClearSize);
             return false;

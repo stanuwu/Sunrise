@@ -153,6 +153,7 @@ bool publish_local_presence(AccountHandle owner, const social::NativePresence& v
     if (g_localPresence != value) {
         g_localPresence = value;
         g_entries[kLocalAccount].peerPublication.observe(value);
+        g_publicGeneration.fetch_add(1, std::memory_order_release);
         local_changed();
     }
     return true;
@@ -414,11 +415,20 @@ bool publish(AccountHandle handle, const AccountState& profile) noexcept {
         }
     }
     // Every refusal is above this point. Readers hold the same lock throughout their copy.
-    auto& candidate = entry.profile.emplace();
+    if (!entry.profile) {
+        entry.profile.emplace();
+    }
+    auto& candidate = *entry.profile;
     candidate.primarySoid = profile.primarySoid;
     candidate.presence = profile.presence;
     candidate.characterCount = profile.characterCount;
-    std::copy_n(profile.characters.begin(), profile.characterCount, candidate.characters.begin());
+    if (&candidate != &profile) {
+        std::copy_n(
+            profile.characters.begin(), profile.characterCount, candidate.characters.begin());
+    }
+    for (std::size_t i = candidate.characterCount; i < candidate.characters.size(); ++i) {
+        candidate.characters[i] = {};
+    }
     for (auto& character : candidate.characters) {
         character.stacks = {};
         seed_row_generations(character);

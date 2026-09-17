@@ -102,6 +102,7 @@ bool draw_invitation(const steam::interfaces::methods::PendingInvitation& invita
     // not sit over the crosshair, at a fixed width in device-independent pixels.
     constexpr float kHorizontalAnchor = 0.5F;
     constexpr float kVerticalAnchor = 0.3F;
+    // UI layout budget for the wrapped invitation sentence and both action buttons.
     constexpr float kDialogWidth = 390.0F;
     const auto* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos({viewport->WorkPos.x + viewport->WorkSize.x * kHorizontalAnchor,

@@ -4,6 +4,7 @@
 #include <WinSock2.h>
 #include <array>
 #include <cstdio>
+#include <mstcpip.h>
 
 #include "../../core/logging/log.h"
 #include "../../core/network_service_socket.h"
@@ -49,7 +50,22 @@ void accept_peer(Listener& listener, std::size_t slot, std::uint64_t now) noexce
     if (accepted == INVALID_SOCKET) {
         return;
     }
-    if (!make_nonblocking(accepted)) {
+    // Match the transport's 30-second stalled-work limit before probing an idle connection.
+    // Windows sends ten unanswered probes at its standard one-second interval (SIO_KEEPALIVE_VALS).
+    // A responsive idle peer stays connected; a vanished machine closes in about 40 seconds.
+    tcp_keepalive keepalive{1, 30'000, 1000};
+    DWORD returned{};
+    if (!make_nonblocking(accepted)
+        || WSAIoctl(accepted,
+                    SIO_KEEPALIVE_VALS,
+                    &keepalive,
+                    sizeof keepalive,
+                    nullptr,
+                    0,
+                    &returned,
+                    nullptr,
+                    nullptr)
+               == SOCKET_ERROR) {
         closesocket(accepted);
         return;
     }

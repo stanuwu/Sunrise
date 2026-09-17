@@ -14,6 +14,25 @@ constexpr std::size_t kDirectoryNameCode = 0x46;
 constexpr std::size_t kDirectoryFlags = 0x59;
 static_assert(state::kDisplayNameCapacity == (kDirectoryNameCode - kDirectoryDisplayName) / 2);
 
+// Native family-two member schema field positions, including its three repeated level bytes.
+constexpr std::size_t kMemberCharacterSoid = 0;
+constexpr std::size_t kMemberPreviousActivity = 8;
+constexpr std::size_t kMemberActivity = 0x0A;
+constexpr std::size_t kMemberTitleKind = 0x0D;
+constexpr std::size_t kMemberLevel = 0x10;
+constexpr std::size_t kMemberLight = 0x14;
+constexpr std::size_t kMemberLightFloat = 0x18;
+constexpr std::size_t kMemberDisplayedLight = 0x20;
+constexpr std::size_t kMemberEmblem = 0x24;
+constexpr std::size_t kMemberAbsentA = 0x26;
+constexpr std::size_t kMemberAbsentB = 0x28;
+constexpr std::size_t kMemberTitle = 0x34;
+constexpr std::size_t kMemberLevelA = 0x38;
+constexpr std::size_t kMemberLevelB = 0x39;
+constexpr std::size_t kMemberLevelC = 0x3A;
+constexpr std::size_t kMemberGroupKey = 0x40;
+constexpr std::size_t kMemberMemberCount = 0x44;
+
 template <typename T>
 void put(std::span<std::byte> output, std::size_t offset, const T& value) noexcept {
     std::memcpy(output.data() + offset, &value, sizeof value);
@@ -29,7 +48,6 @@ void text(std::span<std::byte> output,
 }
 } // namespace
 
-/** Native family-two directory schema. Every position above is one of its declared fields. */
 bool encode_directory(std::uint64_t accountSoid,
                       std::uint64_t characterSoid,
                       const state::AccountPresence& presence,
@@ -47,33 +65,30 @@ bool encode_directory(std::uint64_t accountSoid,
     return true;
 }
 
-/**
- * Native family-two member schema. Each offset below is that schema's own field position and
- * each argument names the field.
- */
 bool encode_member(const Member& member, std::span<std::byte> output) noexcept {
     if (member.characterSoid == 0 || output.size() < kMemberSize) {
         return false;
     }
     auto body = output.first(kMemberSize);
     std::fill(body.begin(), body.end(), std::byte{});
-    put(body, 0, member.characterSoid);
-    put(body, 8, member.previousActivityIndex);
-    put(body, 0x0A, member.activityIndex);
-    put(body, 0x0D, member.titleKind);
+    put(body, kMemberCharacterSoid, member.characterSoid);
+    put(body, kMemberPreviousActivity, member.previousActivityIndex);
+    put(body, kMemberActivity, member.activityIndex);
+    put(body, kMemberTitleKind, member.titleKind);
     const auto level = static_cast<std::int32_t>(member.level);
     const auto light = static_cast<float>(member.light);
-    put(body, 0x10, level);
-    put(body, 0x14, member.light);
-    put(body, 0x18, light);
-    put(body, 0x20, member.light);
-    put(body, 0x24, member.emblem);
-    put(body, 0x26, kAbsentDefinition);
-    put(body, 0x28, kAbsentDefinition);
-    put(body, 0x34, member.title);
-    body[0x38] = body[0x39] = body[0x3A] = static_cast<std::byte>(member.level);
-    put(body, 0x40, member.groupKey);
-    put(body, 0x44, member.memberCount);
+    put(body, kMemberLevel, level);
+    put(body, kMemberLight, member.light);
+    put(body, kMemberLightFloat, light);
+    put(body, kMemberDisplayedLight, member.light);
+    put(body, kMemberEmblem, member.emblem);
+    put(body, kMemberAbsentA, kAbsentDefinition);
+    put(body, kMemberAbsentB, kAbsentDefinition);
+    put(body, kMemberTitle, member.title);
+    body[kMemberLevelA] = body[kMemberLevelB] = body[kMemberLevelC] =
+        static_cast<std::byte>(member.level);
+    put(body, kMemberGroupKey, member.groupKey);
+    put(body, kMemberMemberCount, member.memberCount);
     return true;
 }
 

@@ -386,7 +386,10 @@ Settings defaults() noexcept {
 }
 
 /** Parses the supported settings from complete JSON text. */
-bool parse(std::string_view json, Settings& output) noexcept {
+bool parse(std::string_view json, Settings& output, ParseFailure* failure) noexcept {
+    if (failure) {
+        *failure = ParseFailure::invalidDocument;
+    }
     Settings parsed = defaults();
     parser::Parser parser(json);
     if (!parser.parse_root(parsed)) {
@@ -396,10 +399,15 @@ bool parse(std::string_view json, Settings& output) noexcept {
     if (!parsed.multiplayerEnabled
         && (parsed.compactClient || parsed.compactHost || parsed.configuredRole == Role::host
             || parsed.configuredRole == Role::client || parsed.server.upstream.enabled
-            || parsed.client.externalServer.enabled
-            || parsed.server.bapBind != std::array<unsigned char, 4>{127, 0, 0, 1}
-            || parsed.server.gameplay.bindAddress != std::array<unsigned char, 4>{127, 0, 0, 1})) {
+            || parsed.client.externalServer.enabled || parsed.server.bapBind != kLoopbackOctets
+            || parsed.server.gameplay.bindAddress != kLoopbackOctets)) {
+        if (failure) {
+            *failure = ParseFailure::multiplayerOptInRequired;
+        }
         return false;
+    }
+    if (failure) {
+        *failure = ParseFailure::none;
     }
     output = parsed;
     return true;

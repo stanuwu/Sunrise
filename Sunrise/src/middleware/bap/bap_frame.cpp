@@ -13,11 +13,11 @@ constexpr std::byte kMagic{0x01};
 constexpr std::size_t kOuterMagicOffset = 0;
 constexpr std::size_t kOuterTypeOffset = 1;
 constexpr std::size_t kOuterLengthOffset = 2;
-constexpr std::size_t kOuterHeaderSize = kOuterLengthOffset + encoding::kU32Size;
+static_assert(kOuterHeaderSize == kOuterLengthOffset + encoding::kU32Size);
 /** Fixed wire offsets for the 6-byte request and 8-byte response headers. */
 constexpr std::size_t kServiceOffset = 0;
 constexpr std::size_t kTaskOffset = kServiceOffset + encoding::kU16Size;
-constexpr std::size_t kRequestHeaderSize = kTaskOffset + encoding::kU32Size;
+static_assert(kRequestHeaderSize == kTaskOffset + encoding::kU32Size);
 constexpr std::size_t kStatusOffset = kRequestHeaderSize;
 constexpr std::size_t kResponseHeaderSize = kStatusOffset + encoding::kU16Size;
 

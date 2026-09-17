@@ -87,7 +87,8 @@ bool prepare_join_descriptor(Scratch& scratch,
     // Its descriptor is a u64 key, a u32 declared length, the join descriptor body, four bytes of
     // alignment, and the u64 static join silo the client reads last.
     constexpr std::size_t descriptorBodyOffset = 8 + 4;
-    constexpr std::size_t descriptorSiloOffset = 0x90;
+    constexpr std::size_t descriptorSiloOffset =
+        descriptorBodyOffset + descriptor::kDescriptorSize + 4;
     constexpr std::size_t descriptorSize = descriptorSiloOffset + 8;
     static_assert(descriptorBodyOffset + descriptor::kDescriptorSize <= descriptorSiloOffset);
     auto& account = scratch.accountImage;

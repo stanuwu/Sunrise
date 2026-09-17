@@ -7,8 +7,7 @@
 namespace sunrise::server::bap::encrypted::push {
 /**
  * Projects committed identities regardless of optional profile metadata availability.
- * Called
- * under the BAP transaction lock with the committed native roster snapshot.
+ * Called under the BAP transaction lock with the committed native roster snapshot.
  */
 void project_activity_peers(
     const state::activity::reservations::Roster& roster,

@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cstdio>
-#include <cstring>
 #include <limits>
 
 #include "../../../client/hooks/account_registration/account_registration.h"

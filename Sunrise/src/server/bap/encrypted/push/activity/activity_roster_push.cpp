@@ -211,7 +211,6 @@ void commit_membership_body_record(const Session& session) noexcept {
     }
 }
 
-/** @return True when this connection has not itself delivered this membership revision. */
 bool connection_owes_membership(const Session& session,
                                 std::uint64_t sessionId,
                                 std::uint32_t revision) noexcept {
