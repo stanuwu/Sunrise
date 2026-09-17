@@ -13,7 +13,7 @@ namespace {
 namespace generated = state::activity_sdk::generated_world;
 namespace manifest = state::activity_sdk::generated_world::manifest;
 
-/** Resolves one directory and rejects every reparse-backed ancestor component. */
+/** Resolves one directory. */
 [[nodiscard]] bool ordinary_directory_path(const std::wstring& input,
                                            std::wstring& output) noexcept {
     output.clear();
@@ -40,8 +40,7 @@ namespace manifest = state::activity_sdk::generated_world::manifest;
             const std::wstring prefix = output.substr(0, end);
             const DWORD attributes = GetFileAttributesW(prefix.c_str());
             if (attributes == INVALID_FILE_ATTRIBUTES
-                || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0
-                || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+                || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
                 output.clear();
                 return false;
             }
@@ -148,10 +147,6 @@ bool clean_stale_shards(const std::wstring& directory,
         std::uint32_t scenarioTag = 0;
         generated::Digest digest{};
         if (parse_shard_leaf(leaf, scenarioTag, digest)) {
-            if ((found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-                complete = false;
-                continue;
-            }
             const auto record =
                 std::lower_bound(active.begin(),
                                  active.end(),

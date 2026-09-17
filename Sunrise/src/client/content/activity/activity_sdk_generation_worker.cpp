@@ -163,7 +163,7 @@ void log_stage_duration(std::string_view stage,
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-/** Accepts only a missing or empty ordinary output root for the internal offline pass. */
+/** Accepts only a missing or empty output root for the internal offline pass. */
 [[nodiscard]] bool isolated_output_ready(std::wstring_view path) noexcept {
     if (path.empty()) {
         return false;
@@ -175,8 +175,7 @@ void log_stage_duration(std::string_view stage,
             const DWORD error = GetLastError();
             return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
         }
-        if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0
-            || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
             return false;
         }
         WIN32_FIND_DATAW entry{};
