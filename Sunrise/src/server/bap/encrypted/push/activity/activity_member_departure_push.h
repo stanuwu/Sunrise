@@ -9,7 +9,7 @@ namespace sunrise::server::bap::encrypted::push::activity {
                                             std::span<std::byte> response,
                                             std::size_t& written,
                                             bool& touchesScratch) noexcept;
-/** Replays the recipient's own join result after its changed native membership is acknowledged. */
+/** Replays the recipient's own join result once this link delivered the changed membership. */
 [[nodiscard]] bool consume_member_rejoin(Session& session,
                                          Scratch& scratch,
                                          std::span<std::byte> response,

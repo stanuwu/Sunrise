@@ -25,7 +25,7 @@ bool datagram(SOCKET socket) noexcept {
 bool peer_target(const sockaddr_in& endpoint, bool udp) noexcept {
     return udp && core::settings::multiplayer()
            && state::network::peer_routes::allows(
-               {ntohl(endpoint.sin_addr.s_addr), ntohs(endpoint.sin_port)}, GetTickCount64());
+               {ntohl(endpoint.sin_addr.s_addr), ntohs(endpoint.sin_port)});
 }
 bool local_account_peer(const sockaddr_in& endpoint, SOCKET socket, bool udp) noexcept {
     if (udp || !core::settings::multiplayer()

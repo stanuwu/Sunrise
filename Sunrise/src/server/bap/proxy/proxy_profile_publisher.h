@@ -11,8 +11,12 @@ namespace sunrise::server::bap::proxy::profile_publisher {
 void abandon(std::uint32_t connectionId,
              std::uint32_t taskId,
              std::uint16_t responseService) noexcept;
+/** Refuses this image until its local generation or selected connection changes. */
+void reject(std::uint32_t connectionId,
+            std::uint32_t taskId,
+            std::uint16_t responseService) noexcept;
 void reset() noexcept;
-/** Reuses bounded storage; cached encoded bytes support acknowledgement and change detection. */
-void service(std::uint64_t now) noexcept;
+/** Publishes changes without a time gate; retains prepared bytes across output pressure. */
+void service() noexcept;
 
 } // namespace sunrise::server::bap::proxy::profile_publisher

@@ -51,6 +51,12 @@ constexpr unsigned kPortFilterProbe = 3;
 /** Wire mode 4 is alternate stage 2, which compares mappings across destination ports. */
 constexpr unsigned kMappingProbe = 4;
 
+/**
+ * Milliseconds between carrier traffic lines. Counters are cumulative, so this only sets how
+ * coarse the log is; one line every few seconds shows a stall without filling the file.
+ */
+constexpr std::uint64_t kCarrierReportIntervalMs = 5000;
+
 /** Arrivals and traversal replies already reported, counted against the budgets above. */
 std::atomic<unsigned> g_reported{0};
 std::atomic<unsigned> g_traversalReported{0};
@@ -70,6 +76,8 @@ struct EndpointState {
     std::array<std::uint16_t, kSocketCount> ports{};
     bool winsockOwned{};
     bool ready{};
+    /** Set while the primary slot holds the single carrier, which its own thread receives on. */
+    bool carrier{};
     state::gameplay::Endpoint advertised{};
     Identity identity{};
 };
@@ -108,6 +116,26 @@ struct EndpointState {
 
 SRWLOCK g_lock{SRWLOCK_INIT};
 EndpointState g_endpoint;
+
+/** One carrier datagram addressed to this service, staged for the slice that routes it. */
+struct CarrierArrival {
+    state::gameplay::Endpoint from{};
+    std::size_t slot{};
+    std::size_t size{};
+    std::array<std::byte, carrier_wire::kCapacity> payload{};
+};
+/**
+ * Arrivals the receive thread may stage between two service slices. Each slice processes at most
+ * one full ring's worth, matching the burst budget of the original polled carrier.
+ */
+constexpr std::size_t kCarrierArrivalCapacity = 128;
+SRWLOCK g_carrierLock{SRWLOCK_INIT};
+std::array<CarrierArrival, kCarrierArrivalCapacity> g_carrierArrivals{};
+std::size_t g_carrierHead{}, g_carrierCount{};
+HANDLE g_carrierThread{};
+WSAEVENT g_carrierReadable{WSA_INVALID_EVENT}, g_carrierStop{WSA_INVALID_EVENT};
+/** Set before the stop event, so a drain that is keeping up with a flood still leaves promptly. */
+std::atomic_bool g_carrierStopping{};
 
 // The envelope source is obtained from the native flow, never supplied by a request frame.
 bool deliver(const state::gameplay::Endpoint& target,
@@ -170,6 +198,7 @@ void close_locked() noexcept {
         g_endpoint.sockets[slot] = INVALID_SOCKET;
         g_endpoint.ports[slot] = 0;
     }
+    g_endpoint.carrier = false;
     if (g_endpoint.winsockOwned) {
         WSACleanup();
         g_endpoint.winsockOwned = false;
@@ -235,6 +264,7 @@ bind_one(std::uint32_t bindAddress, std::uint16_t port, SOCKET& output) noexcept
         g_endpoint.ports[kRelaySlot] = settings::effective_relay_port(configured);
         g_endpoint.ports[kDiscoverySlot] = middleware::gameplay::nat::discovery::kFirstPort;
         g_endpoint.ports[kDiscoverySlot + 1] = middleware::gameplay::nat::discovery::kSecondPort;
+        g_endpoint.carrier = true;
         report(core::log::Level::info,
                "ev=single_port stage=bind port=%u physical_sockets=1",
                carrierPort);
@@ -296,13 +326,17 @@ bind_one(std::uint32_t bindAddress, std::uint16_t port, SOCKET& output) noexcept
  * @param buffer Receives the datagram bytes.
  * @param from Receives the source endpoint in host order, plus the local port keying the link.
  * @param size Receives the datagram length.
+ * @param carrier True on the carrier slot, whose datagrams are wrapped in one transport frame.
+ *        The bound mode is passed in rather than read, because the receive thread outlives a
+ *        settings change and must keep framing the socket it was started for.
  * @return True when one datagram was read.
  */
 [[nodiscard]] bool receive_once(std::size_t slot,
                                 std::span<std::byte> buffer,
                                 state::gameplay::Endpoint& from,
                                 std::size_t& size,
-                                std::uint32_t& targetAddress) noexcept {
+                                std::uint32_t& targetAddress,
+                                bool carrier) noexcept {
     AcquireSRWLockExclusive(&g_lock);
     const SOCKET socket = g_endpoint.sockets[slot];
     const std::uint16_t localPort = g_endpoint.ports[slot];
@@ -329,7 +363,7 @@ bind_one(std::uint32_t bindAddress, std::uint16_t port, SOCKET& output) noexcept
     // that tells two links from the same peer apart. Everything downstream keys on it.
     from.localPort = localPort;
     size = static_cast<std::size_t>(received);
-    if (single_port()) {
+    if (carrier) {
         carrier_wire::Frame frame{};
         if (!carrier_wire::decode(buffer.first(size), frame)
             || frame.kind != carrier_wire::Kind::request) {
@@ -344,6 +378,216 @@ bind_one(std::uint32_t bindAddress, std::uint16_t port, SOCKET& output) noexcept
         std::memmove(buffer.data(), frame.payload.data(), size);
     }
     return true;
+}
+
+/**
+ * Routes one received datagram to the service that owns it.
+ * Only the thread that calls service() reaches this, so every consumer below keeps the exact
+ * single-threaded ordering it had when the poll loop called it inline.
+ * @param logicalSlot Pool slot the datagram's local port names.
+ * @param from Source endpoint, carrying the local port that keys the link.
+ * @param buffer Datagram bytes, reused in place for a discovery or traversal reply.
+ * @param size Datagram length.
+ * @param now Monotonic tick count in milliseconds.
+ */
+void route_datagram(std::size_t logicalSlot,
+                    state::gameplay::Endpoint& from,
+                    std::span<std::byte> buffer,
+                    std::size_t size,
+                    std::uint64_t now) noexcept {
+    if (logicalSlot >= kDiscoverySlot) {
+        if (middleware::gameplay::nat::discovery::classify({buffer.data(), size})
+            == middleware::gameplay::nat::discovery::Request::natProbe) {
+            const auto mode = std::to_integer<unsigned>(buffer[3]);
+            // A reply from this same endpoint cannot establish open NAT. The carrier's
+            // logical ports also cannot test physical port filtering or mapping. Let
+            // native traversal exhaust those tests and retain its conservative result.
+            if (mode == kOpenNatProbe
+                || (single_port() && (mode == kPortFilterProbe || mode == kMappingProbe))) {
+                return;
+            }
+            if (mode == kPortFilterProbe) {
+                from.localPort = from.localPort == middleware::gameplay::nat::discovery::kFirstPort
+                                     ? middleware::gameplay::nat::discovery::kSecondPort
+                                     : middleware::gameplay::nat::discovery::kFirstPort;
+            }
+        }
+        const auto replySize = middleware::gameplay::nat::discovery::reply(
+            {buffer.data(), size}, from.address, from.port, buffer);
+        if (replySize) {
+            (void)send_to(from, std::span(buffer).first(replySize));
+        }
+        return;
+    }
+    // Relay framing is opaque to the gameplay association parser. Only registered
+    // pairs can consume it; unknown packets on the dedicated socket are discarded.
+    if (relay::route(from, {buffer.data(), size}) || logicalSlot == kRelaySlot) {
+        return;
+    }
+    // Routing reports only what it recognises, so without this an arrival and a silent drop
+    // read the same. The budget keeps a flood off the log.
+    if (g_reported.fetch_add(1, std::memory_order_relaxed) < kMaxReceiveReports) {
+        report(core::log::Level::info,
+               "ev=gameplay stage=receive result=ok from=0x%08X:%u bytes=%zu b0=0x%02X",
+               from.address,
+               static_cast<unsigned>(from.port),
+               size,
+               size != 0 ? static_cast<unsigned>(buffer[0]) : 0U);
+    }
+    // A traversal request is answered before routing: the association layer has no reader
+    // for it, and until it is answered the client never resolves this address.
+    if (middleware::gameplay::nat::make_introduction_reply({buffer.data(), size})) {
+        const bool sent = send_to(from, {buffer.data(), size});
+        if (g_traversalReported.fetch_add(1, std::memory_order_relaxed) < kMaxTraversalReports) {
+            report(core::log::Level::info,
+                   "ev=gameplay stage=traversal result=%s from=0x%08X:%u",
+                   sent ? "reply" : "send_failed",
+                   from.address,
+                   static_cast<unsigned>(from.port));
+        }
+        return;
+    }
+    // The peer opens every connection with the Demonware association handshake, so this
+    // runs ahead of the engine association the same port also carries.
+    if (dtls::route(from, {buffer.data(), size}, now)) {
+        return;
+    }
+    association::route(from, {buffer.data(), size}, now);
+}
+
+/** Stages one carrier datagram addressed to this service for the next slice to route. */
+void stage_arrival(const state::gameplay::Endpoint& from,
+                   std::size_t slot,
+                   std::span<const std::byte> payload) noexcept {
+    AcquireSRWLockExclusive(&g_carrierLock);
+    // A full stage means the slice has not run for the whole bound above. Dropping the newest
+    // keeps the order of what is already staged, which is what the reliable assembler wants.
+    if (g_carrierCount < kCarrierArrivalCapacity) {
+        auto& arrival =
+            g_carrierArrivals[(g_carrierHead + g_carrierCount) % kCarrierArrivalCapacity];
+        arrival.from = from;
+        arrival.slot = slot;
+        arrival.size = payload.size();
+        std::memcpy(arrival.payload.data(), payload.data(), payload.size());
+        ++g_carrierCount;
+    }
+    ReleaseSRWLockExclusive(&g_carrierLock);
+}
+
+/** Takes the oldest staged arrival. @return True when one was there. */
+[[nodiscard]] bool take_arrival(CarrierArrival& output) noexcept {
+    AcquireSRWLockExclusive(&g_carrierLock);
+    const bool taken = g_carrierCount != 0;
+    if (taken) {
+        output = g_carrierArrivals[g_carrierHead];
+        g_carrierHead = (g_carrierHead + 1) % kCarrierArrivalCapacity;
+        --g_carrierCount;
+    }
+    ReleaseSRWLockExclusive(&g_carrierLock);
+    return taken;
+}
+
+/** Forwards or refuses one carrier datagram addressed to another peer. */
+void relay_arrival(const state::gameplay::Endpoint& from,
+                   std::uint32_t targetAddress,
+                   std::span<const std::byte> payload) noexcept {
+    // Relay only between endpoints the accepted social directory authorises.
+    const bool allowed = state::network::peer_routes::allows({from.address, from.port})
+                         && state::network::peer_routes::allows({targetAddress, from.localPort});
+    if (!allowed) {
+        ++g_carrierDenied;
+        return;
+    }
+    const state::gameplay::Endpoint target{targetAddress, from.localPort};
+    if (deliver(target, from.address, from.port, payload)) {
+        ++g_carrierRelayed;
+    }
+}
+
+/**
+ * Receives the carrier and forwards a relayed peer datagram on the wakeup that delivered it.
+ * Lock order: g_lock is taken first and released again before g_carrierLock, before the route lock
+ * `peer_routes::allows` takes, and before the send in `deliver` retakes it, so no two are ever held
+ * at once and none is held across the wait. The socket stays non-blocking, so shutdown can always
+ * take g_lock exclusively to close it. Only `deliver`, the two relay counters and the staging ring
+ * are touched here; everything the service slice routes stays on the slice's own thread.
+ */
+DWORD WINAPI carrier_receive(LPVOID) noexcept {
+    const std::array<WSAEVENT, 2> waited{g_carrierStop, g_carrierReadable};
+    for (;;) {
+        if (WSAWaitForMultipleEvents(
+                static_cast<DWORD>(waited.size()), waited.data(), FALSE, WSA_INFINITE, FALSE)
+            != WSA_WAIT_EVENT_0 + 1) {
+            return 0;
+        }
+        AcquireSRWLockShared(&g_lock);
+        const SOCKET socket = g_endpoint.sockets[kPrimarySlot];
+        ReleaseSRWLockShared(&g_lock);
+        WSANETWORKEVENTS signalled{};
+        // Enumerating resets the event, so a datagram that lands during the drain below wakes the
+        // next wait instead of being left in the socket.
+        if (socket == INVALID_SOCKET
+            || WSAEnumNetworkEvents(socket, g_carrierReadable, &signalled) == SOCKET_ERROR) {
+            return 0;
+        }
+        if ((signalled.lNetworkEvents & FD_READ) == 0) {
+            continue;
+        }
+        while (!g_carrierStopping.load(std::memory_order_acquire)) {
+            std::array<std::byte, carrier_wire::kCapacity> buffer{};
+            state::gameplay::Endpoint from{};
+            std::size_t size = 0;
+            std::uint32_t targetAddress{};
+            if (!receive_once(kPrimarySlot, buffer, from, size, targetAddress, true)) {
+                break;
+            }
+            if (!size) {
+                continue;
+            }
+            AcquireSRWLockShared(&g_lock);
+            const auto logicalSlot = slot_for_port(g_endpoint, from.localPort);
+            const bool serviceTarget = targetAddress == g_endpoint.advertised.address
+                                       && g_endpoint.ports[logicalSlot] == from.localPort;
+            ReleaseSRWLockShared(&g_lock);
+            if (serviceTarget) {
+                stage_arrival(from, logicalSlot, std::span(buffer).first(size));
+                continue;
+            }
+            relay_arrival(from, targetAddress, std::span(buffer).first(size));
+        }
+    }
+}
+
+/** Starts the carrier receive thread. @return True when the carrier has an owner. */
+[[nodiscard]] bool start_carrier_receive(SOCKET socket) noexcept {
+    g_carrierReadable = WSACreateEvent();
+    g_carrierStop = WSACreateEvent();
+    if (g_carrierReadable != WSA_INVALID_EVENT && g_carrierStop != WSA_INVALID_EVENT
+        && WSAEventSelect(socket, g_carrierReadable, FD_READ) != SOCKET_ERROR) {
+        g_carrierThread = CreateThread(nullptr, 0, &carrier_receive, nullptr, 0, nullptr);
+    }
+    return g_carrierThread != nullptr;
+}
+
+/** Stops the carrier receive thread and releases its events. Callers must not hold g_lock. */
+void stop_carrier_receive() noexcept {
+    if (g_carrierThread != nullptr) {
+        g_carrierStopping.store(true, std::memory_order_release);
+        (void)WSASetEvent(g_carrierStop);
+        (void)WaitForSingleObject(g_carrierThread, INFINITE);
+        CloseHandle(g_carrierThread);
+        g_carrierThread = nullptr;
+        g_carrierStopping.store(false, std::memory_order_release);
+    }
+    for (WSAEVENT* event : {&g_carrierReadable, &g_carrierStop}) {
+        if (*event != WSA_INVALID_EVENT) {
+            (void)WSACloseEvent(*event);
+            *event = WSA_INVALID_EVENT;
+        }
+    }
+    AcquireSRWLockExclusive(&g_carrierLock);
+    g_carrierHead = g_carrierCount = 0;
+    ReleaseSRWLockExclusive(&g_carrierLock);
 }
 
 } // namespace
@@ -392,7 +636,16 @@ bool initialize() noexcept {
     g_endpoint.ready = true;
     const bool embedded = configured.topology == settings::Topology::embedded;
     const std::size_t bound = bound_ports_locked();
+    const bool carrier = g_endpoint.carrier;
+    const SOCKET carrierSocket = g_endpoint.sockets[kPrimarySlot];
     ReleaseSRWLockExclusive(&g_lock);
+    // The carrier has one owner. Without the thread nothing would take a datagram off it, so a
+    // failed start is a failed bind.
+    if (carrier && !start_carrier_receive(carrierSocket)) {
+        shutdown();
+        report(core::log::Level::error, "ev=gameplay stage=endpoint result=fail reason=receive");
+        return false;
+    }
     report(core::log::Level::info,
            "ev=gameplay stage=endpoint result=ok mode=%s port=%u ports=%zu of=%zu",
            embedded ? "embedded" : "external",
@@ -404,126 +657,52 @@ bool initialize() noexcept {
 
 /** Drains a bounded number of datagrams and expires stale associations. */
 void service(std::uint64_t now) noexcept {
-    // Poll the complete pool once; unused host ports must not each incur a recvfrom call.
-    std::array<WSAPOLLFD, kSocketCount> readable{};
-    bool bound{};
     AcquireSRWLockShared(&g_lock);
-    for (std::size_t slot = 0; slot < kSocketCount; ++slot) {
-        readable[slot] = {g_endpoint.sockets[slot], POLLRDNORM, 0};
-        bound |= readable[slot].fd != INVALID_SOCKET;
-    }
-    const int ready = bound ? WSAPoll(readable.data(), static_cast<ULONG>(readable.size()), 0) : 0;
+    const bool carrier = g_endpoint.carrier;
     ReleaseSRWLockShared(&g_lock);
-    for (std::size_t slot = 0; slot < kSocketCount; ++slot) {
-        if (ready <= 0 || !(readable[slot].revents & POLLRDNORM)) {
-            continue;
+    if (carrier) {
+        // The carrier has its own receive thread, which already forwarded everything it relayed.
+        // Only the datagrams addressed to this service are left, and they route here.
+        CarrierArrival arrival;
+        for (std::size_t drained = 0; drained < kCarrierArrivalCapacity && take_arrival(arrival);
+             ++drained) {
+            route_datagram(arrival.slot, arrival.from, arrival.payload, arrival.size, now);
         }
-        for (unsigned drained = 0; drained < (single_port() ? 128U : kReceiveBudget); ++drained) {
-            std::array<std::byte, carrier_wire::kCapacity> buffer{};
-            state::gameplay::Endpoint from{};
-            std::size_t size = 0;
-            std::uint32_t targetAddress{};
-            if (!receive_once(slot,
-                              single_port() ? std::span(buffer)
-                                            : std::span(buffer).first(kDatagramCapacity),
-                              from,
-                              size,
-                              targetAddress)) {
-                break;
-            }
-            auto logicalSlot = slot;
-            if (single_port()) {
-                if (!size) {
-                    continue;
-                }
-                bool serviceTarget{};
-                AcquireSRWLockShared(&g_lock);
-                logicalSlot = slot_for_port(g_endpoint, from.localPort);
-                serviceTarget = targetAddress == g_endpoint.advertised.address
-                                && g_endpoint.ports[logicalSlot] == from.localPort;
-                ReleaseSRWLockShared(&g_lock);
-                if (!serviceTarget) {
-                    // Relay only between fresh endpoints from the accepted social directory.
-                    const bool allowed =
-                        state::network::peer_routes::allows({from.address, from.port}, now)
-                        && state::network::peer_routes::allows({targetAddress, from.localPort},
-                                                               now);
-                    if (allowed) {
-                        const state::gameplay::Endpoint target{targetAddress, from.localPort};
-                        if (deliver(
-                                target, from.address, from.port, std::span(buffer).first(size))) {
-                            ++g_carrierRelayed;
-                        }
-                    } else {
-                        ++g_carrierDenied;
-                    }
-                    continue;
-                }
-            }
-            if (logicalSlot >= kDiscoverySlot) {
-                if (middleware::gameplay::nat::discovery::classify({buffer.data(), size})
-                    == middleware::gameplay::nat::discovery::Request::natProbe) {
-                    const auto mode = std::to_integer<unsigned>(buffer[3]);
-                    // A reply from this same endpoint cannot establish open NAT. The carrier's
-                    // logical ports also cannot test physical port filtering or mapping. Let
-                    // native traversal exhaust those tests and retain its conservative result.
-                    if (mode == kOpenNatProbe
-                        || (single_port() && (mode == kPortFilterProbe || mode == kMappingProbe))) {
-                        continue;
-                    }
-                    if (mode == kPortFilterProbe) {
-                        from.localPort =
-                            from.localPort == middleware::gameplay::nat::discovery::kFirstPort
-                                ? middleware::gameplay::nat::discovery::kSecondPort
-                                : middleware::gameplay::nat::discovery::kFirstPort;
-                    }
-                }
-                const auto replySize = middleware::gameplay::nat::discovery::reply(
-                    {buffer.data(), size}, from.address, from.port, buffer);
-                if (replySize) {
-                    (void)send_to(from, std::span(buffer).first(replySize));
-                }
+    } else {
+        // Poll the complete pool once; unused host ports must not each incur a recvfrom call.
+        std::array<WSAPOLLFD, kSocketCount> readable{};
+        bool bound{};
+        AcquireSRWLockShared(&g_lock);
+        for (std::size_t slot = 0; slot < kSocketCount; ++slot) {
+            readable[slot] = {g_endpoint.sockets[slot], POLLRDNORM, 0};
+            bound |= readable[slot].fd != INVALID_SOCKET;
+        }
+        const int ready =
+            bound ? WSAPoll(readable.data(), static_cast<ULONG>(readable.size()), 0) : 0;
+        ReleaseSRWLockShared(&g_lock);
+        for (std::size_t slot = 0; slot < kSocketCount; ++slot) {
+            if (ready <= 0 || !(readable[slot].revents & POLLRDNORM)) {
                 continue;
             }
-            // Relay framing is opaque to the gameplay association parser. Only registered
-            // pairs can consume it; unknown packets on the dedicated socket are discarded.
-            if (relay::route(from, {buffer.data(), size}) || logicalSlot == kRelaySlot) {
-                continue;
-            }
-            // Routing reports only what it recognises, so without this an arrival and a silent drop
-            // read the same. The budget keeps a flood off the log.
-            if (g_reported.fetch_add(1, std::memory_order_relaxed) < kMaxReceiveReports) {
-                report(core::log::Level::info,
-                       "ev=gameplay stage=receive result=ok from=0x%08X:%u bytes=%zu b0=0x%02X",
-                       from.address,
-                       static_cast<unsigned>(from.port),
-                       size,
-                       size != 0 ? static_cast<unsigned>(buffer[0]) : 0U);
-            }
-            // A traversal request is answered before routing: the association layer has no reader
-            // for it, and until it is answered the client never resolves this address.
-            if (middleware::gameplay::nat::make_introduction_reply({buffer.data(), size})) {
-                const bool sent = send_to(from, {buffer.data(), size});
-                if (g_traversalReported.fetch_add(1, std::memory_order_relaxed)
-                    < kMaxTraversalReports) {
-                    report(core::log::Level::info,
-                           "ev=gameplay stage=traversal result=%s from=0x%08X:%u",
-                           sent ? "reply" : "send_failed",
-                           from.address,
-                           static_cast<unsigned>(from.port));
+            for (unsigned drained = 0; drained < kReceiveBudget; ++drained) {
+                std::array<std::byte, carrier_wire::kCapacity> buffer{};
+                state::gameplay::Endpoint from{};
+                std::size_t size = 0;
+                std::uint32_t targetAddress{};
+                if (!receive_once(slot,
+                                  std::span(buffer).first(kDatagramCapacity),
+                                  from,
+                                  size,
+                                  targetAddress,
+                                  false)) {
+                    break;
                 }
-                continue;
+                route_datagram(slot, from, buffer, size, now);
             }
-            // The peer opens every connection with the Demonware association handshake, so this
-            // runs ahead of the engine association the same port also carries.
-            if (dtls::route(from, {buffer.data(), size}, now)) {
-                continue;
-            }
-            association::route(from, {buffer.data(), size}, now);
         }
     }
     association::expire(now);
-    if (single_port() && now - g_carrierReportTick >= 5000) {
+    if (carrier && now - g_carrierReportTick >= kCarrierReportIntervalMs) {
         g_carrierReportTick = now;
         report(core::log::Level::info,
                "ev=single_port stage=traffic received=%u relayed=%u denied=%u",
@@ -564,6 +743,9 @@ bool send_to(const state::gameplay::Endpoint& destination,
 
 /** Closes the socket and releases the Winsock reference this module took. */
 void shutdown() noexcept {
+    // The receive thread waits on an event, never on a lock, so it can always be joined before the
+    // carrier it reads is closed. That ordering is what keeps a reused descriptor out of its hands.
+    stop_carrier_receive();
     AcquireSRWLockExclusive(&g_lock);
     close_locked();
     g_endpoint.ready = false;

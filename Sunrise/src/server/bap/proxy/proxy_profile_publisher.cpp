@@ -17,16 +17,16 @@
 
 namespace sunrise::server::bap::proxy::profile_publisher {
 namespace {
-constexpr std::uint64_t kPublishIntervalMs = 1'000;
 struct Publication {
-    std::uint64_t attemptedGeneration{};
+    std::uint64_t preparedGeneration{};
     std::uint64_t ackedGeneration{};
     std::uint32_t outstandingTaskId{};
     std::uint32_t connectionId{};
-    std::uint64_t nextAttemptTick{};
-    std::size_t attemptedSize{};
+    std::size_t preparedSize{};
     std::size_t ackedSize{};
     bool acknowledged{};
+    bool prepared{};
+    bool rejected{};
 };
 Publication g_publication;
 std::array<std::byte, middleware::profile::kMaximumEncodedSize> g_composed{};
@@ -51,9 +51,10 @@ bool acknowledge(std::uint32_t connectionId,
         return false;
     }
     g_publication.outstandingTaskId = 0;
-    g_publication.ackedGeneration = g_publication.attemptedGeneration;
-    g_publication.ackedSize = g_publication.attemptedSize;
+    g_publication.ackedGeneration = g_publication.preparedGeneration;
+    g_publication.ackedSize = g_publication.preparedSize;
     g_publication.acknowledged = true;
+    g_publication.rejected = false;
     std::copy_n(g_composed.begin(), g_publication.ackedSize, g_acknowledged.begin());
     report(0, "project", "acked", responseService, taskId, "-");
     return true;
@@ -63,16 +64,33 @@ void abandon(std::uint32_t connectionId,
              std::uint32_t taskId,
              std::uint16_t responseService) noexcept {
     if (connectionId == g_publication.connectionId && g_publication.outstandingTaskId != 0
-        && taskId == g_publication.outstandingTaskId) {
+        && taskId == g_publication.outstandingTaskId
+        && responseService
+               == static_cast<std::uint16_t>(middleware::bap::ResponseService::accountProjection)) {
         g_publication.outstandingTaskId = 0;
+        g_publication.rejected = false;
         report(0, "project", "fail", responseService, taskId, "abandoned");
     }
 }
 
-void service(std::uint64_t now) noexcept {
+void reject(std::uint32_t connectionId,
+            std::uint32_t taskId,
+            std::uint16_t responseService) noexcept {
+    if (connectionId != g_publication.connectionId || g_publication.outstandingTaskId == 0
+        || taskId != g_publication.outstandingTaskId
+        || responseService
+               != static_cast<std::uint16_t>(middleware::bap::ResponseService::accountProjection)) {
+        return;
+    }
+    g_publication.outstandingTaskId = 0;
+    g_publication.rejected = true;
+    report(connectionId, "project", "fail", responseService, taskId, "rejected");
+}
+
+void service() noexcept {
     const bool localHost = core::settings::role() == core::settings::Role::host;
     if ((!localHost && !core::settings::get().server.upstream.enabled)
-        || g_publication.outstandingTaskId != 0 || now < g_publication.nextAttemptTick) {
+        || g_publication.outstandingTaskId != 0) {
         return;
     }
     const auto generation = state::account::profiles::local_generation();
@@ -83,16 +101,27 @@ void service(std::uint64_t now) noexcept {
     if (!localHost && connectionId == 0) {
         return;
     }
-    g_publication.nextAttemptTick = now + kPublishIntervalMs;
+    if (g_publication.rejected && g_publication.connectionId == connectionId
+        && g_publication.preparedGeneration == generation) {
+        return;
+    }
     const state::ScopedAccount local(state::kLocalAccount);
-    std::size_t size = 0;
-    if (!state::local_account_snapshot(g_snapshot)) {
-        return;
+    if (!g_publication.prepared || g_publication.preparedGeneration != generation) {
+        g_publication.prepared = false;
+        std::size_t size{};
+        if (!state::local_account_snapshot(g_snapshot)) {
+            return;
+        }
+        g_snapshot.presence.artifactPowerBonus = state::artifact_power_bonus();
+        if (!middleware::profile::encode(g_snapshot, g_composed, size)) {
+            return;
+        }
+        g_publication.preparedGeneration = generation;
+        g_publication.preparedSize = size;
+        g_publication.prepared = true;
+        g_publication.rejected = false;
     }
-    g_snapshot.presence.artifactPowerBonus = state::artifact_power_bonus();
-    if (!middleware::profile::encode(g_snapshot, g_composed, size)) {
-        return;
-    }
+    const auto size = g_publication.preparedSize;
     // Private-only writes and repeated canonicalization do not publish identical public records.
     if (g_publication.acknowledged && size == g_publication.ackedSize
         && std::equal(g_composed.begin(),
@@ -148,8 +177,7 @@ void service(std::uint64_t now) noexcept {
     }
     g_publication.outstandingTaskId = taskId;
     g_publication.connectionId = connectionId;
-    g_publication.attemptedGeneration = generation;
-    g_publication.attemptedSize = size;
+    g_publication.rejected = false;
     report(connectionId,
            "project",
            "sent",

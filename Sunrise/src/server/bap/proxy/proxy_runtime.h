@@ -62,6 +62,7 @@ void service(std::uint64_t now) noexcept;
                                                 std::span<const std::byte, state::kAesKeySize> key,
                                                 std::span<std::byte> output) noexcept;
 
+/** Assigns a task ID only after admission; refusal clears outTaskId without spending an ID. */
 [[nodiscard]] bool send_upstream_request(std::uint32_t downstreamConnectionId,
                                          std::uint16_t service,
                                          std::uint16_t expectedResponseService,

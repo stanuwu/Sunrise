@@ -16,6 +16,7 @@
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
 #include "../push/activity/nat_relay_push.h"
+#include "../social_feed_route.h"
 #include "queuez_state_validation.h"
 #include "state/investment/store_internal.h"
 
@@ -709,8 +710,11 @@ bool consume_deferred(Session& session,
             session, scratch, response, written, touchesScratch)) {
         return true;
     }
-    if (public_queuez::poll(
-            session, scratch, response, written, touchesScratch, GetTickCount64())) {
+    // Ahead of the queuez poll so a family burst cannot starve a guest's social publication.
+    if (consume_social_notice(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (public_queuez::poll(session, scratch, response, written, touchesScratch)) {
         return true;
     }
     // The overrides go first: they are what the purchased mod unlocks, and the Family-4

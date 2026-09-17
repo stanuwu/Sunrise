@@ -272,8 +272,7 @@ bool consume(Session& session,
                    : proxy::forward_uncorrelated(
                          session.id, frame.serviceId, frame.taskId, frame.body);
     }
-    const auto publicResult =
-        public_queuez::consume(session, scratch, frame, response, written, GetTickCount64());
+    const auto publicResult = public_queuez::consume(session, scratch, frame, response, written);
     if (publicResult != public_queuez::Result::notHandled) {
         return publicResult == public_queuez::Result::success;
     }

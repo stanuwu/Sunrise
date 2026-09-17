@@ -144,6 +144,16 @@ enum class NotificationService : std::uint16_t {
     activityMessage = 9,
     /** Publishes one or more queuez family updates. */
     queuezUpdate = 123,
+    /**
+     * Carries a NAT punch introduction from the retail social service to the peer it names.
+     * The shim never composes one; the proxy forwards it to the game client undecoded.
+     */
+    natPunchIntro = 100,
+    /**
+     * Tells one registered guest that its social publication advanced, so it asks for the feed.
+     * A shim-internal service id, never a retail id (max 307), and never forwarded to the client.
+     */
+    socialPublication = 0x8003,
 };
 
 /** Parsed BAP request header and borrowed body. */

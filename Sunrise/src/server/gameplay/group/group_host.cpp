@@ -539,6 +539,23 @@ void release_endpoint(const state::gameplay::Endpoint& endpoint) noexcept {
     }
 }
 
+void release_account(std::uint64_t accountSoid) noexcept {
+    if (!accountSoid) {
+        return;
+    }
+    AcquireSRWLockExclusive(&g_admittedLock);
+    for (auto& record : g_admitted) {
+        if (record.occupied && record.hasPlayer && record.playerSoids.present
+            && record.playerSoids.accountSoid == accountSoid) {
+            // Native channel closure can preserve a group for a channel rebuild. Losing the
+            // account's last authenticated link ends that ownership instead; otherwise a fresh
+            // endpoint leaves duplicate machine/player identities in every membership snapshot.
+            static_cast<void>(admission::depart(record.endpoint, record.sessionId));
+        }
+    }
+    ReleaseSRWLockExclusive(&g_admittedLock);
+}
+
 /** Consumes one group-session message. */
 bool consume(const state::gameplay::Endpoint& from,
              std::uint8_t id,

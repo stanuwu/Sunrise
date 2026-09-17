@@ -21,6 +21,7 @@
 #include "../../state/runtime/runtime.h"
 #include "../../state/social/steam_roster.h"
 #include "../activity/host_runtime.h"
+#include "../gameplay/group/group_host.h"
 #include "activity_authority_query_owner.h"
 #include "activity_authority_reset_owner.h"
 #include "activity_mission_seed_lease.h"
@@ -28,6 +29,7 @@
 #include "core/threading/srw_lock.h"
 #include "encrypted/bap_connection_publication.h"
 #include "encrypted/push/activity/mission_seed_world_change.h"
+#include "encrypted/social_feed_route.h"
 #include "internal.h"
 #include "proxy/proxy_runtime.h"
 #include "runtime.h"
@@ -159,6 +161,8 @@ void clear_session(Session& session) noexcept {
         const state::ScopedAccount accountScope(session.accountHandle);
         state::social::session_directory().closed(session.accountHandle);
         if (state::social::session_directory().link_count(session.accountHandle) == 0) {
+            server::gameplay::group::release_account(
+                state::account_primary_soid(session.accountHandle));
             if (session.accountHandle == state::kLocalAccount) {
                 static_cast<void>(
                     state::account::profiles::publish_local_presence(state::kLocalAccount, {}));
@@ -817,6 +821,7 @@ void shutdown() noexcept {
     }
     SecureZeroMemory(g_sessions.data(), sizeof g_sessions);
     state::social::reset_directory();
+    encrypted::reset_host_social();
     SecureZeroMemory(&g_scratch, sizeof g_scratch);
 }
 

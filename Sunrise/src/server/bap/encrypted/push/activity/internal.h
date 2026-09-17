@@ -17,6 +17,16 @@ namespace sunrise::server::bap::encrypted::push::activity {
 
 namespace message = middleware::bap::activity_message::sensor_auth_update;
 
+/** Retail sends 2 seconds. Held at the server push period so both sides share one cadence. */
+inline constexpr std::uint16_t kLocalKeepaliveHintMilliseconds = 2'000;
+/**
+ * Peer-heard window. The client marks a peer heard while `now - lastPeerRecv` is under this, so
+ * zero clears every peer bit forever. Two and a half times the keepalive cadence above.
+ */
+inline constexpr std::uint16_t kLocalPeerHeardWindowMilliseconds = 5'000;
+static_assert(kLocalPeerHeardWindowMilliseconds > kLocalKeepaliveHintMilliseconds,
+              "the window must outlast the cadence it measures, or no peer is ever heard");
+
 /** @return True when current msg 1 selects this exact authored region. */
 [[nodiscard]] constexpr bool
 msg1_selects_region(const state::build_data::scenarios::Definition& layout,
@@ -135,23 +145,6 @@ void report_roster_deferral(const Session& session,
 [[nodiscard]] bool connection_owes_membership(const Session& session,
                                               std::uint64_t sessionId,
                                               std::uint32_t revision) noexcept;
-
-/**
- * Records this recipient's receipt for the membership body this connection delivered.
- * Multiple connections can share one member row, whose acknowledgement covers the session.
- * This receipt records the connection's own answer for its delivered body. It ignores a revision
- * this connection did not itself deliver on the current binding.
- * @param session Connection the acknowledgement arrived on.
- * @param revision Membership revision the client says it applied.
- */
-void note_membership_acknowledgement(const Session& session, std::uint32_t revision) noexcept;
-
-/**
- * Tests whether this connection's last delivered membership body has been acknowledged.
- * @param session Connection to test.
- * @return True when this recipient answered for the exact body this link delivered.
- */
-[[nodiscard]] bool connection_membership_acknowledged(const Session& session) noexcept;
 
 /**
  * Tests whether the installed packages author one region as private.

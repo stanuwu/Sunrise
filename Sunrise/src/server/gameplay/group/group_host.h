@@ -88,6 +88,13 @@ void service(std::uint64_t now) noexcept;
  */
 void release_endpoint(const state::gameplay::Endpoint& endpoint) noexcept;
 
+/**
+ * Withdraws an account's native group rows, preserving other owners and shared hosts.
+ * @pre
+ * The caller holds the BAP lock and has closed the account's last authenticated link.
+ */
+void release_account(std::uint64_t accountSoid) noexcept;
+
 /** Refreshes retained native memberships after a channel rebuild or native address change. */
 void refresh_endpoint(const state::gameplay::Endpoint& endpoint) noexcept;
 

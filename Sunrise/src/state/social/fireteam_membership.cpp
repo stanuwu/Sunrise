@@ -15,27 +15,33 @@ bool matches(const Edge& edge, std::uint64_t first, std::uint64_t second) noexce
 constexpr auto maximumRevision = (std::numeric_limits<std::uint64_t>::max)();
 } // namespace
 
-bool Membership::request(std::uint64_t joiner, std::uint64_t target, std::uint64_t now) noexcept {
+bool Membership::request(std::uint64_t joiner, std::uint64_t target) noexcept {
     if (!valid_pair(joiner, target)) {
         return false;
     }
+    Edge* outstanding{};
     Edge* vacant{};
     for (auto& edge : edges_) {
         if (edge.established && matches(edge, joiner, target)) {
             return true;
         }
-        if (edge.joiner == joiner && edge.target == target) {
-            return true;
+        // A joiner names one target at a time: a later lookup replaces the earlier intent
+        // instead of leaving behind a row no admission will ever consume.
+        if (!edge.established && edge.joiner == joiner && outstanding == nullptr) {
+            outstanding = &edge;
         }
         if (edge.joiner == 0 && vacant == nullptr) {
             vacant = &edge;
         }
     }
-    if (!vacant || revision_ == maximumRevision) {
+    Edge* const slot = outstanding != nullptr ? outstanding : vacant;
+    if (slot == nullptr) {
         return false;
     }
-    *vacant = {joiner, target, now, false};
-    ++revision_;
+    // Recorded intent moves no revision. A non-established edge is invisible to `connected` and
+    // `representative`, so counting it would let a lookup refuse a shared allocation whose plan
+    // depends only on admitted relations.
+    *slot = {joiner, target, false};
     return true;
 }
 
@@ -55,7 +61,7 @@ bool Membership::establish(std::uint64_t joiner, std::uint64_t target) noexcept 
     if (!selected || revision_ == maximumRevision) {
         return false;
     }
-    *selected = {joiner, target, 0, true};
+    *selected = {joiner, target, true};
     // A reverse lookup cannot remain pending after the actual relation was admitted.
     for (auto& edge : edges_) {
         if (&edge != selected && matches(edge, joiner, target)) {
@@ -113,23 +119,6 @@ std::uint64_t Membership::representative(std::uint64_t account) const noexcept {
                                           members.begin() + static_cast<std::ptrdiff_t>(count));
 }
 
-std::uint64_t Membership::pending_target(std::uint64_t joiner) const noexcept {
-    std::uint64_t target{};
-    if (joiner == 0) {
-        return 0;
-    }
-    for (const auto& edge : edges_) {
-        if (edge.joiner != joiner || edge.established) {
-            continue;
-        }
-        if (target != 0 && target != edge.target) {
-            return 0;
-        }
-        target = edge.target;
-    }
-    return target;
-}
-
 bool Membership::depart(std::uint64_t account) noexcept {
     if (account == 0 || revision_ == maximumRevision) {
         return false;
@@ -157,25 +146,6 @@ bool Membership::release(std::uint64_t first, std::uint64_t second) noexcept {
             edge = {};
             changed = true;
         }
-    }
-    if (changed) {
-        ++revision_;
-    }
-    return changed;
-}
-
-bool Membership::expire(std::uint64_t now) noexcept {
-    if (revision_ == maximumRevision) {
-        return false;
-    }
-    bool changed{};
-    for (auto& edge : edges_) {
-        if (edge.joiner == 0 || edge.established || now < edge.requestedAt
-            || now - edge.requestedAt < kJoinTimeoutMs) {
-            continue;
-        }
-        edge = {};
-        changed = true;
     }
     if (changed) {
         ++revision_;

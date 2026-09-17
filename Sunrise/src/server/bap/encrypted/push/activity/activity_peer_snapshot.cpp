@@ -17,12 +17,6 @@ void project_activity_peers(
         if (!identity.memberKey) {
             continue;
         }
-        state::AccountHandle owner{};
-        std::array<char, state::kDisplayNameCapacity> name{};
-        if (!state::account::profiles::find(identity.accountSoid, owner)
-            || !state::account::profiles::selected_member_name(owner, identity.opaqueSoid, name)) {
-            continue;
-        }
         auto& peer = output.peers[i];
         peer.identity = {identity.memberKey,
                          identity.smallOpaque,
@@ -32,11 +26,17 @@ void project_activity_peers(
                          identity.opaqueSoid,
                          identity.secondaryOpaque};
         peer.present = true;
-        for (const char c : name) {
-            if (!c || peer.nameLength == peer.name.size()) {
-                break;
+        // Selection may change before native release; keep the committed reservation visible.
+        state::AccountHandle owner{};
+        std::array<char, state::kDisplayNameCapacity> name{};
+        if (state::account::profiles::find(identity.accountSoid, owner)
+            && state::account::profiles::selected_member_name(owner, identity.opaqueSoid, name)) {
+            for (const char c : name) {
+                if (!c || peer.nameLength == peer.name.size()) {
+                    break;
+                }
+                peer.name[peer.nameLength++] = static_cast<unsigned char>(c);
             }
-            peer.name[peer.nameLength++] = static_cast<unsigned char>(c);
         }
         peer.hasName = peer.nameLength != 0;
         middleware::bap::activity_message::TransportReport transport{};

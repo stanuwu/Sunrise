@@ -6,7 +6,7 @@
 #include "fireteam.h"
 
 namespace sunrise::state::activity::fireteam {
-bool request_join(std::uint64_t joiner, std::uint64_t target, std::uint64_t now) noexcept {
+bool request_join(std::uint64_t joiner, std::uint64_t target) noexcept {
     if (!joiner || !target || joiner == target || joiner != account_primary_soid(bound_account())) {
         return false;
     }
@@ -15,35 +15,11 @@ bool request_join(std::uint64_t joiner, std::uint64_t target, std::uint64_t now)
         return false;
     }
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    auto& state = runtime::storage::g_state.activity;
-    const auto before = state.fireteams.revision();
-    bool ready = state.stateRevision != kMaximumRevision;
-    if (ready) {
-        static_cast<void>(state.fireteams.expire(now));
-        ready = state.fireteams.request(joiner, target, now);
-        if (before != state.fireteams.revision()) {
-            ++state.stateRevision;
-        }
-    }
+    // Recorded intent is not a membership fact, so it advances no State revision and cannot
+    // retire a transaction that is already in flight.
+    const bool ready = runtime::storage::g_state.activity.fireteams.request(joiner, target);
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
     return ready;
-}
-
-void expire(std::uint64_t now) noexcept {
-    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    auto& state = runtime::storage::g_state.activity;
-    if (state.stateRevision != kMaximumRevision && state.fireteams.expire(now)) {
-        ++state.stateRevision;
-    }
-    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
-}
-
-std::uint64_t pending_target(std::uint64_t joiner, std::uint64_t now) noexcept {
-    expire(now);
-    AcquireSRWLockShared(&runtime::storage::g_stateLock);
-    const auto value = runtime::storage::g_state.activity.fireteams.pending_target(joiner);
-    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
-    return value;
 }
 
 bool connected(std::uint64_t first, std::uint64_t second) noexcept {

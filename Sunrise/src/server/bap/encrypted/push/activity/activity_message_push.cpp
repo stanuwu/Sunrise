@@ -23,15 +23,6 @@ namespace service = middleware::bap::activity_message;
 
 /** Activity message type 4 accepts a pending join before any later push. */
 constexpr std::uint32_t kJoinResultMessageType = 4;
-/** Retail sends 2 seconds. Held at the server push period so both sides share one cadence. */
-constexpr std::uint16_t kLocalKeepaliveHintMilliseconds = 2'000;
-/**
- * Peer-heard window. The client marks a peer heard while `now - lastPeerRecv` is under this, so
- * zero clears every peer bit forever. Two and a half times the keepalive cadence above.
- */
-constexpr std::uint16_t kLocalPeerHeardWindowMilliseconds = 5'000;
-static_assert(kLocalPeerHeardWindowMilliseconds > kLocalKeepaliveHintMilliseconds,
-              "the window must outlast the cadence it measures, or no peer is ever heard");
 
 /**
  * Wipes the part of one scratch buffer that may hold written bytes.

@@ -33,7 +33,11 @@ struct PendingForward {
     std::uint64_t queuedTick{};
 };
 
-/** Concurrent correlations; additional requests stay in the bounded held-input queue. */
+/**
+ * Concurrent correlations; additional requests stay in the bounded held-input queue. A slot is
+ * one of four, which is why `kResponseTimeoutMs` bounds a correlation: an answer that never
+ * arrives would otherwise hold its slot for the life of the link.
+ */
 inline constexpr std::size_t kPendingCapacity = 4;
 
 inline constexpr std::size_t kLinkFrameCapacity = client::network::kBapFrameCapacity;
@@ -41,6 +45,7 @@ inline constexpr std::uint64_t kRetryIntervalMs = 2000;
 inline constexpr std::uint64_t kConnectTimeoutMs = 5000;
 inline constexpr std::uint64_t kHelloTimeoutMs = 5000;
 
+/** Idle period after which the link sends the protocol's own keepalive service, `echo`. */
 inline constexpr std::uint64_t kKeepaliveIntervalMs = 5000;
 inline constexpr std::uint64_t kResponseTimeoutMs = 30'000;
 inline constexpr std::uint32_t kOriginatedTaskIdBase = 0x80000000U;
@@ -83,6 +88,8 @@ void reset(UpstreamLink& link) noexcept;
  * Services one nonblocking connection. Callbacks return false for temporary output pressure;
  * they must then leave application state unchanged. The same frame is offered again when
  * serviced. Response deadlines exclude time spent waiting for this local consumer.
+ * @param onInternal Receives services the shim originates for itself. They are classified before
+ *        notifications and responses alike, so they can never reach the game client.
  */
 void service_link(UpstreamLink& link,
                   std::uint64_t now,
@@ -91,6 +98,8 @@ void service_link(UpstreamLink& link,
                                          bool plaintextFrame),
                   bool (*onResponse)(UpstreamLink& link,
                                      const PendingForward& forward,
+                                     std::span<const std::byte> plaintextPayload),
+                  bool (*onInternal)(UpstreamLink& link,
                                      std::span<const std::byte> plaintextPayload)) noexcept;
 
 [[nodiscard]] bool queue_forward(UpstreamLink& link,

@@ -85,6 +85,11 @@ bool notification(UpstreamLink& link, std::span<const std::byte> payload, bool p
     return true;
 }
 
+/** Shim-originated services. They must never reach notification() or the downstream reply queue. */
+bool internal(UpstreamLink& link, std::span<const std::byte> payload) noexcept {
+    return social_feed::notify(link.downstreamConnectionId, payload);
+}
+
 bool response(UpstreamLink& link,
               const PendingForward& forward,
               std::span<const std::byte> payload) noexcept {
@@ -107,7 +112,7 @@ bool response(UpstreamLink& link,
             return !failed(link.downstreamConnectionId);
         }
         if (parsed.status != 200) {
-            profile_publisher::abandon(
+            profile_publisher::reject(
                 link.downstreamConnectionId, forward.taskId, parsed.serviceId);
             return true;
         }
@@ -210,6 +215,9 @@ void fail_connection(std::uint32_t id, const char* reason) noexcept {
     g_failed[id - 1] = true;
     report(id, "connection", "failed", 0, 0, reason);
     upstream_link::close_link(*link, reason, abandoned);
+    // Losing the registered social link withdraws its peer authorisation at once, even when
+    // another link survives; only the last link going away discards the projection as well.
+    social_feed::connection_closed(id);
     if (first_ready_upstream() == 0) {
         reset_projection();
         social_feed::reset();
@@ -265,6 +273,7 @@ void close_link(std::uint32_t id) noexcept {
     g_held[id - 1] = {};
     reset_queue(id);
     g_links[id - 1].reset();
+    social_feed::connection_closed(id);
     if (first_ready_upstream() == 0) {
         reset_projection();
         social_feed::reset();
@@ -273,8 +282,10 @@ void close_link(std::uint32_t id) noexcept {
 
 void service(std::uint64_t now) noexcept {
     if (core::settings::role() == core::settings::Role::host) {
-        profile_publisher::service(now);
-        encrypted::service_host_social(now);
+        // Neither producer reads a clock: the publisher follows the local account generation and
+        // the mirror follows the directory's own publication stamp.
+        profile_publisher::service();
+        encrypted::service_host_social();
         return;
     }
     if (!core::settings::get().server.upstream.enabled) {
@@ -289,20 +300,22 @@ void service(std::uint64_t now) noexcept {
         if (id == 0 || failed(id)) {
             continue;
         }
-        upstream_link::service_link(link, now, notification, response);
+        // Inbound frames are applied here, before the social request below is composed, so a
+        // notice is always absorbed by the pass that could otherwise send superseded cursors.
+        upstream_link::service_link(link, now, notification, response, internal);
         if (link.stage == LinkStage::failed && !upstream_link::retry_initial(link, now)) {
             fail_connection(id, "upstream_failed");
         }
         // Another channel for this account does not invalidate its acknowledged public profile.
     }
-    profile_publisher::service(now);
+    profile_publisher::service();
     for (const auto& link : g_links) {
         if (link && link->downstreamConnectionId != 0) {
             flush_held(link->downstreamConnectionId);
         }
     }
     if (g_profileReady) {
-        social_feed::service(now);
+        social_feed::service();
     }
 }
 
@@ -363,12 +376,18 @@ bool send_upstream_request(std::uint32_t id,
                            std::uint16_t responseService,
                            std::span<const std::byte> body,
                            std::uint32_t& taskId) noexcept {
+    taskId = 0;
     auto* link = link_for(id);
     if (!upstream_ready(id)) {
         return false;
     }
-    taskId = link->nextOriginatedTaskId++;
-    return upstream_link::queue_forward(*link, 0, service, taskId, responseService, body);
+    const auto candidate = link->nextOriginatedTaskId;
+    if (!upstream_link::queue_forward(*link, 0, service, candidate, responseService, body)) {
+        return false;
+    }
+    taskId = candidate;
+    ++link->nextOriginatedTaskId;
+    return true;
 }
 
 std::uint32_t first_ready_upstream() noexcept {

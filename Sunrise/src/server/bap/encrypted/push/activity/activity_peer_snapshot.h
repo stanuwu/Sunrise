@@ -5,7 +5,11 @@
 #include "../../../../../state/activity/reservations/definition.h"
 
 namespace sunrise::server::bap::encrypted::push {
-/** Called under the BAP transaction lock with the committed native roster snapshot. */
+/**
+ * Projects committed identities regardless of optional profile metadata availability.
+ * Called
+ * under the BAP transaction lock with the committed native roster snapshot.
+ */
 void project_activity_peers(
     const state::activity::reservations::Roster& roster,
     middleware::bap::activity_message::replicate_membership::MembershipSnapshot& output) noexcept;

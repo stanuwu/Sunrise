@@ -27,10 +27,6 @@ bool joined_member_set(const SessionBinding& binding,
                     output.keys[index] = identity->memberKey;
                 }
             }
-            const auto& member = *member_state(record, row);
-            output.acknowledged = member.hasIdentity
-                                  && member.revision != membership::kAbsentRevision
-                                  && member.acknowledgedRevision == member.revision;
         }
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
@@ -108,6 +104,16 @@ bool depart_member(const SessionBinding& binding,
         changed = record.sharedMembers && transactions::record_matches(record, binding)
                   && row != kInvalidMemberRow && can_republish_members(record, row);
         if (changed) {
+            for (std::size_t survivor = 0; survivor < kInvalidMemberRow; ++survivor) {
+                const auto* member = member_state(record, survivor);
+                if (survivor != row && member && member->hasIdentity
+                    && member->epoch == membership::kMaximumPeerTableEpoch) {
+                    changed = false;
+                    break;
+                }
+            }
+        }
+        if (changed) {
             remove_joined_member(record, row);
             for (auto& peer : record.peerReservations.peers) {
                 if (peer.memberKey == memberKey && peer.accountSoid == accountSoid) {
@@ -119,6 +125,15 @@ bool depart_member(const SessionBinding& binding,
                 primary = {};
             }
             republish_members(record, row);
+            // A disconnect can remove this peer before the native host sends its release.
+            // Changing the peer-table generation clears the survivor's cached reservation keys;
+            // a revision-only removal leaves the departed key suppressing its next join request.
+            for (std::size_t survivor = 0; survivor < kInvalidMemberRow; ++survivor) {
+                auto* member = member_state(record, survivor);
+                if (member && member->hasIdentity) {
+                    ++member->epoch;
+                }
+            }
             record.recordRevision = ++state.stateRevision;
         }
     }

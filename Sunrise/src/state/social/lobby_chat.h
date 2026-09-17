@@ -58,9 +58,12 @@ public:
     void disconnect(std::size_t account) noexcept;
     void forget(std::size_t account) noexcept;
     void reset() noexcept;
+    /** Advances whenever this account's reply body would change. */
+    [[nodiscard]] std::uint64_t publication(std::size_t account) const noexcept;
 
 private:
     struct Account {
+        std::uint64_t publication{};
         std::uint64_t epoch{};
         std::uint64_t membershipRevision{};
         std::uint64_t acceptedThrough{};
@@ -82,7 +85,8 @@ public:
     void leave(std::uint64_t id) noexcept;
     [[nodiscard]] bool contains(std::uint64_t id) const noexcept;
     [[nodiscard]] bool send(std::uint64_t id, std::span<const std::byte> bytes) noexcept;
-    void snapshot(Request& request) const noexcept;
+    /** Also stages how far the outgoing batch is being offered; only a reply commits that mark. */
+    void snapshot(Request& request) noexcept;
     void receive(const Reply& reply) noexcept;
     [[nodiscard]] bool pending(Message& message) const noexcept;
     void delivered(std::uint64_t sequence) noexcept;
@@ -96,6 +100,9 @@ private:
     Request request_{};
     std::uint64_t membershipAck_{};
     std::uint64_t receiptSent_{};
+    /** Outgoing sequence the last accepted reply answered for, and the one being offered now. */
+    std::uint64_t offeredThrough_{};
+    std::uint64_t stagedThrough_{};
     std::uint64_t nextSequence_{1};
     std::array<Message, kQueueCapacity> outgoing_{};
     std::size_t outgoingCount_{};

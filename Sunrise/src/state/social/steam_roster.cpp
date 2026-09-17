@@ -57,6 +57,9 @@ void Hub::closed(AccountHandle account) noexcept {
     }
     departing.syncing = false;
     ++revision_;
+    ++departing.publication;
+    departing.deliveryConnection = 0;
+    departing.deliverySerial = 0;
     chat_.disconnect(account);
     departing.inbox = {};
     departing.inboxCount = 0;
@@ -64,6 +67,7 @@ void Hub::closed(AccountHandle account) noexcept {
         for (std::size_t i = 0; i < peer.inboxCount;) {
             if (peer.inbox[i].inviterSoid == departing.row.primarySoid) {
                 erase(peer.inbox, peer.inboxCount, i);
+                ++peer.publication;
             } else {
                 ++i;
             }
@@ -104,12 +108,17 @@ bool Hub::forget(AccountHandle account) noexcept {
         for (std::size_t i = 0; i < peer.inboxCount;) {
             if (peer.inbox[i].inviterSoid == primary || peer.inbox[i].targetSoid == primary) {
                 erase(peer.inbox, peer.inboxCount, i);
+                ++peer.publication;
             } else {
                 ++i;
             }
         }
     }
+    // The publication counter outlives the identity it described: the guest compares it as a
+    // high-water mark, and restarting it at zero would make a later feed look like an older one.
+    const auto published = accounts_[account].publication;
     accounts_[account] = {};
+    accounts_[account].publication = published + 1;
     chat_.forget(account);
     ++revision_;
     return true;
@@ -119,7 +128,51 @@ std::size_t Hub::link_count(AccountHandle account) const noexcept {
     return account < accounts_.size() ? accounts_[account].links : 0;
 }
 
-bool Hub::sync(AccountHandle account, const feed::Sync& request, feed::Feed& output) noexcept {
+void Hub::delivery(AccountHandle account, std::uint32_t connection, std::uint64_t serial) noexcept {
+    if (account >= accounts_.size()) {
+        return;
+    }
+    // A later registration simply replaces the earlier one; late frames on the old connection are
+    // consumed without changing current state because they no longer match this pair.
+    accounts_[account].deliveryConnection = connection;
+    accounts_[account].deliverySerial = serial;
+}
+
+bool Hub::delivers(AccountHandle account,
+                   std::uint32_t connection,
+                   std::uint64_t serial) const noexcept {
+    return account < accounts_.size() && connection != 0 && serial != 0
+           && accounts_[account].deliveryConnection == connection
+           && accounts_[account].deliverySerial == serial;
+}
+
+Stamp Hub::stamp(AccountHandle account, std::uint32_t routeGeneration) const noexcept {
+    Stamp value{};
+    value.directory = revision_;
+    value.routes = routeGeneration;
+    if (account >= accounts_.size()) {
+        return value;
+    }
+    value.account = accounts_[account].publication;
+    value.lobby = chat_.publication(account);
+    return value;
+}
+
+void Hub::release_waiters(const Account& target) noexcept {
+    const auto primary = target.row.primarySoid;
+    if (primary == 0) {
+        return;
+    }
+    for (auto& peer : accounts_) {
+        if (peer.waitingOn != primary) {
+            continue;
+        }
+        peer.waitingOn = 0;
+        ++peer.publication;
+    }
+}
+
+bool Hub::apply(AccountHandle account, const feed::Sync& request) noexcept {
     if (account >= accounts_.size() || request.epoch == 0
         || request.inviteCount > request.invites.size()) {
         return false;
@@ -162,14 +215,29 @@ bool Hub::sync(AccountHandle account, const feed::Sync& request, feed::Feed& out
         if (source.inboxCount == 0) {
             source.nextDelivery = request.receivedThrough + 1;
         }
+        source.receivedThrough = request.receivedThrough;
+        // Replacing a registration rewrites the epoch, the cursors and the mailbox.
+        ++source.publication;
     }
+    const bool registering = !source.syncing;
     source.syncing = true;
     for (std::size_t i = 0; i < source.inboxCount;) {
         if (source.inbox[i].sequence <= request.receivedThrough) {
             erase(source.inbox, source.inboxCount, i);
+            // The mailbox this account publishes just shrank.
+            ++source.publication;
         } else {
             ++i;
         }
+    }
+    if (source.receivedThrough < request.receivedThrough) {
+        source.receivedThrough = request.receivedThrough;
+        ++source.publication;
+    }
+    if (registering || source.inboxCount != source.inbox.size()) {
+        // Registration and mailbox room are the two conditions the accept loop breaks on, so a
+        // sender parked on either is republished here rather than by a retry clock.
+        release_waiters(source);
     }
     for (std::size_t i = 0; i < request.inviteCount; ++i) {
         const auto& invite = request.invites[i];
@@ -186,18 +254,34 @@ bool Hub::sync(AccountHandle account, const feed::Sync& request, feed::Feed& out
         if (target != accounts_.end()) {
             if (!target->syncing || target->inboxCount == target->inbox.size()
                 || target->nextDelivery == (std::numeric_limits<std::uint64_t>::max)()) {
+                source.waitingOn = target->row.primarySoid;
                 break;
             }
             auto& delivery = target->inbox[target->inboxCount++];
             delivery = invite;
             delivery.sequence = target->nextDelivery++;
+            // A new invitation is visible in the target's feed.
+            ++target->publication;
         }
         source.acceptedThrough = invite.sequence;
+        source.waitingOn = 0;
+        // The operation this account asked for was accepted.
+        ++source.publication;
     }
+    chat_.sync(account, source.row.steamId, request.lobby);
+    return true;
+}
+
+void Hub::publish(AccountHandle account, feed::Feed& output) const noexcept {
     output = {};
+    if (account >= accounts_.size()) {
+        return;
+    }
+    const auto& source = accounts_[account];
     output.epoch = source.epoch;
     output.acceptedThrough = source.acceptedThrough;
-    output.revision = revision_;
+    output.publication = source.publication;
+    output.receivedThrough = source.receivedThrough;
     for (AccountHandle i = 0; i < accounts_.size(); ++i) {
         if (i != account && accounts_[i].links != 0 && valid(accounts_[i].row)) {
             output.rows[output.rowCount++] = accounts_[i].row;
@@ -205,9 +289,7 @@ bool Hub::sync(AccountHandle account, const feed::Sync& request, feed::Feed& out
     }
     output.invites = source.inbox;
     output.inviteCount = source.inboxCount;
-    chat_.sync(account, source.row.steamId, request.lobby);
     chat_.feed(account, output.lobby);
-    return true;
 }
 
 void Client::initialize(std::uint64_t primarySoid, std::uint64_t epoch) noexcept {
@@ -225,6 +307,12 @@ void Client::disconnected() noexcept {
     rowCount_ = 0;
     incoming_ = {};
     incomingCount_ = 0;
+    incomingDeferred_ = false;
+    // A fresh registration has shown the host nothing, so every retained operation is owed again.
+    offeredThrough_ = 0;
+    stagedThrough_ = 0;
+    receiptSent_ = 0;
+    knownPublication_ = 0;
 }
 
 bool Client::post(const Invite& invite) noexcept {
@@ -245,13 +333,19 @@ bool Client::post(const Invite& invite) noexcept {
     return true;
 }
 
-void Client::snapshot(feed::Sync& output) const noexcept {
+void Client::snapshot(feed::Sync& output) noexcept {
     output = {};
     output.epoch = epoch_;
     output.acceptedThrough = acceptedThrough_;
     output.receivedThrough = receivedThrough_;
     output.invites = outgoing_;
     output.inviteCount = outgoingCount_;
+    // Staged, not committed: only an accepted feed proves the host was shown this much.
+    stagedThrough_ = outgoingCount_ != 0 ? outgoing_[outgoingCount_ - 1].sequence : offeredThrough_;
+}
+
+void Client::note_publication(std::uint64_t publication) noexcept {
+    knownPublication_ = (std::max)(knownPublication_, publication);
 }
 
 bool Client::receive(const feed::Feed& value) noexcept {
@@ -294,6 +388,10 @@ bool Client::receive(const feed::Feed& value) noexcept {
         ++revision_;
     }
     acceptedThrough_ = value.acceptedThrough;
+    offeredThrough_ = (std::max)(offeredThrough_, stagedThrough_);
+    // The host echoes its own receipt mark, so an unconfirmed receipt is the client's own work.
+    receiptSent_ = (std::max)(receiptSent_, (std::min)(value.receivedThrough, receivedThrough_));
+    knownPublication_ = (std::max)(knownPublication_, value.publication);
     while (outgoingCount_ != 0 && outgoing_[0].sequence <= acceptedThrough_) {
         erase(outgoing_, outgoingCount_, 0);
     }
@@ -308,12 +406,14 @@ bool Client::receive(const feed::Feed& value) noexcept {
             ++i;
         }
     }
+    incomingDeferred_ = false;
     for (std::size_t i = 0; i < value.inviteCount; ++i) {
         const auto& invite = value.invites[i];
         if (invite.sequence <= receivedThrough_) {
             continue;
         }
         if (incomingCount_ == incoming_.size()) {
+            incomingDeferred_ = true;
             break;
         }
         incoming_[incomingCount_++] = invite;
@@ -398,9 +498,26 @@ std::uint64_t revision() noexcept {
     std::lock_guard lock(clientMutex);
     return client.revision();
 }
-bool dirty() noexcept {
+bool pending_local_work() noexcept {
+    {
+        std::lock_guard lock(clientMutex);
+        if (client.pending_local_work()) {
+            return true;
+        }
+    }
+    return lobby::dirty();
+}
+std::uint64_t known_publication() noexcept {
     std::lock_guard lock(clientMutex);
-    return client.dirty();
+    return client.known_publication();
+}
+void note_publication(std::uint64_t publication) noexcept {
+    std::lock_guard lock(clientMutex);
+    client.note_publication(publication);
+}
+void reset_publication() noexcept {
+    std::lock_guard lock(clientMutex);
+    client.reset_publication();
 }
 std::uint64_t platform_id_for_soid(std::uint64_t soid) noexcept {
     std::array<RosterEntry, kRosterCapacity> peers{};

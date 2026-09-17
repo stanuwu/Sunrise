@@ -14,6 +14,7 @@
 #include "../../../state/account/account_token.h"
 #include "../../../state/account/shared_channel_material.h"
 #include "../../../state/runtime/runtime.h"
+#include "../../../state/social/social_feed.h"
 
 namespace sunrise::server::bap::proxy::upstream_link {
 namespace {
@@ -148,21 +149,32 @@ bool begin_connect(UpstreamLink& link, std::uint64_t now) noexcept {
 }
 
 bool notification_service(std::uint16_t service) noexcept {
-    return service == 9 || service == 100 || service == 123 || service == 301;
+    using middleware::bap::NotificationService;
+    return service == static_cast<std::uint16_t>(NotificationService::activityMessage)
+           || service == static_cast<std::uint16_t>(NotificationService::natPunchIntro)
+           || service == static_cast<std::uint16_t>(NotificationService::queuezUpdate)
+           || service == static_cast<std::uint16_t>(NotificationService::requestRelayConnection);
+}
+
+/** Services the shim originates for itself. They never reach native notification forwarding. */
+bool internal_service(std::uint16_t service) noexcept {
+    return service == state::social::feed::kPublicationNotice;
 }
 
 bool inbound(UpstreamLink& link,
              std::span<const std::byte> plaintext,
              bool plaintextFrame,
              bool (*onNotification)(UpstreamLink&, std::span<const std::byte>, bool),
-             bool (*onResponse)(UpstreamLink&,
-                                const PendingForward&,
-                                std::span<const std::byte>)) noexcept {
+             bool (*onResponse)(UpstreamLink&, const PendingForward&, std::span<const std::byte>),
+             bool (*onInternal)(UpstreamLink&, std::span<const std::byte>)) noexcept {
     if (plaintext.size() < 2) {
         fail(link, "short_payload");
         return false;
     }
     const auto service = middleware::encoding::read_u16_be(plaintext.first<2>());
+    if (internal_service(service)) {
+        return !onInternal || onInternal(link, plaintext);
+    }
     if (notification_service(service)) {
         return !onNotification || onNotification(link, plaintext, plaintextFrame);
     }
@@ -309,7 +321,8 @@ void service_link(UpstreamLink& link,
                   bool (*onNotification)(UpstreamLink&, std::span<const std::byte>, bool),
                   bool (*onResponse)(UpstreamLink&,
                                      const PendingForward&,
-                                     std::span<const std::byte>)) noexcept {
+                                     std::span<const std::byte>),
+                  bool (*onInternal)(UpstreamLink&, std::span<const std::byte>)) noexcept {
     if (link.downstreamConnectionId == 0 || link.stage == LinkStage::failed) {
         return;
     }
@@ -404,11 +417,15 @@ void service_link(UpstreamLink& link,
                 fail(link, "authentication");
                 return;
             }
-            accepted =
-                inbound(link, std::span(plaintext).first(size), false, onNotification, onResponse);
+            accepted = inbound(link,
+                               std::span(plaintext).first(size),
+                               false,
+                               onNotification,
+                               onResponse,
+                               onInternal);
             SecureZeroMemory(plaintext.data(), size);
         } else {
-            accepted = inbound(link, outer.payload, true, onNotification, onResponse);
+            accepted = inbound(link, outer.payload, true, onNotification, onResponse, onInternal);
         }
         if (link.stage != LinkStage::ready) {
             return;
@@ -450,12 +467,14 @@ void service_link(UpstreamLink& link,
                               == static_cast<std::uint16_t>(ResponseService::echo);
             });
         if (!echoPending) {
-            (void)queue_forward(link,
-                                0,
-                                static_cast<std::uint16_t>(RequestService::echo),
-                                link.nextOriginatedTaskId++,
-                                static_cast<std::uint16_t>(ResponseService::echo),
-                                {});
+            if (queue_forward(link,
+                              0,
+                              static_cast<std::uint16_t>(RequestService::echo),
+                              link.nextOriginatedTaskId,
+                              static_cast<std::uint16_t>(ResponseService::echo),
+                              {})) {
+                ++link.nextOriginatedTaskId;
+            }
         }
     }
 }

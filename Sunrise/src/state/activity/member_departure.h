@@ -3,10 +3,9 @@
 #include "definition.h"
 
 namespace sunrise::state::activity {
-/** Native member keys and the current recipient's membership receipt, from one locked snapshot. */
+/** Native member keys of one activity session, from one locked snapshot. */
 struct JoinedMemberSet final {
     std::array<std::uint64_t, entity_slots::kMemberLeaseRowCount> keys{};
-    bool acknowledged{};
 };
 [[nodiscard]] bool joined_member_set(const SessionBinding& binding,
                                      std::uint64_t memberKey,

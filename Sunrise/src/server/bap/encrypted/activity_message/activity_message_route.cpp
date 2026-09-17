@@ -39,6 +39,10 @@ namespace {
 
 namespace activity_sdk = state::activity_sdk;
 
+/** Reads the current membership without naming a bubble. */
+constexpr std::uint32_t kCurrentRevision = 0;
+constexpr std::int32_t kNoBubble = -1;
+
 /** Process-private HMAC key width used only for run-local diagnostic correlation. */
 constexpr std::size_t kFingerprintKeySize = 32;
 /** Domain prefix keeps this diagnostic use separate from protocol authentication. */
@@ -268,6 +272,14 @@ void report_release_refusal(const service::Request& request,
                                                                 plan.membershipMutation)) {
             return false;
         }
+    } else if (plan.bindingIntent == BindingIntent::publicTarget
+               && state::activity::binding_matches(plan.publicHost.source)) {
+        // Embedded solo retains upstream's local member table; only shared targets own peers.
+        static_cast<void>(
+            state::activity::membership::prepare_refresh(plan.publicHost.source.sessionId,
+                                                         kCurrentRevision,
+                                                         kNoBubble,
+                                                         plan.membershipMutation));
     } else if (plan.bindingIntent == BindingIntent::preserveCurrent) {
         // A private join's burst carries the seed membership; the commit lands the same seed.
         plan.joinMembershipBody = JoinMembershipBody::privateSeed;

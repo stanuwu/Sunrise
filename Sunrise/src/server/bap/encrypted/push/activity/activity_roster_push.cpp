@@ -80,13 +80,6 @@ struct ConnectionRecord final {
     BodyRecord membershipStaged{};
     MembershipCursor membershipSentCursor{};
     MembershipCursor membershipStagedCursor{};
-    /**
-     * The delivered membership this recipient has answered for, kept against the link that carried
-     * the body. The member row holds the receipt for the session as a whole; this one speaks for
-     * the connection, which matters when one member holds two links to the same session.
-     */
-    MembershipCursor membershipAckedCursor{};
-    std::uint64_t membershipAckedGeneration{};
 };
 
 // All access runs under the BAP lock, like the Session fields these records extend.
@@ -231,29 +224,6 @@ bool connection_owes_membership(const Session& session,
            || record->membershipSent.bindingGeneration != session.activity.bindingGeneration
            || record->membershipSentCursor.sessionId != sessionId
            || record->membershipSentCursor.revision != revision;
-}
-
-/** Records this recipient's receipt for the membership body this connection delivered. */
-void note_membership_acknowledgement(const Session& session, std::uint32_t revision) noexcept {
-    ConnectionRecord* const record = connection_record(session);
-    if (record == nullptr || revision == state::activity::membership::kAbsentRevision
-        || !record->membershipSent.valid
-        || record->membershipSent.bindingGeneration != session.activity.bindingGeneration
-        || record->membershipSentCursor.revision != revision) {
-        return;
-    }
-    record->membershipAckedCursor = record->membershipSentCursor;
-    record->membershipAckedGeneration = session.activity.bindingGeneration;
-}
-
-/** @return True when this connection's last delivered membership body has been acknowledged. */
-bool connection_membership_acknowledged(const Session& session) noexcept {
-    const ConnectionRecord* const record = connection_record(session);
-    return record != nullptr && record->membershipSent.valid
-           && record->membershipSent.bindingGeneration == session.activity.bindingGeneration
-           && record->membershipAckedGeneration == session.activity.bindingGeneration
-           && record->membershipAckedCursor.sessionId == record->membershipSentCursor.sessionId
-           && record->membershipAckedCursor.revision == record->membershipSentCursor.revision;
 }
 
 /** Adopts the join burst's staged membership body under the connection's new generation. */

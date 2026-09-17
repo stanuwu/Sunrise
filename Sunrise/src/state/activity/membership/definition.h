@@ -14,7 +14,9 @@ inline constexpr std::uint32_t kMaximumMembershipRevision =
     (std::numeric_limits<std::uint32_t>::max)();
 /** A steady zero epoch keeps the client peer table across unchanged refreshes. */
 inline constexpr std::uint32_t kStableEpoch = 0;
-/** Derives the membership epoch of one activity record generation. */
+/** Peer-table generations stop before wrap so retired reservation requests stay stale. */
+inline constexpr std::uint32_t kMaximumPeerTableEpoch = (std::numeric_limits<std::uint32_t>::max)();
+/** Seeds the peer-table generation; server-side departures advance surviving recipients. */
 [[nodiscard]] inline std::uint32_t session_epoch(std::uint64_t createdRevision) noexcept {
     return static_cast<std::uint32_t>(createdRevision);
 }

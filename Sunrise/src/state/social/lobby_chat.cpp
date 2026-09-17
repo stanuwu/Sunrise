@@ -61,23 +61,35 @@ void Hub::sync(std::size_t account, std::uint64_t sender, const Request& request
         return;
     }
     if (owner.epoch != request.epoch) {
+        // The publication counter outlives the registration it describes; resetting it would let
+        // a later body compare equal to an earlier stamp.
+        const auto published = owner.publication;
         owner = {};
+        owner.publication = published + 1;
         owner.epoch = request.epoch;
         owner.acceptedThrough = request.acceptedThrough;
         owner.nextDelivery =
             (std::min)(request.receivedThrough, static_cast<std::uint64_t>(INT_MAX)) + 1;
     }
     if (request.membershipRevision >= owner.membershipRevision) {
+        if (request.membershipRevision != owner.membershipRevision) {
+            ++owner.publication;
+        }
         owner.memberships = request.memberships;
         owner.membershipCount = request.membershipCount;
         owner.membershipRevision = request.membershipRevision;
     }
+    const auto receivedBefore = owner.receivedThrough;
     owner.receivedThrough = (std::max)(owner.receivedThrough,
                                        (std::min)(request.receivedThrough, owner.nextDelivery - 1));
+    if (owner.receivedThrough != receivedBefore) {
+        ++owner.publication;
+    }
     for (std::size_t i = 0; i < owner.pendingCount;) {
         if (owner.pending[i].sequence <= owner.receivedThrough
             || !member(owner, owner.pending[i].lobby)) {
             erase(owner.pending, owner.pendingCount, i);
+            ++owner.publication;
         } else {
             ++i;
         }
@@ -92,6 +104,7 @@ void Hub::sync(std::size_t account, std::uint64_t sender, const Request& request
         }
         if (!member(owner, message.lobby) || message.size > kPayloadCapacity) {
             owner.acceptedThrough = message.sequence;
+            ++owner.publication;
             continue;
         }
         // Preserve the sender's own echo. Another recipient's stalled callback queue must not
@@ -108,8 +121,10 @@ void Hub::sync(std::size_t account, std::uint64_t sender, const Request& request
             delivery = message;
             delivery.sender = sender;
             delivery.sequence = recipient.nextDelivery++;
+            ++recipient.publication;
         }
         owner.acceptedThrough = message.sequence;
+        ++owner.publication;
     }
 }
 
@@ -136,6 +151,7 @@ void Hub::disconnect(std::size_t account) noexcept {
     owner.memberships = {};
     owner.membershipCount = 0;
     owner.pendingCount = 0;
+    ++owner.publication;
 }
 void Hub::reset() noexcept {
     std::destroy_at(this);
@@ -145,8 +161,13 @@ void Hub::forget(std::size_t account) noexcept {
     if (account >= accounts_.size()) {
         return;
     }
+    const auto published = accounts_[account].publication;
     std::destroy_at(&accounts_[account]);
     std::construct_at(&accounts_[account]);
+    accounts_[account].publication = published + 1;
+}
+std::uint64_t Hub::publication(std::size_t account) const noexcept {
+    return account < accounts_.size() ? accounts_[account].publication : 0;
 }
 
 void Client::initialize(std::uint64_t epoch) noexcept {
@@ -196,12 +217,15 @@ bool Client::send(std::uint64_t id, std::span<const std::byte> bytes) noexcept {
     std::copy(bytes.begin(), bytes.end(), message.body.begin());
     return true;
 }
-void Client::snapshot(Request& request) const noexcept {
+void Client::snapshot(Request& request) noexcept {
     request = request_;
     request.messageCount = (std::min)(outgoingCount_, kBatchCapacity);
     for (std::size_t i = 0; i < request.messageCount; ++i) {
         request.messages[i] = outgoing_[i];
     }
+    // Staged, not committed: only an accepted reply proves the host was shown this batch.
+    stagedThrough_ = request.messageCount != 0 ? request.messages[request.messageCount - 1].sequence
+                                               : offeredThrough_;
 }
 void Client::receive(const Reply& reply) noexcept {
     if (reply.epoch != request_.epoch || reply.messageCount > kBatchCapacity
@@ -214,6 +238,7 @@ void Client::receive(const Reply& reply) noexcept {
     request_.acceptedThrough = reply.acceptedThrough;
     membershipAck_ = (std::max)(membershipAck_, reply.membershipRevision);
     receiptSent_ = (std::max)(receiptSent_, reply.receivedThrough);
+    offeredThrough_ = (std::max)(offeredThrough_, stagedThrough_);
     while (outgoingCount_ && outgoing_[0].sequence <= reply.acceptedThrough) {
         erase(outgoing_, outgoingCount_, 0);
     }
@@ -269,8 +294,11 @@ int Client::read(std::uint64_t id,
     return 0;
 }
 bool Client::dirty() const noexcept {
+    // A message the host has seen and refused for queue pressure is not local work; its recipient
+    // draining is what republishes it, so only an unoffered message counts here.
     return request_.epoch != 0
-           && (membershipAck_ != request_.membershipRevision || outgoingCount_ != 0
+           && (membershipAck_ != request_.membershipRevision
+               || (outgoingCount_ != 0 && outgoing_[outgoingCount_ - 1].sequence > offeredThrough_)
                || receiptSent_ != request_.receivedThrough);
 }
 

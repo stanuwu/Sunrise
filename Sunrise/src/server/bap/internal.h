@@ -396,8 +396,6 @@ struct Session {
     ActivityClientBinding activity{};
     /** Tick count after which the activity link owes its next keepalive write. */
     std::uint64_t activityKeepaliveDueTick{};
-    /** Backoff for an owed membership body whose complete frame could not be published. */
-    std::uint64_t activityMembershipRetryDueTick{};
     /** Client member key from the join request. It seeds the membership id. */
     std::uint64_t activityMemberKey{};
     /** Sparse native transport report owned by this exact activity binding. */
@@ -409,15 +407,6 @@ struct Session {
     std::uint32_t activityJoinCorrelation{};
     std::array<std::uint64_t, state::activity::entity_slots::kMemberLeaseRowCount>
         activityMemberSet{};
-    /** Exact changed set whose membership receipt the pending rejoin is waiting for. */
-    std::array<std::uint64_t, state::activity::entity_slots::kMemberLeaseRowCount>
-        activityRejoinMemberSet{};
-    /**
-     * Tick count after which an owed rejoin replay stops waiting for this recipient's membership
-     * receipt and goes out unacknowledged. Zero while nothing is owed.
-     */
-    std::uint64_t activityRejoinDeadlineTick{};
-    std::uint8_t activityRejoinSends{};
     /**
      * Character the join request named, or zero when it carried none.
      * The roster's participation key must be the character the client signed in on. The client
@@ -522,6 +511,14 @@ struct Session {
     std::uint64_t socialRosterRepushRoot{};
     /** True while one family-two re-push is still owed to this peer. */
     bool socialRosterRepushArmed{};
+    /** Social registration this link owns. Zero until a sync request registers it. */
+    std::uint64_t socialSerial{};
+    /** Publication stamp this link has already been told about, for feed and notice alike. */
+    state::social::Stamp socialSentStamp{};
+    /** Latest shared-account generation this peer has received. */
+    std::uint64_t accountGeneration{};
+    /** Newest shared-account generation owed as a full cross-peer refresh. */
+    std::uint64_t accountResyncGeneration{};
     /** Set by encrypted processing only after one account mutation commits and is copied out. */
     bool accountMutationPublished{};
     /** True while another peer's account mutation still needs a full local refresh. */

@@ -274,7 +274,7 @@ bool process(const ServiceRoute& route,
             }
         }
         outcome.hasSubscription = webOutcome.hasSubscription;
-        outcome.nativePresence = std::move(webOutcome.nativePresence);
+        outcome.nativePresence = webOutcome.nativePresence;
         outcome.hasRecordClaim = webOutcome.hasRecordClaim;
         outcome.selectionMoved = webOutcome.selectionMoved;
         outcome.hasArtifactReset = webOutcome.hasArtifactReset;

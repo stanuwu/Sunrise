@@ -210,6 +210,11 @@ void service_changed(AccountHandle owner) noexcept {
     const std::lock_guard lock(g_lock);
     if (owner == kLocalAccount) {
         local_changed();
+        // The local account's committed service dependencies -- its published transport above all
+        // -- are read through the public projection too, and a transport-only change never alters
+        // the public profile bytes, so the public generation has to move here or a route derived
+        // from it would never be recomputed.
+        g_publicGeneration.fetch_add(1, std::memory_order_release);
         return;
     }
     if (!remote(owner) || !g_entries[owner].profile) {

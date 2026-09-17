@@ -307,7 +307,8 @@ bool encode_feed(const Feed& value, std::span<std::byte> output, std::size_t& wr
     writer.put_u8(kVersion);
     writer.put_u64(value.epoch);
     writer.put_u64(value.acceptedThrough);
-    writer.put_u64(value.revision);
+    writer.put_u64(value.publication);
+    writer.put_u64(value.receivedThrough);
     writer.put_u8(static_cast<std::uint8_t>(value.rowCount));
     for (std::size_t index = 0; index < value.rowCount; ++index) {
         const WireRow& row = value.rows[index];
@@ -348,7 +349,8 @@ bool decode_feed(std::span<const std::byte> body, Feed& value) noexcept {
     }
     value.epoch = reader.get_u64();
     value.acceptedThrough = reader.get_u64();
-    value.revision = reader.get_u64();
+    value.publication = reader.get_u64();
+    value.receivedThrough = reader.get_u64();
     const std::size_t rows = reader.get_u8();
     if (rows > kRowCapacity) {
         value = {};
@@ -387,6 +389,30 @@ bool decode_feed(std::span<const std::byte> body, Feed& value) noexcept {
         value = {};
         return false;
     }
+    return true;
+}
+
+bool encode_notice(std::uint64_t publication,
+                   std::span<std::byte> output,
+                   std::size_t& written) noexcept {
+    written = 0;
+    Writer writer{output};
+    writer.put_u64(publication);
+    if (!writer.ok()) {
+        return false;
+    }
+    written = writer.size();
+    return true;
+}
+
+bool decode_notice(std::span<const std::byte> body, std::uint64_t& publication) noexcept {
+    publication = 0;
+    Reader reader{body};
+    const auto value = reader.get_u64();
+    if (!reader.complete()) {
+        return false;
+    }
+    publication = value;
     return true;
 }
 

@@ -48,12 +48,8 @@ void reset_join_state(Session& session) noexcept {
     session.activityJoinGeneration = 0;
     session.activityJoinCorrelation = 0;
     session.activityMemberSet = {};
-    session.activityRejoinMemberSet = {};
-    session.activityRejoinDeadlineTick = 0;
-    session.activityRejoinSends = 0;
     session.activityCharacterSoid = 0;
     session.activityKeepaliveDueTick = 0;
-    session.activityMembershipRetryDueTick = 0;
     session.activityRosterDueTick = 0;
     session.activityTransitionUntilTick = 0;
     session.activityClientIdentitySeenGeneration = 0;
@@ -126,14 +122,6 @@ ConnectionFields connection_fields(const ServiceOutcome& outcome) noexcept {
     fields.receivesClientIdentity =
         plan->mutationDomain == activity_message::MutationDomain::membership
         && plan->membershipMutation.kind == state::activity::membership::MutationKind::identity;
-    // The commit consumes the mutation, so the revision the client answered for is read here.
-    fields.acknowledgesMembership =
-        plan->mutationDomain == activity_message::MutationDomain::membership
-        && plan->membershipMutation.kind
-               == state::activity::membership::MutationKind::acknowledgement;
-    if (fields.acknowledgesMembership) {
-        fields.acknowledgedMembershipRevision = plan->membershipMutation.acknowledgement;
-    }
     return fields;
 }
 
@@ -209,13 +197,6 @@ void publish_connection_fields(Session& session,
     }
     if (fields.receivesClientIdentity) {
         session.activityClientIdentitySeenGeneration = session.activity.bindingGeneration;
-    }
-    // The member row stores the session's shared acknowledgement. This connection also records
-    // its own receipt against the body it delivered, so another link of the same member cannot
-    // stand in for this link's delivery or acknowledgement.
-    if (fields.acknowledgesMembership) {
-        push::activity::note_membership_acknowledgement(session,
-                                                        fields.acknowledgedMembershipRevision);
     }
     publish_activity_transport(session, fields.transportBindingGeneration, fields.transportReport);
     // A join resets the roster container. Its first post-region state change rebuilds the
@@ -334,12 +315,8 @@ void release_activity_connection(Session& session) noexcept {
         state::activity::release_binding(session.activity.session);
     }
     session.activity = {};
-    session.activityMembershipRetryDueTick = 0;
     session.activityJoinCorrelation = 0;
     session.activityMemberSet = {};
-    session.activityRejoinMemberSet = {};
-    session.activityRejoinDeadlineTick = 0;
-    session.activityRejoinSends = 0;
     authority_query::reset(session.activityAuthorityQuery, 0);
     authority_reset::reset(session.activityAuthorityReset, 0);
     session.activityPatchEpoch = {};
