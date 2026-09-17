@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -56,11 +57,25 @@ void set_app_id(DWORD appId) noexcept;
 [[nodiscard]] bool
 queue_callback(int callbackId, ApiCall call, const void* payload, std::size_t payloadSize) noexcept;
 
+/**
+ * A producer-owned generation cancels queued events when its lifetime changes.
+ * The source
+ * must outlive queued events. A callback already executing may finish.
+ */
+struct CallbackGuard {
+    const std::atomic<std::uint64_t>* source{};
+    std::uint64_t generation{};
+    [[nodiscard]] bool valid() const noexcept {
+        return source == nullptr || source->load() == generation;
+    }
+};
+
 struct CallbackDelivery {
     int callbackId{};
     ApiCall call{};
     const void* payload{};
     std::size_t payloadSize{};
+    CallbackGuard guard{};
 };
 /** Enqueues one ordered batch atomically; a refused batch leaves every event pending with its
  * producer. */

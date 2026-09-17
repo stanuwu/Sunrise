@@ -5,9 +5,9 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <optional>
 
+#include "../../core/threading/srw_lock.h"
 #include "account_platform.h"
 
 namespace sunrise::state::account::profiles {
@@ -16,14 +16,16 @@ constexpr std::size_t kTokenSize = 32;
 struct Entry {
     std::uint64_t primarySoid{};
     std::array<std::byte, kTokenSize> token{};
-    std::unique_ptr<AccountState> profile;
+    // One fixed public image per enrollment slot; publishing never allocates on the request path.
+    std::optional<AccountState> profile;
     std::uint32_t generation{};
     std::uint32_t membershipGeneration{};
     network::PeerPublication peerPublication;
 };
 std::array<Entry, kAccountCapacity> g_entries;
 std::size_t g_count = 1;
-std::mutex g_lock;
+// Callers may own BAP serialization. Cache operations never enter BAP, database or client locks.
+core::threading::SrwLock g_lock;
 std::atomic<std::uint64_t> g_localGeneration{1};
 social::NativePresence g_localPresence;
 std::atomic<std::uint32_t> g_publicGeneration{1};
@@ -122,7 +124,9 @@ bool valid(const AccountState& profile) noexcept {
 void reset(std::uint64_t localSoid) noexcept {
     const std::lock_guard lock(g_lock);
     for (auto& entry : g_entries) {
-        entry = {};
+        // Construct in place so clearing a profile does not create a large stack temporary.
+        std::destroy_at(&entry);
+        std::construct_at(&entry);
     }
     g_entries[kLocalAccount].primarySoid = localSoid;
     g_count = 1;
@@ -381,40 +385,37 @@ bool publish(AccountHandle handle, const AccountState& profile) noexcept {
     if (!valid(profile)) {
         return false;
     }
-    auto candidate = std::unique_ptr<AccountState>(new (std::nothrow) AccountState{});
-    if (!candidate) {
-        return false;
-    }
-    candidate->primarySoid = profile.primarySoid;
-    candidate->presence = profile.presence;
-    candidate->characterCount = profile.characterCount;
-    std::copy_n(profile.characters.begin(), profile.characterCount, candidate->characters.begin());
-    for (auto& character : candidate->characters) {
-        character.stacks = {};
-        seed_row_generations(character);
-    }
     const std::lock_guard lock(g_lock);
-    if (!present(handle) || g_entries[handle].primarySoid != candidate->primarySoid) {
+    if (!present(handle) || g_entries[handle].primarySoid != profile.primarySoid) {
         return false;
     }
     for (AccountHandle i = 0; i < g_count; ++i) {
-        if (i != handle && overlaps(*candidate, g_entries[i])) {
+        if (i != handle && overlaps(profile, g_entries[i])) {
             return false;
         }
     }
     auto& entry = g_entries[handle];
-    if (entry.profile && entry.profile->presence.platformId != candidate->presence.platformId) {
+    if (entry.profile && entry.profile->presence.platformId != profile.presence.platformId) {
         return false;
     }
-    if (!entry.profile || entry.profile->presence.displayName != candidate->presence.displayName
+    if (!entry.profile || entry.profile->presence.displayName != profile.presence.displayName
         || account::selected_character_soid(*entry.profile)
-               != account::selected_character_soid(*candidate)) {
+               != account::selected_character_soid(profile)) {
         if (++entry.membershipGeneration == 0) {
             ++entry.membershipGeneration;
         }
     }
-    entry.peerPublication.observe(candidate->presence.native);
-    entry.profile = std::move(candidate);
+    // Every refusal is above this point. Readers hold the same lock throughout their copy.
+    auto& candidate = entry.profile.emplace();
+    candidate.primarySoid = profile.primarySoid;
+    candidate.presence = profile.presence;
+    candidate.characterCount = profile.characterCount;
+    std::copy_n(profile.characters.begin(), profile.characterCount, candidate.characters.begin());
+    for (auto& character : candidate.characters) {
+        character.stacks = {};
+        seed_row_generations(character);
+    }
+    entry.peerPublication.observe(candidate.presence.native);
     if (++entry.generation == 0) {
         ++entry.generation;
     }

@@ -110,6 +110,8 @@ bool shutdown() noexcept {
         if (!hadRuntime) {
             return true;
         }
+        // Invalidate entering social passes and queued events before their producers stop.
+        interfaces::methods::reset_friends();
         if (!core::shutdown()) {
             core::log::write(core::log::Channel::client,
                              core::log::Level::error,
@@ -119,7 +121,6 @@ bool shutdown() noexcept {
 
         // Callback pointers are released only after Client hooks stop producing events.
         runtime::callbacks::clear();
-        interfaces::methods::reset_friends();
         state::social::client_disconnected();
         state::social::lobby::reset();
         g_initialized.store(false, std::memory_order_release);

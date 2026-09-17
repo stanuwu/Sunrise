@@ -42,6 +42,7 @@ struct CallbackEvent {
     ApiCall call{};
     std::size_t payloadSize{};
     std::array<std::byte, kEventPayloadCapacity> payload{};
+    CallbackGuard guard{};
 };
 
 extern SRWLOCK g_lock;

@@ -26,6 +26,14 @@ void reset(std::uint64_t localSoid = 0) noexcept;
 [[nodiscard]] bool find_owner(std::uint64_t objectSoid, AccountHandle& handle) noexcept;
 [[nodiscard]] bool find_token(std::span<const std::byte> token, AccountHandle& handle) noexcept;
 [[nodiscard]] std::uint64_t primary_soid(AccountHandle handle) noexcept;
+/**
+ * Validates and atomically replaces one public image in fixed storage for its enrolled owner.
+
+ * * Refusal preserves content and generations. Copies under the cache SRW lock; never allocates
+ *
+ * or calls the database, BAP, or client callbacks. The input must remain stable during the call.
+
+ */
 [[nodiscard]] bool publish(AccountHandle handle, const AccountState& profile) noexcept;
 /** An absent profile or invalid handle clears output; it never falls back to the local account. */
 [[nodiscard]] bool snapshot(AccountHandle handle, AccountState& output) noexcept;

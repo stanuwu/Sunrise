@@ -75,6 +75,9 @@ void invoke_call_result(void* callback, void* payload, ApiCall call) noexcept {
 
 /** Finds the registrations, then calls them only after the callback lock is released. */
 void dispatch_event(CallbackEvent& event) noexcept {
+    if (!event.guard.valid()) {
+        return;
+    }
     std::array<void*, kCallbackCapacity> callbacks{};
     std::array<void*, kCallResultCapacity> callResults{};
     std::size_t callbackCount{};
@@ -97,9 +100,15 @@ void dispatch_event(CallbackEvent& event) noexcept {
     // Callback code can register again from inside the call, so calls happen after the unlock.
     ReleaseSRWLockExclusive(&g_lock);
     for (std::size_t index = 0; index < callbackCount; ++index) {
+        if (!event.guard.valid()) {
+            return;
+        }
         invoke_callback(callbacks[index], event.payload.data());
     }
     for (std::size_t index = 0; index < callResultCount; ++index) {
+        if (!event.guard.valid()) {
+            return;
+        }
         invoke_call_result(callResults[index], event.payload.data(), event.call);
     }
 }
@@ -144,10 +153,11 @@ void run_slice() noexcept {
         return;
     }
     // The network group must own SignOn before callback work can send it.
+    const auto socialGeneration = interfaces::methods::friends_generation();
     const bool mainActive = runtime::activate_main_once();
     if (mainActive) {
-        interfaces::methods::service_friends();
-        interfaces::methods::service_invites();
+        interfaces::methods::service_friends(socialGeneration);
+        interfaces::methods::service_invites(socialGeneration);
         interfaces::methods::service_lobbies();
     }
     runtime::callbacks::CallbackEvent event;
@@ -220,6 +230,12 @@ bool queue_callbacks(std::span<const CallbackDelivery> deliveries) noexcept {
         }
     }
     AcquireSRWLockExclusive(&g_lock);
+    for (const auto& delivery : deliveries) {
+        if (!delivery.guard.valid()) {
+            ReleaseSRWLockExclusive(&g_lock);
+            return false;
+        }
+    }
     if (deliveries.size() > kEventCapacity - g_eventCount) {
         ReleaseSRWLockExclusive(&g_lock);
         core::log::write(
@@ -233,6 +249,7 @@ bool queue_callbacks(std::span<const CallbackDelivery> deliveries) noexcept {
         event.callbackId = delivery.callbackId;
         event.call = delivery.call;
         event.payloadSize = delivery.payloadSize;
+        event.guard = delivery.guard;
         if (delivery.payloadSize != 0) {
             std::memcpy(event.payload.data(), delivery.payload, delivery.payloadSize);
         }

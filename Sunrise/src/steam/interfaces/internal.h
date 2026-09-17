@@ -108,8 +108,10 @@ int friend_relationship(void*, std::uint64_t steamId) noexcept;
 int friend_persona_state(void*, std::uint64_t steamId) noexcept;
 const char* friend_persona_name(void*, std::uint64_t steamId) noexcept;
 bool friend_game_played(void*, std::uint64_t steamId, FriendGameInfo* info) noexcept;
-void service_friends() noexcept;
-void service_invites() noexcept;
+/** Captured before callback-pump activation so shutdown can invalidate an entering pass. */
+[[nodiscard]] std::uint64_t friends_generation() noexcept;
+void service_friends(std::uint64_t expectedGeneration = 0) noexcept;
+void service_invites(std::uint64_t expectedGeneration = 0) noexcept;
 void reset_friends() noexcept;
 const char* language(void*) noexcept;
 const char* country(void*) noexcept;
