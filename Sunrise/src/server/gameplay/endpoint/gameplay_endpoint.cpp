@@ -44,6 +44,12 @@ constexpr std::size_t kDatagramCapacity = 1500;
 constexpr unsigned kMaxReceiveReports = 64;
 /** Traversal replies reported per run. The client repeats a request until the address resolves. */
 constexpr unsigned kMaxTraversalReports = 8;
+/** Wire mode 2 is native NAT stage 1; any accepted reply classifies NAT as open. */
+constexpr unsigned kOpenNatProbe = 2;
+/** Wire mode 3 is native stage 2, which needs a different physical source port. */
+constexpr unsigned kPortFilterProbe = 3;
+/** Wire mode 4 is alternate stage 2, which compares mappings across destination ports. */
+constexpr unsigned kMappingProbe = 4;
 
 /** Arrivals and traversal replies already reported, counted against the budgets above. */
 std::atomic<unsigned> g_reported{0};
@@ -457,15 +463,15 @@ void service(std::uint64_t now) noexcept {
             if (logicalSlot >= kDiscoverySlot) {
                 if (middleware::gameplay::nat::discovery::classify({buffer.data(), size})
                     == middleware::gameplay::nat::discovery::Request::natProbe) {
-                    const auto stage = std::to_integer<unsigned>(buffer[3]);
-                    // Stage 2 tests an unsolicited reply from a different server address. This
-                    // single-address service cannot perform that test; native traversal falls
-                    // through to its port-filter/mapping tests instead of falsely declaring open
-                    // NAT.
-                    if (stage == 2) {
+                    const auto mode = std::to_integer<unsigned>(buffer[3]);
+                    // A reply from this same endpoint cannot establish open NAT. The carrier's
+                    // logical ports also cannot test physical port filtering or mapping. Let
+                    // native traversal exhaust those tests and retain its conservative result.
+                    if (mode == kOpenNatProbe
+                        || (single_port() && (mode == kPortFilterProbe || mode == kMappingProbe))) {
                         continue;
                     }
-                    if (stage == 3) {
+                    if (mode == kPortFilterProbe) {
                         from.localPort =
                             from.localPort == middleware::gameplay::nat::discovery::kFirstPort
                                 ? middleware::gameplay::nat::discovery::kSecondPort
