@@ -59,6 +59,9 @@ std::uint32_t g_packageHash = kPackageHash, g_packageCost = 0;
 std::uint16_t g_packageSale = kPackageSale, g_packageCategory = kClaimCategory;
 /** Build-86657 Gunsmith reward counter and normal claim interaction. */
 constexpr std::uint16_t kGunsmithCreditRow = 49, kBansheeClaimInteraction = 35;
+/** Build-86657 Banshee's current weapon package sale and reward category. */
+constexpr std::uint32_t kGunsmithPackageHash = 2422825785U;
+constexpr std::uint16_t kGunsmithPackageSale = 16, kGunsmithCategory = 8;
 
 /** @return Flat fixture pool in weapon, Titan, Hunter, Warlock order. */
 std::uint32_t gear_hash(std::size_t index) {
@@ -478,7 +481,7 @@ void verify_claims() {
     g_vendorHash = kBanshee;
     check(state::prepare_vendor_reward(kVendor, kBansheeClaimInteraction, 0, 0, grant)
               == Disposition::refused,
-          "unsupported faction payout refused");
+          "missing Gunsmith package binding refused");
 
     reset_claim();
     g_rewardCapacity = 0;
@@ -654,6 +657,79 @@ void verify_shared_sales() {
           "changed package cannot consume credit");
 }
 
+/** Configures Gunsmith credits without unrelated Vanguard/Crucible selection gates. */
+void reset_gunsmith_claim() {
+    reset();
+    g_packageHash = kGunsmithPackageHash;
+    g_packageSale = kGunsmithPackageSale;
+    g_packageCategory = kGunsmithCategory;
+    check(store::write_family5({})
+              && store::write_unlock(store::Bank::characterObjectValues, kGunsmithCreditRow, 1)
+              && store::write_unlock(
+                  store::Bank::characterObjectValues, state::kVanguardRewardValueRow, 2),
+          "seed isolated Gunsmith fixture credit");
+}
+
+/** Covers weapon-only claims, sale isolation and atomic Gunsmith credit consumption. */
+void verify_gunsmith_sales() {
+    state::PendingItemAcquisition grant{};
+    const auto& weapons = state::vendor_rewards::kGunsmithPool.weapons;
+    for (const auto characterClass : {state::CharacterClass::titan,
+                                      state::CharacterClass::hunter,
+                                      state::CharacterClass::warlock}) {
+        reset_gunsmith_claim();
+        auto account = store::account();
+        account.characters[0].characterClass = characterClass;
+        check(store::write_account(account), "select fixture class");
+        for (std::uint32_t roll = 0; roll <= weapons.size(); ++roll) {
+            check(state::prepare_vendor_reward_sale(kVendor, kGunsmithPackageSale, roll, grant)
+                          == Disposition::prepared
+                      && grant.acquiredDefinitionHash == weapons[roll % weapons.size()],
+                  "all classes receive only the native Gunsmith weapons");
+        }
+        {
+            store::Transaction outer;
+            check(outer.ready() && state::commit_item_acquisition(grant),
+                  "commit Gunsmith claim in response transaction");
+        }
+        check(credits(kGunsmithCreditRow) == 1
+                  && store::account().characters[0].inventory.count == 0,
+              "failed response restores Gunsmith item and credit");
+        check(state::prepare_vendor_reward_sale(kVendor, kGunsmithPackageSale, 0, grant)
+                  == Disposition::prepared,
+              "prepare Gunsmith claim without selection gates");
+        auto duplicate = grant;
+        check(state::commit_item_acquisition(grant) && credits(kGunsmithCreditRow) == 0
+                  && credits(state::kVanguardRewardValueRow) == 2
+                  && !state::commit_item_acquisition(duplicate)
+                  && state::prepare_vendor_reward_sale(kVendor, kGunsmithPackageSale, 0, grant)
+                         == Disposition::refused,
+              "claim spends only Gunsmith credit and refuses duplicates or borrowed credit");
+    }
+    reset_gunsmith_claim();
+    g_rewardCapacity = 0;
+    check(state::prepare_vendor_reward_sale(kVendor, kGunsmithPackageSale, 0, grant)
+                  == Disposition::refused
+              && credits(kGunsmithCreditRow) == 1,
+          "full inventory preserves Gunsmith credit");
+    reset_gunsmith_claim();
+    check(state::prepare_vendor_reward_sale(kVendor, kGunsmithPackageSale + 1, 0, grant)
+              == Disposition::refused,
+          "another sale cannot use Gunsmith credit");
+    ++g_packageCategory;
+    check(state::prepare_vendor_reward_sale(kVendor, kGunsmithPackageSale, 0, grant)
+                  == Disposition::notApplicable
+              && credits(kGunsmithCreditRow) == 1,
+          "same package outside reward category cannot use Gunsmith credit");
+    reset_gunsmith_claim();
+    check(state::prepare_vendor_reward(kVendor, kBansheeClaimInteraction, 0, 0, grant)
+              == Disposition::prepared,
+          "Gunsmith reply uses shared settlement");
+    ++g_packageHash;
+    check(!state::commit_item_acquisition(grant) && credits(kGunsmithCreditRow) == 1,
+          "changed Gunsmith package preserves credit");
+}
+
 } // namespace
 
 namespace sunrise::core::log {
@@ -827,6 +903,7 @@ int main(int argc, char** argv) {
     verify_rank_rewards();
     verify_claims();
     verify_shared_sales();
+    verify_gunsmith_sales();
     store::shutdown();
     check(store::open(argv[2],
                       read_text(root + "/investment_schema.sql"),
@@ -864,6 +941,15 @@ int main(int argc, char** argv) {
               && reopened.characterObjectValues[state::kVanguardRewardValueRow] == 1
               && store::account().characters[0].inventory.count == 1,
           "claim debit and item persist together");
+    reset_gunsmith_claim();
+    check(state::prepare_vendor_reward_sale(kVendor, kGunsmithPackageSale, 0, claim)
+                  == Disposition::prepared
+              && state::commit_item_acquisition(claim),
+          "commit persistent Gunsmith claim");
+    store::shutdown();
+    check(store::open(argv[2], {}, {}, {}, {}), "reopen Gunsmith claim");
+    check(credits(kGunsmithCreditRow) == 0 && store::account().characters[0].inventory.count == 1,
+          "Gunsmith item and debit persist together");
     store::shutdown();
     std::puts("PASS: reputation transaction, exact debit/credit, refusal, staleness and rollback");
 }

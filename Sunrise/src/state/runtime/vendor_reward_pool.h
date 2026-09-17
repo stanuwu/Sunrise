@@ -73,6 +73,8 @@ inline constexpr Pool kVanguardPool{kVanguardWeapons,
 /** Package 3289621657 uses preview 1894103790, with the same weapons but its own armour. */
 inline constexpr Pool kCruciblePool{kVanguardWeapons,
                                     {kCrucibleTitan, kCrucibleHunter, kCrucibleWarlock}};
+/** Build-86657 package 2422825785 uses reward list 546 -> 528 for these weapons, without armour. */
+inline constexpr Pool kGunsmithPool{kVanguardWeapons, {}};
 /** Supported previews contain at most thirty weapons and five eligible armour pieces. */
 inline constexpr std::size_t kCandidateCapacity = 35;
 

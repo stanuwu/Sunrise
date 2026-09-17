@@ -59,6 +59,8 @@ struct RewardRule {
     std::uint16_t saleIndex{};
     std::uint32_t packageHash{};
     const vendor_rewards::Pool* pool{};
+    /** Only the Vanguard and Crucible sales require FLAG[5901] and VALUE[465]. */
+    bool requiresSelectionGates{true};
 };
 /** Vendor, interaction, category, saved counter, package sale and hash from build 86657. */
 constexpr std::array<RewardRule, 3> kRewardRules{{
@@ -66,12 +68,19 @@ constexpr std::array<RewardRule, 3> kRewardRules{{
     {69482069U, 40, 3, kVanguardRewardValueRow, 93, 2746484552U, &vendor_rewards::kVanguardPool},
     // Shaxx's current package previews Crucible gear.
     {3603221665U, 28, 10, kCrucibleRewardValueRow, 96, 3289621657U, &vendor_rewards::kCruciblePool},
-    // Banshee's current package has no supported payout binding.
-    {672118013U, 35, 8, kGunsmithRewardValueRow},
+    // Banshee's sale has empty selection gates and uses the shared weapon pool without armour.
+    {672118013U,
+     35,
+     8,
+     kGunsmithRewardValueRow,
+     16,
+     2422825785U,
+     &vendor_rewards::kGunsmithPool,
+     false},
 }};
 /** Reply zero completes the supported normal reward interactions. */
 constexpr std::uint16_t kAcceptRewardReply = 0;
-/** FLAG[5901] selects both supported current packages instead of their older variants. */
+/** FLAG[5901] selects the current Vanguard and Crucible packages over their older variants. */
 constexpr std::uint16_t kCurrentPackageFlag = 5901;
 /** The normal reward interaction requires VALUE[465] >= 20. */
 constexpr std::uint16_t kRewardLevelSlot = 465;
@@ -106,12 +115,18 @@ bool reward_binding_current(const RewardRule& rule, std::uint16_t saleIndex) noe
     vendors::Definition vendor{};
     vendors::SaleRow sale{};
     build_data::items::Definition package{};
-    Family5State family{};
     if (rule.pool == nullptr || saleIndex != rule.saleIndex
         || !vendors::find(rule.vendorHash, vendor) || !vendors::sale_row(vendor, saleIndex, sale)
         || sale.categoryIndex != rule.category || sale.costQuantity != 0
         || !build_data::find_item_definition_index(sale.itemIndex, package)
-        || package.definitionHash != rule.packageHash || !investment::store::read_family5(family)) {
+        || package.definitionHash != rule.packageHash) {
+        return false;
+    }
+    if (!rule.requiresSelectionGates) {
+        return true;
+    }
+    Family5State family{};
+    if (!investment::store::read_family5(family)) {
         return false;
     }
     bool packageEnabled = false, levelMet = false;
