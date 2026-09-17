@@ -151,28 +151,25 @@ bool notification_service(std::uint16_t service) noexcept {
     return service == 9 || service == 100 || service == 123 || service == 301;
 }
 
-void inbound(UpstreamLink& link,
+bool inbound(UpstreamLink& link,
              std::span<const std::byte> plaintext,
              bool plaintextFrame,
-             void (*onNotification)(UpstreamLink&, std::span<const std::byte>, bool),
-             void (*onResponse)(UpstreamLink&,
+             bool (*onNotification)(UpstreamLink&, std::span<const std::byte>, bool),
+             bool (*onResponse)(UpstreamLink&,
                                 const PendingForward&,
                                 std::span<const std::byte>)) noexcept {
     if (plaintext.size() < 2) {
         fail(link, "short_payload");
-        return;
+        return false;
     }
     const auto service = middleware::encoding::read_u16_be(plaintext.first<2>());
     if (notification_service(service)) {
-        if (onNotification) {
-            onNotification(link, plaintext, plaintextFrame);
-        }
-        return;
+        return !onNotification || onNotification(link, plaintext, plaintextFrame);
     }
     middleware::bap::ResponseFrame response{};
     if (!middleware::bap::parse_response_payload(plaintext, response)) {
         fail(link, "response_shape");
-        return;
+        return false;
     }
     for (auto& forward : link.pending) {
         if (!forward.inUse || forward.taskId != response.taskId) {
@@ -180,16 +177,17 @@ void inbound(UpstreamLink& link,
         }
         if (forward.expectedResponseService != response.serviceId) {
             fail(link, "response_service");
-            return;
+            return false;
         }
         const auto completed = forward;
-        forward = {};
-        if (onResponse) {
-            onResponse(link, completed, plaintext);
+        if (onResponse && !onResponse(link, completed, plaintext)) {
+            return false;
         }
-        return;
+        forward = {};
+        return true;
     }
     fail(link, "unexpected_response");
+    return false;
 }
 
 bool receive_hello(UpstreamLink& link,
@@ -257,7 +255,7 @@ bool queue(UpstreamLink& link,
            std::uint16_t expectedResponse,
            std::span<const std::byte> body,
            bool plaintext) noexcept {
-    if (link.stage != LinkStage::ready) {
+    if (link.stage != LinkStage::ready || link.receiveBlocked) {
         return false;
     }
     PendingForward* free = nullptr;
@@ -283,6 +281,8 @@ void reset(UpstreamLink& link) noexcept {
     close_socket(link);
     link.stage = LinkStage::idle;
     link.established = false;
+    link.receiveBlocked = false;
+    link.blockedSince = 0;
     link.nextAttemptTick = link.attemptStartedTick = link.helloSentTick = link.lastActivityTick = 0;
     link.helloTaskId = 0;
     link.nextOriginatedTaskId = kOriginatedTaskIdBase;
@@ -306,8 +306,8 @@ bool retry_initial(UpstreamLink& link, std::uint64_t now) noexcept {
 
 void service_link(UpstreamLink& link,
                   std::uint64_t now,
-                  void (*onNotification)(UpstreamLink&, std::span<const std::byte>, bool),
-                  void (*onResponse)(UpstreamLink&,
+                  bool (*onNotification)(UpstreamLink&, std::span<const std::byte>, bool),
+                  bool (*onResponse)(UpstreamLink&,
                                      const PendingForward&,
                                      std::span<const std::byte>)) noexcept {
     if (link.downstreamConnectionId == 0 || link.stage == LinkStage::failed) {
@@ -353,47 +353,45 @@ void service_link(UpstreamLink& link,
         fail(link, "hello_timeout");
         return;
     }
-    for (const auto& slot : link.pending) {
-        if (slot.inUse && now - slot.queuedTick >= kResponseTimeoutMs) {
-            fail(link, "response_timeout");
-            return;
-        }
-    }
-    if (FD_ISSET(link.socket, &read)) {
-        const auto free = link.stream.size() - link.streamSize;
-        if (free == 0) {
-            fail(link, "stream_full");
-            return;
-        }
-        const int received = recv(link.socket,
-                                  reinterpret_cast<char*>(link.stream.data() + link.streamSize),
-                                  static_cast<int>(free),
-                                  0);
-        if (received == 0) {
-            fail(link, "eof");
-            return;
-        }
-        if (received < 0) {
-            if (WSAGetLastError() != WSAEWOULDBLOCK) {
-                fail(link, "receive");
-            }
-            return;
-        }
-        link.streamSize += static_cast<std::size_t>(received);
-        link.lastActivityTick = now;
-    }
+    bool mayRead = FD_ISSET(link.socket, &read) != 0;
     for (;;) {
         middleware::bap::OuterFrame outer{};
         std::size_t consumed{};
         const auto result = middleware::bap::parse_stream_frame(
             std::span(link.stream).first(link.streamSize), link.stream.size(), outer, consumed);
         if (result == middleware::bap::StreamFrameResult::incomplete) {
-            break;
+            if (!mayRead) {
+                break;
+            }
+            mayRead = false;
+            const auto free = link.stream.size() - link.streamSize;
+            if (free == 0) {
+                fail(link, "stream_full");
+                return;
+            }
+            const int received = recv(link.socket,
+                                      reinterpret_cast<char*>(link.stream.data() + link.streamSize),
+                                      static_cast<int>(free),
+                                      0);
+            if (received == 0) {
+                fail(link, "eof");
+                return;
+            }
+            if (received < 0) {
+                if (WSAGetLastError() != WSAEWOULDBLOCK) {
+                    fail(link, "receive");
+                }
+                return;
+            }
+            link.streamSize += static_cast<std::size_t>(received);
+            link.lastActivityTick = now;
+            continue;
         }
         if (result == middleware::bap::StreamFrameResult::invalid) {
             fail(link, "framing");
             return;
         }
+        bool accepted = true;
         if (link.stage == LinkStage::helloSent) {
             if (!receive_hello(link, outer, now)) {
                 return;
@@ -406,17 +404,43 @@ void service_link(UpstreamLink& link,
                 fail(link, "authentication");
                 return;
             }
-            middleware::secure_channel::advance_nonce(link.receiveNonce);
-            inbound(link, std::span(plaintext).first(size), false, onNotification, onResponse);
+            accepted =
+                inbound(link, std::span(plaintext).first(size), false, onNotification, onResponse);
             SecureZeroMemory(plaintext.data(), size);
         } else {
-            inbound(link, outer.payload, true, onNotification, onResponse);
+            accepted = inbound(link, outer.payload, true, onNotification, onResponse);
         }
         if (link.stage != LinkStage::ready) {
             return;
         }
+        if (!accepted) {
+            if (!link.receiveBlocked) {
+                link.receiveBlocked = true;
+                link.blockedSince = now;
+            }
+            return;
+        }
+        if (link.receiveBlocked) {
+            const auto paused = now - link.blockedSince;
+            for (auto& pending : link.pending) {
+                if (pending.inUse) {
+                    pending.queuedTick += paused;
+                }
+            }
+            link.receiveBlocked = false;
+            link.blockedSince = 0;
+        }
+        if (outer.frameType == FrameType::encrypted) {
+            middleware::secure_channel::advance_nonce(link.receiveNonce);
+        }
         std::memmove(link.stream.data(), link.stream.data() + consumed, link.streamSize - consumed);
         link.streamSize -= consumed;
+    }
+    for (const auto& slot : link.pending) {
+        if (slot.inUse && now - slot.queuedTick >= kResponseTimeoutMs) {
+            fail(link, "response_timeout");
+            return;
+        }
     }
     if (link.stage == LinkStage::ready && now - link.lastActivityTick >= kKeepaliveIntervalMs) {
         const bool echoPending =
@@ -456,7 +480,8 @@ bool send_fire_and_forget(UpstreamLink& link,
                           std::uint16_t service,
                           std::uint32_t taskId,
                           std::span<const std::byte> body) noexcept {
-    if (link.stage != LinkStage::ready || !send_request(link, service, taskId, body, false)) {
+    if (link.stage != LinkStage::ready || link.receiveBlocked
+        || !send_request(link, service, taskId, body, false)) {
         return false;
     }
     link.lastActivityTick = GetTickCount64();

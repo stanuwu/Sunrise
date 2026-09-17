@@ -33,6 +33,7 @@ struct PendingForward {
     std::uint64_t queuedTick{};
 };
 
+/** Concurrent correlations; additional requests stay in the bounded held-input queue. */
 inline constexpr std::size_t kPendingCapacity = 4;
 
 inline constexpr std::size_t kLinkFrameCapacity = client::network::kBapFrameCapacity;
@@ -65,6 +66,9 @@ struct UpstreamLink {
     std::array<std::byte, state::kBapNonceSize> receiveNonce{};
     std::array<std::byte, kLinkFrameCapacity> stream{};
     std::size_t streamSize{};
+    /** A refused callback leaves the frame, receive nonce and correlation unchanged. */
+    bool receiveBlocked{};
+    std::uint64_t blockedSince{};
     std::array<std::byte, kLinkFrameCapacity * kPendingCapacity> output{};
     std::size_t outputOffset{};
     std::size_t outputSize{};
@@ -75,12 +79,17 @@ void reset(UpstreamLink& link) noexcept;
 /** Retry only before the first completed hello; established native requests cannot be replayed. */
 [[nodiscard]] bool retry_initial(UpstreamLink& link, std::uint64_t now) noexcept;
 
+/**
+ * Services one nonblocking connection. Callbacks return false for temporary output pressure;
+ * they must then leave application state unchanged. The same frame is offered again when
+ * serviced. Response deadlines exclude time spent waiting for this local consumer.
+ */
 void service_link(UpstreamLink& link,
                   std::uint64_t now,
-                  void (*onNotification)(UpstreamLink& link,
+                  bool (*onNotification)(UpstreamLink& link,
                                          std::span<const std::byte> plaintextPayload,
                                          bool plaintextFrame),
-                  void (*onResponse)(UpstreamLink& link,
+                  bool (*onResponse)(UpstreamLink& link,
                                      const PendingForward& forward,
                                      std::span<const std::byte> plaintextPayload)) noexcept;
 

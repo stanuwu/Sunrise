@@ -254,7 +254,7 @@ void clear_session(Session& session) noexcept {
         return false;
     }
     const bool ordered = core::settings::get().server.upstream.enabled;
-    if (ordered && !proxy::can_enqueue_local_reply(session->id)) {
+    if (ordered && !proxy::can_accept_request(session->id)) {
         response.closeConnection = proxy::failed(session->id);
         response.deferFrame = !response.closeConnection;
         response.size =

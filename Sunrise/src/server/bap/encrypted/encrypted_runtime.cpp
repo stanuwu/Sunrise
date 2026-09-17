@@ -268,8 +268,7 @@ bool consume(Session& session,
                                             frame.serviceId,
                                             static_cast<std::uint16_t>(route.response),
                                             frame.taskId,
-                                            frame.body,
-                                            session.sendNonce)
+                                            frame.body)
                    : proxy::forward_uncorrelated(
                          session.id, frame.serviceId, frame.taskId, frame.body);
     }

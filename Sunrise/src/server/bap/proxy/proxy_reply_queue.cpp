@@ -12,9 +12,7 @@ namespace {
 std::array<ReplyQueue, client::network::kBapConnectionCount> g_queues;
 
 void clear(ReplyEntry& entry) noexcept {
-    entry.inUse = entry.ready = entry.needsSeal = entry.needsPlaintextFrame =
-        entry.hasReservedNonce = false;
-    entry.taskId = 0;
+    entry.needsSeal = entry.needsPlaintextFrame = entry.hasReservedNonce = false;
     entry.payloadSize = 0;
     entry.reservedNonce = {};
 }
@@ -36,29 +34,32 @@ void reset_queue(std::uint32_t id) noexcept {
     }
 }
 
+bool prepare_queue(std::uint32_t id) noexcept {
+    auto* queue = queue_for(id);
+    if (!queue) {
+        return false;
+    }
+    for (auto& entry : queue->entries) {
+        entry.payload.reset(new (std::nothrow) std::array<std::byte, kReplyEntryCapacity>);
+        if (!entry.payload) {
+            reset_queue(id);
+            return false;
+        }
+    }
+    return true;
+}
+
 ReplyEntry* push_entry(ReplyQueue& queue) noexcept {
     if (queue.count == queue.entries.size()) {
         return nullptr;
     }
     auto& entry = queue.entries[(queue.head + queue.count) % queue.entries.size()];
     if (!entry.payload) {
-        entry.payload.reset(new (std::nothrow) std::array<std::byte, kReplyEntryCapacity>);
-    }
-    if (!entry.payload) {
         return nullptr;
     }
     clear(entry);
-    entry.inUse = true;
     ++queue.count;
     return &entry;
-}
-
-void pop_tail(ReplyQueue& queue) noexcept {
-    if (queue.count == 0) {
-        return;
-    }
-    clear(queue.entries[(queue.head + queue.count - 1) % queue.entries.size()]);
-    --queue.count;
 }
 
 void pop_head(ReplyQueue& queue) noexcept {
@@ -68,16 +69,6 @@ void pop_head(ReplyQueue& queue) noexcept {
     clear(queue.entries[queue.head]);
     queue.head = static_cast<std::uint8_t>((queue.head + 1) % queue.entries.size());
     --queue.count;
-}
-
-ReplyEntry* find_placeholder(ReplyQueue& queue, std::uint32_t taskId) noexcept {
-    for (std::size_t i = 0; i < queue.count; ++i) {
-        auto& entry = queue.entries[(queue.head + i) % queue.entries.size()];
-        if (entry.inUse && !entry.ready && entry.taskId == taskId) {
-            return &entry;
-        }
-    }
-    return nullptr;
 }
 
 void report(std::uint32_t id,
@@ -125,7 +116,6 @@ bool enqueue_local_reply(std::uint32_t id, std::span<const std::byte> bytes) noe
     }
     std::copy(bytes.begin(), bytes.end(), entry->payload->begin());
     entry->payloadSize = bytes.size();
-    entry->ready = true;
     return true;
 }
 
@@ -140,9 +130,6 @@ std::size_t drain_ordered_replies(std::uint32_t id,
     static std::array<std::byte, kReplyEntryCapacity + 128> framed{}, sealed{};
     while (queue->count != 0) {
         auto& head = queue->entries[queue->head];
-        if (!head.ready) {
-            break;
-        }
         if (head.needsSeal && !head.hasReservedNonce) {
             fail_connection(id, "reply_nonce");
             return 0;

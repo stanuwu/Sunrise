@@ -19,7 +19,8 @@ using upstream_link::LinkStage;
 using upstream_link::PendingForward;
 using upstream_link::UpstreamLink;
 constexpr auto kConnectionCount = client::network::kBapConnectionCount;
-constexpr std::uint64_t kHoldTimeoutMs = 15'000;
+// Both the outer and request headers occupy 6 bytes; encrypted requests also carry a GCM tag.
+constexpr std::size_t kHeldBodyCapacity = upstream_link::kLinkFrameCapacity - 12;
 
 struct HeldForward {
     std::uint16_t service{};
@@ -27,7 +28,6 @@ struct HeldForward {
     std::uint32_t taskId{};
     std::unique_ptr<std::byte[]> body;
     std::size_t bodySize{};
-    std::uint64_t queuedTick{};
     bool plaintext{};
     bool uncorrelated{};
 };
@@ -58,21 +58,20 @@ void abandoned(UpstreamLink& link, const PendingForward& forward) noexcept {
     }
 }
 
-void notification(UpstreamLink& link, std::span<const std::byte> payload, bool plaintext) noexcept {
+bool notification(UpstreamLink& link, std::span<const std::byte> payload, bool plaintext) noexcept {
     const auto id = link.downstreamConnectionId;
     if (failed(id)) {
-        return;
+        return false;
     }
     auto* queue = queue_for(id);
     auto* nonce = plaintext ? nullptr : downstream_send_nonce(id);
     if (!queue || payload.size() > kReplyEntryCapacity || (!plaintext && !nonce)) {
         fail_connection(id, "notification_shape");
-        return;
+        return false;
     }
     auto* entry = push_entry(*queue);
     if (!entry) {
-        fail_connection(id, "notification_queue_full");
-        return;
+        return false;
     }
     entry->needsSeal = !plaintext;
     entry->needsPlaintextFrame = plaintext;
@@ -83,20 +82,20 @@ void notification(UpstreamLink& link, std::span<const std::byte> payload, bool p
     }
     std::copy(payload.begin(), payload.end(), entry->payload->begin());
     entry->payloadSize = payload.size();
-    entry->ready = true;
+    return true;
 }
 
-void response(UpstreamLink& link,
+bool response(UpstreamLink& link,
               const PendingForward& forward,
               std::span<const std::byte> payload) noexcept {
     if (failed(link.downstreamConnectionId)) {
-        return;
+        return false;
     }
     middleware::bap::ResponseFrame parsed{};
     if (!middleware::bap::parse_response_payload(payload, parsed)
         || parsed.serviceId != forward.expectedResponseService || parsed.taskId != forward.taskId) {
         fail_connection(link.downstreamConnectionId, "response_tuple");
-        return;
+        return false;
     }
     if (forward.downstreamConnectionId == 0) {
         if (parsed.serviceId == state::social::feed::kFeedResponse) {
@@ -105,30 +104,20 @@ void response(UpstreamLink& link,
                     link.downstreamConnectionId, forward.taskId, parsed.body)) {
                 fail_connection(link.downstreamConnectionId, "social_response");
             }
-            return;
+            return !failed(link.downstreamConnectionId);
         }
         if (parsed.status != 200) {
             profile_publisher::abandon(
                 link.downstreamConnectionId, forward.taskId, parsed.serviceId);
-            return;
+            return true;
         }
         if (profile_publisher::acknowledge(
                 link.downstreamConnectionId, forward.taskId, parsed.serviceId)) {
             g_profileReady = true;
         }
-        return;
+        return true;
     }
-    auto* queue = queue_for(forward.downstreamConnectionId);
-    auto* entry = queue ? find_placeholder(*queue, forward.taskId) : nullptr;
-    if (!entry || payload.size() > kReplyEntryCapacity) {
-        fail_connection(link.downstreamConnectionId, "response_queue");
-        return;
-    }
-    std::copy(payload.begin(), payload.end(), entry->payload->begin());
-    entry->payloadSize = payload.size();
-    entry->needsSeal = !forward.plaintextForward;
-    entry->needsPlaintextFrame = forward.plaintextForward;
-    entry->ready = true;
+    return notification(link, payload, forward.plaintextForward);
 }
 
 bool hold(std::uint32_t id,
@@ -143,40 +132,46 @@ bool hold(std::uint32_t id,
         return false;
     }
     auto& queue = g_held[id - 1];
-    if (queue.count == queue.entries.size()
-        || body.size() > upstream_link::kLinkFrameCapacity - 22) {
+    const auto capacity =
+        kHeldBodyCapacity - (plaintext ? 0 : middleware::secure_channel::kFrameTagSize);
+    if (queue.count == queue.entries.size() || body.size() > capacity) {
         return false;
     }
-    std::unique_ptr<std::byte[]> copy;
-    if (!body.empty()) {
-        copy.reset(new (std::nothrow) std::byte[body.size()]);
-        if (!copy) {
-            return false;
+    if (!uncorrelated) {
+        // A duplicate live task is invalid, not capacity pressure: retaining it would stall
+        // the held queue behind a correlation that cannot be sent.
+        for (const auto& pending : link->pending) {
+            if (pending.inUse && pending.taskId == taskId) {
+                return false;
+            }
         }
-        std::copy(body.begin(), body.end(), copy.get());
+        for (std::size_t i = 0; i < queue.count; ++i) {
+            const auto& held = queue.entries[(queue.head + i) % queue.entries.size()];
+            if (!held.uncorrelated && held.taskId == taskId) {
+                return false;
+            }
+        }
     }
     auto& slot = queue.entries[(queue.head + queue.count) % queue.entries.size()];
-    slot = HeldForward{service,
-                       responseService,
-                       taskId,
-                       std::move(copy),
-                       body.size(),
-                       GetTickCount64(),
-                       plaintext,
-                       uncorrelated};
+    if (!slot.body) {
+        return false;
+    }
+    std::copy(body.begin(), body.end(), slot.body.get());
+    slot.service = service;
+    slot.responseService = responseService;
+    slot.taskId = taskId;
+    slot.bodySize = body.size();
+    slot.plaintext = plaintext;
+    slot.uncorrelated = uncorrelated;
     ++queue.count;
     return true;
 }
 
-void flush_held(std::uint32_t id, std::uint64_t now) noexcept {
+void flush_held(std::uint32_t id) noexcept {
     auto& queue = g_held[id - 1];
     auto& link = *g_links[id - 1];
     while (queue.count != 0 && !failed(id)) {
         auto& slot = queue.entries[queue.head];
-        if (now - slot.queuedTick >= kHoldTimeoutMs) {
-            fail_connection(id, "forward_timeout");
-            return;
-        }
         if (!g_profileReady || link.stage != LinkStage::ready) {
             return;
         }
@@ -195,7 +190,8 @@ void flush_held(std::uint32_t id, std::uint64_t now) noexcept {
             }
             return;
         }
-        slot = {};
+        SecureZeroMemory(slot.body.get(), slot.bodySize);
+        slot.bodySize = 0;
         queue.head = (queue.head + 1) % queue.entries.size();
         --queue.count;
     }
@@ -239,7 +235,21 @@ void open_link(std::uint32_t id) noexcept {
     link->downstreamConnectionId = id;
     g_failed[id - 1] = false;
     g_held[id - 1] = {};
-    reset_queue(id);
+    // Each open proxy connection owns eight reply buffers, eight held bodies and the link's
+    // five wire buffers (~10.3 MiB). Allocate here so request admission cannot fail mid-mutation.
+    if (!prepare_queue(id)) {
+        close_link(id);
+        g_failed[id - 1] = true;
+        return;
+    }
+    for (auto& held : g_held[id - 1].entries) {
+        held.body.reset(new (std::nothrow) std::byte[kHeldBodyCapacity]);
+        if (!held.body) {
+            close_link(id);
+            g_failed[id - 1] = true;
+            return;
+        }
+    }
 }
 
 void close_link(std::uint32_t id) noexcept {
@@ -288,7 +298,7 @@ void service(std::uint64_t now) noexcept {
     profile_publisher::service(now);
     for (const auto& link : g_links) {
         if (link && link->downstreamConnectionId != 0) {
-            flush_held(link->downstreamConnectionId, now);
+            flush_held(link->downstreamConnectionId);
         }
     }
     if (g_profileReady) {
@@ -302,26 +312,35 @@ bool upstream_ready(std::uint32_t id) noexcept {
            && !failed(id);
 }
 
+bool can_accept_request(std::uint32_t id) noexcept {
+    const auto* link = link_for(id);
+    if (!link || failed(id) || !can_enqueue_local_reply(id)) {
+        return false;
+    }
+    const auto& held = g_held[id - 1];
+    if (held.count == held.entries.size()) {
+        return false;
+    }
+    // Native replies match only the head of the client's pending-request ring. Leave later
+    // input in the transport until an earlier forwarded reply reaches the output queue;
+    // otherwise a local reply can overtake it. Notifications and shim-originated requests
+    // still progress through service() while downstream input is deferred.
+    for (std::size_t i = 0; i < held.count; ++i) {
+        if (!held.entries[(held.head + i) % held.entries.size()].uncorrelated) {
+            return false;
+        }
+    }
+    return std::none_of(link->pending.begin(), link->pending.end(), [](const auto& pending) {
+        return pending.inUse && pending.downstreamConnectionId != 0;
+    });
+}
+
 bool forward_request(std::uint32_t id,
                      std::uint16_t service,
                      std::uint16_t responseService,
                      std::uint32_t taskId,
-                     std::span<const std::byte> body,
-                     std::array<std::byte, state::kBapNonceSize>& nonce) noexcept {
-    auto* queue = queue_for(id);
-    auto* entry = queue ? push_entry(*queue) : nullptr;
-    if (!entry) {
-        return false;
-    }
-    if (!hold(id, service, responseService, taskId, body, false, false)) {
-        pop_tail(*queue);
-        return false;
-    }
-    entry->taskId = taskId;
-    entry->hasReservedNonce = true;
-    entry->reservedNonce = nonce;
-    middleware::secure_channel::advance_nonce(nonce);
-    return true;
+                     std::span<const std::byte> body) noexcept {
+    return hold(id, service, responseService, taskId, body, false, false);
 }
 
 bool forward_uncorrelated(std::uint32_t id,
@@ -336,17 +355,7 @@ bool forward_plaintext_request(std::uint32_t id,
                                std::uint16_t responseService,
                                std::uint32_t taskId,
                                std::span<const std::byte> body) noexcept {
-    auto* queue = queue_for(id);
-    auto* entry = queue ? push_entry(*queue) : nullptr;
-    if (!entry) {
-        return false;
-    }
-    if (!hold(id, service, responseService, taskId, body, true, false)) {
-        pop_tail(*queue);
-        return false;
-    }
-    entry->taskId = taskId;
-    return true;
+    return hold(id, service, responseService, taskId, body, true, false);
 }
 
 bool send_upstream_request(std::uint32_t id,
