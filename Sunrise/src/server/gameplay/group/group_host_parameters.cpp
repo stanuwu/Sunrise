@@ -32,6 +32,9 @@ constexpr bool kHostMemberSelected = true;
     return std::uint64_t{1} << static_cast<std::uint8_t>(parameter);
 }
 
+/** Only the low registry bits name a parameter. The writer drops the rest of either mask. */
+constexpr std::uint64_t kParameterMaskBits = (std::uint64_t{1} << wire::kParameterCount) - 1U;
+
 /** The parameter bits this host carries in every group snapshot it publishes. */
 constexpr std::uint64_t kHostSelectedMask = parameter_mask(wire::Parameter::hostSelected);
 constexpr std::uint64_t kActivityHostMask = parameter_mask(wire::Parameter::activityHost);
@@ -170,15 +173,21 @@ bool publish_activity_host(const state::gameplay::Endpoint& endpoint,
 
 /**
  * Answers one parameter request with the parameters this host can encode.
- * An empty answer leaves the peer waiting, so the answer carries every requested parameter that
- * has an encoder and names the rest as unheld.
+ * A native peer repeats an unanswered request every rendered frame with no interval of its own, so
+ * silence is an unbounded flood. The answer carries every requested parameter that has an encoder
+ * and names every requested parameter that has none as released.
  */
 void answer_parameters(const state::gameplay::Endpoint& endpoint,
                        std::uint64_t sessionId,
                        std::uint64_t requested,
                        std::uint8_t playerCount,
                        std::uint32_t memberMask) noexcept {
-    std::uint64_t carried = requested & wire::kEncodableParameters;
+    const std::uint64_t selected = requested & kParameterMaskBits;
+    std::uint64_t carried = selected & wire::kEncodableParameters;
+    // Releasing an empty slot is a no-op on the peer, so a parameter with no encoder here is safe
+    // to name. A parameter that has an encoder but no ready binding stays owed instead: releasing
+    // it would drop the copy the peer already applied.
+    const std::uint64_t released = selected & ~wire::kEncodableParameters;
     // The body is built from this copy, so no retain is needed. See publish_activity_host.
     HostSessionBinding binding{};
     const bool needsActivity =
@@ -193,16 +202,19 @@ void answer_parameters(const state::gameplay::Endpoint& endpoint,
         // A zero host id is worse than no answer for this one.
         carried &= ~kActivityHostMask;
     }
-    if (carried == 0) {
+    if (carried == 0 && released == 0) {
+        // Every requested parameter has an encoder and none has a ready binding yet. The caller
+        // keeps it owed and republishes it, so this request is answered by that publish.
         report(core::log::Level::debug,
-               "ev=gameplay stage=parameters result=unheld mask=0x%08X",
-               static_cast<unsigned>(requested));
+               "ev=gameplay stage=parameters result=deferred mask=0x%08X",
+               static_cast<unsigned>(selected));
         return;
     }
 
     wire::ParameterUpdate update{};
     update.sessionId = sessionId;
     update.carriedMask = carried;
+    update.releasedMask = released;
     // A zero host id latches an unusable parameter on the peer, so the answer carries the same
     // body the unsolicited publish does.
     if (hasActivity && (carried & kActivityHostMask) != 0) {
@@ -224,9 +236,10 @@ void answer_parameters(const state::gameplay::Endpoint& endpoint,
     const bool sent = send_parameter_update(update, endpoint);
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::warn,
-           "ev=gameplay stage=parameters result=%s carried=0x%08X names=%s",
+           "ev=gameplay stage=parameters result=%s carried=0x%08X released=0x%08X names=%s",
            sent ? "answered" : "fail",
            static_cast<unsigned>(carried),
+           static_cast<unsigned>(released),
            wire::parameter_names(carried, names.data(), names.size()));
 }
 

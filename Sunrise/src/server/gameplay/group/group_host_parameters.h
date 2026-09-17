@@ -25,7 +25,8 @@ namespace sunrise::server::gameplay::group {
                                          std::uint32_t memberMask) noexcept;
 
 /**
- * Answers one parameter request with the parameters this host can encode.
+ * Answers one parameter request with the parameters this host can encode, naming the requested
+ * parameters it has no encoder for as released so the request is never met with silence.
  * @param sessionId Session the request named, which is also the link it goes back on.
  * @param requested Requested parameter mask, already reduced to its meaningful bits.
  * @param playerCount Players the session holds now, which sets the free join slots it advertises.

@@ -36,7 +36,6 @@
 #include "../hooks/membership_probe/membership_probe.h"
 #include "../hooks/network/investment/investment_derived_rebuild.h"
 #include "../hooks/network/presence_publication.h"
-#include "../hooks/network/reliable_request_admission.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_path/package_path_redirect.h"
@@ -178,7 +177,6 @@ void clear_game_targets() noexcept {
         const auto rollbackAdapters = []() noexcept {
             // Each uninstall retains its native ownership when an in-flight call prevents removal.
             bool removed = hooks::presence_publication::uninstall();
-            removed = hooks::reliable_requests::uninstall() && removed;
             removed = hooks::replication_budget::uninstall() && removed;
             removed = hooks::instance_mutex::uninstall() && removed;
             removed = hooks::machine_id::uninstall() && removed;
@@ -206,13 +204,6 @@ void clear_game_targets() noexcept {
             core::log::write(core::log::Channel::client,
                              core::log::Level::error,
                              "ev=activate stage=replication_budget result=fail");
-            rollbackAdapters();
-            return false;
-        }
-        if (!hooks::reliable_requests::install()) {
-            core::log::write(core::log::Channel::client,
-                             core::log::Level::error,
-                             "ev=activate stage=reliable_requests result=fail");
             rollbackAdapters();
             return false;
         }
