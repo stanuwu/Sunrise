@@ -151,9 +151,7 @@ void report_upgrade(std::uint32_t fileVersion) noexcept {
 
 /** Loads the settings file from the owned folder, or creates the default one. */
 bool initialize(void* module) noexcept {
-    if (!configure_role(Role::embedded, false)) {
-        return fail("role");
-    }
+    shutdown();
     path::Buffer configPath;
     if (!path::artifact_directory(module, configPath)
         || !path::append(configPath, kSettingsFileSuffix)) {
@@ -220,7 +218,8 @@ bool initialize(void* module) noexcept {
     if (!parser::Parser(document).parse_version(version, &compact)) {
         return fail("version");
     }
-    if (!compact && version < kSettingsVersion) {
+    // The compact document has no schema history, so only a versioned or full file is replaced.
+    if (version < kSettingsVersion && (version != 0 || !compact)) {
         if (!DeleteFileW(configPath.chars.data())) {
             return fail("delete_old");
         }
@@ -232,11 +231,10 @@ bool initialize(void* module) noexcept {
     if (!parse(document, parsed)) {
         return fail("parse");
     }
+    report_version(parsed.version);
+    Role selectedRole = parsed.hasConfiguredRole ? parsed.configuredRole : Role::embedded;
     if (parsed.compactClient || parsed.compactHost) {
-        const auto selectedRole = parsed.compactHost ? Role::host : Role::client;
-        if (!configure_role(selectedRole, true)) {
-            return fail("compact_role");
-        }
+        selectedRole = parsed.compactHost ? Role::host : Role::client;
         if (!parsed.steam.user.hasConfiguredSteamId
             && !steam::platform_identity::load_or_create(parsed.steam.user.steamId)) {
             return fail("identity_cache");
@@ -257,10 +255,8 @@ bool initialize(void* module) noexcept {
             parsed.server.upstream.bapPort = parsed.client.serverEndpoint.bapPort;
             parsed.server.bapPort = 0;
         }
-    } else if (!configure_role(parsed.configuredRole, parsed.hasConfiguredRole)) {
-        return fail("configured_role");
     }
-    if (role() == Role::client && !parsed.client.externalServer.enabled) {
+    if (selectedRole == Role::client && !parsed.client.externalServer.enabled) {
         if (!parsed.server.upstream.enabled) {
             parsed.server.upstream.enabled = true;
             parsed.server.upstream.host = parsed.client.serverEndpoint.host;
@@ -269,10 +265,10 @@ bool initialize(void* module) noexcept {
         }
         parsed.server.bapPort = 0;
     }
-    if (hosts_session() && parsed.server.upstream.enabled) {
+    if (selectedRole == Role::host && parsed.server.upstream.enabled) {
         return fail("host_upstream");
     }
-    if (role() == Role::host) {
+    if (selectedRole == Role::host) {
         if (parsed.client.externalServer.enabled) {
             return fail("host_external");
         }
@@ -288,7 +284,10 @@ bool initialize(void* module) noexcept {
     for (std::size_t i = 0; i < parsed.server.upstream.host.size(); ++i) {
         parsed.server.upstream.hostWide[i] = static_cast<wchar_t>(parsed.server.upstream.host[i]);
     }
-    report_version(parsed.version);
+    // Publish the role only after every configuration and identity check succeeds.
+    if (!configure_role(selectedRole, true)) {
+        return fail("configured_role");
+    }
     g_settings = parsed;
     return true;
 }
@@ -296,6 +295,7 @@ bool initialize(void* module) noexcept {
 /** Resets active settings to the fixed defaults. */
 void shutdown() noexcept {
     g_settings = defaults();
+    (void)configure_role(Role::embedded, false);
 }
 
 /** @return Active read-only Core settings. */
