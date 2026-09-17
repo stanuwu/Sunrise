@@ -356,7 +356,8 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         || mutation.characterIndex >= current.characterCount
         || !current.characters[mutation.characterIndex].selected
         || current.characters[mutation.characterIndex].soid != mutation.characterSoid
-        || !quest_current(mutation) || current.primarySoid != mutation.accountSoid
+        || !quest_current(mutation) || !vendor_reward_current(mutation)
+        || current.primarySoid != mutation.accountSoid
         || !same_character(current.characters[mutation.characterIndex], mutation.beforeCharacter)
         || !same_profile_inventory(
             current, mutation.beforeProfileItems, mutation.expectedProfileItemCount)
@@ -381,7 +382,7 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
 } // namespace runtime::detail
 
 /**
- * Preview inventory and quest values together without changing the save.
+ * Preview inventory, quest values and claim credit together without changing the save.
  * @param mutation Prepared acquisition checked against current saved state.
  * @param after Receives the candidate account; use only on success.
  * @param afterUnlocks Receives matching account and selected-character unlocks on success.
@@ -405,13 +406,17 @@ bool preview_item_acquisition(const PendingItemAcquisition& mutation,
     } else if (quest.scope == Quest::Scope::character) {
         afterUnlocks.characterObjectValues[quest.row] = value;
     }
+    if (mutation.vendorReward.beforeCredits > 0) {
+        afterUnlocks.characterObjectValues[kVanguardRewardValueRow] =
+            mutation.vendorReward.beforeCredits - 1;
+    }
     return true;
 }
 
 /**
- * Inventory and first-step state share one transaction; failure rolls both back.
+ * Inventory, first-step state and claim credit share one transaction; failure rolls all back.
  * @param mutation Prepared grant consumed on either success or failure.
- * @return True when both writes commit against the unchanged prepared state.
+ * @return True when all writes commit against the unchanged prepared state.
  */
 bool commit_item_acquisition(PendingItemAcquisition& mutation) noexcept {
     const PendingItemAcquisition& prepared = mutation;
@@ -427,6 +432,12 @@ bool commit_item_acquisition(PendingItemAcquisition& mutation) noexcept {
     if (quest.scope != Quest::Scope::none
         && prepared.previousQuestValue == build_data::items::kUnsetQuestValue
         && !investment::store::write_unlock(quest_bank(quest), quest.row, quest.value)) {
+        return false;
+    }
+    if (prepared.vendorReward.beforeCredits > 0
+        && !investment::store::write_unlock(investment::store::Bank::characterObjectValues,
+                                            kVanguardRewardValueRow,
+                                            prepared.vendorReward.beforeCredits - 1)) {
         return false;
     }
     return transaction.commit();

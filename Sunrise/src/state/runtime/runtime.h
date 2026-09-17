@@ -14,6 +14,7 @@
 #include "../build_data/vendors/definition.h"
 #include "../unlocks/definition.h"
 #include "state.h"
+#include "state_vendor_reputation_runtime.h"
 
 namespace sunrise::state::unlocks {
 struct Table;
@@ -179,6 +180,7 @@ struct PendingItemAcquisition {
     bool profileChanged{};
     build_data::items::QuestInitialization questInitialization{};
     std::int32_t previousQuestValue{};
+    VendorRewardClaim vendorReward{};
     bool prepared{};
 
     /**
