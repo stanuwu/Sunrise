@@ -37,12 +37,7 @@
     },
     "custom_bootflow_textures": true,
     "socket_menu_routing": false,
-    "reveal_lore_books": true,
-    "cheats": false,
-    "exports": {
-      "package_keys": false,
-      "tag_definitions": false
-    }
+    "reveal_lore_books": true
   },
   "server": {
     "max_players": 32,

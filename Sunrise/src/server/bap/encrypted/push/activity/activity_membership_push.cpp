@@ -157,7 +157,10 @@ build_remote_member(const membership_message::CitizenAdvertisement& advertisemen
 /** @return True only when extracted package data selects a private Bubble Host lane. */
 [[nodiscard]] bool remote_member_allowed(const Session& session,
                                          std::int32_t effectiveRegion) noexcept {
-    sdk::BoundView view{};
+    if (state::activity::forced::override_active()) {
+        return true;
+    }
+    sdk::generated_world::GeneratedWorldView worldView{};
     bool isPublic = false;
     return resolve_activity(session, view)
            && sdk::generated_world::region_is_public(view, effectiveRegion, isPublic) && !isPublic;

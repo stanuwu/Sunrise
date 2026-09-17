@@ -31,10 +31,12 @@ struct Settings {
      * On by default; a client stand-in until the unlock banks carry every gate the nodes read.
      */
     bool revealLoreBooks{true};
-    /** Unlocks the cheat tools. A session with them unlocked saves no progress. */
-    bool cheats{false};
-    /** Startup exports for Sunrise Studio; all off by default. */
-    Exports exports;
+    /**
+     * Answers the orbit destination hold as released without calling the game's predicate.
+     * The predicate waits for an armed destination or a starting cinematic, so skipping it
+     * suppresses the orbit-side entry cinematic.
+     */
+    bool skipOrbitCinematicWait{false};
 };
 
 } // namespace sunrise::core::settings::client
