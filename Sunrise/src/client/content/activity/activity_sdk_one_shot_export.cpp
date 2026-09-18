@@ -120,8 +120,7 @@ void copy_result(Status status, const Result& source, public_abi::Result& output
             const std::wstring prefix = directory.substr(0, end);
             const DWORD attributes = GetFileAttributesW(prefix.c_str());
             if (attributes == INVALID_FILE_ATTRIBUTES
-                || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0
-                || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+                || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
                 return false;
             }
             if (separator == std::wstring::npos) {
@@ -155,10 +154,8 @@ void copy_result(Status status, const Result& source, public_abi::Result& output
     const DWORD estateAttributes = GetFileAttributesW(output.c_str());
     return ordinary_ancestry(output) && artifactAttributes != INVALID_FILE_ATTRIBUTES
            && (artifactAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0
-           && (artifactAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0
            && estateAttributes != INVALID_FILE_ATTRIBUTES
-           && (estateAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0
-           && (estateAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+           && (estateAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 /**
@@ -197,8 +194,7 @@ void copy_result(Status status, const Result& source, public_abi::Result& output
         }
         const DWORD attributes = GetFileAttributesW(requestedPath.c_str());
         return attributes == INVALID_FILE_ATTRIBUTES
-               || ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
-                   && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0);
+               || ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
     } catch (...) {
         return false;
     }

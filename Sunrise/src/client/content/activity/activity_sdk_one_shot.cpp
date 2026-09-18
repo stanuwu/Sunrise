@@ -118,8 +118,7 @@ void report(OfflineProgressSink sink,
             const std::wstring prefix = directory.substr(0, end);
             const DWORD attributes = GetFileAttributesW(prefix.c_str());
             if (attributes == INVALID_FILE_ATTRIBUTES
-                || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0
-                || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+                || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
                 return false;
             }
             if (separator == std::wstring::npos) {
@@ -132,15 +131,14 @@ void report(OfflineProgressSink sink,
     }
 }
 
-/** Canonicalizes one existing directory after rejecting reparse points in its ancestry. */
+/** Canonicalizes one existing directory. */
 [[nodiscard]] bool final_directory_path(std::wstring_view input, std::wstring& output) noexcept {
     std::wstring lexical;
     if (!full_path(input, lexical) || !ordinary_ancestry(lexical)) {
         return false;
     }
     const DWORD attributes = GetFileAttributesW(lexical.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0
-        || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
         return false;
     }
     const HANDLE directory = CreateFileW(lexical.c_str(),
@@ -191,7 +189,6 @@ void report(OfflineProgressSink sink,
     const DWORD attributes = GetFileAttributesW(lexical.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES) {
         return (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
-               && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0
                && final_directory_path(lexical, output);
     }
     const std::size_t separator = lexical.find_last_of(L"\\/");

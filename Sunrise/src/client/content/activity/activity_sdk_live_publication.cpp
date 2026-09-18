@@ -42,7 +42,7 @@ struct Marker final {
     std::array<std::uint8_t, 3> reserved{};
 };
 
-[[nodiscard]] bool ordinary_directory(const wchar_t* path) noexcept;
+[[nodiscard]] bool is_directory(const wchar_t* path) noexcept;
 
 /** Resolves one null-terminated lexical path into normalized absolute storage. */
 [[nodiscard]] bool full_path(const wchar_t* input, std::wstring& output) noexcept {
@@ -72,54 +72,33 @@ struct Marker final {
     }
 }
 
-/** Which drive-path component, if any, is not an ordinary directory. */
-enum class Ancestry : std::uint8_t {
-    ready,
-    pathShape,
-    driveRoot,
-    ancestor,
-};
-
-/** A drive path is at least a letter, a colon and a separator. */
-constexpr std::size_t kDrivePrefixLength = 3;
-
-/** Reports the first drive-path component which is not an ordinary directory. */
-[[nodiscard]] Ancestry ordinary_ancestry(const std::wstring& directory) noexcept {
-    if (directory.size() < kDrivePrefixLength || directory[1] != L':' || directory[2] != L'\\') {
-        return Ancestry::pathShape;
+/** Requires every existing drive-path directory component to be ordinary, never a reparse point. */
+[[nodiscard]] bool ordinary_ancestry(const std::wstring& directory) noexcept {
+    if (directory.size() < 3U || directory[1] != L':' || directory[2] != L'\\') {
+        return false;
     }
-    const bool rootOrdinary = ordinary_directory(directory.substr(0, kDrivePrefixLength).c_str());
-    std::size_t cursor = kDrivePrefixLength;
+    if (!is_directory(directory.substr(0, 3U).c_str())) {
+        return false;
+    }
+    std::size_t cursor = 3U;
     while (cursor < directory.size()) {
         const std::size_t separator = directory.find(L'\\', cursor);
         const std::size_t end = separator == std::wstring::npos ? directory.size() : separator;
         const std::wstring prefix = directory.substr(0, end);
-        if (!ordinary_directory(prefix.c_str())) {
-            return Ancestry::ancestor;
+        if (!is_directory(prefix.c_str())) {
+            return false;
         }
         if (separator == std::wstring::npos) {
             break;
         }
         cursor = separator + 1U;
     }
-    return rootOrdinary ? Ancestry::ready : Ancestry::driveRoot;
-}
-
-/** Wine maps its synthetic drive root as a reparse point; real path components stay checked. */
-[[nodiscard]] bool ordinary_ancestry_allowed(Ancestry ancestry) noexcept {
-    if (ancestry == Ancestry::ready) {
-        return true;
-    }
-    if (ancestry != Ancestry::driveRoot) {
-        return false;
-    }
-    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+    return true;
 }
 
 /** Resolves one existing ordinary directory and rejects reparse points in every ancestor. */
 [[nodiscard]] bool canonical_directory(const wchar_t* input, std::wstring& output) noexcept {
-    return full_path(input, output) && ordinary_ancestry_allowed(ordinary_ancestry(output));
+    return full_path(input, output) && ordinary_ancestry(output);
 }
 
 /** Compares two complete Windows path components without locale-sensitive folding. */
@@ -162,24 +141,23 @@ split(std::wstring_view path, std::wstring_view& parent, std::wstring_view& leaf
     return MoveFileExW(source, target, MOVEFILE_WRITE_THROUGH) != FALSE;
 }
 
-/** Requires one ordinary directory and rejects a junction or symbolic-link leaf. */
-[[nodiscard]] bool ordinary_directory(const wchar_t* path) noexcept {
+/** Requires one ordinary directory. */
+[[nodiscard]] bool is_directory(const wchar_t* path) noexcept {
     if (path == nullptr || path[0] == L'\0') {
         return false;
     }
     const DWORD attributes = GetFileAttributesW(path);
-    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
-           && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 /** Requires one ordinary file and rejects a reparse-backed leaf. */
-[[nodiscard]] bool ordinary_file(const wchar_t* path) noexcept {
+[[nodiscard]] bool is_file(const wchar_t* path) noexcept {
     if (path == nullptr || path[0] == L'\0') {
         return false;
     }
     const DWORD attributes = GetFileAttributesW(path);
     return attributes != INVALID_FILE_ATTRIBUTES
-           && (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0;
+           && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
 /** Accepts a missing final path or checks its exact expected ordinary kind. */
@@ -191,8 +169,7 @@ split(std::wstring_view path, std::wstring_view& parent, std::wstring_view& leaf
         return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
     }
     exists = true;
-    return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0
-           && ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) == directory;
+    return ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) == directory;
 }
 
 /** Creates one empty ordinary directory or accepts an existing ordinary directory. */
@@ -200,7 +177,7 @@ split(std::wstring_view path, std::wstring_view& parent, std::wstring_view& leaf
     if (CreateDirectoryW(path.c_str(), nullptr) != FALSE) {
         return true;
     }
-    return GetLastError() == ERROR_ALREADY_EXISTS && ordinary_directory(path.c_str());
+    return GetLastError() == ERROR_ALREADY_EXISTS && is_directory(path.c_str());
 }
 
 /** Builds one collision-resistant sibling backup path without consulting global artifact state. */
@@ -237,7 +214,7 @@ split(std::wstring_view path, std::wstring_view& parent, std::wstring_view& leaf
 /** Reads one exact marker without accepting extra bytes or alternate state. */
 [[nodiscard]] bool read_marker(const std::wstring& path, Marker& output) noexcept {
     output = {};
-    if (!ordinary_file(path.c_str())) {
+    if (!is_file(path.c_str())) {
         return false;
     }
     const HANDLE file = CreateFileW(path.c_str(),
@@ -464,7 +441,6 @@ split(std::wstring_view path, std::wstring_view& parent, std::wstring_view& leaf
         }
         const std::wstring path = parent + L"\\" + std::wstring(name);
         if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0
-            || (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0
             || !tree_publication::discard(path.c_str())) {
             complete = false;
         }
@@ -522,8 +498,8 @@ Status allocate(const wchar_t* finalPackPath, Stage& output) noexcept {
         }
         const std::wstring finalSdkDirectory = parentPath + L"\\sdk";
         const std::wstring finalCatalogPath = finalSdkDirectory + L"\\catalog.bin";
-        if (!ordinary_directory(parentPath.c_str())
-            || !ordinary_directory(finalSdkDirectory.c_str())
+        if (!is_directory(parentPath.c_str())
+            || !is_directory(finalSdkDirectory.c_str())
             || !recover(finalSdkDirectory.c_str(), normalizedPack.c_str(), finalCatalogPath.c_str())
             || !discard_stale_stages(parentPath)) {
             return Status::invalidInput;
@@ -600,8 +576,8 @@ Status publish(const Stage& stage,
         || !full_path(stage.catalogPath.c_str(), canonicalStageCatalog)
         || !full_path(finalPackPath, canonicalFinalPack)
         || !full_path(finalCatalogPath, canonicalFinalCatalog)
-        || !ordinary_file(canonicalStagePack.c_str())
-        || !ordinary_file(canonicalStageCatalog.c_str())) {
+        || !is_file(canonicalStagePack.c_str())
+        || !is_file(canonicalStageCatalog.c_str())) {
         return Status::invalidInput;
     }
     const std::wstring expectedStageSdk = canonicalStageRoot + L"\\sdk";
