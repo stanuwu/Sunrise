@@ -14,10 +14,12 @@ inline constexpr std::size_t kBucketHashCapacity = 16;
 inline constexpr std::size_t kOverflowCapacity = 32;
 /**
  * One row per distinct subclass and ability selection the configured characters use. Each
- * character publishes a row for every subclass it owns at the default selection, plus one for the
- * equipped subclass's real picks when those differ: 3 characters by up to 4 rows.
+ * character publishes a row for every subclass it owns at the default selection, plus one for
+ * every one of those subclasses whose remembered picks differ, since the picks are kept per
+ * subclass item rather than only for the equipped one: 3 characters by 3 owned subclasses by 2
+ * rows.
  */
-inline constexpr std::size_t kDefinitionCapacity = 12;
+inline constexpr std::size_t kDefinitionCapacity = 18;
 /** All bits set marks a bucket no entry claimed. */
 inline constexpr std::uint8_t kEmptyBucketKind = 0xFF;
 
