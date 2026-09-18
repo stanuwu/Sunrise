@@ -354,8 +354,11 @@ bool consume(std::span<const std::byte> request,
         // Returns a SOID family three already publishes. The request body is not parsed.
         const std::uint64_t characterSoid =
             state::account::selected_character_soid(state::account_snapshot());
+        // The reply names a character the roster already holds, so no revision publishes it.
+        middleware::web_service::StatusResponse status{};
+        status.value = middleware::web_service::kNoFamily4Publication;
         return middleware::web_service::messages::opcode501::encode_response(
-                   message, characterSoid, response, written)
+                   message, status, characterSoid, response, written)
                || encode_echo(message, response, written);
     }
 

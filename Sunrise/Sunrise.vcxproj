@@ -147,7 +147,10 @@
     <ClCompile Include="src\middleware\web_service\messages\opcode702_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode406_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode1820_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode501_request_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode502.cpp" />
     <ClCompile Include="src\state\runtime\state_account_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\state_account_roster_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_acquisition_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_reward_grant_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_dismantle_runtime.cpp" />
@@ -264,6 +267,7 @@
     <ClCompile Include="src\client\hooks\external_server\external_server_setopt_guard.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\bootflow_hook_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\bootflow_texture_override.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\character_select_hold.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\lifetime_gate_probe.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\world_step.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\spawn\slice_set_sample.cpp" />
@@ -1763,6 +1767,8 @@
     <ClInclude Include="src\middleware\web_service\messages\opcode503.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode206.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode501_codec.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode501_request_codec.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode502.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode505\opcode505_codec.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode601\opcode601_codec.h" />
     <ClInclude Include="src\middleware\datagen\family4\account\selection_patch\account_selection_patch_encoder.h" />
