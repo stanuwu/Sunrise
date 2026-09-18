@@ -107,6 +107,11 @@ struct Snapshot final {
     std::vector<format::DialogueCue> dialogueCues{};
     std::vector<format::CombatObjectiveGroup> combatObjectiveGroups{};
     std::vector<DirectiveElement> directiveElements{};
+    /**
+     * Scene slots whose package config references no resource, as topology rows, ascending
+     * and unique. The server seeds nothing for them instead of refusing the whole object.
+     */
+    std::vector<std::uint32_t> unresourcedSlots{};
     bool complete{};
 };
 

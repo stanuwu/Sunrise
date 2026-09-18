@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <limits>
 
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
@@ -7,24 +9,40 @@
 
 namespace sunrise::server::activity::activity_sdk_mission {
 
+/** One squad participant of a scene: the authored reference and the squad slot it names. */
+struct SceneSquadParticipant final {
+    middleware::bap::activity_message::sensor_message::ClientReference reference{};
+    std::uint32_t squadSlotRow{state::activity_sdk::format::kAbsentIndex};
+};
+
+/** Every squad participant of one scene descriptor; the package bounds the table. */
+struct SceneSquadParticipants final {
+    std::array<SceneSquadParticipant,
+               state::activity_sdk::format::kAuthoredSceneParticipantCapacity>
+        rows{};
+    std::size_t count{};
+};
+
 /**
- * Collects only the selected scene descriptor's exact squad edges.
+ * Collects the selected scene descriptor's exact squad edges.
+ *
+ * The client binds every role from the participant table in its own content; these rows only
+ * tell the server which squads the scene may draw actors from. The wire dependency set is
+ * narrower (see scene_dependencies in activity_sdk_scene_spawn.h).
  * @param catalog Authenticated SDK catalog.
  * @param sceneSlot Owned scene slot.
  * @param resource Selected resource descriptor for that slot.
- * @param output Receives the complete dependency set; cleared on failure.
- * @return Ready for an exact bounded set, including an empty set.
+ * @param output Receives the complete participant set; cleared on failure.
+ * @return Ready for an exact set, including an empty set.
  */
 [[nodiscard]] inline SceneStatus
-scene_dependencies(const state::activity_sdk::Catalog& catalog,
-                   const state::activity_sdk::format::Slot& sceneSlot,
-                   const state::activity_sdk::format::AuthoredSceneResource& resource,
-                   middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies&
-                       output) noexcept {
+scene_squad_participants(const state::activity_sdk::Catalog& catalog,
+                         const state::activity_sdk::format::Slot& sceneSlot,
+                         const state::activity_sdk::format::AuthoredSceneResource& resource,
+                         SceneSquadParticipants& output) noexcept {
     namespace sdk = state::activity_sdk;
-    namespace message = middleware::bap::activity_message::sensor_auth_update;
     output = {};
-    message::AuthoredSceneDependencies candidate{};
+    SceneSquadParticipants candidate{};
     const auto slots = catalog.slots();
     if (resource.slotIndex >= slots.size() || &slots[resource.slotIndex] != &sceneSlot
         || sceneSlot.slotType != sdk::format::kAuthoredSceneSlotType
@@ -35,7 +53,7 @@ scene_dependencies(const state::activity_sdk::Catalog& catalog,
         return SceneStatus::invalidSlot;
     }
     const auto edges = sdk::slot_authored_scene_squad_edges(catalog, sceneSlot);
-    if (edges.size() > candidate.references.size()) {
+    if (edges.size() > candidate.rows.size()) {
         return SceneStatus::refused;
     }
     for (const auto& edge : edges) {
@@ -55,12 +73,11 @@ scene_dependencies(const state::activity_sdk::Catalog& catalog,
                    > static_cast<std::uint32_t>((std::numeric_limits<std::int16_t>::max)())) {
             return SceneStatus::ambiguousTarget;
         }
-        candidate.references[candidate.count++] = {edge.targetObjectKey,
-                                                   static_cast<std::int8_t>(target->slotType),
-                                                   static_cast<std::int16_t>(target->slotIndex)};
-    }
-    if (!message::valid_authored_scene_dependencies(candidate)) {
-        return SceneStatus::ambiguousTarget;
+        auto& row = candidate.rows[candidate.count++];
+        row.reference = {edge.targetObjectKey,
+                         static_cast<std::int8_t>(target->slotType),
+                         static_cast<std::int16_t>(target->slotIndex)};
+        row.squadSlotRow = edge.squadSlotIndex;
     }
     output = candidate;
     return SceneStatus::ready;

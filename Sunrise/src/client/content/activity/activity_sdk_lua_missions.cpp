@@ -223,6 +223,9 @@ bool render_mission(const Source& source,
         append_uint(output, slot.senseSchema);
         output.append(", auth_schema = ");
         append_uint(output, slot.authSchema);
+        if ((slot.flags & format::kSlotAuthoredSceneUnresourced) != 0) {
+            output.append(", unresourced = true");
+        }
         if (auth != nullptr) {
             output.append(", auth_type = ");
             append_string(output, auth->name);

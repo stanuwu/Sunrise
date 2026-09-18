@@ -245,6 +245,7 @@ local EventKind = {
 ---@field auth_component_offset integer|nil
 ---@field auth_dynamic boolean|nil
 ---@field auth_writable boolean|nil
+---@field unresourced boolean|nil
 ---@field set_object_active fun(SunriseSlot, SunriseObjectArguments?): SunriseRequestKey
 ---@field applied fun(self: SunriseSlot, args: {channel: any}): boolean
 ---@field run_atoms fun(self: SunriseSlot, )lua"

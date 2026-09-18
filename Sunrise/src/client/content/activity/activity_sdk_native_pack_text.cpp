@@ -562,4 +562,26 @@ bool attach_dialogue_cue_counts(const topology_inventory::Snapshot& topology,
     }
 }
 
+/** Flags the slot rows of the scenes the inventory found without a resource. */
+bool attach_unresourced_scenes(const topology_inventory::Snapshot& topology,
+                               const authored_scene::Snapshot& scenes,
+                               topology_enrichment::Snapshot& enrichment) noexcept {
+    if (enrichment.slots.size() != topology.slots.size()) {
+        return false;
+    }
+    for (const std::uint32_t slotRow : scenes.unresourcedSlots) {
+        if (slotRow >= topology.slots.size()
+            || topology.slots[slotRow].slotType != format::kAuthoredSceneSlotType) {
+            return false;
+        }
+        topology_enrichment::Slot& enriched = enrichment.slots[slotRow];
+        if (enriched.componentClass != format::kAuthoredSceneComponentClass
+            || (enriched.flags & format::kSlotSchemaJoinExact) == 0) {
+            return false;
+        }
+        enriched.flags |= format::kSlotAuthoredSceneUnresourced;
+    }
+    return true;
+}
+
 } // namespace sunrise::client::content::activity::sdk_generation::native_pack_pipeline

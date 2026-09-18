@@ -70,12 +70,17 @@ using Source = state::gameplay::entity_identity::ActorSourceReference;
 
 /**
  * Resolves the complete cast before exposing any pair.
+ *
+ * A squad participant joins the cast only when one exact actor control in the scene's own
+ * scenario state resolves to it. The client binds every role from its content and waits for
+ * the squads nobody supplies, so a participant without an actor control is left to it rather
+ * than refused.
  * @param catalog Authenticated SDK data.
  * @param world Exact generated package references.
  * @param occurrenceRow Selected scene occurrence.
  * @param sceneSlotRow Type 43 slot owned by that occurrence.
  * @param output Receives the complete plan; cleared on failure.
- * @return Ready only when every dependency has one exact actor control.
+ * @return Ready only when every cast squad has exactly one actor control.
  */
 SceneStatus collect_scene_spawn_plan(const sdk::Catalog& catalog,
                                      const state::build_data::scriptables::Snapshot& world,
@@ -101,14 +106,14 @@ SceneStatus collect_scene_spawn_plan(const sdk::Catalog& catalog,
     if (resources.size() != 1) {
         return SceneStatus::ambiguousResource;
     }
-    middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies dependencies{};
-    const auto resolved = scene_dependencies(catalog, scene, resources.front(), dependencies);
+    SceneSquadParticipants participants{};
+    const auto resolved = scene_squad_participants(catalog, scene, resources.front(), participants);
     if (resolved != SceneStatus::ready) {
         return resolved;
     }
     SceneSpawnPlan candidate{};
-    for (std::size_t index = 0; index < dependencies.count; ++index) {
-        const auto& reference = dependencies.references[index];
+    for (std::size_t index = 0; index < participants.count; ++index) {
+        const auto& reference = participants.rows[index].reference;
         const Source source{reference.rosterKey,
                             static_cast<std::uint16_t>(reference.slotIndex),
                             static_cast<std::uint8_t>(reference.slotType),
@@ -116,6 +121,10 @@ SceneStatus collect_scene_spawn_plan(const sdk::Catalog& catalog,
                             true};
         auto& pair = candidate.pairs[candidate.count];
         const auto parent = source_squad(catalog, occurrenceRow, source, pair.squadRow);
+        if (parent == SceneStatus::targetUnavailable) {
+            pair = {};
+            continue;
+        }
         if (parent != SceneStatus::ready) {
             return parent;
         }
@@ -154,7 +163,8 @@ SceneStatus collect_scene_spawn_plan(const sdk::Catalog& catalog,
             }
         }
         if (pair.actorSlotRow == sdk::format::kAbsentIndex) {
-            return SceneStatus::targetUnavailable;
+            pair = {};
+            continue;
         }
         pair.actorTarget = physical_target(catalog, pair.actorSlotRow);
         pair.sourceTarget = physical_target(catalog, catalog.squads()[pair.squadRow].slotIndex);

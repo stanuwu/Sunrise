@@ -1,7 +1,11 @@
 #include "activity_sdk_scene_spawn.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
+#include <string_view>
 
+#include "../../core/logging/log.h"
 #include "../../state/activity_sdk/generated_world/runtime.h"
 #include "activity_sdk_device_internal.h"
 #include "activity_sdk_mission_internal.h"
@@ -113,6 +117,43 @@ prepare_pair(const sdk::BoundView& view, std::uint32_t sceneState, SceneSpawnPai
 }
 
 } // namespace
+
+/** Sends the cast's squads when the wire can carry them all, otherwise none. */
+void scene_dependencies(
+    const sdk::Catalog& catalog,
+    std::uint32_t sceneSlotRow,
+    const SceneSpawnPlan& plan,
+    middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies&
+        output) noexcept {
+    output = {};
+    if (plan.count > output.references.size()) {
+        std::array<char, core::log::kLineCapacity> line{};
+        const std::string_view scene = sceneSlotRow < catalog.slots().size()
+                                           ? catalog.string(catalog.slots()[sceneSlotRow].id)
+                                           : std::string_view{};
+        const int written = std::snprintf(line.data(),
+                                          line.size(),
+                                          "ev=scene_dependencies result=omitted scene=%.*s "
+                                          "cast=%zu capacity=%zu",
+                                          static_cast<int>(scene.size()),
+                                          scene.data(),
+                                          plan.count,
+                                          output.references.size());
+        if (written > 0) {
+            core::log::write(
+                core::log::Channel::server,
+                core::log::Level::warn,
+                {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
+        }
+        return;
+    }
+    for (std::size_t index = 0; index < plan.count; ++index) {
+        const host::ScriptableTarget& source = plan.pairs[index].sourceTarget;
+        output.references[output.count++] = {source.registryKey,
+                                             static_cast<std::int8_t>(source.slotType),
+                                             static_cast<std::int16_t>(source.slotIndex)};
+    }
+}
 
 /** Returns immutable scene cast identities without consulting live output state. */
 SceneStatus resolve_scene_spawn_plan(const sdk::BoundView& view,

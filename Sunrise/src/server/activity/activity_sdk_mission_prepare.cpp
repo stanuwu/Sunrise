@@ -7,7 +7,7 @@
 #include "../../state/activity/runtime.h"
 #include "activity_sdk_behavior_scope.h"
 #include "activity_sdk_mission_internal.h"
-#include "activity_sdk_scene_dependencies.h"
+#include "activity_sdk_scene_spawn.h"
 #include "activity_sdk_scriptable_route.h"
 
 namespace sunrise::server::activity::activity_sdk_mission::detail {
@@ -353,11 +353,12 @@ namespace {
         return SceneStatus::missingResource;
     }
 
-    const SceneStatus dependencies =
-        scene_dependencies(catalog, slot, resource, output.sceneDependencies);
-    if (dependencies != SceneStatus::ready) {
-        return dependencies;
+    SceneSpawnPlan cast{};
+    const SceneStatus collected = resolve_scene_spawn_plan(view, occurrenceRow, slotRow, cast);
+    if (collected != SceneStatus::ready) {
+        return collected;
     }
+    scene_dependencies(catalog, slotRow, cast, output.sceneDependencies);
 
     const SceneStatus lease = scene_lease_status(view, link, occurrence.stateIndex);
     if (lease != SceneStatus::ready) {

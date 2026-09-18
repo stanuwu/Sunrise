@@ -371,6 +371,9 @@ Status stage(const wchar_t* sdkDirectory,
             return cancelled(cancel, cancelContext) ? Status::cancelled
                                                     : Status::authoredSceneLinks;
         }
+        if (!attach_unresourced_scenes(topology, sceneRows, topologyDetails)) {
+            return Status::authoredSceneLinks;
+        }
         report(progress, progressContext, Phase::dialogueCues);
         if (!attach_dialogue_cue_counts(
                 topology, squadFacts, packageContext, topologyDetails, sceneRows)) {

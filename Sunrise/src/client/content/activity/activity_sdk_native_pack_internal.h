@@ -64,4 +64,9 @@ struct PackageContext final {
                                               topology_enrichment::Snapshot& enrichment,
                                               authored_scene::Snapshot& authored);
 
+/** Marks the SDK slot row of every type-43 scene whose descriptor names no resource. */
+[[nodiscard]] bool attach_unresourced_scenes(const topology_inventory::Snapshot& topology,
+                                             const authored_scene::Snapshot& scenes,
+                                             topology_enrichment::Snapshot& enrichment) noexcept;
+
 } // namespace sunrise::client::content::activity::sdk_generation::native_pack_pipeline
