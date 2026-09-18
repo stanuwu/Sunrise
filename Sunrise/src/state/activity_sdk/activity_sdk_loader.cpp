@@ -66,6 +66,7 @@ constexpr std::array<std::uint32_t, format::kSectionCount> kExpectedStrides{
     sizeof(format::CombatObjectiveGroup),
     sizeof(format::ActorAbility),
     sizeof(format::ActorAbilityTarget),
+    sizeof(format::AuthoredSceneEventKey),
 };
 
 /** Checks all section bounds before any typed row pointer is formed. */

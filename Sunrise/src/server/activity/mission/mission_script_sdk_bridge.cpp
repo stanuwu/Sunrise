@@ -421,6 +421,7 @@ resolve_slot_id(const void* context, std::string_view id, lua_vm::SlotDefinition
     output.nameHash = row.nameHash;
     output.elementIndex = row.elementIndex;
     output.elementCount = row.elementCount;
+    output.flags = row.flags;
     return !output.id.empty();
 }
 

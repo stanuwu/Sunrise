@@ -61,6 +61,7 @@ bool validate_storage(const Inputs&,
         value.combatObjectiveGroups.size(),
         value.actorAbilities.size(),
         value.actorAbilityTargets.size(),
+        value.authoredSceneEventKeys.size(),
     };
     const bool bounded = std::all_of(counts.begin(), counts.end(), [](std::size_t count) {
         return count <= (std::numeric_limits<std::uint32_t>::max)();

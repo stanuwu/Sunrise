@@ -84,8 +84,8 @@ namespace {
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
     // Named arguments this call accepts. Any other key is refused.
-    static constexpr std::array<std::string_view, 5> kDeclared{
-        "directive", "state", "navpoint", "audience", "waypoint"};
+    static constexpr std::array<std::string_view, 6> kDeclared{
+        "directive", "state", "navpoint", "audience", "waypoint", "progress"};
     refuse_unknown_arguments(state, kDeclared);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot)) {
@@ -122,6 +122,31 @@ namespace {
                                          .elementIndex = resolved.elementIndex,
                                          .state = static_cast<std::int8_t>(directiveState),
                                          .visible = true};
+    // Progress rides only on an element that declares a counter; the HUD ignores it otherwise.
+    if (push_argument(state, "progress") != LUA_TNIL) {
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const std::size_t count = lua_rawlen(state, -1);
+        if ((resolved.flags & format::kDirectiveElementCounter) == 0) {
+            return luaL_error(state, "directive progress requires an element with a counter");
+        }
+        if (count == 0 || count > preset.progress.size()) {
+            return luaL_error(state, "directive progress holds one to four integers");
+        }
+        for (std::size_t index = 1; index <= count; ++index) {
+            lua_rawgeti(state, -1, static_cast<lua_Integer>(index));
+            if (!lua_isinteger(state, -1)) {
+                return luaL_error(state, "directive progress values must be integers");
+            }
+            const lua_Integer value = lua_tointeger(state, -1);
+            if (value < (std::numeric_limits<std::int32_t>::min)()
+                || value > (std::numeric_limits<std::int32_t>::max)()) {
+                return luaL_error(state, "directive progress is outside its native field width");
+            }
+            preset.progress[index - 1] = static_cast<std::int32_t>(value);
+            lua_pop(state, 1);
+        }
+    }
+    lua_pop(state, 1);
     if (!optional_slot_reference(
             state, "audience", scriptable_auth::kType70SlotType, preset.audience)) {
         return luaL_error(state,

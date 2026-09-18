@@ -207,6 +207,31 @@ bool validate(const topology::Snapshot& topology,
             return false;
         }
     }
+    for (std::size_t index = 0; index < snapshot.eventKeys.size(); ++index) {
+        const EventKey& row = snapshot.eventKeys[index];
+        // A key belongs to a resourced scene and names the resource its graph hangs off.
+        const auto resource = std::find_if(
+            snapshot.resources.begin(),
+            snapshot.resources.end(),
+            [&row](const Resource& candidate) { return candidate.slotIndex == row.slotIndex; });
+        const squad::DescriptorFact* descriptor = resource == snapshot.resources.end()
+                                                      ? nullptr
+                                                      : find_descriptor(descriptors,
+                                                                        resource->slotIndex,
+                                                                        resource->configTag,
+                                                                        resource->descriptorOffset);
+        Text expectedId{};
+        if (descriptor == nullptr || resource->resourceTag != row.resourceTag || row.graphTag == 0
+            || row.graphTag == format::kAbsentIndex || row.key == 0
+            || row.key == format::kAbsentIndex || row.flags != format::kAuthoredSceneEventKeyExact
+            || row.reserved != 0
+            || !event_key_id(topology, *descriptor, row.graphTag, row.gateOffset, expectedId)
+            || expectedId.value != row.id.value || expectedId.length != row.id.length
+            || (index != 0
+                && event_key_natural(snapshot.eventKeys[index - 1]) >= event_key_natural(row))) {
+            return false;
+        }
+    }
     for (std::size_t index = 0; index < snapshot.squadEdges.size(); ++index) {
         const SquadEdge& row = snapshot.squadEdges[index];
         const squad::DescriptorFact* descriptor =

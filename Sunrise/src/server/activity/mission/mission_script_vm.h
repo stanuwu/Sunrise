@@ -124,6 +124,8 @@ struct DirectiveElementDefinition final {
     std::int32_t elementIndex{};
     /** Rows that sub-array holds, so the bound is the array's, never the wire lane's width. */
     std::uint32_t elementCount{};
+    /** Authored flag word; the counter bit says the HUD shows the lane's progress values. */
+    std::uint32_t flags{};
 };
 
 /** One state name a type-42 performance sensor may start on the actor it drives. */

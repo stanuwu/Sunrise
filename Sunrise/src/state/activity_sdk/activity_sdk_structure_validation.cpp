@@ -21,6 +21,20 @@ template <typename Row, typename Id>
     return true;
 }
 
+/** @return True when every directive element has a valid description or progress label. */
+[[nodiscard]] bool directive_texts(const Catalog& catalog) noexcept {
+    for (const format::DirectiveElement& row : catalog.directive_elements()) {
+        const std::string_view description = catalog.string(row.description);
+        const std::string_view progress = catalog.string(row.progress);
+        if ((description.empty() && progress.empty())
+            || description.find('\0') != std::string_view::npos
+            || progress.find('\0') != std::string_view::npos) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /** @return True when every activity's row ranges stay inside the sections they index. */
 [[nodiscard]] bool activity_ranges(const Catalog& catalog) noexcept {
     for (const format::Activity& row : catalog.activities()) {
@@ -131,11 +145,8 @@ bool structure(const Catalog& catalog) {
                catalog.directive_elements(), catalog, [](const auto& row) { return row.id; })
            && required_ids(
                catalog.directive_elements(), catalog, [](const auto& row) { return row.title; })
-           && required_ids(catalog.directive_elements(),
-                           catalog,
-                           [](const auto& row) { return row.description; })
-           && activity_ranges(catalog) && topology_ranges(catalog) && behavior_ranges(catalog)
-           && runtime_ranges(catalog);
+           && directive_texts(catalog) && activity_ranges(catalog) && topology_ranges(catalog)
+           && behavior_ranges(catalog) && runtime_ranges(catalog);
 }
 
 } // namespace sunrise::state::activity_sdk::validation

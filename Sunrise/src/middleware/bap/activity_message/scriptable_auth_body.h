@@ -501,6 +501,8 @@ inline constexpr std::size_t kType53ByteCount = (kType53BitCount + 7) / 8;
 inline constexpr std::uint8_t kType68SlotType = 68;
 inline constexpr std::uint32_t kType68Schema = 0x80804F67;
 inline constexpr std::size_t kType68EntryCount = 3;
+/** Signed progress values each lane carries; a counter element shows the first two. */
+inline constexpr std::size_t kType68ProgressCount = 4;
 inline constexpr std::size_t kType68BitCount = 4'802;
 inline constexpr std::size_t kType68ByteCount = (kType68BitCount + 7) / 8;
 /** ClientRef slot type of an authored navigation marker a directive may point at. */
@@ -553,6 +555,8 @@ struct Type68Preset final {
     /** Native directive state: 0 enters, 1 completes, and 2 uses the alternate exit state. */
     std::int8_t state{};
     bool visible{true};
+    /** Lane progress values, current then maximum first; the HUD reads them as a counter. */
+    std::array<std::int32_t, kType68ProgressCount> progress{};
     /** Authored type-47 destination; absent removes the explicit guidance marker. */
     Type2LaneClientRef navpoint{};
     /** The navpoint's slot name hash; the client resolves it to a position when the object is

@@ -113,6 +113,7 @@ struct Storage final {
     std::vector<format::CombatObjectiveGroup> combatObjectiveGroups{};
     std::vector<format::ActorAbility> actorAbilities{};
     std::vector<format::ActorAbilityTarget> actorAbilityTargets{};
+    std::vector<format::AuthoredSceneEventKey> authoredSceneEventKeys{};
 
     /** @return Borrowed sections in exact current format order. */
     [[nodiscard]] pack::Tables tables() const noexcept;

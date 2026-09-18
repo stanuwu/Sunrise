@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -12,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/tables/activity_display_name_reader.h"
 #include "activity_sdk_dialogue_group_index.h"
 #include "activity_sdk_native_pack_internal.h"
@@ -51,6 +53,38 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
     }
     target = member - static_cast<std::size_t>(distance);
     return true;
+}
+
+/** Logs one packed directive element the generator leaves out, and why. */
+void log_directive_element(std::uint32_t slotIndex,
+                           std::uint32_t nameHash,
+                           std::size_t element,
+                           std::uint32_t flags,
+                           const char* result) noexcept {
+    std::array<char, 160> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity_sdk_directive_element result=%s slot_row=%u "
+                                      "name=0x%08X element=%zu flags=0x%08X",
+                                      result,
+                                      static_cast<unsigned>(slotIndex),
+                                      static_cast<unsigned>(nameHash),
+                                      element,
+                                      static_cast<unsigned>(flags));
+    if (written > 0) {
+        core::log::write(
+            core::log::Channel::client,
+            core::log::Level::debug,
+            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1U)});
+    }
+}
+
+/** Reads one packed localized string reference: container tag, then string hash. */
+[[nodiscard]] bool read_reference(std::span<const std::byte> bytes,
+                                  std::size_t offset,
+                                  display::Reference& output) noexcept {
+    return read_value(bytes, offset, output.containerTag)
+           && read_value(bytes, offset + 4U, output.stringHash);
 }
 
 /** Reads one array field's data offset and count, checking its declared class and stride. */
@@ -104,10 +138,12 @@ struct AuthoredTextCandidate final {
     std::uint32_t definitionHash{};
 };
 
-/** The two localized fields are one directive element, not two selectable directives. */
+/** The localized fields are one directive element, not several selectable directives. */
 struct AuthoredDirectiveCandidate final {
     display::Reference title{};
     display::Reference description{};
+    display::Reference progress{};
+    std::uint32_t flags{};
     std::uint32_t slotIndex{};
     std::uint32_t nameHash{};
     std::int32_t elementIndex{-1};
@@ -221,6 +257,15 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
         result = &cache.emplace(tag, std::move(row)).first->second;
         return true;
     };
+    // An absent reference has no container; a present one must name a string container.
+    auto string_container = [&](const display::Reference& reference) -> bool {
+        if (reference.containerTag == 0) {
+            return true;
+        }
+        const CachedTag* container = nullptr;
+        return package(reference.containerTag, container) && container != nullptr
+               && container->classId == display::kStringContainerClass;
+    };
     try {
         std::vector<AuthoredTextCandidate> dialogueCandidates{};
         std::vector<AuthoredDirectiveCandidate> directiveCandidates{};
@@ -297,55 +342,88 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                     }
                 }
             } else {
-                if (resource->classId != 0x80804F72U) {
+                if (resource->classId != format::kDirectiveTableClass) {
                     continue;
                 }
                 std::size_t entries = 0;
                 std::size_t entryCount = 0;
-                if (!read_array(bytes, 8U, 40U, 0x80804F74U, entries, entryCount)) {
+                if (!read_array(bytes,
+                                format::kDirectiveEntryArrayOffset,
+                                format::kDirectiveEntrySize,
+                                format::kDirectiveEntryClass,
+                                entries,
+                                entryCount)) {
                     continue;
                 }
                 for (std::size_t entry = 0; entry < entryCount; ++entry) {
-                    const std::size_t row = entries + entry * 40U;
+                    const std::size_t row = entries + entry * format::kDirectiveEntrySize;
+                    const std::size_t elementsField = row + format::kDirectiveEntryElementsOffset;
                     std::uint32_t nameHash = 0;
                     std::int64_t relative = 0;
                     std::size_t elements = 0;
                     std::uint64_t elementCount = 0;
                     std::uint32_t elementClass = 0;
-                    if (!read_value(bytes, row, nameHash) || !read_value(bytes, row + 24U, relative)
-                        || !add_relative(row + 24U, relative, elements)
+                    if (!read_value(bytes, row, nameHash)
+                        || !read_value(bytes, elementsField, relative)
+                        || !add_relative(elementsField, relative, elements)
                         || !read_value(bytes, elements, elementCount) || elementCount == 0
                         || elementCount > format::kAbsentIndex
                         || !read_value(bytes, elements + 8U, elementClass)
-                        || elementClass != 0x80804F76U) {
+                        || elementClass != format::kDirectiveElementClass) {
                         continue;
                     }
                     const std::size_t data = elements + 16U;
-                    if (data > bytes.size() || elementCount > (bytes.size() - data) / 36U) {
+                    if (data > bytes.size()
+                        || elementCount
+                               > (bytes.size() - data) / format::kDirectiveElementPackedSize) {
                         continue;
                     }
                     for (std::size_t element = 0; element < elementCount; ++element) {
-                        const std::size_t elementRow = data + element * 36U;
+                        const std::size_t elementRow =
+                            data + element * format::kDirectiveElementPackedSize;
                         AuthoredDirectiveCandidate candidate{};
                         candidate.slotIndex = descriptor.slotIndex;
                         candidate.nameHash = nameHash;
                         candidate.elementIndex = static_cast<std::int32_t>(element);
                         candidate.elementCount = static_cast<std::uint32_t>(elementCount);
-                        if (!read_value(bytes, elementRow, candidate.title.containerTag)
-                            || !read_value(bytes, elementRow + 4U, candidate.title.stringHash)
-                            || !read_value(
-                                bytes, elementRow + 8U, candidate.description.containerTag)
-                            || !read_value(
-                                bytes, elementRow + 12U, candidate.description.stringHash)) {
+                        if (!read_reference(bytes,
+                                            elementRow + format::kDirectiveElementTitleOffset,
+                                            candidate.title)
+                            || !read_reference(bytes,
+                                               elementRow
+                                                   + format::kDirectiveElementDescriptionOffset,
+                                               candidate.description)
+                            || !read_reference(bytes,
+                                               elementRow + format::kDirectiveElementProgressOffset,
+                                               candidate.progress)
+                            || !read_value(bytes,
+                                           elementRow + format::kDirectiveElementFlagsOffset,
+                                           candidate.flags)) {
+                            log_directive_element(
+                                descriptor.slotIndex, nameHash, element, candidate.flags, "read");
                             continue;
                         }
-                        const CachedTag* title = nullptr;
-                        const CachedTag* description = nullptr;
-                        if (!package(candidate.title.containerTag, title) || title == nullptr
-                            || title->classId != display::kStringContainerClass
-                            || !package(candidate.description.containerTag, description)
-                            || description == nullptr
-                            || description->classId != display::kStringContainerClass) {
+                        // The title is always authored; the other two may be absent.
+                        if (candidate.title.containerTag == 0
+                            || !string_container(candidate.title)) {
+                            log_directive_element(
+                                descriptor.slotIndex, nameHash, element, candidate.flags, "title");
+                            continue;
+                        }
+                        if (!string_container(candidate.description)) {
+                            log_directive_element(descriptor.slotIndex,
+                                                  nameHash,
+                                                  element,
+                                                  candidate.flags,
+                                                  "description");
+                            continue;
+                        }
+                        if (!string_container(candidate.progress)) {
+                            log_directive_element(descriptor.slotIndex,
+                                                  nameHash,
+                                                  element,
+                                                  candidate.flags,
+                                                  "progress");
                             continue;
                         }
                         directiveCandidates.push_back(candidate);
@@ -354,13 +432,14 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             }
         }
         std::vector<display::Reference> references{};
-        references.reserve(dialogueCandidates.size() + directiveCandidates.size() * 2U);
+        references.reserve(dialogueCandidates.size() + directiveCandidates.size() * 3U);
         for (const AuthoredTextCandidate& row : dialogueCandidates) {
             references.push_back(row.reference);
         }
         for (const AuthoredDirectiveCandidate& row : directiveCandidates) {
             references.push_back(row.title);
             references.push_back(row.description);
+            references.push_back(row.progress);
         }
         if (references.empty()) {
             return true;
@@ -402,8 +481,16 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
         for (const AuthoredDirectiveCandidate& candidate : directiveCandidates) {
             const display::Name& title = names.names[resolved++];
             const display::Name& description = names.names[resolved++];
-            if (title.authoredEmpty || title.length == 0 || description.authoredEmpty
-                || description.length == 0) {
+            const display::Name& progress = names.names[resolved++];
+            const bool hasDescription = !description.authoredEmpty && description.length != 0;
+            const bool hasProgress = !progress.authoredEmpty && progress.length != 0;
+            if (title.authoredEmpty || title.length == 0 || (!hasDescription && !hasProgress)) {
+                log_directive_element(candidate.slotIndex,
+                                      candidate.nameHash,
+                                      static_cast<std::size_t>(candidate.elementIndex),
+                                      candidate.flags,
+                                      title.authoredEmpty || title.length == 0 ? "no_title"
+                                                                               : "no_text");
                 continue;
             }
             char id[96]{};
@@ -417,8 +504,12 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             if (length <= 0 || static_cast<std::size_t>(length) >= sizeof id
                 || !copy_text(std::string_view(id, static_cast<std::size_t>(length)), row.id)
                 || !copy_text(std::string_view(title.value.data(), title.length), row.title)
-                || !copy_text(std::string_view(description.value.data(), description.length),
-                              row.description)) {
+                || (hasDescription
+                    && !copy_text(std::string_view(description.value.data(), description.length),
+                                  row.description))
+                || (hasProgress
+                    && !copy_text(std::string_view(progress.value.data(), progress.length),
+                                  row.progress))) {
                 continue;
             }
             row.slotIndex = candidate.slotIndex;
@@ -427,8 +518,16 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             row.elementCount = candidate.elementCount;
             row.titleContainerTag = candidate.title.containerTag;
             row.titleStringHash = candidate.title.stringHash;
-            row.descriptionContainerTag = candidate.description.containerTag;
-            row.descriptionStringHash = candidate.description.stringHash;
+            // An absent field keeps zero tags, so the row says which fields were authored.
+            if (hasDescription) {
+                row.descriptionContainerTag = candidate.description.containerTag;
+                row.descriptionStringHash = candidate.description.stringHash;
+            }
+            if (hasProgress) {
+                row.progressContainerTag = candidate.progress.containerTag;
+                row.progressStringHash = candidate.progress.stringHash;
+            }
+            row.flags = candidate.flags;
             output.directiveElements.push_back(row);
         }
         auto dialogueLess = [](const auto& first, const auto& second) {

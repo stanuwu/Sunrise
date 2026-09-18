@@ -37,6 +37,19 @@ struct Resource final {
     std::uint32_t reserved{};
 };
 
+/** One event gate of a scene's graph before its ID is linked. */
+struct EventKey final {
+    Text id{};
+    std::uint32_t slotIndex{};
+    std::uint32_t resourceTag{};
+    std::uint32_t graphTag{};
+    std::uint32_t gateOffset{};
+    std::int32_t ordinal{};
+    std::uint32_t key{};
+    std::uint32_t flags{};
+    std::uint32_t reserved{};
+};
+
 /** One exact format-v12 same-object scene-to-squad edge before its ID is linked. */
 struct SquadEdge final {
     Text id{};
@@ -75,11 +88,12 @@ struct DialogueCueText final {
     std::uint32_t stringHash{};
 };
 
-/** One exact type-68 HUD element and its two authored localized fields. */
+/** One exact type-68 HUD element and its authored localized fields; absent ones stay empty. */
 struct DirectiveElement final {
     Text id{};
     Text title{};
     Text description{};
+    Text progress{};
     std::uint32_t slotIndex{};
     std::uint32_t nameHash{};
     std::int32_t elementIndex{};
@@ -88,6 +102,9 @@ struct DirectiveElement final {
     std::uint32_t titleStringHash{};
     std::uint32_t descriptionContainerTag{};
     std::uint32_t descriptionStringHash{};
+    std::uint32_t progressContainerTag{};
+    std::uint32_t progressStringHash{};
+    std::uint32_t flags{};
 };
 
 /** Scene-owned descriptor facts retain a complete source universe per selected object. */
@@ -101,6 +118,8 @@ struct Facts final {
 /** Canonical section-19 and section-22 rows with unresolved string references. */
 struct Snapshot final {
     std::vector<Resource> resources{};
+    /** Every gate of every resourced scene, in slot then gate order. */
+    std::vector<EventKey> eventKeys{};
     std::vector<SquadEdge> squadEdges{};
     std::vector<TaskTarget> taskTargets{};
     std::vector<DialogueCueText> dialogueCueTexts{};

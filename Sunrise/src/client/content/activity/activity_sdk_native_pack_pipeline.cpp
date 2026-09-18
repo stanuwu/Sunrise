@@ -212,7 +212,8 @@ lua_source(const state::activity_sdk::identity::Expected& identity,
             storage.actorSequenceBindings,
             worldSources,
             storage.combatObjectiveGroups,
-            storage.actorAbilities};
+            storage.actorAbilities,
+            storage.authoredSceneEventKeys};
 }
 
 } // namespace

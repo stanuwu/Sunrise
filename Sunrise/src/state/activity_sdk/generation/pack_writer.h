@@ -72,6 +72,7 @@ struct Tables final {
     std::span<const format::CombatObjectiveGroup> combatObjectiveGroups{};
     std::span<const format::ActorAbility> actorAbilities{};
     std::span<const format::ActorAbilityTarget> actorAbilityTargets{};
+    std::span<const format::AuthoredSceneEventKey> authoredSceneEventKeys{};
 };
 
 /** Canonical pack build and publication outcomes. */

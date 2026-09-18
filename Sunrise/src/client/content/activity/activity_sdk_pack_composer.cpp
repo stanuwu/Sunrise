@@ -696,6 +696,11 @@ link_text(const StringLinker& linker, const Text& input, format::StringRef& outp
             return false;
         }
     }
+    for (const authored_scene_inventory::EventKey& row : authoredScenes.eventKeys) {
+        if (!keep_legacy(linker, row.id)) {
+            return false;
+        }
+    }
     for (const authored_scene_inventory::SquadEdge& row : authoredScenes.squadEdges) {
         if (!keep_legacy(linker, row.id)) {
             return false;
@@ -713,7 +718,7 @@ link_text(const StringLinker& linker, const Text& input, format::StringRef& outp
     }
     for (const authored_scene_inventory::DirectiveElement& row : authoredScenes.directiveElements) {
         if (!keep_legacy(linker, row.id) || !keep_legacy(linker, row.title)
-            || !keep_legacy(linker, row.description)) {
+            || !keep_legacy(linker, row.description) || !keep_legacy(linker, row.progress)) {
             return false;
         }
     }
@@ -775,6 +780,7 @@ pack::Tables Storage::tables() const noexcept {
         combatObjectiveGroups,
         actorAbilities,
         actorAbilityTargets,
+        authoredSceneEventKeys,
     };
 }
 

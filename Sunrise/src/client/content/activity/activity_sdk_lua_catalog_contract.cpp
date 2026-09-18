@@ -20,7 +20,7 @@ struct RowSpec final {
 };
 
 /** Every StringRef field declared by the row table below. */
-constexpr std::size_t kDecodedStringFieldCount = 54;
+constexpr std::size_t kDecodedStringFieldCount = 55;
 /** Section index of the activity-owned binding-tag rows, which have no direct collection. */
 constexpr std::uint32_t kBindingTagSectionIndex = 24;
 /** Section index of the binding-locator rows, projected both directly and per activity. */
@@ -175,7 +175,8 @@ constexpr std::array<RowSpec, 40> kRows{{
      "CatalogDirectiveElementView",
      "s:id;s:title;s:description;u32:slot_index;u32:name_hash;i32:element_index;"
      "u32:element_count;u32:title_container_tag;u32:title_string_hash;"
-     "u32:description_container_tag;u32:description_string_hash"},
+     "u32:description_container_tag;u32:description_string_hash;s:progress;"
+     "u32:progress_container_tag;u32:progress_string_hash;u32:flags"},
     {25,
      "activity_binding_locators",
      "activity_binding_locators",

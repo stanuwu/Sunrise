@@ -391,6 +391,19 @@ bool render_mission(const Source& source,
             append_hex(output, scene.configTag);
             output.append(", resource_tag = ");
             append_hex(output, scene.resourceTag);
+            // The graph's gates in order: what set_scene_events publishes to run the scene.
+            bool anyKey = false;
+            for (const format::AuthoredSceneEventKey& gate : source.authoredSceneEventKeys) {
+                if (gate.sceneSlotIndex != slotRow) {
+                    continue;
+                }
+                output.append(anyKey ? ", " : ", event_keys = { ");
+                append_hex(output, gate.key);
+                anyKey = true;
+            }
+            if (anyKey) {
+                output.append(" }");
+            }
             output.append(" },\n");
             sceneConstants.append("    ");
             sceneConstants.append(key);
@@ -580,8 +593,12 @@ bool render_mission(const Source& source,
         }
         for (const std::uint32_t rowIndex : found->second) {
             const format::DirectiveElement& row = source.directiveElements[rowIndex];
-            (void)append_unique_key(
-                directiveConstants, directiveKeys, text(source, row.title), row.nameHash);
+            const std::string_view progress = text(source, row.progress);
+            // A counter element shares its title with the plain one; its label tells them apart.
+            (void)append_unique_key(directiveConstants,
+                                    directiveKeys,
+                                    progress.empty() ? text(source, row.title) : progress,
+                                    row.nameHash);
             directiveConstants.append("{ id = ");
             append_string(directiveConstants, text(source, row.id));
             directiveConstants.append(", slot_row = ");
@@ -594,6 +611,13 @@ bool render_mission(const Source& source,
             append_string(directiveConstants, text(source, row.title));
             directiveConstants.append(", description = ");
             append_string(directiveConstants, text(source, row.description));
+            if (!progress.empty()) {
+                directiveConstants.append(", progress = ");
+                append_string(directiveConstants, progress);
+            }
+            if ((row.flags & format::kDirectiveElementCounter) != 0) {
+                directiveConstants.append(", counter = true");
+            }
             directiveConstants.append(" },\n");
         }
     }
