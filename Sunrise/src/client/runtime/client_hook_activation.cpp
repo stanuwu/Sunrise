@@ -15,6 +15,7 @@
 #include "../content/bootstrap/bootstrap_token_publish.h"
 #include "../content/investment/worker.h"
 #include "../executable/image.h"
+#include "../hooks/activity_context_slot/activity_context_slot.h"
 #include "../hooks/assert_handler/assert_handler_lifecycle.h"
 #include "../hooks/async_io/async_io_lifetime_guard.h"
 #include "../hooks/bootflow/bootflow_hook_lifecycle.h"
@@ -184,6 +185,9 @@ void clear_game_targets() noexcept {
     (void)hooks::bootflow::install();
     // The launcher calls the Director's own selection entry points; nothing is detoured.
     (void)activity::mission_launch::install();
+    // Opt-in per mission script: only a script that declares the swapped activity context slot
+    // changes the Client's own slot. Every other activity keeps the native value.
+    (void)hooks::activity_context_slot::install();
     // The teleport hooks attach whether or not the feature is on, so the interface can enable it
     // without a restart. Both replacements return immediately while nothing is requested.
     (void)hooks::teleport::install();

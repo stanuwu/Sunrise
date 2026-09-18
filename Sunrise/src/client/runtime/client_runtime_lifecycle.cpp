@@ -5,6 +5,7 @@
 #include "../content/activity/activity_sdk_generation_worker.h"
 #include "../content/activity/scriptable_catalog_worker.h"
 #include "../content/investment/worker.h"
+#include "../hooks/activity_context_slot/activity_context_slot.h"
 #include "../hooks/assert_handler/assert_handler_lifecycle.h"
 #include "../hooks/async_io/async_io_lifetime_guard.h"
 #include "../hooks/bootflow/bootflow_hook_lifecycle.h"
@@ -59,6 +60,13 @@ bool shutdown() noexcept {
     // Detached after presentation, so no later frame can apply the cursor policy.
     hooks::cursor::uninstall();
     hooks::polled_input::uninstall();
+    if (!hooks::activity_context_slot::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=activity_context_slot result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
     if (!hooks::world_objects::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
