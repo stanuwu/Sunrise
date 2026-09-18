@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../../../middleware/bap/activity_message/auth_schema_catalog.h"
+#include "../../../state/activity_sdk/runtime.h"
 #include "activity_sdk_lua_missions_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::internal {
@@ -503,6 +504,7 @@ bool render_mission(const Source& source,
     std::string dialogueDefinitionConstants = "mission.DialogueDefinition = {\n";
     for (const std::uint32_t slot : slots) {
         const auto found = index.dialogueBySlot.find(slot);
+        const auto cues = index.dialogueCuesBySlot.find(slot);
         const auto slotKey = slotKeyByRow.find(slot);
         if (slotKey == slotKeyByRow.end() || slot >= source.slots.size()) {
             continue;
@@ -527,18 +529,23 @@ bool render_mission(const Source& source,
             append_uint(dialogueCueConstants, cue);
             dialogueCueConstants.append(",\n");
 
-            if (found != index.dialogueBySlot.end()) {
-                for (const std::uint32_t rowIndex : found->second) {
-                    const format::DialogueCueText& row = source.dialogueCueTexts[rowIndex];
-                    if (row.cueIndex == cue) {
-                        dialogueDefinitionConstants.append("        [");
-                        append_uint(dialogueDefinitionConstants, cue);
-                        dialogueDefinitionConstants.append("] = ");
-                        append_hex(dialogueDefinitionConstants, row.definitionHash);
-                        dialogueDefinitionConstants.append(",\n");
-                        break;
-                    }
-                }
+            // Cue rows are contiguous per slot and indexed by cue, so the cue offsets the slot's
+            // first row.
+            if (cues != index.dialogueCuesBySlot.end()
+                && cues->second + cue < source.dialogueCues.size()
+                && source.dialogueCues[cues->second + cue].slotIndex == slot
+                && source.dialogueCues[cues->second + cue].cueIndex == cue) {
+                const format::DialogueCue& row = source.dialogueCues[cues->second + cue];
+                dialogueDefinitionConstants.append("        [");
+                append_uint(dialogueDefinitionConstants, cue);
+                dialogueDefinitionConstants.append("] = { hash = ");
+                append_hex(dialogueDefinitionConstants, row.definitionHash);
+                dialogueDefinitionConstants.append(", duration_ms = ");
+                append_uint(dialogueDefinitionConstants,
+                            state::activity_sdk::authored_milliseconds(row.authoredWindowSeconds));
+                dialogueDefinitionConstants.append(", lines = ");
+                append_uint(dialogueDefinitionConstants, row.lineCount);
+                dialogueDefinitionConstants.append(" },\n");
             }
 
             dialogueCueTextConstants.append("        [");

@@ -234,6 +234,50 @@ void push_script_event(RuntimeInstance& instance, const host::Event& event) noex
     }
 }
 
+void push_program_event(RuntimeInstance& instance, const host::Event& event) noexcept {
+    if (instance.programStatus != ProgramStatus::loaded) {
+        return;
+    }
+    try {
+        instance.scriptEvents.push_back(event);
+    } catch (const std::bad_alloc&) {
+        log_line(core::log::Level::warn, &instance, "script_event", "allocation_failure");
+    }
+}
+
+bool describe_dialogue_cue(const RuntimeInstance& instance,
+                           std::uint32_t slotRow,
+                           std::uint16_t cue,
+                           host::Event& event) noexcept {
+    event.dialogueSlotRow = slotRow;
+    event.dialogueCue = cue;
+    if (instance.view.catalog == nullptr) {
+        return false;
+    }
+    const sdk::Catalog& catalog = *instance.view.catalog;
+    const auto slots = catalog.slots();
+    const auto objects = catalog.objects();
+    if (slotRow >= slots.size()) {
+        return false;
+    }
+    const format::Slot& slot = slots[slotRow];
+    if (slot.slotType != format::kDialogueSlotType || slot.objectIndex >= objects.size()
+        || slot.slotIndex
+               > static_cast<std::uint32_t>((std::numeric_limits<std::int16_t>::max)())) {
+        return false;
+    }
+    const auto cues = sdk::slot_dialogue_cues(catalog, slot);
+    if (cue >= cues.size()) {
+        return false;
+    }
+    event.dialogueRegistryKey = objects[slot.objectIndex].objectKey;
+    event.dialogueSlotType = static_cast<std::int8_t>(slot.slotType);
+    event.dialogueSlotIndex = static_cast<std::int16_t>(slot.slotIndex);
+    // The client reports no line end; the authored window is the only length a cue carries.
+    event.dialogueDurationMs = sdk::authored_milliseconds(cues[cue].authoredWindowSeconds);
+    return true;
+}
+
 /**
  * Queues an exact host-policy transition without consuming a client mission-input sequence.
  * @param binding Activity generation that accepted the damage.
@@ -620,6 +664,15 @@ void service_timers(std::uint64_t now) noexcept {
             instance.pendingTimerEvent.timerSequence = selected->sequence;
             instance.pendingTimerEvent.missionSequence = instance.lastMissionSequence;
             instance.pendingTimerEvent.kind = host::EventKind::timerElapsed;
+            // A runtime dialogue timer closes its cue; the source is described again from the
+            // catalog, and a cue it no longer describes still finishes with its row and cue.
+            std::uint32_t dialogueSlotRow = 0;
+            std::uint16_t dialogueCue = 0;
+            if (lua_vm::parse_dialogue_timer_key(selected->key, dialogueSlotRow, dialogueCue)) {
+                instance.pendingTimerEvent.kind = host::EventKind::dialogueFinished;
+                static_cast<void>(describe_dialogue_cue(
+                    instance, dialogueSlotRow, dialogueCue, instance.pendingTimerEvent));
+            }
             instance.firstTimerAttempt = now;
             instance.nextTimerAttempt = now;
             instance.timerAttempts = 0;

@@ -10,7 +10,7 @@ namespace sunrise::state::activity_sdk::format {
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
 /** Runtime-pack schema version accepted by this reader. */
-inline constexpr std::uint32_t kVersion = 40;
+inline constexpr std::uint32_t kVersion = 41;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 50;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
@@ -117,6 +117,11 @@ inline constexpr std::uint32_t kDialogueAuthoredListClass = 0x80808D54U;
 inline constexpr std::uint32_t kDialogueDefinitionArrayClass = 0x80808D18U;
 inline constexpr std::uint32_t kDialogueGroupArrayClass = 0x80808D19U;
 inline constexpr std::uint32_t kDialogueMaximumCueCount = 128U;
+/** Every dialogue line holds two takes of the same text. */
+inline constexpr std::uint32_t kDialogueTakeCount = 2U;
+/** A cue row's lines were read from the one content tree matching its authored duration. */
+inline constexpr std::uint32_t kDialogueCueLinesExact = 0x1U;
+inline constexpr std::uint32_t kDialogueCueFlagMask = kDialogueCueLinesExact;
 /** Inspect exposure is read-only and may be rendered by diagnostics. */
 inline constexpr std::uint32_t kInspectExposure = 0x1U;
 /** Panel-test exposure marks a candidate that still passes runtime gates. */
@@ -393,7 +398,8 @@ inline constexpr std::size_t kSquadAnchorSize = 48;
 inline constexpr std::size_t kAuthoredSceneResourceSize = 40;
 inline constexpr std::size_t kAuthoredSceneSquadEdgeSize = 40;
 inline constexpr std::size_t kTaskTargetSize = 44;
-inline constexpr std::size_t kDialogueCueTextSize = 36;
+inline constexpr std::size_t kDialogueCueSize = 40;
+inline constexpr std::size_t kDialogueCueTextSize = 52;
 inline constexpr std::size_t kDirectiveElementSize = 56;
 inline constexpr std::size_t kBehaviorProgramSize = 28;
 inline constexpr std::size_t kBehaviorInputSize = 36;
@@ -1180,17 +1186,25 @@ struct CombatObjectiveGroup final {
     bool operator==(const CombatObjectiveGroup&) const = default;
 };
 
-/** A delayed cue expires after this authored window; it is not a playback duration. */
+/**
+ * A delayed cue expires after this authored window; it is not a playback duration.
+ * One row per cue of a type-53 slot, in slot then cue order; lines are present only when
+ * kDialogueCueLinesExact is set.
+ */
 struct DialogueCue final {
     std::uint32_t slotIndex{};
     std::uint32_t cueIndex{};
     std::uint32_t definitionHash{};
     float authoredWindowSeconds{};
-
-    bool operator==(const DialogueCue&) const = default;
+    StringRef id{};
+    /** Dialogue list the cue was read from, the row's provenance. */
+    std::uint32_t listTag{};
+    std::uint32_t lineCount{};
+    std::uint32_t flags{};
+    std::uint32_t reserved{};
 };
 
-/** One localized variant belongs to one exact authored type-53 cue definition. */
+/** One localized take of one line of a cue, in slot, cue, line, then take order. */
 struct DialogueCueText final {
     StringRef id{};
     StringRef text{};
@@ -1199,6 +1213,11 @@ struct DialogueCueText final {
     std::uint32_t definitionHash{};
     std::uint32_t containerTag{};
     std::uint32_t stringHash{};
+    /** Play order of the line inside its cue. */
+    std::uint32_t lineIndex{};
+    std::uint32_t takeIndex{};
+    std::uint32_t audioTag{};
+    std::uint32_t durationMs{};
 };
 
 /** One bounded authored type-68 HUD element with its exact title and description fields. */
@@ -1510,6 +1529,7 @@ static_assert(sizeof(SquadAnchor) == kSquadAnchorSize);
 static_assert(sizeof(AuthoredSceneResource) == kAuthoredSceneResourceSize);
 static_assert(sizeof(AuthoredSceneSquadEdge) == kAuthoredSceneSquadEdgeSize);
 static_assert(sizeof(TaskTarget) == kTaskTargetSize);
+static_assert(sizeof(DialogueCue) == kDialogueCueSize);
 static_assert(sizeof(DialogueCueText) == kDialogueCueTextSize);
 static_assert(sizeof(DirectiveElement) == kDirectiveElementSize);
 static_assert(sizeof(BehaviorProgram) == kBehaviorProgramSize);

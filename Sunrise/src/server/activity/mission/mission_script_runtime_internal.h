@@ -305,6 +305,20 @@ void log_line(core::log::Level level,
               std::string_view error = {}) noexcept;
 /** Appends one host-state event for the script. */
 void push_script_event(RuntimeInstance& instance, const host::Event& event) noexcept;
+/**
+ * Appends one event whose dispatch changes durable state on the runtime's behalf, so it is queued
+ * whether or not the script handles it.
+ */
+void push_program_event(RuntimeInstance& instance, const host::Event& event) noexcept;
+/**
+ * Fills the type-53 source and authored duration of one cue from the bound SDK catalog.
+ * The slot row and cue are set even on failure.
+ * @return False when the row is not a dialogue slot of this catalog or the cue has no cue row.
+ */
+[[nodiscard]] bool describe_dialogue_cue(const RuntimeInstance& instance,
+                                         std::uint32_t slotRow,
+                                         std::uint16_t cue,
+                                         host::Event& event) noexcept;
 /** Raises a fireteam event on each private instance whose party life counts changed. */
 void publish_fireteam_life(std::uint64_t now) noexcept;
 /** Merges the type-13 participation records of one Sense snapshot into the instance. */

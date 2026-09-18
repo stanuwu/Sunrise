@@ -75,6 +75,15 @@ struct VariableRefCollectionHandle final {
     return true;
 }
 
+/**
+ * Reads one timer name a script supplied, refusing the runtime's reserved prefix.
+ * @return False when the name is malformed or reserved.
+ */
+[[nodiscard]] inline bool
+parse_script_timer_key(lua_State* state, int index, StateKey& output) noexcept {
+    return parse_state_key(state, index, output) && !runtime_timer_key(output);
+}
+
 void push_request_key(lua_State* state, std::uint64_t key);
 void push_timer_ref(lua_State* state, const StateKey& key);
 void push_variable_ref(lua_State* state, const StateKey& key);

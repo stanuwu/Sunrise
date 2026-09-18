@@ -389,6 +389,7 @@ void draw_dialogues(const sdk::BoundView& view, const mission::Snapshot& snapsho
                                     display_text(catalog, object.id).data(),
                                     static_cast<unsigned>(occurrenceRow),
                                     static_cast<unsigned>(slot.slotIndex));
+                const auto cueRows = sdk::slot_dialogue_cues(catalog, slot);
                 for (std::uint32_t cueRow = 0; cueRow < slot.reserved; ++cueRow) {
                     // The cue index is a 16-bit wire field, so the row is narrowed once here.
                     const auto cue = static_cast<std::uint16_t>(cueRow);
@@ -406,16 +407,16 @@ void draw_dialogues(const sdk::BoundView& view, const mission::Snapshot& snapsho
                     }
                     ImGui::EndDisabled();
                     ImGui::SameLine();
-                    std::uint32_t definitionHash = 0;
-                    for (const sdk::format::DialogueCueText& row : catalog.dialogue_cue_texts()) {
-                        if (row.slotIndex == slotRow && row.cueIndex == cue) {
-                            definitionHash = row.definitionHash;
-                            break;
-                        }
+                    if (cueRow < cueRows.size()) {
+                        const sdk::format::DialogueCue& definition = cueRows[cueRow];
+                        ImGui::Text("Cue %u  definition %08X  %.3f s  %u lines",
+                                    static_cast<unsigned>(cue),
+                                    static_cast<unsigned>(definition.definitionHash),
+                                    static_cast<double>(definition.authoredWindowSeconds),
+                                    static_cast<unsigned>(definition.lineCount));
+                    } else {
+                        ImGui::Text("Cue %u  no definition", static_cast<unsigned>(cue));
                     }
-                    ImGui::Text("Cue %u  definition %08X",
-                                static_cast<unsigned>(cue),
-                                static_cast<unsigned>(definitionHash));
                     ImGui::Indent();
                     bool hasCandidate = false;
                     const auto dialogueRows = catalog.dialogue_cue_texts();

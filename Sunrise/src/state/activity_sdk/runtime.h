@@ -182,9 +182,10 @@ public:
     authored_scene_squad_edges() const noexcept;
     /** @return Every exact type-38 task target. */
     [[nodiscard]] std::span<const format::TaskTarget> task_targets() const noexcept;
-    /** @return Every localized authored dialogue-line alias. */
-    [[nodiscard]] std::span<const format::DialogueCueText> dialogue_cue_texts() const noexcept;
+    /** @return Every type-53 cue in slot then cue order. */
     [[nodiscard]] std::span<const format::DialogueCue> dialogue_cues() const noexcept;
+    /** @return Every localized take of a dialogue line. */
+    [[nodiscard]] std::span<const format::DialogueCueText> dialogue_cue_texts() const noexcept;
     [[nodiscard]] std::span<const format::ActorAbility> actor_abilities() const noexcept;
     [[nodiscard]] std::span<const format::ActorAbilityTarget>
     actor_ability_targets() const noexcept;
@@ -503,6 +504,11 @@ squad_members(const Catalog& catalog, const format::Squad& squad) noexcept;
 /** Returns exact anchors owned by one squad. */
 [[nodiscard]] std::span<const format::SquadAnchor>
 squad_anchors(const Catalog& catalog, const format::Squad& squad) noexcept;
+/** Returns every cue of one type-53 slot, indexed by cue. */
+[[nodiscard]] std::span<const format::DialogueCue>
+slot_dialogue_cues(const Catalog& catalog, const format::Slot& slot) noexcept;
+/** Rounds authored seconds to the nearest millisecond, saturating at 32 bits. */
+[[nodiscard]] std::uint32_t authored_milliseconds(float seconds) noexcept;
 /** Returns all exact authored resources retained for one type-43 slot. */
 [[nodiscard]] std::span<const format::AuthoredSceneResource>
 slot_authored_scene_resources(const Catalog& catalog, const format::Slot& slot) noexcept;

@@ -664,8 +664,22 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
             return false;
         }
     }
-    output.dialogueCues = authoredScenes.dialogueCues;
     output.combatObjectiveGroups = authoredScenes.combatObjectiveGroups;
+    output.dialogueCues.resize(authoredScenes.dialogueCues.size());
+    for (std::size_t index = 0; index < authoredScenes.dialogueCues.size(); ++index) {
+        const authored_scene_inventory::DialogueCue& input = authoredScenes.dialogueCues[index];
+        format::DialogueCue& target = output.dialogueCues[index];
+        target.slotIndex = input.slotIndex;
+        target.cueIndex = input.cueIndex;
+        target.listTag = input.listTag;
+        target.definitionHash = input.definitionHash;
+        target.authoredWindowSeconds = input.authoredWindowSeconds;
+        target.lineCount = input.lineCount;
+        target.flags = input.flags;
+        if (!link_text(linker, input.id, target.id)) {
+            return false;
+        }
+    }
     output.dialogueCueTexts.resize(authoredScenes.dialogueCueTexts.size());
     for (std::size_t index = 0; index < authoredScenes.dialogueCueTexts.size(); ++index) {
         const authored_scene_inventory::DialogueCueText& input =
@@ -676,6 +690,10 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         target.definitionHash = input.definitionHash;
         target.containerTag = input.containerTag;
         target.stringHash = input.stringHash;
+        target.lineIndex = input.lineIndex;
+        target.takeIndex = input.takeIndex;
+        target.audioTag = input.audioTag;
+        target.durationMs = input.durationMs;
         if (!link_text(linker, input.id, target.id)
             || !link_text(linker, input.text, target.text)) {
             return false;

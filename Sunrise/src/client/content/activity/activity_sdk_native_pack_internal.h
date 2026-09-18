@@ -47,6 +47,7 @@ struct PackageContext final {
 
 /** Extracts localized dialogue aliases and safe authored directive elements. */
 [[nodiscard]] bool attach_authored_text(const topology_inventory::Snapshot& topology,
+                                        const topology_enrichment::Snapshot& enrichment,
                                         const squads::Facts& facts,
                                         PackageContext& packageContext,
                                         authored_scene::Snapshot& output);
@@ -61,7 +62,6 @@ struct PackageContext final {
 [[nodiscard]] bool attach_dialogue_cue_counts(const topology_inventory::Snapshot& topology,
                                               const squads::Facts& facts,
                                               PackageContext& packageContext,
-                                              topology_enrichment::Snapshot& enrichment,
-                                              authored_scene::Snapshot& authored);
+                                              topology_enrichment::Snapshot& enrichment);
 
 } // namespace sunrise::client::content::activity::sdk_generation::native_pack_pipeline

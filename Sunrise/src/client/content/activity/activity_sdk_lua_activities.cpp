@@ -147,6 +147,9 @@ namespace {
     for (std::uint32_t index = 0; index < source.taskTargets.size(); ++index) {
         output.tasksBySlot[source.taskTargets[index].taskSlotIndex].push_back(index);
     }
+    for (std::uint32_t index = 0; index < source.dialogueCues.size(); ++index) {
+        output.dialogueCuesBySlot.emplace(source.dialogueCues[index].slotIndex, index);
+    }
     for (std::uint32_t index = 0; index < source.dialogueCueTexts.size(); ++index) {
         output.dialogueBySlot[source.dialogueCueTexts[index].slotIndex].push_back(index);
     }

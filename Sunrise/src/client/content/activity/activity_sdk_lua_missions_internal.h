@@ -16,6 +16,8 @@ struct RenderIndex final {
     std::vector<std::vector<std::uint32_t>> squadsByScenario{};
     std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> scenesBySlot{};
     std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> tasksBySlot{};
+    /** First cue row of each type-53 slot; a slot's cue rows are contiguous and cue-indexed. */
+    std::unordered_map<std::uint32_t, std::uint32_t> dialogueCuesBySlot{};
     std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> dialogueBySlot{};
     std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> directivesBySlot{};
     std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> combatGroupsBySlot{};

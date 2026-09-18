@@ -726,6 +726,7 @@
     <ClCompile Include="src\client\content\activity\activity_sdk_native_pack_pipeline.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_dialogue_group_index.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_actor_ability_inventory.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_dialogue_list.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_pack_composer.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_pack_composer_rows.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_pack_composer_validate.cpp" />
@@ -1898,6 +1899,7 @@
     <ClInclude Include="src\client\content\activity\activity_sdk_native_pack_pipeline.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_dialogue_group_index.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_actor_ability_inventory.h" />
+    <ClInclude Include="src\client\content\activity\activity_sdk_dialogue_list.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_pack_composer.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_pack_composer_internal.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_policy_input_adapter.h" />

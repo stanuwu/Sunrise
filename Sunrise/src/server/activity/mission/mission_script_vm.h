@@ -604,6 +604,21 @@ initial_state_omissions(const Vm& vm,
                                           std::size_t& timerCount,
                                           std::uint64_t& nextTimerSequence,
                                           std::uint64_t& nextIntentKey) noexcept;
+/** Timer names under this prefix belong to the runtime; a script can neither arm nor read them. */
+inline constexpr std::string_view kRuntimeTimerPrefix = "sunrise/";
+/** @return True when a timer name falls under the runtime's reserved prefix. */
+[[nodiscard]] bool runtime_timer_key(const StateKey& key) noexcept;
+/** Names the runtime timer that closes one staged cue of one type-53 slot row. */
+[[nodiscard]] bool
+dialogue_timer_key(std::uint32_t slotRow, std::uint16_t cue, StateKey& output) noexcept;
+/**
+ * Reads back the slot row and cue a runtime dialogue timer was named after.
+ * @return False for any other name, including a script timer.
+ */
+[[nodiscard]] bool
+parse_dialogue_timer_key(const StateKey& key, std::uint32_t& slotRow, std::uint16_t& cue) noexcept;
+/** @return True when committed durable state holds a timer of this exact name. */
+[[nodiscard]] bool timer_armed(const Vm& vm, const StateKey& key) noexcept;
 /** Removes the oldest action after a native adapter accepted it. */
 void consume_intent(Vm& vm) noexcept;
 /** Discards every committed action after a terminal native-delivery failure. */

@@ -64,7 +64,19 @@ struct TaskTarget final {
     std::uint32_t reserved{};
 };
 
-/** One localized candidate found below an authored type-53 cue. */
+/** One type-53 cue read from the list its slot's descriptor references. */
+struct DialogueCue final {
+    Text id{};
+    std::uint32_t slotIndex{};
+    std::uint32_t cueIndex{};
+    std::uint32_t listTag{};
+    std::uint32_t definitionHash{};
+    float authoredWindowSeconds{};
+    std::uint32_t lineCount{};
+    std::uint32_t flags{};
+};
+
+/** One localized take of one line of a type-53 cue. */
 struct DialogueCueText final {
     Text id{};
     Text text{};
@@ -73,6 +85,10 @@ struct DialogueCueText final {
     std::uint32_t definitionHash{};
     std::uint32_t containerTag{};
     std::uint32_t stringHash{};
+    std::uint32_t lineIndex{};
+    std::uint32_t takeIndex{};
+    std::uint32_t audioTag{};
+    std::uint32_t durationMs{};
 };
 
 /** One exact type-68 HUD element and its two authored localized fields. */
@@ -103,8 +119,8 @@ struct Snapshot final {
     std::vector<Resource> resources{};
     std::vector<SquadEdge> squadEdges{};
     std::vector<TaskTarget> taskTargets{};
+    std::vector<DialogueCue> dialogueCues{};
     std::vector<DialogueCueText> dialogueCueTexts{};
-    std::vector<format::DialogueCue> dialogueCues{};
     std::vector<format::CombatObjectiveGroup> combatObjectiveGroups{};
     std::vector<DirectiveElement> directiveElements{};
     bool complete{};
