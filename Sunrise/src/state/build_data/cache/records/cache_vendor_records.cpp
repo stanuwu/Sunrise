@@ -74,28 +74,49 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
     return true;
 }
 
-/** Encodes one vendor sale row. */
+/** Encodes one vendor sale row. Unused cost entries stay zero so the packed row always matches. */
 bool encode(const vendors::SaleRow& value, VendorSaleRowRecord& record) noexcept {
     record = {};
+    if (value.costCount > value.costs.size()) {
+        return false;
+    }
     record.itemIndex = value.itemIndex;
     record.secondaryItemIndex = value.secondaryItemIndex;
     record.categoryIndex = value.categoryIndex;
-    record.costQuantity = value.costQuantity;
-    record.costItemIndex = value.costItemIndex;
+    record.costCount = value.costCount;
+    record.priceState = static_cast<std::uint8_t>(value.priceState);
+    for (std::size_t cost = 0; cost < value.costCount; ++cost) {
+        record.costs[cost].itemIndex = value.costs[cost].itemIndex;
+        record.costs[cost].quantity = value.costs[cost].quantity;
+    }
     return true;
 }
 
 /** Decodes one vendor sale row. */
 bool decode(const VendorSaleRowRecord& record, vendors::SaleRow& value) noexcept {
     value = {};
-    if (record.reserved != decltype(record.reserved){}) {
+    if (record.reserved != decltype(record.reserved){} || record.costCount > record.costs.size()
+        || record.priceState > static_cast<std::uint8_t>(vendors::PriceState::unreadable)) {
         return false;
+    }
+    for (std::size_t cost = 0; cost < record.costs.size(); ++cost) {
+        const VendorSaleCostRecord& stored = record.costs[cost];
+        if (stored.reserved != 0) {
+            return false;
+        }
+        if (cost >= record.costCount) {
+            if (stored.itemIndex != 0 || stored.quantity != 0) {
+                return false;
+            }
+            continue;
+        }
+        value.costs[cost] = {stored.itemIndex, stored.quantity};
     }
     value.itemIndex = record.itemIndex;
     value.secondaryItemIndex = record.secondaryItemIndex;
     value.categoryIndex = record.categoryIndex;
-    value.costQuantity = record.costQuantity;
-    value.costItemIndex = record.costItemIndex;
+    value.costCount = record.costCount;
+    value.priceState = static_cast<vendors::PriceState>(record.priceState);
     return true;
 }
 

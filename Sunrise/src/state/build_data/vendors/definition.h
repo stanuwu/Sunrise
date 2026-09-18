@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace sunrise::state::build_data::vendors {
 
@@ -22,9 +24,9 @@ inline constexpr std::size_t kSaleRowStride = 184;
 inline constexpr std::size_t kInstalledRowStride = 24;
 /** One interaction row is 80 bytes. */
 inline constexpr std::size_t kThirdRowStride = 80;
-/** One price-override row is 48 bytes: the cost item index, then the units it charges. */
+/** One cost entry is 48 bytes. `SaleCost` documents its layout. */
 inline constexpr std::size_t kSaleCostRowStride = 48;
-/** Element class of a sale row's price-override array. */
+/** Element class of a sale row's cost array. */
 inline constexpr std::uint32_t kSaleCostRowClass = 0x80807865U;
 
 /** Wrapper class of the vendor index blob. */
@@ -83,22 +85,65 @@ struct Definition {
     std::uint16_t thirdCount{};
 };
 
-/** A sale row charging nothing carries this instead of a cost item. */
+/** A cost entry naming no item carries this. */
 inline constexpr std::uint16_t kAbsentCostItem = 0xFFFFU;
+/** Cost entries one sale row may declare. The widest row in the installed catalog declares four. */
+inline constexpr std::size_t kSaleCostCapacity = 4;
+/**
+ * Cost entry +40 in every expression-free entry of the installed catalog. Its role is not
+ * decoded, so an entry carrying anything else is conditional rather than priced statically.
+ */
+inline constexpr std::uint32_t kPlainCostWord = 100'000U;
+
+/**
+ * One cost entry of a sale row (row +32 array, `kSaleCostRowClass`, 48 bytes), reduced to its
+ * static item and quantity. The entry also carries two expression arrays, at +8 and +24, and a
+ * word at +40; those decide whether the static quantity is the price at all, and the answer is
+ * kept on the row as its `PriceState`. On Xûr's definition every entry is static: item 128 with
+ * 29, 23, 97 and 9 units, the Legendary Shard prices of his weapons, armour, Fated Engram and
+ * Invitation of the Nine.
+ */
+struct SaleCost {
+    /** Entry +0. Cost item-definition index. */
+    std::uint16_t itemIndex{kAbsentCostItem};
+    /** Entry +4. Units charged. */
+    std::uint32_t quantity{};
+};
+
+/** Whether a sale row's static cost entries are its price. */
+enum class PriceState : std::uint8_t {
+    /** Every entry is expression-free with the plain word: the static quantities are the price. */
+    plain,
+    /**
+     * An entry carries an expression, or a word other than `kPlainCostWord`. Its price depends
+     * on state this build does not evaluate, so the row cannot be bought.
+     */
+    conditional,
+    /** The row's cost array did not read. The row keeps its item and category and cannot be bought.
+     */
+    unreadable,
+};
 
 /** One sale row of one vendor definition. */
 struct SaleRow {
     /** Row +100. The row's vendor category. The catalog bounds it by the category count. */
     std::int32_t categoryIndex{};
-    /** First price-override row's charged units. Zero when the row charges nothing. */
-    std::uint32_t costQuantity{};
     /** Row +70. Main sale item-definition index. */
     std::uint16_t itemIndex{};
     /** Row +176. `kAbsentSecondaryItem` when the row names none. */
     std::uint16_t secondaryItemIndex{};
-    /** First price-override row's item, or `kAbsentCostItem` when the row charges nothing. */
-    std::uint16_t costItemIndex{kAbsentCostItem};
+    /** Every cost entry, in declared order. A plain row charges all of them together. */
+    std::array<SaleCost, kSaleCostCapacity> costs{};
+    /** Entries of `costs` in use. Zero when the row charges nothing. */
+    std::uint8_t costCount{};
+    /** Whether `costs` is the price. Only a plain row is charged. */
+    PriceState priceState{PriceState::plain};
 };
+
+/** @return The static cost entries of one sale row, which are its price only while it is plain. */
+[[nodiscard]] inline std::span<const SaleCost> cost_entries(const SaleRow& row) noexcept {
+    return {row.costs.data(), row.costCount > row.costs.size() ? std::size_t{0} : row.costCount};
+}
 
 /** One category row, reduced to the definition hash a rowless request resolves through. */
 struct InstalledRow {

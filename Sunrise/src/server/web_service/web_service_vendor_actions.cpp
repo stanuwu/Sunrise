@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -298,26 +299,33 @@ constexpr std::array<LegacyQuestStep, 3> kLegacyQuestSteps{{
     // A sale row holds its cost as u32; the mutation charges an i32, so a wider row is refused.
     constexpr auto kQuantityLimit =
         static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)());
+    // An exchange charges exactly one static stack, so a row that is not plainly priced, or
+    // declares any number of entries but one, is not one.
+    const std::span<const vendor_domain::SaleCost> price = vendor_domain::cost_entries(row);
+    const vendor_domain::SaleCost single = price.size() == 1 ? price[0] : vendor_domain::SaleCost{};
     state::build_data::items::Definition cost{};
     // A recycle row owns its purchase from here, refused or not: falling through would grant the
     // placeholder, which is the failure this path exists to avoid.
-    if (row.costItemIndex == vendor_domain::kAbsentCostItem || row.costQuantity == 0
-        || row.costQuantity > kQuantityLimit
-        || !state::build_data::find_item_definition_index(row.costItemIndex, cost)) {
+    if (row.priceState != vendor_domain::PriceState::plain || price.size() != 1
+        || single.quantity == 0 || single.quantity > kQuantityLimit
+        || !state::build_data::find_item_definition_index(single.itemIndex, cost)) {
         core::log::writef(core::log::Channel::server,
                           core::log::Level::warn,
                           "ev=vendor_exchange stage=apply result=fail reason=cost vendor=%d "
-                          "hash=0x%08X row=%d cost_item=%u quantity=%u",
+                          "hash=0x%08X row=%d price_state=%u entries=%zu cost_item=%u "
+                          "quantity=%u",
                           vendorIndex,
                           entry.definitionHash,
                           rowIndex,
-                          static_cast<unsigned>(row.costItemIndex),
-                          static_cast<unsigned>(row.costQuantity));
+                          static_cast<unsigned>(row.priceState),
+                          price.size(),
+                          static_cast<unsigned>(single.itemIndex),
+                          static_cast<unsigned>(single.quantity));
         return true;
     }
     const bool applied = state::prepare_vendor_exchange(
         cost.definitionHash,
-        static_cast<std::int32_t>(row.costQuantity),
+        static_cast<std::int32_t>(single.quantity),
         std::span<const state::ProfileExchangePayout>{payouts.data(), payoutCount},
         mutation);
     core::log::writef(core::log::Channel::server,
@@ -329,7 +337,7 @@ constexpr std::array<LegacyQuestStep, 3> kLegacyQuestSteps{{
                       entry.definitionHash,
                       rowIndex,
                       cost.definitionHash,
-                      static_cast<unsigned>(row.costQuantity),
+                      static_cast<unsigned>(single.quantity),
                       payoutCount);
     return true;
 }
@@ -340,13 +348,17 @@ constexpr std::array<LegacyQuestStep, 3> kLegacyQuestSteps{{
  * @param message Request being answered, for the log line.
  * @param collectibleIndex Collectible that owns the item.
  * @param itemDefinitionIndex Item to grant.
+ * @param price A vendor row's cost entries, spent in place of the collectible's material set;
+ *        absent for a Collections pull, which pays with the collectible's materials.
  * @param outcome Receives the prepared mutation on success.
  * @return True when a mutation is prepared. A pursuit already held prepares none.
  */
-bool grant_item_definition(const middleware::web_service::Message& message,
-                           std::uint16_t collectibleIndex,
-                           std::uint16_t itemDefinitionIndex,
-                           Outcome& outcome) noexcept {
+bool grant_item_definition(
+    const middleware::web_service::Message& message,
+    std::uint16_t collectibleIndex,
+    std::uint16_t itemDefinitionIndex,
+    std::optional<std::span<const state::build_data::vendors::SaleCost>> price,
+    Outcome& outcome) noexcept {
     state::build_data::items::Definition definition{};
     if (!state::build_data::find_item_definition_index(itemDefinitionIndex, definition)) {
         report_item_acquisition(
@@ -404,7 +416,7 @@ bool grant_item_definition(const middleware::web_service::Message& message,
             return false;
         }
         if (!state::prepare_profile_item_acquisition(
-                collectibleIndex, definition.definitionHash, *mutation)) {
+                collectibleIndex, definition.definitionHash, price, *mutation)) {
             clear_mutation(outcome);
             report_item_acquisition(message,
                                     "profile_state",
@@ -436,7 +448,8 @@ bool grant_item_definition(const middleware::web_service::Message& message,
                                 0);
         return false;
     }
-    if (!state::prepare_item_acquisition(collectibleIndex, definition.definitionHash, *mutation)) {
+    if (!state::prepare_item_acquisition(
+            collectibleIndex, definition.definitionHash, price, *mutation)) {
         clear_mutation(outcome);
         report_item_acquisition(
             message, "state", collectibleIndex, itemDefinitionIndex, definition.definitionHash, 0);
@@ -478,24 +491,24 @@ void acquire_item(const middleware::web_service::Message& message, Outcome& outc
             message, "collectible_definition", collectibleIndex, kUnavailableDefinitionIndex, 0, 0);
         return;
     }
-    (void)grant_item_definition(message, collectibleIndex, itemDefinitionIndex, outcome);
+    (void)grant_item_definition(
+        message, collectibleIndex, itemDefinitionIndex, std::nullopt, outcome);
 }
 
 /**
  * Resolves one vendor row to the item it sells. Shared by 901 and 904, which name a row alike.
  * @param vendorIndex Vendor table row.
  * @param rowIndex Sale row within that vendor.
- * @param itemDefinitionIndex Receives the item the row sells.
- * @param categoryIndex Receives the row's category, which is its sale row plus 100.
+ * @param row Receives the sale row: its item, category and price.
  * @param reason Receives the step that failed, when one does.
  * @return True when the row resolved.
  */
 [[nodiscard]] bool resolve_vendor_row(std::int32_t vendorIndex,
                                       std::int32_t rowIndex,
-                                      std::uint16_t& itemDefinitionIndex,
-                                      std::int32_t& categoryIndex,
+                                      state::build_data::vendors::SaleRow& row,
                                       const char*& reason) noexcept {
     namespace vendor_domain = state::build_data::vendors;
+    row = {};
     if (vendorIndex < 0 || rowIndex < 0) {
         reason = "negative_index";
         return false;
@@ -506,13 +519,10 @@ void acquire_item(const middleware::web_service::Message& message, Outcome& outc
         reason = "vendor";
         return false;
     }
-    vendor_domain::SaleRow row{};
     if (!vendor_domain::sale_row(definition, static_cast<std::size_t>(rowIndex), row)) {
         reason = "sale_row";
         return false;
     }
-    itemDefinitionIndex = row.itemIndex;
-    categoryIndex = row.categoryIndex;
     return true;
 }
 
@@ -634,17 +644,33 @@ constexpr std::uint32_t kAbsentNameHash = 0x811C9DC5U;
  * @param opcode Opcode to report under.
  * @param vendorIndex Vendor the request names.
  * @param rowIndex Sale row the request names.
- * @param categoryIndex Category of that row, from sale row +100.
- * @param itemDefinitionIndex Item the row names.
+ * @param row The resolved sale row. Its price is spent by a grant and by a bounty roll, and an
+ *        exchange spends it as the stack it recycles.
  * @param outcome Receives whatever mutation the row prepared.
  */
 void settle_vendor_row(const middleware::web_service::Message& message,
                        std::uint16_t opcode,
                        std::int32_t vendorIndex,
                        std::int32_t rowIndex,
-                       std::int32_t categoryIndex,
-                       std::uint16_t itemDefinitionIndex,
+                       const state::build_data::vendors::SaleRow& row,
                        Outcome& outcome) noexcept {
+    namespace vendor_domain = state::build_data::vendors;
+    const std::int32_t categoryIndex = row.categoryIndex;
+    const std::uint16_t itemDefinitionIndex = row.itemIndex;
+    // A row is sold only while its static entries are its price. A conditional row's price
+    // depends on state this build does not evaluate, and an unreadable row's is unknown.
+    if (row.priceState != vendor_domain::PriceState::plain) {
+        report_purchase(opcode,
+                        "fail",
+                        row.priceState == vendor_domain::PriceState::conditional
+                            ? "conditional_price"
+                            : "unreadable_price",
+                        vendorIndex,
+                        rowIndex,
+                        itemDefinitionIndex);
+        return;
+    }
+    const std::span<const vendor_domain::SaleCost> price = vendor_domain::cost_entries(row);
     std::uint16_t rolledBounty = kUnavailableDefinitionIndex;
     if (roll_vendor_bounty(vendorIndex, categoryIndex, rolledBounty)) {
         report_purchase(opcode,
@@ -657,7 +683,9 @@ void settle_vendor_row(const middleware::web_service::Message& message,
         if (rolledBounty != kUnavailableDefinitionIndex) {
             std::uint16_t rolledCollectible = state::build_data::collectibles::kNoCollectibleIndex;
             (void)find_collectible_for_item(rolledBounty, rolledCollectible);
-            (void)grant_item_definition(message, rolledCollectible, rolledBounty, outcome);
+            // The tile prices whatever it rolls: only its placeholder item is withheld, never
+            // its price. A tile the character cannot pay for grants nothing.
+            (void)grant_item_definition(message, rolledCollectible, rolledBounty, price, outcome);
         }
         return;
     }
@@ -696,7 +724,7 @@ void settle_vendor_row(const middleware::web_service::Message& message,
                     vendorIndex,
                     rowIndex,
                     granted);
-    (void)grant_item_definition(message, collectibleIndex, granted, outcome);
+    (void)grant_item_definition(message, collectibleIndex, granted, price, outcome);
 }
 
 /**
@@ -722,17 +750,17 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
         return;
     }
     const std::int32_t row = request.saleIndex;
-    std::uint16_t itemDefinitionIndex = 0;
     const char* reason = "unknown";
     // A row of -1 says the tile is not a sale row at all, so the installed array answers it.
     // Reading the slot as a sale row here would grant whatever sits at that row.
     const bool rowless = row < 0;
-    // A rowless 904 is an interaction reply, so its slot names the interaction, not a sale row.
-    std::int32_t questCategoryIndex = -1;
+    // A rowless 904 is an interaction reply, so its slot names the interaction, not a sale row:
+    // it has no category and no price.
+    state::build_data::vendors::SaleRow sale{};
+    sale.categoryIndex = state::build_data::vendors::kAbsentCategoryIndex;
     const bool located =
-        rowless ? resolve_rowless_quest(request.vendorIndex, request.slotIndex, itemDefinitionIndex)
-                : resolve_vendor_row(
-                      request.vendorIndex, row, itemDefinitionIndex, questCategoryIndex, reason);
+        rowless ? resolve_rowless_quest(request.vendorIndex, request.slotIndex, sale.itemIndex)
+                : resolve_vendor_row(request.vendorIndex, row, sale, reason);
     if (!located) {
         report_purchase(quest::kOpcode,
                         "fail",
@@ -746,19 +774,13 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
         }
         return;
     }
-    settle_vendor_row(message,
-                      quest::kOpcode,
-                      request.vendorIndex,
-                      row,
-                      questCategoryIndex,
-                      itemDefinitionIndex,
-                      outcome);
+    settle_vendor_row(message, quest::kOpcode, request.vendorIndex, row, sale, outcome);
 }
 
 /**
  * Prepares one opcode-901 vendor purchase, for any Tower vendor.
- * The sale row names an item-definition index, so this hands over to the Collections grant.
- * Only a recycle row charges: an ordinary row's cost is read but not yet spent.
+ * The sale row names an item-definition index, so this hands over to the Collections grant, and
+ * the row's own cost is charged with it: a purchase that cannot pay grants nothing.
  */
 void purchase_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     namespace purchase = middleware::web_service::messages::opcode901;
@@ -767,11 +789,9 @@ void purchase_item(const middleware::web_service::Message& message, Outcome& out
         report_purchase(purchase::kOpcode, "fail", "payload", -1, -1, kUnavailableDefinitionIndex);
         return;
     }
-    std::uint16_t itemDefinitionIndex = 0;
     const char* reason = "unknown";
-    std::int32_t categoryIndex = -1;
-    if (!resolve_vendor_row(
-            request.vendorIndex, request.saleIndex, itemDefinitionIndex, categoryIndex, reason)) {
+    state::build_data::vendors::SaleRow sale{};
+    if (!resolve_vendor_row(request.vendorIndex, request.saleIndex, sale, reason)) {
         report_purchase(purchase::kOpcode,
                         "fail",
                         reason,
@@ -780,13 +800,8 @@ void purchase_item(const middleware::web_service::Message& message, Outcome& out
                         kUnavailableDefinitionIndex);
         return;
     }
-    settle_vendor_row(message,
-                      purchase::kOpcode,
-                      request.vendorIndex,
-                      request.saleIndex,
-                      categoryIndex,
-                      itemDefinitionIndex,
-                      outcome);
+    settle_vendor_row(
+        message, purchase::kOpcode, request.vendorIndex, request.saleIndex, sale, outcome);
 }
 
 } // namespace sunrise::server::web_service

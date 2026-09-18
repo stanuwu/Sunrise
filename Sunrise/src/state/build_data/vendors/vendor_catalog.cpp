@@ -84,7 +84,8 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
  * Checks the sale rows one definition owns.
  * @param definition Owning definition.
  * @param saleRows Complete flat sale bank.
- * @return True when every row names a category of this definition, or none at all.
+ * @return True when every row names a category of this definition, or none at all, and its cost
+ *         entries fit their state: an unreadable row has none.
  */
 [[nodiscard]] bool canonical_sale_rows(const Definition& definition,
                                        std::span<const SaleRow> saleRows) noexcept {
@@ -94,7 +95,11 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
         const bool selects =
             value.categoryIndex == kAbsentCategoryIndex
             || (value.categoryIndex >= 0 && value.categoryIndex < definition.installedCount);
-        if (!selects) {
+        const bool priced =
+            value.costCount <= value.costs.size()
+            && (value.priceState == PriceState::plain || value.priceState == PriceState::conditional
+                || (value.priceState == PriceState::unreadable && value.costCount == 0));
+        if (!selects || !priced) {
             return false;
         }
     }

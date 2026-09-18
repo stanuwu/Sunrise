@@ -31,7 +31,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 65;
+inline constexpr std::uint32_t kCacheFormatVersion = 66;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -546,15 +546,25 @@ struct VendorDefinitionRecord {
     std::uint16_t thirdCount{};
 };
 
+/** Disk form of one cost entry of a vendor sale row. */
+struct VendorSaleCostRecord {
+    std::uint32_t quantity{};
+    std::uint16_t itemIndex{};
+    /** Must be zero, so the packed cost entry always matches. */
+    std::uint16_t reserved{};
+};
+
 /** Disk form of one vendor sale row. */
 struct VendorSaleRowRecord {
     std::int32_t categoryIndex{};
-    std::uint32_t costQuantity{};
+    std::array<VendorSaleCostRecord, vendors::kSaleCostCapacity> costs{};
     std::uint16_t itemIndex{};
     std::uint16_t secondaryItemIndex{};
-    std::uint16_t costItemIndex{};
+    std::uint8_t costCount{};
+    /** `vendors::PriceState`, stored as its underlying value. */
+    std::uint8_t priceState{};
     /** Must be zero, so the packed sale row always matches. */
-    std::uint16_t reserved{};
+    std::array<std::uint8_t, 2> reserved{};
 };
 
 /** Disk form of one vendor category row. */
@@ -588,7 +598,10 @@ static_assert(sizeof(SpawnPointRecord)
 static_assert(sizeof(VendorIndexRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorDefinitionRecord)
               == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));
-static_assert(sizeof(VendorSaleRowRecord) == 4 * sizeof(std::uint16_t) + 2 * sizeof(std::uint32_t));
+static_assert(sizeof(VendorSaleCostRecord) == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
+static_assert(sizeof(VendorSaleRowRecord)
+              == sizeof(std::int32_t) + vendors::kSaleCostCapacity * sizeof(VendorSaleCostRecord)
+                     + 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorInstalledRowRecord) == sizeof(std::uint32_t));
 static_assert(sizeof(HashNameRecord)
               == hash_names::kNameLength + sizeof(std::uint32_t) + 4 * sizeof(std::uint8_t));

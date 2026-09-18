@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 
+#include "../../core/logging/log.h"
 #include "../build_data/runtime.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
@@ -292,6 +293,70 @@ apply_collection_materials(const AccountState& before,
             .first(static_cast<std::size_t>(collectible.materialRequirementCount)),
         after,
         changed);
+}
+
+/**
+ * Writes what a refused price asked for, entry by entry, against what the profile holds.
+ * A held count of -1 names an entry whose item is not installed, which the engine cannot debit.
+ */
+static void report_price_refusal(const AccountState& account,
+                                 std::span<const build_data::vendors::SaleCost> price) noexcept {
+    for (const build_data::vendors::SaleCost& entry : price) {
+        build_data::items::Definition item{};
+        std::int64_t held = -1;
+        if (build_data::find_item_definition_index(entry.itemIndex, item)) {
+            held = 0;
+            for (std::size_t index = 0; index < account.profileItemCount; ++index) {
+                if (account.profileItems[index].definitionHash == item.definitionHash) {
+                    held += account.profileItems[index].quantity;
+                }
+            }
+        }
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=vendor stage=price result=fail item=%u quantity=%u held=%lld",
+                          static_cast<unsigned>(entry.itemIndex),
+                          entry.quantity,
+                          static_cast<long long>(held));
+    }
+}
+
+/**
+ * Spends one vendor sale row's price through the engine that spends Collections materials, so a
+ * cost item is validated and debited by the same rules: a stackable profile item, every stack
+ * summed, refused when short, then debited and compacted.
+ * @param price The row's cost entries; empty charges nothing.
+ * @param after Receives the charged account, or `before` again when refused.
+ * @return True when every entry was paid, or the price was empty.
+ */
+[[nodiscard]] bool apply_sale_price(const AccountState& before,
+                                    std::span<const build_data::vendors::SaleCost> price,
+                                    AccountState& after,
+                                    bool& changed) noexcept {
+    namespace materials = build_data::material_requirements;
+    after = before;
+    changed = false;
+    if (price.size() > build_data::vendors::kSaleCostCapacity) {
+        return false;
+    }
+    // Every entry is consumed on purchase; nothing in a sale row is a held-only requirement.
+    std::array<materials::Requirement, build_data::vendors::kSaleCostCapacity> requirements{};
+    for (std::size_t index = 0; index < price.size(); ++index) {
+        requirements[index] = {.quantity = price[index].quantity,
+                               .itemDefinitionIndex = price[index].itemIndex,
+                               .deleteOnAction = true};
+    }
+    if (apply_material_requirements(
+            before,
+            std::span<const materials::Requirement>{requirements.data(), price.size()},
+            after,
+            changed)) {
+        return true;
+    }
+    after = before;
+    changed = false;
+    report_price_refusal(before, price);
+    return false;
 }
 
 /** @return True when the account holds the requested socket-action source. */
