@@ -1,7 +1,8 @@
 /**
- * Infinite ammo. Three setters hold a weapon's supply, and each is asked for a full one rather than
- * written to, so a stored count's encoding stays out of this. Reserves and magazine do not clamp,
- * so their number is the number shown. A sword's setter does clamp.
+ * Infinite ammo. The reserve and magazine setters receive replacement counts rather than being
+ * written to, so a stored count's encoding stays out of this. Reserves do not clamp, so their
+ * number is the number shown. A sword's setter does clamp; Infinite Magazine uses a fixed count
+ * of 50.
  */
 
 #include "infinite_ammo.h"
@@ -51,6 +52,8 @@ constexpr auto kSword = patterns::signature<patterns::signature_length(kSwordTex
 constexpr std::int32_t kRequestedCount = 500;
 /** Supply asked for on a sword. Its setter clamps this down to the sword's own maximum. */
 constexpr float kRequestedSupply = 9999.0F;
+/** Magazine count used by Infinite Magazine. */
+constexpr std::int32_t kRequestedMagazineCount = 50;
 
 using Setter = std::int64_t(__fastcall*)(void*, std::int32_t);
 using SwordSetter = void(__fastcall*)(void*, float);
@@ -83,8 +86,8 @@ std::int64_t __fastcall set_reserves(void* weapon, std::int32_t amount) noexcept
 }
 
 /**
- * Passes the magazine through and tops the reserve up here. The reserve setter only runs on a
- * reload, so a weapon that starts empty never reaches it.
+ * Uses the fixed magazine count when Infinite Magazine is enabled. The reserve
+ * setter is still called exactly as before when Infinite Reserves is enabled.
  * @param weapon Weapon instance.
  * @param amount Amount the caller wanted to store.
  * @return Whatever the original returns.
@@ -94,9 +97,12 @@ std::int64_t __fastcall set_magazine(void* weapon, std::int32_t amount) noexcept
     if (next == nullptr) {
         return 0;
     }
-    const std::int64_t result = next(weapon, amount);
+    const client::player::Settings settings = client::player::get();
+    const std::int32_t requestedAmount =
+        settings.infiniteMagazineEnabled ? kRequestedMagazineCount : amount;
+    const std::int64_t result = next(weapon, requestedAmount);
     const Setter reserves = reinterpret_cast<Setter>(g_handles[kReservesSlot].original);
-    if (enabled() && reserves != nullptr && weapon != nullptr) {
+    if (settings.infiniteAmmoEnabled && reserves != nullptr && weapon != nullptr) {
         (void)reserves(weapon, kRequestedCount);
     }
     return result;
@@ -145,7 +151,7 @@ void __fastcall set_sword_supply(void* weapon, float supply) noexcept {
 
 } // namespace
 
-/** Attaches to all three setters. The magazine one only tops the reserve up. */
+/** Attaches to all three setters. The magazine one optionally uses its fixed count. */
 bool install() noexcept {
     if (g_handles[kReservesSlot].original != nullptr) {
         return true;

@@ -5,6 +5,7 @@ namespace sunrise::client::player {
 /** Runtime player configuration. This module owns it; Core settings do not carry it. */
 struct Settings {
     bool infiniteAmmoEnabled{false};
+    bool infiniteMagazineEnabled{false};
     /** Holds every activity inactivity timeout at its longest. */
     bool antiAfkEnabled{false};
 };
