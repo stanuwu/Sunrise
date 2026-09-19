@@ -830,6 +830,8 @@
     <ClCompile Include="src\server\activity\mission\mission_script_message_catalog.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_edges.cpp" />
+    <ClCompile Include="src\server\activity\mission\mission_script_runtime_occupancy.cpp" />
+    <ClCompile Include="src\server\activity\mission\mission_script_trigger_volume.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_incidents.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_roster.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_combatant_damage.cpp" />
@@ -1146,6 +1148,7 @@
     <ClCompile Include="src\server\gameplay\peer\peer_packet_fragments.cpp" />
     <ClCompile Include="src\middleware\gameplay\external\common_state.cpp" />
     <ClCompile Include="src\middleware\gameplay\external\control_state_codec.cpp" />
+    <ClCompile Include="src\middleware\gameplay\external\player_snapshot_codec.cpp" />
     <ClCompile Include="src\middleware\gameplay\external\external_entity_codec.cpp" />
     <ClCompile Include="src\middleware\gameplay\external\sobject_payload_codec.cpp" />
     <ClCompile Include="src\middleware\gameplay\external\external_empty_profile.cpp" />
@@ -1564,6 +1567,7 @@
     <ClInclude Include="src\server\activity\mission\mission_script_catalog_sdk_fields.inc" />
     <ClInclude Include="src\server\activity\mission\mission_script_cinematic.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_player_trigger.h" />
+    <ClInclude Include="src\server\activity\mission\mission_script_trigger_volume.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_lua_bap_internal.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_lua_bounded_internal.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_lua_catalog_internal.h" />
@@ -1993,6 +1997,7 @@
     <ClInclude Include="src\server\gameplay\peer\peer_packet_fragments.h" />
     <ClInclude Include="src\middleware\gameplay\external\common_state.h" />
     <ClInclude Include="src\middleware\gameplay\external\control_state_codec.h" />
+    <ClInclude Include="src\middleware\gameplay\external\player_snapshot_codec.h" />
     <ClInclude Include="src\middleware\gameplay\external\external_entity_codec.h" />
     <ClInclude Include="src\middleware\gameplay\external\sobject_payload_codec.h" />
     <ClInclude Include="src\middleware\gameplay\external\external_empty_profile.h" />
