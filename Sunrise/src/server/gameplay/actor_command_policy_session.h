@@ -173,6 +173,20 @@ same_token(const middleware::gameplay::external::EntityToken& left,
 /** @return The row for one group session, allocating it when free. The caller holds the lock. */
 [[nodiscard]] SessionRow* find_or_create_session(std::uint64_t groupSessionId) noexcept;
 
+/** @return The authored source, raised to its squad when the world view maps a combatant to one. */
+[[nodiscard]] inline state::gameplay::entity_identity::ActorSourceReference
+authored_squad_source(const SessionRow& session,
+                      state::gameplay::entity_identity::ActorSourceReference source) noexcept {
+    if (const auto* world = session.worldView.snapshot(); world != nullptr) {
+        state::gameplay::entity_identity::ActorSourceReference squadSource{};
+        if (middleware::gameplay::external::resolve_combatant_squad_source(
+                *world, source, squadSource)) {
+            return squadSource;
+        }
+    }
+    return source;
+}
+
 /**
  * Known actor-source state overrides legacy network-squad membership, including a clear.
  * @param session Row holding the actor and exact selected squad references.
@@ -192,14 +206,7 @@ selected_entity_squad(const SessionRow& session,
         return kSelectedSquadCapacity;
     }
     selectedCount = (std::min)(selectedCount, session.selectedSquads.size());
-    auto source = actor.authoredSource;
-    if (const auto* world = session.worldView.snapshot(); world != nullptr) {
-        state::gameplay::entity_identity::ActorSourceReference squadSource{};
-        if (middleware::gameplay::external::resolve_combatant_squad_source(
-                *world, source, squadSource)) {
-            source = squadSource;
-        }
-    }
+    const auto source = authored_squad_source(session, actor.authoredSource);
     std::size_t found = kSelectedSquadCapacity;
     for (std::size_t index = 0; index < selectedCount; ++index) {
         const auto& selected = session.selectedSquads[index];

@@ -239,6 +239,183 @@ struct ConfigOccurrenceCountKeyHash final {
                       value.row.spawnRuleConfigTag);
 }
 
+// Squads whose spawner names no rule: emitted without a rule or anchors, placeable only with a
+// selected type-66 rule slot. Shares the linker's private identity and member helpers.
+
+// Match the full descriptor tuple; no schema guesses based on slot type alone.
+[[nodiscard]] bool unbound_descriptor_exact(
+    const topology::Snapshot& topology,
+    const std::unordered_map<std::uint32_t, const GraphSlotSchemaProvenance*>& schemas,
+    const GraphDescriptor& d) {
+    if (!d.complete || d.slotIndex >= topology.slots.size()
+        || d.objectIndex >= topology.objects.size()) {
+        return false;
+    }
+    const auto& slot = topology.slots[d.slotIndex];
+    if (slot.objectIndex != d.objectIndex || slot.slotType != format::kSquadSlotType) {
+        return false;
+    }
+    const auto found = schemas.find(d.slotIndex);
+    const auto* match = found == schemas.end() ? nullptr : found->second;
+    return match != nullptr && match->exact && match->componentClass == d.componentClass
+           && match->senseSchema == d.senseSchema && match->authSchema == d.authSchema;
+}
+
+// A repeated authored config path is ambiguity, even when all paths have equal coordinates.
+[[nodiscard]] bool unbound_occurrence_exact(const topology::Snapshot& topology,
+                                            const std::vector<const GraphConfigContext*>& contexts,
+                                            const GraphDescriptor& d,
+                                            std::uint32_t occurrenceIndex) {
+    if (occurrenceIndex >= topology.occurrences.size()) {
+        return false;
+    }
+    const auto& o = topology.occurrences[occurrenceIndex];
+    if (o.objectIndex != d.objectIndex) {
+        return false;
+    }
+    std::uint32_t count = 0;
+    bool exact = false;
+    for (const auto* cp : contexts) {
+        const auto& c = *cp;
+        if (c.configTag != d.configTag || c.occurrenceIndex != occurrenceIndex) {
+            continue;
+        }
+        ++count;
+        exact = c.complete && c.objectIndex == d.objectIndex && c.scenarioIndex == o.scenarioIndex;
+    }
+    return count == 1 && exact;
+}
+
+// Append independently owned sources. Never construct or modify a GraphEdge.
+[[nodiscard]] bool project_unbound_squads(const topology::Snapshot& topology,
+                                          const Facts& facts,
+                                          const GraphSnapshot& graph,
+                                          SquadIdHasher& hasher,
+                                          ActorResolver actorResolver,
+                                          void* actorContext,
+                                          std::vector<PendingSquad>& pending) {
+    std::unordered_map<std::uint32_t, const GraphSlotSchemaProvenance*> schemas{};
+    for (const auto& schema : graph.slotSchemas) {
+        if (!schemas.emplace(schema.slotIndex, &schema).second) {
+            return false;
+        }
+    }
+    std::unordered_map<std::uint32_t, std::size_t> spawnersByConfig{};
+    std::unordered_map<std::uint32_t, std::vector<const GraphConfigContext*>> contextsByConfig{};
+    for (std::size_t i = 0; i < graph.spawners.size(); ++i) {
+        if (!spawnersByConfig.emplace(graph.spawners[i].configTag, i).second) {
+            return false;
+        }
+    }
+    for (const auto& c : graph.configContexts) {
+        contextsByConfig[c.configTag].push_back(&c);
+    }
+    for (const auto& d : graph.descriptors) {
+        const auto foundSource = spawnersByConfig.find(d.configTag);
+        if (foundSource == spawnersByConfig.end()) {
+            continue;
+        }
+        const auto i = foundSource->second;
+        if (i >= facts.spawners.size()) {
+            return false;
+        }
+        const GraphSpawner& spawner = graph.spawners[i];
+        const SpawnerFact& source = facts.spawners[i];
+        if (!spawner.requiresSelectedRule) {
+            continue;
+        }
+        if (spawner.configTag != source.configTag) {
+            return false;
+        }
+        if (d.componentClass != format::kSquadComponentClass
+            || d.senseSchema != format::kSquadSenseSchema
+            || d.authSchema != format::kSquadAuthSchema
+            || !unbound_descriptor_exact(topology, schemas, d)) {
+            continue;
+        }
+        const auto foundContexts = contextsByConfig.find(d.configTag);
+        if (foundContexts == contextsByConfig.end()) {
+            continue;
+        }
+        std::vector<std::uint32_t> occurrenceIndexes{};
+        for (const auto* c : foundContexts->second) {
+            occurrenceIndexes.push_back(c->occurrenceIndex);
+        }
+        std::sort(occurrenceIndexes.begin(), occurrenceIndexes.end());
+        occurrenceIndexes.erase(std::unique(occurrenceIndexes.begin(), occurrenceIndexes.end()),
+                                occurrenceIndexes.end());
+        for (const auto oi : occurrenceIndexes) {
+            if (!unbound_occurrence_exact(topology, foundContexts->second, d, oi)) {
+                continue;
+            }
+            const auto& occurrence = topology.occurrences[oi];
+            std::string_view occurrenceId{};
+            if (!text_view(occurrence.id, occurrenceId)) {
+                return false;
+            }
+            const std::array<std::string_view, 2> parts{d.id, occurrenceId};
+            std::string digest{};
+            if (!domain_hash(hasher, "sunrise-runtime-unbound-squad-v1", parts, digest)) {
+                return false;
+            }
+            PendingSquad squad{};
+            squad.row.id = "squad/" + digest;
+            squad.row.scenarioIndex = occurrence.scenarioIndex;
+            squad.row.objectIndex = d.objectIndex;
+            squad.row.slotIndex = d.slotIndex;
+            squad.row.spawnerConfigTag = d.configTag;
+            squad.row.spawnRuleConfigTag = format::kAbsentIndex;
+            squad.row.occurrenceIndex = oi;
+            squad.row.flags = format::kSquadRequiresSelectedRule
+                              | format::kSquadSourceDescriptorExact
+                              | format::kSquadScenarioOccurrenceExact;
+            bool sourceActorLinksComplete = true;
+            for (std::uint32_t mi = 0; mi < source.members.size(); ++mi) {
+                SquadMember member{};
+                if (!detail::build_member(source.members[mi],
+                                          digest,
+                                          mi,
+                                          actorResolver,
+                                          actorContext,
+                                          member,
+                                          sourceActorLinksComplete)) {
+                    return false;
+                }
+                squad.members.push_back(std::move(member));
+            }
+            // An unresolved unbound source must not disable the authored bound squads.
+            if (!sourceActorLinksComplete) {
+                continue;
+            }
+            const bool countValid = squad.members.size() >= format::kSquadMinimumMemberCount
+                                    && squad.members.size() <= format::kSquadMaximumMemberCount;
+            if (countValid) {
+                squad.row.flags |= format::kSquadMemberCountValid;
+            }
+            if (countValid
+                && std::all_of(
+                    squad.members.begin(), squad.members.end(), [](const SquadMember& m) {
+                        return (m.flags & format::kSquadMemberInvariantReadyMask)
+                                   == format::kSquadMemberInvariantReadyMask
+                               && m.defaultCount > 0;
+                    })) {
+                squad.row.flags |= format::kSquadCandidateCountsInvariantComplete;
+            }
+            std::vector<std::uint32_t> keys{};
+            for (const auto& m : squad.members) {
+                keys.push_back(m.memberKey);
+            }
+            std::sort(keys.begin(), keys.end());
+            if (std::adjacent_find(keys.begin(), keys.end()) != keys.end()) {
+                return false;
+            }
+            // Empty anchors and an absent rule are intentional; kSquadRunnableMask cannot pass.
+            pending.push_back(std::move(squad));
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 /** Normalizes the authored graph once, then derives the narrower runnable squad projection. */
@@ -562,6 +739,11 @@ bool link(const topology::Snapshot& topology,
                     pending.push_back(std::move(squad));
                 }
             }
+        }
+
+        if (!project_unbound_squads(
+                topology, facts, graph, squadIdHasher, actorResolver, actorContext, pending)) {
+            return false;
         }
 
         std::sort(pending.begin(),

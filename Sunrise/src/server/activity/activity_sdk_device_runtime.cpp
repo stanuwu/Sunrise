@@ -13,6 +13,7 @@
 #include "../../middleware/bap/activity_message/music_section_auth.h"
 #include "../../middleware/bap/activity_message/scene_events_auth.h"
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
+#include "../../middleware/bap/activity_message/squad_attachment_auth.h"
 #include "../../middleware/bap/activity_message/squad_objective_auth.h"
 #include "../../middleware/content/packages/tables/region_reader.h"
 #include "../../state/activity/runtime.h"
@@ -22,6 +23,7 @@
 #include "activity_sdk_actor_sequences.h"
 #include "activity_sdk_device_internal.h"
 #include "host_runtime.h"
+#include "squad_attachment_ownership_validation.h"
 
 namespace sunrise::server::activity::activity_sdk_devices {
 namespace {
@@ -180,6 +182,80 @@ Status apply_auth_reserved(const sdk::BoundView& view,
         return Status::queued;
     }
     return Status::refused;
+}
+
+/** Selects a same-owner squad through the audited build-86657 attachment Auth schema. */
+Status
+set_squad_attachment_reserved(const sdk::BoundView& view,
+                              std::uint32_t slotRow,
+                              std::uint32_t sourceRow,
+                              std::uint64_t sourceSpawnGeneration,
+                              bool active,
+                              const host::ScriptableOutputReservation& reservation) noexcept {
+    PreparedDevice target{}, source{};
+    Status status = prepare_slot(view, slotRow, target);
+    if (status != Status::ready) {
+        return status;
+    }
+    status = prepare_slot(view, sourceRow, source);
+    if (status != Status::ready) {
+        return status;
+    }
+    if (target.activityClientGeneration != source.activityClientGeneration
+        || target.effectiveRegion != source.effectiveRegion
+        || target.scenarioRow != source.scenarioRow || target.stateRow != source.stateRow) {
+        return Status::staleActivityClient;
+    }
+    host::SquadAttachmentOwnership owned{};
+    const auto digest = view.catalog->sdk_build_sha256();
+    if (digest.size() != owned.sdkBuildSha256.size()) {
+        return Status::wrongSdkBuild;
+    }
+    std::copy(digest.begin(), digest.end(), owned.sdkBuildSha256.begin());
+    const auto payload = view.catalog->payload_sha256();
+    if (!state::activity_sdk::attachment_compatibility::supports(payload)) {
+        return Status::unsupportedAttachmentPayload;
+    }
+    std::copy(payload.begin(), payload.end(), owned.sdkPayloadSha256.begin());
+    owned.source = source.target;
+    owned.sourceSpawnGeneration = sourceSpawnGeneration;
+    owned.active = active;
+    if (!host::attachments::same_owner_pair(target.target, owned)) {
+        return Status::refused;
+    }
+    std::vector<host::PendingScriptableOverride> estate;
+    if (!host::scriptable_auth_estate(view.binding, target.activityClientGeneration, estate)) {
+        return Status::staleBinding;
+    }
+    for (const auto& previous : estate) {
+        if (host::attachments::same_ref(previous.target, target.target)) {
+            owned.previousRevision = previous.revision;
+        }
+    }
+    const auth::Type26SquadSelection selection =
+        active ? auth::Type26SquadSelection{source.target.registryKey,
+                                            static_cast<std::int16_t>(source.target.slotIndex),
+                                            true}
+               : auth::Type26SquadSelection{};
+    std::array<std::byte, auth::kType26MaximumByteCount> body{};
+    std::size_t written = 0, bits = 0;
+    if (!auth::encode_type26_squad_selection(selection, body, written, bits)
+        || !host::attachments::admits(
+            target.target, owned, estate, std::span(body).first(written), bits)) {
+        return Status::refused;
+    }
+    const bool queued = server::bap::request_activity_sdk_auth_override(
+        view.binding,
+        target.target,
+        target.target.stateLocalRoster ? &target.generatedRosterGroup : nullptr,
+        std::span(body).first(written),
+        static_cast<std::uint16_t>(bits),
+        target.effectiveRegion,
+        target.activityClientGeneration,
+        &reservation,
+        host::ScriptableOverrideKind::sdkAuth,
+        owned);
+    return queued ? Status::queued : Status::refused;
 }
 
 /** Sets the active set of one device's objects against a reserved Host output revision. */
@@ -597,6 +673,8 @@ const char* status_name(Status status) noexcept {
         return "refused";
     case Status::refusedSlotType:
         return "refused_slot_type";
+    case Status::unsupportedAttachmentPayload:
+        return "unsupported_attachment_payload";
     }
     return "unknown";
 }

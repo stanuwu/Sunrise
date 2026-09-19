@@ -7,6 +7,9 @@
 
 #include "../../../middleware/bap/activity_message/auth_fields.h"
 #include "../../../middleware/bap/activity_message/auth_schema_catalog.h"
+#include "../../../middleware/bap/activity_message/mission_effect_auth.h"
+#include "../../../middleware/bap/activity_message/squad_attachment_auth.h"
+#include "../../../middleware/bap/activity_message/volume_toggle_auth.h"
 #include "mission_script_lua_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
@@ -100,6 +103,120 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     return value;
 }
 
+/** Sends a native type-32 toggle for one current same-owner authored volume. */
+[[nodiscard]] int slot_set_volume_active(lua_State* state) {
+    const auto* handle = static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    static constexpr std::array<std::string_view, 2> declared{"volume", "active"};
+    refuse_unknown_arguments(state, declared);
+    const SlotHandle target = checked_argument<SlotHandle>(state, "volume", kSlotMetatable);
+    lua_getfield(state, 2, "active");
+    if (!lua_isboolean(state, -1)) {
+        return luaL_error(state, "active must be a boolean");
+    }
+    const bool active = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    SlotDefinition source{}, volume{};
+    if (!current_slot(state, *handle, source) || !current_slot(state, target, volume)) {
+        return luaL_error(state, "toggle or volume is stale or invalid");
+    }
+    if (source.slotType != scriptable_auth::kType32SlotType
+        || source.componentClass != scriptable_auth::kType32ComponentClass
+        || source.authSchema != scriptable_auth::kType32Schema
+        || (source.flags & format::kSlotSchemaJoinExact) == 0) {
+        return luaL_error(state, "source must be an exact type-32 toggle sensor");
+    }
+    if (volume.slotType != scriptable_auth::kVolumeSlotType || volume.objectTag != source.objectTag
+        || volume.registryKey != source.registryKey
+        || volume.slotIndex
+               > static_cast<std::uint32_t>((std::numeric_limits<std::int16_t>::max)())) {
+        return luaL_error(state, "volume must be a same-owner type-60 slot");
+    }
+    std::array<std::byte, scriptable_auth::kType32ByteCount> body{};
+    std::size_t written = 0;
+    if (!scriptable_auth::encode_type32_volume(
+            {volume.registryKey, static_cast<std::int16_t>(volume.slotIndex), active},
+            body,
+            written)) {
+        return luaL_error(state, "native toggle encoder rejected the volume");
+    }
+    return queue_slot_auth(
+        state, source, scriptable_auth::kType32Schema, scriptable_auth::kType32BitCount, body);
+}
+
+/** Selects an audited same-owner squad lifetime for a type-26 attachment. */
+[[nodiscard]] int slot_set_squad_attachment(lua_State* state) {
+    const auto* handle = static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    static constexpr std::array<std::string_view, 3> declared{
+        "source", "spawn_generation", "active"};
+    refuse_unknown_arguments(state, declared);
+    const SlotHandle sourceHandle = checked_argument<SlotHandle>(state, "source", kSlotMetatable);
+    const lua_Integer generation = checked_integer_argument(state, "spawn_generation");
+    lua_getfield(state, 2, "active");
+    if (!lua_isboolean(state, -1)) {
+        return luaL_error(state, "active must be a boolean");
+    }
+    const bool active = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    SlotDefinition target{}, source{};
+    if (!current_slot(state, *handle, target) || !current_slot(state, sourceHandle, source)) {
+        return luaL_error(state, "attachment or squad source is stale or invalid");
+    }
+    if (target.slotType != 26 || target.authSchema != scriptable_auth::kType26Schema
+        || (target.flags & format::kSlotSchemaJoinExact) == 0
+        || source.slotType != format::kSquadSlotType
+        || source.authSchema != format::kSquadAuthSchema
+        || (source.flags & format::kSlotSchemaJoinExact) == 0
+        || target.objectTag != source.objectTag || target.registryKey != source.registryKey) {
+        return luaL_error(state, "attachment requires an exact same-owner type-1 source");
+    }
+    if (generation <= 0 || generation > (std::numeric_limits<std::int32_t>::max)()) {
+        return luaL_error(state, "spawn_generation must be a positive signed 32-bit integer");
+    }
+    CallFrame& frame = active_frame(state);
+    Intent intent{};
+    intent.kind = IntentKind::setSquadAttachment;
+    intent.firstRow = target.nativeRow;
+    intent.secondRow = source.nativeRow;
+    intent.sourceSpawnGeneration = static_cast<std::uint64_t>(generation);
+    intent.active = active;
+    return queue_intent(state, frame, intent);
+}
+
+/** Attaches the authored hop-on effect to the entities a type-34 filter selects. */
+[[nodiscard]] int slot_set_mission_effect(lua_State* state) {
+    namespace effect = middleware::bap::activity_message::mission_effect;
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    static constexpr std::array<std::string_view, 3> kDeclared{"filter", "enabled", "revision"};
+    refuse_unknown_arguments(state, kDeclared);
+    SlotDefinition slot{};
+    if (!current_slot(state, *handle, slot) || slot.slotType != effect::kSlotType
+        || slot.authSchema != effect::kSchema) {
+        return luaL_error(state, "mission effect requires an authored type-26 hop-on");
+    }
+    const bool enabled = optional_boolean_argument(state, "enabled", true);
+    scriptable_auth::Type2LaneClientRef filter{};
+    if (enabled) {
+        lua_getfield(state, 2, "filter");
+        const bool present = !lua_isnil(state, -1);
+        lua_pop(state, 1);
+        if (!present
+            || !optional_slot_reference(
+                state, "filter", scriptable_auth::kType34SlotType, filter)) {
+            return luaL_error(state, "mission effect requires a type-34 filter");
+        }
+    }
+    const lua_Integer revision = optional_integer_argument(state, "revision", 1);
+    if (!valid_counter(revision)) {
+        return luaL_error(state, "effect revision must be positive");
+    }
+    std::array<std::byte, effect::kBytes> body{};
+    std::size_t written = 0;
+    if (!effect::encode(filter, enabled, static_cast<std::int32_t>(revision), body, written)) {
+        return luaL_error(state, "mission effect encoder failed");
+    }
+    return queue_slot_auth(state, slot, effect::kSchema, effect::kBits, body);
+}
 /** Reads one Slot row member, its syntax methods, and its authorized actions. */
 [[nodiscard]] int slot_index(lua_State* state) {
     const auto* const handle =
@@ -165,6 +282,12 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
         lua_pushinteger(state, definition.flags);
     } else if (key == "set_object_filter") {
         lua_pushcfunction(state, &slot_set_object_filter);
+    } else if (key == "set_volume_active") {
+        lua_pushcfunction(state, &slot_set_volume_active);
+    } else if (key == "set_squad_attachment") {
+        lua_pushcfunction(state, &slot_set_squad_attachment);
+    } else if (key == "set_mission_effect") {
+        lua_pushcfunction(state, &slot_set_mission_effect);
     } else if (key == "watch_damage") {
         lua_pushcfunction(state, &slot_watch_damage);
     } else if (key == "set_object_active") {

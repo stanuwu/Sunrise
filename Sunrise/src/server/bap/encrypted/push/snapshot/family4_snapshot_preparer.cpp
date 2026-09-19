@@ -83,6 +83,8 @@ bool prepare(Scratch& scratch,
     }
 
     Prepared staged{};
+    staged.accountIdentity = {account.primarySoid,
+                              state::account::selected_character_soid(account)};
     staged.rawClearSize =
         (std::max)(reservation.rawClearSize,
                    reservation.rawWriteOffset + family4_datagen::account::layout::kObjectSize);

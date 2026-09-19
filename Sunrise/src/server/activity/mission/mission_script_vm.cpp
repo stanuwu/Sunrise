@@ -198,6 +198,7 @@ inline constexpr std::array<const char*, host::kEventKindCount> kEventHandlerNam
     "on_event_squad_provoked",
     "on_event_device_state",
     "on_event_region_changed",
+    "on_event_trigger_state",
 }};
 
 static_assert([] {
@@ -546,15 +547,14 @@ OpenStatus open(Vm& vm,
         preserve_failure_and_close(impl);
         return status;
     }
-
     CallFrame loadFrame{};
     loadFrame.remainingInstructions = kInitializationInstructionBudget;
     impl.frame = &loadFrame;
     lua_sethook(impl.state, &instruction_hook, LUA_MASKCOUNT, kHookInterval);
     const int executed = lua_pcall(impl.state, 0, 1, 0);
-    lua_sethook(impl.state, nullptr, 0, 0);
-    impl.frame = nullptr;
     if (executed != LUA_OK) {
+        lua_sethook(impl.state, nullptr, 0, 0);
+        impl.frame = nullptr;
         detail::set_error(
             impl,
             existing_error(impl.state, "mission initialization failed with a non-string error"));
@@ -564,10 +564,14 @@ OpenStatus open(Vm& vm,
         preserve_failure_and_close(impl);
         return status;
     }
+    // The returned program table stays above the capture/seal frames so a declared preload is
+    // charged to the same initialization budget as the opening chunk.
     lua_pushcfunction(impl.state, &capture_program);
-    lua_insert(impl.state, -2);
+    lua_pushvalue(impl.state, -2);
     const int captured = lua_pcall(impl.state, 1, 0, 0);
     if (captured != LUA_OK) {
+        lua_sethook(impl.state, nullptr, 0, 0);
+        impl.frame = nullptr;
         detail::set_error(
             impl, existing_error(impl.state, "mission declaration failed with a non-string error"));
         const OpenStatus status =
@@ -575,6 +579,8 @@ OpenStatus open(Vm& vm,
         preserve_failure_and_close(impl);
         return status;
     }
+    lua_sethook(impl.state, nullptr, 0, 0);
+    impl.frame = nullptr;
     lua_settop(impl.state, 0);
     impl.active = true;
     impl.faulted = false;
@@ -902,6 +908,8 @@ const char* status_name(OpenStatus status) noexcept {
         return "runtime_error";
     case OpenStatus::invalidProgram:
         return "invalid_program";
+    case OpenStatus::dependencyRefused:
+        return "dependency_refused";
     }
     return "unknown";
 }

@@ -21,6 +21,41 @@ constexpr std::uint32_t kAbilityAuthSchema = 0x80807DA1U;
 constexpr std::uint32_t kAbilityTargetSlotType = 58U;
 constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
 
+/** Validates common profile evidence without manufacturing a single actor identity. */
+[[nodiscard]] bool squad_member_profiles(const Catalog& catalog) noexcept {
+    const auto actors = catalog.actor_classes();
+    for (const format::SquadMember& member : catalog.squad_members()) {
+        const bool exactActor = (member.flags & format::kSquadMemberActorClassExact) != 0;
+        const bool exactProfile = (member.flags & format::kSquadMemberAuthoredProfileExact) != 0;
+        if ((member.flags & ~format::kSquadMemberFlagMask) != 0
+            || member.squadIndex >= catalog.squads().size()
+            || (exactActor ? member.actorClassIndex >= actors.size()
+                           : member.actorClassIndex != format::kAbsentIndex)) {
+            return false;
+        }
+        if (!exactProfile) {
+            if (member.authoredSpawnProfile != std::array<std::int8_t, 4>{} || exactActor) {
+                return false;
+            }
+            continue;
+        }
+        constexpr auto required =
+            format::kSquadMemberCandidateCountsComplete | format::kSquadMemberNoNullCandidates;
+        bool anyCandidate = false;
+        for (const auto count : member.candidateCounts) {
+            anyCandidate = anyCandidate || count != 0;
+        }
+        if ((member.flags & required) != required || !anyCandidate
+            || !format::valid_authored_spawn_profile(member.authoredSpawnProfile)
+            || (exactActor
+                && member.authoredSpawnProfile
+                       != actors[member.actorClassIndex].authoredSpawnProfile)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /** @return True when every task target names slots and objectives the catalog holds. */
 [[nodiscard]] bool task_targets(const Catalog& catalog) noexcept {
     const auto targets = catalog.task_targets();
@@ -582,13 +617,15 @@ bool relations(const Catalog& catalog) {
         bool (*run)(const Catalog&) noexcept;
     };
     // Every relation check a catalog must pass, named so a refusal reports which one failed.
-    static constexpr std::array<Check, 7> kChecks{{{"task_targets", &task_targets},
-                                                   {"authored_text", &authored_text},
-                                                   {"behavior_edges", &behavior_edges},
-                                                   {"actor_semantics", &actor_semantics},
-                                                   {"runtime_semantics", &runtime_semantics},
-                                                   {"sobject_semantics", &sobject_semantics},
-                                                   {"entity_types", &entity_types}}};
+    static constexpr std::array<Check, 8> kChecks{
+        {{"task_targets", &task_targets},
+         {"squad_member_profiles", &squad_member_profiles},
+         {"authored_text", &authored_text},
+         {"behavior_edges", &behavior_edges},
+         {"actor_semantics", &actor_semantics},
+         {"runtime_semantics", &runtime_semantics},
+         {"sobject_semantics", &sobject_semantics},
+         {"entity_types", &entity_types}}};
     for (const Check& check : kChecks) {
         if (!check.run(catalog)) {
             remember(check.name);

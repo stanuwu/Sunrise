@@ -132,8 +132,12 @@ namespace {
            && left.authBody == right.authBody && left.sequenceOwner == right.sequenceOwner
            && left.sdkBuildSha256 == right.sdkBuildSha256 && left.kind == right.kind
            && left.firstRow == right.firstRow && left.secondRow == right.secondRow
-           && left.objectTag == right.objectTag && left.registryKey == right.registryKey
-           && left.sceneEventKey == right.sceneEventKey && left.authSchema == right.authSchema
+           && left.spawnRuleSlotRow == right.spawnRuleSlotRow
+           && left.expectedObjectiveRevision == right.expectedObjectiveRevision
+           && left.sourceSpawnGeneration == right.sourceSpawnGeneration
+           && left.objectTag == right.objectTag
+           && left.registryKey == right.registryKey && left.sceneEventKey == right.sceneEventKey
+           && left.authSchema == right.authSchema
            && left.actorCommandSelector == right.actorCommandSelector
            && left.actorCommandValue == right.actorCommandValue
            && left.authBitCount == right.authBitCount

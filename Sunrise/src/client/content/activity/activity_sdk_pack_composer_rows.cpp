@@ -593,6 +593,7 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         target.flags = input.flags;
         target.candidateCounts = input.candidateCounts;
         target.defaultCount = input.defaultCount;
+        target.authoredSpawnProfile = input.authoredSpawnProfile;
         if (!link_string(linker, input.id, target.id)) {
             return false;
         }

@@ -204,9 +204,12 @@ void reset_incidents() noexcept {
 } // namespace detail
 
 /** Queues one owned, outer-valid client msg 19 for the Activity Host service. */
-bool submit_incident(const IncidentInput& input) noexcept {
-    if (!state::activity::binding_matches(input.binding) || !incident_allowed(input.incident)) {
-        return false;
+IngressRefusal submit_incident(const IncidentInput& input) noexcept {
+    if (!state::activity::binding_matches(input.binding)) {
+        return IngressRefusal::binding;
+    }
+    if (!incident_allowed(input.incident)) {
+        return IngressRefusal::payload;
     }
     AcquireSRWLockExclusive(&g_lock);
     PendingInput pending{};
@@ -216,11 +219,11 @@ bool submit_incident(const IncidentInput& input) noexcept {
         ++g_droppedIngress;
         ++g_droppedIncidents;
         ReleaseSRWLockExclusive(&g_lock);
-        return false;
+        return IngressRefusal::queue;
     }
     ++g_queuedIngress;
     ReleaseSRWLockExclusive(&g_lock);
-    return true;
+    return IngressRefusal::none;
 }
 
 /** Queues one outer-valid operator msg 19 for the exact activity generation. */

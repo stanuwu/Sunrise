@@ -15,6 +15,7 @@
 #include "../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../state/activity_sdk/runtime.h"
 #include "../host_runtime.h"
+#include "mission_observation_epoch.h"
 #include "mission_script_actor_path_sense.h"
 #include "mission_script_combatant_damage_sense.h"
 #include "mission_script_device_sense.h"
@@ -24,6 +25,7 @@
 #include "mission_script_runtime.h"
 #include "mission_script_squad_sense.h"
 #include "mission_script_vm.h"
+#include "mission_trigger_observation.h"
 
 // What the mission-runtime translation units share: the instance table and service slice,
 // the attach pipeline, the two Host feeds and the VM callback, the panel rows, the delivery state
@@ -89,13 +91,17 @@ constexpr std::size_t kTriggerOccupancyCapacity = 32;
 constexpr std::size_t kSquadObservationCapacity = 160;
 /** Watched authored scenes retained per instance. */
 constexpr std::size_t kSceneObservationCapacity = 32;
-/** Watched objective sensors retained per instance. */
+/**
+ * Watched objective sensors retained per instance. Strange Terrain reports eleven distinct
+ * sensors before the relic phase; keep route-wide headroom aligned with the other authored-watch
+ * tables so later crystals cannot lose their first baseline.
+ */
 constexpr std::size_t kObjectiveObservationCapacity = 32;
 static_assert(kSquadObjectiveGroupCount == host::kSquadObjectiveGroupCount);
 /** Watched Ghost links, damage monitors, interactable objects and named actors per instance. */
 constexpr std::size_t kGhostObservationCapacity = kGhostLinkCapacity;
 constexpr std::size_t kDamageObservationCapacity = 8;
-constexpr std::size_t kObjectInteractionObservationCapacity = 64;
+constexpr std::size_t kObjectInteractionObservationCapacity = 160;
 constexpr std::size_t kActorPathObservationCapacity = 64;
 /** Watched device levels retained per instance. */
 constexpr std::size_t kDeviceObservationCapacity = 128;
@@ -110,10 +116,10 @@ constexpr std::uint64_t kHostCommitTimeoutMs = 2'000;
 
 /** Last occupancy seen for one watched volume, so only a change raises an event. */
 struct TriggerOccupancy final {
+    trigger_observation::Tracker tracker{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
-    bool occupied{};
     bool used{};
 };
 
@@ -158,6 +164,8 @@ struct DeviceObservation final {
 /** Last object and interaction level seen for one interactable object. */
 struct ObjectInteractionObservation final {
     ObjectInteractionLevel level{};
+    /** Sense sequence of the last accepted observation; the oldest row yields at capacity. */
+    std::uint64_t sequence{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -177,12 +185,23 @@ struct GhostObservation final {
 struct SquadObservation final {
     SquadObjectiveCosts objectiveCosts{};
     std::array<std::int32_t, host::kSquadSlotCapacity> slotCounts{};
+    /** Source, sequence and spawn-echo continuity; only consecutive reports bridge absent levels.
+     */
+    observation_epoch::Cursor epoch{};
+    std::uint32_t reportCounter{};
+    bool hasReportCounter{};
+    std::int32_t spawnGeneration{};
+    bool hasSpawnGeneration{};
+    bool hasAlive{};
+    bool hasRemoval{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::int32_t aliveCount{};
     std::uint16_t slotIndex{};
     std::uint8_t slotCountLength{};
     bool removalFlag{};
+    std::uint32_t schemaRow{};
+    std::uint8_t slotType{};
     bool used{};
 };
 /** Last completion latch seen for one watched authored scene, so only the edge raises an event. */
@@ -252,6 +271,8 @@ struct RuntimeInstance final {
     std::array<DeviceObservation, kDeviceObservationCapacity> deviceObservations{};
     std::array<ObjectInteractionObservation, kObjectInteractionObservationCapacity>
         objectInteractionObservations{};
+    /** Held region whose object levels are current; a region change re-baselines them. */
+    std::int32_t objectObservationHeldRegion{-1};
     std::array<ActorPathObservation, kActorPathObservationCapacity> actorPathObservations{};
     std::array<SceneObservation, kSceneObservationCapacity> sceneObservations{};
     std::array<ObjectiveObservation, kObjectiveObservationCapacity> objectiveObservations{};
@@ -279,6 +300,7 @@ struct RuntimeInstance final {
     std::int32_t activeRegion{-1};
     ProgramStatus programStatus{ProgramStatus::none};
     DeliveryStage deliveryStage{DeliveryStage::idle};
+    /** Last logged native reaction drain class; 0 is ready/empty, otherwise status+1. */
     /** The player key the bound link's message 5 binds, read at attach. */
     std::uint64_t playerKey{};
     bool publicTarget{};
@@ -313,7 +335,8 @@ void observe_player_life(RuntimeInstance& instance,
 
 /** Raises one event per watched trigger volume whose occupancy changed. */
 void push_trigger_edges(RuntimeInstance& instance,
-                        const host::SenseObservationSnapshot& sense) noexcept;
+                        const host::SenseObservationSnapshot& sense,
+                        std::uint64_t missionSequence) noexcept;
 /** Raises one dedicated type-31 edge from a decoded schema-0x8080879F msg-19 payload. */
 void push_player_trigger(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Raises one exact Type-6 start/finish edge from a decoded schema-0x808087BF msg-19 payload. */
@@ -327,6 +350,14 @@ void push_damage_edges(RuntimeInstance& instance,
 /** Raises observed Type-2 damage pools and lifecycle resets without inferring damage. */
 void push_combatant_damage_edges(RuntimeInstance& instance,
                                  const host::SenseObservationSnapshot& sense) noexcept;
+/** Raises a damage state from an entity's replicated damage levels (fractions of full). */
+void push_entity_damage(RuntimeInstance& instance,
+                        std::uint32_t registryKey,
+                        std::uint8_t slotType,
+                        std::uint16_t slotIndex,
+                        float primary,
+                        float secondary,
+                        std::uint64_t tick) noexcept;
 /** Raises current device values and sequence resets from accepted client reports. */
 void push_device_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;
@@ -461,10 +492,12 @@ void note_vm_status(RuntimeInstance& instance,
 
 /** Resolves the script root and the SDK Lua search path. Logs its own refusal. */
 [[nodiscard]] bool resolve_script_paths() noexcept;
-/** Clears the script buffer, both paths and every reload authorization. */
+/** Clears both script buffers and both paths. */
 void clear_script_paths() noexcept;
 /** @return False when no authorization slot is free, so the reload cannot replace this program. */
 [[nodiscard]] bool authorize_reload(const RuntimeInstance& instance) noexcept;
+/** @return True while the binding, link, SDK view and generated world still match the instance. */
+[[nodiscard]] bool still_exact(RuntimeInstance& instance) noexcept;
 /** Drops slots that no longer match, publishes the roster, and attaches active host instances. */
 void synchronize_instances(std::uint64_t now) noexcept;
 /** Advances fresh programs only when their declared state roster has reached transport output. */

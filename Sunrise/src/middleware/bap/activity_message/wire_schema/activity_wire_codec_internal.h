@@ -114,6 +114,11 @@ public:
     }
 }
 
+/** Types 12 and 35 are raw 64-bit words, read and written whole. */
+[[nodiscard]] constexpr bool is_raw64(std::uint8_t typeCode) noexcept {
+    return typeCode == 12 || typeCode == 35;
+}
+
 /** @return A low bit mask of the given width. Width 0 masks everything away. */
 [[nodiscard]] constexpr std::uint64_t mask(std::uint8_t width) noexcept {
     return width == 64  ? (std::numeric_limits<std::uint64_t>::max)()

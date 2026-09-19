@@ -114,6 +114,10 @@ struct RosterGroupLease {
     /** Bubbles this key was ever registered under; a later push keeps it in every one of them. */
     std::uint64_t bubbles{};
     std::uint8_t sequence{};
+    /** Group revision the client last received; it rebuilds the group, and loses Sense, on a
+     * change. */
+    std::uint8_t publishedSequence{};
+    bool published{};
     bool used{};
 };
 

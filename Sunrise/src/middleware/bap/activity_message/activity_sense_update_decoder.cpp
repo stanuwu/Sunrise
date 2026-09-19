@@ -3,11 +3,12 @@
 
 #include "../../encoding/bit_reader.h"
 #include "../../encoding/byte_order.h"
+#include "activity_sense_update_reader.h"
 #include "sense_update.h"
 
 namespace sunrise::middleware::bap::activity_message::sense_update {
 namespace {
-namespace bits = middleware::encoding::bits;
+using namespace decoding;
 
 /** Field widths of the object header ClientRef, in bits. */
 constexpr std::uint8_t kKeyWidth = 32, kTypeWidth = 7, kIndexWidth = 16;
@@ -17,6 +18,7 @@ constexpr std::uint32_t kTypeBias = 1, kIndexBias = 32768;
 constexpr std::uint32_t kDevice = 0x80804F47U, kScene = 0x8080626AU;
 constexpr std::uint32_t kSquad = 0x80807ECCU, kObjective = 0x80807F04U;
 constexpr std::uint32_t kOccupancy = 0x80809531U;
+constexpr std::uint32_t kAttachment = 0x8080954AU;
 constexpr std::uint32_t kGhostLink = 0x80804D3EU;
 constexpr std::uint32_t kObject = 0x8080992EU;
 constexpr std::uint32_t kObjectSpawnMask = 0x80809E1BU, kObjectReplies = 0x80809AEAU;
@@ -26,6 +28,7 @@ constexpr std::uint32_t kSquadReals = 0x80807ECDU;
 constexpr std::uint32_t kObjectiveBlock = 0x80807F07U, kObjectiveTasks = 0x80807F08U;
 constexpr std::uint32_t kCombatant = 0x80807DA2U, kCombatantAtoms = 0x80807F6EU;
 constexpr std::uint32_t kCombatantKeyed = 0x80807DA3U, kCombatantLanes = 0x80807DA4U;
+constexpr std::uint32_t kEngagement = 0x808094F0U, kEngagementList = 0x808094F8U;
 /** Type-13 participation root and its nested blocks, in body order. */
 constexpr std::uint32_t kPlayer = 0x80804F2FU, kPlayerState = 0x808094E4U;
 constexpr std::uint32_t kPlayerScalars = 0x80804F39U, kPlayerTail = 0x80804F35U;
@@ -42,38 +45,6 @@ constexpr std::uint64_t kPlayerScalarCountMaximum = 4, kPlayerKeyCountMaximum = 
 constexpr std::uint32_t kSpatialMaximumBits = 0x45000000U, kUnitMaximumBits = 0x3F800000U;
 
 enum class NativeStatus : std::uint8_t { complete, unsupported, unsafeCount, malformed };
-
-/** Bit reader with its own budget, so one object cannot consume the whole packet. */
-class Reader final {
-public:
-    Reader(bits::Reader& source, std::size_t budget, std::size_t total) noexcept
-        : source_(source), left_(budget), total_(total) {}
-    [[nodiscard]] bool read(std::uint8_t width, std::uint64_t& value) noexcept {
-        if (width > left_ || !source_.read(width, value)) {
-            return false;
-        }
-        left_ -= width;
-        return true;
-    }
-    [[nodiscard]] bool skip(std::size_t width) noexcept {
-        if (width > left_ || !source_.skip(width)) {
-            return false;
-        }
-        left_ -= width;
-        return true;
-    }
-    [[nodiscard]] std::size_t left() const noexcept {
-        return left_;
-    }
-    [[nodiscard]] std::size_t position() const noexcept {
-        return total_ - source_.remaining_bits();
-    }
-
-private:
-    bits::Reader& source_;
-    std::size_t left_{};
-    std::size_t total_{};
-};
 
 /** @param width Field width in bits. @return Low-bit mask of that width. */
 [[nodiscard]] constexpr std::uint64_t mask(std::uint8_t width) noexcept {
@@ -133,20 +104,11 @@ private:
     DecodedObject* object_{};
 };
 
-/** Required fields are present; optional fields consume one presence bit within the budget. */
-[[nodiscard]] bool present(Reader& reader, bool optional, bool& output) noexcept {
-    output = true;
-    if (!optional) {
-        return true;
-    }
-    std::uint64_t raw = 0;
-    if (!reader.read(1, raw)) {
-        return false;
-    }
-    output = raw != 0;
-    return true;
-}
-/** Records an unsigned value only when its presence bit and selected value fit. */
+/**
+ * Reads one optional or required unsigned field and records it.
+ * @param optional True when a presence bit precedes the value.
+ * @return True when the presence bit and any value were complete.
+ */
 [[nodiscard]] bool read_unsigned(Reader& reader,
                                  Values& values,
                                  std::uint32_t schema,
@@ -537,7 +499,51 @@ real_value(std::uint64_t raw, std::uint8_t width, std::uint32_t maximumBits) noe
     }
     return NativeStatus::complete;
 }
-/** Validates the complete participation body before its Ghost flag becomes usable. */
+/**
+ * The observed engagement list is empty. Nonempty custom35 elements remain unsupported until
+ * their native codec is established; a storage size is not a wire width.
+ */
+[[nodiscard]] NativeStatus decode_engagement(Reader& reader, Values& values) noexcept {
+    constexpr std::uint64_t capacity = 16;
+    std::uint64_t count = 0;
+    const auto at = static_cast<std::uint32_t>(reader.position());
+    if (!reader.read(5, count)) {
+        return NativeStatus::malformed;
+    }
+    if (count > capacity) {
+        return NativeStatus::unsafeCount;
+    }
+    if (count != 0) {
+        return NativeStatus::unsupported;
+    }
+    values.put(kEngagementList, 0, 0, at, 5, ValueKind::unsignedInteger, count, 0, 0.0F, true);
+    return read_signed(reader, values, kEngagement, 1, 16, 16, 32768, false)
+               ? NativeStatus::complete
+               : NativeStatus::malformed;
+}
+
+/** Build86657's attachment Sense has three required s32 counters and one bool. */
+[[nodiscard]] NativeStatus decode_attachment(Reader& reader, Values& values) noexcept {
+    for (std::uint16_t ordinal = 0; ordinal < 3; ++ordinal) {
+        if (!read_signed(reader,
+                         values,
+                         kAttachment,
+                         ordinal,
+                         32,
+                         32,
+                         (std::numeric_limits<std::int32_t>::min)(),
+                         false)) {
+            return NativeStatus::malformed;
+        }
+    }
+    return read_bool(reader, values, kAttachment, 3, false) ? NativeStatus::complete
+                                                            : NativeStatus::malformed;
+}
+
+/**
+ * Decodes the type-13 participation body. The whole body is read before its Ghost flag counts,
+ * because a player mid-load publishes a body with the flag but without a settled actor.
+ */
 [[nodiscard]] NativeStatus decode_player(Reader& reader, Values& values) noexcept {
     // The participation field uses a signed 32-bit midpoint bias.
     constexpr auto signedBias = (std::numeric_limits<std::int32_t>::min)();
@@ -676,10 +682,14 @@ decode_body(std::uint32_t schema, Reader& reader, Values& values) noexcept {
         return decode_objective(reader, values);
     case kOccupancy:
         return decode_occupancy(reader, values);
+    case kAttachment:
+        return decode_attachment(reader, values);
     case kObject:
         return decode_object(reader, values);
     case kCombatant:
         return decode_combatant(reader, values);
+    case kEngagement:
+        return decode_engagement(reader, values);
     default:
         return NativeStatus::unsupported;
     }
@@ -724,8 +734,11 @@ bool decode_sense_update(std::span<const std::byte> input,
     }
     update.tailBits = static_cast<std::uint32_t>(reader.remaining_bits() + 1);
     if (root != 0) {
-        finish(update, reader, total, DecodeStatus::schemaUnavailable, consumed);
-        return true;
+        Reader rootBody(reader, reader.remaining_bits(), total);
+        if (!consume_root_sense(rootBody)) {
+            finish(update, reader, total, DecodeStatus::malformed, consumed);
+            return false;
+        }
     }
     bool partial = false;
     for (;;) {

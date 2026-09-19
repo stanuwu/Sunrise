@@ -212,7 +212,7 @@ void report_roster_push(Session& session,
                           group.hasStateSequence ? 1U : 0U);
         if (groupWritten > 0) {
             core::log::write(core::log::Channel::server,
-                             core::log::Level::debug,
+                             core::log::Level::trace,
                              {line.data(), static_cast<std::size_t>(groupWritten)});
         }
     }
@@ -226,7 +226,7 @@ void report_roster_push(Session& session,
                               key);
             if (keyWritten > 0) {
                 core::log::write(core::log::Channel::server,
-                                 core::log::Level::debug,
+                                 core::log::Level::trace,
                                  {line.data(), static_cast<std::size_t>(keyWritten)});
             }
         }
@@ -248,7 +248,7 @@ void report_roster_push(Session& session,
                           static_cast<unsigned long long>(body_hash(body)));
         if (authWritten > 0) {
             core::log::write(core::log::Channel::server,
-                             core::log::Level::debug,
+                             core::log::Level::trace,
                              {line.data(), static_cast<std::size_t>(authWritten)});
         }
     }

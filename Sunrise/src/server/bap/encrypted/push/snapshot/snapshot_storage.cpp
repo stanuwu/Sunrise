@@ -105,6 +105,7 @@ bool commit(const Prepared& staged, Prepared& output) noexcept {
     output.objects = staged.objects;
     output.rawClearSize = staged.rawClearSize;
     output.compressedClearSize = staged.compressedClearSize;
+    output.accountIdentity = staged.accountIdentity;
     output.family = middleware::queuez::Family{
         staged.family.type,
         staged.family.rootSoid,

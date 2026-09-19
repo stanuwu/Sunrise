@@ -101,6 +101,8 @@ struct EntityBaselineMutation final : EntityBaselineChange {
     bool scoped{};
     std::array<EntityBaselineChange, kEntityBatchCapacity - 1> additionalChanges{};
     std::uint16_t additionalChangeCount{};
+    /** Descendants this batch detached because an ancestor received a record and they did not. */
+    std::uint16_t detachedCount{};
     std::uint64_t expectedAnchorOrder{}, replacementAnchorOrder{};
 };
 

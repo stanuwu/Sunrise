@@ -2,6 +2,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <new>
 #include <span>
 
 #include "../../../../middleware/bap/activity_message/cinematic_incident.h"
@@ -162,9 +164,20 @@ bool frame_only(const ActivityClientBinding& binding,
         kFramingRoutes.end(),
         [adapter](const FramingRoute& candidate) noexcept { return candidate.adapter == adapter; });
     service::incident::Incident parsedIncident{};
-    sense_update::SenseUpdate parsedSense{};
     const bool isIncident = adapter == IngressAdapter::incidentHostIncident;
     const bool isSense = adapter == IngressAdapter::senseUpdateHostSense;
+    // Packet storage is shared by diagnostics and mission delivery; keep its bounded
+    // arrays off the networking thread's stack, including the submission copy.
+    std::unique_ptr<sense_update::SenseUpdate> parsedSense;
+    std::unique_ptr<server::activity::host::SenseInput> senseInput;
+    if (isSense) {
+        parsedSense.reset(new (std::nothrow) sense_update::SenseUpdate{});
+        senseInput.reset(new (std::nothrow) server::activity::host::SenseInput{});
+        if (!parsedSense || !senseInput) {
+            report_message(request.messageType, request.sessionId, "sense_storage_unavailable");
+            return false;
+        }
+    }
     receipts::Framed framed{};
     if (isSense) {
         const activity_sdk::Snapshot catalog = activity_sdk::snapshot();
@@ -172,8 +185,8 @@ bool frame_only(const ActivityClientBinding& binding,
         const sense_update::Resolver resolver{&context, resolve_sense_group, resolve_sense_slot};
         std::size_t consumedBits = 0;
         static_cast<void>(sense_update::decode_sense_update(
-            request.payload, resolver, parsedSense, consumedBits));
-        framed = receipts::frame_sense_update(request, parsedSense);
+            request.payload, resolver, *parsedSense, consumedBits));
+        framed = receipts::frame_sense_update(request, *parsedSense);
     } else {
         framed = isIncident ? receipts::frame_incident_copy(request, parsedIncident)
                  : row != kFramingRoutes.end() ? row->frame(request)
@@ -182,8 +195,8 @@ bool frame_only(const ActivityClientBinding& binding,
     DiagnosticBody diagnostic{};
     diagnostic.consumedBits = framed.consumedBits;
     diagnostic.status = diagnostic_status(framed, isIncident);
-    diagnostic.sense = isSense ? &parsedSense.decoded : nullptr;
-    if (isSense && parsedSense.decoded.status == sense_update::DecodeStatus::partial) {
+    diagnostic.sense = isSense ? &parsedSense->decoded : nullptr;
+    if (isSense && parsedSense->decoded.status == sense_update::DecodeStatus::partial) {
         diagnostic.status = server::activity::host::ClientMessageStatus::decodedPartial;
     }
     const std::uint64_t clientMessageSequence = record(request,
@@ -192,32 +205,35 @@ bool frame_only(const ActivityClientBinding& binding,
                                                        &binding.session,
                                                        binding.bindingGeneration,
                                                        diagnostic);
-    if (isSense && parsedSense.decoded.status != sense_update::DecodeStatus::malformed) {
-        server::activity::host::SenseInput input{};
+    if (isSense && parsedSense->decoded.status != sense_update::DecodeStatus::malformed) {
+        server::activity::host::SenseInput& input = *senseInput;
         input.binding = binding.session;
         input.sourceGeneration = binding.bindingGeneration;
         input.clientMessageSequence = clientMessageSequence;
-        input.epochFirst = parsedSense.epoch.first;
-        input.epochSecond = parsedSense.epoch.second;
+        input.epochFirst = parsedSense->epoch.first;
+        input.epochSecond = parsedSense->epoch.second;
         input.payloadBytes = static_cast<std::uint32_t>(request.payload.size());
         input.peerHeardMask = request.peerHeardMask;
-        input.tailBits = parsedSense.tailBits;
+        input.tailBits = parsedSense->tailBits;
         input.consumedBits = static_cast<std::uint32_t>(framed.consumedBits);
-        input.firstGroupBits = parsedSense.firstGroupBits;
-        input.firstRegistryKey = parsedSense.firstRegistryKey;
-        input.groupsSeen = parsedSense.decoded.groupsSeen;
-        input.groupsDecoded = parsedSense.decoded.groupsDecoded;
-        input.groupsSkipped = parsedSense.decoded.groupsSkipped;
-        input.objectsSeen = parsedSense.decoded.objectsSeen;
-        input.objectsDecoded = parsedSense.decoded.objectsDecoded;
-        input.firstSlotIndex = parsedSense.firstSlotIndex;
-        input.firstSlotType = parsedSense.firstSlotType;
-        input.decodeStatus = parsedSense.decoded.status;
+        input.firstGroupBits = parsedSense->firstGroupBits;
+        input.firstRegistryKey = parsedSense->firstRegistryKey;
+        input.groupsSeen = parsedSense->decoded.groupsSeen;
+        input.groupsDecoded = parsedSense->decoded.groupsDecoded;
+        input.groupsSkipped = parsedSense->decoded.groupsSkipped;
+        input.objectsSeen = parsedSense->decoded.objectsSeen;
+        input.objectsDecoded = parsedSense->decoded.objectsDecoded;
+        input.firstSlotIndex = parsedSense->firstSlotIndex;
+        input.firstSlotType = parsedSense->firstSlotType;
+        input.decodeStatus = parsedSense->decoded.status;
         input.verdict = framed.verdict;
-        input.decoded = parsedSense.decoded;
-        input.hasFirstObject = parsedSense.hasFirstObject;
-        if (!server::activity::host::submit_sense(input)) {
-            report_message(request.messageType, request.sessionId, "host_ingress_refused");
+        input.decoded = parsedSense->decoded;
+        input.hasFirstObject = parsedSense->hasFirstObject;
+        const auto refusal = server::activity::host::submit_sense(input);
+        if (refusal != server::activity::host::IngressRefusal::none) {
+            report_message(request.messageType,
+                           request.sessionId,
+                           server::activity::host::ingress_refusal_name(refusal));
         }
     } else if (isIncident && framed.verdict == store::Verdict::framed) {
         server::activity::host::IncidentInput input{};
@@ -239,8 +255,11 @@ bool frame_only(const ActivityClientBinding& binding,
                 std::span(parsedIncident.payload).first(parsedIncident.payloadLength),
                 input.cinematic);
         }
-        if (!server::activity::host::submit_incident(input)) {
-            report_message(request.messageType, request.sessionId, "host_ingress_refused");
+        const auto refusal = server::activity::host::submit_incident(input);
+        if (refusal != server::activity::host::IngressRefusal::none) {
+            report_message(request.messageType,
+                           request.sessionId,
+                           server::activity::host::ingress_refusal_name(refusal));
         }
     }
     return true;

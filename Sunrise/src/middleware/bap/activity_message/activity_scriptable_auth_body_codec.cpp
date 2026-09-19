@@ -5,6 +5,7 @@
 #include "combatant_auth.h"
 #include "mission_auth_patch.h"
 #include "scriptable_auth_internal.h"
+#include "squad_attachment_auth.h"
 
 // The two scriptable-auth bodies whose encoded width depends on the caller's values: the type-2
 // actor channel set and keyed lanes, and the type-34 filter predicate list. Both select their
@@ -840,6 +841,49 @@ bool validate_type2_body(std::span<const std::byte> input, std::size_t bitCount)
     }
     return reader.read(1U, value) && value == 0
            && reader.remaining_bits() == input.size() * 8U - bitCount && finish_padding(reader);
+}
+
+bool encode_type26_squad_selection(const Type26SquadSelection& selection,
+                                   std::span<std::byte> output,
+                                   std::size_t& written,
+                                   std::size_t& writtenBits) noexcept {
+    written = 0;
+    writtenBits = 0;
+    if ((selection.active && selection.slotIndex < 0)
+        || (!selection.active
+            && (selection.registryKey != kClientRefAbsentKey || selection.slotIndex != -1))) {
+        return false;
+    }
+    const std::size_t bitCount = selection.active ? kType26SquadBitCount : kType26EmptyBitCount;
+    const std::size_t byteCount = (bitCount + 7U) / 8U;
+    if (output.size() < byteCount) {
+        return false;
+    }
+    bits::Writer writer(output.first(byteCount));
+    if (!writer.write(0, kBoolWidth) || !writer.write(0, kBoolWidth)) {
+        return false;
+    }
+    // Preserve all four authored zero scalars. Two are native control counters, not revisions
+    // that an attachment writer may freely advance. Auth dirty reconciliation owns the update.
+    for (std::size_t index = 0; index < 4; ++index) {
+        if (!writer.write(kSigned32Bias, kSigned32Width)) {
+            return false;
+        }
+    }
+    if (!write_absent_client_ref(writer) || !writer.write(selection.active ? 1U : 0U, kBoolWidth)) {
+        return false;
+    }
+    if (selection.active
+        && (!writer.write(kType26SquadSelectionSchema, kSigned32Width)
+            || !write_lane_client_ref(writer, {selection.registryKey, 1, selection.slotIndex}))) {
+        return false;
+    }
+    if (writer.bit_count() != bitCount || !writer.finish(written) || written != byteCount) {
+        written = 0;
+        return false;
+    }
+    writtenBits = bitCount;
+    return true;
 }
 
 } // namespace sunrise::middleware::bap::activity_message::scriptable_auth

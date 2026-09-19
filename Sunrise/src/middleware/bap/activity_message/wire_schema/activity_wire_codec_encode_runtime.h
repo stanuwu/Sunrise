@@ -58,7 +58,7 @@ struct RuntimeAuthoredValue final {
     if (field.typeCode == 11) {
         return value.kind == ValueKind::real32 && std::isfinite(value.realValue);
     }
-    if (field.typeCode == 35) {
+    if (is_raw64(field.typeCode)) {
         return value.kind == ValueKind::unsignedInteger;
     }
     const std::uint8_t width = storage_width(field.typeCode);
@@ -234,10 +234,11 @@ private:
         if (!valid_runtime_scalar(field, value)) {
             return RuntimeWalkStatus::unsupportedField;
         }
-        const bool raw64 = field.typeCode == 35;
+        const bool raw64 = is_raw64(field.typeCode);
         const std::uint8_t nativeWidth = raw64 ? 64 : storage_width(field.typeCode);
         const std::uint8_t declaredWidth = raw64 ? 64 : runtime_declared_width(field);
-        if (nativeWidth == 0 || declaredWidth == 0) {
+        // Mirrors the decoder: a zero declared width writes no bits.
+        if (nativeWidth == 0) {
             return RuntimeWalkStatus::unsupportedField;
         }
         std::uint64_t decoded = 0;
@@ -783,6 +784,14 @@ private:
             if (resolver_.isZeroBitType != nullptr
                 && resolver_.isZeroBitType(resolver_.context, field.typeCode)) {
                 return RuntimeWalkStatus::complete;
+            }
+            // The native union reader dispatches through the per-type table, where a nested
+            // arm is a no-op and a type-34 arm is the ordinary selected-schema reader.
+            if (field.typeCode == 1) {
+                return RuntimeWalkStatus::complete;
+            }
+            if (field.typeCode == 34) {
+                return write_selected(owner, field, occurrence, depth);
             }
             return write_inline_type(owner, field, occurrence, memory, depth + 1);
         }

@@ -122,7 +122,8 @@ resolve_activity_binding_locator(const void* context,
     const auto allSquads = catalog.squads();
     const auto members = sdk::squad_members(catalog, squad);
     if (members.empty() || members.size() > output.defaultCounts.size()
-        || (squad.flags & format::kSquadRunnableMask) != format::kSquadRunnableMask
+        || (squad.flags & format::squad_required_mask(squad.flags))
+               != format::squad_required_mask(squad.flags)
         || &squad < allSquads.data() || &squad >= allSquads.data() + allSquads.size()) {
         return false;
     }

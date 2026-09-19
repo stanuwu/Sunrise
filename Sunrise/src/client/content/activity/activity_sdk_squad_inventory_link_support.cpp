@@ -377,6 +377,35 @@ template <typename... Values>
     if (noNull) {
         output.flags |= format::kSquadMemberNoNullCandidates;
     }
+    bool commonProfileExact = allActorsEligible && actorResolver != nullptr;
+    bool foundProfile = false;
+    std::uint32_t singleActorIndex = format::kAbsentIndex;
+    std::array<std::int8_t, 4> commonProfile{};
+    if (commonProfileExact) {
+        for (const std::uint32_t tag : actorTags) {
+            std::uint32_t actorIndex = format::kAbsentIndex;
+            std::array<std::int8_t, 4> profile{};
+            if (!actorResolver(actorContext, tag, actorIndex, profile)
+                || actorIndex == format::kAbsentIndex
+                || !format::valid_authored_spawn_profile(profile)) {
+                commonProfileExact = false;
+                actorLinksComplete = false;
+                continue;
+            }
+            if (actorTags.size() == 1) {
+                singleActorIndex = actorIndex;
+            }
+            if (foundProfile && profile != commonProfile) {
+                commonProfileExact = false;
+            }
+            commonProfile = profile;
+            foundProfile = true;
+        }
+    }
+    if (commonProfileExact && foundProfile) {
+        output.flags |= format::kSquadMemberAuthoredProfileExact;
+        output.authoredSpawnProfile = commonProfile;
+    }
     if (allActorsEligible && actorTags.size() == 1) {
         output.actorDefinitionTag = *actorTags.begin();
         if (!format_text(output.actorDefinitionId,
@@ -384,11 +413,8 @@ template <typename... Values>
                          static_cast<unsigned>(output.actorDefinitionTag))) {
             return false;
         }
-        std::uint32_t actorIndex = format::kAbsentIndex;
-        if (actorResolver != nullptr
-            && actorResolver(actorContext, output.actorDefinitionTag, actorIndex)
-            && actorIndex != format::kAbsentIndex) {
-            output.actorClassIndex = actorIndex;
+        if (singleActorIndex != format::kAbsentIndex) {
+            output.actorClassIndex = singleActorIndex;
             output.actorLink = ActorLink::exactReciprocal;
             output.flags |= format::kSquadMemberActorClassExact;
         } else {

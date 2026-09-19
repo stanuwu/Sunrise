@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -249,13 +249,13 @@
     <ClCompile Include="src\client\hooks\teleport\teleport_move.cpp" />
     <ClCompile Include="src\client\hooks\teleport\teleport_action_key.cpp" />
     <ClCompile Include="src\client\hooks\world_objects\world_object_registry.cpp" />
+    <ClCompile Include="src\client\memory\current_process_memory.cpp" />
     <ClCompile Include="src\client\hooks\world_objects\world_object_identity_report.cpp" />
     <ClCompile Include="src\client\hooks\world_objects\world_object_purge_policy.cpp" />
     <ClCompile Include="src\client\hooking\detour.cpp" />
     <ClCompile Include="src\client\hooking\detour\protected_detour_uninstall.cpp" />
     <ClCompile Include="src\client\hooking\detour\transaction\detour_thread_transaction.cpp" />
     <ClCompile Include="src\client\executable\image.cpp" />
-    <ClCompile Include="src\client\memory\current_process_memory.cpp" />
     <ClCompile Include="src\client\hooks\package_trust\package_trust_bypass.cpp" />
     <ClCompile Include="src\client\hooks\feature_flags\feature_flags.cpp" />
     <ClCompile Include="src\client\hooks\cine_probe\cine_probe.cpp" />
@@ -1196,6 +1196,7 @@
     <ClCompile Include="src\middleware\bap\activity_message\activity_start_activity_parser.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_sense_update_parser.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_sense_update_decoder.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_sense_update_root.cpp" />
     <ClCompile Include="src\server\bap\encrypted\activity_message\receipts\activity_message_receipts.cpp" />
     <ClCompile Include="src\server\bap\encrypted\activity_message\receipts\activity_incident_grants.cpp" />
     <ClCompile Include="src\state\activity\receipts\activity_receipts.cpp" />
@@ -2071,7 +2072,16 @@
     <ClInclude Include="src\middleware\bap\activity_message\ghost_link_sense.h" />
     <ClInclude Include="src\middleware\bap\activity_message\interactable_object_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\mission_auth_patch.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_sense_update_reader.h" />
     <ClInclude Include="src\middleware\bap\activity_message\mission_effect_auth.h" />
+    <ClInclude Include="src\client\content\activity\activity_sdk_spawn_reference.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\squad_attachment_auth.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\volume_toggle_auth.h" />
+    <ClInclude Include="src\server\activity\mission\mission_observation_epoch.h" />
+    <ClInclude Include="src\server\activity\mission\mission_trigger_observation.h" />
+    <ClInclude Include="src\server\activity\squad_attachment_ownership_validation.h" />
+    <ClInclude Include="src\server\activity\squad_authored_profile.h" />
+    <ClInclude Include="src\state\activity_sdk\attachment_compatibility.h" />
     <ClInclude Include="src\middleware\bap\activity_message\music_section_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\roster_presence.h" />
     <ClInclude Include="src\middleware\bap\activity_message\scene_events_auth.h" />

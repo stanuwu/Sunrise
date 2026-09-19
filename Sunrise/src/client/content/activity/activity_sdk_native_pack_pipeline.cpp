@@ -137,8 +137,11 @@ void report(ProgressProbe probe, void* context, Phase phase) noexcept {
 }
 
 /** Resolves one exact actor definition tag against the validated sorted actor section. */
-[[nodiscard]] bool
-resolve_actor(void* opaque, std::uint32_t definitionTag, std::uint32_t& output) noexcept {
+[[nodiscard]] bool resolve_actor(void* opaque,
+                                 std::uint32_t definitionTag,
+                                 std::uint32_t& output,
+                                 std::array<std::int8_t, 4>& profile) noexcept {
+    profile = {};
     output = format::kAbsentIndex;
     if (opaque == nullptr) {
         return false;
@@ -154,7 +157,11 @@ resolve_actor(void* opaque, std::uint32_t definitionTag, std::uint32_t& output) 
         || static_cast<std::size_t>(found - actors.begin()) >= format::kAbsentIndex) {
         return false;
     }
+    if (!format::valid_authored_spawn_profile(found->authoredSpawnProfile)) {
+        return false;
+    }
     output = static_cast<std::uint32_t>(found - actors.begin());
+    profile = found->authoredSpawnProfile;
     return true;
 }
 

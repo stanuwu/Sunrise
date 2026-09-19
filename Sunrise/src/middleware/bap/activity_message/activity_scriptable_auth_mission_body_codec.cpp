@@ -443,7 +443,7 @@ bool validate_type68_body(std::span<const std::byte> input, std::size_t bitCount
     if (active >= 0) {
         const std::size_t selected = static_cast<std::size_t>(active);
         if (names[selected] == 0 || names[selected] == kClientRefAbsentKey || elements[selected] < 0
-            || states[selected] < 0 || states[selected] > 2) {
+            || states[selected] < -1 || states[selected] > 2) {
             return false;
         }
     }

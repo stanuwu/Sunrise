@@ -29,6 +29,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "triggerEntered";
     case host::EventKind::triggerExited:
         return "triggerExited";
+    case host::EventKind::triggerState:
+        return "triggerState";
     case host::EventKind::squadState:
         return "squadState";
     case host::EventKind::squadProvoked:
@@ -142,6 +144,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return kTriggerEnteredEventMetatable;
     case host::EventKind::triggerExited:
         return kTriggerExitedEventMetatable;
+    case host::EventKind::triggerState:
+        return kTriggerStateEventMetatable;
     case host::EventKind::squadState:
         return kSquadStateEventMetatable;
     case host::EventKind::squadProvoked:

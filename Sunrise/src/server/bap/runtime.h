@@ -256,8 +256,8 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     std::int32_t expectedRegion,
     std::uint64_t expectedGeneration,
     const activity::host::ScriptableOutputReservation* reservation = nullptr,
-    activity::host::ScriptableOverrideKind kind =
-        activity::host::ScriptableOverrideKind::sdkAuth) noexcept;
+    activity::host::ScriptableOverrideKind kind = activity::host::ScriptableOverrideKind::sdkAuth,
+    std::optional<activity::host::SquadAttachmentOwnership> attachment = std::nullopt) noexcept;
 
 /** Queues a type-31 arm or disarm only while exactly one authenticated link owns the binding. */
 [[nodiscard]] bool request_activity_type31_override(

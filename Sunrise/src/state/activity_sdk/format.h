@@ -10,7 +10,8 @@ namespace sunrise::state::activity_sdk::format {
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
 /** Runtime-pack schema version accepted by this reader. */
-inline constexpr std::uint32_t kVersion = 40;
+/** Version 41 adds independently verified common squad-member profiles. */
+inline constexpr std::uint32_t kVersion = 41;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 50;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
@@ -240,12 +241,35 @@ inline constexpr std::uint32_t kSquadFlagMask =
     | kSquadAllPointsExact | kSquadMemberCountValid | kSquadCandidateCountsInvariantComplete;
 /** A squad runs only with every extraction fact present. */
 inline constexpr std::uint32_t kSquadRunnableMask = kSquadFlagMask;
+/** The spawner names no rule of its own: a placement must select a type-66 rule slot. */
+inline constexpr std::uint32_t kSquadRequiresSelectedRule = 0x40U;
+/** Runnable without the authored edge and its points, which a selected rule replaces. */
+inline constexpr std::uint32_t kSquadSourcePrerequisiteMask =
+    kSquadRunnableMask & ~(kSquadSpawnerRuleEdgeExact | kSquadAllPointsExact);
+/** The mask one squad row must satisfy before it can be placed. */
+[[nodiscard]] constexpr std::uint32_t squad_required_mask(std::uint32_t flags) noexcept {
+    return (flags & kSquadRequiresSelectedRule) != 0 ? kSquadSourcePrerequisiteMask
+                                                     : kSquadRunnableMask;
+}
 /** Member flags separate actor resolution from count-array completeness. */
 inline constexpr std::uint32_t kSquadMemberActorClassExact = 0x1U;
 inline constexpr std::uint32_t kSquadMemberCandidateCountsComplete = 0x2U;
 inline constexpr std::uint32_t kSquadMemberCandidateCountsInvariant = 0x4U;
 inline constexpr std::uint32_t kSquadMemberNoNullCandidates = 0x8U;
-inline constexpr std::uint32_t kSquadMemberFlagMask = 0xFU;
+inline constexpr std::uint32_t kSquadMemberAuthoredProfileExact = 0x10U;
+inline constexpr std::uint32_t kSquadMemberFlagMask = 0x1FU;
+
+/** Auth field 5 lanes 1..4 retain the validated package logical ranges. */
+[[nodiscard]] constexpr bool
+valid_authored_spawn_profile(const std::array<std::int8_t, 4>& profile) noexcept {
+    constexpr std::array<std::int8_t, 4> maximum{2, 6, 2, 6};
+    for (std::size_t index = 0; index < profile.size(); ++index) {
+        if (profile[index] < 0 || profile[index] > maximum[index]) {
+            return false;
+        }
+    }
+    return true;
+}
 inline constexpr std::uint32_t kSquadMemberInvariantReadyMask =
     kSquadMemberCandidateCountsComplete | kSquadMemberCandidateCountsInvariant
     | kSquadMemberNoNullCandidates;
@@ -388,7 +412,7 @@ inline constexpr std::size_t kRsatDescriptorSize = 92;
 inline constexpr std::size_t kRsatSchemaSize = 64;
 inline constexpr std::size_t kRsatFieldSize = 40;
 inline constexpr std::size_t kSquadSize = 52;
-inline constexpr std::size_t kSquadMemberSize = 44;
+inline constexpr std::size_t kSquadMemberSize = 48;
 inline constexpr std::size_t kSquadAnchorSize = 48;
 inline constexpr std::size_t kAuthoredSceneResourceSize = 40;
 inline constexpr std::size_t kAuthoredSceneSquadEdgeSize = 40;
@@ -611,6 +635,7 @@ inline constexpr std::size_t kSquadMemberActorClassIndex = 20;
 inline constexpr std::size_t kSquadMemberFlags = 24;
 inline constexpr std::size_t kSquadMemberCandidateCounts = 28;
 inline constexpr std::size_t kSquadMemberDefaultCount = 40;
+inline constexpr std::size_t kSquadMemberAuthoredSpawnProfile = 44;
 inline constexpr std::size_t kSquadAnchorId = 0;
 inline constexpr std::size_t kSquadAnchorSquadIndex = 8;
 inline constexpr std::size_t kSquadAnchorPointOrdinal = 12;
@@ -1099,6 +1124,7 @@ struct SquadMember final {
     std::uint32_t flags{};
     std::array<std::uint16_t, kSquadCandidateCountLaneCount> candidateCounts{};
     std::int32_t defaultCount{-1};
+    std::array<std::int8_t, 4> authoredSpawnProfile{};
 };
 
 /** One exact authored anchor retains its placed-entry identity and raw position bits. */
@@ -1781,6 +1807,8 @@ static_assert(offsetof(SquadMember, actorClassIndex) == offset::kSquadMemberActo
 static_assert(offsetof(SquadMember, flags) == offset::kSquadMemberFlags);
 static_assert(offsetof(SquadMember, candidateCounts) == offset::kSquadMemberCandidateCounts);
 static_assert(offsetof(SquadMember, defaultCount) == offset::kSquadMemberDefaultCount);
+static_assert(offsetof(SquadMember, authoredSpawnProfile)
+              == offset::kSquadMemberAuthoredSpawnProfile);
 static_assert(offsetof(SquadAnchor, id) == offset::kSquadAnchorId);
 static_assert(offsetof(SquadAnchor, squadIndex) == offset::kSquadAnchorSquadIndex);
 static_assert(offsetof(SquadAnchor, pointOrdinal) == offset::kSquadAnchorPointOrdinal);

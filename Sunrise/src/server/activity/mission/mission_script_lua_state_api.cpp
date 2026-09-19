@@ -1,10 +1,13 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <string_view>
 
+#include "../../../core/logging/log.h"
 #include "mission_script_lua_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
@@ -160,6 +163,58 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
     frame.candidate.phaseChanged = true;
     return 0;
 }
+/**
+ * Emits one script variable write. Controllers park their gate state in named variables
+ * (`later.<name>.status`, `later.<name>.reason`, `route.invalidated`, ...); without this row a
+ * stalled encounter can only be described as "no further requests", never explained.
+ */
+void log_variable_write(const StateKey& key, const VariableValue& value) noexcept {
+    std::array<char, core::log::kLineCapacity> line{};
+    const std::string_view name = state_key_view(key);
+    int written = 0;
+    switch (value.kind) {
+    case VariableValueKind::boolean:
+        written = std::snprintf(line.data(),
+                                line.size(),
+                                "ev=mission_script stage=variable result=set name=%.*s value=%s",
+                                static_cast<int>(name.size()),
+                                name.data(),
+                                value.booleanValue ? "true" : "false");
+        break;
+    case VariableValueKind::integer:
+        written = std::snprintf(line.data(),
+                                line.size(),
+                                "ev=mission_script stage=variable result=set name=%.*s value=%lld",
+                                static_cast<int>(name.size()),
+                                name.data(),
+                                static_cast<long long>(value.integerValue));
+        break;
+    case VariableValueKind::real:
+        written = std::snprintf(line.data(),
+                                line.size(),
+                                "ev=mission_script stage=variable result=set name=%.*s value=%.6g",
+                                static_cast<int>(name.size()),
+                                name.data(),
+                                value.realValue);
+        break;
+    case VariableValueKind::string:
+        written = std::snprintf(line.data(),
+                                line.size(),
+                                "ev=mission_script stage=variable result=set name=%.*s value=%.*s",
+                                static_cast<int>(name.size()),
+                                name.data(),
+                                static_cast<int>(value.stringLength),
+                                value.stringValue.data());
+        break;
+    }
+    if (written > 0) {
+        core::log::write(
+            core::log::Channel::server,
+            core::log::Level::debug,
+            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
+    }
+}
+
 /** Stages one variable write that commits with the enclosing callback. */
 [[nodiscard]] int context_set_variable(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
@@ -185,6 +240,7 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
         ++frame.candidate.variableCount;
     }
     frame.candidate.variables[row] = {key, value};
+    log_variable_write(key, value);
     return 0;
 }
 /** Stages one variable removal that commits with the enclosing callback. */

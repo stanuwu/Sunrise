@@ -74,6 +74,7 @@ struct SceneDefinition final {
 
 /** One scenario-local reusable object slot resolved against the pinned SDK view. */
 struct SlotDefinition final {
+    std::uint32_t objectiveCount{};
     std::string_view id{};
     std::string_view name{};
     std::string_view objectId{};
@@ -444,6 +445,8 @@ enum class OpenStatus : std::uint8_t {
     compileError,
     runtimeError,
     invalidProgram,
+    /** The returned sealed dependency declaration was missing, malformed or incomplete. */
+    dependencyRefused,
 };
 
 /** Stable protected-callback outcome. */

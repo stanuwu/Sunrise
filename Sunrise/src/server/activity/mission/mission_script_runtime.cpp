@@ -267,6 +267,51 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
     ReleaseSRWLockExclusive(&g_lock);
 }
 
+/**
+ * Queues one replicated damage level for a squad slot, once per change.
+ * @param binding Activity generation that accepted the entity update.
+ * @param sourceGeneration ActivityClient generation that owns the policy.
+ * @param registryKey Authored registry key.
+ * @param slotType Authored slot type: the squad's, or the combatant's own.
+ * @param slotIndex Authored slot index.
+ * @param health Pool 0 of the damage component, 0..1023.
+ * @param shield Pool 1 of the damage component, 0..1023.
+ */
+void report_squad_damage(const state::activity::SessionBinding& binding,
+                         std::uint64_t sourceGeneration,
+                         std::uint32_t registryKey,
+                         std::uint8_t slotType,
+                         std::uint16_t slotIndex,
+                         std::uint16_t health,
+                         std::uint16_t shield) noexcept {
+    if (sourceGeneration == 0 || registryKey == 0 || health > 1023 || shield > 1023
+        || slotIndex > static_cast<std::uint16_t>((std::numeric_limits<std::int16_t>::max)())) {
+        return;
+    }
+    AcquireSRWLockExclusive(&g_lock);
+    auto* instance = find_instance(binding);
+    if (instance != nullptr && instance->view.activityClientGeneration == sourceGeneration) {
+        push_entity_damage(*instance,
+                           registryKey,
+                           slotType,
+                           slotIndex,
+                           static_cast<float>(health) / 1023.0F,
+                           static_cast<float>(shield) / 1023.0F,
+                           GetTickCount64());
+    } else {
+        // Bounded evidence: a report that finds no mission is otherwise silent.
+        static unsigned refused = 0;
+        if (refused < 8) {
+            ++refused;
+            log_line(core::log::Level::debug,
+                     instance,
+                     "combatant_damage",
+                     instance == nullptr ? "no_instance" : "stale_generation");
+        }
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
 /** Retains the last VM stage and status shown on the panel. */
 void note_vm_status(RuntimeInstance& instance,
                     std::string_view stage,
@@ -337,6 +382,8 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.ghostObservations = {};
     instance.actorPathObservations = {};
     instance.squadObservations = {};
+    instance.objectInteractionObservations = {};
+    instance.objectObservationHeldRegion = -1;
     instance.combatantDamageObservations = {};
     instance.deviceObservations = {};
     instance.sceneObservations = {};

@@ -786,6 +786,14 @@ private:
                 && resolver_.isZeroBitType(resolver_.context, field.typeCode)) {
                 return RuntimeWalkStatus::complete;
             }
+            // The native union reader dispatches through the per-type table, where a nested
+            // arm is a no-op and a type-34 arm is the ordinary selected-schema reader.
+            if (field.typeCode == 1) {
+                return RuntimeWalkStatus::complete;
+            }
+            if (field.typeCode == 34) {
+                return walk_selected(owner, field, occurrence, depth);
+            }
             return walk_inline_type(owner, field, occurrence, memory, depth + 1);
         }
         if (field.typeCode == 28) {
@@ -817,10 +825,12 @@ private:
                          ValueRole::customIndex);
             return RuntimeWalkStatus::complete;
         }
-        const bool raw64 = field.typeCode == 35;
+        const bool raw64 = is_raw64(field.typeCode);
         const std::uint8_t nativeWidth = raw64 ? 64 : storage_width(field.typeCode);
         const std::uint8_t width = raw64 ? 64 : runtime_declared_width(field);
-        if (nativeWidth == 0 || width == 0) {
+        // Native scalar readers read param[1] bits; a zero width (a union field's own params) reads
+        // none.
+        if (nativeWidth == 0) {
             return RuntimeWalkStatus::unsupportedField;
         }
         const std::uint32_t at = static_cast<std::uint32_t>(reader_.position());
@@ -861,7 +871,7 @@ private:
                             || field.typeCode == 27 || field.typeCode == 28 || field.typeCode == 39
                             || field.typeCode == 40 || field.typeCode == 42 || field.typeCode == 43
                             || field.typeCode == 44 || field.typeCode == 45;
-        const bool raw64 = field.typeCode == 35;
+        const bool raw64 = is_raw64(field.typeCode);
         const bool zeroBit = resolver_.isZeroBitType != nullptr
                              && resolver_.isZeroBitType(resolver_.context, field.typeCode);
         // A selected field carries its schema handle on the wire, so it is structural but must
@@ -876,7 +886,7 @@ private:
         }
         const std::uint8_t nativeWidth = structural || raw64 ? 0 : storage_width(field.typeCode);
         const std::uint8_t declaredWidth = structural || raw64 ? 0 : runtime_declared_width(field);
-        if (!structural && !raw64 && (nativeWidth == 0 || declaredWidth == 0)) {
+        if (!structural && !raw64 && nativeWidth == 0) {
             return RuntimeWalkStatus::unsupportedField;
         }
         for (std::uint32_t index = 0; index < repeats; ++index) {

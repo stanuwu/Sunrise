@@ -3,6 +3,23 @@
 
 namespace sunrise::server::activity::host {
 
+/** @return Stable reason name for one declined ingress submission. */
+const char* ingress_refusal_name(IngressRefusal refusal) noexcept {
+    switch (refusal) {
+    case IngressRefusal::binding:
+        return "host_ingress_refused_binding";
+    case IngressRefusal::generation:
+        return "host_ingress_refused_generation";
+    case IngressRefusal::payload:
+        return "host_ingress_refused_payload";
+    case IngressRefusal::queue:
+        return "host_ingress_refused_queue";
+    case IngressRefusal::none:
+        break;
+    }
+    return "host_ingress_refused";
+}
+
 /** @return Stable UI name for one event kind. */
 const char* event_name(EventKind kind) noexcept {
     switch (kind) {
@@ -42,6 +59,8 @@ const char* event_name(EventKind kind) noexcept {
         return "script effect result";
     case EventKind::phaseEntered:
         return "mission phase entered";
+    case EventKind::triggerState:
+        return "triggerState";
     case EventKind::triggerEntered:
         return "trigger volume entered";
     case EventKind::triggerExited:

@@ -21,10 +21,13 @@ inline constexpr std::uint8_t kLiteralZeroWidth = 1;
 inline constexpr std::size_t kOuterByteCapacity = 514'048;
 /** The client's per-group scratch bounds one group substream. This capacity is also in bytes. */
 inline constexpr std::size_t kGroupByteCapacity = 102'400;
-/** Object rows retained for one diagnostic packet. Parsing continues after this fills. */
-inline constexpr std::size_t kDecodedObjectCapacity = 128;
-/** Scalar rows retained for one diagnostic packet. Parsing continues after this fills. */
-inline constexpr std::size_t kDecodedValueCapacity = 1024;
+/** Owned object rows per packet, shared by diagnostics and accepted mission input.
+ * Build-86657 region transitions exceed 128 rows. Overflow remains explicit and
+ * incomplete values are never delivered; this is a storage budget, not a wire limit.
+ */
+inline constexpr std::size_t kDecodedObjectCapacity = 256;
+/** Owned scalar rows, including absent fields, in the bounded packet storage budget. */
+inline constexpr std::size_t kDecodedValueCapacity = 4096;
 /** Runtime SDK row sentinel shared without depending on the State layer. */
 inline constexpr std::uint32_t kAbsentRuntimeRow = (std::numeric_limits<std::uint32_t>::max)();
 

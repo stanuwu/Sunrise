@@ -81,6 +81,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::phaseEntered:
     case host::EventKind::triggerEntered:
     case host::EventKind::triggerExited:
+    case host::EventKind::triggerState:
     case host::EventKind::squadState:
     case host::EventKind::squadProvoked:
     case host::EventKind::entitySpawned:
@@ -125,7 +126,9 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
            || event.kind == host::EventKind::effectResult
            || event.kind == host::EventKind::phaseEntered
            || event.kind == host::EventKind::triggerEntered
+           || event.kind == host::EventKind::triggerState
            || event.kind == host::EventKind::triggerExited
+           || event.kind == host::EventKind::objectState
            || event.kind == host::EventKind::squadState
            || event.kind == host::EventKind::squadProvoked
            || event.kind == host::EventKind::entitySpawned
@@ -564,6 +567,28 @@ void clear_feed_cursors() noexcept {
     g_missionInputCursor = {};
 }
 
+/** A committed held-region change requires fresh native object levels, preserving replay cursors.
+ */
+void reconcile_object_region(RuntimeInstance& instance, const host::Event& event) noexcept {
+    if (event.kind != host::EventKind::clientStateChanged
+        || instance.objectObservationHeldRegion == event.heldRegionIndex) {
+        return;
+    }
+    // Clearing only the state flag republishes the next level as a baseline without replaying an
+    // already-reported interaction latch.
+    for (auto& observation : instance.objectInteractionObservations) {
+        if (observation.used) {
+            observation.level.stateKnown = false;
+        }
+    }
+    for (auto& observation : instance.triggerOccupancy) {
+        if (observation.used) {
+            observation.tracker.invalidate_levels();
+        }
+    }
+    instance.objectObservationHeldRegion = event.heldRegionIndex;
+}
+
 /**
  * Runs one event through the VM, commits what it changed, and faults on a script failure.
  * @param sense Values owned by a Sense row, or null.
@@ -634,7 +659,7 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
             observe_player_life(instance, *sense);
             publish_fireteam_life(now);
         }
-        push_trigger_edges(instance, *sense);
+        push_trigger_edges(instance, *sense, event.missionSequence);
         push_ghost_edges(instance, *sense);
         push_object_interaction_edges(instance, *sense);
         push_damage_edges(instance, *sense);
@@ -668,6 +693,7 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         if (!commit_mission_state(instance, true, nextInputSequence)) {
             return lua_vm::CallStatus::scriptError;
         }
+        reconcile_object_region(instance, event);
         ++instance.eventsCommitted;
         lua_vm::Snapshot diagnostics{};
         lua_vm::snapshot(instance.vm, diagnostics);
@@ -690,9 +716,11 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         return status;
     }
     if (status == lua_vm::CallStatus::noHandler) {
-        return commit_mission_state(instance, true, nextInputSequence)
-                   ? status
-                   : lua_vm::CallStatus::scriptError;
+        if (!commit_mission_state(instance, true, nextInputSequence)) {
+            return lua_vm::CallStatus::scriptError;
+        }
+        reconcile_object_region(instance, event);
+        return status;
     }
     if (status == lua_vm::CallStatus::inactive) {
         return status;

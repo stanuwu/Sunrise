@@ -8,6 +8,7 @@
 
 #include "../../middleware/gameplay/external/composite_entity_codec.h"
 #include "../../middleware/gameplay/external/simulation_event_runtime_codec.h"
+#include "../../state/activity/runtime.h"
 #include "../../state/activity_sdk/runtime.h"
 #include "../activity/mission/mission_script_runtime.h"
 #include "actor_command_policy.h"
@@ -258,9 +259,63 @@ struct SquadClientRefLayout final {
 
 } // namespace
 
+/** One replicated damage level bound for its mission, staged under the policy lock. */
+struct DamageReport final {
+    state::gameplay::entity_identity::ActorSourceReference source{};
+    state::activity::SessionBinding binding{};
+    std::uint64_t generation{};
+    bool policyBinding{};
+    bool reported{};
+};
+
+/**
+ * An authored actor's replicated damage levels go to its mission as a damage state, keyed by its
+ * squad when the world view knows one and by its own authored slot otherwise. The caller holds the
+ * lock.
+ */
+[[nodiscard]] static DamageReport
+stage_damage_report(const SessionRow& session,
+                    const state::gameplay::entity_identity::Source& origin,
+                    const external::EntityRecord& record,
+                    bool accepted) noexcept {
+    DamageReport report{};
+    const auto& actor = session.actors.slots[record.token.slot];
+    report.source = authored_squad_source(session, actor.authoredSource);
+    report.reported = accepted && (record.flags & external::entityUpdate) != 0
+                      && record.update.damageKnown && actor.occupied
+                      && actor.incarnation == record.token.incarnation && report.source.known
+                      && report.source.present;
+    // A session learns its binding only from a policy; without one the packet's source names it.
+    report.policyBinding = session.policyActive && session.bindingRetained;
+    report.binding = session.binding;
+    report.generation = report.policyBinding ? session.activityClientGeneration
+                                             : origin.activityClientGeneration;
+    return report;
+}
+
+/** Hands a staged level to the mission runtime once the policy lock is released. */
+static void publish_damage_report(DamageReport report,
+                                  const state::gameplay::entity_identity::Source& origin,
+                                  const external::EntityRecord& record) noexcept {
+    if (!report.reported
+        || (!report.policyBinding
+            && !(state::activity::snapshot_binding(origin.activitySessionId, report.binding)
+                 && report.binding.createdRevision == origin.activityRevision))) {
+        return;
+    }
+    server::activity::mission::report_squad_damage(report.binding,
+                                                   report.generation,
+                                                   report.source.key,
+                                                   report.source.type,
+                                                   report.source.index,
+                                                   record.update.damageHealth,
+                                                   record.update.damageShield);
+}
+
 /** Optional policy projection retains only its supported entity metadata. */
-static bool accept_entity_record(std::uint64_t groupSessionId,
+static bool accept_entity_record(const state::gameplay::entity_identity::Source& origin,
                                  const external::EntityRecord& record) noexcept {
+    const std::uint64_t groupSessionId = origin.groupSessionId;
     if (groupSessionId == 0) {
         return false;
     }
@@ -375,7 +430,9 @@ static bool accept_entity_record(std::uint64_t groupSessionId,
         session->actors.classCount = priorClassCount;
         session->actors.slots[record.token.slot] = priorSlot;
     }
+    const DamageReport damage = stage_damage_report(*session, origin, record, accepted);
     ReleaseSRWLockExclusive(&g_lock);
+    publish_damage_report(damage, origin, record);
     if (policyCommandQueued) {
         report(core::log::Level::info,
                "ev=actor_policy stage=command result=queued group=0x%016llX slot=%u incarnation=%u",
@@ -387,9 +444,9 @@ static bool accept_entity_record(std::uint64_t groupSessionId,
 }
 
 /** Policy projection visits every record after transport acceptance. */
-bool accept_entity_batch(std::uint64_t groupSessionId,
+bool accept_entity_batch(const state::gameplay::entity_identity::Source& source,
                          const external::EntityBatch& batch) noexcept {
-    if (groupSessionId == 0
+    if (source.groupSessionId == 0
         || external::entity_record_count(batch) > external::kEntityBatchCapacity) {
         return false;
     }
@@ -398,8 +455,8 @@ bool accept_entity_batch(std::uint64_t groupSessionId,
         if (batch.ignoredRecordMask.test(index)) {
             continue;
         }
-        accepted = accept_entity_record(groupSessionId, external::entity_record_at(batch, index))
-                   && accepted;
+        accepted =
+            accept_entity_record(source, external::entity_record_at(batch, index)) && accepted;
     }
     return accepted;
 }

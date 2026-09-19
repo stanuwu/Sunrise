@@ -11,6 +11,15 @@ namespace {
 
 std::atomic<Snapshot> g_snapshot{};
 std::atomic<Status> g_status{Status::notReady};
+SRWLOCK g_publicationLock = SRWLOCK_INIT;
+
+/** Loading/validation happens before this short swap; no game or Host lock is taken here. */
+void publish_snapshot(Snapshot pending, Status status) noexcept {
+    AcquireSRWLockExclusive(&g_publicationLock);
+    g_snapshot.store(std::move(pending), std::memory_order_release);
+    g_status.store(status, std::memory_order_release);
+    ReleaseSRWLockExclusive(&g_publicationLock);
+}
 
 template <typename Value>
 [[nodiscard]] std::span<const Value>
@@ -317,12 +326,10 @@ void initialize(void* module, const ExpectedIdentity& expected) noexcept {
     std::shared_ptr<Catalog> pending;
     Status result = Status::catalogInvalid;
     if (load(module, expected, pending, result)) {
-        g_snapshot.store(Snapshot(std::move(pending)), std::memory_order_release);
-        g_status.store(Status::ready, std::memory_order_release);
+        publish_snapshot(Snapshot(std::move(pending)), Status::ready);
         return;
     }
-    g_snapshot.store({}, std::memory_order_release);
-    g_status.store(result, std::memory_order_release);
+    publish_snapshot({}, result);
 }
 
 /** Keeps the published mapping when a catalog-authorized replacement cannot be authenticated. */
@@ -332,8 +339,7 @@ bool reload(void* module, const ExpectedIdentity& expected) noexcept {
     if (!load(module, expected, pending, result)) {
         return false;
     }
-    g_snapshot.store(Snapshot(std::move(pending)), std::memory_order_release);
-    g_status.store(Status::ready, std::memory_order_release);
+    publish_snapshot(Snapshot(std::move(pending)), Status::ready);
     return true;
 }
 
@@ -358,8 +364,7 @@ bool reload(void* module) noexcept {
 #endif
 
 void shutdown() noexcept {
-    g_snapshot.store({}, std::memory_order_release);
-    g_status.store(Status::notReady, std::memory_order_release);
+    publish_snapshot({}, Status::notReady);
 }
 
 Status status() noexcept {
@@ -925,6 +930,14 @@ const format::Slot* task_linked_objective_slot(const Catalog& catalog,
                    && slot.authSchema == format::kObjectiveAuthSchema
                ? &slot
                : nullptr;
+}
+
+CatalogPublicationGuard::CatalogPublicationGuard() noexcept {
+    AcquireSRWLockShared(&g_publicationLock);
+}
+
+CatalogPublicationGuard::~CatalogPublicationGuard() noexcept {
+    ReleaseSRWLockShared(&g_publicationLock);
 }
 
 } // namespace sunrise::state::activity_sdk

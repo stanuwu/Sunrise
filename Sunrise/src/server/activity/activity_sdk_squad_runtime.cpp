@@ -6,10 +6,12 @@
 #include <string_view>
 
 #include "../../middleware/content/packages/tables/region_reader.h"
+#include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/activity/runtime.h"
 #include "../../state/build_data/runtime.h"
 #include "../bap/runtime.h"
 #include "host_runtime.h"
+#include "squad_authored_profile.h"
 
 namespace sunrise::server::activity::activity_sdk_squads {
 namespace {
@@ -95,30 +97,7 @@ struct PreparedSquad final {
                                     const format::Squad& squad,
                                     std::span<const std::int32_t> requestedCounts,
                                     std::array<std::int8_t, 4>& output) noexcept {
-    output = {};
-    const auto members = sdk::squad_members(catalog, squad);
-    const auto actors = catalog.actor_classes();
-    bool found = false;
-    // A named type-2 member needs its parent's authored profile but zero loose actors.
-    const bool loose = std::any_of(
-        requestedCounts.begin(), requestedCounts.end(), [](auto count) { return count > 0; });
-    for (std::size_t index = 0; index < members.size(); ++index) {
-        if (loose && requestedCounts[index] <= 0) {
-            continue;
-        }
-        const format::SquadMember& member = members[index];
-        if ((member.flags & format::kSquadMemberActorClassExact) == 0
-            || member.actorClassIndex >= actors.size()) {
-            return false;
-        }
-        const auto& candidate = actors[member.actorClassIndex].authoredSpawnProfile;
-        if (found && candidate != output) {
-            return false;
-        }
-        output = candidate;
-        found = true;
-    }
-    return found;
+    return select_authored_profile(sdk::squad_members(catalog, squad), requestedCounts, output);
 }
 /** Checks the generated source slot before it can select a wire roster target. */
 [[nodiscard]] bool valid_generated_slot(const sdk::Catalog& catalog,
@@ -322,7 +301,8 @@ struct PreparedSquad final {
     if (squad.scenarioIndex != view.scenarioRow) {
         return Status::wrongScenario;
     }
-    if ((squad.flags & format::kSquadRunnableMask) != format::kSquadRunnableMask) {
+    const auto requiredMask = format::squad_required_mask(squad.flags);
+    if ((squad.flags & requiredMask) != requiredMask) {
         return Status::notRunnable;
     }
     const Status members = member_status(catalog, squad, squadRow, requestedCounts);
@@ -463,11 +443,15 @@ retirement_eligibility(const sdk::BoundView& view,
                                         std::optional<std::uint32_t> spawnRuleSlotRow,
                                         std::optional<squad_auth::SpawnRule>& output) noexcept {
     output.reset();
-    if (!spawnRuleSlotRow.has_value()) {
-        return Status::ready;
-    }
     const auto squads = catalog.squads();
     const auto slots = catalog.slots();
+    if (!spawnRuleSlotRow.has_value()) {
+        // A spawner with no rule of its own cannot be placed without a selected one.
+        return squadRow < squads.size()
+                       && (squads[squadRow].flags & format::kSquadRequiresSelectedRule) != 0
+                   ? Status::notRunnable
+                   : Status::ready;
+    }
     if (squadRow >= squads.size() || *spawnRuleSlotRow >= slots.size()) {
         return Status::invalidSquad;
     }

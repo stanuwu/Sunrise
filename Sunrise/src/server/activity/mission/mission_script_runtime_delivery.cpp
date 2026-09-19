@@ -422,6 +422,9 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
     case lua_vm::IntentKind::signalAuthoredScene:
         result = "scene_event_staged";
         break;
+    case lua_vm::IntentKind::setSquadAttachment:
+        result = "attachment_staged";
+        break;
     case lua_vm::IntentKind::activateAuthoredScene:
         result = "scene_staged";
         break;

@@ -197,8 +197,8 @@ constexpr std::int8_t kFilterModeInside = 1;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
     // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 4> kDeclared{
-        "players", "target", "inside", "inside_any"};
+    static constexpr std::array<std::string_view, 6> kDeclared{
+        "players", "target", "targets", "squad", "inside", "inside_any"};
     refuse_unknown_arguments(state, kDeclared);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot) || slot.slotType != auth::kType34SlotType
@@ -243,6 +243,44 @@ constexpr std::int8_t kFilterModeInside = 1;
     }
     if (target.slotIndex >= 0) {
         body.predicates[body.count++] = auth::Type34ModeSlotRefC{kFilterModeDirect, target};
+    }
+    // Several authored objects at once (a beam hop-on names every crystal it tethers).
+    lua_getfield(state, 2, "targets");
+    if (!lua_isnil(state, -1)) {
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const std::size_t count = lua_rawlen(state, -1);
+        if (count == 0 || count + body.count > auth::kType34PredicateCapacity) {
+            return luaL_error(state, "targets count is outside the filter capacity");
+        }
+        for (std::size_t index = 1; index <= count; ++index) {
+            lua_rawgeti(state, -1, static_cast<lua_Integer>(index));
+            const auto* const targetHandle =
+                static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
+            SlotDefinition object{};
+            if (!current_slot(state, *targetHandle, object)
+                || object.slotType != auth::kType4SlotType
+                || object.slotIndex > auth_fields::kMaximumClientRefIndex) {
+                return luaL_error(state, "targets require authored type-4 objects");
+            }
+            body.predicates[body.count++] =
+                auth::Type34ModeSlotRefC{kFilterModeDirect,
+                                         {object.registryKey,
+                                          static_cast<std::int8_t>(auth::kType4SlotType),
+                                          static_cast<std::int16_t>(object.slotIndex)}};
+            lua_pop(state, 1);
+        }
+    }
+    lua_pop(state, 1);
+    // A squad reference selects the boss a shield/tether hop-on hosts on.
+    auth::Type2LaneClientRef squad{};
+    if (!optional_slot_reference(state, "squad", 1U, squad)) {
+        return luaL_error(state, "filter squad must be an authored type-1 squad");
+    }
+    if (squad.slotIndex >= 0) {
+        if (body.count >= auth::kType34PredicateCapacity) {
+            return luaL_error(state, "squad does not fit the filter capacity");
+        }
+        body.predicates[body.count++] = auth::Type34ModeSlotRefC{kFilterModeDirect, squad};
     }
     auth::Type2LaneClientRef inside{};
     if (!optional_slot_reference(state, "inside", auth::kType60SlotType, inside)) {

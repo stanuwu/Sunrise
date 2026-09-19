@@ -28,6 +28,8 @@ struct Prepared {
     middleware::queuez::Family family{};
     std::size_t rawClearSize{};
     std::size_t compressedClearSize{};
+    /** Exact account/character used to encode a Family-4 image, zero for other families. */
+    std::array<std::uint64_t, 2> accountIdentity{};
 
     // Default copying would leave family.objects pointing into the source descriptor array.
     Prepared() noexcept = default;

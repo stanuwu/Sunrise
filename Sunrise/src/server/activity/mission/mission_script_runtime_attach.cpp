@@ -86,8 +86,10 @@ reload_authorization(const state::activity::SessionBinding& binding) noexcept {
     return module;
 }
 
+} // namespace
+
 /** True when the link, the SDK view and the world view still match what the instance bound. */
-[[nodiscard]] bool still_exact(RuntimeInstance& instance) noexcept {
+bool still_exact(RuntimeInstance& instance) noexcept {
     server::bap::ActivityLinkView link{};
     lua_vm::WorldGenerationIdentity worldGeneration{};
     return server::bap::activity_link_view(instance.view.binding, link)
@@ -103,6 +105,8 @@ reload_authorization(const state::activity::SessionBinding& binding) noexcept {
                   == instance.view.activityClientGeneration
            && sdk_bridge::world_generation_identity(instance.worldView, worldGeneration);
 }
+
+namespace {
 
 /**
  * Re-points one open program at the current ActivityClient generation.

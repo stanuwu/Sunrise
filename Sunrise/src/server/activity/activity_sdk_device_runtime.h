@@ -37,6 +37,8 @@ enum class Status : std::uint8_t {
     refused,
     /** The slot type faults the stock client from wire-legal values, so no body reaches it. */
     refusedSlotType,
+    /** Loaded SDK data has not been audited for owned squad attachments. */
+    unsupportedAttachmentPayload,
 };
 
 /**
@@ -128,6 +130,15 @@ play_combatant_sequence_reserved(const state::activity_sdk::BoundView& view,
     std::span<const std::byte> sdkBuildSha256,
     const host::ScriptableOutputReservation& reservation,
     host::ScriptableOverrideKind kind = host::ScriptableOverrideKind::sdkAuth) noexcept;
+
+/** Selects or clears an audited attachment using one delivered squad spawn generation. */
+[[nodiscard]] Status
+set_squad_attachment_reserved(const state::activity_sdk::BoundView& view,
+                              std::uint32_t slotRow,
+                              std::uint32_t sourceRow,
+                              std::uint64_t sourceSpawnGeneration,
+                              bool active,
+                              const host::ScriptableOutputReservation& reservation) noexcept;
 
 /**
  * Instantiates or removes package-authored type-4 entries, one push for the whole run.
