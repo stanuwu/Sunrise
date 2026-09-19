@@ -17,6 +17,7 @@ struct MemberPurge final {
     entity_slots::LeaseMask slots{};
     std::uint64_t accountSoid{};
     std::uint64_t memberKey{};
+    std::uint64_t replicationSequence{};
 };
 /** Copies the bound member's owed purge without consuming it; false clears output. */
 [[nodiscard]] bool pending_member_purge(const SessionBinding& binding,
@@ -24,6 +25,14 @@ struct MemberPurge final {
                                         MemberPurge& output) noexcept;
 /** Commits only after the complete frame fits; advances the receipt barrier for slot reuse. */
 [[nodiscard]] bool commit_member_purge(const MemberPurge& pending) noexcept;
+/** Reads the shared replication sequence for one exact private or public session. */
+[[nodiscard]] bool replication_sequence(const SessionBinding& binding,
+                                        std::uint64_t& sequence) noexcept;
+/** Advances the shared sequence once, refusing stale preparations and exhausted counters. */
+[[nodiscard]] bool
+advance_replication_sequence(const SessionBinding& binding,
+                             std::uint64_t expected,
+                             const MemberPurge* deliveredPurge = nullptr) noexcept;
 /** Consumes the exact native member's connection departure without disbanding its fireteam. */
 [[nodiscard]] bool depart_member(const SessionBinding& binding,
                                  std::uint64_t accountSoid,

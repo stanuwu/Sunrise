@@ -4,16 +4,112 @@
 
 #include "../../../../../middleware/bap/activity_message/activity_host_control.h"
 #include "../../../../../middleware/bap/activity_message/activity_join_result_encoder.h"
+#include "../../../../../middleware/bap/activity_message/activity_replication_epoch_encoder.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
 #include "../../../../../state/activity/member_departure.h"
+#include "../../../../gameplay/peer/peer_transport.h"
 #include "activity_notification_frame.h"
 #include "internal.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
-namespace {
-/** Single-bubble selector; a departure purge names one bubble. */
-constexpr std::uint8_t kDepartureBubbleSelector = 0;
-} // namespace
+bool append_replication_steps(Session& session,
+                              Scratch& scratch,
+                              std::uint64_t target,
+                              const state::activity::MemberPurge* purge,
+                              std::span<const std::byte, state::kAesKeySize> key,
+                              std::array<std::byte, state::kBapNonceSize>& nonce,
+                              std::span<std::byte> response,
+                              std::size_t& written) noexcept {
+    namespace control = middleware::bap::activity_message::host_control;
+    namespace epoch = middleware::bap::activity_message::replication_epoch;
+    if (target < session.activity.replicationSequence
+        || (purge && purge->memberKey
+            && (purge->replicationSequence <= session.activity.replicationSequence
+                || purge->replicationSequence > target))) {
+        return false;
+    }
+    for (auto sequence = session.activity.replicationSequence; sequence < target;) {
+        ++sequence;
+        std::array<std::byte, control::kPurgeAuthorityByteCount> bytes{};
+        std::size_t size{};
+        const bool hasPurge = purge && purge->memberKey && purge->replicationSequence == sequence;
+        const bool encoded =
+            hasPurge ? control::encode_purge_authority(
+                           {purge->slots, static_cast<std::uint8_t>(sequence), 0}, bytes, size)
+                     : epoch::encode(static_cast<std::uint8_t>(sequence), bytes, size);
+        if (!encoded
+            || !append_notification_frame(scratch,
+                                          session.activity.session.sessionId,
+                                          hasPurge ? control::kPurgeAuthorityMessageType
+                                                   : epoch::kMessageType,
+                                          std::span(bytes).first(size),
+                                          key,
+                                          nonce,
+                                          response,
+                                          written)) {
+            return false;
+        }
+        middleware::secure_channel::advance_nonce(nonce);
+    }
+    return true;
+}
+
+std::size_t commit_replication_steps(Session& session, std::uint64_t target) noexcept {
+    std::size_t updated{};
+    while (session.activity.replicationSequence < target) {
+        const auto previous = session.activity.replicationEpoch;
+        ++session.activity.replicationSequence;
+        session.activity.replicationEpoch =
+            static_cast<std::uint8_t>(session.activity.replicationSequence);
+        updated +=
+            server::gameplay::peer::commit_replication_epoch(session.activity.session,
+                                                             session.activity.bindingGeneration,
+                                                             previous,
+                                                             session.activity.replicationEpoch);
+        auto& request = session.activityReplicationEpoch;
+        if (request.bindingGeneration == session.activity.bindingGeneration
+            && request.generation == session.activity.replicationEpoch) {
+            request.pending = false;
+            request.staged = false;
+        }
+    }
+    return updated;
+}
+
+bool consume_replication_step(Session& session,
+                              Scratch& scratch,
+                              std::span<std::byte> response,
+                              std::size_t& written,
+                              bool& touchesScratch) noexcept {
+    written = 0;
+    std::uint64_t target{};
+    if (!session.authenticated || !session.activityJoinGeneration
+        || session.activityJoinGeneration != session.activity.bindingGeneration
+        || !state::activity::replication_sequence(session.activity.session, target)
+        || session.activity.replicationSequence >= target) {
+        return false;
+    }
+    state::activity::MemberPurge pending{};
+    if (state::activity::pending_member_purge(
+            session.activity.session, session.activityMemberKey, pending)
+        && pending.replicationSequence == session.activity.replicationSequence + 1) {
+        return false;
+    }
+    auto nonce = session.sendNonce;
+    std::size_t size{};
+    touchesScratch = true;
+    const auto next = session.activity.replicationSequence + 1;
+    if (!append_replication_steps(
+            session, scratch, next, nullptr, session.sessionKey, nonce, scratch.framed, size)
+        || size > response.size()) {
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), size, response.begin());
+    written = size;
+    session.sendNonce = nonce;
+    commit_replication_steps(session, next);
+    return true;
+}
 
 bool consume_member_rejoin(Session& session,
                            Scratch& scratch,
@@ -24,6 +120,11 @@ bool consume_member_rejoin(Session& session,
     if (!session.authenticated || !session.activityMemberKey || !session.activityJoinGeneration
         || session.activityJoinGeneration != session.activity.bindingGeneration
         || !session.activityJoinCorrelation) {
+        return false;
+    }
+    std::uint64_t currentSequence{};
+    if (!state::activity::replication_sequence(session.activity.session, currentSequence)
+        || currentSequence != session.activity.replicationSequence) {
         return false;
     }
     state::activity::JoinedMemberSet members{};
@@ -51,6 +152,7 @@ bool consume_member_rejoin(Session& session,
                                                   session.activity.session.sessionId,
                                                   kLocalPeerHeardWindowMilliseconds,
                                                   kLocalKeepaliveHintMilliseconds,
+                                                  session.activity.replicationEpoch,
                                                   bytes,
                                                   bodySize)
                          && append_notification_frame(scratch,
@@ -90,9 +192,14 @@ bool consume_member_departure(Session& session,
         return false;
     }
     namespace control = middleware::bap::activity_message::host_control;
-    // Departure names one bubble with selector zero. Only a client-requested authority purge
-    // advances the replication epoch; this notification must not spend that handshake's value.
-    const control::PurgeAuthorityBody body{pending.slots, kDepartureBubbleSelector, 0};
+    // Native 16F0CE0 forwards this byte through world command 17 to 170B030, which
+    // requires the next replication epoch for every purge, including a departure.
+    const auto previousEpoch = session.activity.replicationEpoch;
+    if (pending.replicationSequence != session.activity.replicationSequence + 1) {
+        return false;
+    }
+    const auto nextEpoch = static_cast<std::uint8_t>(pending.replicationSequence);
+    const control::PurgeAuthorityBody body{pending.slots, nextEpoch, 0};
     std::array<std::byte, control::kPurgeAuthorityByteCount> bytes{};
     std::size_t bodySize{}, framedSize{};
     auto nonce = session.sendNonce;
@@ -115,6 +222,16 @@ bool consume_member_departure(Session& session,
     written = framedSize;
     middleware::secure_channel::advance_nonce(nonce);
     session.sendNonce = nonce;
+    session.activity.replicationSequence = pending.replicationSequence;
+    session.activity.replicationEpoch = nextEpoch;
+    static_cast<void>(server::gameplay::peer::commit_replication_epoch(
+        session.activity.session, session.activity.bindingGeneration, previousEpoch, nextEpoch));
+    auto& request = session.activityReplicationEpoch;
+    if (request.bindingGeneration == session.activity.bindingGeneration
+        && request.generation == nextEpoch) {
+        request.pending = false;
+        request.staged = false;
+    }
     session.activityKeepaliveDueTick = 0;
     return true;
 }

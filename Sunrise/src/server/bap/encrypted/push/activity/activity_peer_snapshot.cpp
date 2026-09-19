@@ -5,6 +5,34 @@
 #include "../../../activity_transport_publication.h"
 
 namespace sunrise::server::bap::encrypted::push {
+namespace {
+/** Resolves one account/character-bound public name for either local or remote membership. */
+std::uint8_t project_name(std::uint64_t account,
+                          std::uint64_t character,
+                          std::span<std::uint16_t> output) noexcept {
+    state::AccountHandle owner{};
+    std::array<char, state::kDisplayNameCapacity> name{};
+    std::uint8_t length{};
+    if (state::account::profiles::find(account, owner)
+        && state::account::profiles::selected_member_name(owner, character, name)) {
+        for (const char c : name) {
+            if (!c || length == output.size()) {
+                break;
+            }
+            output[length++] = static_cast<unsigned char>(c);
+        }
+    }
+    return length;
+}
+} // namespace
+
+void project_activity_local_name(
+    middleware::bap::activity_message::replicate_membership::MembershipSnapshot& output) noexcept {
+    output.localName = {};
+    output.localNameLength =
+        project_name(output.identity.accountSoid, output.identity.field5, output.localName);
+}
+
 void project_activity_peers(
     const state::activity::reservations::Roster& roster,
     middleware::bap::activity_message::replicate_membership::MembershipSnapshot& output) noexcept {
@@ -27,17 +55,7 @@ void project_activity_peers(
                          identity.secondaryOpaque};
         peer.present = true;
         // Selection may change before native release; keep the committed reservation visible.
-        state::AccountHandle owner{};
-        std::array<char, state::kDisplayNameCapacity> name{};
-        if (state::account::profiles::find(identity.accountSoid, owner)
-            && state::account::profiles::selected_member_name(owner, identity.opaqueSoid, name)) {
-            for (const char c : name) {
-                if (!c || peer.nameLength == peer.name.size()) {
-                    break;
-                }
-                peer.name[peer.nameLength++] = static_cast<unsigned char>(c);
-            }
-        }
+        peer.nameLength = project_name(identity.accountSoid, identity.opaqueSoid, peer.name);
         peer.hasName = peer.nameLength != 0;
         middleware::bap::activity_message::TransportReport transport{};
         if (!published_activity_transport_locked(

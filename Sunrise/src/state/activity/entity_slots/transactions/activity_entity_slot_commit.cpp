@@ -63,7 +63,8 @@ bool apply_shared(ActivityState& state,
         }
         const auto derived =
             plan_member_lease(leases, plan.memberRow, plan.serverMask, plan.requestedCount);
-        if (!derived.valid || derived != plan.memberLease || plan.mask != derived.mask) {
+        if (!derived.valid || derived != plan.memberLease || plan.mask != derived.mask
+            || plan.replicationSequence != leases.replicationSequence) {
             return false;
         }
         const bool alreadyJoined = member_joined(record, plan.memberRow) && !previousKey;

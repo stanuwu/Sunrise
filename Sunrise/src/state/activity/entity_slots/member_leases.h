@@ -23,6 +23,10 @@ struct MemberLeases final {
     /** Held until a membership acknowledgement follows that recipient's purge. */
     std::array<LeaseMask, kMemberLeaseRowCount> retired{};
     std::array<std::uint32_t, kMemberLeaseRowCount> purgeRevision{};
+    /** Session-wide replication sequence; its low byte is the native epoch. */
+    std::uint64_t replicationSequence{};
+    /** Sequence at which each recipient must apply its retained departure mask. */
+    std::array<std::uint64_t, kMemberLeaseRowCount> purgeSequence{};
     std::uint32_t joinedRows{};
     std::uint16_t blockWidth{};
     std::uint8_t nextBlock{};
@@ -156,6 +160,11 @@ inline void depart_member_lease(MemberLeases& leases, std::size_t row) noexcept 
     if (row >= kMemberLeaseRowCount || !(leases.joinedRows & (1U << row))) {
         return;
     }
+    const bool purges =
+        slot_count(leases.held[row]) != 0 && (leases.joinedRows & ~(1U << row)) != 0;
+    if (purges) {
+        ++leases.replicationSequence;
+    }
     for (std::size_t survivor = 0; survivor < kMemberLeaseRowCount; ++survivor) {
         if (survivor == row || !(leases.joinedRows & (1U << survivor))) {
             continue;
@@ -165,7 +174,11 @@ inline void depart_member_lease(MemberLeases& leases, std::size_t row) noexcept 
             leases.retired[survivor][index] |= leases.held[row][index];
         }
         leases.purgeRevision[survivor] = 0;
+        if (purges) {
+            leases.purgeSequence[survivor] = leases.replicationSequence;
+        }
     }
+    leases.purgeSequence[row] = 0;
     leases.purgeOwed[row] = {};
     leases.retired[row] = {};
     leases.purgeRevision[row] = 0;

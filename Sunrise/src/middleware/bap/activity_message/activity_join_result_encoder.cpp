@@ -27,7 +27,9 @@ constexpr std::size_t kJoinStatusBitOffset = 570;
 constexpr std::size_t kJoinStatusBitCount = 3;
 /** Stored join-status value 1 decodes to the accepted enum. */
 constexpr std::uint8_t kAcceptedJoinStatus = 1;
-/** The peer-heard window starts at schema bit 1,765, immediately before the keepalive hint. */
+/** Native schema 0x80808693 decodes bits 1757..1764 into join-result +0x2A08. */
+constexpr std::size_t kReplicationEpochBitOffset = 1'757;
+/** The peer-heard window immediately follows the replication epoch. */
 constexpr std::size_t kPeerHeardWindowBitOffset = 1'765;
 /** The peer-heard window is one unsigned 16-bit schema field. */
 constexpr std::size_t kPeerHeardWindowBitCount = encoding::kU16Size * encoding::kBitsPerByte;
@@ -55,6 +57,7 @@ constexpr std::uint32_t kSignedZero = 0x80000000;
 static_assert(kEncodedSize
               == (kMeaningfulBitCount + encoding::kBitsPerByte - 1) / encoding::kBitsPerByte);
 static_assert(kJoinStatusBitOffset + kJoinStatusBitCount <= kMeaningfulBitCount);
+static_assert(kReplicationEpochBitOffset + encoding::kBitsPerByte == kPeerHeardWindowBitOffset);
 static_assert(kPeerHeardWindowBitOffset + kPeerHeardWindowBitCount <= kMeaningfulBitCount);
 static_assert(kKeepaliveBitOffset + kKeepaliveBitCount <= kMeaningfulBitCount);
 // The two fields abut, so a gap or an overlap here would silently corrupt both.
@@ -123,6 +126,7 @@ bool encode_join_result(std::uint32_t correlation,
                         std::uint64_t sessionId,
                         std::uint16_t peerHeardWindowMs,
                         std::uint16_t keepaliveHintMs,
+                        std::uint8_t replicationEpoch,
                         std::span<std::byte> output,
                         std::size_t& written) noexcept {
     written = {};
@@ -139,6 +143,7 @@ bool encode_join_result(std::uint32_t correlation,
     write_bits(body, kJoinStatusBitOffset, kJoinStatusBitCount, kAcceptedJoinStatus);
     write_bits(body, kPeerHeardWindowBitOffset, kPeerHeardWindowBitCount, peerHeardWindowMs);
     write_bits(body, kKeepaliveBitOffset, kKeepaliveBitCount, keepaliveHintMs);
+    write_bits(body, kReplicationEpochBitOffset, 8, replicationEpoch);
     // The biased fields below have no host value yet, so they carry their logical zero. Leaving
     // them at raw zero sends 0x80 text filler and a return code of INT32_MIN.
     write_bits(body, kOopahReturnCodeBitOffset, kOopahReturnCodeBitCount, kSignedZero);

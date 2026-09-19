@@ -99,8 +99,8 @@ template <std::size_t Size>
 /** Writes the player blob, including the partition consumed by native participation sensing. */
 [[nodiscard]] bool write_player_blob(encoding::bits::Writer& writer,
                                      const client_identity::ClientIdentity& identity,
-                                     const PeerMember* peer) noexcept {
-    const bool named = peer != nullptr && peer->hasName;
+                                     std::span<const std::uint16_t> nameUnits,
+                                     bool named) noexcept {
     const auto name = [&]() noexcept {
         if (!writer.write(named ? 1U : 0U, 1)) {
             return false;
@@ -108,8 +108,8 @@ template <std::size_t Size>
         if (!named) {
             return true;
         }
-        for (std::size_t i = 0; i < peer->nameLength; ++i) {
-            if (!writer.write(peer->name[i], 16)) {
+        for (const auto unit : nameUnits) {
+            if (!writer.write(unit, 16)) {
                 return false;
             }
         }
@@ -138,7 +138,11 @@ template <std::size_t Size>
                                          const client_identity::ClientIdentity& identity,
                                          const RemoteViewMember* remote,
                                          std::uint64_t activityHostId,
-                                         const PeerMember* peer) noexcept {
+                                         const PeerMember* peer,
+                                         std::span<const std::uint16_t> localName) noexcept {
+    const bool named = peer != nullptr ? peer->hasName : !localName.empty();
+    const auto nameUnits =
+        peer != nullptr ? std::span(peer->name).first(peer->nameLength) : localName;
     for (std::size_t field = 0; field < kIdentityPresenceFieldCount; ++field) {
         const bool present =
             field == 3 || field == 4 || field == 5 || field == 14
@@ -190,12 +194,11 @@ template <std::size_t Size>
             return false;
         }
         if (field == 14
-            && (!writer.write(kPlayerBlobByteCount
-                                  + (peer != nullptr && peer->hasName
-                                         ? kPlayerBlobNameByteCount * (peer->nameLength + 1U)
-                                         : 0U),
-                              kPlayerBlobLengthWidth)
-                || !write_player_blob(writer, identity, peer))) {
+            && (!writer.write(
+                    kPlayerBlobByteCount
+                        + (named ? kPlayerBlobNameByteCount * (nameUnits.size() + 1U) : 0U),
+                    kPlayerBlobLengthWidth)
+                || !write_player_blob(writer, identity, nameUnits, named))) {
             return false;
         }
     }
@@ -264,7 +267,8 @@ template <std::size_t Size>
                                 const RegionLeg& pendingLeg,
                                 std::uint8_t syncToken,
                                 std::uint64_t activityHostId,
-                                const PeerMember* peer = nullptr) noexcept {
+                                const PeerMember* peer = nullptr,
+                                std::span<const std::uint16_t> localName = {}) noexcept {
     const std::uint32_t field1Wire = std::bit_cast<std::uint32_t>(identity.field1) + kField1Bias;
     const std::uint32_t field2Wire = std::bit_cast<std::uint32_t>(identity.field2) + kField2Bias;
     return writer.write(1, 1) && write_member_key(writer, identity.memberKey)
@@ -272,7 +276,7 @@ template <std::size_t Size>
            && writer.write(identity.field3, 64) && writer.write(identity.accountSoid, 64)
            && writer.write(identity.field5, 64) && writer.write(identity.field6, 64)
            && writer.write(1, 1) && writer.write(1, 1)
-           && write_player_identity(writer, identity, remote, activityHostId, peer)
+           && write_player_identity(writer, identity, remote, activityHostId, peer, localName)
            && (peer != nullptr ? write_peer_transition(writer, *peer)
                                : write_member_transition(writer, currentLeg, pendingLeg, syncToken))
            && writer.write(0, 1) && writer.write(0, 1) && writer.write(1, 1)
@@ -335,8 +339,14 @@ template <std::size_t Size>
 /** Checks the fields that could otherwise encode outside their own wire width. */
 bool valid(const MembershipSnapshot& snapshot) noexcept {
     namespace authoritative = client_authoritative_data;
-    if (snapshot.localSlot >= kMemberCount || snapshot.localSlot == kServiceHostSlot) {
+    if (snapshot.localSlot >= kMemberCount || snapshot.localSlot == kServiceHostSlot
+        || snapshot.localNameLength > snapshot.localName.size()) {
         return false;
+    }
+    for (std::size_t i = 0; i < snapshot.localNameLength; ++i) {
+        if (snapshot.localName[i] == 0) {
+            return false;
+        }
     }
     for (std::size_t i = 0; i < snapshot.peers.size(); ++i) {
         const auto& peer = snapshot.peers[i];
@@ -394,7 +404,9 @@ bool write_member_table(encoding::bits::Writer& writer,
                                    snapshot.currentLeg,
                                    snapshot.pendingLeg,
                                    snapshot.teleport.token,
-                                   snapshot.activityHostId);
+                                   snapshot.activityHostId,
+                                   nullptr,
+                                   std::span(snapshot.localName).first(snapshot.localNameLength));
         } else if (slot == 1 && snapshot.remoteViewMember.present) {
             encoded = write_member(writer,
                                    snapshot.remoteViewMember.identity,

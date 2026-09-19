@@ -166,6 +166,8 @@ void publish_connection_fields(Session& session,
         }
         release_host_generations(session.activityAdvertisementHeld);
         reset_join_state(session);
+        session.activity.replicationSequence = publication.activity.replicationSequence;
+        session.activity.replicationEpoch = publication.activity.replicationEpoch;
         session.activityMemberKey = fields.joinMemberKey;
         session.activityJoinGeneration = session.activity.bindingGeneration;
         session.activityJoinCorrelation = fields.joinCorrelation;

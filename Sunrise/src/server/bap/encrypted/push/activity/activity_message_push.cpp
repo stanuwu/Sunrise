@@ -50,12 +50,14 @@ bool append_join_notifications(Scratch& scratch,
     const std::size_t initialWritten = written;
     auto initialNonce = nonce;
     std::size_t messageSize = 0;
-    bool encoded = service::join_result::encode_join_result(activity.correlation,
-                                                            activity.sessionId,
-                                                            kLocalPeerHeardWindowMilliseconds,
-                                                            kLocalKeepaliveHintMilliseconds,
-                                                            scratch.responseBody,
-                                                            messageSize)
+    bool encoded = service::join_result::encode_join_result(
+                       activity.correlation,
+                       activity.sessionId,
+                       kLocalPeerHeardWindowMilliseconds,
+                       kLocalKeepaliveHintMilliseconds,
+                       static_cast<std::uint8_t>(activity.entitySlotMutation.replicationSequence),
+                       scratch.responseBody,
+                       messageSize)
                    && append_notification_frame(scratch,
                                                 activity.sessionId,
                                                 kJoinResultMessageType,

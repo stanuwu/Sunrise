@@ -25,6 +25,7 @@
 #include "activity_transaction/activity_transaction_notifications.h"
 #include "bap_connection_publication.h"
 #include "internal.h"
+#include "push/activity/activity_member_departure_push.h"
 #include "push/activity/activity_roster_push.h"
 #include "queuez/queuez_outcome_staging.h"
 #include "social_feed_route.h"
@@ -419,7 +420,8 @@ bool consume(Session& session,
                                                               session.sessionKey,
                                                               nextSendNonce,
                                                               scratch.framed,
-                                                              framedSize)) {
+                                                              framedSize,
+                                                              false)) {
             // Reports still commit their observed state; a failed snapshot answer commits nothing.
             diagnostics::report_failure(frame.serviceId, "notify");
             if (activityPlan->mutationDomain == activity_message::MutationDomain::authorityPurge
@@ -539,13 +541,8 @@ bool consume(Session& session,
                 }
                 if (activityPlan->mutationDomain
                     == activity_message::MutationDomain::authorityPurge) {
-                    const auto previousEpoch = session.activity.replicationEpoch;
-                    session.activity.replicationEpoch = activityPlan->authorityPurge.body.epoch;
-                    const auto updatedViews = server::gameplay::peer::commit_replication_epoch(
-                        session.activity.session,
-                        session.activity.bindingGeneration,
-                        previousEpoch,
-                        session.activity.replicationEpoch);
+                    const auto updatedViews = push::activity::commit_replication_steps(
+                        session, activityPlan->authorityPurge.expectedSequence + 1);
                     state::activity::bubble_authority::record_purge(
                         activityPlan->sessionId, activityPlan->authorityPurge.body.slots);
                     server::gameplay::squad_entity_retirement::returned_slots(

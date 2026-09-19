@@ -149,6 +149,7 @@ struct RosterPublication {
     state::activity::bubble_authority::Grant grant{};
     state::gameplay::squad_entity_retirement::RetirementPlan entityRetirement{};
     /** Epochs remain staged until both retirement and roster frames reach the caller. */
+    std::uint64_t retirementSequence{};
     std::uint8_t retirementPriorEpoch{};
     std::uint8_t retirementBaseEpoch{};
     std::uint8_t retirementEpoch{};
@@ -299,7 +300,9 @@ struct ActivityClientBinding {
     std::uint64_t hostGeneration{};
     /** Changes on every bind and rejoin, even when the session id stays the same. */
     std::uint64_t bindingGeneration{};
-    /** Epoch this host authored in the accepted join result. */
+    /** Last sequence queued on this ordered connection, not proof of client application. */
+    std::uint64_t replicationSequence{};
+    /** Low byte of the last sequence queued on this connection. */
     std::uint8_t replicationEpoch{};
     /** Private: last citizen region. Public: immutable region captured by the host binding. */
     std::int32_t advertisedRegion{-1};

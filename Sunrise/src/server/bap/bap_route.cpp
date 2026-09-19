@@ -14,6 +14,7 @@
 #include "../../state/account/public_profiles.h"
 #include "../../state/activity/fireteam.h"
 #include "../../state/activity/member_context.h"
+#include "../../state/activity/member_departure.h"
 #include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/activity/runtime.h"
 #include "../../state/build_data/runtime.h"
@@ -687,6 +688,13 @@ bool request_replication_epoch(const state::activity::SessionBinding& binding,
         session != nullptr && expectedGeneration != 0
         && session->activity.bindingGeneration == expectedGeneration
         && requestedEpoch == static_cast<std::uint8_t>(session->activity.replicationEpoch + 1U);
+    if (queued) {
+        std::uint64_t current{};
+        queued = state::activity::replication_sequence(binding, current)
+                 && (current == session->activity.replicationSequence
+                         ? state::activity::advance_replication_sequence(binding, current)
+                         : current > session->activity.replicationSequence);
+    }
     if (queued) {
         ReplicationEpochPublication& request = session->activityReplicationEpoch;
         queued = !request.pending

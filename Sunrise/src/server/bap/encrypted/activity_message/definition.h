@@ -6,6 +6,7 @@
 #include "../../../../middleware/bap/activity_message/activity_patch_epoch_parser.h"
 #include "../../../../middleware/bap/activity_message/entity_authority.h"
 #include "../../../../middleware/bap/activity_message/transport_report.h"
+#include "../../../../state/activity/member_departure.h"
 #include "../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../state/activity/runtime.h"
 #include "../../../gameplay/group/group_host_sessions.h"
@@ -126,6 +127,9 @@ struct AuthorityAbdicationIngress final {
 /** A purge request retains its exact mask and the next shared replication epoch. */
 struct AuthorityPurgeIngress final {
     middleware::bap::activity_message::host_control::PurgeAuthorityBody body{};
+    state::activity::MemberPurge departure{};
+    state::activity::SessionBinding binding{};
+    std::uint64_t expectedSequence{};
     std::uint64_t sourceGeneration{};
     bool pending{};
 };

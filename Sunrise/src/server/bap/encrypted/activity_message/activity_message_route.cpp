@@ -185,10 +185,14 @@ void report_release_refusal(const service::Request& request,
 [[nodiscard]] bool prepare_join(const ActivityClientBinding& binding,
                                 const service::Request& request,
                                 ActivityPlan& plan) noexcept {
+    const auto refuse = [](const char* reason) noexcept {
+        core::log::write(core::log::Channel::server, core::log::Level::warn, reason);
+        return false;
+    };
     service::JoinRequest parsed;
     if (!service::join_request::parse_join_request(request.payload, parsed)
         || parsed.sessionId != request.sessionId) {
-        return false;
+        return refuse("ev=activity stage=join result=refused reason=payload_identity");
     }
     const auto identity = native_member_identity(parsed.identity);
     const bool shared = core::settings::hosts_session();
@@ -197,15 +201,10 @@ void report_release_refusal(const service::Request& request,
         plan.targetBinding = binding.session;
         // The join burst carries the membership body, so its logical host must already be ready.
         // Private activities use one stable Bubble Host. Public regions use their citizen host.
-        if (binding.role == ActivityClientRole::privateCurrent) {
-            const std::int32_t arrival = push::activity::effective_region(binding.session).index;
-            if (push::activity::private_region(
-                    binding.session, binding.bindingGeneration, arrival)) {
-                if (!server::gameplay::complete_private_host_session(binding.session, arrival)) {
-                    return false;
-                }
-            } else {
-                server::gameplay::complete_host_session(binding.session, arrival);
+        const std::int32_t arrival = push::activity::effective_region(binding.session).index;
+        if (push::activity::private_region(binding.session, binding.bindingGeneration, arrival)) {
+            if (!server::gameplay::complete_private_host_session(binding.session, arrival)) {
+                return refuse("ev=activity stage=join result=refused reason=private_host");
             }
         } else {
             server::gameplay::complete_host_session(
@@ -221,7 +220,7 @@ void report_release_refusal(const service::Request& request,
                && state::activity::shared_target(parsed.sessionId, identity, plan.targetBinding)) {
         plan.bindingIntent = BindingIntent::sharedTarget;
     } else {
-        return false;
+        return refuse("ev=activity stage=join result=refused reason=target_authorization");
     }
     // The client takes the low slots and the server keeps the reserve above them.
     const core::settings::server::gameplay::Settings& gameplay =
@@ -254,7 +253,7 @@ void report_release_refusal(const service::Request& request,
                                                                nullptr);
     }
     if (!prepared) {
-        return false;
+        return refuse("ev=activity stage=join result=refused reason=member_lease");
     }
     plan.correlation = parsed.correlation;
     plan.sessionId = parsed.sessionId;
@@ -268,7 +267,7 @@ void report_release_refusal(const service::Request& request,
     if (shared) {
         if (!state::activity::membership::prepare_join_snapshot(plan.entitySlotMutation,
                                                                 plan.membershipMutation)) {
-            return false;
+            return refuse("ev=activity stage=join result=refused reason=membership_snapshot");
         }
     } else if (plan.bindingIntent == BindingIntent::publicTarget
                && state::activity::binding_matches(plan.publicHost.source)) {

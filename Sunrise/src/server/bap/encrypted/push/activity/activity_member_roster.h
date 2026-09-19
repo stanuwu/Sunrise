@@ -8,6 +8,21 @@ namespace sunrise::server::bap::encrypted::push::activity {
 /** Wire slot type of the participation block, the one slot a joined member is seated in. */
 inline constexpr std::uint8_t kParticipationSlotType = 13;
 
+/** Retires the delivered key ordinals without retaining bodies that require live player slots. */
+inline void retire_member_roster(
+    middleware::bap::activity_message::sensor_auth_update::Snapshot& snapshot) noexcept {
+    for (std::size_t index = 0; index < snapshot.roster.groupCount; ++index) {
+        snapshot.roster.groups[index].retired = true;
+    }
+    snapshot.authOverrides = {};
+    snapshot.senseOverrides = {};
+    snapshot.participationSeats = {};
+    snapshot.participationSeatCount = 0;
+    snapshot.perMemberParticipation = false;
+    snapshot.scoreboard = {};
+    snapshot.hasScoreboard = false;
+}
+
 /** Projects only this activity's joined, region-reporting members onto registered native slots. */
 inline void
 fill_member_roster(middleware::bap::activity_message::sensor_auth_update::Snapshot& snapshot,

@@ -224,6 +224,9 @@ bool process(const ServiceRoute& route,
                 return refuse_web_action(message, output, written);
             }
             outcome.hasChangeCharacter = true;
+            // Character selection clears the native cache without another WS702 report.
+            // Withdraw the old report only when this transition's response commits.
+            outcome.nativePresence = state::social::NativePresence{};
             return true;
         }
         state::investment::store::Transaction investmentTransaction;

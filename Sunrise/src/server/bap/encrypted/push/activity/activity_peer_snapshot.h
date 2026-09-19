@@ -5,6 +5,9 @@
 #include "../../../../../state/activity/reservations/definition.h"
 
 namespace sunrise::server::bap::encrypted::push {
+/** Publishes only the recipient's own currently selected character's public name. */
+void project_activity_local_name(
+    middleware::bap::activity_message::replicate_membership::MembershipSnapshot& output) noexcept;
 /**
  * Projects committed identities regardless of optional profile metadata availability.
  * Called under the BAP transaction lock with the committed native roster snapshot.

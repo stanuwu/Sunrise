@@ -82,51 +82,6 @@ constexpr std::int32_t kNoBubble = -1;
 /** A refresh re-send carries the current revision instead of asking for an older one. */
 constexpr std::uint32_t kCurrentRevision = 0;
 
-/** Clears a staged replication epoch while keeping the request pending. */
-void discard_staged_replication_epoch(Session& session) noexcept {
-    session.activityReplicationEpoch.staged = false;
-}
-
-/** Commits one replication epoch only after the complete frame is published. */
-void commit_staged_replication_epoch(Session& session) noexcept {
-    ReplicationEpochPublication& request = session.activityReplicationEpoch;
-    if (request.staged && request.bindingGeneration == session.activity.bindingGeneration) {
-        session.activity.replicationEpoch = request.generation;
-        request.pending = false;
-    }
-    request.staged = false;
-}
-
-/** Appends the exact pending activity message 44 body. */
-[[nodiscard]] bool append_replication_epoch(Session& session,
-                                            Scratch& scratch,
-                                            std::span<const std::byte, state::kAesKeySize> key,
-                                            std::array<std::byte, state::kBapNonceSize>& nonce,
-                                            std::span<std::byte> response,
-                                            std::size_t& written) noexcept {
-    ReplicationEpochPublication& request = session.activityReplicationEpoch;
-    request.staged = false;
-    if (!request.pending || request.bindingGeneration != session.activity.bindingGeneration) {
-        return false;
-    }
-    std::array<std::byte, replication_epoch::kEncodedSize> body{};
-    std::size_t bodySize = 0;
-    if (!replication_epoch::encode(request.generation, body, bodySize)
-        || !append_notification_frame(scratch,
-                                      session.activity.session.sessionId,
-                                      replication_epoch::kMessageType,
-                                      std::span(body).first(bodySize),
-                                      key,
-                                      nonce,
-                                      response,
-                                      written)) {
-        return false;
-    }
-    middleware::secure_channel::advance_nonce(nonce);
-    request.staged = true;
-    return true;
-}
-
 /**
  * Copies one staged frame to the caller and publishes its nonce.
  * @param session Connection-owned send nonce.
@@ -147,14 +102,17 @@ void commit_staged_replication_epoch(Session& session) noexcept {
                                  bool published) noexcept {
     server::gameplay::entity_identities::PublicationLease entityLease;
     if (!published || framedSize == 0 || framedSize > response.size()
-        || !begin_staged_roster_publication(session, entityLease)) {
+        || !begin_staged_roster_publication(session, entityLease)
+        || (session.activityRosterStaged.staged
+            && session.activityRosterStaged.entityRetirement.pending
+            && !state::activity::advance_replication_sequence(
+                session.activity.session, session.activityRosterStaged.retirementSequence))) {
         // Nothing left, so a roster staged into the discarded body is offered again next push.
         discard_staged_roster(session);
         discard_staged_advertisement(session);
         discard_staged_incident(session);
         discard_staged_authority_reset(session);
         discard_staged_authority_query(session);
-        discard_staged_replication_epoch(session);
         return false;
     }
     for (std::size_t index = 0; index < framedSize; ++index) {
@@ -169,7 +127,6 @@ void commit_staged_replication_epoch(Session& session) noexcept {
     commit_staged_incident(session);
     commit_staged_authority_reset(session, GetTickCount64());
     commit_staged_authority_query(session, GetTickCount64());
-    commit_staged_replication_epoch(session);
     return true;
 }
 
@@ -206,6 +163,9 @@ bool consume_activity_keepalive(Session& session,
                                 bool& touchesScratch) noexcept {
     written = 0;
     if (consume_member_departure(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (consume_replication_step(session, scratch, response, written, touchesScratch)) {
         return true;
     }
     if (consume_member_rejoin(session, scratch, response, written, touchesScratch)) {
@@ -429,9 +389,6 @@ bool consume_activity_keepalive(Session& session,
     }
     published = append_global_state_notification(
         scratch, session.activity.session, key, nextSendNonce, scratch.framed, framedSize);
-    const bool appendedReplicationEpoch =
-        append_replication_epoch(session, scratch, key, nextSendNonce, scratch.framed, framedSize);
-    published = appendedReplicationEpoch || published;
     // Nothing may advance membership State until the first required frame proves this caller owns
     // enough capacity to publish at least the keepalive prefix.
     if (!published || framedSize > response.size()) {

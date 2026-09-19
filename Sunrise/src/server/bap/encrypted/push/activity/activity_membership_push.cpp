@@ -208,6 +208,7 @@ make_base_snapshot(const Session& session,
     wire.identity.accountSoid = snapshot.identity.accountSoid;
     wire.identity.field5 = snapshot.identity.opaqueSoid;
     wire.identity.field6 = snapshot.identity.secondaryOpaque;
+    project_activity_local_name(wire);
     wire.spawn.state = snapshot.spawn.state;
     wire.spawn.opaqueByte = snapshot.spawn.opaqueByte;
     wire.spawn.opaqueValue = snapshot.spawn.opaqueValue;

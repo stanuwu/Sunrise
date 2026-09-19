@@ -118,6 +118,9 @@ struct MembershipSnapshot final {
     /** Actual local row in this activity generation. Slot one belongs to the service host. */
     std::uint8_t localSlot{};
     client_identity::ClientIdentity identity{};
+    /** The recipient's own name belongs in both native player-name fields too. */
+    std::array<std::uint16_t, 63> localName{};
+    std::uint8_t localNameLength{};
     /**
      * Activity Host id every member row publishes as player-state field 4.
      * The client sends zero there in its own join request, so the host names itself. It is the
@@ -228,6 +231,14 @@ inline constexpr std::size_t kPeerMemberFixedBitCount =
 /** The player blob carries each name unit twice, so one character costs two 16-bit writes. */
 inline constexpr std::size_t kPeerNameUnitBitCount = 32;
 
+/** @return Both local name strings, including their terminators, or zero when unavailable. */
+[[nodiscard]] constexpr std::size_t
+local_name_bit_count(const MembershipSnapshot& snapshot) noexcept {
+    return snapshot.localNameLength
+               ? kPeerNameUnitBitCount * (static_cast<std::size_t>(snapshot.localNameLength) + 1)
+               : 0;
+}
+
 /** @return Bits every present peer row adds, including whichever optional fields it carries. */
 [[nodiscard]] constexpr std::size_t
 peer_member_bit_count(const MembershipSnapshot& snapshot) noexcept {
@@ -260,7 +271,7 @@ region_leg_bit_count(const MembershipSnapshot& snapshot) noexcept {
 [[nodiscard]] constexpr std::size_t encoded_size(const MembershipSnapshot& snapshot) noexcept {
     return (kMeaningfulBitCount + (snapshot.remoteViewMember.present ? kRemoteMemberBitDelta : 0)
             + snapshot.citizenCount * kDescriptorBitCount + region_leg_bit_count(snapshot)
-            + peer_member_bit_count(snapshot) + 7)
+            + peer_member_bit_count(snapshot) + local_name_bit_count(snapshot) + 7)
            / 8;
 }
 
@@ -269,7 +280,7 @@ region_leg_bit_count(const MembershipSnapshot& snapshot) noexcept {
 meaningful_bit_count(const MembershipSnapshot& snapshot) noexcept {
     return kMeaningfulBitCount + (snapshot.remoteViewMember.present ? kRemoteMemberBitDelta : 0)
            + snapshot.citizenCount * kDescriptorBitCount + region_leg_bit_count(snapshot)
-           + peer_member_bit_count(snapshot);
+           + peer_member_bit_count(snapshot) + local_name_bit_count(snapshot);
 }
 
 /** The host table has one fixed record per bubble, and the client reads at most 64 of them. */
@@ -322,14 +333,15 @@ inline constexpr std::size_t kRegionBlockEndBit = 29'984;
 region_block_end_bit(const MembershipSnapshot& snapshot) noexcept {
     return kRegionBlockEndBit + (snapshot.remoteViewMember.present ? kRemoteMemberBitDelta : 0)
            + snapshot.citizenCount * kDescriptorBitCount + region_leg_bit_count(snapshot)
-           + peer_member_bit_count(snapshot);
+           + peer_member_bit_count(snapshot) + local_name_bit_count(snapshot);
 }
 
 /** @return First bit of region zero after the exact member-table shape. */
 [[nodiscard]] constexpr std::size_t
 region_block_start_bit(const MembershipSnapshot& snapshot) noexcept {
     return kRegionBlockStartBit + (snapshot.remoteViewMember.present ? kRemoteMemberBitDelta : 0)
-           + region_leg_bit_count(snapshot) + peer_member_bit_count(snapshot);
+           + region_leg_bit_count(snapshot) + peer_member_bit_count(snapshot)
+           + local_name_bit_count(snapshot);
 }
 
 /** @return True when every snapshot field fits the fixed wire field that carries it. */

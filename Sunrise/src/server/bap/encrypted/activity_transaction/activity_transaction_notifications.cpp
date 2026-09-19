@@ -5,6 +5,7 @@
 #include "../bap_connection_publication.h"
 #include "../push/activity/activity_arrival.h"
 #include "../push/activity/activity_global_state_push.h"
+#include "../push/activity/activity_member_departure_push.h"
 #include "../push/activity/activity_membership_push.h"
 #include "../push/activity/activity_message_push.h"
 #include "../push/activity/activity_notification_frame.h"
@@ -51,7 +52,7 @@ namespace {
  * @param nonce Local send nonce advanced only by complete staged notifications.
  * @param response Lock-owned complete-frame staging storage.
  * @param written Existing staged byte count, updated only by complete notifications.
- * @return True only when the complete requested snapshot was staged.
+ * @return True when the available snapshot was staged; a missing epoch defers only the roster.
  */
 [[nodiscard]] bool stage_refresh(Session& session,
                                  Scratch& scratch,
@@ -68,6 +69,9 @@ namespace {
     const bool membershipReady =
         !needsMembership
         || (activity.membershipMutation.hasSnapshot && !advertisement_pending(session, activity));
+    const bool hasEpoch =
+        session.activityPatchEpoch.seen
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration;
     const push::activity::RefreshReport refresh{activity.membershipMutation.bubbleIndex,
                                                 activity.membershipMutation.requestedRevision};
     const bool complete =
@@ -79,23 +83,28 @@ namespace {
         && (!needsMembership
             || push::activity::append_membership_notification(
                 scratch, session, activity, key, nonce, response, written))
-        && push::activity::append_roster_notification(session,
-                                                      scratch,
-                                                      key,
-                                                      nonce,
-                                                      response,
-                                                      written,
-                                                      nullptr,
-                                                      nullptr,
-                                                      true,
-                                                      &refresh,
-                                                      allowEntityRetirement);
+        && (!hasEpoch
+            || push::activity::append_roster_notification(session,
+                                                          scratch,
+                                                          key,
+                                                          nonce,
+                                                          response,
+                                                          written,
+                                                          nullptr,
+                                                          nullptr,
+                                                          true,
+                                                          &refresh,
+                                                          allowEntityRetirement));
     if (!complete) {
         push::activity::discard_staged_roster(session);
         discard_staged_advertisement(session);
         session.activityRosterOwedForEpoch = initialRosterDebt;
         nonce = initialNonce;
         written = initialWritten;
+    } else if (!hasEpoch) {
+        // Joint launches can request refresh before type 52 supplies the patch epoch. Deliver
+        // globals and membership now; type 52 answers the remaining roster debt on this link.
+        session.activityRosterOwedForEpoch = true;
     }
     return complete;
 }
@@ -183,7 +192,7 @@ namespace {
  * @param nonce Local send nonce advanced only by complete staged notifications.
  * @param response Lock-owned complete-frame staging storage.
  * @param written Existing staged byte count, updated only by complete notifications.
- * @return True when every requested notification is staged.
+ * @return True when required notifications are staged; refresh roster debt may await an epoch.
  */
 bool stage_notifications(Session& session,
                          Scratch& scratch,
@@ -207,13 +216,21 @@ bool stage_notifications(Session& session,
             || activity_link_count_locked(session.activity.session,
                                           session.activity.bindingGeneration)
                    != 1
-            || purge.body.epoch
-                   != static_cast<std::uint8_t>(session.activity.replicationEpoch + 1U)) {
+            || purge.body.epoch != static_cast<std::uint8_t>(purge.expectedSequence + 1U)) {
             return false;
         }
         std::array<std::byte, control::kPurgeAuthorityByteCount> body{};
         std::size_t bodySize = 0;
-        if (!control::encode_purge_authority(purge.body, body, bodySize)
+        if (!push::activity::append_replication_steps(session,
+                                                      scratch,
+                                                      purge.expectedSequence,
+                                                      purge.departure.memberKey ? &purge.departure
+                                                                                : nullptr,
+                                                      key,
+                                                      nonce,
+                                                      response,
+                                                      written)
+            || !control::encode_purge_authority(purge.body, body, bodySize)
             || !push::activity::append_notification_frame(scratch,
                                                           activity.sessionId,
                                                           control::kPurgeAuthorityMessageType,

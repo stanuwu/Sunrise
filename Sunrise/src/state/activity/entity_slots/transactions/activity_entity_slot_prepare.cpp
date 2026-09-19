@@ -39,6 +39,7 @@ namespace {
     mutation.sessionId = sessionId;
     mutation.expectedStateRevision = state.stateRevision;
     mutation.expectedRecordRevision = record.recordRevision;
+    mutation.replicationSequence = record.memberLeases.replicationSequence;
     mutation.targetSlot = target;
     mutation.shared = record.sharedMembers;
     if (requireJoined && record.sharedMembers) {
@@ -111,6 +112,7 @@ bool prepare_join(std::uint64_t sessionId,
                 prepared.replacesMemberKey = previous->memberKey;
                 depart_member_lease(leases, prepared.memberRow);
             }
+            prepared.replicationSequence = leases.replicationSequence;
             prepared.memberLease =
                 plan_member_lease(leases, prepared.memberRow, prepared.serverMask, grantCount);
             if (!prepared.memberLease.valid || identity->memberKey != memberKey
