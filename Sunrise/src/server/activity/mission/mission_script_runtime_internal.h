@@ -108,13 +108,56 @@ constexpr std::uint64_t kTransportTimeoutMs = 15'000;
 /** How long an enqueued Host output may take to reach the reducer before the delivery retries. */
 constexpr std::uint64_t kHostCommitTimeoutMs = 2'000;
 
-/** Last occupancy seen for one watched volume, so only a change raises an event. */
+/**
+ * Last occupancy seen for one watched volume, so only a change raises an event. The client's
+ * Sense and the host's own evaluation are kept apart; the volume is occupied when either says so.
+ */
 struct TriggerOccupancy final {
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
     bool occupied{};
+    bool clientOccupied{};
+    bool hostOccupied{};
+    /** The client has published this volume; its row must outlive an empty host level. */
+    bool clientReported{};
     bool used{};
+};
+
+/** Players whose channel-3 position one instance tracks. */
+constexpr std::size_t kHostPlayerCapacity = 6;
+/** Type-30 monitors the host evaluates for one instance. The Leviathan raid authors 89. */
+constexpr std::size_t kHostMonitorCapacity = 128;
+/** A player not heard from for this long no longer counts as present. */
+constexpr std::uint64_t kHostPlayerStaleMs = 5'000;
+
+/** Last world position one player's client reported on channel 3. */
+struct HostPlayerPosition final {
+    std::uint64_t playerKey{};
+    std::array<float, 3> position{};
+    std::uint64_t tick{};
+    bool used{};
+};
+
+/** One authored type-30 monitor and the type-60 volume it measures. */
+struct HostMonitor final {
+    std::uint32_t registryKey{};
+    std::uint32_t objectTag{};
+    std::uint32_t tableRow{};
+    std::uint16_t slotIndex{};
+    /** Caller value from the monitor's latest type-30 Auth, carried on its edges. Zero until set.
+     */
+    std::int32_t value{};
+    /** A script-set object filter selects players the host cannot see, so the host stands aside. */
+    bool filtered{};
+};
+
+/** Host evaluation of type-30 player monitors from reported player positions. */
+struct HostOccupancy final {
+    std::array<HostPlayerPosition, kHostPlayerCapacity> players{};
+    std::array<HostMonitor, kHostMonitorCapacity> monitors{};
+    std::size_t monitorCount{};
+    bool resolved{};
 };
 
 /** Last movement and delivery level seen for one named actor, so only a change raises an event. */
@@ -245,6 +288,7 @@ struct RuntimeInstance final {
     std::uint64_t firstTimerAttempt{};
     std::uint64_t nextTimerAttempt{};
     std::array<TriggerOccupancy, kTriggerOccupancyCapacity> triggerOccupancy{};
+    HostOccupancy hostOccupancy{};
     std::array<SquadObservation, kSquadObservationCapacity> squadObservations{};
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
@@ -314,6 +358,26 @@ void observe_player_life(RuntimeInstance& instance,
 /** Raises one event per watched trigger volume whose occupancy changed. */
 void push_trigger_edges(RuntimeInstance& instance,
                         const host::SenseObservationSnapshot& sense) noexcept;
+/** @return The retained row for one watched volume; `created` marks a first report. */
+[[nodiscard]] TriggerOccupancy* find_trigger_occupancy(RuntimeInstance& instance,
+                                                       std::uint32_t registryKey,
+                                                       std::uint32_t objectTag,
+                                                       std::uint16_t slotIndex,
+                                                       bool& created) noexcept;
+/**
+ * @return True when one source's level change moved the volume's combined level. On a new row,
+ * `firstLevelIsEdge` decides whether an occupied first level is an entry or only the baseline.
+ */
+[[nodiscard]] bool
+settle_trigger_occupancy(TriggerOccupancy& row, bool created, bool firstLevelIsEdge) noexcept;
+/** Records one player's reported position and raises the monitor edges it causes. */
+void observe_host_player_position(RuntimeInstance& instance,
+                                  std::uint64_t playerKey,
+                                  const std::array<float, 3>& position,
+                                  std::uint64_t tick) noexcept;
+/** Applies committed type-30 condition Auths: a filtered monitor leaves host evaluation. */
+void note_host_occupancy_conditions(RuntimeInstance& instance,
+                                    std::span<const mission_state::TypedIntent> intents) noexcept;
 /** Raises one dedicated type-31 edge from a decoded schema-0x8080879F msg-19 payload. */
 void push_player_trigger(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Raises one exact Type-6 start/finish edge from a decoded schema-0x808087BF msg-19 payload. */

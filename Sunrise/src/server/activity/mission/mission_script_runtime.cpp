@@ -267,6 +267,22 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
     ReleaseSRWLockExclusive(&g_lock);
 }
 
+/** Measures the host's type-30 monitors with one reported player position. */
+void report_player_position(const state::activity::SessionBinding& binding,
+                            std::uint64_t sourceGeneration,
+                            std::uint64_t playerKey,
+                            const std::array<float, 3>& position) noexcept {
+    if (sourceGeneration == 0) {
+        return;
+    }
+    AcquireSRWLockExclusive(&g_lock);
+    auto* instance = find_instance(binding);
+    if (instance != nullptr && instance->view.activityClientGeneration == sourceGeneration) {
+        observe_host_player_position(*instance, playerKey, position, GetTickCount64());
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
 /** Retains the last VM stage and status shown on the panel. */
 void note_vm_status(RuntimeInstance& instance,
                     std::string_view stage,
@@ -334,6 +350,7 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.startPending = false;
     instance.timerPending = false;
     instance.triggerOccupancy = {};
+    instance.hostOccupancy = {};
     instance.ghostObservations = {};
     instance.actorPathObservations = {};
     instance.squadObservations = {};
@@ -380,6 +397,10 @@ void accept_mission_state(RuntimeInstance& instance,
                           const mission_state::Snapshot& snapshot) noexcept {
     if (instance.attempt.generation != snapshot.state.attempt.generation) {
         instance.triggerOccupancy = {};
+        // Positions stay; monitor filters belong to the attempt that declared them.
+        instance.hostOccupancy.monitors = {};
+        instance.hostOccupancy.monitorCount = 0;
+        instance.hostOccupancy.resolved = false;
         instance.squadObservations = {};
         instance.ghostObservations = {};
         instance.damageObservations = {};
@@ -498,6 +519,7 @@ bool commit_mission_state(RuntimeInstance& instance,
     if (status == mission_state::Status::ready) {
         const std::uint32_t previousPhase = instance.missionPhase;
         accept_mission_state(instance, snapshot);
+        note_host_occupancy_conditions(instance, pendingIntents);
         if (instance.missionPhase != previousPhase) {
             queue_phase_entered(instance, previousPhase);
         }

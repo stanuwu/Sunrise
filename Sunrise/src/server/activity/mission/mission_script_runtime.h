@@ -95,6 +95,15 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
                            std::uint32_t registryKey,
                            std::uint16_t slotIndex) noexcept;
 
+/**
+ * Publishes one player's world position from an accepted gameplay channel 3, reported by the
+ * client of the matching source generation. The host measures its type-30 monitors with it.
+ */
+void report_player_position(const state::activity::SessionBinding& binding,
+                            std::uint64_t sourceGeneration,
+                            std::uint64_t playerKey,
+                            const std::array<float, 3>& position) noexcept;
+
 /** Starts the optional, off-by-default server mission-script manager. */
 void initialize() noexcept;
 /** Writes the authored controller path, `<name>/<name>.lua`, for one 1-based SDK activity row. */
