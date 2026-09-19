@@ -19,11 +19,12 @@ inline constexpr std::uint32_t kParameterUpdateSize = 44064;
 inline constexpr std::uint32_t kParameterRequestSize = 44056;
 /** The registry holds 25 parameters, so only the low 25 bitmap bits are meaningful. */
 inline constexpr std::uint8_t kParameterCount = 25;
+/** Every bit with a corresponding registry entry. */
+inline constexpr std::uint64_t kParameterMaskBits = (std::uint64_t{1} << kParameterCount) - 1;
 
 /**
- * Header of a parameter request.
- * The bodies after it are not decoded. Each parameter has its own codec of unknown width, so
- * the reader cannot walk past this point.
+ * Header of a parameter request. Body widths depend on the selected parameters.
+ * `walk_parameter_request` locates supported bodies and reports where unknown codecs stop it.
  */
 struct ParameterRequestHeader {
     std::uint64_t sessionId{};

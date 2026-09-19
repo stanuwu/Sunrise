@@ -25,7 +25,6 @@
 #include "../../middleware/web_service/messages/opcode904/opcode904_codec.h"
 #include "../../middleware/web_service/web_service_envelope.h"
 #include "../../state/account/account_state.h"
-#include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/runtime/runtime.h"
 #include "opcode_routes.h"
@@ -87,39 +86,6 @@ std::uint64_t next_family5_clock() noexcept {
         next = wall > previous ? wall : previous + 1;
     } while (!issued.compare_exchange_weak(previous, next, std::memory_order_relaxed));
     return next;
-}
-
-/** Records the authoritative world state carried by the client's character write-back. */
-bool note_character_writeback(
-    const middleware::web_service::Message& message,
-    std::span<const state::account::inventory::PresentedItemRow> presentation) noexcept {
-    namespace writeback = middleware::web_service::messages::opcode702;
-    writeback::Request request{};
-    const bool parsed = writeback::parse_request(message, request);
-    std::array<char, core::log::kLineCapacity> line{};
-    const int written = std::snprintf(line.data(),
-                                      line.size(),
-                                      "ev=activity stage=writeback result=%s world_state=%u "
-                                      "activity=%d/%d/%d selector=%d",
-                                      parsed ? "ok" : "unparsed",
-                                      static_cast<unsigned>(request.worldState),
-                                      static_cast<int>(request.activityBytes[0]),
-                                      static_cast<int>(request.activityBytes[1]),
-                                      static_cast<int>(request.activityBytes[2]),
-                                      static_cast<int>(request.activitySelector));
-    if (written > 0) {
-        core::log::write(core::log::Channel::server,
-                         parsed ? core::log::Level::info : core::log::Level::warn,
-                         {line.data(), static_cast<std::size_t>(written)});
-    }
-    if (parsed && request.hasWorldState) {
-        state::activity::membership::note_client_writeback(request.worldState
-                                                           == writeback::kInWorld);
-    }
-    return parsed
-           && (!request.newItems
-               || state::account::inventory::record_character_seen(*request.newItems,
-                                                                   presentation));
 }
 
 /** @return True when a purchase names the seasonal artifact vendor, which is answered here. */
@@ -317,7 +283,7 @@ bool consume(std::span<const std::byte> request,
     }
     if (message.opcode == middleware::web_service::messages::opcode702::kOpcode) {
         // A write-back the server cannot read is still answered; no reply drops the connection.
-        static_cast<void>(note_character_writeback(message, presentation));
+        static_cast<void>(note_character_writeback(message, presentation, outcome));
     }
     if (message.opcode == middleware::web_service::messages::opcode205::kOpcode) {
         state::InvestmentState investment{};
@@ -334,7 +300,7 @@ bool consume(std::span<const std::byte> request,
         // The request's own key is echoed and adopted. An authored id here costs the ship and the
         // banner.
         if (!bootstrap.hasPrimarySoid) {
-            bootstrap.primarySoid = state::account_snapshot().primarySoid;
+            bootstrap.primarySoid = state::bound_account_snapshot().primarySoid;
         }
         state::InvestmentState investment{};
         if (!parsed || !state::investment_snapshot(investment)
@@ -353,7 +319,7 @@ bool consume(std::span<const std::byte> request,
     if (message.opcode == middleware::web_service::messages::opcode501::kOpcode) {
         // Returns a SOID family three already publishes. The request body is not parsed.
         const std::uint64_t characterSoid =
-            state::account::selected_character_soid(state::account_snapshot());
+            state::account::selected_character_soid(state::bound_account_snapshot());
         return middleware::web_service::messages::opcode501::encode_response(
                    message, characterSoid, response, written)
                || encode_echo(message, response, written);

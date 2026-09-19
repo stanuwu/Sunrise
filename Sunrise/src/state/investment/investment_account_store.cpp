@@ -1,3 +1,5 @@
+#include "../account/account_context.h"
+#include "../account/public_profiles.h"
 #include "store_internal.h"
 
 namespace sunrise::state::investment::store {
@@ -96,6 +98,62 @@ bool write_characters(const AccountState& value) noexcept {
 
 } // namespace
 
+bool owns_account_root(std::uint64_t rootSoid) noexcept {
+    const std::lock_guard lock(g_mutex);
+    if (!local_account_access() || rootSoid == 0) {
+        return false;
+    }
+    // One scalar query avoids loading equipment, preferences and inventory just to route a root.
+    Statement row("SELECT EXISTS(SELECT 1 FROM account WHERE id=1 AND soid=?1 "
+                  "UNION ALL SELECT 1 FROM characters WHERE soid=?1)");
+    int owned{};
+    return row.parameters(rootSoid) && row.step() == SQLITE_ROW && row.column(0, owned)
+           && row.step() == SQLITE_DONE && owned != 0;
+}
+
+bool read_selected_character(std::uint64_t& output) noexcept {
+    output = 0;
+    if (!local_account_access()) {
+        return false;
+    }
+    Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
+    }
+    Statement owner("SELECT soid FROM account WHERE id=1");
+    std::uint64_t primary{};
+    if (owner.step() != SQLITE_ROW || !owner.column(0, primary) || primary == 0
+        || owner.step() != SQLITE_DONE) {
+        return false;
+    }
+    // Selection belongs to the process-local session; SQLite supplies only slot identities.
+    Statement rows("SELECT slot,soid FROM characters ORDER BY slot");
+    std::size_t count{};
+    std::uint64_t selected{};
+    int result = rows.step();
+    while (result == SQLITE_ROW) {
+        std::size_t slot{};
+        std::uint64_t character{};
+        if (!rows.columns(slot, character) || slot != count || slot >= kCharacterCapacity
+            || character == 0) {
+            return false;
+        }
+        if (g_session.selected[slot]) {
+            if (selected != 0) {
+                return false;
+            }
+            selected = character;
+        }
+        ++count;
+        result = rows.step();
+    }
+    if (result != SQLITE_DONE || !transaction.commit()) {
+        return false;
+    }
+    output = selected;
+    return true;
+}
+
 /** A read returns one complete account or an empty output on failure. */
 bool read_account(AccountState& output) noexcept {
     Transaction transaction;
@@ -150,13 +208,21 @@ bool write_account(const AccountState& value) noexcept {
         g_session.selected[index] = value.characters[index].selected;
         g_session.activities[index] = value.characters[index].currentActivityIndex;
     }
+    account::profiles::local_changed();
     return true;
 }
 
 /** A sign-in timestamp belongs only to the current connection lifetime. */
 void set_sign_in_time(std::uint64_t seconds) noexcept {
     const std::lock_guard lock(g_mutex);
+    if (!local_account_access()) {
+        return;
+    }
+    if (g_session.signInSeconds == seconds) {
+        return;
+    }
     g_session.signInSeconds = seconds;
+    account::profiles::local_changed();
 }
 
 } // namespace sunrise::state::investment::store

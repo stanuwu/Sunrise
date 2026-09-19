@@ -38,6 +38,12 @@ constexpr std::uint32_t kDefaultReviveDelayHalf = 0x4200U;
 /** A packed region is bubble times eight plus the state ordinal. */
 constexpr std::uint32_t kStatesPerBubble = 8;
 /**
+ * Lifetime field `.2`: whether the activity admits fireteam joins and invites. The client stores
+ * the bit at roster object `+0x180+2`; a zero locks its fireteam session (closed flag 8), so a
+ * member who returns to orbit is refused `not-joinable` on the way back in.
+ */
+constexpr std::uint32_t kActivityAllowsFireteamJoin = 1;
+/**
  * Empty map-generator body, schema `0x80805007`.
  * Two 475-bit records, a u32, then fixed arrays of 32 and 64 u8. The fixed array lengths apply
  * even with both dynamic arrays empty; counting one byte each truncates the body by 752 bits.
@@ -106,7 +112,9 @@ constexpr std::size_t kSpawnKeyCount = 32;
  * @param snapshot Message input.
  * @return True when the body fits.
  */
-[[nodiscard]] bool write_participation(bits::Writer& writer, const Snapshot& snapshot) noexcept {
+[[nodiscard]] bool write_participation(bits::Writer& writer,
+                                       const Snapshot& snapshot,
+                                       std::uint64_t playerKey) noexcept {
     // An optional field's value follows its presence bit, so sending +0 shifts everything below.
     bool encoded = writer.write(snapshot.hasRegion ? 1U : 0U, kPresenceWidth);
     if (encoded && snapshot.hasRegion) {
@@ -114,13 +122,14 @@ constexpr std::size_t kSpawnKeyCount = 32;
     }
     // The participation record is this body's head, so struct +8 and +10 are record +8 and +10.
     // Record +8 is step 36 task 9's own term and +10 is the spawn gate's.
-    // Record +56, the team index, 5 bits at bias 1, must equal the membership blob's team byte.
+    // Record +56's assignment, 5 bits at bias 1, must equal the membership blob's A.P2 value.
     return encoded && writer.write(0, kPresenceWidth) && writer.write(1, kPresenceWidth)
            && writer.write(1, kPresenceWidth) && writer.write(1, kPresenceWidth)
            && writer.write(0, kPresenceWidth) && writer.write(1, 3) && writer.write(1, 2)
            && writer.write(0, 3) && writer.write(0, 32) && writer.write(1, 5)
            && writer.write(0, kPresenceWidth) && writer.write(0, 3)
-           && writer.write(1, kPresenceWidth) && writer.write(snapshot.playerKey, 64)
+           && writer.write(1, kPresenceWidth)
+           && writer.write(playerKey != 0 ? playerKey : snapshot.playerKey, 64)
            && writer.write(0, 5) && writer.write(3, 6) && writer.write(0, 6)
            && writer.write(0, 6)
            // Byte 736 skips the late spawn-location hold. Byte 737 holds the spawn while the
@@ -148,7 +157,8 @@ constexpr std::size_t kSpawnKeyCount = 32;
     // name hash; zero is a hash that no row matches.
     bool encoded =
         writer.write(std::uint32_t{snapshot.lifetime} + kLifetimeBias, kLifetimeWidth)
-        && writer.write(1, 3) && writer.write(0, kPresenceWidth) && writer.write(kSignedZero, 32)
+        && writer.write(1, 3) && writer.write(kActivityAllowsFireteamJoin, kPresenceWidth)
+        && writer.write(kSignedZero, 32)
         && writer.write(kEmptyNameHash, 32)
         // `.5` names the published region's bubble; a disabled darkness policy sends -1.
         && writer.write(snapshot.hasDarknessPolicy && !snapshot.darknessEnabled ? kSignedMinusOne
@@ -238,6 +248,9 @@ auth_body_bits(const Snapshot& snapshot, std::uint8_t slotType, bool carriesPlay
                          + (snapshot.hasDarknessPolicy ? kHalfWidth : 0U)
                    : 0;
     }
+    if (slotType == scoreboard_record::kSlotType && snapshot.hasScoreboard) {
+        return scoreboard_record::record_body_bits(snapshot.scoreboard);
+    }
     if (slotType == kSlotTypeLifetime) {
         return kLifetimeBits;
     }
@@ -272,12 +285,15 @@ auth_body_bits(const Snapshot& snapshot, std::uint8_t slotType, bool carriesPlay
 bool write_auth_body(bits::Writer& writer,
                      const Snapshot& snapshot,
                      std::uint8_t slotType,
-                     bool carriesPlayerKey) noexcept {
+                     bool carriesPlayerKey,
+                     std::uint64_t playerKey) noexcept {
     const std::size_t start = writer.bit_count();
     const std::size_t expected = auth_body_bits(snapshot, slotType, carriesPlayerKey);
     bool encoded = true;
     if (slotType == kSlotTypeParticipation && carriesPlayerKey) {
-        encoded = write_participation(writer, snapshot);
+        encoded = write_participation(writer, snapshot, playerKey);
+    } else if (slotType == scoreboard_record::kSlotType && snapshot.hasScoreboard) {
+        encoded = scoreboard_record::write_record_body(writer, snapshot.scoreboard);
     } else if (slotType == kSlotTypeLifetime) {
         encoded = write_lifetime(writer, snapshot);
     } else if (slotType == kSlotTypeConfiguration) {

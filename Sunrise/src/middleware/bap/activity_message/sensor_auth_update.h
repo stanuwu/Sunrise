@@ -8,6 +8,7 @@
 #include "../../encoding/bit_writer.h"
 #include "activity_patch_epoch_parser.h"
 #include "definition.h"
+#include "scoreboard_record.h"
 #include "sensor_message.h"
 #include "squad_auth_body.h"
 #include "squad_sense_state.h"
@@ -195,11 +196,22 @@ struct Roster final {
     std::span<const BubbleSubBlock> bubbleSubBlocks{};
 };
 
+/** A joined character assigned to an actual registered participation slot. */
+struct ParticipationSeat final {
+    std::uint64_t playerKey{};
+    std::uint16_t slotIndex{};
+};
+
 /** Everything one `sensor_auth_update` carries. */
 struct Snapshot final {
     /** Message 52's payload, echoed exactly. A wrong epoch skips phase 2 and reports nothing. */
     patch_epoch::PatchEpoch patchEpoch{};
     Roster roster{};
+    std::array<ParticipationSeat, scoreboard_record::kElementCount> participationSeats{};
+    std::size_t participationSeatCount{};
+    scoreboard_record::Record scoreboard{};
+    bool perMemberParticipation{};
+    bool hasScoreboard{};
     /** Exact typed bodies for slots already present in `roster`. */
     std::span<const AuthOverride> authOverrides{};
     std::span<const SenseOverride> senseOverrides{};
@@ -404,7 +416,8 @@ auth_body_bits(const Snapshot& snapshot, std::uint8_t slotType, bool carriesPlay
 [[nodiscard]] bool write_auth_body(encoding::bits::Writer& writer,
                                    const Snapshot& snapshot,
                                    std::uint8_t slotType,
-                                   bool carriesPlayerKey) noexcept;
+                                   bool carriesPlayerKey,
+                                   std::uint64_t playerKey = 0) noexcept;
 
 /**
  * Writes one per-object state block.
@@ -429,6 +442,7 @@ auth_body_bits(const Snapshot& snapshot, std::uint8_t slotType, bool carriesPlay
                                       std::uint16_t slotIndex,
                                       std::uint8_t flags,
                                       bool missionSeedOnly,
-                                      bool carriesPlayerKey) noexcept;
+                                      bool carriesPlayerKey,
+                                      std::uint64_t playerKey = 0) noexcept;
 
 } // namespace sunrise::middleware::bap::activity_message::sensor_auth_update

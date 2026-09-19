@@ -311,7 +311,8 @@ squad_override_available_locked(const Session& session,
 
 } // namespace
 
-/** Queues a squad placement only while exactly one authenticated link owns the binding. */
+/** Queues a squad placement only while the requested authenticated client generation owns the
+ * binding. */
 bool request_activity_squad_override(
     const state::activity::SessionBinding& binding,
     const activity::host::ScriptableTarget& target,
@@ -328,7 +329,8 @@ bool request_activity_squad_override(
     std::optional<middleware::bap::activity_message::squad_auth::SpawnRule> spawnRule) noexcept {
     const std::lock_guard lock(session_lock());
     std::size_t linkCount = 0;
-    const Session* const session = unique_activity_link_locked(binding, linkCount);
+    const Session* const session =
+        activity_link_for_generation_locked(binding, expectedGeneration, linkCount);
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued = expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
                         && session->activity.bindingGeneration == expectedGeneration

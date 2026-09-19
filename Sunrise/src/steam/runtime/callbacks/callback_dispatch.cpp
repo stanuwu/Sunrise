@@ -9,10 +9,14 @@
 #include "../../../client/content/activity/scriptable_catalog_worker.h"
 #include "../../../client/content/investment/worker.h"
 #include "../../../client/hooks/feature_flags/feature_flags.h"
+#include "../../../client/hooks/instance_mutex/instance_mutex_release.h"
+#include "../../../client/hooks/machine_id/machine_id_override.h"
 #include "../../../client/hooks/net_tick_probe/net_tick_probe.h"
 #include "../../../core/logging/log.h"
+#include "../../../core/settings/settings.h"
 #include "../../../core/ui/busy/busy.h"
 #include "../../../server/runtime/server_runtime.h"
+#include "../../interfaces/internal.h"
 #include "../internal.h"
 #include "callback_registry.h"
 
@@ -104,6 +108,9 @@ void invoke_call_result(void* callback, void* payload, ApiCall call) noexcept {
 
 /** Finds the registrations, then calls them only after the callback lock is released. */
 void dispatch_event(CallbackEvent& event) noexcept {
+    if (!event.guard.valid()) {
+        return;
+    }
     std::array<void*, kCallbackCapacity> callbacks{};
     std::array<void*, kCallResultCapacity> callResults{};
     std::size_t callbackCount{};
@@ -126,9 +133,15 @@ void dispatch_event(CallbackEvent& event) noexcept {
     // Callback code can register again from inside the call, so calls happen after the unlock.
     ReleaseSRWLockExclusive(&g_lock);
     for (std::size_t index = 0; index < callbackCount; ++index) {
+        if (!event.guard.valid()) {
+            return;
+        }
         invoke_callback(callbacks[index], event.payload.data());
     }
     for (std::size_t index = 0; index < callResultCount; ++index) {
+        if (!event.guard.valid()) {
+            return;
+        }
         invoke_call_result(callResults[index], event.payload.data(), event.call);
     }
 }
@@ -173,7 +186,13 @@ void run_slice() noexcept {
         return;
     }
     // The network group must own SignOn before callback work can send it.
+    const auto socialGeneration = interfaces::methods::friends_generation();
     const bool mainActive = runtime::activate_main_once();
+    if (mainActive) {
+        interfaces::methods::service_friends(socialGeneration);
+        interfaces::methods::service_invites(socialGeneration);
+        interfaces::methods::service_lobbies();
+    }
     runtime::callbacks::CallbackEvent event;
     for (std::size_t count = 0;
          count < runtime::callbacks::kEventCapacity && runtime::callbacks::pop_event(event);
@@ -182,6 +201,10 @@ void run_slice() noexcept {
     }
     if (mainActive) {
         const auto now = GetTickCount64();
+        if (core::settings::multiplayer()) {
+            client::hooks::machine_id::poll();
+            client::hooks::instance_mutex::release_once();
+        }
         // Reached only once the game is activated, which is when its feature registry exists.
         client::hooks::feature_flags::apply_once();
         // Samples the healthy cadence. The assert observer samples it again once this tick stops.
@@ -221,32 +244,50 @@ bool queue_callback(int callbackId,
                     ApiCall call,
                     const void* payload,
                     std::size_t payloadSize) noexcept {
+    const CallbackDelivery delivery{callbackId, call, payload, payloadSize};
+    return queue_callbacks(std::span(&delivery, 1));
+}
+
+bool queue_callbacks(std::span<const CallbackDelivery> deliveries) noexcept {
     using namespace runtime::callbacks;
-    if (callbackId <= 0 || payloadSize > kEventPayloadCapacity
-        || (payload == nullptr && payloadSize != 0)) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::error,
-                         "ev=callback_queue result=invalid");
+    if (deliveries.size() > kEventCapacity) {
         return false;
     }
+    for (const auto& delivery : deliveries) {
+        if (delivery.callbackId <= 0 || delivery.payloadSize > kEventPayloadCapacity
+            || (delivery.payload == nullptr && delivery.payloadSize != 0)) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::error,
+                             "ev=callback_queue result=invalid");
+            return false;
+        }
+    }
     AcquireSRWLockExclusive(&g_lock);
-    if (g_eventCount == kEventCapacity) {
+    for (const auto& delivery : deliveries) {
+        if (!delivery.guard.valid()) {
+            ReleaseSRWLockExclusive(&g_lock);
+            return false;
+        }
+    }
+    if (deliveries.size() > kEventCapacity - g_eventCount) {
         ReleaseSRWLockExclusive(&g_lock);
         core::log::write(
             core::log::Channel::client, core::log::Level::error, "ev=callback_queue result=full");
         return false;
     }
-    // Head plus count names the only free ring slot while the lock is held.
-    const std::size_t tail = (g_eventHead + g_eventCount) % kEventCapacity;
-    auto& event = g_events[tail];
-    event = {};
-    event.callbackId = callbackId;
-    event.call = call;
-    event.payloadSize = payloadSize;
-    if (payloadSize != 0) {
-        std::memcpy(event.payload.data(), payload, payloadSize);
+    for (const auto& delivery : deliveries) {
+        const std::size_t tail = (g_eventHead + g_eventCount) % kEventCapacity;
+        auto& event = g_events[tail];
+        event = {};
+        event.callbackId = delivery.callbackId;
+        event.call = delivery.call;
+        event.payloadSize = delivery.payloadSize;
+        event.guard = delivery.guard;
+        if (delivery.payloadSize != 0) {
+            std::memcpy(event.payload.data(), delivery.payload, delivery.payloadSize);
+        }
+        ++g_eventCount;
     }
-    ++g_eventCount;
     ReleaseSRWLockExclusive(&g_lock);
     return true;
 }

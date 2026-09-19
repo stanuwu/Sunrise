@@ -14,7 +14,9 @@ inline constexpr std::uint32_t kMaximumMembershipRevision =
     (std::numeric_limits<std::uint32_t>::max)();
 /** A steady zero epoch keeps the client peer table across unchanged refreshes. */
 inline constexpr std::uint32_t kStableEpoch = 0;
-/** Derives the membership epoch of one activity record generation. */
+/** Peer-table generations stop before wrap so retired reservation requests stay stale. */
+inline constexpr std::uint32_t kMaximumPeerTableEpoch = (std::numeric_limits<std::uint32_t>::max)();
+/** Seeds the peer-table generation; server-side departures advance surviving recipients. */
 [[nodiscard]] inline std::uint32_t session_epoch(std::uint64_t createdRevision) noexcept {
     return static_cast<std::uint32_t>(createdRevision);
 }
@@ -62,6 +64,7 @@ struct Identity final {
     std::uint64_t opaqueSoid{};
     /** The role of this second type-23 scalar is not verified. */
     std::uint64_t secondaryOpaque{};
+    bool operator==(const Identity&) const noexcept = default;
 };
 
 /** Spawn state kept for the current activity host, in no wire form. */
@@ -194,12 +197,14 @@ struct MembershipState final {
     /** Set once the client has reported each leg, so message 12 mirrors only reported legs. */
     bool currentReported{};
     bool pendingReported{};
+    /** Distinguish native reports from host-owned initial fallback tokens. */
+    bool transitionReported{};
+    std::uint8_t nativeTransitionToken{};
+    bool teleportReported{};
     /** Bubble the client's last message-18 refresh named as current; -1 before one arrives. */
     std::int32_t bubble{kMinimumRefreshBubble};
     /** Membership revision that refresh said the client had applied. */
     std::uint32_t bubbleRevision{kAbsentRevision};
-    /** The client's last character write-back (ws 702) reported the in-world state. */
-    bool clientInWorld{};
     /** Region the attached mission program declared as its initial state; -1 when none. */
     std::int32_t declaredInitialRegion{kAbsentRegionIndex};
     /** Spawn set the attached mission program declared with that state; zero when none. */

@@ -15,7 +15,7 @@ namespace {
  * @return Account half, or zero while no account is loaded.
  */
 [[nodiscard]] std::uint64_t session_soid_base() noexcept {
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     return account.primarySoid & transactions::kAccountMask;
 }
 

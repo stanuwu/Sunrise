@@ -116,6 +116,7 @@ void report_perk_banks(const char* family, const layout::Appearance& block) noex
 [[nodiscard]] layout::Summary build_summary(std::int32_t light,
                                             std::uint16_t titleRecordIndex) noexcept {
     layout::Summary summary{};
+    summary.lightFloatA = static_cast<float>(light);
     summary.light = light;
     summary.hashA = layout::kNoHash;
     summary.indexD = titleRecordIndex;
@@ -195,12 +196,16 @@ bool encode_family0(const state::CharacterState& character,
     }
     report_perk_banks("0", block);
     const auto record = output.first(kFamily0RecordSize);
-    copy_record(identity,
-                block,
-                build_summary(light, character.equippedTitleRecordIndex),
-                0,
-                kFamily0TailSize,
-                record);
+    auto summary = build_summary(light, character.equippedTitleRecordIndex);
+    constexpr auto emblemSlot =
+        static_cast<std::uint8_t>(state::account::inventory::EquipmentSlot::emblem);
+    for (std::size_t i = 0; i < instances.itemCount && i < instances.items.size(); ++i) {
+        if (instances.items[i].equipmentSlot == emblemSlot) {
+            summary.indexA = instances.items[i].instance.baseDefinitionIndex;
+            break;
+        }
+    }
+    copy_record(identity, block, summary, 0, kFamily0TailSize, record);
     const layout::Family0Tail tail{};
     std::memcpy(record.data() + kFamily0RecordSize - kFamily0TailSize, &tail, sizeof tail);
     return true;

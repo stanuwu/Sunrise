@@ -14,6 +14,7 @@ namespace sunrise::client::hooks::network::lifecycle {
  */
 inline constexpr std::array kGameSlots{
     HookSlot::transportKind,
+    HookSlot::transportKindSession,
     HookSlot::httpExecuteRequest,
     HookSlot::bubbleAuthorityDecoder,
     HookSlot::contentUntrackedGetter,

@@ -18,6 +18,9 @@
 
 namespace sunrise::server::bap {
 
+/** Services shared-service links under the same lock as native request and nonce publication. */
+void service(std::uint64_t now) noexcept;
+
 /** Makes the next investment refresh pump take one more slice. */
 using InvestmentSliceConsumer = void (*)() noexcept;
 
@@ -140,6 +143,16 @@ activity_link_count(const state::activity::SessionBinding& binding) noexcept;
 [[nodiscard]] bool activity_link_view(const state::activity::SessionBinding& binding,
                                       ActivityLinkView& output) noexcept;
 
+/** Resolves one native client generation without requiring other players to leave the activity. */
+[[nodiscard]] bool activity_link_view(const state::activity::SessionBinding& binding,
+                                      std::uint64_t generation,
+                                      ActivityLinkView& output) noexcept;
+
+/** Resolves the native member that owns a new mission program to one exact live generation. */
+[[nodiscard]] bool activity_link_view_for_member(const state::activity::SessionBinding& binding,
+                                                 std::uint64_t memberKey,
+                                                 ActivityLinkView& output) noexcept;
+
 /** Checks whether one exact ActivityClient can change its SDK selected-state roster lease. */
 [[nodiscard]] ActivityMissionSeedLeaseStatus
 activity_mission_seed_available(const state::activity::SessionBinding& binding,
@@ -185,6 +198,16 @@ activity_type23_override_available(const state::activity::SessionBinding& bindin
 /** Reads the unique ActivityClient bound to one gameplay group session. */
 [[nodiscard]] bool activity_replication_view_for_group(std::uint64_t groupSessionId,
                                                        ActivityReplicationView& output) noexcept;
+/** Exact native player ownership resolves a view when several accounts share its session. */
+[[nodiscard]] bool activity_replication_view_for_session(std::uint64_t activitySessionId,
+                                                         std::uint64_t accountSoid,
+                                                         std::uint64_t characterSoid,
+                                                         ActivityReplicationView& output) noexcept;
+/** Exact native player ownership resolves a view when several accounts share its group. */
+[[nodiscard]] bool activity_replication_view_for_group(std::uint64_t groupSessionId,
+                                                       std::uint64_t accountSoid,
+                                                       std::uint64_t characterSoid,
+                                                       ActivityReplicationView& output) noexcept;
 
 /** Queues activity message 44 on one exact ActivityClient generation. */
 [[nodiscard]] bool request_replication_epoch(const state::activity::SessionBinding& binding,
@@ -215,7 +238,8 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
                                   std::uint64_t expectedGeneration,
                                   ActivityAuthorityResetSnapshot& output) noexcept;
 
-/** Queues a type-23 override only while exactly one authenticated link owns the binding. */
+/** Queues a type-23 override only while the requested authenticated client generation owns the
+ * binding. */
 [[nodiscard]] bool request_activity_type23_override(
     const state::activity::SessionBinding& binding,
     const activity::host::ScriptableTarget& target,
@@ -226,7 +250,8 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     std::uint64_t expectedGeneration,
     const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
 
-/** Queues one activity lifetime change while exactly one authenticated link owns the binding. */
+/** Queues one activity lifetime change while the requested authenticated client generation owns the
+ * binding. */
 [[nodiscard]] bool request_activity_lifetime_override(
     const state::activity::SessionBinding& binding,
     std::uint8_t lifetimeState,
@@ -259,11 +284,13 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     activity::host::ScriptableOverrideKind kind =
         activity::host::ScriptableOverrideKind::sdkAuth) noexcept;
 
-/** Queues a type-31 arm or disarm only while exactly one authenticated link owns the binding. */
+/** Queues a type-31 arm or disarm only while the requested authenticated client generation owns the
+ * binding. */
 [[nodiscard]] bool request_activity_type31_override(
     const state::activity::SessionBinding& binding,
     const activity::host::ScriptableTarget& target,
     std::int32_t expectedRegion,
+    std::uint64_t expectedGeneration,
     const activity::host::ScriptableOutputReservation* reservation = nullptr,
     bool enabled = true) noexcept;
 
@@ -348,7 +375,8 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     std::uint64_t expectedGeneration,
     const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
 
-/** Queues a squad placement only while exactly one authenticated link owns the binding. */
+/** Queues a squad placement only while the requested authenticated client generation owns the
+ * binding. */
 [[nodiscard]] bool request_activity_squad_override(
     const state::activity::SessionBinding& binding,
     const activity::host::ScriptableTarget& target,

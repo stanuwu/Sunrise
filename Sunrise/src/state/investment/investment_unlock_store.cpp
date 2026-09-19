@@ -1,3 +1,4 @@
+#include "../account/public_profiles.h"
 #include "store_internal.h"
 
 namespace sunrise::state::investment::store {
@@ -270,7 +271,11 @@ bool write_family5(const Family5State& value) noexcept {
             return false;
         }
     }
-    return transaction.commit();
+    if (!transaction.commit()) {
+        return false;
+    }
+    account::profiles::local_changed();
+    return true;
 }
 
 /** Ownership rows use stable positions because their manifest handles depend on order. */

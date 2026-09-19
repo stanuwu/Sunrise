@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <span>
 
+#include "../../../process/freeze/client_process_freeze.h"
 #include "../../detour.h"
 
 namespace sunrise::client::hooking::detour::transaction {
@@ -18,6 +19,7 @@ struct Threads {
     std::array<HANDLE, kThreadLimit> handles{};
     std::array<DWORD, kThreadLimit> ids{};
     std::size_t count{};
+    process::freeze::ProcessLocks processLocks{};
 };
 
 /** Result of checking suspended instruction pointers. */

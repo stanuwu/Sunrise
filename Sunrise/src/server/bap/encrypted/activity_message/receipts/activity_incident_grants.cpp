@@ -231,7 +231,7 @@ void grant_random_world_loot(std::span<const std::uint32_t> weapons,
         || titanArmour.size() != warlockArmour.size()) {
         return;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     std::span<const std::uint32_t> armour;
     for (std::size_t index = 0; index < account.characterCount; ++index) {
         if (!account.characters[index].selected) {

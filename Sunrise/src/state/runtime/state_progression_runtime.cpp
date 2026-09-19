@@ -427,7 +427,7 @@ bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,
     mutation = {};
     SaleRows rows{};
     std::size_t count = 0;
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     if (!sale_rows(rows, count) || saleIndex >= count || saleIndex >= 32
         || rows[saleIndex].unlockFlagSlot == build_data::collectibles::kUnavailableFlagSlot
         || !account::valid(account)) {
@@ -478,7 +478,7 @@ bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,
 bool commit_artifact_mod_unlock(PendingArtifactPurchase& mutation) noexcept {
     const PendingArtifactPurchase prepared = mutation;
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     return prepared.prepared && prepared.accountSoid != 0 && prepared.characterSoid != 0
            && prepared.beforeMask != prepared.afterMask
            && prepared.characterIndex < account.characterCount

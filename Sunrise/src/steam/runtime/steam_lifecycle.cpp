@@ -10,6 +10,9 @@
 #include "../../core/logging/log.h"
 #include "../../core/runtime/core_runtime.h"
 #include "../../core/runtime/host_environment.h"
+#include "../../core/settings/role.h"
+#include "../../state/social/steam_roster.h"
+#include "../interfaces/internal.h"
 #include "callbacks/callback_registry.h"
 #include "core/threading/data_mutex.h"
 #include "internal.h"
@@ -55,6 +58,9 @@ std::atomic_bool g_initialized{false};
 
 /** Starts the Steam shim and its exported state. */
 bool initialize(void* module) noexcept {
+    if (!core::settings::activates_client_hooks(core::settings::role())) {
+        return false;
+    }
     if (core::runtime::is_wine()) {
         client::graphics::initialize_wine_display();
     }
@@ -104,6 +110,8 @@ bool shutdown() noexcept {
         if (!hadRuntime) {
             return true;
         }
+        // Invalidate entering social passes and queued events before their producers stop.
+        interfaces::methods::reset_friends();
         if (!core::shutdown()) {
             core::log::write(core::log::Channel::client,
                              core::log::Level::error,
@@ -113,6 +121,8 @@ bool shutdown() noexcept {
 
         // Callback pointers are released only after Client hooks stop producing events.
         runtime::callbacks::clear();
+        state::social::client_disconnected();
+        state::social::lobby::reset();
         g_initialized.store(false, std::memory_order_release);
         lifecycle.mainActivationDone = false;
         lifecycle.mainActivationResult = false;
@@ -134,6 +144,9 @@ namespace sunrise::steam::runtime {
 
 /** Runs main-image activation once, from a caller that proves the game is loaded. */
 bool activate_main_once() noexcept {
+    if (!core::settings::activates_client_hooks(core::settings::role())) {
+        return false;
+    }
     return g_lifecycle.lock_write([](Lifecycle& lifecycle) {
         if (!lifecycle.mainActivationDone && core::is_initialized()) {
             lifecycle.mainActivationDone = true;

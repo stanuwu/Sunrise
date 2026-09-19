@@ -10,15 +10,25 @@ namespace sunrise::client::process::freeze {
 /** 1024 threads cover the game's pools without heap storage. */
 inline constexpr std::size_t kThreadLimit = 1024;
 
-/** Threads one hold keeps suspended, and the process locks it owns with them. */
-struct Held {
-    std::array<HANDLE, kThreadLimit> handles{};
-    std::array<DWORD, kThreadLimit> ids{};
-    std::size_t count{};
+/** Process locks that allocations and loader operations need while threads are suspended. */
+struct ProcessLocks {
     ULONG_PTR loaderCookie{};
     bool loaderLocked{};
     bool heapLocked{};
 };
+
+/** Threads one hold keeps suspended, and the process locks it owns with them. */
+struct Held : ProcessLocks {
+    std::array<HANDLE, kThreadLimit> handles{};
+    std::array<DWORD, kThreadLimit> ids{};
+    std::size_t count{};
+};
+
+/** Takes loader then process-heap locks before suspending any thread. Caller owns exclusivity. */
+[[nodiscard]] bool acquire_process_locks(ProcessLocks& locks) noexcept;
+
+/** Drops process locks after every suspended thread has been resumed. */
+void release_process_locks(ProcessLocks& locks) noexcept;
 
 /**
  * Suspends every other thread in the process until the matching release.

@@ -4,6 +4,7 @@
 #include <span>
 
 #include "../../../../state/activity/definition.h"
+#include "activity_startup_reservations.h"
 
 namespace sunrise::server::bap::encrypted::activity_host_manager {
 
@@ -21,6 +22,7 @@ namespace sunrise::server::bap::encrypted::activity_host_manager {
                                    std::span<std::byte> output,
                                    std::size_t& written,
                                    state::activity::PendingAllocation& allocation,
-                                   bool& hasAllocation) noexcept;
+                                   bool& hasAllocation,
+                                   PendingStartupReservations& startupReservations) noexcept;
 
 } // namespace sunrise::server::bap::encrypted::activity_host_manager

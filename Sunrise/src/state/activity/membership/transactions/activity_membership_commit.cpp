@@ -2,10 +2,11 @@
 
 #include <cstdint>
 
+#include "../../../account/account_context.h"
 #include "../../../runtime/storage/internal.h"
+#include "../../member_mutation.h"
 #include "../activity_membership_query.h"
 #include "internal.h"
-#include "state/investment/store_internal.h"
 
 namespace sunrise::state::activity::membership {
 namespace {
@@ -20,29 +21,28 @@ namespace {
 [[nodiscard]] bool commit_identity(ActivityState& state,
                                    SessionRecord& record,
                                    const PendingMutation& prepared) noexcept {
+    auto& member = *member_state(record, prepared.memberRow);
     if (!prepared.hasSnapshot
         || !transactions::equal(prepared.snapshot.identity, prepared.identityGuard)
-        || !transactions::valid_identity(prepared.snapshot.identity, record.memberKey)) {
+        || !transactions::valid_identity(prepared.snapshot.identity, prepared.expectedMemberKey)) {
         return false;
     }
     // Current State decides the outcome. Comparing it against the prepared plan and refusing on a
     // difference would drop the identity whenever State moved between prepare and commit, so no
     // membership would ever publish.
     const bool changed =
-        !record.membership.hasIdentity
-        || !transactions::equal(record.membership.identity, prepared.snapshot.identity);
+        !member.hasIdentity || !transactions::equal(member.identity, prepared.snapshot.identity);
     if (changed
         && (state.stateRevision == activity::kMaximumRevision
-            || record.membership.revision == kMaximumMembershipRevision)) {
+            || member.revision == kMaximumMembershipRevision)) {
         return false;
     }
     if (!changed) {
         return true;
     }
-    const std::uint32_t revision =
-        record.membership.hasIdentity ? record.membership.revision + 1U : kInitialRevision;
+    const std::uint32_t revision = member.hasIdentity ? member.revision + 1U : kInitialRevision;
 
-    MembershipState updated = record.membership;
+    MembershipState updated = member;
     if (!updated.hasTransitionToken) {
         updated.transitionToken = kInitialTransitionToken;
         updated.hasTransitionToken = true;
@@ -51,7 +51,7 @@ namespace {
     updated.revision = revision;
     updated.acknowledgedRevision = kAbsentRevision;
     updated.hasIdentity = true;
-    record.membership = updated;
+    member = updated;
     transactions::publish_change(state, record);
     return true;
 }
@@ -63,16 +63,17 @@ namespace {
  * @return True when the request guard and snapshot still match.
  */
 [[nodiscard]] bool commit_refresh(SessionRecord& record, const PendingMutation& prepared) noexcept {
+    auto& member = *member_state(record, prepared.memberRow);
     if (prepared.refreshRequestGuard
         != transactions::refresh_guard(prepared.requestedRevision, prepared.bubbleIndex)) {
         return false;
     }
-    if (record.membership.hasIdentity) {
+    if (member.hasIdentity) {
         if (!prepared.hasSnapshot) {
             return false;
         }
-        const Snapshot expected = transactions::make_snapshot(
-            record.membership, record.membership.identity, record.membership.revision);
+        const Snapshot expected =
+            transactions::make_snapshot(member, member.identity, member.revision);
         if (!transactions::equal(prepared.snapshot, expected)) {
             return false;
         }
@@ -81,8 +82,8 @@ namespace {
     }
     // The bubble is the client saying which slice set it holds. It is not a published field, so
     // no revision moves.
-    record.membership.bubble = prepared.bubbleIndex;
-    record.membership.bubbleRevision = prepared.requestedRevision;
+    member.bubble = prepared.bubbleIndex;
+    member.bubbleRevision = prepared.requestedRevision;
     return true;
 }
 
@@ -90,14 +91,15 @@ namespace {
 [[nodiscard]] bool commit_republish(ActivityState& state,
                                     SessionRecord& record,
                                     const PendingMutation& prepared) noexcept {
-    if (!prepared.hasSnapshot || !record.membership.hasIdentity
-        || record.membership.revision == kMaximumMembershipRevision
-        || prepared.snapshot.revision != record.membership.revision + 1U
-        || !transactions::equal(prepared.snapshot.identity, record.membership.identity)) {
+    auto& member = *member_state(record, prepared.memberRow);
+    if (!prepared.hasSnapshot || !member.hasIdentity
+        || member.revision == kMaximumMembershipRevision
+        || prepared.snapshot.revision != member.revision + 1U
+        || !transactions::equal(prepared.snapshot.identity, member.identity)) {
         return false;
     }
-    ++record.membership.revision;
-    record.membership.acknowledgedRevision = kAbsentRevision;
+    ++member.revision;
+    member.acknowledgedRevision = kAbsentRevision;
     transactions::publish_change(state, record);
     return true;
 }
@@ -112,14 +114,16 @@ namespace {
 [[nodiscard]] bool commit_acknowledgement(ActivityState& state,
                                           SessionRecord& record,
                                           const PendingMutation& prepared) noexcept {
-    const bool changed = record.membership.hasIdentity
-                         && prepared.acknowledgement == record.membership.revision
-                         && prepared.acknowledgement != record.membership.acknowledgedRevision;
+    auto& member = *member_state(record, prepared.memberRow);
+    const bool changed = member.hasIdentity && prepared.acknowledgement == member.revision
+                         && prepared.acknowledgement != member.acknowledgedRevision;
     if (changed && state.stateRevision == activity::kMaximumRevision) {
         return false;
     }
     if (changed) {
-        record.membership.acknowledgedRevision = prepared.acknowledgement;
+        member.acknowledgedRevision = prepared.acknowledgement;
+        entity_slots::acknowledge_member_purge(
+            record.memberLeases, prepared.memberRow, prepared.acknowledgement);
         transactions::publish_change(state, record);
     }
     return true;
@@ -142,17 +146,26 @@ bool commit(PendingMutation& mutation, CommittedClientState* clientState) noexce
         return false;
     }
 
-    const std::lock_guard accountGuard(investment::store::g_mutex);
-    const auto primarySoid = investment::store::account().primarySoid;
+    const auto primarySoid = account_primary_soid(bound_account());
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
     auto& root = runtime::storage::g_state;
     ActivityState& state = root.activity;
     SessionRecord& record = state.sessions[prepared.targetSlot];
-    bool committed = state.stateRevision == prepared.expectedStateRevision && record.occupied
-                     && record.joined && record.joinedRevision != kInvalidRevision
-                     && record.sessionId == prepared.sessionId
-                     && record.recordRevision == prepared.expectedRecordRevision
-                     && primarySoid == prepared.expectedPrimarySoid;
+    bool committed =
+        state.stateRevision == prepared.expectedStateRevision && record.occupied && record.joined
+        && record.joinedRevision != kInvalidRevision && record.sessionId == prepared.sessionId
+        && record.recordRevision == prepared.expectedRecordRevision
+        && primarySoid == prepared.expectedPrimarySoid
+        && member_state(record, prepared.memberRow) != nullptr
+        && (!record.sharedMembers
+            || member_row(record, prepared.expectedMemberKey, primarySoid) == prepared.memberRow);
+    const auto beforeRevision = state.stateRevision;
+    const bool peerVisible = record.sharedMembers
+                             && (prepared.kind == MutationKind::identity
+                                 || prepared.kind == MutationKind::authoritative);
+    if (committed && peerVisible && !can_republish_members(record, prepared.memberRow)) {
+        committed = false;
+    }
     if (committed && prepared.kind == MutationKind::identity) {
         committed = commit_identity(state, record, prepared);
     } else if (committed && prepared.kind == MutationKind::authoritative) {
@@ -169,6 +182,9 @@ bool commit(PendingMutation& mutation, CommittedClientState* clientState) noexce
         committed = commit_acknowledgement(state, record, prepared);
     } else {
         committed = false;
+    }
+    if (committed && peerVisible && state.stateRevision != beforeRevision) {
+        republish_members(record, prepared.memberRow);
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
     return committed;

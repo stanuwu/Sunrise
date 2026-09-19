@@ -30,6 +30,15 @@ enum class Bank : int {
                         std::string_view settingsSchema,
                         std::string_view settingsDefaults) noexcept;
 void shutdown() noexcept;
+/** Binds an upstream seed account once, preserving all slot-owned investment rows. */
+[[nodiscard]] bool bind_identity(std::uint64_t primarySoid) noexcept;
+/** Matches a persisted account or character root; requires private local access. */
+[[nodiscard]] bool owns_account_root(std::uint64_t rootSoid) noexcept;
+/**
+ * Reads real character slots and the session selection under one private-local transaction.
+ * Failure clears output; success returns zero when no existing character is selected.
+ */
+[[nodiscard]] bool read_selected_character(std::uint64_t& output) noexcept;
 [[nodiscard]] bool read_account(AccountState& output) noexcept;
 [[nodiscard]] AccountState account() noexcept;
 [[nodiscard]] bool write_account(const AccountState& value) noexcept;

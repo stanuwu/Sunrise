@@ -56,6 +56,9 @@ bool prepare(Scratch& scratch,
              const Reservation& reservation,
              std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
              Prepared& prepared) noexcept {
+    const state::ScopedAccountView accountScope(
+        state::account_for_subscription_root(subscription.familyRootSoid));
+    const bool publicOnly = !state::local_account_access();
     if (reservation.rawWriteOffset > scratch.plaintext.size()
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
         return report_failure("reservation");
@@ -66,13 +69,13 @@ bool prepare(Scratch& scratch,
     }
     // Package extraction may have completed after State initialization on a first cache build.
     // Canonicalize profile action-source identities immediately before the first Family-4 image.
-    if (!state::ensure_profile_item_identities()) {
+    if (!publicOnly && !state::ensure_profile_item_identities()) {
         return report_failure("profile_identities");
     }
     // Account canonicalization stays out of this builder. Families zero and three do not pass
     // through it, so push::ensure_account_canonical runs ahead of the whole dispatch.
-    const state::AccountState account = state::account_snapshot();
-    if (!state::account::valid(account)) {
+    const state::AccountState account = state::bound_account_snapshot();
+    if (!(publicOnly ? state::account::valid_public(account) : state::account::valid(account))) {
         return report_failure("account_state");
     }
 
@@ -88,7 +91,7 @@ bool prepare(Scratch& scratch,
                    reservation.rawWriteOffset + family4_datagen::account::layout::kObjectSize);
     std::size_t compressedExtent = reservation.compressedWriteOffset;
     const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-    if (!family4_datagen::account::encode(account, accountBytes)) {
+    if (!family4_datagen::account::encode(account, accountBytes, publicOnly)) {
         return report_failure("account_object");
     }
     if (!append_object(scratch,
@@ -114,8 +117,11 @@ bool prepare(Scratch& scratch,
             rawStorage.first(family4_datagen::character::layout::kObjectSize);
         const state::CharacterState& selectedCharacter =
             account.characters[selected.characterIndex];
-        if (!family4_datagen::character::encode(
-                selectedCharacter, selected.loadout, selected.lightEvaluation, characterBytes)) {
+        if (!family4_datagen::character::encode(selectedCharacter,
+                                                selected.loadout,
+                                                selected.lightEvaluation,
+                                                characterBytes,
+                                                publicOnly)) {
             return report_failure("character_encode");
         }
         if (!apply_acquisition_presentation(

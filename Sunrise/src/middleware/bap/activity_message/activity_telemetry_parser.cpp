@@ -165,6 +165,16 @@ constexpr std::uint8_t kWideWidth = 64;
 
 } // namespace
 
+bool read_reservation_identity(encoding::bits::Reader& reader, ReservationRecord& record) noexcept {
+    record = {};
+    ReservationRecord parsed{};
+    if (!read_reservation_record(reader, parsed)) {
+        return false;
+    }
+    record = parsed;
+    return true;
+}
+
 /** Parses a complete peer-reservation request. */
 bool parse_reservation_request(std::span<const std::byte> input,
                                ReservationRequest& request,

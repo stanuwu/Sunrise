@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 #include "../../../../middleware/bap/activity_message/cinematic_incident.h"
@@ -9,6 +10,7 @@
 #include "../../../../middleware/bap/activity_message/incident.h"
 #include "../../../../middleware/bap/activity_message/player_trigger_incident.h"
 #include "../../../../middleware/bap/activity_message/sense_update.h"
+#include "../../../../state/activity/member_context.h"
 #include "../../../../state/activity_sdk/runtime.h"
 #include "activity_message_route_internal.h"
 
@@ -313,7 +315,15 @@ bool prepare_authority_purge(const ActivityClientBinding& binding,
     plan.sessionId = request.sessionId;
     plan.authorityPurge.body.slots = purge.mask;
     plan.authorityPurge.body.reason = static_cast<std::int8_t>(purge.reason);
-    plan.authorityPurge.body.epoch = static_cast<std::uint8_t>(binding.replicationEpoch + 1U);
+    auto& pending = plan.authorityPurge;
+    pending.binding = binding.session;
+    if (!state::activity::replication_sequence(binding.session, pending.expectedSequence)
+        || pending.expectedSequence == (std::numeric_limits<std::uint64_t>::max)()) {
+        return false;
+    }
+    static_cast<void>(state::activity::pending_member_purge(
+        binding.session, state::activity::member_context().memberKey, pending.departure));
+    plan.authorityPurge.body.epoch = static_cast<std::uint8_t>(pending.expectedSequence + 1U);
     plan.authorityPurge.sourceGeneration = binding.bindingGeneration;
     plan.authorityPurge.pending = true;
     plan.delivery = Delivery::purgeNotification;

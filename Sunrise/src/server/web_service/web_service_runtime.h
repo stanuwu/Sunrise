@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <new>
+#include <optional>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -17,6 +18,8 @@ namespace sunrise::server::web_service {
 
 /** Optional Server action produced while answering one Web Service request. */
 struct Outcome {
+    /** Public writeback is published only after the owning BAP request commits. */
+    std::optional<state::social::NativePresence> nativePresence;
     bool hasSubscription{};
     middleware::queuez::Subscription subscription{};
     /** A claim changed the account flag bank, so a fresh account image has to follow. */

@@ -1,9 +1,9 @@
 #include <Windows.h>
 
+#include "../../../account/account_context.h"
 #include "../../../runtime/storage/internal.h"
 #include "../activity_membership_query.h"
 #include "internal.h"
-#include "state/investment/store_internal.h"
 
 namespace sunrise::state::activity::membership {
 
@@ -16,21 +16,20 @@ bool prepare_authoritative(std::uint64_t sessionId,
         return false;
     }
 
-    const std::lock_guard accountGuard(investment::store::g_mutex);
-    const auto primarySoid = investment::store::account().primarySoid;
+    const auto primarySoid = account_primary_soid(bound_account());
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const auto& root = runtime::storage::g_state;
     PendingMutation prepared{};
     const SessionRecord* record =
         transactions::prepare_base(root.activity, primarySoid, sessionId, prepared);
+    const auto* member = record ? member_state(*record, prepared.memberRow) : nullptr;
     bool ready = record != nullptr;
     if (ready) {
-        const MembershipState merged = transactions::merge(record->membership, update);
-        const bool changed = !transactions::equal_authoritative(record->membership, merged);
+        const MembershipState merged = transactions::merge(*member, update);
+        const bool changed = !transactions::equal_authoritative(*member, merged);
         const bool revisionExhausted =
             root.activity.stateRevision == activity::kMaximumRevision
-            || (record->membership.hasIdentity
-                && record->membership.revision == kMaximumMembershipRevision);
+            || (member->hasIdentity && member->revision == kMaximumMembershipRevision);
         if (changed && revisionExhausted) {
             ready = false;
         } else {
@@ -38,10 +37,9 @@ bool prepare_authoritative(std::uint64_t sessionId,
             prepared.authoritativeGuard = update;
             prepared.kind = MutationKind::authoritative;
             prepared.changesState = changed;
-            prepared.movesRegion = transactions::moves_region(record->membership, merged);
-            prepared.movesTransitionToken =
-                transactions::moves_transition_token(record->membership, merged);
-            prepared.hasSnapshot = changed && record->membership.hasIdentity;
+            prepared.movesRegion = transactions::moves_region(*member, merged);
+            prepared.movesTransitionToken = transactions::moves_transition_token(*member, merged);
+            prepared.hasSnapshot = changed && member->hasIdentity;
             if (prepared.hasSnapshot) {
                 prepared.snapshot =
                     transactions::make_snapshot(merged, merged.identity, merged.revision + 1U);

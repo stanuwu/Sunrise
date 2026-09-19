@@ -2,8 +2,10 @@
 
 #include <Windows.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace sunrise::steam {
 
@@ -54,6 +56,33 @@ void set_app_id(DWORD appId) noexcept;
  */
 [[nodiscard]] bool
 queue_callback(int callbackId, ApiCall call, const void* payload, std::size_t payloadSize) noexcept;
+
+/**
+ * A producer-owned generation cancels queued events when its lifetime changes. The source
+ * must outlive queued events; a callback already executing may finish.
+ */
+struct CallbackGuard {
+    const std::atomic<std::uint64_t>* source{};
+    std::uint64_t generation{};
+    /** @return True for an unguarded event or while its producer's generation still matches. */
+    [[nodiscard]] bool valid() const noexcept {
+        return source == nullptr || source->load() == generation;
+    }
+};
+
+/** One callback event awaiting a queue slot; `guard` may cancel it before delivery. */
+struct CallbackDelivery {
+    int callbackId{};
+    ApiCall call{};
+    const void* payload{};
+    std::size_t payloadSize{};
+    CallbackGuard guard{};
+};
+/**
+ * Enqueues one ordered batch atomically; a refused batch leaves every event pending with its
+ * producer.
+ */
+[[nodiscard]] bool queue_callbacks(std::span<const CallbackDelivery> deliveries) noexcept;
 
 /** @return The shim's single valid user handle. */
 [[nodiscard]] UserHandle user_handle() noexcept;

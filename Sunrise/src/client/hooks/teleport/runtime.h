@@ -44,8 +44,8 @@ void clear_targets() noexcept;
  */
 [[nodiscard]] bool install() noexcept;
 
-/** Detaches both teleport hooks. */
-void uninstall() noexcept;
+/** Detaches both hooks only after camera, physics and explicit sync callers have finished. */
+[[nodiscard]] bool uninstall() noexcept;
 
 /** Publishes the camera pose for the frame and the forward vector for the next physics tick. */
 void capture_camera_pose(std::uint32_t playerIndex) noexcept;
@@ -132,5 +132,8 @@ void apply_pending(void* component) noexcept;
 
 /** Copies the last complete pose published by the camera-frame hook. */
 [[nodiscard]] bool camera_pose(CameraPose& pose) noexcept;
+
+/** Reads the native controlled handle for local-player ownership checks. */
+[[nodiscard]] bool current_controlled_handle(std::uint32_t& handle) noexcept;
 
 } // namespace sunrise::client::hooks::teleport

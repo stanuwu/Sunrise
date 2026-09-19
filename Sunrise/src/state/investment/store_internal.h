@@ -8,6 +8,7 @@
 #include <string>
 #include <type_traits>
 
+#include "../account/account_context.h"
 #include "store.h"
 
 namespace sunrise::state::investment::store {
@@ -58,7 +59,7 @@ public:
 
     /** Reads one typed SQL scalar without narrowing an out-of-range value. */
     template <typename T> [[nodiscard]] bool column(int index, T& value) const noexcept {
-        if (statement_ == nullptr) {
+        if (!local_account_access() || statement_ == nullptr) {
             return false;
         }
         if constexpr (std::is_enum_v<T>) {

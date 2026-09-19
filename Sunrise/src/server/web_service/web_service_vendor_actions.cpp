@@ -232,7 +232,7 @@ constexpr std::array<LegacyQuestStep, 3> kLegacyQuestSteps{{
     // One account view for the whole pool. Reading it copies the whole account, and the pool is
     // walked candidate by candidate, so taking it per candidate would copy it dozens of times to
     // answer dozens of questions about the same unchanging view.
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     for (std::size_t at = 0; at < poolCount; ++at) {
         if (state::account::holds_pursuit(account, pool[at])) {
             ++held;

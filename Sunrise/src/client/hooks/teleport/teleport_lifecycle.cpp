@@ -64,10 +64,31 @@ using PhysicsSync = std::int64_t(__fastcall*)(std::byte*, std::byte*);
 
 std::array<hooking::detour::Handle, kHandleCount> g_handles{};
 std::atomic_bool g_installed{false};
+SRWLOCK g_lifecycleLock = SRWLOCK_INIT;
+std::atomic<CameraTransform> g_cameraOriginal{};
+std::atomic<PhysicsSync> g_physicsOriginal{};
+std::atomic_uint32_t g_calls{};
 
-/** @return The trampoline for a handle slot, or null. */
-template <typename T> [[nodiscard]] T original(std::size_t slot) noexcept {
-    return reinterpret_cast<T>(g_handles[slot].original);
+struct Call final {
+    Call() noexcept {
+        g_calls.fetch_add(1, std::memory_order_acq_rel);
+    }
+    ~Call() {
+        g_calls.fetch_sub(1, std::memory_order_acq_rel);
+    }
+};
+
+template <typename T> [[nodiscard]] T published(std::atomic<T>& slot) noexcept {
+    auto next = slot.load(std::memory_order_acquire);
+    while (next == nullptr) {
+        slot.wait(nullptr, std::memory_order_acquire);
+        next = slot.load(std::memory_order_acquire);
+    }
+    return next;
+}
+
+bool idle() noexcept {
+    return g_calls.load(std::memory_order_acquire) == 0;
 }
 
 /**
@@ -75,9 +96,10 @@ template <typename T> [[nodiscard]] T original(std::size_t slot) noexcept {
  * @param playerIndex Player whose camera was transformed.
  * @return Whatever the original returns.
  */
-std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
-    const CameraTransform next = original<CameraTransform>(kCameraSlot);
-    const std::int64_t result = next != nullptr ? next(playerIndex) : 0;
+__declspec(noinline) std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
+    const Call call;
+    const CameraTransform next = published(g_cameraOriginal);
+    const std::int64_t result = next(playerIndex);
     capture_camera_pose(playerIndex);
     poll_request();
     force_pending();
@@ -96,7 +118,10 @@ std::int64_t __fastcall camera_transform(std::uint32_t playerIndex) noexcept {
  * @param outFlags The original's second argument, untouched.
  * @return Whatever the original returns.
  */
-std::int64_t __fastcall physics_sync(std::byte* component, std::byte* outFlags) noexcept {
+__declspec(noinline) std::int64_t __fastcall physics_sync(std::byte* component,
+                                                          std::byte* outFlags) noexcept {
+    const Call call;
+    const PhysicsSync next = published(g_physicsOriginal);
     apply_pending(component);
     // Shares this detour rather than adding a second one to the same function. The flag it clears
     // is written and read inside this tick, so it has to run here and not on a frame poll.
@@ -104,8 +129,7 @@ std::int64_t __fastcall physics_sync(std::byte* component, std::byte* outFlags) 
     hooks::fly::apply(component);
     // This tick is the only one that sees every component, so it is where the player's is found.
     client::player::position::observe(component);
-    const PhysicsSync next = original<PhysicsSync>(kPhysicsSlot);
-    return next != nullptr ? next(component, outFlags) : 0;
+    return next(component, outFlags);
 }
 
 /**
@@ -144,7 +168,7 @@ constexpr std::size_t kSyncFlagsCapacity = 256;
 } // namespace
 
 /** Attaches the camera and physics hooks that carry the teleport. */
-bool install() noexcept {
+bool install_locked() noexcept {
     if (g_installed.load(std::memory_order_acquire)) {
         return true;
     }
@@ -178,6 +202,12 @@ bool install() noexcept {
     if (!resolve_action_keys()) {
         (void)fail("action_keys");
     }
+    g_cameraOriginal.store(reinterpret_cast<CameraTransform>(g_handles[kCameraSlot].original),
+                           std::memory_order_release);
+    g_physicsOriginal.store(reinterpret_cast<PhysicsSync>(g_handles[kPhysicsSlot].original),
+                            std::memory_order_release);
+    g_cameraOriginal.notify_all();
+    g_physicsOriginal.notify_all();
     g_installed.store(true, std::memory_order_release);
     core::log::write(
         core::log::Channel::client, core::log::Level::info, "ev=teleport stage=install result=ok");
@@ -185,8 +215,12 @@ bool install() noexcept {
 }
 
 /** Calls the physics sync for one component through the installed trampoline. */
-void invoke_sync(void* component) noexcept {
-    const PhysicsSync next = original<PhysicsSync>(kPhysicsSlot);
+__declspec(noinline) void invoke_sync(void* component) noexcept {
+    const Call call;
+    if (!g_installed.load(std::memory_order_acquire)) {
+        return;
+    }
+    const PhysicsSync next = g_physicsOriginal.load(std::memory_order_acquire);
     if (next == nullptr || component == nullptr) {
         return;
     }
@@ -195,26 +229,51 @@ void invoke_sync(void* component) noexcept {
 }
 
 /** Detaches both teleport hooks. */
-void uninstall() noexcept {
+bool uninstall_locked() noexcept {
     if (!g_installed.exchange(false, std::memory_order_acq_rel)) {
-        return;
+        return true;
     }
+    const std::array entries{
+        hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&camera_transform)},
+        hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&physics_sync)},
+        hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&invoke_sync)},
+    };
+    if (hooking::detour::uninstall(g_handles, entries, &idle)
+        != hooking::detour::UninstallResult::removed) {
+        g_installed.store(true, std::memory_order_release);
+        return false;
+    }
+    g_cameraOriginal.store(nullptr, std::memory_order_release);
+    g_physicsOriginal.store(nullptr, std::memory_order_release);
     clear_targets();
     clear_action_keys();
     hooks::fly::reset();
     client::player::position::reset();
     polled_input::release_key();
-    // A thread still inside a replacement keeps the detours; the cleared targets make them inert.
-    bool replacementActive = false;
-    if (!hooking::detour::uninstall(g_handles, replacementActive)) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::warn,
-                         replacementActive
-                             ? "ev=teleport stage=uninstall result=fail reason=active"
-                             : "ev=teleport stage=uninstall result=fail reason=detach");
-        return;
-    }
     g_handles = {};
+    return true;
+}
+
+bool install() noexcept {
+    if (!TryAcquireSRWLockExclusive(&g_lifecycleLock)) {
+        return false;
+    }
+    __try {
+        return install_locked();
+    } __finally {
+        ReleaseSRWLockExclusive(&g_lifecycleLock);
+    }
+}
+
+bool uninstall() noexcept {
+    if (!TryAcquireSRWLockExclusive(&g_lifecycleLock)) {
+        return false;
+    }
+    __try {
+        return uninstall_locked();
+    } __finally {
+        ReleaseSRWLockExclusive(&g_lifecycleLock);
+    }
 }
 
 } // namespace sunrise::client::hooks::teleport

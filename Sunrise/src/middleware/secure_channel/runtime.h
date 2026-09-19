@@ -20,6 +20,11 @@ inline constexpr std::size_t kFrameTagSize = 16;
                                        std::span<std::byte> output,
                                        std::size_t& written) noexcept;
 
+/** Verifies the complete envelope before publishing its connection key and nonce. */
+[[nodiscard]] bool decode_server_hello(const state::SignOnState& signOn,
+                                       std::span<const std::byte> envelope,
+                                       state::BapState& output) noexcept;
+
 /** Seals one frameType-1 plaintext as a tag followed by ciphertext. */
 [[nodiscard]] bool seal_frame(std::span<const std::byte, state::kAesKeySize> key,
                               std::span<const std::byte, state::kBapNonceSize> nonce,

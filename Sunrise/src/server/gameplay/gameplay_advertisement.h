@@ -43,7 +43,8 @@ void build_advertisement(
     RegionSource regionSource,
     std::uint8_t localMemberSlot,
     middleware::bap::activity_message::replicate_membership::CitizenAdvertisement& output,
-    std::uint64_t& hostGeneration) noexcept;
+    std::uint64_t& hostGeneration,
+    bool publicRegion = false) noexcept;
 
 /**
  * Builds one further directory entry from the same source, without reporting an outcome.
@@ -59,11 +60,13 @@ void build_directory_entry(
     std::int32_t regionIndex,
     std::uint8_t localMemberSlot,
     middleware::bap::activity_message::replicate_membership::CitizenAdvertisement& output,
-    std::uint64_t& hostGeneration) noexcept;
+    std::uint64_t& hostGeneration,
+    bool publicRegion = false) noexcept;
 
 /** Claims a missing host row and reports whether its advertisement is ready. */
 [[nodiscard]] AdvertisementState advertisement_state(const state::activity::SessionBinding& source,
-                                                     std::int32_t regionIndex) noexcept;
+                                                     std::int32_t regionIndex,
+                                                     bool publicRegion = false) noexcept;
 
 /**
  * Claims the region's host row and completes a pending allocation at once.
@@ -72,7 +75,8 @@ void build_directory_entry(
  * @param regionIndex Concrete region the join burst advertises.
  */
 void complete_host_session(const state::activity::SessionBinding& source,
-                           std::int32_t regionIndex) noexcept;
+                           std::int32_t regionIndex,
+                           bool publicRegion = false) noexcept;
 
 /** Starts the private activity's stable logical Bubble Host and completes its allocation. */
 [[nodiscard]] bool complete_private_host_session(const state::activity::SessionBinding& source,

@@ -515,15 +515,18 @@ Status fire_trigger(const sdk::BoundView& view, std::uint32_t slotRow) noexcept 
     if (status != Status::ready) {
         return status;
     }
-    const bool queued = prepared.target.stateLocalRoster
-                            ? server::bap::request_activity_state_local_type31_override(
-                                  view.binding,
-                                  prepared.target,
-                                  prepared.generatedRosterGroup,
-                                  prepared.effectiveRegion,
-                                  prepared.activityClientGeneration)
-                            : server::bap::request_activity_type31_override(
-                                  view.binding, prepared.target, prepared.effectiveRegion);
+    const bool queued =
+        prepared.target.stateLocalRoster
+            ? server::bap::request_activity_state_local_type31_override(
+                  view.binding,
+                  prepared.target,
+                  prepared.generatedRosterGroup,
+                  prepared.effectiveRegion,
+                  prepared.activityClientGeneration)
+            : server::bap::request_activity_type31_override(view.binding,
+                                                            prepared.target,
+                                                            prepared.effectiveRegion,
+                                                            prepared.activityClientGeneration);
     if (queued) {
         return Status::queued;
     }
@@ -550,8 +553,12 @@ Status fire_trigger_reserved(const sdk::BoundView& view,
                   prepared.activityClientGeneration,
                   &reservation,
                   enabled)
-            : server::bap::request_activity_type31_override(
-                  view.binding, prepared.target, prepared.effectiveRegion, &reservation, enabled);
+            : server::bap::request_activity_type31_override(view.binding,
+                                                            prepared.target,
+                                                            prepared.effectiveRegion,
+                                                            prepared.activityClientGeneration,
+                                                            &reservation,
+                                                            enabled);
     if (queued) {
         return Status::queued;
     }

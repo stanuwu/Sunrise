@@ -156,7 +156,7 @@ same_retained_scope(const RetainedSquadGroup& group,
  * @return Authored SOID of the named character, or of the selected character when nothing matches.
  */
 [[nodiscard]] std::uint64_t roster_player_key(std::uint64_t joinCharacter) noexcept {
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const std::uint64_t selected = state::account::selected_character_soid(account);
     if (joinCharacter == 0) {
         return selected;

@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <span>
 
+#include "telemetry.h"
+
 namespace sunrise::middleware::bap::activity_message {
 
 /** Discriminator 1 carries the peer-heard mask and is the only variant this client sends. */
@@ -37,6 +39,8 @@ struct Request final {
 
 /** Typed values needed from the fixed prefix of an activity join request. */
 struct JoinRequest final {
+    /** Native BC identity, including account and player key supplied by this client. */
+    telemetry::ReservationRecord identity{};
     std::uint32_t correlation{};
     std::uint64_t sessionId{};
     /** 8 wire bytes, low byte first, that name this client inside membership State. */

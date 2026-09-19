@@ -91,7 +91,7 @@ bool g_steered{false};
         return true;
     }
     // The snapshot copies the whole account, so it stops once the bindings arrive.
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     if (!account.settings.keyBindings.configured) {
         return false;
     }

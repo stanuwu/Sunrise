@@ -40,6 +40,8 @@ bool derive(std::span<const patterns::ImageRange> image,
 
     Targets resolved;
     resolved.transportKind = matches[index(patterns::game::Id::transportKind)].address;
+    resolved.transportKindSession =
+        matches[index(patterns::game::Id::transportKindSession)].address;
     resolved.httpExecuteRequest = matches[index(patterns::game::Id::httpExecuteRequest)].address;
     resolved.signOnReadinessFailure =
         matches[index(patterns::game::Id::signOnReadinessFailure)].address;

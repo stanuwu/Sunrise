@@ -10,7 +10,7 @@ SettingsUpdateDisposition prepare_settings_update(const account::settings::Setti
                                                   PendingSettingsUpdate& mutation) noexcept {
     mutation = {};
 
-    const AccountState current = account_snapshot();
+    const AccountState current = bound_account_snapshot();
     if (!account::valid(current)) {
         return SettingsUpdateDisposition::rejected;
     }

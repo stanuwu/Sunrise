@@ -18,6 +18,11 @@ namespace sunrise::middleware::datagen::family4::loadout {
                            std::size_t selectedCharacterIndex,
                            ResolvedLoadout& output) noexcept;
 
+/** Resolves a public inspection row without changing the account's selected character. */
+[[nodiscard]] bool resolve_character(const state::AccountState& account,
+                                     std::size_t characterIndex,
+                                     ResolvedLoadout& output) noexcept;
+
 /**
  * Resolves the item instances one character owns, selected or not.
  * The equip-summary reader looks up an instance without a null check, so every character the

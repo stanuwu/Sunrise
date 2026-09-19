@@ -5,6 +5,13 @@
 
 namespace sunrise::middleware::datagen {
 
+/** Native inspection family and its account/character object schemas. */
+inline constexpr std::uint32_t kInspectionFamily = 1;
+/** Object id for the family-one account slot. */
+inline constexpr std::uint32_t kInspectionRootObjectId = 0xC47D63DBU;
+/** Object id for the family-one selected-character slot. */
+inline constexpr std::uint32_t kInspectionCharacterObjectId = 0x1A10412DU;
+
 /** Object id the client matches against the family-three roster slot. */
 inline constexpr std::uint32_t kRosterObjectId = 0x1C35451DU;
 /** Object id for the family-three per-character record slot. */
@@ -29,6 +36,14 @@ inline constexpr std::uint64_t kUnlockSentinelSoid = 0x7FFFFFFFFFFFFFFFULL;
 inline constexpr std::uint32_t kSocialRosterDirectoryObjectId = 0xDA277CE4U;
 /** Object id for the family-two social roster member slot. */
 inline constexpr std::uint32_t kSocialRosterMemberObjectId = 0x811115CEU;
+/** Object id for the family-six fireteam directory slot. */
+inline constexpr std::uint32_t kFireteamDirectoryObjectId = 0xBF49D4F0U;
+/** Object id for the family-six fireteam descriptor slot. */
+inline constexpr std::uint32_t kFireteamDescriptorObjectId = 0xE40CA32AU;
+/** Object id for the family-seven join directory slot. */
+inline constexpr std::uint32_t kJoinDirectoryObjectId = 0x05D07598U;
+/** Object id for the family-seven join descriptor slot. */
+inline constexpr std::uint32_t kJoinDescriptorObjectId = 0x722C6528U;
 
 /** Sizes the family-two slot descriptors declare, in bytes. */
 inline constexpr std::size_t kSocialRosterDirectorySize = 96;
@@ -40,6 +55,8 @@ inline constexpr std::uint32_t kSocialRosterFamily = 2;
 inline constexpr std::uint32_t kRosterFamily = 3;
 inline constexpr std::uint32_t kAccountFamily = 4;
 inline constexpr std::uint32_t kUnlockFamily = 5;
+inline constexpr std::uint32_t kFireteamFamily = 6;
+inline constexpr std::uint32_t kJoinFamily = 7;
 
 /** Slots those objects occupy. */
 inline constexpr std::uint32_t kRosterSlot = 0;
@@ -59,18 +76,31 @@ inline constexpr std::uint32_t kItemInstanceSlot = 3;
 [[nodiscard]] constexpr bool
 object_id(std::uint32_t familyType, std::uint32_t slotIndex, std::uint32_t& objectId) noexcept {
     objectId = 0;
-    if (familyType == kSocialRosterFamily && slotIndex == kSocialRosterDirectorySlot) {
+    if (familyType == kInspectionFamily && slotIndex == kAccountSlot) {
+        objectId = kInspectionRootObjectId;
+    } else if (familyType == kInspectionFamily && slotIndex == kCharacterSlot) {
+        objectId = kInspectionCharacterObjectId;
+    } else if ((familyType == kInspectionFamily || familyType == kAccountFamily)
+               && slotIndex == kItemInstanceSlot) {
+        objectId = kItemInstanceObjectId;
+    } else if (familyType == kSocialRosterFamily && slotIndex == kSocialRosterDirectorySlot) {
         objectId = kSocialRosterDirectoryObjectId;
     } else if (familyType == kSocialRosterFamily && slotIndex == kSocialRosterMemberSlot) {
         objectId = kSocialRosterMemberObjectId;
+    } else if (familyType == kFireteamFamily && slotIndex == 0) {
+        objectId = kFireteamDirectoryObjectId;
+    } else if (familyType == kFireteamFamily && slotIndex == 1) {
+        objectId = kFireteamDescriptorObjectId;
+    } else if (familyType == kJoinFamily && slotIndex == 0) {
+        objectId = kJoinDirectoryObjectId;
+    } else if (familyType == kJoinFamily && slotIndex == 1) {
+        objectId = kJoinDescriptorObjectId;
     } else if (familyType == kRosterFamily && slotIndex == kRosterSlot) {
         objectId = kRosterObjectId;
     } else if (familyType == kAccountFamily && slotIndex == kAccountSlot) {
         objectId = kAccountObjectId;
     } else if (familyType == kAccountFamily && slotIndex == kCharacterSlot) {
         objectId = kCharacterObjectId;
-    } else if (familyType == kAccountFamily && slotIndex == kItemInstanceSlot) {
-        objectId = kItemInstanceObjectId;
     }
     return objectId != 0;
 }

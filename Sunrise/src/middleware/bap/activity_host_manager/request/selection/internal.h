@@ -27,7 +27,8 @@ namespace sunrise::middleware::bap::activity_host_manager::request::selection {
  * @return True when the fixed prefix and the descriptor are both complete.
  */
 [[nodiscard]] bool parse_field_two(std::span<const std::byte> input,
-                                   ActivityManagerSelection& selection) noexcept;
+                                   ActivityManagerSelection& selection,
+                                   StartupReservations& reservations) noexcept;
 
 /**
  * Copies one bit range out of a bit-packed buffer, left-aligned into byte storage.

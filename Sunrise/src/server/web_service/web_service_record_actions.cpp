@@ -89,7 +89,7 @@ class_armour_pool(state::CharacterClass characterClass,
     namespace pass = state::progression::season_pass;
     std::span<const std::uint32_t> weapons;
     std::span<const std::uint32_t> armour;
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const state::CharacterState* character = nullptr;
     for (std::size_t index = 0; index < account.characterCount; ++index) {
         if (account.characters[index].selected) {

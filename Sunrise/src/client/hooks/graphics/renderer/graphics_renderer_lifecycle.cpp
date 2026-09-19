@@ -6,6 +6,7 @@
 
 #include "../../../../core/ui/layout/layout.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
+#include "../../../../steam/interfaces/invitations.h"
 #include "../../../ui/mission_launch/mission_launch_art.h"
 #include "../../cursor/runtime.h"
 #include "../../inactivity/inactivity_override.h"
@@ -332,7 +333,9 @@ void present(IDXGISwapChain* swapChain) noexcept {
         inactivity::poll();
     }
     // The cursor policy calls Win32, so it runs only after the renderer lock is gone.
-    const bool visible = core::ui::runtime::snapshot().visible;
+    steam::interfaces::methods::PendingInvitation invitation{};
+    const bool visible = core::ui::runtime::snapshot().visible
+                         || steam::interfaces::methods::pending_invitation(invitation);
     cursor::apply_visibility(visible);
     polled_input::apply_visibility(visible);
     // The game makes its raw-mouse window during startup, so the first tries find nothing.

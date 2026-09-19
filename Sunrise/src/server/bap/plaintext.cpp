@@ -4,11 +4,15 @@
 #include <cstdio>
 
 #include "../../core/logging/log.h"
+#include "../../core/settings/settings.h"
 #include "../../middleware/secure_channel/runtime.h"
 #include "../../state/matchmaking/matchmaking_state.h"
 #include "../../state/runtime/runtime.h"
+#include "../../state/social/steam_roster.h"
+#include "account_enrollment.h"
 #include "encrypted/internal.h"
 #include "internal.h"
+#include "proxy/proxy_runtime.h"
 
 namespace sunrise::server::bap::plaintext {
 namespace {
@@ -118,6 +122,9 @@ void arm_encryption(Session& session, const state::BapState& bap) noexcept {
     session.receiveNonce = bap.nonce;
     session.receiveNonce.back() ^= kReceiveDirectionMask;
     session.sessionKey = bap.sessionKey;
+    if (!session.authenticated && core::settings::hosts_session()) {
+        state::social::session_directory().opened(session.accountHandle);
+    }
     session.authenticated = true;
 }
 
@@ -140,6 +147,16 @@ void arm_encryption(Session& session, const state::BapState& bap) noexcept {
     written = 0;
     encrypted::ServiceRoute route;
     (void)encrypted::routing::resolve(request.serviceId, route);
+    if (proxy::classify(request.serviceId, request.body) == proxy::Plane::upstream) {
+        return route.responseMode == encrypted::ResponseMode::reply
+                   ? proxy::forward_plaintext_request(session.id,
+                                                      request.serviceId,
+                                                      static_cast<std::uint16_t>(route.response),
+                                                      request.taskId,
+                                                      request.body)
+                   : proxy::forward_uncorrelated(
+                         session.id, request.serviceId, request.taskId, request.body);
+    }
     if (route.responseMode != encrypted::ResponseMode::reply) {
         return true;
     }
@@ -209,10 +226,35 @@ bool consume(Session& session,
     }
     if (frame.serviceId
         != static_cast<std::uint16_t>(middleware::bap::RequestService::serverHello)) {
+        if (core::settings::hosts_session() && !session.authenticated) {
+            return false;
+        }
         return consume_service(session, scratch, frame, response, written);
     }
 
     const auto& signOnState = state::sign_on();
+    state::AccountHandle accountHandle = state::kLocalAccount;
+    AccountEnrollment enrollment;
+    if (core::settings::hosts_session()) {
+        // Activity-channel hellos may carry more fields after the same bounded token prefix.
+        if (frame.body.size() < kTokenOffset + state::kSessionTokenSize
+            || frame.body[0] != kSessionTokenTag || frame.body[1] != kSessionTokenSize
+            || !enroll_account(frame.body.subspan(kTokenOffset, state::kSessionTokenSize),
+                               accountHandle,
+                               enrollment.attachedNow)) {
+            report_refusal(session, frame.serviceId, "account_token");
+            return false;
+        }
+        enrollment.handle = accountHandle;
+        enrollment.primary = state::account_primary_soid(accountHandle);
+        if ((session.authenticated && accountHandle != session.accountHandle)
+            // 127.0.0.1 in host order: the local account may only be claimed from this machine.
+            || (accountHandle == state::kLocalAccount && session.remoteAddress != 0x7F000001U)) {
+            report_refusal(session, frame.serviceId, "account_scope");
+            return false;
+        }
+    }
+    const state::ScopedAccount accountScope(accountHandle);
     // This connection's own key, nonce and envelope IV. The envelope hands them to the client, so
     // the material it carries and the material this link then seals with are the same object.
     state::BapState bapState{};
@@ -220,15 +262,15 @@ bool consume(Session& session,
         report_refusal(session, frame.serviceId, "session_material");
         return false;
     }
-    // Every service 25 is answered without reading the body, on both links. The reply is built
-    // from State alone, so the body is logged and never refused. The activity host's hello uses
-    // other framing, and refusing it strands that link in `_authenticating`.
+    // Local channels retain the upstream framing exception: the activity host's hello uses
+    // other framing, and refusing it strands that link in `_authenticating`. Shared-service
+    // channels must first resolve the bounded account token above.
     if (session.authenticated) {
         report_refusal(session, frame.serviceId, "reauthenticated");
     }
-    if (!valid_hello_shape(frame.body)) {
+    if (!core::settings::hosts_session() && !valid_hello_shape(frame.body)) {
         report_hello_shape(session, frame.body);
-    } else if (!hello_token_matches(frame.body, signOnState)) {
+    } else if (!core::settings::hosts_session() && !hello_token_matches(frame.body, signOnState)) {
         report_refusal(session, frame.serviceId, "token_mismatch_accepted");
     }
     // A repeat hello replaces its context, so the old one goes back before the new one is taken.
@@ -263,7 +305,13 @@ bool consume(Session& session,
     // Publish the context and counters only after the whole svc-26 response exists. A context that
     // was not free publishes as invalid instead of costing the reply.
     session.matchmakingContext = matchmakingContext;
+    session.accountHandle = accountHandle;
+    if (session.authenticated && core::settings::get().server.upstream.enabled) {
+        proxy::close_link(session.id);
+        proxy::open_link(session.id);
+    }
     arm_encryption(session, bapState);
+    enrollment.attachedNow = false;
     return true;
 }
 

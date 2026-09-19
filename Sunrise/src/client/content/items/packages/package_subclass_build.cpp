@@ -109,7 +109,7 @@ bool build_character_abilities(
         report_ability_failure("table_array", 0, table.size(), 0);
         return false;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     // First-option defaults every shipped subclass starts at. Equipping one resets its picks to
     // these, so every owned subclass publishes a row at this selection. The row must exist
     // synchronously: the equip response is built inline with the commit.

@@ -559,7 +559,7 @@ bool prepare_vendor_exchange(std::uint32_t costDefinitionHash,
         || costQuantity <= 0 || payouts.empty() || payouts.size() > kProfileStackChangeCapacity) {
         return false;
     }
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     if (!account::valid(account) || account.primarySoid == 0) {
         return false;
     }

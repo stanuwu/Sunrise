@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "../../encoding/bit_reader.h"
-#include "player_block.h"
+#include "native_player_profile.h"
 
 namespace sunrise::middleware::gameplay::group {
 
@@ -35,8 +35,7 @@ struct PeerPropertiesHeader {
 };
 
 /**
- * Leading fields of a player-add message, and the soid pair its player block carries.
- * The rest of the 232-byte block and the 20-byte tail after it are not decoded.
+ * Complete native player-add body, including the 232-byte B block and 20-byte tail.
  */
 struct PlayerAddRequest {
     std::uint64_t sessionId{};
@@ -46,6 +45,8 @@ struct PlayerAddRequest {
     std::uint8_t kind{};
     /** The block's account and character soids. A host must republish them or no player is made. */
     PlayerBlockSoids soids{};
+    /** All own native profile fields from the same full-mode block. */
+    NativePlayerProfile profile{};
 };
 
 /**
@@ -63,18 +64,20 @@ struct PlayerRemoveRequest {
 };
 
 /**
- * Leading fields of a player-properties message.
- * The 232-byte sparse player record and its 20-byte tail after them are not decoded.
+ * Native player-properties message, including its sparse B fields and mandatory tail.
  */
 struct PlayerPropertiesRequest {
     std::uint64_t sessionId{};
     std::uint32_t sequence{};
     /** Player kind, 0 through 3. */
     std::uint8_t kind{};
+    NativePlayerProfile profile{};
+    bool hasBaselineChecksum{};
+    std::uint32_t baselineChecksum{};
 };
 
 /**
- * Reads the identity fields of a player-add message.
+ * Reads the complete player-add message.
  * @param reader Reader positioned at the body.
  * @param output Receives the fields.
  * @return True when every field was present and the reserved bit read zero.
@@ -99,5 +102,8 @@ struct PlayerPropertiesRequest {
  */
 [[nodiscard]] bool read_player_properties_header(encoding::bits::Reader& reader,
                                                  PlayerPropertiesRequest& output) noexcept;
+/** Reads the complete native sparse publication and its optional baseline checksum. */
+[[nodiscard]] bool read_player_properties(encoding::bits::Reader& reader,
+                                          PlayerPropertiesRequest& output) noexcept;
 
 } // namespace sunrise::middleware::gameplay::group

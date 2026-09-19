@@ -42,7 +42,7 @@ struct PreparedSquad final {
     if (!state::activity::binding_matches(view.binding)) {
         return Status::staleBinding;
     }
-    (void)server::bap::activity_link_view(view.binding, link);
+    (void)server::bap::activity_link_view(view.binding, view.activityClientGeneration, link);
     switch (
         sdk::revalidate(view, view.binding, link.matchingLinks, link.activityClientGeneration)) {
     case sdk::Status::ready:

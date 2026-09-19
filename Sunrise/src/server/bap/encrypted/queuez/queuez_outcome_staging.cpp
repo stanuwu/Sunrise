@@ -24,7 +24,7 @@ namespace {
     std::copy(existing.begin(), existing.end(), output.begin());
     std::size_t used = existing.size();
 
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     middleware::datagen::family4::loadout::ResolvedLoadout loadout{};
     if (!mutation.prepared || mutation.characterIndex >= account.characterCount
         || account.characters[mutation.characterIndex].soid != mutation.characterSoid
@@ -314,7 +314,7 @@ bool stage_service_outcome(Scratch& scratch,
         }
         middleware::secure_channel::advance_nonce(nonce);
         after = selection.after;
-        // Family zero and Family three no longer fit beside the enlarged upstream Family-four
+        // Family zero and Family three do not fit beside the enlarged upstream Family-four
         // selection notification in this bounded reply. Publish them through the already-proven
         // deferred refresh channel after the primary mutation commits.
         armsAbilityRefresh = true;
@@ -365,7 +365,7 @@ bool stage_service_outcome(Scratch& scratch,
             return false;
         }
     } else if (outcome.hasArtifactReset) {
-        const state::AccountState account = state::account_snapshot();
+        const state::AccountState account = state::bound_account_snapshot();
         std::uint64_t selectedCharacter = 0;
         for (std::size_t index = 0; index < account.characterCount; ++index) {
             if (account.characters[index].selected) {

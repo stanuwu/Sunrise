@@ -5,6 +5,7 @@
 
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/bap/activity_message/activity_join_result_encoder.h"
+#include "../../../../state/activity/reservations/runtime.h"
 #include "../../../../state/activity/runtime.h"
 #include "../../../../state/matchmaking/matchmaking_state.h"
 #include "../../../../state/runtime/runtime.h"
@@ -29,8 +30,10 @@ constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "re
     publication.activity.session = binding;
     publication.activity.source = binding;
     publication.activity.role = ActivityClientRole::privateCurrent;
+    static_cast<void>(state::activity::replication_sequence(
+        publication.activity.session, publication.activity.replicationSequence));
     publication.activity.replicationEpoch =
-        middleware::bap::activity_message::join_result::kInitialReplicationEpoch;
+        static_cast<std::uint8_t>(publication.activity.replicationSequence);
     publication.hasActivitySessionBinding = true;
     return true;
 }
@@ -62,8 +65,10 @@ constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "re
     publication.activity.hostGeneration = current.generation;
     publication.activity.advertisedRegion = current.regionIndex;
     publication.activity.role = ActivityClientRole::publicTarget;
+    static_cast<void>(state::activity::replication_sequence(
+        publication.activity.session, publication.activity.replicationSequence));
     publication.activity.replicationEpoch =
-        middleware::bap::activity_message::join_result::kInitialReplicationEpoch;
+        static_cast<std::uint8_t>(publication.activity.replicationSequence);
     publication.hasActivitySessionBinding = true;
     return true;
 }
@@ -143,6 +148,7 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     reason = "none";
     if (auto* allocation = transaction_if<state::activity::PendingAllocation>(outcome)) {
         const std::uint64_t sessionId = allocation->sessionId;
+        const bool reused = allocation->reused;
         std::uint64_t bindingGeneration = 0;
         if (sessionId == state::activity::kAbsentSessionId
             || !reserve_activity_binding_generation(bindingGeneration)
@@ -151,7 +157,9 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
             return false;
         }
         if (!retain_private(sessionId, publication)) {
-            static_cast<void>(state::activity::release_session(sessionId));
+            if (!reused) {
+                static_cast<void>(state::activity::release_session(sessionId));
+            }
             reason = "retain_private";
             return false;
         }
@@ -163,7 +171,8 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
             const bool joins = plan->delivery == activity_message::Delivery::joinNotifications;
             const bool validJoinIntent =
                 plan->bindingIntent == activity_message::BindingIntent::preserveCurrent
-                || plan->bindingIntent == activity_message::BindingIntent::publicTarget;
+                || plan->bindingIntent == activity_message::BindingIntent::publicTarget
+                || plan->bindingIntent == activity_message::BindingIntent::sharedTarget;
             if (joins && !validJoinIntent) {
                 reason = "join_intent";
                 return false;
@@ -176,6 +185,12 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
             if (joins && plan->bindingIntent == activity_message::BindingIntent::publicTarget
                 && !retain_public(*plan, publication)) {
                 reason = "retain_public";
+                return false;
+            }
+            if (joins && plan->bindingIntent == activity_message::BindingIntent::sharedTarget
+                && (!state::activity::binding_matches(plan->targetBinding)
+                    || !retain_private(plan->sessionId, publication))) {
+                reason = "retain_shared";
                 return false;
             }
             // The commit consumes the plan, so the counts are taken from a copy of it.
@@ -193,12 +208,17 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
                 publication.hasActivitySessionBinding = true;
                 if (plan->bindingIntent == activity_message::BindingIntent::preserveCurrent) {
                     publication.preservesActivitySessionBinding = true;
-                } else if (plan->bindingIntent != activity_message::BindingIntent::publicTarget) {
+                } else if (plan->bindingIntent != activity_message::BindingIntent::publicTarget
+                           && plan->bindingIntent
+                                  != activity_message::BindingIntent::sharedTarget) {
                     discard_activity_publication(publication);
                     reason = "bind_intent";
                     return false;
                 }
                 publication.activity.bindingGeneration = bindingGeneration;
+                publication.activity.replicationSequence = attempted.replicationSequence;
+                publication.activity.replicationEpoch =
+                    static_cast<std::uint8_t>(attempted.replicationSequence);
             }
             return true;
         }
@@ -206,6 +226,10 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
             reason = "membership";
             return state::activity::membership::commit(plan->membershipMutation,
                                                        &publication.clientState);
+        }
+        if (plan->mutationDomain == activity_message::MutationDomain::reservations) {
+            reason = "reservations";
+            return state::activity::reservations::commit(plan->reservationMutation);
         }
         if (plan->mutationDomain == activity_message::MutationDomain::authorityQuery) {
             reason = "authority_query";
@@ -221,11 +245,18 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         }
         if (plan->mutationDomain == activity_message::MutationDomain::authorityPurge) {
             reason = "authority_purge";
-            return plan->authorityPurge.pending;
+            const auto& purge = plan->authorityPurge;
+            return purge.pending
+                   && state::activity::advance_replication_sequence(
+                       purge.binding,
+                       purge.expectedSequence,
+                       purge.departure.memberKey ? &purge.departure : nullptr);
         }
-        // The retained patch epoch is connection state, so it commits nothing here.
+        // Epoch and leave delivery are connection state; neither mutates shared State here.
         reason = "mutation_domain";
-        return plan->mutationDomain == activity_message::MutationDomain::patchEpoch;
+        return plan->mutationDomain == activity_message::MutationDomain::patchEpoch
+               || (plan->mutationDomain == activity_message::MutationDomain::none
+                   && plan->delivery == activity_message::Delivery::leaveNotification);
     }
     if (auto* mutation = transaction_if<state::matchmaking::PendingMutation>(outcome)) {
         reason = "matchmaking";

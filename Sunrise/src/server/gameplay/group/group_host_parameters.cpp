@@ -6,6 +6,7 @@
 #include "../../../middleware/gameplay/group/current_activity_body.h"
 #include "../../../middleware/gameplay/group/parameter_messages.h"
 #include "../../../middleware/gameplay/group/parameter_registry.h"
+#include "../endpoint/gameplay_endpoint.h"
 #include "../gameplay_log.h"
 #include "group_host_internal.h"
 #include "group_host_sessions.h"
@@ -17,8 +18,6 @@ namespace {
 namespace wire = middleware::gameplay::group;
 namespace bits = middleware::encoding::bits;
 
-/** Loopback address the BAP listener binds, in host order. */
-constexpr std::uint32_t kLoopbackAddress = 0x7F000001;
 /** Players a session holds. This is the client's own fallback when no activity names a capacity. */
 constexpr std::uint8_t kSessionPlayerCapacity = 12;
 /** No join-policy bit is set. Any set bit disables the peer's user-join lane. */
@@ -52,7 +51,8 @@ constexpr std::uint64_t kActiveJoinControlsMask =
 /** Fills `activity-host` from one exact host binding and the shared selection nonce. */
 void fill_activity_host(wire::ActivityHostParameter& body,
                         const HostSessionBinding& binding,
-                        std::uint64_t selectionNonce) noexcept {
+                        std::uint64_t selectionNonce,
+                        std::uint32_t memberMask) noexcept {
     // The peer builds no join request unless this matches the `current-activity` nonce. The
     // fireteam's rejoin blocker also refuses a zero nonce.
     body.selectionId = selectionNonce;
@@ -60,8 +60,8 @@ void fill_activity_host(wire::ActivityHostParameter& body,
     // names no committed activity session, and a gameplay identity is not one.
     body.hostId = binding.target.sessionId;
     // The peer tests the bit of its own member index, which the snapshot assigned.
-    body.memberMask = kSnapshotMemberMask;
-    body.address = kLoopbackAddress;
+    body.memberMask = memberMask;
+    body.address = endpoint::advertised().address;
     body.port = core::settings::get().server.bapPort;
 }
 
@@ -117,17 +117,19 @@ void fill_previous_activity(wire::ParameterUpdate& update,
 
 } // namespace
 
-/** Sends one parameter update on the reliable channel of the session it names. */
-bool send_parameter_update(const wire::ParameterUpdate& update) noexcept {
+bool send_parameter_update(const wire::ParameterUpdate& update,
+                           const state::gameplay::Endpoint& endpoint) noexcept {
     return send_reliable(
-        update.sessionId,
+        endpoint,
         wire::kParameterUpdateId,
         wire::kParameterUpdateSize,
         [&update](bits::Writer& writer) { return wire::write_parameter_update(writer, update); });
 }
 
 /** Publishes the `activity-host` parameter for one admitted peer. */
-bool publish_activity_host(std::uint64_t sessionId) noexcept {
+bool publish_activity_host(const state::gameplay::Endpoint& endpoint,
+                           std::uint64_t sessionId,
+                           std::uint32_t memberMask) noexcept {
     // The body is built from this copy, so no retain is needed: `host_session_for_group` returns
     // only a ready row whose State bindings still match, and nothing below reads the table.
     HostSessionBinding binding{};
@@ -149,11 +151,11 @@ bool publish_activity_host(std::uint64_t sessionId) noexcept {
     // All three go in one update, so the peer never holds the host without the activity it
     // belongs to. The replaced descriptor moves to `previous-activity` in the same step.
     update.carriedMask = kActivityHostMask | kCurrentActivityMask | kPreviousActivityMask;
-    fill_activity_host(update.activityHost, binding, selectionNonce);
+    fill_activity_host(update.activityHost, binding, selectionNonce, memberMask);
     fill_current_activity(update, binding, selectionNonce);
     fill_previous_activity(update, binding);
 
-    const bool sent = send_parameter_update(update);
+    const bool sent = send_parameter_update(update, endpoint);
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::debug,
            "ev=gameplay stage=activityhost result=%s host=0x%llX address=0x%08X port=%u names=%s",
@@ -165,15 +167,17 @@ bool publish_activity_host(std::uint64_t sessionId) noexcept {
     return sent;
 }
 
-/**
- * Answers one parameter request with the parameters this host can encode.
- * An empty answer leaves the peer waiting, so the answer carries every requested parameter that
- * has an encoder and names the rest as unheld.
- */
-void answer_parameters(std::uint64_t sessionId,
+void answer_parameters(const state::gameplay::Endpoint& endpoint,
+                       std::uint64_t sessionId,
                        std::uint64_t requested,
-                       std::uint8_t playerCount) noexcept {
-    std::uint64_t carried = requested & wire::kEncodableParameters;
+                       std::uint8_t playerCount,
+                       std::uint32_t memberMask) noexcept {
+    const std::uint64_t selected = requested & wire::kParameterMaskBits;
+    std::uint64_t carried = selected & wire::kEncodableParameters;
+    // Releasing an empty slot is a no-op on the peer, so a parameter with no encoder here is safe
+    // to name. A parameter that has an encoder but no ready binding stays owed instead: releasing
+    // it would drop the copy the peer already applied.
+    const std::uint64_t released = selected & ~wire::kEncodableParameters;
     // The body is built from this copy, so no retain is needed. See publish_activity_host.
     HostSessionBinding binding{};
     const bool needsActivity =
@@ -188,20 +192,23 @@ void answer_parameters(std::uint64_t sessionId,
         // A zero host id is worse than no answer for this one.
         carried &= ~kActivityHostMask;
     }
-    if (carried == 0) {
+    if (carried == 0 && released == 0) {
+        // Every requested parameter has an encoder and none has a ready binding yet. The caller
+        // keeps it owed and republishes it, so this request is answered by that publish.
         report(core::log::Level::debug,
-               "ev=gameplay stage=parameters result=unheld mask=0x%08X",
-               static_cast<unsigned>(requested));
+               "ev=gameplay stage=parameters result=deferred mask=0x%08X",
+               static_cast<unsigned>(selected));
         return;
     }
 
     wire::ParameterUpdate update{};
     update.sessionId = sessionId;
     update.carriedMask = carried;
+    update.releasedMask = released;
     // A zero host id latches an unusable parameter on the peer, so the answer carries the same
     // body the unsolicited publish does.
     if (hasActivity && (carried & kActivityHostMask) != 0) {
-        fill_activity_host(update.activityHost, binding, selectionNonce);
+        fill_activity_host(update.activityHost, binding, selectionNonce, memberMask);
     }
     if (hasActivity && (carried & kCurrentActivityMask) != 0) {
         fill_current_activity(update, binding, selectionNonce);
@@ -216,12 +223,13 @@ void answer_parameters(std::uint64_t sessionId,
         update.hostSelected = kHostMemberSelected;
     }
 
-    const bool sent = send_parameter_update(update);
+    const bool sent = send_parameter_update(update, endpoint);
     std::array<char, kParameterNameCapacity> names{};
     report(sent ? core::log::Level::info : core::log::Level::warn,
-           "ev=gameplay stage=parameters result=%s carried=0x%08X names=%s",
+           "ev=gameplay stage=parameters result=%s carried=0x%08X released=0x%08X names=%s",
            sent ? "answered" : "fail",
            static_cast<unsigned>(carried),
+           static_cast<unsigned>(released),
            wire::parameter_names(carried, names.data(), names.size()));
 }
 

@@ -98,15 +98,6 @@ bool client_region_ready(const Session& session, const RefreshReport* refresh) n
     return !movePending && held >= 0;
 }
 
-/** Tests whether the client has reported arrival in its instantiated region. */
-bool client_in_world(const Session& session, const RefreshReport* refresh) noexcept {
-    // ws-702 world state 8 is the arrival report. It does not depend on the player spawn.
-    // Both reports are tested here, so either one arriving last opens the gate.
-    const state::activity::membership::ClientPlacement placement =
-        client_placement(session, refresh);
-    return placement.clientInWorld && client_region_ready(session, refresh);
-}
-
 /** Resolves the region one prepared membership body publishes. */
 EffectiveRegion planned_region(const state::activity::membership::PendingMutation& mutation,
                                const state::activity::SessionBinding& binding) noexcept {

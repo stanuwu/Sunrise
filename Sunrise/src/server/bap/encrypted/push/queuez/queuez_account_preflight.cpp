@@ -33,6 +33,9 @@ void report(core::log::Level level, const char* reason) noexcept {
 
 /** Canonicalizes the account before any family image is allowed to read it. */
 void ensure_account_canonical() noexcept {
+    if (state::bound_account() != state::kLocalAccount) {
+        return;
+    }
     if (g_settled.load(std::memory_order_acquire)) {
         return;
     }

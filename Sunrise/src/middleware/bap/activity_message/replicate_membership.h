@@ -13,6 +13,12 @@ namespace sunrise::middleware::bap::activity_message::replicate_membership {
 
 /** Membership snapshots use activity message type 12. */
 inline constexpr std::uint32_t kMessageType = 12;
+/** Fixed member slots the native membership table holds, and the width of the masks below. */
+inline constexpr std::size_t kMemberSlotCount = 32;
+/** Slot one belongs to the service host, so no peer may claim it. */
+inline constexpr std::uint8_t kServiceHostSlot = 1;
+/** One serialized NetAddr, in bits, which is how every transport field is budgeted. */
+inline constexpr std::size_t kTransportAddressBitCount = gameplay::descriptor::kNetAddrSize * 8U;
 /** One local player and an explicit empty view mask use 30,085 meaningful bits. */
 inline constexpr std::size_t kMeaningfulBitCount = 30'085;
 /** The one-member snapshot has three zero padding bits. */
@@ -80,6 +86,27 @@ struct RegionLeg final {
     bool present{};
 };
 
+/** A real admitted player. Reservation alone supplies no transition or readiness state. */
+struct PeerMember final {
+    client_identity::ClientIdentity identity{};
+    TransportReport transport{};
+    RegionLeg currentLeg{};
+    RegionLeg pendingLeg{};
+    /** Explicit native slot; the unset value retains the original slots 2 through 31. */
+    std::uint8_t slot{0xFF};
+    std::uint8_t transitionToken{};
+    std::uint8_t syncToken{};
+    bool hasTransitionToken{};
+    bool hasSyncToken{};
+    /** Reflected peer name, as code units. The writer appends the terminator after them. */
+    std::array<std::uint16_t, 63> name{};
+    std::uint8_t nameLength{};
+    bool hasName{};
+    bool present{};
+};
+/** Peers fill slots two through the last, leaving the table room for its owner and the host. */
+inline constexpr std::size_t kPeerMemberCapacity = kMemberSlotCount - 2;
+
 /** A present leg adds its five scalars and two clear presence bits. */
 inline constexpr std::size_t kRegionLegBitCount = 10 + 32 + 32 + 2 + 2 + 1 + 1;
 /** Ten whole bytes, so a leg never moves the body's padding. */
@@ -88,7 +115,12 @@ static_assert(kRegionLegByteCount * 8 == kRegionLegBitCount);
 
 /** Inputs for one local-player membership snapshot. */
 struct MembershipSnapshot final {
+    /** Actual local row in this activity generation. Slot one belongs to the service host. */
+    std::uint8_t localSlot{};
     client_identity::ClientIdentity identity{};
+    /** The recipient's own name belongs in both native player-name fields too. */
+    std::array<std::uint16_t, 63> localName{};
+    std::uint8_t localNameLength{};
     /**
      * Activity Host id every member row publishes as player-state field 4.
      * The client sends zero there in its own join request, so the host names itself. It is the
@@ -100,11 +132,13 @@ struct MembershipSnapshot final {
     RegionLeg pendingLeg{};
     /** Optional remote host in member slot one. Absent keeps the established one-member body. */
     RemoteViewMember remoteViewMember{};
+    /** Peers keep their native slots even when the recipient is not the first player. */
+    std::array<PeerMember, kPeerMemberCapacity> peers{};
     client_authoritative_data::SpawnState spawn{};
     client_authoritative_data::TeleportState teleport{};
     /**
-     * Host directory. One entry per region we advertise a host for, in no particular order.
-     * Empty unless the gameplay channel is advertising an endpoint this run.
+     * Host directory. One entry per region this snapshot advertises a host for, in no
+     * particular order. Empty unless the gameplay channel is advertising an endpoint this run.
      */
     std::array<CitizenAdvertisement, kCitizenCapacity> citizens{};
     /** Filled entries at the front of the directory. */
@@ -137,16 +171,93 @@ inline constexpr std::uint32_t kLocalMemberMask = 1U;
 /** A remote view host occupies member slot one. */
 inline constexpr std::uint32_t kRemoteMemberMask = 1U << 1U;
 
+/** The default preserves the established reservation-only row layout. */
+[[nodiscard]] constexpr std::uint8_t peer_slot(const MembershipSnapshot& snapshot,
+                                               std::size_t index) noexcept {
+    return snapshot.peers[index].slot == 0xFF ? static_cast<std::uint8_t>(index + 2)
+                                              : snapshot.peers[index].slot;
+}
+/** @return The present peer occupying `slot`, or null when no peer does. */
+[[nodiscard]] constexpr const PeerMember* peer_at_slot(const MembershipSnapshot& snapshot,
+                                                       std::size_t slot) noexcept {
+    for (std::size_t i = 0; i < snapshot.peers.size(); ++i) {
+        if (snapshot.peers[i].present && peer_slot(snapshot, i) == slot) {
+            return &snapshot.peers[i];
+        }
+    }
+    return nullptr;
+}
+/** @return True when `peer` has a transition leg or sync token still to report. */
+[[nodiscard]] constexpr bool has_peer_transition(const PeerMember& peer) noexcept {
+    return peer.currentLeg.present || peer.pendingLeg.present || peer.hasSyncToken;
+}
+
 /** @return Mask of the member slots this body fills. */
 [[nodiscard]] constexpr std::uint32_t
 occupied_member_mask(const MembershipSnapshot& snapshot) noexcept {
-    return kLocalMemberMask | (snapshot.remoteViewMember.present ? kRemoteMemberMask : 0U);
+    std::uint32_t mask = (snapshot.localSlot < kMemberSlotCount ? 1U << snapshot.localSlot : 0U)
+                         | (snapshot.remoteViewMember.present ? kRemoteMemberMask : 0U);
+    for (std::size_t i = 0; i < snapshot.peers.size(); ++i) {
+        if (snapshot.peers[i].present && peer_slot(snapshot, i) < kMemberSlotCount) {
+            mask |= 1U << peer_slot(snapshot, i);
+        }
+    }
+    return mask;
 }
 
 /** The native view updater skips the own member and activates the advertised remote member. */
 [[nodiscard]] constexpr std::uint32_t
 active_view_mask(const MembershipSnapshot& snapshot) noexcept {
-    return snapshot.remoteViewMember.present ? kRemoteMemberMask : 0U;
+    std::uint32_t mask = snapshot.remoteViewMember.present ? kRemoteMemberMask : 0U;
+    for (std::size_t i = 0; i < snapshot.peers.size(); ++i) {
+        const auto& peer = snapshot.peers[i];
+        if (peer.present && peer.transport.hasFlags && (peer.transport.flags & 0x10U)
+            && peer.transport.hasAddress && peer_slot(snapshot, i) < kMemberSlotCount) {
+            mask |= 1U << peer_slot(snapshot, i);
+        }
+    }
+    return mask;
+}
+
+/**
+ * Extra bits replacing an absent row in activity_membership_member_writer.cpp:
+ * 365 member prefix (presence, key, 10/32-bit indices, four SOIDs, two presence bits),
+ * 374 identity (15 presence bits, three SOIDs, 14-bit blob length, 19-byte blob, terminator),
+ * one absent transition bit and eight leave fields, less the three absent-row presence bits.
+ * Optional identity and transition payloads are added separately below.
+ */
+inline constexpr std::size_t kPeerMemberFixedBitCount =
+    (1 + 64 + 10 + 32 + 4 * 64 + 2) + (15 + 3 * 64 + 14 + 19 * 8 + 1) + 1 + 8 - 3;
+/** The player blob carries each name unit twice, so one character costs two 16-bit writes. */
+inline constexpr std::size_t kPeerNameUnitBitCount = 32;
+
+/** @return Both local name strings, including their terminators, or zero when unavailable. */
+[[nodiscard]] constexpr std::size_t
+local_name_bit_count(const MembershipSnapshot& snapshot) noexcept {
+    return snapshot.localNameLength
+               ? kPeerNameUnitBitCount * (static_cast<std::size_t>(snapshot.localNameLength) + 1)
+               : 0;
+}
+
+/** @return Bits every present peer row adds, including whichever optional fields it carries. */
+[[nodiscard]] constexpr std::size_t
+peer_member_bit_count(const MembershipSnapshot& snapshot) noexcept {
+    std::size_t bits{};
+    for (const auto& peer : snapshot.peers) {
+        if (!peer.present) {
+            continue;
+        }
+        bits += kPeerMemberFixedBitCount + (has_peer_transition(peer) ? 5 : 0)
+                + (peer.hasSyncToken ? 8 : 0) + (peer.currentLeg.present ? kRegionLegBitCount : 0)
+                + (peer.pendingLeg.present ? kRegionLegBitCount : 0)
+                + (peer.transport.hasFlags ? 6 : 0)
+                + (peer.transport.hasAddress ? kTransportAddressBitCount : 0)
+                + (peer.transport.hasAlternate ? kTransportAddressBitCount : 0)
+                + (peer.hasName
+                       ? kPeerNameUnitBitCount * (static_cast<std::size_t>(peer.nameLength) + 1)
+                       : 0);
+    }
+    return bits;
 }
 
 /** @return Bits the local member's present region legs add. */
@@ -158,17 +269,18 @@ region_leg_bit_count(const MembershipSnapshot& snapshot) noexcept {
 
 /** @return Encoded byte size for one snapshot, which grows with each advertised region. */
 [[nodiscard]] constexpr std::size_t encoded_size(const MembershipSnapshot& snapshot) noexcept {
-    const std::size_t base =
-        snapshot.remoteViewMember.present ? kRemoteHostEncodedSize : kEncodedSize;
-    return base + snapshot.citizenCount * gameplay::descriptor::kDescriptorSize
-           + region_leg_bit_count(snapshot) / 8;
+    return (kMeaningfulBitCount + (snapshot.remoteViewMember.present ? kRemoteMemberBitDelta : 0)
+            + snapshot.citizenCount * kDescriptorBitCount + region_leg_bit_count(snapshot)
+            + peer_member_bit_count(snapshot) + local_name_bit_count(snapshot) + 7)
+           / 8;
 }
 
 /** @return Meaningful bits before byte padding for this exact member/directory shape. */
 [[nodiscard]] constexpr std::size_t
 meaningful_bit_count(const MembershipSnapshot& snapshot) noexcept {
     return kMeaningfulBitCount + (snapshot.remoteViewMember.present ? kRemoteMemberBitDelta : 0)
-           + snapshot.citizenCount * kDescriptorBitCount + region_leg_bit_count(snapshot);
+           + snapshot.citizenCount * kDescriptorBitCount + region_leg_bit_count(snapshot)
+           + peer_member_bit_count(snapshot) + local_name_bit_count(snapshot);
 }
 
 /** The host table has one fixed record per bubble, and the client reads at most 64 of them. */
@@ -220,14 +332,16 @@ inline constexpr std::size_t kRegionBlockEndBit = 29'984;
 [[nodiscard]] constexpr std::size_t
 region_block_end_bit(const MembershipSnapshot& snapshot) noexcept {
     return kRegionBlockEndBit + (snapshot.remoteViewMember.present ? kRemoteMemberBitDelta : 0)
-           + snapshot.citizenCount * kDescriptorBitCount + region_leg_bit_count(snapshot);
+           + snapshot.citizenCount * kDescriptorBitCount + region_leg_bit_count(snapshot)
+           + peer_member_bit_count(snapshot) + local_name_bit_count(snapshot);
 }
 
 /** @return First bit of region zero after the exact member-table shape. */
 [[nodiscard]] constexpr std::size_t
 region_block_start_bit(const MembershipSnapshot& snapshot) noexcept {
     return kRegionBlockStartBit + (snapshot.remoteViewMember.present ? kRemoteMemberBitDelta : 0)
-           + region_leg_bit_count(snapshot);
+           + region_leg_bit_count(snapshot) + peer_member_bit_count(snapshot)
+           + local_name_bit_count(snapshot);
 }
 
 /** @return True when every snapshot field fits the fixed wire field that carries it. */
