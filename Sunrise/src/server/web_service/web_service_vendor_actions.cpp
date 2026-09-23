@@ -1,7 +1,5 @@
 /** Vendor, bounty, exchange and quest actions the web service prepares from one request. */
 
-#include <algorithm>
-#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -11,8 +9,6 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
-#include "../../middleware/crypto/random_bytes.h"
-#include "../../middleware/encoding/byte_order.h"
 #include "../../middleware/web_service/messages/opcode1820.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
 #include "../../middleware/web_service/messages/opcode904/opcode904_codec.h"
@@ -681,15 +677,12 @@ void settle_vendor_row(const middleware::web_service::Message& message,
     if (vendorIndex >= 0 && vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
         && state::is_vendor_reward_category(static_cast<std::uint16_t>(vendorIndex),
                                             categoryIndex)) {
-        auto* reward = emplace_mutation<state::PendingItemAcquisition>(outcome);
-        std::array<std::byte, sizeof(std::uint32_t)> randomBytes{};
+        auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
         const bool prepared =
             reward != nullptr && rowIndex >= 0
             && rowIndex <= (std::numeric_limits<std::uint16_t>::max)()
-            && middleware::crypto::random::fill(randomBytes)
             && state::prepare_vendor_reward_sale(static_cast<std::uint16_t>(vendorIndex),
                                                  static_cast<std::uint16_t>(rowIndex),
-                                                 middleware::encoding::read_u32_le(randomBytes),
                                                  *reward)
                    == state::VendorReputationDisposition::prepared;
         if (!prepared) {
@@ -829,9 +822,8 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
         return;
     }
     if (row == quest::kAbsentSaleIndex) {
-        auto* reward = emplace_mutation<state::PendingItemAcquisition>(outcome);
-        std::array<std::byte, sizeof(std::uint32_t)> randomBytes{};
-        if (reward == nullptr || !middleware::crypto::random::fill(randomBytes)) {
+        auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+        if (reward == nullptr) {
             clear_mutation(outcome);
             report_purchase(quest::kOpcode,
                             "fail",
@@ -845,7 +837,6 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
             state::prepare_vendor_reward(static_cast<std::uint16_t>(request.vendorIndex),
                                          static_cast<std::uint16_t>(request.slotIndex),
                                          static_cast<std::uint16_t>(request.third),
-                                         middleware::encoding::read_u32_le(randomBytes),
                                          *reward);
         if (disposition == state::VendorReputationDisposition::prepared) {
             report_purchase(quest::kOpcode,

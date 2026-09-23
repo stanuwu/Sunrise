@@ -11,7 +11,10 @@ $repSqlite = Join-Path $repRoot 'Sunrise/vendor/sqlite'
 $repSources = @(
     'tests/vendor_reputation.cpp',
     'Sunrise/src/state/runtime/state_vendor_reputation_runtime.cpp',
-    'Sunrise/src/state/runtime/vendor_reward_pool.cpp',
+    'Sunrise/src/state/runtime/state_account_reward_grant_runtime.cpp',
+    'Sunrise/src/state/build_data/rewards/reward_catalog.cpp',
+    'Sunrise/src/state/rewards/reward_resolver.cpp',
+    'Sunrise/src/middleware/crypto/random_bytes.cpp',
     'Sunrise/src/state/runtime/state_account_profile_runtime.cpp',
     'Sunrise/src/state/runtime/state_account_acquisition_runtime.cpp',
     'Sunrise/src/state/runtime/state_account_equipment_runtime.cpp',
@@ -34,7 +37,7 @@ try {
         & cmd.exe /d /s /c "`"$repVcVars`" >nul && cl /nologo /O2 /w /TC /c /DSQLITE_OMIT_LOAD_EXTENSION /DSQLITE_THREADSAFE=1 `"$repSqlite/sqlite3.c`" /Fosqlite3.obj"
         if ($LASTEXITCODE -ne 0) { throw 'SQLite test build failed.' }
     }
-    $repCommand = "`"$repVcVars`" >nul && cl /nologo /std:c++20 /EHsc /O2 /Gy /W4 /WX /utf-8 /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I`"$repSource`" /external:I`"$repSqlite`" /external:W0 " + ($repSources -join ' ') + ' sqlite3.obj /Fevendor_reputation.exe /link /OPT:REF /STACK:8388608'
+    $repCommand = "`"$repVcVars`" >nul && cl /nologo /std:c++20 /EHsc /O2 /Gy /W4 /WX /utf-8 /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I`"$repSource`" /external:I`"$repSqlite`" /external:W0 " + ($repSources -join ' ') + ' sqlite3.obj bcrypt.lib /Fevendor_reputation.exe /link /OPT:REF /STACK:8388608'
     & cmd.exe /d /s /c $repCommand
     if ($LASTEXITCODE -ne 0) { throw 'Reputation test build failed.' }
     $repScratch = Join-Path $repBuild ('reputation-' + [guid]::NewGuid().ToString('N') + '.sqlite3')

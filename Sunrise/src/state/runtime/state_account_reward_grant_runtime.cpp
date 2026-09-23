@@ -1069,24 +1069,12 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation, bool* artifactBonu
             ready = investment::store::write_unlock(
                 investment::store::Bank::accountFlags, flag.index, unlocks::kFlagSet);
         }
-        for (const PreparedQuestStep* move : mutation.saved_value_moves()) {
-            const Quest& value = move->next;
-            if (ready && value.scope != Quest::Scope::none) {
-                ready = investment::store::write_unlock(quest_bank(value), value.row, value.value);
-            }
+        if (ready && mutation.vendorReward.beforeCredits > 0) {
+            ready = investment::store::write_unlock(investment::store::Bank::characterObjectValues,
+                                                    mutation.vendorReward.rewardValueRow,
+                                                    mutation.vendorReward.beforeCredits - 1);
         }
-        const PreparedProgressionCredit& progression = mutation.progression;
-        if (ready && progression.scope != build_data::progressions::Scope::unreplicated) {
-            ready = investment::store::write_unlock(
-                progression.scope == build_data::progressions::Scope::account
-                    ? investment::store::Bank::accountProgressions
-                    : investment::store::Bank::characterProgressions,
-                progression.definitionIndex,
-                progression.value);
-        }
-        // The XP is granted last, onto the total preview_reward_unlocks checked above.
-        ready = ready && grant_reward_experience(mutation.seasonalExperience, bonusMoved)
-                && transaction.commit();
+        ready = ready && transaction.commit();
     }
     if (!ready && mutation.claimedRecordIndex != kUnclaimedRecordIndex) {
         // The claim was written when the reward was prepared, so a refused install undoes it.

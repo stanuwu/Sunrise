@@ -4,10 +4,10 @@
 #include <limits>
 
 #include "../build_data/progressions/progression_catalog.h"
+#include "../build_data/rewards/reward_catalog.h"
 #include "../build_data/vendors/vendor_catalog.h"
 #include "../investment/store_internal.h"
 #include "state_account_transaction_helpers.h"
-#include "vendor_reward_pool.h"
 
 namespace sunrise::state {
 namespace {
@@ -49,7 +49,7 @@ constexpr std::array<ReputationRule, 7> kReputationRules{{
 /** Native progression level walks read experience from lane zero. */
 constexpr std::size_t kExperienceLane = 0;
 
-/** Checked build-86657 claim bindings; an unreadable package pool leaves payout unsupported. */
+/** Checked build-86657 claim bindings; the installed reward catalog resolves payout. */
 struct RewardRule {
     std::uint32_t vendorHash;
     std::uint16_t interaction;
@@ -60,14 +60,20 @@ struct RewardRule {
     /** Only the Vanguard and Crucible sales require FLAG[5901] and VALUE[465]. */
     bool requiresSelectionGates{true};
 };
+/** Build-86657 Vanguard rank package item hash. */
+constexpr std::uint32_t kVanguardPackageHash = 2746484552U;
+/** Build-86657 Crucible rank package item hash. */
+constexpr std::uint32_t kCruciblePackageHash = 3289621657U;
+/** Build-86657 Gunsmith rank package item hash. */
+constexpr std::uint32_t kGunsmithPackageHash = 2422825785U;
 /** Vendor, interaction, category, saved counter, package sale and hash from build 86657. */
 constexpr std::array<RewardRule, 3> kRewardRules{{
     // Zavala's current package previews Vanguard gear.
-    {69482069U, 40, 3, kVanguardRewardValueRow, 93, vendor_rewards::kVanguardPackageHash},
+    {69482069U, 40, 3, kVanguardRewardValueRow, 93, kVanguardPackageHash},
     // Shaxx's current package previews Crucible gear.
-    {3603221665U, 28, 10, kCrucibleRewardValueRow, 96, vendor_rewards::kCruciblePackageHash},
-    // Banshee's sale has empty selection gates and uses the shared weapon pool without armour.
-    {672118013U, 35, 8, kGunsmithRewardValueRow, 16, vendor_rewards::kGunsmithPackageHash, false},
+    {3603221665U, 28, 10, kCrucibleRewardValueRow, 96, kCruciblePackageHash},
+    // Banshee's sale has no Vanguard/Crucible selection gates.
+    {672118013U, 35, 8, kGunsmithRewardValueRow, 16, kGunsmithPackageHash, false},
 }};
 /** Reply zero completes the supported normal reward interactions. */
 constexpr std::uint16_t kAcceptRewardReply = 0;
@@ -96,7 +102,8 @@ const RewardRule* reward_rule(std::uint16_t vendorIndex) noexcept {
 }
 
 /**
- * Accept only the supported package and explicit evaluated gates; do not guess missing values.
+ * Accept only the supported auto-opening package and explicit evaluated gates.
+ * Caller holds the investment-store lock while reading the current gates.
  * @param rule Checked vendor binding.
  * @param saleIndex Requested sale, retained for commit revalidation.
  * @return True when saved gates and the installed package binding agree.
@@ -106,11 +113,16 @@ bool reward_binding_current(const RewardRule& rule, std::uint16_t saleIndex) noe
     vendors::Definition vendor{};
     vendors::SaleRow sale{};
     build_data::items::Definition package{};
+    build_data::rewards::Item reward{};
     if (saleIndex != rule.saleIndex || !vendors::find(rule.vendorHash, vendor)
         || !vendors::sale_row(vendor, saleIndex, sale) || sale.categoryIndex != rule.category
         || sale.costQuantity != 0
         || !build_data::find_item_definition_index(sale.itemIndex, package)
-        || package.definitionHash != rule.packageHash) {
+        || package.definitionHash != rule.packageHash
+        || !build_data::rewards::find_item(sale.itemIndex, reward)
+        || reward.definitionHash != package.definitionHash
+        || reward.poolIndex == build_data::rewards::kAbsent
+        || (reward.flags & build_data::rewards::kOpenOnAcquisition) == 0) {
         return false;
     }
     if (!rule.requiresSelectionGates) {
@@ -134,23 +146,6 @@ bool reward_binding_current(const RewardRule& rule, std::uint16_t saleIndex) noe
         }
     }
     return packageEnabled && levelMet;
-}
-
-/**
- * Supported rewards must be installed instanced gear, not packages, cosmetics or quests.
- * @param hash Candidate preview item hash.
- * @return True when the installed item and detail rows agree on supported gear.
- */
-bool reward_item_supported(std::uint32_t hash) noexcept {
-    build_data::items::Definition item{};
-    build_data::items::details::Definition detail{};
-    return build_data::find_item_definition_hash(hash, item)
-           && item.questInitialization.scope == build_data::items::QuestInitialization::Scope::none
-           && build_data::find_configured_item_detail(item.definitionIndex, detail)
-           && detail.definitionHash == hash && detail.definitionIndex == item.definitionIndex
-           && detail.bucketId == item.bucketId && detail.equipmentSlot.has_value()
-           && detail.instancedDefinitionState
-                  == build_data::items::details::InstancedDefinitionState::instanced;
 }
 
 /**
@@ -445,15 +440,13 @@ bool is_vendor_reward_category(std::uint16_t vendorIndex, std::int32_t categoryI
  * @param vendorIndex Installed vendor selector.
  * @param interactionIndex Rowless interaction selector.
  * @param replyIndex Reply within that interaction.
- * @param random Server-generated selection value.
  * @param mutation Receives the prepared grant; cleared on refusal.
  * @return Recognized but unsupported replies refuse rather than falling through to a free grant.
  */
 VendorReputationDisposition prepare_vendor_reward(std::uint16_t vendorIndex,
                                                   std::uint16_t interactionIndex,
                                                   std::uint16_t replyIndex,
-                                                  std::uint32_t random,
-                                                  PendingItemAcquisition& mutation) noexcept {
+                                                  PendingRecordRewardGrant& mutation) noexcept {
     mutation = {};
     const auto* rule = reward_rule(vendorIndex);
     if (rule == nullptr || rule->interaction != interactionIndex) {
@@ -462,21 +455,20 @@ VendorReputationDisposition prepare_vendor_reward(std::uint16_t vendorIndex,
     if (replyIndex != kAcceptRewardReply) {
         return VendorReputationDisposition::refused;
     }
-    return prepare_vendor_reward_sale(vendorIndex, rule->saleIndex, random, mutation);
+    return prepare_vendor_reward_sale(vendorIndex, rule->saleIndex, mutation);
 }
 
 /**
- * A reward sale consumes its own faction credit only together with the granted gear.
+ * A reward sale binds its rank credit to the installed package's prepared grant.
  * @param vendorIndex Installed vendor selector.
  * @param saleIndex Requested package sale.
- * @param random Server-generated selection value; never supplied by the client.
  * @param mutation Receives the prepared grant; cleared on refusal.
  * @return Unrelated sales are not applicable; unsupported or unaffordable rewards are refused.
  */
-VendorReputationDisposition prepare_vendor_reward_sale(std::uint16_t vendorIndex,
-                                                       std::uint16_t saleIndex,
-                                                       std::uint32_t random,
-                                                       PendingItemAcquisition& mutation) noexcept {
+VendorReputationDisposition
+prepare_vendor_reward_sale(std::uint16_t vendorIndex,
+                           std::uint16_t saleIndex,
+                           PendingRecordRewardGrant& mutation) noexcept {
     mutation = {};
     const auto* rule = reward_rule(vendorIndex);
     build_data::vendors::Definition vendor{};
@@ -492,35 +484,14 @@ VendorReputationDisposition prepare_vendor_reward_sale(std::uint16_t vendorIndex
         return VendorReputationDisposition::notApplicable;
     }
     const std::lock_guard lock(investment::store::g_mutex);
-    AccountState account{};
     std::int32_t credits = 0;
-    if (!reward_binding_current(*rule, saleIndex) || !investment::store::read_account(account)
-        || !account::valid(account) || !runtime::detail::valid_profile_inventory(account)
+    if (!reward_binding_current(*rule, saleIndex)
         || !investment::store::read_unlock(
             investment::store::Bank::characterObjectValues, rule->rewardValueRow, credits)
         || credits <= 0) {
         return VendorReputationDisposition::refused;
     }
-    const auto selected = runtime::detail::selected_character_index(account);
-    if (selected >= account.characterCount) {
-        return VendorReputationDisposition::refused;
-    }
-    vendor_rewards::Pool pool{};
-    if (!vendor_rewards::find(rule->packageHash, pool)) {
-        return VendorReputationDisposition::refused;
-    }
-    std::array<std::uint32_t, vendor_rewards::kCandidateCapacity> eligible{};
-    std::size_t count = 0;
-    for (const auto hash :
-         vendor_rewards::candidates(pool, account.characters[selected].characterClass)) {
-        if (reward_item_supported(hash)) {
-            eligible[count++] = hash;
-        }
-    }
-    // Reconstructed policy chooses one installed gear row; retail weights and extras are unknown.
-    if (count == 0
-        || !runtime::detail::finalize_item_acquisition(
-            account, account, eligible[random % count], false, {.direct = true}, mutation)) {
+    if (!prepare_item_reward(sale.itemIndex, 1, mutation)) {
         mutation = {};
         return VendorReputationDisposition::refused;
     }
@@ -529,33 +500,25 @@ VendorReputationDisposition prepare_vendor_reward_sale(std::uint16_t vendorIndex
 }
 
 /**
- * Hold the store lock; claim credit and content gates must still match before publication.
- * @param mutation Prepared item acquisition with optional vendor claim state.
- * @return False for a stale credit, changed gate or an item outside the selected class's pool.
+ * Claim credit and the installed sale must still match before publication.
+ * Caller holds the investment-store lock across this check and the reward preview.
+ * @param claim Prepared claim state; zero credits mean no vendor claim.
+ * @return False for a stale credit or changed package gate.
  */
-bool vendor_reward_current(const PendingItemAcquisition& mutation) noexcept {
-    const auto& claim = mutation.vendorReward;
+bool vendor_reward_current(const VendorRewardClaim& claim) noexcept {
     if (claim.beforeCredits == 0) {
         return true;
     }
     std::int32_t current = 0;
     const auto* rule = reward_rule(claim.vendorIndex);
-    if (claim.beforeCredits < 0 || !mutation.directGrant || rule == nullptr
-        || claim.rewardValueRow != rule->rewardValueRow
+    if (claim.beforeCredits < 0 || rule == nullptr || claim.rewardValueRow != rule->rewardValueRow
         || !reward_binding_current(*rule, claim.saleIndex)
         || !investment::store::read_unlock(
             investment::store::Bank::characterObjectValues, claim.rewardValueRow, current)
-        || current != claim.beforeCredits
-        || !reward_item_supported(mutation.acquiredDefinitionHash)) {
+        || current != claim.beforeCredits) {
         return false;
     }
-    vendor_rewards::Pool pool{};
-    if (!vendor_rewards::find(rule->packageHash, pool)) {
-        return false;
-    }
-    const auto eligible = vendor_rewards::candidates(pool, mutation.beforeCharacter.characterClass);
-    return std::find(eligible.begin(), eligible.end(), mutation.acquiredDefinitionHash)
-           != eligible.end();
+    return true;
 }
 
 } // namespace sunrise::state

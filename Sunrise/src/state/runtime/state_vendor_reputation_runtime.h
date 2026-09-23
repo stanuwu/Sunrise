@@ -49,7 +49,7 @@ struct PendingVendorReputation {
 /** Build-86657 VALUE[927] reads character-object value row 55 for Vanguard claims. */
 inline constexpr std::uint16_t kVanguardRewardValueRow = 55;
 
-/** Positive credits identify a prepared claim; zero leaves ordinary acquisitions unchanged. */
+/** Positive credits identify a prepared claim; zero leaves ordinary rewards unchanged. */
 struct VendorRewardClaim {
     std::int32_t beforeCredits{};
     std::uint16_t vendorIndex{};
@@ -58,19 +58,17 @@ struct VendorRewardClaim {
     std::uint16_t rewardValueRow{};
 };
 
-struct PendingItemAcquisition;
+struct PendingRecordRewardGrant;
 [[nodiscard]] VendorReputationDisposition
 prepare_vendor_reward_sale(std::uint16_t vendorIndex,
                            std::uint16_t saleIndex,
-                           std::uint32_t random,
-                           PendingItemAcquisition& mutation) noexcept;
+                           PendingRecordRewardGrant& mutation) noexcept;
 [[nodiscard]] VendorReputationDisposition
 prepare_vendor_reward(std::uint16_t vendorIndex,
                       std::uint16_t interactionIndex,
                       std::uint16_t replyIndex,
-                      std::uint32_t random,
-                      PendingItemAcquisition& mutation) noexcept;
-[[nodiscard]] bool vendor_reward_current(const PendingItemAcquisition& mutation) noexcept;
+                      PendingRecordRewardGrant& mutation) noexcept;
+[[nodiscard]] bool vendor_reward_current(const VendorRewardClaim& claim) noexcept;
 [[nodiscard]] bool is_vendor_reward_category(std::uint16_t vendorIndex,
                                              std::int32_t categoryIndex) noexcept;
 
