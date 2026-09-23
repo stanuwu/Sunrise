@@ -112,10 +112,10 @@ void reset_pools() {
 }
 /** Build-86657 Gunsmith's repeating rank costs 3000 XP. */
 constexpr std::int32_t kGunsmithRankCost = 3000;
-/** Four rows exercise the zero-cost first rank and three installed rank costs. */
+/** Four positive-cost rows exercise finite ranks and the repeating tail. */
 constexpr std::size_t kFixtureRankStepCount = 4;
 std::array<state::build_data::progressions::Step, kFixtureRankStepCount> g_rankSteps{{
-    {0},
+    {kGunsmithRankCost},
     {kGunsmithRankCost},
     {kGunsmithRankCost},
     {kGunsmithRankCost},
@@ -165,7 +165,8 @@ void reset() {
     g_progression = kGunsmithProgression;
     g_characterScope = true;
     g_materialAvailable = true;
-    g_rankSteps = {{{0}, {kGunsmithRankCost}, {kGunsmithRankCost}, {kGunsmithRankCost}}};
+    g_rankSteps = {
+        {{kGunsmithRankCost}, {kGunsmithRankCost}, {kGunsmithRankCost}, {kGunsmithRankCost}}};
     g_rewardCapacity = kEngramCapacity;
     g_rewardAvailable = true;
     state::AccountState account{};
@@ -366,7 +367,7 @@ void verify_rank_rewards() {
         g_soldHash = entry.placeholder;
         g_costHash = entry.material;
         g_progression = entry.progression;
-        g_rankSteps = {{{0}, {entry.rankCost}, {entry.rankCost}, {entry.rankCost}}};
+        g_rankSteps = {{{entry.rankCost}, {entry.rankCost}, {entry.rankCost}, {entry.rankCost}}};
         auto account = store::account();
         account.profileItems[0].definitionHash = entry.material;
         check(store::write_account(account)
@@ -403,13 +404,13 @@ void verify_rank_rewards() {
               && gunsmith()[0] == kGunsmithRankCost - kAward,
           "changed progression cost refuses stale turn-in");
     reset();
-    g_rankSteps[0].cost = 1;
+    g_rankSteps[0].cost = 0;
     check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::refused,
-          "rank ladder without a zero first step refused");
+          "rank ladder with a zero first step refused");
     reset();
-    /** Three installed costs plus one repeated final cost reach the first tail threshold. */
+    /** Four fixture costs plus one repeated final cost reach the first tail threshold. */
     constexpr std::int32_t kFirstRepeatedRankThreshold =
-        kGunsmithRankCost * static_cast<std::int32_t>(kFixtureRankStepCount);
+        kGunsmithRankCost * static_cast<std::int32_t>(kFixtureRankStepCount + 1);
     check(store::write_unlock(store::Bank::characterProgressions,
                               kGunsmithProgression,
                               kFirstRepeatedRankThreshold - kAward)
@@ -462,7 +463,7 @@ void verify_rank_rewards() {
     auto account = store::account();
     /** Uneven costs prove one payment can cross several installed thresholds. */
     constexpr std::array<state::build_data::progressions::Step, kFixtureRankStepCount>
-        kUnevenRankSteps{{{0}, {90}, {180}, {360}}};
+        kUnevenRankSteps{{{90}, {180}, {300}, {360}}};
     /** Twenty materials award 600 XP and cross all three paid fixture steps. */
     constexpr std::uint32_t kUnevenRankTurnIn = 20;
     g_rankSteps = kUnevenRankSteps;

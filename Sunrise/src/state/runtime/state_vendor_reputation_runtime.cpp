@@ -211,9 +211,8 @@ VendorReputationDisposition resolve_award(std::uint16_t vendorIndex,
                        build_data::progressions::kStepPerDefinitionCapacity>
                 steps{};
             if (!build_data::progressions::steps(rule.progressionIndex, steps, count) || count < 2
-                || steps[0].cost != 0
                 || std::any_of(
-                    steps.begin() + 1,
+                    steps.begin(),
                     steps.begin() + static_cast<std::ptrdiff_t>(count),
                     [](const auto& step) { return step.cost <= 0; })) {
                 return VendorReputationDisposition::refused;
@@ -265,7 +264,7 @@ bool charge_materials(AccountState& account, const VendorReputationAward& award)
  * Walks one captured ladder and repeats its final cost only when installed content says to.
  * @param award Prepared award carrying the installed rank costs.
  * @param experience Nonnegative progression XP.
- * @param rank Receives the number of completed steps, including the zero-cost first step.
+ * @param rank Receives the number of completed positive-cost steps.
  * @return False when the captured ladder cannot define ranks.
  */
 bool rank_at_experience(const VendorReputationAward& award,
@@ -273,13 +272,13 @@ bool rank_at_experience(const VendorReputationAward& award,
                         std::int64_t& rank) noexcept {
     rank = 0;
     if (experience < 0 || award.rankStepCount < 2
-        || award.rankStepCount > award.rankStepCosts.size() || award.rankStepCosts[0] != 0) {
+        || award.rankStepCount > award.rankStepCosts.size() || award.rankStepCosts[0] <= 0) {
         return false;
     }
     std::int64_t remaining = experience;
     for (std::size_t step = 0; step < award.rankStepCount; ++step) {
         const auto cost = award.rankStepCosts[step];
-        if (step != 0 && cost <= 0) {
+        if (cost <= 0) {
             return false;
         }
         if (remaining < cost) {
