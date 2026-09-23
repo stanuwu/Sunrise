@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -65,6 +66,8 @@ constexpr std::uint16_t kGunsmithPackageSale = 16, kGunsmithCategory = 8;
 
 /** Synthetic resolved items exercise the installed wrapper-to-reward path. */
 constexpr std::array<std::uint32_t, 2> kFixtureWeapons{991314988U, 720351795U};
+/** The fixture uses the installed Energy bucket's ten-row limit. */
+constexpr std::size_t kFixtureGearBucketCapacity = 10;
 /** The synthetic character bucket holds a resolved instanced reward. */
 constexpr std::uint8_t kRewardBucket = 2;
 /** Native empty bucket tag inherits the pool's bucket constraint. */
@@ -544,6 +547,34 @@ void verify_claims() {
               && credits(state::kVanguardRewardValueRow) == 2,
           "full inventory preserves credit");
     reset_claim();
+    g_rewardCapacity = kFixtureGearBucketCapacity + 1;
+    auto account = store::account();
+    for (std::size_t index = 0; index < kFixtureGearBucketCapacity - 1; ++index) {
+        auto& item = account.characters[0].inventory.values[index];
+        item.instanceSoid = kOtherCharacter + index + 1;
+        item.definitionHash = kFixtureWeapons.front();
+        item.quantity = 1;
+        item.mutationSerial = static_cast<std::int32_t>(index);
+    }
+    account.characters[0].inventory.count = kFixtureGearBucketCapacity - 1;
+    account.characters[0].nextInventorySerial = kFixtureGearBucketCapacity;
+    check(store::write_account(account)
+              && state::prepare_vendor_reward_sale(kVendor, kPackageSale, grant)
+                     == Disposition::prepared,
+          "reward fits with one gear-bucket row free");
+    auto& lastItem = account.characters[0].inventory.values[kFixtureGearBucketCapacity - 1];
+    lastItem.instanceSoid = kOtherCharacter + kFixtureGearBucketCapacity;
+    lastItem.definitionHash = kFixtureWeapons.front();
+    lastItem.quantity = 1;
+    lastItem.mutationSerial = static_cast<std::int32_t>(kFixtureGearBucketCapacity - 1);
+    account.characters[0].inventory.count = kFixtureGearBucketCapacity;
+    check(store::write_account(account)
+              && state::prepare_vendor_reward_sale(kVendor, kPackageSale, grant)
+                     == Disposition::refused
+              && credits(state::kVanguardRewardValueRow) == 2
+              && store::account().characters[0].inventory.count == kFixtureGearBucketCapacity,
+          "full gear bucket preserves credit despite account capacity");
+    reset_claim();
     g_rewardAvailable = false;
     check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, grant) == Disposition::refused,
           "missing reward definition refuses payout");
@@ -833,11 +864,11 @@ void revoke(std::uint16_t) noexcept {}
 
 namespace sunrise::middleware::datagen::family4::loadout {
 /**
- * Models bucket capacity without installed game content; acquisition and persistence are real.
+ * Models total and per-gear-bucket capacity without installed game content.
  * @param account Candidate account.
  * @param selectedCharacterIndex Character whose items must fit.
  * @param output Receives synthetic inventory positions.
- * @return False when the fixture bucket has insufficient space.
+ * @return False when total or gear-bucket capacity is exhausted.
  */
 bool resolve(const state::AccountState& account,
              std::size_t selectedCharacterIndex,
@@ -845,6 +876,13 @@ bool resolve(const state::AccountState& account,
     output = {};
     const auto& inventory = account.characters[selectedCharacterIndex].inventory;
     if (inventory.count > g_rewardCapacity) {
+        return false;
+    }
+    const auto gearCount = std::count_if(
+        inventory.values.begin(),
+        inventory.values.begin() + static_cast<std::ptrdiff_t>(inventory.count),
+        [](const auto& item) { return item.definitionHash == kFixtureWeapons.front(); });
+    if (gearCount > kFixtureGearBucketCapacity) {
         return false;
     }
     for (std::size_t index = 0; index < inventory.count; ++index) {
