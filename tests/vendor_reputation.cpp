@@ -63,22 +63,52 @@ constexpr std::uint16_t kGunsmithCreditRow = 49, kBansheeClaimInteraction = 35;
 constexpr std::uint32_t kGunsmithPackageHash = 2422825785U;
 constexpr std::uint16_t kGunsmithPackageSale = 16, kGunsmithCategory = 8;
 
-/** @return Flat fixture pool in weapon, Titan, Hunter, Warlock order. */
+/** Small installed-looking fixture; production candidates come from packages, never these rows. */
+constexpr std::array<std::uint32_t, 2> kFixtureWeapons{991314988U, 720351795U};
+/** Vanguard class armour in Titan, Hunter, Warlock order. */
+constexpr std::array<std::uint32_t, 3> kFixtureVanguardArmour{273457849U, 3761819011U, 1578461326U};
+/** Crucible class armour in Titan, Hunter, Warlock order. */
+constexpr std::array<std::uint32_t, 3> kFixtureCrucibleArmour{657606375U, 3153956825U, 3684978064U};
+
+/** @return Flat fixture gear hashes across the three supported package pools. */
 std::uint32_t gear_hash(std::size_t index) {
-    for (const auto pool :
-         {std::span<const std::uint32_t>(state::vendor_rewards::kVanguardWeapons),
-          std::span<const std::uint32_t>(state::vendor_rewards::kVanguardTitan),
-          std::span<const std::uint32_t>(state::vendor_rewards::kVanguardHunter),
-          std::span<const std::uint32_t>(state::vendor_rewards::kVanguardWarlock),
-          std::span<const std::uint32_t>(state::vendor_rewards::kCrucibleTitan),
-          std::span<const std::uint32_t>(state::vendor_rewards::kCrucibleHunter),
-          std::span<const std::uint32_t>(state::vendor_rewards::kCrucibleWarlock)}) {
+    for (const auto pool : {std::span<const std::uint32_t>(kFixtureWeapons),
+                            std::span<const std::uint32_t>(kFixtureVanguardArmour),
+                            std::span<const std::uint32_t>(kFixtureCrucibleArmour)}) {
         if (index < pool.size()) {
             return pool[index];
         }
         index -= pool.size();
     }
     return 0;
+}
+
+/** Seeds one faction package pool with two shared weapons and its own class armour. */
+state::vendor_rewards::Pool fixture_pool(std::uint32_t packageHash,
+                                         const std::array<std::uint32_t, 3>* armour) {
+    state::vendor_rewards::Pool pool{};
+    pool.packageHash = packageHash;
+    for (std::size_t classIndex = 0; classIndex < pool.items.size(); ++classIndex) {
+        for (const auto hash : kFixtureWeapons) {
+            pool.items[classIndex][pool.counts[classIndex]++] = hash;
+        }
+        if (armour != nullptr) {
+            pool.items[classIndex][pool.counts[classIndex]++] = (*armour)[classIndex];
+        }
+    }
+    return pool;
+}
+
+/** Restores the disposable test catalog after each controlled membership mutation. */
+void check(bool passed, const char* label);
+
+void reset_pools() {
+    const std::array pools{
+        fixture_pool(kPackageHash, &kFixtureVanguardArmour),
+        fixture_pool(kCruciblePackageHash, &kFixtureCrucibleArmour),
+        fixture_pool(kGunsmithPackageHash, nullptr),
+    };
+    check(state::vendor_rewards::replace(pools), "seed faction reward pools");
 }
 /** Build-86657 Gunsmith's repeating rank costs 3000 XP. */
 constexpr std::int32_t kGunsmithRankCost = 3000;
@@ -479,7 +509,7 @@ void verify_claims() {
     check(state::commit_item_acquisition(grant) && credits(state::kVanguardRewardValueRow) == 1
               && store::account().characters[0].inventory.count == 1
               && store::account().characters[0].inventory.values[0].definitionHash
-                     == state::vendor_rewards::kVanguardWeapons.front(),
+                     == kFixtureWeapons.front(),
           "one item and one credit commit together");
     check(!state::commit_item_acquisition(duplicate) && !state::commit_item_acquisition(grant),
           "duplicate and reused claims refused");
@@ -605,16 +635,14 @@ void verify_claims() {
         auto account = store::account();
         account.characters[0].characterClass = characterClass;
         check(store::write_account(account), "set fixture class");
-        const auto armour =
-            state::vendor_rewards::armour(state::vendor_rewards::kVanguardPool, characterClass);
-        for (std::size_t slot = 0; slot < armour.size(); ++slot) {
-            const auto roll =
-                static_cast<std::uint32_t>(state::vendor_rewards::kVanguardWeapons.size() + slot);
-            check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, roll, grant)
-                          == Disposition::prepared
-                      && grant.acquiredDefinitionHash == armour[slot],
-                  "armour selection matches class");
-        }
+        state::vendor_rewards::Pool pool{};
+        check(state::vendor_rewards::find(kPackageHash, pool), "find Vanguard fixture pool");
+        const auto candidates = state::vendor_rewards::candidates(pool, characterClass);
+        const auto roll = static_cast<std::uint32_t>(kFixtureWeapons.size());
+        check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, roll, grant)
+                      == Disposition::prepared
+                  && grant.acquiredDefinitionHash == candidates[roll],
+              "armour selection matches class");
     }
 }
 
@@ -634,19 +662,20 @@ void verify_shared_sales() {
             }
             const auto row = crucible ? kCrucibleCreditRow : state::kVanguardRewardValueRow;
             const auto otherRow = crucible ? state::kVanguardRewardValueRow : kCrucibleCreditRow;
-            const auto& pool = crucible ? state::vendor_rewards::kCruciblePool
-                                        : state::vendor_rewards::kVanguardPool;
+            state::vendor_rewards::Pool pool{};
+            check(state::vendor_rewards::find(crucible ? kCruciblePackageHash : kPackageHash, pool),
+                  "find faction fixture pool");
             auto account = store::account();
             account.characters[0].characterClass = characterClass;
             check(store::write_account(account)
                       && store::write_unlock(store::Bank::characterObjectValues, row, 1)
                       && store::write_unlock(store::Bank::characterObjectValues, otherRow, 2),
                   "seed independent fixture faction credits");
-            const auto roll = static_cast<std::uint32_t>(pool.weapons.size());
+            const auto roll = static_cast<std::uint32_t>(kFixtureWeapons.size());
             check(state::prepare_vendor_reward_sale(kVendor, g_packageSale, roll, grant)
                           == Disposition::prepared
                       && grant.acquiredDefinitionHash
-                             == state::vendor_rewards::armour(pool, characterClass).front(),
+                             == state::vendor_rewards::candidates(pool, characterClass)[roll],
                   "sale chooses the vendor's own class armour");
             state::AccountState after{};
             state::unlocks::Table banks{};
@@ -694,6 +723,34 @@ void verify_shared_sales() {
     ++g_packageHash;
     check(!state::commit_item_acquisition(grant) && credits(state::kVanguardRewardValueRow) == 2,
           "changed package cannot consume credit");
+
+    reset_claim();
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
+              == Disposition::prepared,
+          "prepare before installed membership change");
+    auto changedPool = fixture_pool(kPackageHash, &kFixtureVanguardArmour);
+    for (std::size_t classIndex = 0; classIndex < changedPool.items.size(); ++classIndex) {
+        changedPool.items[classIndex][0] = changedPool.items[classIndex][1];
+        changedPool.items[classIndex][1] = changedPool.items[classIndex][2];
+        --changedPool.counts[classIndex];
+    }
+    const std::array changedPools{
+        changedPool,
+        fixture_pool(kCruciblePackageHash, &kFixtureCrucibleArmour),
+        fixture_pool(kGunsmithPackageHash, nullptr),
+    };
+    check(state::vendor_rewards::replace(changedPools) && !state::commit_item_acquisition(grant)
+              && credits(state::kVanguardRewardValueRow) == 2,
+          "removed installed member cannot consume a prepared claim credit");
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, 0, grant)
+                  == Disposition::prepared
+              && grant.acquiredDefinitionHash == kFixtureWeapons[1],
+          "new claim selects only the remaining installed members");
+    auto invalidPools = changedPools;
+    invalidPools[0].items[0][1] = invalidPools[0].items[0][0];
+    check(!state::vendor_rewards::replace(invalidPools),
+          "duplicate installed member refuses catalog replacement");
+    reset_pools();
 }
 
 /** Configures Gunsmith credits without unrelated Vanguard/Crucible selection gates. */
@@ -712,7 +769,7 @@ void reset_gunsmith_claim() {
 /** Covers weapon-only claims, sale isolation and atomic Gunsmith credit consumption. */
 void verify_gunsmith_sales() {
     state::PendingItemAcquisition grant{};
-    const auto& weapons = state::vendor_rewards::kGunsmithPool.weapons;
+    const auto& weapons = kFixtureWeapons;
     for (const auto characterClass : {state::CharacterClass::titan,
                                       state::CharacterClass::hunter,
                                       state::CharacterClass::warlock}) {
@@ -959,6 +1016,7 @@ int main(int argc, char** argv) {
                       read_text(root + "/account_settings_schema.sql"),
                       read_text(root + "/account_settings_defaults.sql")),
           "open disposable store");
+    reset_pools();
     verify();
     verify_rank_rewards();
     verify_claims();

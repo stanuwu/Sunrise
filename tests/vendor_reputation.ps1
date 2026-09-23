@@ -11,6 +11,7 @@ $repSqlite = Join-Path $repRoot 'Sunrise/vendor/sqlite'
 $repSources = @(
     'tests/vendor_reputation.cpp',
     'Sunrise/src/state/runtime/state_vendor_reputation_runtime.cpp',
+    'Sunrise/src/state/runtime/vendor_reward_pool.cpp',
     'Sunrise/src/state/runtime/state_account_profile_runtime.cpp',
     'Sunrise/src/state/runtime/state_account_acquisition_runtime.cpp',
     'Sunrise/src/state/runtime/state_account_equipment_runtime.cpp',

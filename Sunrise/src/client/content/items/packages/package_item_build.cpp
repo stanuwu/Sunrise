@@ -12,6 +12,7 @@
 #include "../../../../state/account/inventory/synthesizer_tier.h"
 #include "../../../../state/build_data/activities/activity_catalog.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/runtime/vendor_reward_pool.h"
 #include "../../activity/activity_catalog_build.h"
 #include "../../activity/entity_position_profile_build.h"
 #include "../../hash_names/hash_name_build.h"
@@ -97,7 +98,7 @@ namespace {
 bool ready() noexcept {
     return root_domains_ready() && state::build_data::scenario_layouts_ready()
            && state::build_data::spawn_sets_ready() && state::build_data::hash_names_ready()
-           && state::build_data::vendor_catalog_ready()
+           && state::build_data::vendor_catalog_ready() && state::vendor_rewards::settled()
            && content::activity::entity_position_profiles::ready()
            && (state::build_data::activities::ready()
                || state::build_data::activities::extraction_failed());
@@ -138,7 +139,7 @@ bool build() noexcept {
             return true;
         }
     }
-    if (root_domains_ready() && state::build_data::vendor_catalog_ready()) {
+    if (root_domains_ready() && state::vendor_rewards::settled()) {
         SecureZeroMemory(&keys, sizeof keys);
         return ready();
     }
@@ -352,7 +353,24 @@ bool build() noexcept {
                                             table)
                       && table.elementClass == tables::kItemIndexTableClass;
         }
-        if (located && build_item_rows(source, storage, table, rowCount, reason)) {
+        const bool rowsBuilt = located && !root_domains_ready()
+                               && build_item_rows(source, storage, table, rowCount, reason);
+        // Other root builders reuse child for their own tables; consume the item index now.
+        if (located && state::build_data::item_definitions_ready()
+            && state::build_data::configured_item_details_ready()
+            && !state::vendor_rewards::settled()) {
+            if (!content::vendors::build_rewards(source,
+                                                 storage.scratch,
+                                                 std::span<const std::byte>{storage.root},
+                                                 std::span<const std::byte>{storage.child},
+                                                 table)) {
+                core::log::writef(core::log::Channel::state,
+                                  core::log::Level::warn,
+                                  "ev=build_data stage=vendor_rewards result=unavailable");
+                state::vendor_rewards::settle_unavailable();
+            }
+        }
+        if (rowsBuilt) {
             if (!build_material_requirements(
                     source, storage, std::span<const std::byte>{storage.root}, table.count)) {
                 reason = "materials";
@@ -367,6 +385,12 @@ bool build() noexcept {
                     std::span(storage.bountyRows).first(storage.bountyCount));
             }
         }
+    }
+    if (root_domains_ready() && !state::vendor_rewards::settled()) {
+        state::vendor_rewards::settle_unavailable();
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=build_data stage=vendor_rewards result=unavailable_root");
     }
     SecureZeroMemory(&keys, sizeof keys);
     const bool complete = ready();

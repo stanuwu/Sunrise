@@ -819,6 +819,7 @@
     <ClCompile Include="src\state\build_data\cache\records\cache_spawn_set_records.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_vendor_records.cpp" />
     <ClCompile Include="src\state\build_data\vendors\vendor_catalog.cpp" />
+    <ClCompile Include="src\state\runtime\vendor_reward_pool.cpp" />
     <ClCompile Include="src\state\build_data\vendors\artifact_sale_view.cpp" />
     <ClCompile Include="src\state\unlocks\unlocks_expression.cpp" />
     <ClCompile Include="src\client\content\vendors\package_vendor_build.cpp" />

@@ -49,7 +49,7 @@ constexpr std::array<ReputationRule, 7> kReputationRules{{
 /** Native progression level walks read experience from lane zero. */
 constexpr std::size_t kExperienceLane = 0;
 
-/** Checked build-86657 claim bindings; a missing pool leaves payout unsupported. */
+/** Checked build-86657 claim bindings; an unreadable package pool leaves payout unsupported. */
 struct RewardRule {
     std::uint32_t vendorHash;
     std::uint16_t interaction;
@@ -57,25 +57,17 @@ struct RewardRule {
     std::uint16_t rewardValueRow;
     std::uint16_t saleIndex{};
     std::uint32_t packageHash{};
-    const vendor_rewards::Pool* pool{};
     /** Only the Vanguard and Crucible sales require FLAG[5901] and VALUE[465]. */
     bool requiresSelectionGates{true};
 };
 /** Vendor, interaction, category, saved counter, package sale and hash from build 86657. */
 constexpr std::array<RewardRule, 3> kRewardRules{{
     // Zavala's current package previews Vanguard gear.
-    {69482069U, 40, 3, kVanguardRewardValueRow, 93, 2746484552U, &vendor_rewards::kVanguardPool},
+    {69482069U, 40, 3, kVanguardRewardValueRow, 93, vendor_rewards::kVanguardPackageHash},
     // Shaxx's current package previews Crucible gear.
-    {3603221665U, 28, 10, kCrucibleRewardValueRow, 96, 3289621657U, &vendor_rewards::kCruciblePool},
+    {3603221665U, 28, 10, kCrucibleRewardValueRow, 96, vendor_rewards::kCruciblePackageHash},
     // Banshee's sale has empty selection gates and uses the shared weapon pool without armour.
-    {672118013U,
-     35,
-     8,
-     kGunsmithRewardValueRow,
-     16,
-     2422825785U,
-     &vendor_rewards::kGunsmithPool,
-     false},
+    {672118013U, 35, 8, kGunsmithRewardValueRow, 16, vendor_rewards::kGunsmithPackageHash, false},
 }};
 /** Reply zero completes the supported normal reward interactions. */
 constexpr std::uint16_t kAcceptRewardReply = 0;
@@ -114,9 +106,9 @@ bool reward_binding_current(const RewardRule& rule, std::uint16_t saleIndex) noe
     vendors::Definition vendor{};
     vendors::SaleRow sale{};
     build_data::items::Definition package{};
-    if (rule.pool == nullptr || saleIndex != rule.saleIndex
-        || !vendors::find(rule.vendorHash, vendor) || !vendors::sale_row(vendor, saleIndex, sale)
-        || sale.categoryIndex != rule.category || sale.costQuantity != 0
+    if (saleIndex != rule.saleIndex || !vendors::find(rule.vendorHash, vendor)
+        || !vendors::sale_row(vendor, saleIndex, sale) || sale.categoryIndex != rule.category
+        || sale.costQuantity != 0
         || !build_data::find_item_definition_index(sale.itemIndex, package)
         || package.definitionHash != rule.packageHash) {
         return false;
@@ -468,7 +460,7 @@ VendorReputationDisposition prepare_vendor_reward(std::uint16_t vendorIndex,
     if (rule == nullptr || rule->interaction != interactionIndex) {
         return VendorReputationDisposition::notApplicable;
     }
-    if (replyIndex != kAcceptRewardReply || rule->pool == nullptr) {
+    if (replyIndex != kAcceptRewardReply) {
         return VendorReputationDisposition::refused;
     }
     return prepare_vendor_reward_sale(vendorIndex, rule->saleIndex, random, mutation);
@@ -514,24 +506,22 @@ VendorReputationDisposition prepare_vendor_reward_sale(std::uint16_t vendorIndex
     if (selected >= account.characterCount) {
         return VendorReputationDisposition::refused;
     }
-    const auto armour =
-        vendor_rewards::armour(*rule->pool, account.characters[selected].characterClass);
-    std::array<std::uint32_t, vendor_rewards::kCandidateCapacity> candidates{};
-    if (rule->pool->weapons.size() + armour.size() > candidates.size()) {
+    vendor_rewards::Pool pool{};
+    if (!vendor_rewards::find(rule->packageHash, pool)) {
         return VendorReputationDisposition::refused;
     }
+    std::array<std::uint32_t, vendor_rewards::kCandidateCapacity> eligible{};
     std::size_t count = 0;
-    for (const auto pool : {rule->pool->weapons, armour}) {
-        for (const auto hash : pool) {
-            if (reward_item_supported(hash)) {
-                candidates[count++] = hash;
-            }
+    for (const auto hash :
+         vendor_rewards::candidates(pool, account.characters[selected].characterClass)) {
+        if (reward_item_supported(hash)) {
+            eligible[count++] = hash;
         }
     }
     // Reconstructed policy chooses one installed gear row; retail weights and extras are unknown.
     if (count == 0
         || !runtime::detail::finalize_item_acquisition(
-            account, account, candidates[random % count], false, {.direct = true}, mutation)) {
+            account, account, eligible[random % count], false, {.direct = true}, mutation)) {
         mutation = {};
         return VendorReputationDisposition::refused;
     }
@@ -560,13 +550,13 @@ bool vendor_reward_current(const PendingItemAcquisition& mutation) noexcept {
         || !reward_item_supported(mutation.acquiredDefinitionHash)) {
         return false;
     }
-    const auto armour =
-        vendor_rewards::armour(*rule->pool, mutation.beforeCharacter.characterClass);
-    const auto weapons = rule->pool->weapons;
-    return std::find(weapons.begin(), weapons.end(), mutation.acquiredDefinitionHash)
-               != weapons.end()
-           || std::find(armour.begin(), armour.end(), mutation.acquiredDefinitionHash)
-                  != armour.end();
+    vendor_rewards::Pool pool{};
+    if (!vendor_rewards::find(rule->packageHash, pool)) {
+        return false;
+    }
+    const auto eligible = vendor_rewards::candidates(pool, mutation.beforeCharacter.characterClass);
+    return std::find(eligible.begin(), eligible.end(), mutation.acquiredDefinitionHash)
+           != eligible.end();
 }
 
 } // namespace sunrise::state
