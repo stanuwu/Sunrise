@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "../build_data/progressions/progression_catalog.h"
 #include "../build_data/vendors/vendor_catalog.h"
 #include "../investment/store_internal.h"
 #include "state_account_transaction_helpers.h"
@@ -19,26 +20,24 @@ struct ReputationRule {
     std::uint16_t progressionIndex;
     std::int32_t experiencePerUnit;
     std::uint16_t rewardValueRow{};
-    std::int32_t rankCost{};
+    bool repeatLastStep{};
 };
 
 /** Build-86657 VALUE[888] and VALUE[906] map to these character-object value rows. */
 constexpr std::uint16_t kCrucibleRewardValueRow = 45, kGunsmithRewardValueRow = 49;
-/** Build-86657 Vanguard and Crucible use 2000-XP steps and repeat the last step. */
-constexpr std::int32_t kTokenRankCost = 2000;
-/** Build-86657 Gunsmith uses 3000-XP steps and repeats the last step. */
-constexpr std::int32_t kGunsmithRankCost = 3000;
+/** Build-86657 progressions 49, 55 and 62 repeat their final installed step. */
+constexpr bool kRepeatFactionRankStep = true;
 
 /** Vendor/item hashes, character progression indices and XP per unit from build 86657. */
 constexpr std::array<ReputationRule, 7> kReputationRules{{
     // Banshee: Gunsmith Rewards charges Gunsmith Materials for Gunsmith progression.
-    {672118013U, 3831705402U, 685157383U, 55, 30, kGunsmithRewardValueRow, kGunsmithRankCost},
+    {672118013U, 3831705402U, 685157383U, 55, 30, kGunsmithRewardValueRow, kRepeatFactionRankStep},
     // Banshee: the same placeholder also accepts Weapon Telemetry at its own XP rate.
-    {672118013U, 3831705402U, 685157381U, 55, 25, kGunsmithRewardValueRow, kGunsmithRankCost},
+    {672118013U, 3831705402U, 685157381U, 55, 25, kGunsmithRewardValueRow, kRepeatFactionRankStep},
     // Zavala: Vanguard Tactician Rewards charges Vanguard Tactician Tokens.
-    {69482069U, 3987308529U, 3899548068U, 62, 100, kVanguardRewardValueRow, kTokenRankCost},
+    {69482069U, 3987308529U, 3899548068U, 62, 100, kVanguardRewardValueRow, kRepeatFactionRankStep},
     // Shaxx: Crucible Rewards charges Crucible Tokens, not Valor or Glory points.
-    {3603221665U, 265113466U, 183980811U, 49, 100, kCrucibleRewardValueRow, kTokenRankCost},
+    {3603221665U, 265113466U, 183980811U, 49, 100, kCrucibleRewardValueRow, kRepeatFactionRankStep},
     // Devrim: EDZ token turn-ins use a different placeholder from destination materials.
     {396892126U, 61430328U, 2640973641U, 52, 100},
     // Devrim: destination-material turn-ins accept Dusklight Shards.
@@ -209,12 +208,30 @@ VendorReputationDisposition resolve_award(std::uint16_t vendorIndex,
                    == slots.begin() + static_cast<std::ptrdiff_t>(count)) {
             return VendorReputationDisposition::refused;
         }
-        award = {cost.definitionHash,
-                 sale.costQuantity,
-                 static_cast<std::int32_t>(experience),
-                 rule.progressionIndex,
-                 rule.rewardValueRow,
-                 rule.rankCost};
+        award.costHash = cost.definitionHash;
+        award.costQuantity = sale.costQuantity;
+        award.experience = static_cast<std::int32_t>(experience);
+        award.progressionIndex = rule.progressionIndex;
+        award.rewardValueRow = rule.rewardValueRow;
+        award.repeatLastStep = rule.repeatLastStep;
+        if (rule.rewardValueRow != 0) {
+            std::array<build_data::progressions::Step,
+                       build_data::progressions::kStepPerDefinitionCapacity>
+                steps{};
+            if (!build_data::progressions::steps(rule.progressionIndex, steps, count) || count < 2
+                || steps[0].cost != 0
+                || std::any_of(
+                    steps.begin() + 1,
+                    steps.begin() + static_cast<std::ptrdiff_t>(count),
+                    [](const auto& step) { return step.cost <= 0; })) {
+                return VendorReputationDisposition::refused;
+            }
+            award.rankStepCount = count;
+            std::transform(steps.begin(),
+                           steps.begin() + static_cast<std::ptrdiff_t>(count),
+                           award.rankStepCosts.begin(),
+                           [](const auto& step) { return step.cost; });
+        }
         return VendorReputationDisposition::prepared;
     }
     return recognized ? VendorReputationDisposition::refused
@@ -253,23 +270,61 @@ bool charge_materials(AccountState& account, const VendorReputationAward& award)
 }
 
 /**
+ * Walks one captured ladder and repeats its final cost only when installed content says to.
+ * @param award Prepared award carrying the installed rank costs.
+ * @param experience Nonnegative progression XP.
+ * @param rank Receives the number of completed steps, including the zero-cost first step.
+ * @return False when the captured ladder cannot define ranks.
+ */
+bool rank_at_experience(const VendorReputationAward& award,
+                        std::int64_t experience,
+                        std::int64_t& rank) noexcept {
+    rank = 0;
+    if (experience < 0 || award.rankStepCount < 2
+        || award.rankStepCount > award.rankStepCosts.size() || award.rankStepCosts[0] != 0) {
+        return false;
+    }
+    std::int64_t remaining = experience;
+    for (std::size_t step = 0; step < award.rankStepCount; ++step) {
+        const auto cost = award.rankStepCosts[step];
+        if (step != 0 && cost <= 0) {
+            return false;
+        }
+        if (remaining < cost) {
+            return true;
+        }
+        remaining -= cost;
+        ++rank;
+    }
+    if (award.repeatLastStep) {
+        rank += remaining / award.rankStepCosts[award.rankStepCount - 1];
+    }
+    return true;
+}
+
+/**
  * Reconstructed policy awards one claim credit per newly crossed rank, without backfilling XP.
  * @param banks Candidate unlock banks; no saved state is written here.
- * @param award Build-matched turn-in and repeating rank rule.
+ * @param award Build-matched turn-in and captured rank ladder.
  * @param beforeExperience Nonnegative XP before this turn-in.
- * @return False when the counter is negative or the complete credit would overflow.
+ * @return False when the ladder or counter is invalid or the complete credit would overflow.
  */
 bool grant_rank_rewards(unlocks::Table& banks,
                         const VendorReputationAward& award,
                         std::int32_t beforeExperience) noexcept {
-    if (award.rankCost == 0) {
+    if (award.rankStepCount == 0) {
         return true;
     }
-    if (award.rankCost <= 0 || beforeExperience < 0 || award.experience <= 0) {
+    if (beforeExperience < 0 || award.experience <= 0) {
         return false;
     }
     const auto afterExperience = static_cast<std::int64_t>(beforeExperience) + award.experience;
-    const auto count = afterExperience / award.rankCost - beforeExperience / award.rankCost;
+    std::int64_t beforeRank = 0, afterRank = 0;
+    if (!rank_at_experience(award, beforeExperience, beforeRank)
+        || !rank_at_experience(award, afterExperience, afterRank) || afterRank < beforeRank) {
+        return false;
+    }
+    const auto count = afterRank - beforeRank;
     auto& credits = banks.characterObjectValues[award.rewardValueRow];
     if (credits < 0 || count > (std::numeric_limits<std::int32_t>::max)() - credits) {
         return false;
@@ -364,7 +419,7 @@ bool commit_vendor_reputation(PendingVendorReputation& mutation) noexcept {
     }
     auto& progression = banks.characterProgressions[award.progressionIndex];
     if (progression != mutation.beforeProgression || progression[kExperienceLane] < 0
-        || (award.rankCost > 0
+        || (award.rankStepCount != 0
             && banks.characterObjectValues[award.rewardValueRow] != mutation.beforeRewardCredits)
         || progression[kExperienceLane]
                > (std::numeric_limits<std::int32_t>::max)() - award.experience

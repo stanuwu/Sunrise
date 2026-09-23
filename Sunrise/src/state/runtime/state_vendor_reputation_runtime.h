@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../account/account_state.h"
+#include "../build_data/progressions/definition.h"
 #include "../unlocks/definition.h"
 
 namespace sunrise::state {
@@ -14,10 +15,14 @@ struct VendorReputationAward {
     std::uint32_t costQuantity{};
     std::int32_t experience{};
     std::uint16_t progressionIndex{};
-    /** Character-object value row; used only when rankCost is positive. */
+    /** Character-object value row; used only when rankStepCount is positive. */
     std::uint16_t rewardValueRow{};
+    /** Installed rank costs captured for commit revalidation. */
+    std::array<std::int32_t, build_data::progressions::kStepPerDefinitionCapacity> rankStepCosts{};
     /** Zero preserves XP-only handling for factions without a supported reward rule. */
-    std::int32_t rankCost{};
+    std::size_t rankStepCount{};
+    /** Build-86657 progression metadata marks these faction ladders as repeating. */
+    bool repeatLastStep{};
     bool operator==(const VendorReputationAward&) const = default;
 };
 

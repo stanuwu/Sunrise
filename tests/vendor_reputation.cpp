@@ -82,6 +82,14 @@ std::uint32_t gear_hash(std::size_t index) {
 }
 /** Build-86657 Gunsmith's repeating rank costs 3000 XP. */
 constexpr std::int32_t kGunsmithRankCost = 3000;
+/** Four rows exercise the zero-cost first rank and three installed rank costs. */
+constexpr std::size_t kFixtureRankStepCount = 4;
+std::array<state::build_data::progressions::Step, kFixtureRankStepCount> g_rankSteps{{
+    {0},
+    {kGunsmithRankCost},
+    {kGunsmithRankCost},
+    {kGunsmithRankCost},
+}};
 /** Build-86657 engram bucket has ten character inventory slots. */
 constexpr std::size_t kEngramCapacity = 10;
 std::size_t g_rewardCapacity = kEngramCapacity;
@@ -127,6 +135,7 @@ void reset() {
     g_progression = kGunsmithProgression;
     g_characterScope = true;
     g_materialAvailable = true;
+    g_rankSteps = {{{0}, {kGunsmithRankCost}, {kGunsmithRankCost}, {kGunsmithRankCost}}};
     g_rewardCapacity = kEngramCapacity;
     g_rewardAvailable = true;
     state::AccountState account{};
@@ -327,6 +336,7 @@ void verify_rank_rewards() {
         g_soldHash = entry.placeholder;
         g_costHash = entry.material;
         g_progression = entry.progression;
+        g_rankSteps = {{{0}, {entry.rankCost}, {entry.rankCost}, {entry.rankCost}}};
         auto account = store::account();
         account.profileItems[0].definitionHash = entry.material;
         check(store::write_account(account)
@@ -352,6 +362,30 @@ void verify_rank_rewards() {
         check(store::read_unlocks(other, 1) && other.characterObjectValues[entry.rewardRow] == 0,
               "other character receives no credit");
     }
+    reset();
+    check(store::write_unlock(
+              store::Bank::characterProgressions, kGunsmithProgression, kGunsmithRankCost - kAward)
+              && state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared,
+          "prepare before progression cost change");
+    ++g_rankSteps[1].cost;
+    check(!state::commit_vendor_reputation(pending) && credits(kGunsmithCreditRow) == 0
+              && store::account().profileItems[0].quantity == kInitialQuantity
+              && gunsmith()[0] == kGunsmithRankCost - kAward,
+          "changed progression cost refuses stale turn-in");
+    reset();
+    g_rankSteps[0].cost = 1;
+    check(state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::refused,
+          "rank ladder without a zero first step refused");
+    reset();
+    /** Three installed costs plus one repeated final cost reach the first tail threshold. */
+    constexpr std::int32_t kFirstRepeatedRankThreshold =
+        kGunsmithRankCost * static_cast<std::int32_t>(kFixtureRankStepCount);
+    check(store::write_unlock(store::Bank::characterProgressions,
+                              kGunsmithProgression,
+                              kFirstRepeatedRankThreshold - kAward)
+              && state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared
+              && state::commit_vendor_reputation(pending) && credits(kGunsmithCreditRow) == 1,
+          "installed repeat-tail rule awards its crossed credit");
     reset();
     check(store::write_unlock(
               store::Bank::characterProgressions, kGunsmithProgression, kGunsmithRankCost - kAward),
@@ -396,14 +430,19 @@ void verify_rank_rewards() {
           "historical ranks never backfilled");
     reset();
     auto account = store::account();
-    // Two complete Gunsmith ranks in one payment exercise multi-credit accounting.
-    g_cost = static_cast<std::uint32_t>(kGunsmithRankCost * 2 / 30);
+    /** Uneven costs prove one payment can cross several installed thresholds. */
+    constexpr std::array<state::build_data::progressions::Step, kFixtureRankStepCount>
+        kUnevenRankSteps{{{0}, {90}, {180}, {360}}};
+    /** Twenty materials award 600 XP and cross all three paid fixture steps. */
+    constexpr std::uint32_t kUnevenRankTurnIn = 20;
+    g_rankSteps = kUnevenRankSteps;
+    g_cost = kUnevenRankTurnIn;
     account.profileItems[0].quantity = static_cast<std::int32_t>(g_cost);
     check(store::write_account(account)
               && state::prepare_vendor_reputation(kVendor, kSale, pending) == Disposition::prepared
-              && state::commit_vendor_reputation(pending) && credits(kGunsmithCreditRow) == 2
+              && state::commit_vendor_reputation(pending) && credits(kGunsmithCreditRow) == 3
               && store::account().characters[0].inventory.count == 0,
-          "two thresholds award two credits, no items");
+          "uneven thresholds award every crossed credit, no items");
 }
 
 /** Configures a disposable eligible Zavala claim without changing any player save. */
@@ -850,6 +889,27 @@ bool find_progression_slots(progressions::Scope scope,
     count = 1;
     return true;
 }
+
+namespace progressions {
+/**
+ * Copies the controlled installed-cost fixture for the selected progression.
+ * @param definitionIndex Requested native progression index.
+ * @param output Caller-owned step storage.
+ * @param count Receives the copied row count.
+ * @return False when the request does not match the fixture or storage is too small.
+ */
+bool steps(std::uint16_t definitionIndex, std::span<Step> output, std::size_t& count) noexcept {
+    count = 0;
+    if (definitionIndex != g_progression || output.size() < g_rankSteps.size()) {
+        return false;
+    }
+    for (std::size_t step = 0; step < g_rankSteps.size(); ++step) {
+        output[step] = g_rankSteps[step];
+    }
+    count = g_rankSteps.size();
+    return true;
+}
+} // namespace progressions
 } // namespace sunrise::state::build_data
 
 namespace sunrise::state {
