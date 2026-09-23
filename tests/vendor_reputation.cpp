@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <limits>
 #include <string>
+#include <string_view>
 
 #include "core/logging/log.h"
 #include "middleware/datagen/family4/loadout/loadout_resolver.h"
@@ -543,9 +544,12 @@ void verify_claims() {
 
     reset_claim();
     g_rewardCapacity = 0;
-    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, grant) == Disposition::refused
+    const char* refusal = nullptr;
+    check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, grant, &refusal)
+                  == Disposition::refused
+              && refusal != nullptr && std::string_view(refusal) == "instance_capacity"
               && credits(state::kVanguardRewardValueRow) == 2,
-          "full inventory preserves credit");
+          "full inventory reports capacity and preserves credit");
     reset_claim();
     g_rewardCapacity = kFixtureGearBucketCapacity + 1;
     auto account = store::account();
@@ -585,9 +589,10 @@ void verify_claims() {
               && !state::commit_record_reward(grant),
           "stale credit refuses claim");
     check(store::write_unlock(store::Bank::characterObjectValues, state::kVanguardRewardValueRow, 0)
-              && state::prepare_vendor_reward_sale(kVendor, kPackageSale, grant)
-                     == Disposition::refused,
-          "no credit refuses claim");
+              && state::prepare_vendor_reward_sale(kVendor, kPackageSale, grant, &refusal)
+                     == Disposition::refused
+              && refusal != nullptr && std::string_view(refusal) == "rank_credit",
+          "no credit reports binding refusal");
     reset_claim();
     check(state::prepare_vendor_reward_sale(kVendor, kPackageSale, grant) == Disposition::prepared
               && store::write_family5({}) && !state::commit_record_reward(grant)

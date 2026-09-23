@@ -678,19 +678,21 @@ void settle_vendor_row(const middleware::web_service::Message& message,
         && state::is_vendor_reward_category(static_cast<std::uint16_t>(vendorIndex),
                                             categoryIndex)) {
         auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+        const char* refusal = "storage";
         const bool prepared =
             reward != nullptr && rowIndex >= 0
             && rowIndex <= (std::numeric_limits<std::uint16_t>::max)()
             && state::prepare_vendor_reward_sale(static_cast<std::uint16_t>(vendorIndex),
                                                  static_cast<std::uint16_t>(rowIndex),
-                                                 *reward)
+                                                 *reward,
+                                                 &refusal)
                    == state::VendorReputationDisposition::prepared;
         if (!prepared) {
             clear_mutation(outcome);
         }
         report_purchase(opcode,
                         prepared ? "ok" : "fail",
-                        "rank_reward",
+                        prepared ? "rank_reward" : refusal,
                         vendorIndex,
                         rowIndex,
                         itemDefinitionIndex);

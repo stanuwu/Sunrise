@@ -463,12 +463,16 @@ VendorReputationDisposition prepare_vendor_reward(std::uint16_t vendorIndex,
  * @param vendorIndex Installed vendor selector.
  * @param saleIndex Requested package sale.
  * @param mutation Receives the prepared grant; cleared on refusal.
+ * @param refusal Receives the first failed guard, when requested.
  * @return Unrelated sales are not applicable; unsupported or unaffordable rewards are refused.
  */
-VendorReputationDisposition
-prepare_vendor_reward_sale(std::uint16_t vendorIndex,
-                           std::uint16_t saleIndex,
-                           PendingRecordRewardGrant& mutation) noexcept {
+VendorReputationDisposition prepare_vendor_reward_sale(std::uint16_t vendorIndex,
+                                                       std::uint16_t saleIndex,
+                                                       PendingRecordRewardGrant& mutation,
+                                                       const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    reason = "vendor_rule";
     mutation = {};
     const auto* rule = reward_rule(vendorIndex);
     build_data::vendors::Definition vendor{};
@@ -476,6 +480,7 @@ prepare_vendor_reward_sale(std::uint16_t vendorIndex,
     if (rule == nullptr) {
         return VendorReputationDisposition::notApplicable;
     }
+    reason = "vendor_sale";
     if (!build_data::vendors::find(rule->vendorHash, vendor)
         || !build_data::vendors::sale_row(vendor, saleIndex, sale)) {
         return VendorReputationDisposition::refused;
@@ -484,17 +489,22 @@ prepare_vendor_reward_sale(std::uint16_t vendorIndex,
         return VendorReputationDisposition::notApplicable;
     }
     const std::lock_guard lock(investment::store::g_mutex);
+    reason = "reward_binding";
+    if (!reward_binding_current(*rule, saleIndex)) {
+        return VendorReputationDisposition::refused;
+    }
+    reason = "rank_credit";
     std::int32_t credits = 0;
-    if (!reward_binding_current(*rule, saleIndex)
-        || !investment::store::read_unlock(
+    if (!investment::store::read_unlock(
             investment::store::Bank::characterObjectValues, rule->rewardValueRow, credits)
         || credits <= 0) {
         return VendorReputationDisposition::refused;
     }
-    if (!prepare_item_reward(sale.itemIndex, 1, mutation)) {
+    if (!prepare_item_reward(sale.itemIndex, 1, mutation, &reason)) {
         mutation = {};
         return VendorReputationDisposition::refused;
     }
+    reason = nullptr;
     mutation.vendorReward = {credits, vendorIndex, saleIndex, rule->rewardValueRow};
     return VendorReputationDisposition::prepared;
 }

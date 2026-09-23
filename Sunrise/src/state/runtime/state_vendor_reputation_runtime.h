@@ -62,7 +62,8 @@ struct PendingRecordRewardGrant;
 [[nodiscard]] VendorReputationDisposition
 prepare_vendor_reward_sale(std::uint16_t vendorIndex,
                            std::uint16_t saleIndex,
-                           PendingRecordRewardGrant& mutation) noexcept;
+                           PendingRecordRewardGrant& mutation,
+                           const char** refusal = nullptr) noexcept;
 [[nodiscard]] VendorReputationDisposition
 prepare_vendor_reward(std::uint16_t vendorIndex,
                       std::uint16_t interactionIndex,
