@@ -106,6 +106,13 @@ CREATE TABLE family5 (
     UNIQUE (kind, slot)
 ) STRICT;
 
+CREATE TABLE character_objective_values (
+    character_soid INTEGER NOT NULL REFERENCES characters(soid) DEFERRABLE INITIALLY DEFERRED,
+    slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 32767),
+    value INTEGER NOT NULL CHECK (value BETWEEN 0 AND 2147483647),
+    PRIMARY KEY (character_soid, slot)
+) STRICT;
+
 CREATE TABLE entitlements (
     position INTEGER PRIMARY KEY,
     name TEXT NOT NULL,

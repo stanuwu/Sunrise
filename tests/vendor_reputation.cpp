@@ -1004,11 +1004,11 @@ bool resolve(const state::AccountState& account,
 /**
  * Runs against disposable SQLite only, then checks persistence by closing and reopening it.
  * @param argc Argument count.
- * @param argv Executable, repository SQL directory and new disposable database path.
+ * @param argv Executable, SQL directory, disposable database, and optional existing-save copy.
  * @return Zero when every check passes; failed checks abort.
  */
 int main(int argc, char** argv) {
-    check(argc == 3, "resource directory and disposable database arguments");
+    check(argc == 3 || argc == 4, "resource directory and disposable database arguments");
     const std::string root = argv[1];
     check(store::open(":memory:",
                       read_text(root + "/investment_schema.sql"),
@@ -1069,5 +1069,34 @@ int main(int argc, char** argv) {
     check(credits(kGunsmithCreditRow) == 0 && store::account().characters[0].inventory.count == 1,
           "Gunsmith item and debit persist together");
     store::shutdown();
+    sqlite3* legacy{};
+    check(sqlite3_open_v2(argv[2], &legacy, SQLITE_OPEN_READWRITE, nullptr) == SQLITE_OK,
+          "open disposable store as a version-2 fixture");
+    check(sqlite3_exec(legacy,
+                       "DROP TABLE character_objective_values; PRAGMA user_version=2;",
+                       nullptr,
+                       nullptr,
+                       nullptr)
+              == SQLITE_OK,
+          "prepare version-2 schema without objective counters");
+    check(sqlite3_close(legacy) == SQLITE_OK, "close version-2 fixture");
+    check(store::open(argv[2], {}, {}, {}, {}), "migrate saved store from version 2");
+    check(credits(kGunsmithCreditRow) == 0 && store::account().characters[0].inventory.count == 1,
+          "migration preserves vendor claim and inventory");
+    store::shutdown();
+    check(sqlite3_open_v2(argv[2], &legacy, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK,
+          "inspect migrated disposable store");
+    sqlite3_stmt* version{};
+    check(sqlite3_prepare_v2(legacy, "PRAGMA user_version", -1, &version, nullptr) == SQLITE_OK
+              && sqlite3_step(version) == SQLITE_ROW && sqlite3_column_int(version, 0) == 3,
+          "migration advances schema version");
+    check(sqlite3_finalize(version) == SQLITE_OK && sqlite3_close(legacy) == SQLITE_OK,
+          "close migrated fixture");
+    if (argc == 4) {
+        check(store::open(argv[3], {}, {}, {}, {}), "open existing version-3 save copy");
+        state::AccountState existing{};
+        check(store::read_account(existing), "read account from existing save copy");
+        store::shutdown();
+    }
     std::puts("PASS: reputation transaction, exact debit/credit, refusal, staleness and rollback");
 }
