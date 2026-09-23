@@ -338,10 +338,75 @@ bool prepare_record_reward_grant(
     }
 
     const auto characterBytes = rawStorage.first(character_layout::kObjectSize);
-    const char* const characterFailure = encode_granted_character(
-        account, unlocks, mutation, selected, acquisitionPresentationRows, characterBytes);
-    if (characterFailure != nullptr) {
-        return fail(characterFailure);
+    const state::CharacterState& character = account.characters[mutation.characterIndex];
+    state::unlocks::Table unlocks{};
+    if (!state::preview_reward_unlocks(mutation, unlocks)) {
+        clear_after(scratch, reservation);
+        return report_failure("record_reward_unlocks");
+    }
+    // Both objects must publish the same reward after-image, including spent claim credit.
+    if (!family4_datagen::character::encode(
+            character, selected.loadout, selected.lightEvaluation, characterBytes, unlocks)) {
+        clear_after(scratch, reservation);
+        return report_failure("record_reward_character_encode");
+    }
+    auto& characterObject = *reinterpret_cast<character_layout::Object*>(characterBytes.data());
+    if (characterObject.inventoryChanges.writeSlot != 0
+        || characterObject.inventoryChanges.nextSequence != 0
+        || !std::all_of(characterObject.inventoryChanges.records.cbegin(),
+                        characterObject.inventoryChanges.records.cend(),
+                        kChangeRecordIsZero)) {
+        clear_after(scratch, reservation);
+        return report_failure("record_reward_character_changes");
+    }
+    std::size_t characterChanges = 0;
+    for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
+        const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
+        if (reward.kind == state::RecordRewardKind::profileStack
+            || reward.kind == state::RecordRewardKind::accountUnlock) {
+            continue;
+        }
+        state::build_data::items::Definition definition{};
+        if (characterChanges >= characterObject.inventoryChanges.records.size()
+            || !state::build_data::find_item_definition_hash(reward.definitionHash, definition)) {
+            clear_after(scratch, reservation);
+            return report_failure("record_reward_character_definition");
+        }
+        std::size_t found = characterObject.inventoryItems.size();
+        for (std::size_t row = 0; row < characterObject.inventoryItems.size(); ++row) {
+            const auto& item = characterObject.inventoryItems[row];
+            const bool matches = reward.kind == state::RecordRewardKind::characterInstance
+                                     ? item.instanceSoid == reward.instanceSoid
+                                     : item.instanceSoid == 0
+                                           && item.definitionIndex == definition.definitionIndex
+                                           && item.mutationSerial == reward.mutationSerial;
+            if (!matches) {
+                continue;
+            }
+            if (found != characterObject.inventoryItems.size()
+                || item.quantity != reward.afterQuantity) {
+                clear_after(scratch, reservation);
+                return report_failure("record_reward_character_row");
+            }
+            found = row;
+        }
+        if (found == characterObject.inventoryItems.size()) {
+            clear_after(scratch, reservation);
+            return report_failure("record_reward_character_row_missing");
+        }
+        auto& change = characterObject.inventoryChanges.records[characterChanges];
+        change.sequence = static_cast<std::uint16_t>(characterChanges);
+        change.mutationSerial = reward.mutationSerial;
+        change.kind = kChangeKind;
+        change.flags = kChangeFlags;
+        ++characterChanges;
+    }
+    characterObject.inventoryChanges.writeSlot = static_cast<std::uint16_t>(characterChanges);
+    characterObject.inventoryChanges.nextSequence = static_cast<std::uint16_t>(characterChanges);
+    if (!apply_acquisition_presentation(
+            characterBytes, selected.loadout, acquisitionPresentationRows)) {
+        clear_after(scratch, reservation);
+        return report_failure("record_reward_presentation");
     }
     if (!append_object(scratch,
                        characterBytes,
