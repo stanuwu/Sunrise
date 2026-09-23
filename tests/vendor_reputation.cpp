@@ -862,10 +862,6 @@ bool sale_row(const Definition&, std::size_t row, SaleRow& output) noexcept {
 } // namespace sunrise::state::build_data::vendors
 
 namespace sunrise::state::build_data {
-/** Season bundles are not part of the faction grant under test. */
-bool find_season_pass_package(std::uint32_t, season_pass::Package&) noexcept {
-    return false;
-}
 /** Unrelated acquisition code shares the profile helper translation unit. */
 bool find_collectible_definition(std::uint16_t, collectibles::Definition&) noexcept {
     return false;
