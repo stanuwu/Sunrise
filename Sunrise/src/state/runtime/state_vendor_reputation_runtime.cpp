@@ -17,29 +17,28 @@ struct ReputationRule {
     std::uint32_t vendorHash;
     std::uint32_t placeholderHash;
     std::uint32_t costHash;
-    std::uint16_t progressionIndex;
     std::int32_t experiencePerUnit;
     std::uint16_t rewardValueRow{};
 };
 
 /** Build-86657 VALUE[888] and VALUE[906] map to these character-object value rows. */
 constexpr std::uint16_t kCrucibleRewardValueRow = 45, kGunsmithRewardValueRow = 49;
-/** Vendor/item hashes, character progression indices and XP per unit from build 86657. */
+/** Checked build-86657 sale identities and token XP; native faction rows supply progression. */
 constexpr std::array<ReputationRule, 7> kReputationRules{{
     // Banshee: Gunsmith Rewards charges Gunsmith Materials for Gunsmith progression.
-    {672118013U, 3831705402U, 685157383U, 55, 30, kGunsmithRewardValueRow},
+    {672118013U, 3831705402U, 685157383U, 30, kGunsmithRewardValueRow},
     // Banshee: the same placeholder also accepts Weapon Telemetry at its own XP rate.
-    {672118013U, 3831705402U, 685157381U, 55, 25, kGunsmithRewardValueRow},
+    {672118013U, 3831705402U, 685157381U, 25, kGunsmithRewardValueRow},
     // Zavala: Vanguard Tactician Rewards charges Vanguard Tactician Tokens.
-    {69482069U, 3987308529U, 3899548068U, 62, 100, kVanguardRewardValueRow},
+    {69482069U, 3987308529U, 3899548068U, 100, kVanguardRewardValueRow},
     // Shaxx: Crucible Rewards charges Crucible Tokens, not Valor or Glory points.
-    {3603221665U, 265113466U, 183980811U, 49, 100, kCrucibleRewardValueRow},
+    {3603221665U, 265113466U, 183980811U, 100, kCrucibleRewardValueRow},
     // Devrim: EDZ token turn-ins use a different placeholder from destination materials.
-    {396892126U, 61430328U, 2640973641U, 52, 100},
+    {396892126U, 61430328U, 2640973641U, 100},
     // Devrim: destination-material turn-ins accept Dusklight Shards.
-    {396892126U, 1317670974U, 950899352U, 52, 50},
+    {396892126U, 1317670974U, 950899352U, 50},
     // Devrim: the same material placeholder accepts Dusklight Crystals at their own XP rate.
-    {396892126U, 1317670974U, 478751073U, 52, 250},
+    {396892126U, 1317670974U, 478751073U, 250},
 }};
 
 /** Native progression level walks read experience from lane zero. */
@@ -180,31 +179,34 @@ VendorReputationDisposition resolve_award(std::uint16_t vendorIndex,
         std::array<std::uint16_t, build_data::progressions::kDefinitionCapacity> slots{};
         std::size_t count = 0;
         build_data::progressions::Definition progression{};
+        const auto progressionIndex = vendor.factionProgressionIndex;
         const std::int64_t experience =
             static_cast<std::int64_t>(sale.costQuantity) * rule.experiencePerUnit;
-        if (experience > (std::numeric_limits<std::int32_t>::max)()
+        if (vendor.factionHash == 0
+            || progressionIndex == vendors::kUnavailableFactionProgressionIndex
+            || experience > (std::numeric_limits<std::int32_t>::max)()
             || !build_data::find_progression_slots(
                 build_data::progressions::Scope::character, slots, count)
             || count > slots.size()
             || std::find(slots.begin(),
                          slots.begin() + static_cast<std::ptrdiff_t>(count),
-                         rule.progressionIndex)
+                         progressionIndex)
                    == slots.begin() + static_cast<std::ptrdiff_t>(count)
-            || !build_data::progressions::find(rule.progressionIndex, progression)
+            || !build_data::progressions::find(progressionIndex, progression)
             || progression.scope != build_data::progressions::Scope::character) {
             return VendorReputationDisposition::refused;
         }
         award.costHash = cost.definitionHash;
         award.costQuantity = sale.costQuantity;
         award.experience = static_cast<std::int32_t>(experience);
-        award.progressionIndex = rule.progressionIndex;
+        award.progressionIndex = progressionIndex;
         award.rewardValueRow = rule.rewardValueRow;
         award.repeatLastStep = progression.repeatLastStep;
         if (rule.rewardValueRow != 0) {
             std::array<build_data::progressions::Step,
                        build_data::progressions::kStepPerDefinitionCapacity>
                 steps{};
-            if (!build_data::progressions::steps(rule.progressionIndex, steps, count) || count < 2
+            if (!build_data::progressions::steps(progressionIndex, steps, count) || count < 2
                 || std::any_of(
                     steps.begin(),
                     steps.begin() + static_cast<std::ptrdiff_t>(count),

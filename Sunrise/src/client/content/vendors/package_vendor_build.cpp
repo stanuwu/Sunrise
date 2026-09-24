@@ -22,9 +22,18 @@ namespace tables = middleware::content::packages::tables;
 namespace domain = state::build_data::vendors;
 namespace generated = middleware::content::packages::schema::generated;
 
+/** One array a definition or a sale row declares, reduced to what the catalog stores. */
+struct ArrayView {
+    std::uint32_t base{};
+    std::uint32_t classId{};
+    std::uint16_t count{};
+};
+
 /** Every extracted row, kept off the caller stack. */
 struct Storage {
     std::vector<std::byte> blob{};
+    std::vector<std::byte> factionBlob{};
+    ArrayView factionRows{};
     std::array<domain::IndexEntry, domain::kIndexCapacity> index{};
     std::array<domain::Definition, domain::kDefinitionCapacity> definitions{};
     std::array<domain::SaleRow, domain::kSaleRowCapacity> saleRows{};
@@ -49,6 +58,8 @@ struct Storage {
     /** Only published prefixes are visible; extraction fully assigns each new row. */
     void reset() noexcept {
         blob.clear();
+        factionBlob.clear();
+        factionRows = {};
         indexCount = 0;
         definitionCount = 0;
         saleRowCount = 0;
@@ -60,13 +71,6 @@ struct Storage {
         unreadableGates = 0;
         unreadableTransfers = 0;
     }
-};
-
-/** One array a definition or a sale row declares, reduced to what the catalog stores. */
-struct ArrayView {
-    std::uint32_t base{};
-    std::uint32_t classId{};
-    std::uint16_t count{};
 };
 
 /** @param blob Source bytes. @param offset Field offset. @param value Receives the field. */
@@ -115,6 +119,17 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
               array.elementClass,
               static_cast<std::uint16_t>(array.count)};
     return true;
+}
+
+/** Reads the native faction rows used by vendor definition +18. */
+[[nodiscard]] bool
+read_factions(const reader::Source& source, reader::Scratch& scratch, Storage& storage) noexcept {
+    return reader::read_tag(source, scratch, kFactionTableTag, storage.factionBlob)
+           && read_array(std::span<const std::byte>{storage.factionBlob},
+                         kFactionArrayDescriptor,
+                         kFactionRowStride,
+                         storage.factionRows)
+           && storage.factionRows.count != 0 && storage.factionRows.classId == kFactionRowClass;
 }
 
 /**
@@ -458,6 +473,13 @@ bool build(const reader::Source& source,
     }
     static Storage storage{};
     storage.reset();
+    if (!read_factions(source, scratch, storage)) {
+        // A missing faction table removes reputation links, not ordinary vendor sales.
+        storage.factionRows = {};
+        core::log::write(core::log::Channel::state,
+                         core::log::Level::warn,
+                         "ev=build_data stage=vendors result=factions_unavailable");
+    }
     if (!read_index(source, scratch, storage)) {
         report(storage, 0, "index");
         return false;

@@ -11,6 +11,20 @@ namespace generated = middleware::content::packages::schema::generated;
 
 /** Tag of the installed vendor index blob, which names every vendor definition. */
 inline constexpr std::uint32_t kIndexRootTag = 0x8131931DU;
+/** Installed faction table named by the build-86657 investment content. */
+inline constexpr std::uint32_t kFactionTableTag = 0x81327CD5U;
+/** The faction table's rows begin at this array descriptor. */
+inline constexpr std::size_t kFactionArrayDescriptor = 8;
+/** One faction row holds its hash and progression index in the first eight bytes. */
+inline constexpr std::size_t kFactionRowStride = 24;
+/** The installed faction table's row class. */
+inline constexpr std::uint32_t kFactionRowClass = 0x808074CEU;
+/** Faction definition hash at the start of a faction row. */
+inline constexpr std::size_t kFactionHashOffset = 0;
+/** Progression definition index following the faction hash. */
+inline constexpr std::size_t kFactionProgressionIndexOffset = 4;
+/** Vendor definition +18 selects a faction row; out-of-range values name no faction. */
+inline constexpr std::size_t kVendorFactionIndexOffset = 18;
 
 /** Array descriptors of a vendor definition: category rows, sale rows and interactions. */
 inline constexpr std::size_t kInstalledArrayDescriptor =

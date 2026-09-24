@@ -846,7 +846,7 @@ static_assert(sizeof(SpawnPointRecord)
                      + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorIndexRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorDefinitionRecord)
-              == 15 * sizeof(std::uint32_t) + 5 * sizeof(std::uint16_t));
+              == 15 * sizeof(std::uint32_t) + 6 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorSaleCostRecord) == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorSaleRowRecord)
               == sizeof(std::int32_t) + vendors::kSaleCostCapacity * sizeof(VendorSaleCostRecord)
