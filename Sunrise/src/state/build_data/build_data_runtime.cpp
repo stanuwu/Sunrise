@@ -90,6 +90,11 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         return false;
     }
     persistenceState.enabled = true;
+    if (!vendors::load_reputation_sales(module)) {
+        runtime::persistence::clear_locked(persistenceState);
+        ReleaseSRWLockExclusive(&persistenceState.lock);
+        return false;
+    }
 
     cache::records::DomainCounts counts{};
     std::size_t namedRows = 0;

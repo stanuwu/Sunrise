@@ -50,3 +50,5 @@
 
 /** A created character's starting state has its own tables and rows in the save. */
 #define IDR_CHARACTER_STARTER 111
+/** Build-scoped vendor turn-in definitions are static content, not player-save rows. */
+#define IDR_VENDOR_REPUTATION_CONTENT 112

@@ -5,6 +5,7 @@
 
 #include "../build_data/progressions/progression_catalog.h"
 #include "../build_data/rewards/reward_catalog.h"
+#include "../build_data/vendors/reputation_sale_catalog.h"
 #include "../build_data/vendors/vendor_catalog.h"
 #include "../investment/store_internal.h"
 #include "state_account_transaction_helpers.h"
@@ -12,34 +13,8 @@
 namespace sunrise::state {
 namespace {
 
-/** Build-86657 faction tokenValues apply only to the matching vendor sale placeholder. */
-struct ReputationRule {
-    std::uint32_t vendorHash;
-    std::uint32_t placeholderHash;
-    std::uint32_t costHash;
-    std::int32_t experiencePerUnit;
-    std::uint16_t rewardValueRow{};
-};
-
 /** Build-86657 VALUE[888] and VALUE[906] map to these character-object value rows. */
 constexpr std::uint16_t kCrucibleRewardValueRow = 45, kGunsmithRewardValueRow = 49;
-/** Checked build-86657 sale identities and token XP; native faction rows supply progression. */
-constexpr std::array<ReputationRule, 7> kReputationRules{{
-    // Banshee: Gunsmith Rewards charges Gunsmith Materials for Gunsmith progression.
-    {672118013U, 3831705402U, 685157383U, 30, kGunsmithRewardValueRow},
-    // Banshee: the same placeholder also accepts Weapon Telemetry at its own XP rate.
-    {672118013U, 3831705402U, 685157381U, 25, kGunsmithRewardValueRow},
-    // Zavala: Vanguard Tactician Rewards charges Vanguard Tactician Tokens.
-    {69482069U, 3987308529U, 3899548068U, 100, kVanguardRewardValueRow},
-    // Shaxx: Crucible Rewards charges Crucible Tokens, not Valor or Glory points.
-    {3603221665U, 265113466U, 183980811U, 100, kCrucibleRewardValueRow},
-    // Devrim: EDZ token turn-ins use a different placeholder from destination materials.
-    {396892126U, 61430328U, 2640973641U, 100},
-    // Devrim: destination-material turn-ins accept Dusklight Shards.
-    {396892126U, 1317670974U, 950899352U, 50},
-    // Devrim: the same material placeholder accepts Dusklight Crystals at their own XP rate.
-    {396892126U, 1317670974U, 478751073U, 250},
-}};
 
 /** Native progression level walks read experience from lane zero. */
 constexpr std::size_t kExperienceLane = 0;
@@ -164,65 +139,64 @@ VendorReputationDisposition resolve_award(std::uint16_t vendorIndex,
         || !build_data::find_item_definition_index(sale.itemIndex, sold)) {
         return VendorReputationDisposition::notApplicable;
     }
-    bool recognized = false;
-    for (const auto& rule : kReputationRules) {
-        if (rule.vendorHash != entry.definitionHash
-            || rule.placeholderHash != sold.definitionHash) {
-            continue;
-        }
-        recognized = true;
-        if (sale.costItemIndex == vendors::kAbsentCostItem || sale.costQuantity == 0
-            || !build_data::find_item_definition_index(sale.costItemIndex, cost)
-            || cost.definitionHash != rule.costHash) {
-            continue;
-        }
-        std::array<std::uint16_t, build_data::progressions::kDefinitionCapacity> slots{};
-        std::size_t count = 0;
-        build_data::progressions::Definition progression{};
-        const auto progressionIndex = vendor.factionProgressionIndex;
-        const std::int64_t experience =
-            static_cast<std::int64_t>(sale.costQuantity) * rule.experiencePerUnit;
-        if (vendor.factionHash == 0
-            || progressionIndex == vendors::kUnavailableFactionProgressionIndex
-            || experience > (std::numeric_limits<std::int32_t>::max)()
-            || !build_data::find_progression_slots(
-                build_data::progressions::Scope::character, slots, count)
-            || count > slots.size()
-            || std::find(slots.begin(),
-                         slots.begin() + static_cast<std::ptrdiff_t>(count),
-                         progressionIndex)
-                   == slots.begin() + static_cast<std::ptrdiff_t>(count)
-            || !build_data::progressions::find(progressionIndex, progression)
-            || progression.scope != build_data::progressions::Scope::character) {
+    vendors::ReputationSale authored{};
+    if (!vendors::find_reputation_sale(entry.definitionHash, saleIndex, authored)) {
+        return vendors::is_reputation_placeholder(entry.definitionHash, sold.definitionHash)
+                   ? VendorReputationDisposition::refused
+                   : VendorReputationDisposition::notApplicable;
+    }
+    // The manifest's token value is trusted only for this exact installed sale and faction.
+    if (sold.definitionHash != authored.placeholderHash
+        || sale.categoryIndex != authored.categoryIndex
+        || sale.costItemIndex == vendors::kAbsentCostItem
+        || sale.costQuantity != authored.costQuantity
+        || !build_data::find_item_definition_index(sale.costItemIndex, cost)
+        || cost.definitionHash != authored.costHash || vendor.factionHash != authored.factionHash) {
+        return VendorReputationDisposition::refused;
+    }
+    std::array<std::uint16_t, build_data::progressions::kDefinitionCapacity> slots{};
+    std::size_t count = 0;
+    build_data::progressions::Definition progression{};
+    const auto progressionIndex = vendor.factionProgressionIndex;
+    const std::int64_t experience =
+        static_cast<std::int64_t>(sale.costQuantity) * authored.experiencePerUnit;
+    if (progressionIndex == vendors::kUnavailableFactionProgressionIndex
+        || experience > (std::numeric_limits<std::int32_t>::max)()
+        || !build_data::find_progression_slots(
+            build_data::progressions::Scope::character, slots, count)
+        || count > slots.size()
+        || std::find(
+               slots.begin(), slots.begin() + static_cast<std::ptrdiff_t>(count), progressionIndex)
+               == slots.begin() + static_cast<std::ptrdiff_t>(count)
+        || !build_data::progressions::find(progressionIndex, progression)
+        || progression.scope != build_data::progressions::Scope::character) {
+        return VendorReputationDisposition::refused;
+    }
+    award.costHash = cost.definitionHash;
+    award.costQuantity = sale.costQuantity;
+    award.experience = static_cast<std::int32_t>(experience);
+    award.progressionIndex = progressionIndex;
+    const auto* reward = reward_rule(vendorIndex);
+    award.rewardValueRow = reward != nullptr ? reward->rewardValueRow : 0;
+    award.repeatLastStep = progression.repeatLastStep;
+    if (award.rewardValueRow != 0) {
+        std::array<build_data::progressions::Step,
+                   build_data::progressions::kStepPerDefinitionCapacity>
+            steps{};
+        if (!build_data::progressions::steps(progressionIndex, steps, count) || count < 2
+            || std::any_of(
+                steps.begin(),
+                steps.begin() + static_cast<std::ptrdiff_t>(count),
+                [](const auto& step) { return step.cost <= 0; })) {
             return VendorReputationDisposition::refused;
         }
-        award.costHash = cost.definitionHash;
-        award.costQuantity = sale.costQuantity;
-        award.experience = static_cast<std::int32_t>(experience);
-        award.progressionIndex = progressionIndex;
-        award.rewardValueRow = rule.rewardValueRow;
-        award.repeatLastStep = progression.repeatLastStep;
-        if (rule.rewardValueRow != 0) {
-            std::array<build_data::progressions::Step,
-                       build_data::progressions::kStepPerDefinitionCapacity>
-                steps{};
-            if (!build_data::progressions::steps(progressionIndex, steps, count) || count < 2
-                || std::any_of(
-                    steps.begin(),
-                    steps.begin() + static_cast<std::ptrdiff_t>(count),
-                    [](const auto& step) { return step.cost <= 0; })) {
-                return VendorReputationDisposition::refused;
-            }
-            award.rankStepCount = count;
-            std::transform(steps.begin(),
-                           steps.begin() + static_cast<std::ptrdiff_t>(count),
-                           award.rankStepCosts.begin(),
-                           [](const auto& step) { return step.cost; });
-        }
-        return VendorReputationDisposition::prepared;
+        award.rankStepCount = count;
+        std::transform(steps.begin(),
+                       steps.begin() + static_cast<std::ptrdiff_t>(count),
+                       award.rankStepCosts.begin(),
+                       [](const auto& step) { return step.cost; });
     }
-    return recognized ? VendorReputationDisposition::refused
-                      : VendorReputationDisposition::notApplicable;
+    return VendorReputationDisposition::prepared;
 }
 
 /**

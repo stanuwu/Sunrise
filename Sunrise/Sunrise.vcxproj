@@ -818,6 +818,7 @@
     <ClCompile Include="src\state\build_data\cache\records\cache_spawn_set_records.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_vendor_records.cpp" />
     <ClCompile Include="src\state\build_data\vendors\vendor_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\vendors\reputation_sale_catalog.cpp" />
     <ClCompile Include="src\state\build_data\vendors\artifact_sale_view.cpp" />
     <ClCompile Include="src\state\unlocks\unlocks_expression.cpp" />
     <ClCompile Include="src\client\content\vendors\package_vendor_build.cpp" />
@@ -2510,6 +2511,7 @@
     <ClInclude Include="src\state\build_data\vendors\definition.h" />
     <ClInclude Include="src\state\build_data\vendors\vendor_catalog.h" />
     <ClInclude Include="src\state\unlocks\unlocks_expression.h" />
+    <ClInclude Include="src\state\build_data\vendors\reputation_sale_catalog.h" />
     <ClInclude Include="src\client\content\vendors\layout.h" />
     <ClInclude Include="src\client\content\vendors\vendor_build.h" />
     <ClInclude Include="src\state\build_data\scenarios\definition.h" />
