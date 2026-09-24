@@ -673,30 +673,30 @@ void settle_vendor_row(const middleware::web_service::Message& message,
         return;
     }
     const std::span<const vendor_domain::SaleCost> price = vendor_domain::cost_entries(row);
-    // A recognized reward sale owns its credit debit and must never fall through to a free grant.
-    if (vendorIndex >= 0 && vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
-        && state::is_vendor_reward_category(static_cast<std::uint16_t>(vendorIndex),
-                                            categoryIndex)) {
+    if (vendorIndex >= 0 && rowIndex >= 0
+        && vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
+        && rowIndex <= (std::numeric_limits<std::uint16_t>::max)()) {
         auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
-        const char* refusal = "storage";
-        const bool prepared =
-            reward != nullptr && rowIndex >= 0
-            && rowIndex <= (std::numeric_limits<std::uint16_t>::max)()
-            && state::prepare_vendor_reward_sale(static_cast<std::uint16_t>(vendorIndex),
-                                                 static_cast<std::uint16_t>(rowIndex),
-                                                 *reward,
-                                                 &refusal)
-                   == state::VendorReputationDisposition::prepared;
-        if (!prepared) {
-            clear_mutation(outcome);
+        if (reward == nullptr) {
+            report_purchase(opcode, "fail", "storage", vendorIndex, rowIndex, itemDefinitionIndex);
+            return;
         }
-        report_purchase(opcode,
-                        prepared ? "ok" : "fail",
-                        prepared ? "rank_reward" : refusal,
-                        vendorIndex,
-                        rowIndex,
-                        itemDefinitionIndex);
-        return;
+        const char* refusal = "storage";
+        const auto disposition =
+            state::prepare_vendor_reward_sale(static_cast<std::uint16_t>(vendorIndex),
+                                              static_cast<std::uint16_t>(rowIndex),
+                                              *reward,
+                                              &refusal);
+        if (disposition == state::VendorReputationDisposition::prepared) {
+            report_purchase(
+                opcode, "ok", "rank_reward", vendorIndex, rowIndex, itemDefinitionIndex);
+            return;
+        }
+        clear_mutation(outcome);
+        if (disposition == state::VendorReputationDisposition::refused) {
+            report_purchase(opcode, "fail", refusal, vendorIndex, rowIndex, itemDefinitionIndex);
+            return;
+        }
     }
     if (vendorIndex >= 0 && rowIndex >= 0
         && vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()

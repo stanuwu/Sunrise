@@ -51,6 +51,11 @@ struct VendorRewardClaim {
     std::int32_t beforeCredits{};
     std::uint16_t vendorIndex{};
     std::uint16_t saleIndex{};
+    std::uint32_t packageHash{};
+    std::int32_t categoryIndex{};
+    std::uint16_t itemIndex{};
+    std::uint16_t poolIndex{};
+    std::uint16_t interactionIndex{};
     /** Rechecked against the vendor binding before preview or commit. */
     std::uint16_t rewardValueRow{};
 };
@@ -67,7 +72,5 @@ prepare_vendor_reward(std::uint16_t vendorIndex,
                       std::uint16_t replyIndex,
                       PendingRecordRewardGrant& mutation) noexcept;
 [[nodiscard]] bool vendor_reward_current(const VendorRewardClaim& claim) noexcept;
-[[nodiscard]] bool is_vendor_reward_category(std::uint16_t vendorIndex,
-                                             std::int32_t categoryIndex) noexcept;
 
 } // namespace sunrise::state
