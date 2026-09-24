@@ -411,7 +411,7 @@ bool preview_item_acquisition(const PendingItemAcquisition& mutation,
 /**
  * Inventory and first-step state share one transaction; failure rolls both back.
  * @param mutation Prepared grant consumed on either success or failure.
- * @return True when all writes commit against the unchanged prepared state.
+ * @return True when both writes commit against the unchanged prepared state.
  */
 bool commit_item_acquisition(PendingItemAcquisition& mutation) noexcept {
     const PendingItemAcquisition& prepared = mutation;

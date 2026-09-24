@@ -1,10 +1,6 @@
 #pragma once
 
-#include <cstddef>
-#include <span>
-
 #include "../../../middleware/content/packages/reader/reader.h"
-#include "../../../middleware/content/packages/tables/definition_index_table.h"
 
 namespace sunrise::client::content::items::packages {
 class RewardConditions;
