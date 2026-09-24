@@ -13,6 +13,8 @@ $repSources = @(
     'Sunrise/src/state/runtime/state_vendor_reputation_runtime.cpp',
     'Sunrise/src/state/runtime/state_account_reward_grant_runtime.cpp',
     'Sunrise/src/state/build_data/rewards/reward_catalog.cpp',
+    'Sunrise/src/state/build_data/cache/records/cache_reward_records.cpp',
+    'Sunrise/src/state/build_data/cache/records/cache_investment_records.cpp',
     'Sunrise/src/state/rewards/reward_resolver.cpp',
     'Sunrise/src/middleware/crypto/random_bytes.cpp',
     'Sunrise/src/state/runtime/state_account_profile_runtime.cpp',

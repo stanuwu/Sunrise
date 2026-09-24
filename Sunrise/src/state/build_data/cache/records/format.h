@@ -343,7 +343,7 @@ struct ProgressionRecord {
     std::uint16_t stepOffset{};
     std::uint8_t stepCount{};
     std::uint8_t scope{};
-    std::uint32_t definitionHash{};
+    std::uint8_t repeatLastStep{};
 };
 
 /** Disk form of one progression rank step. */
@@ -879,8 +879,7 @@ static_assert(sizeof(RosterGroupRecord)
               == 2 * sizeof(std::uint32_t) + sizeof(std::uint16_t)
                      + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
-static_assert(sizeof(ProgressionRecord)
-              == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+static_assert(sizeof(ProgressionRecord) == 2 * sizeof(std::uint16_t) + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(ProgressionStepRecord) == sizeof(std::int32_t));
 static_assert(sizeof(SeasonPassRewardRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
