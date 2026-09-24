@@ -46,9 +46,6 @@ struct PendingVendorReputation {
     std::uint16_t vendorIndex, std::uint16_t saleIndex, PendingVendorReputation& mutation) noexcept;
 [[nodiscard]] bool commit_vendor_reputation(PendingVendorReputation& mutation) noexcept;
 
-/** Build-86657 VALUE[927] reads character-object value row 55 for Vanguard claims. */
-inline constexpr std::uint16_t kVanguardRewardValueRow = 55;
-
 /** Positive credits identify a prepared claim; zero leaves ordinary rewards unchanged. */
 struct VendorRewardClaim {
     std::int32_t beforeCredits{};
