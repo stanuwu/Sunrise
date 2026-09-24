@@ -7,6 +7,7 @@
 #include "../build_data/rewards/reward_catalog.h"
 #include "../build_data/vendors/reputation_sale_catalog.h"
 #include "../build_data/vendors/vendor_catalog.h"
+#include "../build_data/vendors/vendor_gate_catalog.h"
 #include "../investment/store_internal.h"
 #include "state_account_transaction_helpers.h"
 
@@ -19,7 +20,7 @@ constexpr std::uint16_t kCrucibleRewardValueRow = 45, kGunsmithRewardValueRow = 
 /** Native progression level walks read experience from lane zero. */
 constexpr std::size_t kExperienceLane = 0;
 
-/** Checked build-86657 claim bindings; the installed reward catalog resolves payout. */
+/** Supported reconstructed claim links; installed content supplies their conditions. */
 struct RewardRule {
     std::uint32_t vendorHash;
     std::uint16_t interaction;
@@ -27,8 +28,6 @@ struct RewardRule {
     std::uint16_t rewardValueRow;
     std::uint16_t saleIndex{};
     std::uint32_t packageHash{};
-    /** Only the Vanguard and Crucible sales require FLAG[5901] and VALUE[465]. */
-    bool requiresSelectionGates{true};
 };
 /** Build-86657 Vanguard rank package item hash. */
 constexpr std::uint32_t kVanguardPackageHash = 2746484552U;
@@ -42,17 +41,127 @@ constexpr std::array<RewardRule, 3> kRewardRules{{
     {69482069U, 40, 3, kVanguardRewardValueRow, 93, kVanguardPackageHash},
     // Shaxx's current package previews Crucible gear.
     {3603221665U, 28, 10, kCrucibleRewardValueRow, 96, kCruciblePackageHash},
-    // Banshee's sale has no Vanguard/Crucible selection gates.
-    {672118013U, 35, 8, kGunsmithRewardValueRow, 16, kGunsmithPackageHash, false},
+    // Banshee's sale is ungated, but its interaction still checks the player's level.
+    {672118013U, 35, 8, kGunsmithRewardValueRow, 16, kGunsmithPackageHash},
 }};
 /** Reply zero completes the supported normal reward interactions. */
 constexpr std::uint16_t kAcceptRewardReply = 0;
-/** FLAG[5901] selects the current Vanguard and Crucible packages over their older variants. */
-constexpr std::uint16_t kCurrentPackageFlag = 5901;
-/** The normal reward interaction requires VALUE[465] >= 20. */
-constexpr std::uint16_t kRewardLevelSlot = 465;
-/** The normal reward interaction excludes levels below this content threshold. */
-constexpr std::int32_t kMinimumRewardLevel = 20;
+
+/** Saved unlocks and Family-5 overrides visible to one native vendor gate. */
+struct GateValues {
+    const build_data::vendors::Gate& gate;
+    const Family5State& family;
+    const unlocks::Table& banks;
+};
+
+/** @return The native slot binding, or null when extraction did not resolve it. */
+const build_data::vendors::GateInput* gate_input(const GateValues& values,
+                                                 build_data::vendors::Opcode opcode,
+                                                 std::uint16_t slot) noexcept {
+    const auto inputs = std::span{values.gate.inputs}.first(values.gate.inputCount);
+    const auto found = std::find_if(inputs.begin(), inputs.end(), [&](const auto& input) {
+        return input.opcode == opcode && input.slot == slot;
+    });
+    return found == inputs.end() ? nullptr : &*found;
+}
+
+/** A Family-5 override supersedes an installed bank mapping when it names the same slot. */
+bool gate_flag(void* context, std::uint16_t slot, std::uint8_t& logical) noexcept {
+    const auto& values = *static_cast<const GateValues*>(context);
+    const auto* input = gate_input(values, build_data::vendors::Opcode::flag, slot);
+    if (input == nullptr) {
+        return false;
+    }
+    for (std::size_t index = 0; index < values.family.flagCount; ++index) {
+        if (values.family.flags[index].slot == slot) {
+            logical = values.family.flags[index].value;
+            return true;
+        }
+    }
+    using Bank = build_data::vendors::GateBank;
+    switch (input->bank) {
+    case Bank::accountFlag:
+        if (input->row < values.banks.accountFlags.size()) {
+            logical = values.banks.accountFlags[input->row];
+            return true;
+        }
+        break;
+    case Bank::profileFlag:
+        if (input->row < values.banks.profileFlags.size()) {
+            logical = values.banks.profileFlags[input->row];
+            return true;
+        }
+        break;
+    case Bank::characterFlag:
+        if (input->row < values.banks.characterObjectFlags.size()) {
+            logical = values.banks.characterObjectFlags[input->row];
+            return true;
+        }
+        break;
+    default:
+        break;
+    }
+    return false;
+}
+
+/** Reads a native value slot from Family-5 or its installed saved-bank row. */
+bool gate_value(void* context, std::uint16_t slot, std::int32_t& value) noexcept {
+    const auto& values = *static_cast<const GateValues*>(context);
+    const auto* input = gate_input(values, build_data::vendors::Opcode::loadValue, slot);
+    if (input == nullptr) {
+        return false;
+    }
+    for (std::size_t index = 0; index < values.family.valueCount; ++index) {
+        if (values.family.values[index].slot == slot) {
+            value = values.family.values[index].value;
+            return true;
+        }
+    }
+    using Bank = build_data::vendors::GateBank;
+    switch (input->bank) {
+    case Bank::accountValue:
+        if (input->row < values.banks.objectiveValues.size()) {
+            value = values.banks.objectiveValues[input->row];
+            return true;
+        }
+        break;
+    case Bank::characterValue:
+        if (input->row < values.banks.characterObjectValues.size()) {
+            value = values.banks.characterObjectValues[input->row];
+            return true;
+        }
+        break;
+    default:
+        break;
+    }
+    return false;
+}
+
+/** An empty authored sale field has no condition; a missing input refuses a nonempty gate. */
+bool gate_passes(const build_data::vendors::Gate& gate,
+                 const Family5State& family,
+                 const unlocks::Table& banks) noexcept {
+    if (gate.program.count == 0) {
+        return true;
+    }
+    GateValues values{gate, family, banks};
+    const build_data::vendors::Inputs inputs{gate_flag, gate_value, &values};
+    bool result = false;
+    return build_data::vendors::evaluate(
+               std::span{gate.program.instructions}.first(gate.program.count), inputs, result)
+           && result;
+}
+
+/** The interaction must test the same saved character credit row this claim debits. */
+bool tests_reward_credit(const build_data::vendors::Gate& gate,
+                         std::uint16_t rewardValueRow) noexcept {
+    const auto inputs = std::span{gate.inputs}.first(gate.inputCount);
+    return std::any_of(inputs.begin(), inputs.end(), [&](const auto& input) {
+        return input.opcode == build_data::vendors::Opcode::loadValue
+               && input.bank == build_data::vendors::GateBank::characterValue
+               && input.row == rewardValueRow;
+    });
+}
 
 /**
  * Resolves vendor identity independently of request selectors.
@@ -72,7 +181,7 @@ const RewardRule* reward_rule(std::uint16_t vendorIndex) noexcept {
 }
 
 /**
- * Accept only the supported auto-opening package and explicit evaluated gates.
+ * Accept only the supported auto-opening package and its installed native gates.
  * Caller holds the investment-store lock while reading the current gates.
  * @param rule Checked vendor binding.
  * @param saleIndex Requested sale, retained for commit revalidation.
@@ -95,27 +204,27 @@ bool reward_binding_current(const RewardRule& rule, std::uint16_t saleIndex) noe
         || (reward.flags & build_data::rewards::kOpenOnAcquisition) == 0) {
         return false;
     }
-    if (!rule.requiresSelectionGates) {
-        return true;
-    }
-    Family5State family{};
-    if (!investment::store::read_family5(family)) {
+    vendors::InteractionGate interaction{};
+    vendors::SaleGates gates{};
+    if (!vendors::find_interaction_gate(rule.vendorHash, rule.interaction, interaction)
+        || !vendors::find_sale_gates(rule.vendorHash, saleIndex, gates)
+        || interaction.categoryIndex != rule.category || gates.categoryIndex != rule.category
+        || !tests_reward_credit(interaction.condition, rule.rewardValueRow)) {
         return false;
     }
-    bool packageEnabled = false, levelMet = false;
-    for (std::size_t index = 0; index < family.flagCount; ++index) {
-        const auto& flag = family.flags[index];
-        if (flag.slot == kCurrentPackageFlag) {
-            packageEnabled = flag.value == unlocks::kFlagSet;
-        }
+    Family5State family{};
+    AccountState account{};
+    unlocks::Table banks{};
+    if (!investment::store::read_family5(family) || !investment::store::read_account(account)
+        || !account::valid(account)) {
+        return false;
     }
-    for (std::size_t index = 0; index < family.valueCount; ++index) {
-        const auto& value = family.values[index];
-        if (value.slot == kRewardLevelSlot) {
-            levelMet = value.value >= kMinimumRewardLevel;
-        }
-    }
-    return packageEnabled && levelMet;
+    const auto selected = runtime::detail::selected_character_index(account);
+    return selected < account.characterCount
+           && investment::store::read_unlocks(banks, static_cast<int>(selected))
+           && gate_passes(interaction.condition, family, banks)
+           && gate_passes(gates.admission, family, banks)
+           && gate_passes(gates.selection, family, banks);
 }
 
 /**
@@ -464,15 +573,15 @@ VendorReputationDisposition prepare_vendor_reward_sale(std::uint16_t vendorIndex
         return VendorReputationDisposition::notApplicable;
     }
     const std::lock_guard lock(investment::store::g_mutex);
-    reason = "reward_binding";
-    if (!reward_binding_current(*rule, saleIndex)) {
-        return VendorReputationDisposition::refused;
-    }
     reason = "rank_credit";
     std::int32_t credits = 0;
     if (!investment::store::read_unlock(
             investment::store::Bank::characterObjectValues, rule->rewardValueRow, credits)
         || credits <= 0) {
+        return VendorReputationDisposition::refused;
+    }
+    reason = "reward_binding";
+    if (!reward_binding_current(*rule, saleIndex)) {
         return VendorReputationDisposition::refused;
     }
     if (!prepare_item_reward(sale.itemIndex, 1, mutation, &reason)) {
