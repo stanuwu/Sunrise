@@ -683,10 +683,10 @@ void settle_vendor_row(const middleware::web_service::Message& message,
         }
         const char* refusal = "storage";
         const auto disposition =
-            state::prepare_vendor_reward_sale(static_cast<std::uint16_t>(vendorIndex),
-                                              static_cast<std::uint16_t>(rowIndex),
-                                              *reward,
-                                              &refusal);
+            state::prepare_vendor_rank_reward_sale(static_cast<std::uint16_t>(vendorIndex),
+                                                   static_cast<std::uint16_t>(rowIndex),
+                                                   *reward,
+                                                   &refusal);
         if (disposition == state::VendorReputationDisposition::prepared) {
             report_purchase(
                 opcode, "ok", "rank_reward", vendorIndex, rowIndex, itemDefinitionIndex);
@@ -835,11 +835,11 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
                             kUnavailableDefinitionIndex);
             return;
         }
-        const auto disposition =
-            state::prepare_vendor_reward(static_cast<std::uint16_t>(request.vendorIndex),
-                                         static_cast<std::uint16_t>(request.slotIndex),
-                                         static_cast<std::uint16_t>(request.third),
-                                         *reward);
+        const auto disposition = state::prepare_vendor_rank_reward_interaction(
+            static_cast<std::uint16_t>(request.vendorIndex),
+            static_cast<std::uint16_t>(request.slotIndex),
+            static_cast<std::uint16_t>(request.third),
+            *reward);
         if (disposition == state::VendorReputationDisposition::prepared) {
             report_purchase(quest::kOpcode,
                             "ok",

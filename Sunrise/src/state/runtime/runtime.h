@@ -364,7 +364,7 @@ struct PendingRecordRewardGrant {
     std::size_t beforeProfileItemCount{};
     std::size_t afterProfileItemCount{};
     std::size_t rewardCount{};
-    VendorRewardClaim vendorReward{};
+    VendorRankRewardClaim vendorReward{};
     bool prepared{};
 
     /** @return The flags of the wrappers this grant consumes. */

@@ -1071,7 +1071,7 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation, bool* artifactBonu
         }
         if (ready && mutation.vendorReward.beforeCredits > 0) {
             ready = investment::store::write_unlock(investment::store::Bank::characterObjectValues,
-                                                    mutation.vendorReward.rewardValueRow,
+                                                    mutation.vendorReward.rankCreditRow,
                                                     mutation.vendorReward.beforeCredits - 1);
         }
         ready = ready && transaction.commit();

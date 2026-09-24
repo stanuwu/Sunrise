@@ -15,11 +15,11 @@ struct VendorReputationAward {
     std::uint32_t costQuantity{};
     std::int32_t experience{};
     std::uint16_t progressionIndex{};
-    /** Character-object value row; used only when rankStepCount is positive. */
-    std::uint16_t rewardValueRow{};
+    /** Saved rank-credit row; used only when rankStepCount is positive. */
+    std::uint16_t rankCreditRow{};
     /** Installed rank costs captured for commit revalidation. */
     std::array<std::int32_t, build_data::progressions::kStepPerDefinitionCapacity> rankStepCosts{};
-    /** Zero preserves XP-only handling for factions without a supported reward rule. */
+    /** Zero preserves XP-only handling for factions without a rank-claim link. */
     std::size_t rankStepCount{};
     /** Build-86657 progression metadata marks these faction ladders as repeating. */
     bool repeatLastStep{};
@@ -31,7 +31,7 @@ struct PendingVendorReputation {
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         beforeItems{};
     unlocks::ProgressionLanes beforeProgression{};
-    std::int32_t beforeRewardCredits{};
+    std::int32_t beforeRankCredits{};
     VendorReputationAward award{};
     std::uint64_t accountSoid{};
     std::uint64_t characterSoid{};
@@ -47,7 +47,7 @@ struct PendingVendorReputation {
 [[nodiscard]] bool commit_vendor_reputation(PendingVendorReputation& mutation) noexcept;
 
 /** Positive credits identify a prepared claim; zero leaves ordinary rewards unchanged. */
-struct VendorRewardClaim {
+struct VendorRankRewardClaim {
     std::int32_t beforeCredits{};
     std::uint16_t vendorIndex{};
     std::uint16_t saleIndex{};
@@ -56,21 +56,21 @@ struct VendorRewardClaim {
     std::uint16_t itemIndex{};
     std::uint16_t poolIndex{};
     std::uint16_t interactionIndex{};
-    /** Rechecked against the vendor binding before preview or commit. */
-    std::uint16_t rewardValueRow{};
+    /** Saved rank-credit row rechecked before preview or commit. */
+    std::uint16_t rankCreditRow{};
 };
 
 struct PendingRecordRewardGrant;
 [[nodiscard]] VendorReputationDisposition
-prepare_vendor_reward_sale(std::uint16_t vendorIndex,
-                           std::uint16_t saleIndex,
-                           PendingRecordRewardGrant& mutation,
-                           const char** refusal = nullptr) noexcept;
+prepare_vendor_rank_reward_sale(std::uint16_t vendorIndex,
+                                std::uint16_t saleIndex,
+                                PendingRecordRewardGrant& mutation,
+                                const char** refusal = nullptr) noexcept;
 [[nodiscard]] VendorReputationDisposition
-prepare_vendor_reward(std::uint16_t vendorIndex,
-                      std::uint16_t interactionIndex,
-                      std::uint16_t replyIndex,
-                      PendingRecordRewardGrant& mutation) noexcept;
-[[nodiscard]] bool vendor_reward_current(const VendorRewardClaim& claim) noexcept;
+prepare_vendor_rank_reward_interaction(std::uint16_t vendorIndex,
+                                       std::uint16_t interactionIndex,
+                                       std::uint16_t replyIndex,
+                                       PendingRecordRewardGrant& mutation) noexcept;
+[[nodiscard]] bool vendor_rank_reward_current(const VendorRankRewardClaim& claim) noexcept;
 
 } // namespace sunrise::state
