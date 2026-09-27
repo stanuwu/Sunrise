@@ -183,6 +183,25 @@ push_timer_member(lua_State* state, const host::Event& event, std::string_view k
     return true;
 }
 
+/** Type-53 source, cue and authored duration both dialogue cue edges carry. */
+[[nodiscard]] bool
+push_dialogue_member(lua_State* state, const host::Event& event, std::string_view key) {
+    if (key == "dialogue_registry_key") {
+        lua_pushinteger(state, event.dialogueRegistryKey);
+    } else if (key == "dialogue_slot_type") {
+        lua_pushinteger(state, event.dialogueSlotType);
+    } else if (key == "dialogue_slot_index") {
+        lua_pushinteger(state, event.dialogueSlotIndex);
+    } else if (key == "cue") {
+        lua_pushinteger(state, event.dialogueCue);
+    } else if (key == "duration_ms") {
+        lua_pushinteger(state, event.dialogueDurationMs);
+    } else {
+        return false;
+    }
+    return true;
+}
+
 /** The peer identity both session edges carry. */
 [[nodiscard]] bool
 push_session_peer_member(lua_State* state, const host::Event& event, std::string_view key) {
@@ -641,6 +660,35 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
     return 1;
 }
 
+/** Reads one member of a staged dialogue cue. */
+[[nodiscard]] int dialogue_staged_index(lua_State* state) {
+    const host::Event& event = check_event(state, 1);
+    const std::string_view key = lua_string_view(state, 2);
+    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key)) {
+        return 1;
+    }
+    if (event_surface_visible(state, event.kind) && push_dialogue_member(state, event, key)) {
+        return 1;
+    }
+    lua_pushnil(state);
+    return 1;
+}
+
+/** Reads one member of a finished dialogue cue and the runtime timer that closed it. */
+[[nodiscard]] int dialogue_finished_index(lua_State* state) {
+    const host::Event& event = check_event(state, 1);
+    const std::string_view key = lua_string_view(state, 2);
+    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key)) {
+        return 1;
+    }
+    if (event_surface_visible(state, event.kind)
+        && (push_dialogue_member(state, event, key) || push_timer_member(state, event, key))) {
+        return 1;
+    }
+    lua_pushnil(state);
+    return 1;
+}
+
 } // namespace
 
 /** Installs the derived and internal view metatables. */
@@ -667,6 +715,8 @@ void register_derived_event_metatables(lua_State* state) {
     register_metatable(state, kObjectInteractionEventMetatable, &object_interaction_index);
     register_metatable(state, kDeviceStateEventMetatable, &device_state_index);
     register_metatable(state, kActorPathEventMetatable, &actor_path_index);
+    register_metatable(state, kDialogueStagedEventMetatable, &dialogue_staged_index);
+    register_metatable(state, kDialogueFinishedEventMetatable, &dialogue_finished_index);
 }
 
 } // namespace sunrise::server::activity::mission::lua_vm::detail

@@ -1,8 +1,10 @@
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cstring>
 #include <limits>
 #include <new>
+#include <string_view>
 
 #include "mission_script_lua_resolve.h"
 #include "mission_script_vm_internal.h"
@@ -30,6 +32,9 @@ using detail::Impl;
 using detail::impl_from_state;
 using detail::raise_lua_error;
 using detail::VmAccess;
+
+/** Runtime timer names that close a staged dialogue cue follow the reserved prefix with this. */
+constexpr std::string_view kDialogueTimerKind = "dialogue/";
 
 static_assert(sizeof(Impl) <= kVmStorageByteCapacity);
 static_assert(alignof(Impl) <= alignof(std::max_align_t));
@@ -198,6 +203,8 @@ inline constexpr std::array<const char*, host::kEventKindCount> kEventHandlerNam
     "on_event_squad_provoked",
     "on_event_device_state",
     "on_event_region_changed",
+    "on_event_dialogue_staged",
+    "on_event_dialogue_finished",
 }};
 
 static_assert([] {
@@ -328,7 +335,8 @@ void initialize_candidate(const Impl& impl, Candidate& candidate) noexcept {
 
 /** Consumes only the exact active timer represented by an internal elapsed event. */
 [[nodiscard]] bool consume_elapsed_timer(Candidate& candidate, const host::Event& event) noexcept {
-    if (event.kind != host::EventKind::timerElapsed) {
+    if (event.kind != host::EventKind::timerElapsed
+        && event.kind != host::EventKind::dialogueFinished) {
         return true;
     }
     for (std::size_t index = 0; index < candidate.timerCount; ++index) {
@@ -345,6 +353,51 @@ void initialize_candidate(const Impl& impl, Candidate& candidate) noexcept {
         return true;
     }
     return false;
+}
+
+/**
+ * Arms or replaces the runtime timer that closes the cue a dialogueStaged event reports.
+ * The timer commits with this callback even when the program has no handler for the event. A full
+ * timer table or an exhausted timer sequence leaves the cue without a timer; the runtime logs the
+ * full table before it dispatches.
+ */
+void arm_dialogue_timer(Candidate& candidate,
+                        const host::Event& event,
+                        std::uint64_t now) noexcept {
+    StateKey key{};
+    if (event.kind != host::EventKind::dialogueStaged
+        || !dialogue_timer_key(event.dialogueSlotRow, event.dialogueCue, key)
+        || candidate.nextTimerSequence == state::activity::mission::kAbsentTimerSequence) {
+        return;
+    }
+    const std::string_view name(key.bytes.data(), key.length);
+    std::size_t row = 0;
+    while (row < candidate.timerCount
+           && std::string_view(candidate.timers[row].key.bytes.data(),
+                               candidate.timers[row].key.length)
+                  < name) {
+        ++row;
+    }
+    const bool replaces = row < candidate.timerCount && same_key(candidate.timers[row].key, key);
+    if (!replaces) {
+        if (candidate.timerCount == candidate.timers.size()) {
+            return;
+        }
+        for (std::size_t move = candidate.timerCount; move > row; --move) {
+            candidate.timers[move] = candidate.timers[move - 1];
+        }
+        ++candidate.timerCount;
+    }
+    const std::uint64_t sequence = candidate.nextTimerSequence;
+    candidate.nextTimerSequence = sequence == (std::numeric_limits<std::uint64_t>::max)()
+                                      ? state::activity::mission::kAbsentTimerSequence
+                                      : sequence + 1;
+    const std::uint64_t delay = event.dialogueDurationMs;
+    candidate.timers[row] = {key,
+                             now > (std::numeric_limits<std::uint64_t>::max)() - delay
+                                 ? (std::numeric_limits<std::uint64_t>::max)()
+                                 : now + delay,
+                             sequence};
 }
 
 /** Publishes one callback candidate without allowing its revision to wrap. */
@@ -415,6 +468,9 @@ void initialize_candidate(const Impl& impl, Candidate& candidate) noexcept {
         ++impl.refusedCallbacks;
         impl.faulted = true;
         return CallStatus::scriptError;
+    }
+    if (event != nullptr) {
+        arm_dialogue_timer(frame.candidate, *event, now);
     }
     frame.handler = handler;
     frame.event = event;
@@ -774,6 +830,15 @@ bool initial_state_omissions(const Vm& vm,
     return true;
 }
 
+/** @return True when one mission timer is armed under this exact state key. */
+bool timer_armed(const Vm& vm, const StateKey& key) noexcept {
+    const Impl& impl = VmAccess::get(vm);
+    return impl.active
+           && std::any_of(impl.timers.begin(),
+                          impl.timers.begin() + static_cast<std::ptrdiff_t>(impl.timerCount),
+                          [&](const MissionTimer& timer) { return same_key(timer.key, key); });
+}
+
 /** Copies the next unread outbox action without consuming it; false when none is pending. */
 bool pending_intent(const Vm& vm, Intent& output) noexcept {
     const Impl& impl = VmAccess::get(vm);
@@ -805,6 +870,81 @@ bool snapshot_intents(const Vm& vm, std::vector<Intent>& output) noexcept {
         return false;
     }
     return true;
+}
+
+bool runtime_timer_key(const StateKey& key) noexcept {
+    return key.length <= key.bytes.size()
+           && std::string_view(key.bytes.data(), key.length).starts_with(kRuntimeTimerPrefix);
+}
+
+bool dialogue_timer_key(std::uint32_t slotRow, std::uint16_t cue, StateKey& output) noexcept {
+    output = {};
+    // sunrise/dialogue/<slot row>/<cue>, both in decimal; the longest name fits the key storage.
+    char* cursor = output.bytes.data();
+    char* const end = output.bytes.data() + output.bytes.size() - 1;
+    const auto append = [&](std::string_view text) {
+        if (static_cast<std::size_t>(end - cursor) < text.size()) {
+            return false;
+        }
+        cursor = std::copy(text.begin(), text.end(), cursor);
+        return true;
+    };
+    if (!append(kRuntimeTimerPrefix) || !append(kDialogueTimerKind)) {
+        output = {};
+        return false;
+    }
+    auto written = std::to_chars(cursor, end, slotRow);
+    if (written.ec != std::errc{}) {
+        output = {};
+        return false;
+    }
+    cursor = written.ptr;
+    if (!append("/")) {
+        output = {};
+        return false;
+    }
+    written = std::to_chars(cursor, end, cue);
+    if (written.ec != std::errc{}) {
+        output = {};
+        return false;
+    }
+    output.length = static_cast<std::uint8_t>(written.ptr - output.bytes.data());
+    return true;
+}
+
+bool parse_dialogue_timer_key(const StateKey& key,
+                              std::uint32_t& slotRow,
+                              std::uint16_t& cue) noexcept {
+    slotRow = 0;
+    cue = 0;
+    if (!runtime_timer_key(key)) {
+        return false;
+    }
+    std::string_view name(key.bytes.data(), key.length);
+    name.remove_prefix(kRuntimeTimerPrefix.size());
+    if (!name.starts_with(kDialogueTimerKind)) {
+        return false;
+    }
+    name.remove_prefix(kDialogueTimerKind.size());
+    const std::size_t separator = name.find('/');
+    if (separator == std::string_view::npos) {
+        return false;
+    }
+    // Only the canonical decimal spelling dialogue_timer_key writes is accepted.
+    const auto canonical = [](std::string_view digits) {
+        return !digits.empty() && (digits.size() == 1 || digits.front() != '0');
+    };
+    const std::string_view slotDigits = name.substr(0, separator);
+    const std::string_view cueDigits = name.substr(separator + 1);
+    if (!canonical(slotDigits) || !canonical(cueDigits)) {
+        return false;
+    }
+    const auto slotRead =
+        std::from_chars(slotDigits.data(), slotDigits.data() + slotDigits.size(), slotRow);
+    const auto cueRead =
+        std::from_chars(cueDigits.data(), cueDigits.data() + cueDigits.size(), cue);
+    return slotRead.ec == std::errc{} && slotRead.ptr == slotDigits.data() + slotDigits.size()
+           && cueRead.ec == std::errc{} && cueRead.ptr == cueDigits.data() + cueDigits.size();
 }
 
 /** Copies complete durable script state without changing its revision. */

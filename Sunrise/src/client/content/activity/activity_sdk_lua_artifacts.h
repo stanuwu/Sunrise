@@ -79,6 +79,7 @@ struct Source final {
     std::span<const ScenarioWorldSource> scenarioWorldSources{};
     std::span<const format::CombatObjectiveGroup> combatObjectiveGroups{};
     std::span<const format::ActorAbility> actorAbilities{};
+    std::span<const format::DialogueCue> dialogueCues{};
 };
 
 /** One readable generated Lua module with a filesystem-safe canonical name. */

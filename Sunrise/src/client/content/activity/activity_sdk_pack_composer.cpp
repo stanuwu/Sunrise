@@ -706,6 +706,11 @@ link_text(const StringLinker& linker, const Text& input, format::StringRef& outp
             return false;
         }
     }
+    for (const authored_scene_inventory::DialogueCue& row : authoredScenes.dialogueCues) {
+        if (!keep_legacy(linker, row.id)) {
+            return false;
+        }
+    }
     for (const authored_scene_inventory::DialogueCueText& row : authoredScenes.dialogueCueTexts) {
         if (!keep_legacy(linker, row.id) || !keep_legacy(linker, row.text)) {
             return false;

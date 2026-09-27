@@ -86,6 +86,9 @@ inline constexpr char kPlayerTriggerEventMetatable[] = "sunrise.mission.event.pl
 inline constexpr char kCinematicStartedEventMetatable[] = "sunrise.mission.event.cinematic_started";
 inline constexpr char kCinematicTerminatedEventMetatable[] =
     "sunrise.mission.event.cinematic_terminated";
+// Dialogue cue lifecycle.
+inline constexpr char kDialogueStagedEventMetatable[] = "sunrise.mission.event.dialogue_staged";
+inline constexpr char kDialogueFinishedEventMetatable[] = "sunrise.mission.event.dialogue_finished";
 
 /** Mission ABI id of the named device-transition intent. It reuses the device channel route. */
 inline constexpr std::string_view kDeviceTransitionSurface = "mission.intent.device-transition.v1";

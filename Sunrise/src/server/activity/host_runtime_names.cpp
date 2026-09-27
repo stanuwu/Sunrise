@@ -88,6 +88,10 @@ const char* event_name(EventKind kind) noexcept {
         return "cinematic skip requested";
     case EventKind::cinematicTerminated:
         return "cinematic terminated";
+    case EventKind::dialogueStaged:
+        return "dialogue cue staged";
+    case EventKind::dialogueFinished:
+        return "dialogue cue finished";
     }
     return "unknown";
 }

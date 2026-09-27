@@ -145,11 +145,15 @@ enum class EventKind : std::uint8_t {
     deviceState = 39,
     /** An accepted client report moved the held region to another authored region. */
     regionChanged = 40,
+    /** One dialogue cue reached the transport queue; this is not a Host feed row. */
+    dialogueStaged = 41,
+    /** A staged cue's authored duration elapsed on its runtime timer; not a Host feed row. */
+    dialogueFinished = 42,
 };
 
 /** Kinds are numbered without gaps, so the last one plus one is the count. */
 inline constexpr std::size_t kEventKindCount =
-    static_cast<std::size_t>(EventKind::regionChanged) + 1U;
+    static_cast<std::size_t>(EventKind::dialogueFinished) + 1U;
 
 /**
  * Terminal delivery outcome of one script-requested effect.
@@ -645,6 +649,14 @@ struct Event final {
     std::uint32_t playerTriggerResolvedObjectId{};
     std::int16_t playerTriggerSlotIndex{-1};
     std::int8_t playerTriggerSlotType{-1};
+    /** Type-53 source and cue of a dialogueStaged or dialogueFinished event. */
+    std::uint32_t dialogueSlotRow{};
+    std::uint32_t dialogueRegistryKey{};
+    /** Play time of the cue, from the SDK dialogue cue row. */
+    std::uint32_t dialogueDurationMs{};
+    std::uint16_t dialogueCue{};
+    std::int16_t dialogueSlotIndex{-1};
+    std::int8_t dialogueSlotType{-1};
     /** Type-6 source ClientRef carried by a schema-0x808087BF cinematic incident. */
     std::uint32_t cinematicRegistryKey{};
     std::uint64_t cinematicRuntimeObjectId{};

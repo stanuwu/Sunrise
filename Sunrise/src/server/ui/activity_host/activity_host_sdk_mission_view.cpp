@@ -441,12 +441,15 @@ void draw_dialogues(const sdk::BoundView& view, const mission::Snapshot& snapsho
                                     display_text(catalog, object.id).data(),
                                     static_cast<unsigned>(occurrenceRow),
                                     static_cast<unsigned>(slot.slotIndex));
+                const auto cueRows = sdk::slot_dialogue_cues(catalog, slot);
+                // The check reads the cue only against the slot's cue count, which every cue
+                // drawn here satisfies, so one resolution per sensor answers for all of them.
+                const mission::SceneStatus available =
+                    mission::dialogue_cue_availability(view, occurrenceRow, slotRow, 0);
                 for (std::uint32_t cueRow = 0; cueRow < slot.reserved; ++cueRow) {
                     // The cue index is a 16-bit wire field, so the row is narrowed once here.
                     const auto cue = static_cast<std::uint16_t>(cueRow);
                     ImGui::PushID(static_cast<int>(cueRow));
-                    const mission::SceneStatus available =
-                        mission::dialogue_cue_availability(view, occurrenceRow, slotRow, cue);
                     ImGui::BeginDisabled(available != mission::SceneStatus::ready);
                     if (ImGui::Button("Play cue")) {
                         g_dialogueActionOccurrence = occurrenceRow;
@@ -458,33 +461,29 @@ void draw_dialogues(const sdk::BoundView& view, const mission::Snapshot& snapsho
                     }
                     ImGui::EndDisabled();
                     ImGui::SameLine();
-                    std::uint32_t definitionHash = 0;
-                    for (const sdk::format::DialogueCueText& row : catalog.dialogue_cue_texts()) {
-                        if (row.slotIndex == slotRow && row.cueIndex == cue) {
-                            definitionHash = row.definitionHash;
-                            break;
-                        }
+                    if (cueRow < cueRows.size()) {
+                        const sdk::format::DialogueCue& definition = cueRows[cueRow];
+                        ImGui::Text("Cue %u  definition %08X  %.3f s  %u lines",
+                                    static_cast<unsigned>(cue),
+                                    static_cast<unsigned>(definition.definitionHash),
+                                    static_cast<double>(definition.authoredWindowSeconds),
+                                    static_cast<unsigned>(definition.lineCount));
+                    } else {
+                        ImGui::Text("Cue %u  no definition", static_cast<unsigned>(cue));
                     }
-                    ImGui::Text("Cue %u  definition %08X",
-                                static_cast<unsigned>(cue),
-                                static_cast<unsigned>(definitionHash));
                     ImGui::Indent();
                     bool hasCandidate = false;
-                    const auto dialogueRows = catalog.dialogue_cue_texts();
+                    const auto dialogueRows = sdk::cue_dialogue_texts(catalog, slot, cueRow);
                     for (std::size_t rowIndex = 0; rowIndex < dialogueRows.size(); ++rowIndex) {
-                        const sdk::format::DialogueCueText& row = dialogueRows[rowIndex];
-                        if (row.slotIndex != slotRow || row.cueIndex != cue) {
-                            continue;
-                        }
-                        const std::string_view candidate = catalog.string(row.text);
+                        const std::string_view candidate =
+                            catalog.string(dialogueRows[rowIndex].text);
                         if (candidate.empty()) {
                             continue;
                         }
+                        // The two takes of a line usually share their text; show it once.
                         bool duplicate = false;
                         for (std::size_t previous = 0; previous < rowIndex; ++previous) {
-                            const sdk::format::DialogueCueText& prior = dialogueRows[previous];
-                            if (prior.slotIndex == slotRow && prior.cueIndex == cue
-                                && catalog.string(prior.text) == candidate) {
+                            if (catalog.string(dialogueRows[previous].text) == candidate) {
                                 duplicate = true;
                                 break;
                             }

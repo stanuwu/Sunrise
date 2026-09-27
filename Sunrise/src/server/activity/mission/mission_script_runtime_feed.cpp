@@ -101,6 +101,8 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::fireteamState:
     case host::EventKind::objectInteracted:
     case host::EventKind::ghostLinkState:
+    case host::EventKind::dialogueStaged:
+    case host::EventKind::dialogueFinished:
         return false;
     default:
         return true;
@@ -113,7 +115,8 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     if (event.attemptGeneration != 0 && event.attemptGeneration != instance.attempt.generation) {
         return false;
     }
-    if (event.kind == host::EventKind::timerElapsed) {
+    if (event.kind == host::EventKind::timerElapsed
+        || event.kind == host::EventKind::dialogueFinished) {
         return true;
     }
     if (event.sourceGeneration != instance.view.activityClientGeneration) {
@@ -132,6 +135,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
            || event.kind == host::EventKind::entityDied
            || event.kind == host::EventKind::sceneFinished
            || event.kind == host::EventKind::objectiveProgress
+           || event.kind == host::EventKind::dialogueStaged
            || event.kind == host::EventKind::entitySlotsRequested
            || event.kind == host::EventKind::sessionJoined
            || event.kind == host::EventKind::sessionLeft
@@ -564,6 +568,34 @@ void clear_feed_cursors() noexcept {
     g_missionInputCursor = {};
 }
 
+namespace {
+
+/** Logs a staged cue whose dispatch finds the timer table full, so no timer will finish it. */
+void log_full_dialogue_timers(RuntimeInstance& instance, const host::Event& event) noexcept {
+    lua_vm::Snapshot diagnostics{};
+    lua_vm::snapshot(instance.vm, diagnostics);
+    mission_state::StateKey key{};
+    if (diagnostics.timerCount < mission_state::kTimerCapacity
+        || !lua_vm::dialogue_timer_key(event.dialogueSlotRow, event.dialogueCue, key)
+        || lua_vm::timer_armed(instance.vm, key)) {
+        return;
+    }
+    std::array<char, 48> fields{};
+    const int written = std::snprintf(fields.data(),
+                                      fields.size(),
+                                      "slot_row=%u cue=%u",
+                                      static_cast<unsigned>(event.dialogueSlotRow),
+                                      static_cast<unsigned>(event.dialogueCue));
+    log_line(core::log::Level::warn,
+             &instance,
+             "dialogue",
+             "timer_capacity",
+             written > 0 ? std::string_view(fields.data(), static_cast<std::size_t>(written))
+                         : std::string_view{});
+}
+
+} // namespace
+
 /**
  * Runs one event through the VM, commits what it changed, and faults on a script failure.
  * @param sense Values owned by a Sense row, or null.
@@ -608,6 +640,9 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
                      "legs",
                      {legs.data(), static_cast<std::size_t>(written)});
         }
+    }
+    if (firstAttempt && event.kind == host::EventKind::dialogueStaged) {
+        log_full_dialogue_timers(instance, event);
     }
     instance.dispatchAttemptGeneration = event.attemptGeneration;
     instance.dispatchInputSequence = event.missionSequence;
@@ -658,9 +693,11 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
                  : event.kind == host::EventKind::incidentReceived   ? "detail=incident"
                  : event.kind == host::EventKind::entitySlotsRequested
                      ? "detail=entity_slots_requested"
-                 : event.kind == host::EventKind::timerElapsed ? "detail=timer"
-                 : event.kind == host::EventKind::effectResult ? "detail=effect_result"
-                                                               : "detail=client_message");
+                 : event.kind == host::EventKind::timerElapsed     ? "detail=timer"
+                 : event.kind == host::EventKind::effectResult     ? "detail=effect_result"
+                 : event.kind == host::EventKind::dialogueStaged   ? "detail=dialogue_staged"
+                 : event.kind == host::EventKind::dialogueFinished ? "detail=dialogue_finished"
+                                                                   : "detail=client_message");
     }
     const std::uint64_t nextInputSequence =
         host_feed_row(event.kind) ? event.missionSequence : instance.lastMissionSequence;
@@ -683,9 +720,11 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
                      : event.kind == host::EventKind::incidentReceived   ? "detail=incident"
                      : event.kind == host::EventKind::entitySlotsRequested
                          ? "detail=entity_slots_requested"
-                     : event.kind == host::EventKind::timerElapsed ? "detail=timer"
-                     : event.kind == host::EventKind::effectResult ? "detail=effect_result"
-                                                                   : "detail=client_message");
+                     : event.kind == host::EventKind::timerElapsed     ? "detail=timer"
+                     : event.kind == host::EventKind::effectResult     ? "detail=effect_result"
+                     : event.kind == host::EventKind::dialogueStaged   ? "detail=dialogue_staged"
+                     : event.kind == host::EventKind::dialogueFinished ? "detail=dialogue_finished"
+                                                                       : "detail=client_message");
         }
         return status;
     }

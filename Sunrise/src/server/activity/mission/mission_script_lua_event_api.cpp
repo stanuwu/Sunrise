@@ -63,6 +63,10 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "damageState";
     case host::EventKind::deviceState:
         return "deviceState";
+    case host::EventKind::dialogueStaged:
+        return "dialogueStaged";
+    case host::EventKind::dialogueFinished:
+        return "dialogueFinished";
     case host::EventKind::objectState:
         return "objectState";
     case host::EventKind::ghostLinkState:
@@ -179,6 +183,10 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return kObjectInteractionEventMetatable;
     case host::EventKind::deviceState:
         return kDeviceStateEventMetatable;
+    case host::EventKind::dialogueStaged:
+        return kDialogueStagedEventMetatable;
+    case host::EventKind::dialogueFinished:
+        return kDialogueFinishedEventMetatable;
     case host::EventKind::ghostLinkState:
         return kGhostLinkEventMetatable;
     }

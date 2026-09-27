@@ -52,8 +52,8 @@ namespace {
 [[nodiscard]] int timer_ref_collection_resolve(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kTimerRefCollectionMetatable));
     StateKey key{};
-    if (!parse_state_key(state, 2, key)) {
-        return luaL_argerror(state, 2, "mission timer name is invalid");
+    if (!parse_script_timer_key(state, 2, key)) {
+        return luaL_argerror(state, 2, "mission timer name is invalid or reserved");
     }
     push_timer_ref(state, key);
     return 1;

@@ -20,14 +20,14 @@ struct RowSpec final {
 };
 
 /** Every StringRef field declared by the row table below. */
-constexpr std::size_t kDecodedStringFieldCount = 54;
+constexpr std::size_t kDecodedStringFieldCount = 55;
 /** Section index of the activity-owned binding-tag rows, which have no direct collection. */
 constexpr std::uint32_t kBindingTagSectionIndex = 24;
 /** Section index of the binding-locator rows, projected both directly and per activity. */
 constexpr std::uint32_t kBindingLocatorSectionIndex = 25;
 
 /** Compact type:name tokens are the single native inventory for all raw pack rows. */
-constexpr std::array<RowSpec, 40> kRows{{
+constexpr std::array<RowSpec, 41> kRows{{
     {1,
      "activities",
      "activities",
@@ -168,7 +168,7 @@ constexpr std::array<RowSpec, 40> kRows{{
      "dialogue_cue_texts",
      "CatalogDialogueCueTextView",
      "s:id;s:text;u32:slot_index;u32:cue_index;u32:definition_hash;u32:container_tag;"
-     "u32:string_hash"},
+     "u32:string_hash;u32:line_index;u32:take_index;u32:audio_tag;u32:duration_ms"},
     {23,
      "directive_elements",
      "directive_elements",
@@ -287,6 +287,12 @@ constexpr std::array<RowSpec, 40> kRows{{
      "s:name;u32:codec_families;u32:type_code;u32:decoded_size;u32:fixed_bits;"
      "u32:minimum_bits;u32:maximum_bits;u32:flags;u32:reserved;"
      "u64:writer_evidence_address;u64:reader_evidence_address"},
+    {46,
+     "dialogue_cues",
+     "dialogue_cues",
+     "CatalogDialogueCueView",
+     "s:id;u32:slot_index;u32:cue_index;u32:list_tag;u32:definition_hash;u32:duration_ms;"
+     "u32:line_count;u32:flags;u32:reserved"},
 }};
 
 void sort_keys(Value::Object& value) {

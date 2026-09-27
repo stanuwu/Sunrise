@@ -130,8 +130,8 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
 [[nodiscard]] int state_timer(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kStateMetatable));
     StateKey key{};
-    if (!parse_state_key(state, 2, key)) {
-        return luaL_argerror(state, 2, "mission timer name is invalid");
+    if (!parse_script_timer_key(state, 2, key)) {
+        return luaL_argerror(state, 2, "mission timer name is invalid or reserved");
     }
     const CallFrame& frame = active_frame(state);
     bool found = false;
@@ -212,8 +212,8 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
 [[nodiscard]] int context_start_timer(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
     StateKey key{};
-    if (!parse_state_key(state, 2, key)) {
-        return luaL_argerror(state, 2, "mission timer name is invalid");
+    if (!parse_script_timer_key(state, 2, key)) {
+        return luaL_argerror(state, 2, "mission timer name is invalid or reserved");
     }
     const lua_Integer delay = luaL_checkinteger(state, 3);
     if (delay < 0
@@ -251,8 +251,8 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
 [[nodiscard]] int context_cancel_timer(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
     StateKey key{};
-    if (!parse_state_key(state, 2, key)) {
-        return luaL_argerror(state, 2, "mission timer name is invalid");
+    if (!parse_script_timer_key(state, 2, key)) {
+        return luaL_argerror(state, 2, "mission timer name is invalid or reserved");
     }
     CallFrame& frame = active_frame(state);
     bool found = false;
