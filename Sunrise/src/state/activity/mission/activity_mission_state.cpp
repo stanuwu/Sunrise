@@ -132,6 +132,7 @@ namespace {
            && left.authBody == right.authBody && left.sequenceOwner == right.sequenceOwner
            && left.sdkBuildSha256 == right.sdkBuildSha256 && left.kind == right.kind
            && left.firstRow == right.firstRow && left.secondRow == right.secondRow
+           && left.sourceSpawnGeneration == right.sourceSpawnGeneration
            && left.objectTag == right.objectTag && left.registryKey == right.registryKey
            && left.sceneEventKey == right.sceneEventKey && left.authSchema == right.authSchema
            && left.actorCommandSelector == right.actorCommandSelector

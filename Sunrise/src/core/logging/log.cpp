@@ -22,7 +22,7 @@ namespace {
 constexpr std::array<std::string_view, static_cast<std::size_t>(Channel::count)> kChannelNames{
     "core", "client", "state", "server", "middleware"};
 /** Stable serialized severity names; Level::off is never emitted. */
-constexpr std::array<std::string_view, 4> kLevelNames{"error", "warn", "info", "debug"};
+constexpr std::array<std::string_view, 5> kLevelNames{"error", "warn", "info", "debug", "trace"};
 /** Optional logs are isolated below the shared generated-artifact directory. */
 constexpr std::wstring_view kLogDirectorySuffix = L"\\logs";
 /** The active log keeps one stable filename across process starts. */

@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "../../middleware/content/packages/tables/region_reader.h"
+#include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/activity/runtime.h"
 #include "../../state/activity_sdk/squad_profiles.h"
 #include "../../state/build_data/runtime.h"
@@ -301,7 +302,7 @@ struct PreparedSquad final {
     if (squad.scenarioIndex != view.scenarioRow) {
         return Status::wrongScenario;
     }
-    if ((squad.flags & format::kSquadRunnableMask) != format::kSquadRunnableMask) {
+    if (!format::squad_runnable(squad.flags)) {
         return Status::notRunnable;
     }
     const Status members = member_status(catalog, squad, squadRow, requestedCounts);
@@ -442,11 +443,15 @@ retirement_eligibility(const sdk::BoundView& view,
                                         std::optional<std::uint32_t> spawnRuleSlotRow,
                                         std::optional<squad_auth::SpawnRule>& output) noexcept {
     output.reset();
-    if (!spawnRuleSlotRow.has_value()) {
-        return Status::ready;
-    }
     const auto squads = catalog.squads();
     const auto slots = catalog.slots();
+    if (!spawnRuleSlotRow.has_value()) {
+        // A spawner with no rule of its own cannot be placed without a selected one.
+        return squadRow < squads.size()
+                       && (squads[squadRow].flags & format::kSquadRequiresSelectedRule) != 0
+                   ? Status::notRunnable
+                   : Status::ready;
+    }
     if (squadRow >= squads.size() || *spawnRuleSlotRow >= slots.size()) {
         return Status::invalidSquad;
     }

@@ -45,6 +45,11 @@ struct ResolverContext final {
 class MirrorBuilder final {
 public:
     state::gameplay::entity_identity::ActorSourceReference actorSource{};
+    std::uint16_t damageHealth{};
+    std::uint16_t damageShield{};
+    bool damageKnown{};
+    /** Damage pools seen so far; each pool is its own nested walk. */
+    std::uint8_t damagePools{};
     /** Opens an empty fixed-capacity bit writer. */
     MirrorBuilder() noexcept : writer_(bytes_) {}
 
@@ -74,6 +79,9 @@ public:
         std::memcpy(candidate.state.data() + sizeof(header), bytes_.data(), byteCount);
         candidate.byteCount = static_cast<std::uint16_t>(sizeof(header) + byteCount);
         candidate.actorSource = actorSource;
+        candidate.damageHealth = damageHealth;
+        candidate.damageShield = damageShield;
+        candidate.damageKnown = damageKnown;
         output = candidate;
         return true;
     }

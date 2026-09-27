@@ -9,8 +9,8 @@ namespace sunrise::state::activity_sdk::format {
 
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
-/** Runtime-pack schema version accepted by this reader. */
-inline constexpr std::uint32_t kVersion = 42;
+/** Runtime-pack schema version accepted by this reader. 43 adds rule-less squads. */
+inline constexpr std::uint32_t kVersion = 43;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 51;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
@@ -260,6 +260,21 @@ inline constexpr std::uint32_t kSquadFlagMask =
     | kSquadAllPointsExact | kSquadMemberCountValid | kSquadCandidateCountsInvariantComplete;
 /** A squad runs only with every extraction fact present. */
 inline constexpr std::uint32_t kSquadRunnableMask = kSquadFlagMask;
+/** The spawner names no rule of its own: a placement must select a type-66 rule slot. */
+inline constexpr std::uint32_t kSquadRequiresSelectedRule = 0x40U;
+/** Runnable without the authored edge and its points, which a selected rule replaces. */
+inline constexpr std::uint32_t kSquadSourcePrerequisiteMask =
+    kSquadRunnableMask & ~(kSquadSpawnerRuleEdgeExact | kSquadAllPointsExact);
+/**
+ * @return True when a squad row may be placed or commanded. A rule-less squad is exempt from the
+ * rule edge and points that its selected rule supplies.
+ */
+[[nodiscard]] constexpr bool squad_runnable(std::uint32_t flags) noexcept {
+    const std::uint32_t required = (flags & kSquadRequiresSelectedRule) != 0
+                                       ? kSquadSourcePrerequisiteMask
+                                       : kSquadRunnableMask;
+    return (flags & required) == required;
+}
 /** Member flags separate actor resolution from count-array completeness. */
 inline constexpr std::uint32_t kSquadMemberActorClassExact = 0x1U;
 inline constexpr std::uint32_t kSquadMemberCandidateCountsComplete = 0x2U;

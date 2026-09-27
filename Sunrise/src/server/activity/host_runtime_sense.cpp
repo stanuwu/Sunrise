@@ -21,6 +21,62 @@
 #include "host_runtime_internal.h"
 
 namespace sunrise::server::activity::host {
+namespace detail {
+
+/**
+ * Tests whether every exposed object is complete inside one safely framed packet. A partial decode
+ * must carry a partial receipt, and an unsafe or malformed sibling refuses the whole packet.
+ */
+bool usable_sense_observation_packet(
+    const SenseEnvelope& envelope,
+    const middleware::bap::activity_message::sense_update::DecodedPacket& packet) noexcept {
+    const auto& [sourceGeneration,
+                 clientMessageSequence,
+                 verdict,
+                 decodeStatus,
+                 groupsSeen,
+                 groupsDecoded,
+                 groupsSkipped,
+                 objectsSeen,
+                 objectsDecoded] = envelope;
+    namespace sense = middleware::bap::activity_message::sense_update;
+    if (sourceGeneration == 0 || clientMessageSequence == 0
+        || !((decodeStatus == sense::DecodeStatus::complete
+              && verdict == state::activity::receipts::Verdict::framed)
+             || (decodeStatus == sense::DecodeStatus::partial
+                 && verdict == state::activity::receipts::Verdict::partial))
+        || decodeStatus != packet.status || !sense::observation_packet(packet)
+        || groupsSeen != packet.groupsSeen || groupsDecoded != packet.groupsDecoded
+        || groupsSkipped != packet.groupsSkipped || objectsSeen != packet.objectsSeen
+        || objectsDecoded != packet.objectsDecoded || packet.objectsDecoded == 0
+        || packet.objectCount > packet.objectsSeen || packet.groupsDecoded > packet.groupsSeen
+        || packet.groupsSkipped > packet.groupsSeen
+        || packet.groupsDecoded != packet.groupsSeen - packet.groupsSkipped) {
+        return false;
+    }
+    for (std::size_t index = 0; index < packet.objectCount; ++index) {
+        const sense::DecodedObject& object = packet.objects[index];
+        if (object.status == sense::ObjectStatus::unsafeCount) {
+            return false;
+        }
+        if (object.status != sense::ObjectStatus::decoded) {
+            continue;
+        }
+        for (std::size_t prior = 0; prior < index; ++prior) {
+            const sense::DecodedObject& other = packet.objects[prior];
+            if (other.status == sense::ObjectStatus::decoded
+                && other.registryKey == object.registryKey && other.objectTag == object.objectTag
+                && other.senseSchema == object.senseSchema && other.schemaRow == object.schemaRow
+                && other.slotIndex == object.slotIndex && other.slotType == object.slotType) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+} // namespace detail
+
 namespace {
 
 using namespace detail;
@@ -51,14 +107,17 @@ packet_has_sense_key(const middleware::bap::activity_message::sense_update::Deco
 
 /** @return True when the envelope closed and each decoded object's storage is bounded. */
 [[nodiscard]] bool valid_sense_observation_input(const SenseInput& input) noexcept {
-    namespace sense = middleware::bap::activity_message::sense_update;
-    const auto& packet = input.decoded;
-    return input.sourceGeneration != 0 && input.clientMessageSequence != 0
-           && input.verdict == state::activity::receipts::Verdict::framed
-           && input.decodeStatus == packet.status && sense::observation_packet(packet)
-           && input.groupsSeen == packet.groupsSeen && input.groupsDecoded == packet.groupsDecoded
-           && input.groupsSkipped == packet.groupsSkipped && input.objectsSeen == packet.objectsSeen
-           && input.objectsDecoded == packet.objectsDecoded;
+    return detail::usable_sense_observation_packet(
+        {.sourceGeneration = input.sourceGeneration,
+         .clientMessageSequence = input.clientMessageSequence,
+         .verdict = input.verdict,
+         .decodeStatus = input.decodeStatus,
+         .groupsSeen = input.groupsSeen,
+         .groupsDecoded = input.groupsDecoded,
+         .groupsSkipped = input.groupsSkipped,
+         .objectsSeen = input.objectsSeen,
+         .objectsDecoded = input.objectsDecoded},
+        input.decoded);
 }
 
 /** Mixes one fixed-width value into the local scene change guard. */
@@ -588,9 +647,12 @@ void apply_sense(const SenseInput& input, std::uint64_t now) noexcept {
 } // namespace detail
 
 /** Queues one owned msg-6 prefix for the Activity Host service. */
-bool submit_sense(const SenseInput& input) noexcept {
-    if (!state::activity::binding_matches(input.binding) || input.sourceGeneration == 0) {
-        return false;
+IngressRefusal submit_sense(const SenseInput& input) noexcept {
+    if (!state::activity::binding_matches(input.binding)) {
+        return IngressRefusal::binding;
+    }
+    if (input.sourceGeneration == 0) {
+        return IngressRefusal::generation;
     }
     AcquireSRWLockExclusive(&g_lock);
     PendingInput pending{};
@@ -599,11 +661,11 @@ bool submit_sense(const SenseInput& input) noexcept {
     if (!append_pending(pending)) {
         ++g_droppedIngress;
         ReleaseSRWLockExclusive(&g_lock);
-        return false;
+        return IngressRefusal::queue;
     }
     ++g_queuedIngress;
     ReleaseSRWLockExclusive(&g_lock);
-    return true;
+    return IngressRefusal::none;
 }
 
 /** Copies initialized recovery state for one exact ActivityClient generation. */

@@ -10,6 +10,7 @@
 
 #include "../../../state/activity_sdk/format.h"
 #include "activity_sdk_external_placements.h"
+#include "activity_sdk_spawn_reference.h"
 #include "activity_sdk_topology_inventory.h"
 
 namespace sunrise::client::content::activity::sdk_generation::squad_inventory {
@@ -90,6 +91,8 @@ struct SpawnerFact final {
     std::uint32_t secondaryComponentClass{};
     /** Set when the spawner carries its own point set instead of a type-66 reference. */
     bool hasInlinePointSet{};
+    /** Successful canonical parsing distinguishes absent from unread inline data. */
+    bool inlinePointSetInspected{};
     std::uint64_t inlinePointSetOffset{};
     std::uint64_t inlinePlacementComponentOffset{};
     std::uint32_t inlineInitialPointIndex{};

@@ -59,6 +59,11 @@ template <typename Row>
         row.members.count = static_cast<std::uint32_t>(source.members.size());
         row.complete = source.complete;
         row.hasInlinePointSet = source.hasInlinePointSet;
+        row.requiresSelectedRule = requires_selected_spawn_rule(source.rawReference98,
+                                                                source.rawReferenceA0,
+                                                                source.complete,
+                                                                source.inlinePointSetInspected,
+                                                                source.hasInlinePointSet);
         if (!insert_config(byConfig, row, spawnerRow)) {
             return false;
         }

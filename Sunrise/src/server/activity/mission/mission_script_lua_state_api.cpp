@@ -1,10 +1,13 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <string_view>
 
+#include "../../../core/logging/log.h"
 #include "mission_script_lua_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
@@ -160,6 +163,49 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
     frame.candidate.phaseChanged = true;
     return 0;
 }
+/** Logs one staged variable write, so the gate state a controller keeps in variables is visible. */
+void log_variable_write(const StateKey& key, const VariableValue& value) noexcept {
+    std::array<char, 32> scalar{};
+    std::string_view text{};
+    int scalarWritten = 0;
+    switch (value.kind) {
+    case VariableValueKind::boolean:
+        text = value.booleanValue ? "true" : "false";
+        break;
+    case VariableValueKind::integer:
+        scalarWritten = std::snprintf(
+            scalar.data(), scalar.size(), "%lld", static_cast<long long>(value.integerValue));
+        break;
+    case VariableValueKind::real:
+        scalarWritten = std::snprintf(scalar.data(), scalar.size(), "%.6g", value.realValue);
+        break;
+    case VariableValueKind::string:
+        text = {value.stringValue.data(),
+                (std::min)(std::size_t{value.stringLength}, value.stringValue.size())};
+        break;
+    }
+    if (scalarWritten > 0) {
+        text = {scalar.data(),
+                (std::min)(static_cast<std::size_t>(scalarWritten), scalar.size() - 1)};
+    }
+    const std::string_view name = state_key_view(key);
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=mission_script stage=variable result=set name=%.*s value=%.*s",
+                      static_cast<int>(name.size()),
+                      name.data(),
+                      static_cast<int>(text.size()),
+                      text.data());
+    if (written > 0) {
+        core::log::write(
+            core::log::Channel::server,
+            core::log::Level::debug,
+            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
+    }
+}
+
 /** Stages one variable write that commits with the enclosing callback. */
 [[nodiscard]] int context_set_variable(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
@@ -185,6 +231,7 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
         ++frame.candidate.variableCount;
     }
     frame.candidate.variables[row] = {key, value};
+    log_variable_write(key, value);
     return 0;
 }
 /** Stages one variable removal that commits with the enclosing callback. */

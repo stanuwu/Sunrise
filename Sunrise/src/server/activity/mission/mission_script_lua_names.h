@@ -59,6 +59,7 @@ inline constexpr char kScriptableOverrideCanceledEventMetatable[] =
 // Operator refusal, then the world changes a program subscribes to.
 inline constexpr char kOperatorRefusedEventMetatable[] = "sunrise.mission.event.operator_refused";
 inline constexpr char kEffectResultEventMetatable[] = "sunrise.mission.event.effect_result";
+inline constexpr char kTriggerStateEventMetatable[] = "sunrise.mission.event.trigger_state";
 inline constexpr char kTriggerEnteredEventMetatable[] = "sunrise.mission.event.trigger_entered";
 inline constexpr char kTriggerExitedEventMetatable[] = "sunrise.mission.event.trigger_exited";
 inline constexpr char kSquadStateEventMetatable[] = "sunrise.mission.event.squad_state";

@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include <new>
+#include <span>
 
 namespace sunrise::middleware::gameplay::external {
 namespace {
@@ -241,6 +242,33 @@ static TypePayloadCodec batch_codec(BatchCodecContext& context) noexcept {
     return (record.flags & entityUpdate) != 0 || record.update.byteCount == 0;
 }
 
+/**
+ * The client sends a child that is being removed as its own direct element, not inside its parent's
+ * implicit group. Drops those children from one resolved group; the anchor at index zero stays.
+ */
+static void drop_leaving_children(const EntityBatch& batch,
+                                  std::span<EntityToken> tokens,
+                                  std::size_t& count) noexcept {
+    const auto leaving = [&](const EntityToken& token) noexcept {
+        for (std::size_t index = 0; index < entity_record_count(batch); ++index) {
+            const auto& direct = entity_record_at(batch, index);
+            if (!direct.implicitToken && (direct.flags & entityRemove) != 0
+                && direct.token.slot == token.slot
+                && direct.token.incarnation == token.incarnation) {
+                return true;
+            }
+        }
+        return false;
+    };
+    std::size_t kept = 1;
+    for (std::size_t index = 1; index < count; ++index) {
+        if (!leaving(tokens[index])) {
+            tokens[kept++] = tokens[index];
+        }
+    }
+    count = count == 0 ? 0 : kept;
+}
+
 /** Writes one token in slot-then-incarnation order. */
 [[nodiscard]] bool write_token(encoding::bits::Writer& writer, const EntityToken& token) noexcept {
     return valid_token(token) && writer.write(token.slot, kEntitySlotWidth)
@@ -410,6 +438,7 @@ prepare_batch(const TypePayloadCodec& codec, const EntityBatch& batch, BatchPlan
                     || anchorCount == 0 || anchorCount > anchorTokens.size()) {
                     return false;
                 }
+                drop_leaving_children(batch, anchorTokens, anchorCount);
                 anchorIndex = 0;
             }
             if (anchorIndex >= anchorCount || anchorTokens[anchorIndex].slot != record.token.slot

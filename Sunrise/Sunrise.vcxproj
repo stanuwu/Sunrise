@@ -1197,6 +1197,7 @@
     <ClCompile Include="src\middleware\bap\activity_message\activity_start_activity_parser.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_sense_update_parser.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_sense_update_decoder.cpp" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_sense_update_root.cpp" />
     <ClCompile Include="src\server\bap\encrypted\activity_message\receipts\activity_message_receipts.cpp" />
     <ClCompile Include="src\server\bap\encrypted\activity_message\receipts\activity_incident_grants.cpp" />
     <ClCompile Include="src\state\activity\receipts\activity_receipts.cpp" />
@@ -2073,7 +2074,14 @@
     <ClInclude Include="src\middleware\bap\activity_message\ghost_link_sense.h" />
     <ClInclude Include="src\middleware\bap\activity_message\interactable_object_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\mission_auth_patch.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\activity_sense_update_reader.h" />
     <ClInclude Include="src\middleware\bap\activity_message\mission_effect_auth.h" />
+    <ClInclude Include="src\client\content\activity\activity_sdk_spawn_reference.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\squad_attachment_auth.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\volume_toggle_auth.h" />
+    <ClInclude Include="src\server\activity\mission\mission_observation_epoch.h" />
+    <ClInclude Include="src\server\activity\mission\mission_trigger_observation.h" />
+    <ClInclude Include="src\server\activity\squad_attachment_ownership_validation.h" />
     <ClInclude Include="src\middleware\bap\activity_message\music_section_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\roster_presence.h" />
     <ClInclude Include="src\middleware\bap\activity_message\scene_events_auth.h" />
