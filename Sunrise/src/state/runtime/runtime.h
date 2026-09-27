@@ -785,6 +785,27 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
  */
 [[nodiscard]] bool grant_seasonal_experience(std::int32_t amount) noexcept;
 
+/**
+ * Replaces seasonal XP with zero and republishes every value derived from it, atomically.
+ * Artifact ownership, Season pass claims and record flags are left as they are.
+ * @return False when any write fails; nothing is kept then.
+ */
+[[nodiscard]] bool reset_seasonal_experience() noexcept;
+
+/**
+ * XP that moves the published total whole ranks forward, keeping its progress inside the rank.
+ * @param ranks Ranks to advance.
+ * @return XP to grant, stopping at the rank-100 threshold; zero once the pass is complete.
+ */
+[[nodiscard]] std::int32_t seasonal_experience_to_advance(std::uint16_t ranks) noexcept;
+
+/**
+ * Part of an XP amount the Season pass still has room for below its rank-100 threshold.
+ * @param amount XP the caller wants to grant.
+ * @return XP to grant; zero for a non-positive amount or once the pass is complete.
+ */
+[[nodiscard]] std::int32_t seasonal_experience_within_pass(std::int32_t amount) noexcept;
+
 /** @param rewardIndex Native reward-array index. @return True when the row is claimed. */
 [[nodiscard]] bool season_pass_reward_claimed(std::uint16_t rewardIndex) noexcept;
 

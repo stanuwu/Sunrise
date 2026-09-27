@@ -234,10 +234,11 @@ bool publish_artifact_character_banks(CharacterArtifactWrite& write) noexcept {
     }
     strip_artifact_flags_locked(family, rows, count);
     const std::uint16_t used = points_used(mask);
+    // Owned mods keep the points they cost, so XP below them (after a reset) never goes negative.
+    const std::uint16_t earned = (std::max)(artifact_points_earned_for(experience), used);
     if (!upsert_value(family, kArtifactPowerBonusSlot, artifact_power_bonus_for(experience))
         || !upsert_value(family, kArtifactPointsUsedSlot, used)
-        || !upsert_value(
-            family, kArtifactPointsEarnedSlot, artifact_points_earned_for(experience))) {
+        || !upsert_value(family, kArtifactPointsEarnedSlot, earned)) {
         return false;
     }
     CharacterArtifactWrite write{&rows, count, mask, used};
@@ -250,10 +251,10 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
            && unlocks::set_account_progression(kArtifactUnlockProgressionIndex, experience)
            && unlocks::set_account_progression(pass::kProgressionDefinitionIndex,
                                                (std::min)(experience, kMaximumPassExperience))
-           && unlocks::set_account_progression(pass::kHudProgressionDefinitionIndex,
-                                               experience < kMaximumPassExperience
-                                                   ? experience % kExperiencePerRank
-                                                   : experience - kMaximumPassExperience);
+           // The HUD bar repeats past rank 100 only; earlier XP there shows a rank-100 banner.
+           && unlocks::set_account_progression(
+               pass::kHudProgressionDefinitionIndex,
+               experience < kMaximumPassExperience ? 0 : experience - kMaximumPassExperience);
 }
 
 } // namespace
@@ -357,6 +358,36 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
                        && publish_artifact_locked(family, mask, total)
                        && investment::store::write_family5(family) && transaction.commit();
     return saved;
+}
+
+/** Publishes zero XP the way a grant publishes its total, keeping the owned artifact mods. */
+bool reset_seasonal_experience() noexcept {
+    investment::store::Transaction transaction;
+    SaleRows rows{};
+    std::size_t count = 0;
+    Family5State family;
+    if (!transaction.ready() || !sale_rows(rows, count)
+        || !investment::store::read_family5(family)) {
+        return false;
+    }
+    const std::uint32_t mask = artifact_mask(rows, count);
+    return publish_experience_lanes(0) && publish_artifact_locked(family, mask, 0)
+           && investment::store::write_family5(family) && transaction.commit();
+}
+
+/** The pass threshold is the only cap; below it the whole amount fits. */
+std::int32_t seasonal_experience_within_pass(std::int32_t amount) noexcept {
+    // A negative total is invalid State; count from zero instead of below it.
+    const std::int32_t room = kMaximumPassExperience - (std::max)(seasonal_experience(), 0);
+    return amount > 0 && room > 0 ? (std::min)(amount, room) : 0;
+}
+
+/** Whole ranks keep the progress inside the current rank until the pass threshold cuts it. */
+std::int32_t seasonal_experience_to_advance(std::uint16_t ranks) noexcept {
+    // No request needs more than the whole pass, which keeps the product inside the XP type.
+    const std::int64_t wanted = (std::min)(static_cast<std::int64_t>(ranks) * kExperiencePerRank,
+                                           static_cast<std::int64_t>(kMaximumPassExperience));
+    return seasonal_experience_within_pass(static_cast<std::int32_t>(wanted));
 }
 
 /** @return True when this Season pass reward row is already claimed. */

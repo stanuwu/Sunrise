@@ -35,6 +35,26 @@ void unregister_client_investment_slice_consumer() noexcept;
 /** Asks for one more investment refresh slice. Does nothing while no Client is registered. */
 void request_investment_slice() noexcept;
 
+/**
+ * Grants the seasonal XP for whole ranks and queues its HUD notification like any earned XP.
+ * @param ranks Ranks to advance; the grant stops at the Season pass rank-100 threshold.
+ * @return False when the pass is already complete or the grant was refused.
+ */
+[[nodiscard]] bool grant_seasonal_ranks(std::uint16_t ranks) noexcept;
+
+/**
+ * Grants seasonal XP through the same notification path, cut at the rank-100 threshold.
+ * @param amount XP to grant; only the part below the threshold is granted.
+ * @return False for a non-positive amount, a complete pass, or a refused grant.
+ */
+[[nodiscard]] bool grant_seasonal_experience_capped(std::int32_t amount) noexcept;
+
+/**
+ * Returns seasonal XP to zero and resyncs every peer without an XP notification.
+ * @return False when the State reset was refused; nothing changed then.
+ */
+[[nodiscard]] bool reset_seasonal_progression() noexcept;
+
 /** Read-only eligibility state from one exact authenticated ActivityClient link. */
 struct ActivityLinkView final {
     std::size_t matchingLinks{};
