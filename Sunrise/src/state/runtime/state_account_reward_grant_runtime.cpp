@@ -183,12 +183,15 @@ apply_reward_sockets(const item_details::Definition& detail,
     std::size_t kept = 0;
     for (std::size_t index = 0; index < resolved.count; ++index) {
         const reward_resolution::Grant grant = resolved.grants[index];
+        build_data::items::Definition item{};
         item_details::Definition detail{};
-        const bool stackable =
-            grant.socketCount == 0
+        // A perk grants its account flag, never an inventory stack.
+        const bool inventoryStack =
+            grant.socketCount == 0 && build_data::find_item_definition_index(grant.itemIndex, item)
+            && item.bucketId != inventory_buckets::kPerkBucketId
             && build_data::find_configured_item_detail(grant.itemIndex, detail)
             && detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable;
-        auto* const merged = stackable ? kept_stack(resolved, kept, grant.itemIndex) : nullptr;
+        auto* const merged = inventoryStack ? kept_stack(resolved, kept, grant.itemIndex) : nullptr;
         if (merged == nullptr) {
             resolved.grants[kept++] = grant;
             continue;
