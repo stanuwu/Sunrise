@@ -134,6 +134,7 @@ reload_authorization(const state::activity::SessionBinding& binding) noexcept {
     }
     instance.view = std::move(view);
     instance.worldView = std::move(worldView);
+    instance.hostOccupancy = {};
     instance.publicTarget = link.publicTarget;
     instance.playerKey = link.playerKey;
     instance.identity.playerKey = link.playerKey;
@@ -667,6 +668,7 @@ void attach_instance(const host::InstanceSnapshot& hostInstance,
     }
     instance->view = std::move(view);
     instance->worldView = std::move(worldView);
+    instance->hostOccupancy = {};
     instance->publicTarget = link.publicTarget;
     instance->playerKey = link.playerKey;
     instance->occupied = true;
