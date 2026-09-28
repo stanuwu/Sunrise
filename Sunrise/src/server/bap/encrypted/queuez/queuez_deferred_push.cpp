@@ -2,8 +2,12 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
+#include <new>
+#include <span>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/crypto/random_bytes.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/account/account_state.h"
 #include "../../../../state/activity/destination/definition.h"
@@ -52,6 +56,84 @@ selected_character(const state::AccountState& account) noexcept {
     return nullptr;
 }
 
+/** Publishes and commits one world reward resolved through its installed reward definition. */
+[[nodiscard]] bool consume_world_record_reward(const WorldRewardRequest& request,
+                                               Session& session,
+                                               Scratch& scratch,
+                                               std::span<std::byte> response,
+                                               std::size_t& written,
+                                               bool& touchesScratch) noexcept {
+    const auto fail = [&](const char* reason) noexcept {
+        report_reward_refusal("world_publish", request.itemDefinitionIndex, reason);
+        return false;
+    };
+    // A draw is not retained, so it waits for a buffer its whole frame is sure to fit.
+    if (response.size() < scratch.framed.size()) {
+        return false;
+    }
+    const std::unique_ptr<state::PendingRecordRewardGrant> pending(
+        new (std::nothrow) state::PendingRecordRewardGrant);
+    if (!pending) {
+        return fail("reward_allocation");
+    }
+    std::uint64_t seed = 0;
+    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
+        return fail("random_source");
+    }
+    const char* reason = "transaction";
+    state::investment::store::Transaction transaction;
+    if (!transaction.ready()) {
+        return fail(reason);
+    }
+    const auto preparation =
+        state::prepare_item_reward(request.itemDefinitionIndex,
+                                   static_cast<std::uint32_t>(request.quantity),
+                                   seed,
+                                   *pending,
+                                   &reason);
+    if (preparation == state::RewardPreparation::unresolvable) {
+        (void)bap::retire_world_reward(transaction, request, reason);
+        return false;
+    }
+    if (preparation != state::RewardPreparation::prepared) {
+        return fail(reason);
+    }
+    queuez::RecordRewardGrant update{};
+    touchesScratch = true;
+    std::size_t framedSize = 0;
+    const bool staged = queuez::stage_record_reward_grant(session.queuez, *pending, update);
+    const bool encoded =
+        staged
+        && push::append_record_reward_notification(scratch,
+                                                   session.queuez,
+                                                   update,
+                                                   *pending,
+                                                   active_acquisition_presentation_rows(session),
+                                                   session.sessionKey,
+                                                   session.sendNonce,
+                                                   scratch.framed,
+                                                   framedSize)
+        && framedSize != 0;
+    if (!state::commit_record_reward(*pending)) {
+        return fail("inventory_commit");
+    }
+    if (!bap::complete_world_reward(request.id) || !transaction.commit()) {
+        return fail("queue_commit");
+    }
+    // No buffer fixes a failed stage or encode, so the grant commits and the row retires.
+    if (!encoded) {
+        bap::arm_account_resync_everywhere();
+        return fail(!staged ? "inventory_stage" : "inventory_encode");
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    middleware::secure_channel::advance_nonce(session.sendNonce);
+    session.queuez = update.after;
+    bap::arm_account_resync_elsewhere(session);
+    bap::arm_acquisition_presentation_hold(session);
+    return true;
+}
+
 /** Publishes and commits one character-inventory world reward. */
 [[nodiscard]] bool consume_world_item_acquisition(const WorldRewardRequest& request,
                                                   Session& session,
@@ -59,6 +141,10 @@ selected_character(const state::AccountState& account) noexcept {
                                                   std::span<std::byte> response,
                                                   std::size_t& written,
                                                   bool& touchesScratch) noexcept {
+    if (state::item_grant_route(request.itemDefinitionIndex) != state::ItemGrantRoute::quest) {
+        return consume_world_record_reward(
+            request, session, scratch, response, written, touchesScratch);
+    }
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
         return false;
@@ -69,38 +155,33 @@ selected_character(const state::AccountState& account) noexcept {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_acquisition result=fail reason=prepare");
-        bap::settle_world_reward();
         return false;
     }
     touchesScratch = true;
     queuez::ItemAcquisition acquisition{};
-    if (!queuez::stage_item_acquisition(session.queuez,
-                                        pending.accountSoid,
-                                        pending.characterSoid,
-                                        pending.acquiredInstanceSoid,
-                                        pending.updates_account(),
-                                        acquisition)) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=world_acquisition result=fail reason=stage");
-        bap::settle_world_reward();
-        return false;
-    }
+    const bool staged = queuez::stage_item_acquisition(session.queuez,
+                                                       pending.accountSoid,
+                                                       pending.characterSoid,
+                                                       pending.acquiredInstanceSoid,
+                                                       pending.updates_account(),
+                                                       acquisition);
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;
-    if (!push::append_item_acquisition_notification(scratch,
-                                                    acquisition,
-                                                    pending,
-                                                    active_acquisition_presentation_rows(session),
-                                                    session.sessionKey,
-                                                    nextSendNonce,
-                                                    scratch.framed,
-                                                    framedSize)
-        || framedSize == 0 || framedSize > response.size()) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=world_acquisition result=fail reason=encode");
-        bap::settle_world_reward();
+    const bool encoded =
+        staged
+        && push::append_item_acquisition_notification(scratch,
+                                                      acquisition,
+                                                      pending,
+                                                      active_acquisition_presentation_rows(session),
+                                                      session.sessionKey,
+                                                      nextSendNonce,
+                                                      scratch.framed,
+                                                      framedSize)
+        && framedSize != 0;
+    // Only a piggyback slot can be short; the grant waits for a full poll.
+    if (encoded && framedSize > response.size()) {
+        report_reward_refusal(
+            "world_acquisition", request.itemDefinitionIndex, "response_capacity");
         return false;
     }
     if (!state::commit_item_acquisition(pending) || !bap::complete_world_reward(request.id)
@@ -108,7 +189,14 @@ selected_character(const state::AccountState& account) noexcept {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_acquisition result=fail reason=commit");
-        bap::settle_world_reward();
+        return false;
+    }
+    // No buffer fixes a failed stage or encode, so the grant commits and the row retires.
+    if (!encoded) {
+        bap::arm_account_resync_everywhere();
+        report_reward_refusal("world_acquisition",
+                              request.itemDefinitionIndex,
+                              !staged ? "inventory_stage" : "inventory_encode");
         return false;
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
@@ -139,37 +227,31 @@ selected_character(const state::AccountState& account) noexcept {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_profile_acquisition result=fail reason=prepare");
-        bap::settle_world_reward();
         return false;
     }
     touchesScratch = true;
     queuez::ProfileItemAcquisition acquisition{};
-    if (!queuez::stage_profile_item_acquisition(session.queuez,
-                                                pending.accountSoid,
-                                                pending.acquiredInstanceSoid,
-                                                pending.actionSource,
-                                                pending.appended,
-                                                acquisition)) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=world_profile_acquisition result=fail reason=stage");
-        bap::settle_world_reward();
-        return false;
-    }
+    const bool staged = queuez::stage_profile_item_acquisition(session.queuez,
+                                                               pending.accountSoid,
+                                                               pending.acquiredInstanceSoid,
+                                                               pending.actionSource,
+                                                               pending.appended,
+                                                               acquisition);
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;
-    if (!push::append_profile_item_acquisition_notification(scratch,
-                                                            acquisition,
-                                                            pending,
-                                                            session.sessionKey,
-                                                            nextSendNonce,
-                                                            scratch.framed,
-                                                            framedSize)
-        || framedSize == 0 || framedSize > response.size()) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=world_profile_acquisition result=fail reason=encode");
-        bap::settle_world_reward();
+    const bool encoded = staged
+                         && push::append_profile_item_acquisition_notification(scratch,
+                                                                               acquisition,
+                                                                               pending,
+                                                                               session.sessionKey,
+                                                                               nextSendNonce,
+                                                                               scratch.framed,
+                                                                               framedSize)
+                         && framedSize != 0;
+    // Only a piggyback slot can be short; the grant waits for a full poll.
+    if (encoded && framedSize > response.size()) {
+        report_reward_refusal(
+            "world_profile_acquisition", request.itemDefinitionIndex, "response_capacity");
         return false;
     }
     if (!state::commit_profile_item_acquisition(pending) || !bap::complete_world_reward(request.id)
@@ -177,7 +259,14 @@ selected_character(const state::AccountState& account) noexcept {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_profile_acquisition result=fail reason=commit");
-        bap::settle_world_reward();
+        return false;
+    }
+    // No buffer fixes a failed stage or encode, so the grant commits and the row retires.
+    if (!encoded) {
+        bap::arm_account_resync_everywhere();
+        report_reward_refusal("world_profile_acquisition",
+                              request.itemDefinitionIndex,
+                              !staged ? "inventory_stage" : "inventory_encode");
         return false;
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
@@ -695,6 +784,9 @@ bool consume_deferred(Session& session,
         }
         if (published) {
             return true;
+        }
+        if (session.accountResyncArmed) {
+            return false;
         }
     }
     if (consume_seasonal_experience_presentation(

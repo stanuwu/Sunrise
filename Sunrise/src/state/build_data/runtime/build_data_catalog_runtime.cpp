@@ -14,6 +14,7 @@
 #include "../nodes/node_catalog.h"
 #include "../progressions/progression_catalog.h"
 #include "../records/record_catalog.h"
+#include "../rewards/reward_catalog.h"
 #include "../runtime.h"
 #include "../scenarios/scenario_catalog.h"
 #include "../season_pass/season_pass_catalog.h"
@@ -372,6 +373,7 @@ void clear_catalogs() noexcept {
     rollback_ability_publication();
     progressions::clear();
     season_pass::clear();
+    rewards::clear();
     bounties::clear();
     records::clear();
     nodes::clear();

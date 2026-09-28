@@ -141,15 +141,7 @@ struct SeasonPassRewardTransaction {
 
     std::unique_ptr<state::PendingSeasonPassReward> pending{};
 
-    std::variant<std::monostate,
-
-                 queuez::ItemAcquisition,
-
-                 queuez::ProfileItemAcquisition,
-
-                 queuez::RecordRewardGrant>
-
-        update{};
+    queuez::RecordRewardGrant update{};
 };
 
 /** Optional side effect produced while decoding one authenticated service body. */
@@ -474,30 +466,6 @@ void append_queuez_notification(Scratch& scratch,
     std::span<const std::byte, state::kAesKeySize> key,
 
     std::array<std::byte, state::kBapNonceSize>& nonce,
-
-    std::span<std::byte> response,
-
-    std::size_t& written,
-
-    queuez::SessionState& after) noexcept;
-
-/** Publishes one Season package as new residents plus their acquisition descriptors. */
-
-[[nodiscard]] bool append_season_pass_package_notification(
-
-    Scratch& scratch,
-
-    const queuez::SessionState& before,
-
-    const state::PendingDirectItemBundle& mutation,
-
-    std::uint16_t rewardIndex,
-
-    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
-
-    std::span<const std::byte, state::kAesKeySize> key,
-
-    std::span<const std::byte, state::kBapNonceSize> nonce,
 
     std::span<std::byte> response,
 

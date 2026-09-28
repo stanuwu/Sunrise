@@ -17,6 +17,7 @@
 #include "../../vendors/vendor_build.h"
 #include "build.h"
 #include "internal.h"
+#include "package_reward_build.h"
 #include "package_socket_plug_build.h"
 
 namespace sunrise::client::content::items::packages {
@@ -34,7 +35,7 @@ namespace {
            && state::build_data::ability_buckets_ready()
            && state::build_data::socket_entry_buckets_ready()
            && state::build_data::progression_definitions_ready()
-           && state::build_data::season_pass_ready()
+           && state::build_data::season_pass_ready() && reward_definitions_settled()
            && state::build_data::repeatable_bounties_ready()
            && state::build_data::record_definitions_ready()
            && state::build_data::node_definitions_ready()
@@ -126,7 +127,8 @@ bool build() noexcept {
             if (!state::build_data::item_definitions_ready()
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
-                || !state::build_data::season_pass_ready() || !exotic_catalysts_settled()) {
+                || !state::build_data::season_pass_ready() || !reward_definitions_settled()
+                || !exotic_catalysts_settled()) {
                 reason = "unlock_maps";
                 if (!read_unlock_slot_maps(
                         source, storage, std::span<const std::byte>{storage.root})) {
@@ -184,11 +186,18 @@ bool build() noexcept {
                         std::span(storage.progressionSteps).first(storage.progressionStepCount));
                 }
             }
-            if (!state::build_data::season_pass_ready()
-                && build_season_pass(source, storage, std::span<const std::byte>{storage.root})) {
-                (void)state::build_data::publish_season_pass(
-                    std::span(storage.seasonPassRewards).first(storage.seasonPassRewardCount),
-                    std::span(storage.seasonPassPackages).first(storage.seasonPassPackageCount));
+            // Pass rows bind through the reward condition tables, which load before the pools.
+            if (!reward_definitions_settled() || !state::build_data::season_pass_ready()) {
+                (void)storage.rewardBuild.load(
+                    source, storage.scratch, storage.root, storage.slotMaps);
+            }
+            if (!state::build_data::season_pass_ready() && storage.rewardBuild.conditions.loaded()
+                && build_season_pass(source, storage, std::span<const std::byte>{storage.root})
+                && !state::build_data::publish_season_pass(
+                    std::span(storage.seasonPassRewards).first(storage.seasonPassRewardCount))) {
+                core::log::write(core::log::Channel::client,
+                                 core::log::Level::warn,
+                                 "ev=pkg stage=season_pass result=fail reason=publish");
             }
             // Records are read before nodes: a node's lore-book flag and its parent bar come
             // from the records it owns, so the record rows must already be in pass storage.

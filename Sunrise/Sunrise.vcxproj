@@ -99,6 +99,11 @@
     <None Include="vendor\lua\UPSTREAM_README" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\state\build_data\cache\records\cache_reward_records.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_reward_build.cpp" />
+    <ClCompile Include="src\state\rewards\reward_resolver.cpp" />
+    <ClCompile Include="src\state\build_data\rewards\reward_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\rewards\reward_build_data_runtime.cpp" />
     <ClCompile Include="src\state\gameplay\external\entity_object_types.cpp" />
     <ClCompile Include="src\state\investment\investment_account_store.cpp" />
     <ClCompile Include="src\state\investment\investment_database.cpp" />
@@ -642,7 +647,7 @@
     <ClCompile Include="src\state\build_data\cache\records\cache_vendor_records.cpp" />
     <ClCompile Include="src\state\build_data\vendors\vendor_catalog.cpp" />
     <ClCompile Include="src\state\build_data\vendors\artifact_sale_view.cpp" />
-    <ClCompile Include="src\state\build_data\vendors\vendor_expression.cpp" />
+    <ClCompile Include="src\state\unlocks\unlocks_expression.cpp" />
     <ClCompile Include="src\client\content\vendors\package_vendor_build.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_hash_name_records.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_entity_metadata_records.cpp" />
@@ -1255,6 +1260,11 @@
     <ClCompile Remove="vendor\lua\lzio.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\middleware\content\packages\tables\field_reader.h" />
+    <ClInclude Include="src\client\content\items\packages\package_reward_build.h" />
+    <ClInclude Include="src\state\rewards\reward_resolver.h" />
+    <ClInclude Include="src\state\build_data\rewards\reward_catalog.h" />
+    <ClInclude Include="src\state\build_data\rewards\definition.h" />
     <ClInclude Include="resources\resource.h" />
     <ClInclude Include="src\core\logging\log.h" />
     <ClInclude Include="src\core\logging\snapshot\snapshot.h" />
@@ -1512,7 +1522,7 @@
     <ClInclude Include="src\state\build_data\spawn_sets\definition.h" />
     <ClInclude Include="src\state\build_data\vendors\definition.h" />
     <ClInclude Include="src\state\build_data\vendors\vendor_catalog.h" />
-    <ClInclude Include="src\state\build_data\vendors\vendor_expression.h" />
+    <ClInclude Include="src\state\unlocks\unlocks_expression.h" />
     <ClInclude Include="src\client\content\vendors\layout.h" />
     <ClInclude Include="src\client\content\vendors\vendor_build.h" />
     <ClInclude Include="src\state\build_data\scenarios\definition.h" />

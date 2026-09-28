@@ -30,9 +30,10 @@ void clear_slot_map(SlotMap& output) noexcept {
     output.fill(kUnmappedSlot);
 }
 
-/** Clears all four so an unread table cannot leave a prior pass's indexes addressable. */
+/** An unread table must not leave a prior pass's indices addressable. */
 void clear_slot_maps(SlotMaps& maps) noexcept {
     clear_slot_map(maps.accountFlag);
+    clear_slot_map(maps.profileFlag);
     clear_slot_map(maps.characterFlag);
     clear_slot_map(maps.accountValue);
     clear_slot_map(maps.characterValue);
@@ -113,7 +114,7 @@ read_slot_map(std::span<const std::byte> blob, std::size_t descriptor, SlotMap& 
 /**
  * A gate names a slot; its saved bank index is the mapping row that names that slot.
  * @param source Borrowed package source.
- * @param storage Receives four slot maps and retained value-map bytes; may be partial on failure.
+ * @param storage Receives slot maps and retained value-map bytes; may be partial on failure.
  * @param root Investment root bytes naming the flag and value mapping tables.
  * @return True when both account maps read; a character map may remain unmapped.
  */
@@ -131,6 +132,7 @@ bool read_unlock_slot_maps(const reader::Source& source,
     const std::span<const std::byte> flagMap{storage.child};
     const bool flagMapRead =
         read_slot_map(flagMap, tables::kAccountFlagMapDescriptor, maps.accountFlag);
+    (void)read_slot_map(flagMap, tables::kProfileFlagMapDescriptor, maps.profileFlag);
     (void)read_slot_map(flagMap, tables::kCharacterFlagMapDescriptor, maps.characterFlag);
 
     std::uint32_t valueMapTag = 0;

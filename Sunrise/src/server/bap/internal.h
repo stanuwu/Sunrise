@@ -25,6 +25,10 @@
 #include "encrypted/queuez/definition.h"
 #include "runtime.h"
 
+namespace sunrise::state::investment::store {
+class Transaction;
+}
+
 namespace sunrise::server::bap {
 
 /** One session per transport peer slot, so a connection id indexes this array directly. */
@@ -323,6 +327,9 @@ struct ReplicationEpochPublication {
     bool staged{};
 };
 
+/** Logs one refused reward stage with its native index and a specific reason. */
+void report_reward_refusal(const char* stage, std::uint16_t index, const char* reason) noexcept;
+
 /** Which inventory one world reward lands in. */
 enum class WorldRewardKind : std::uint8_t {
     item,
@@ -332,6 +339,7 @@ enum class WorldRewardKind : std::uint8_t {
 /** One reward earned in world, held until a Family-4 peer can publish it. */
 struct WorldRewardRequest {
     std::uint64_t id{};
+    std::uint32_t definitionHash{};
     std::int32_t quantity{};
     std::uint16_t itemDefinitionIndex{};
     WorldRewardKind kind{};
@@ -536,7 +544,7 @@ unique_activity_link_locked(const state::activity::SessionBinding& binding,
 session_scenario_layout(const Session& session,
                         state::build_data::scenarios::Definition& output) noexcept;
 
-/** Commits every queued world reward with no presentation and empties the queue. */
+/** Commits saved world rewards with no presentation until one must wait. */
 void drain_world_rewards() noexcept;
 
 /** Arms every other Family-4 peer after the origin publishes a complete account mutation. */
@@ -555,13 +563,18 @@ void arm_acquisition_presentation_hold(Session& session) noexcept;
 [[nodiscard]] bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,
                                                       std::int32_t quantity) noexcept;
 
-/** Reads the oldest queued world reward without removing it. */
+/** Reads the oldest saved world reward that can still be granted, retiring rows that cannot. */
 [[nodiscard]] bool current_world_reward(WorldRewardRequest& request) noexcept;
 
 /** Removes the world reward returned by current_world_reward. */
 [[nodiscard]] bool complete_world_reward(std::uint64_t id) noexcept;
 
-/** Commits the queued reward with no flyout once its presentation cannot be built. */
+/** Deletes an ungrantable reward on the caller's open savepoint, commits, and logs why. */
+[[nodiscard]] bool retire_world_reward(state::investment::store::Transaction& transaction,
+                                       const WorldRewardRequest& request,
+                                       const char* reason) noexcept;
+
+/** Grants the oldest saved reward with no flyout, retiring rewards that can never be granted. */
 void settle_world_reward() noexcept;
 
 /** Queues one transient XP item update so the native HUD presents a seasonal XP gain. */

@@ -48,8 +48,13 @@ namespace {
            && domains.recordRewards.size() <= kMaximumCount
            && domains.progressionSteps.size() <= kMaximumCount
            && domains.seasonPassRewards.size() <= kMaximumCount
-           && domains.seasonPassPackages.size() <= kMaximumCount
-           && domains.bounties.size() <= kMaximumCount;
+           && domains.bounties.size() <= kMaximumCount
+           && domains.rewardPools.size() <= kMaximumCount
+           && domains.rewardEntries.size() <= kMaximumCount
+           && domains.rewardItems.size() <= kMaximumCount
+           && domains.rewardInstructions.size() <= kMaximumCount
+           && domains.rewardModifiers.size() <= kMaximumCount
+           && domains.rewardSockets.size() <= kMaximumCount;
 }
 
 /** @return True when the requested final-name rule is one of the declared values. */

@@ -529,22 +529,9 @@ bool process(const ServiceRoute& route,
         }
         if (recordRewardGrant != nullptr) {
             auto* transaction = emplace_transaction<RecordRewardGrantTransaction>(outcome);
-            std::array<std::uint64_t, state::kRecordRewardGrantCapacity> residents{};
-            std::size_t residentCount = 0;
-            for (std::size_t index = 0; index < recordRewardGrant->rewardCount; ++index) {
-                const auto& reward = recordRewardGrant->rewards[index];
-                if (reward.kind == state::RecordRewardKind::characterInstance
-                    || reward.appendedProfileResident) {
-                    residents[residentCount++] = reward.instanceSoid;
-                }
-            }
-            const bool staged =
-                transaction != nullptr
-                && queuez::stage_record_reward_grant(queuezState,
-                                                     recordRewardGrant->accountSoid,
-                                                     recordRewardGrant->characterSoid,
-                                                     std::span(residents).first(residentCount),
-                                                     transaction->update);
+            const bool staged = transaction != nullptr
+                                && queuez::stage_record_reward_grant(
+                                    queuezState, *recordRewardGrant, transaction->update);
             if (!staged) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
@@ -577,43 +564,9 @@ bool process(const ServiceRoute& route,
                                  "ev=ws2400 stage=reward_preflight result=fail");
                 return refuse_web_action(message, output, written);
             }
-            bool staged = false;
-            std::int32_t stagedVersion = 0;
-            if (const auto* itemGrant =
-                    std::get_if<state::PendingItemAcquisition>(&seasonPassReward->grant)) {
-                auto& update = transaction->update.emplace<queuez::ItemAcquisition>();
-                staged = queuez::stage_item_acquisition(queuezState,
-                                                        itemGrant->accountSoid,
-                                                        itemGrant->characterSoid,
-                                                        itemGrant->acquiredInstanceSoid,
-                                                        true,
-                                                        update);
-                stagedVersion = update.after.family4Version;
-            } else if (const auto* profileGrant = std::get_if<state::PendingProfileItemAcquisition>(
-                           &seasonPassReward->grant)) {
-                auto& update = transaction->update.emplace<queuez::ProfileItemAcquisition>();
-                staged = queuez::stage_profile_item_acquisition(queuezState,
-                                                                profileGrant->accountSoid,
-                                                                profileGrant->acquiredInstanceSoid,
-                                                                profileGrant->actionSource,
-                                                                profileGrant->appended,
-                                                                update);
-                stagedVersion = update.after.family4Version;
-            } else if (const auto* bundle =
-                           std::get_if<state::PendingDirectItemBundle>(&seasonPassReward->grant)) {
-                staged = queuez::stage_direct_item_bundle(queuezState,
-                                                          bundle->accountSoid,
-                                                          bundle->characterSoid,
-                                                          bundle->firstInstanceSoid,
-                                                          bundle->itemCount,
-                                                          stagedVersion);
-            } else if (const auto* resources =
-                           std::get_if<state::PendingRecordRewardGrant>(&seasonPassReward->grant)) {
-                auto& update = transaction->update.emplace<queuez::RecordRewardGrant>();
-                staged = queuez::stage_record_reward_grant(
-                    queuezState, resources->accountSoid, resources->characterSoid, {}, update);
-                stagedVersion = update.after.family4Version;
-            }
+            const bool staged = queuez::stage_record_reward_grant(
+                queuezState, seasonPassReward->grant, transaction->update);
+            const auto stagedVersion = transaction->update.after.family4Version;
             if (!staged) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
