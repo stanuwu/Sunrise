@@ -56,6 +56,23 @@ bool replace(std::span<const Definition> definitions, std::span<const Step> step
     return replaced;
 }
 
+/**
+ * Reads one definition under the catalog lock.
+ * @param definitionIndex Native progression definition index.
+ * @param definition Receives the row, or an empty row when absent.
+ * @return False when the catalog does not hold the index.
+ */
+bool find(std::uint16_t definitionIndex, Definition& definition) noexcept {
+    definition = {};
+    const std::shared_lock guard(g_lock);
+    const auto rows = g_definitions.rows();
+    if (definitionIndex >= rows.size()) {
+        return false;
+    }
+    definition = rows[definitionIndex];
+    return true;
+}
+
 /** Copies the rank steps one progression declares, in rank order. */
 bool steps(std::uint16_t definitionIndex, std::span<Step> output, std::size_t& count) noexcept {
     count = 0;

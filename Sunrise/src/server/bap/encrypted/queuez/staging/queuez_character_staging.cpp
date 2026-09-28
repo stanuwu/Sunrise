@@ -7,6 +7,7 @@
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/datagen/definitions.h"
+#include "../../../../../state/runtime/runtime.h"
 #include "../queuez_state_validation.h"
 
 namespace sunrise::server::bap::encrypted::queuez {
@@ -472,55 +473,30 @@ bool stage_item_acquisition(const SessionState& before,
     return staged;
 }
 
-/** Checks that a fixed bundle can append all residents in one Family-4 increment. */
-bool stage_direct_item_bundle(const SessionState& before,
-                              std::uint64_t accountSoid,
-                              std::uint64_t characterSoid,
-                              std::uint64_t firstInstanceSoid,
-                              std::size_t itemCount,
-                              std::int32_t& family4Version) noexcept {
-    family4Version = 0;
-    std::uint32_t accountDefinitionId = 0;
-    std::uint32_t characterDefinitionId = 0;
-    std::uint32_t itemDefinitionId = 0;
-    if (!valid(before) || !before.family4Active || accountSoid == 0 || characterSoid == 0
-        || firstInstanceSoid == 0 || itemCount == 0 || accountSoid != before.family4RootSoid
-        || before.family4ResidentCount == 0
-        || itemCount > before.family4Residents.size() - before.family4ResidentCount
-        || itemCount - 1U > (std::numeric_limits<std::uint64_t>::max)() - firstInstanceSoid
-        || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
-        || !middleware::datagen::object_id(
-            kAccountFamilyType, middleware::datagen::kAccountSlot, accountDefinitionId)
-        || !middleware::datagen::object_id(
-            kAccountFamilyType, middleware::datagen::kCharacterSlot, characterDefinitionId)
-        || !middleware::datagen::object_id(
-            kAccountFamilyType, middleware::datagen::kItemInstanceSlot, itemDefinitionId)) {
+/** Stages one atomic record-reward manifest update. */
+bool stage_record_reward_grant(const SessionState& before,
+                               const state::PendingRecordRewardGrant& pending,
+                               RecordRewardGrant& grant) noexcept {
+    grant = {};
+    if (!pending.prepared || pending.rewardCount > pending.rewards.size()) {
         return false;
     }
-
-    std::size_t accountMatches = 0;
-    std::size_t characterMatches = 0;
-    for (std::size_t residentIndex = 0; residentIndex < before.family4ResidentCount;
-         ++residentIndex) {
-        const ResidentObject& resident = before.family4Residents[residentIndex];
-        accountMatches += static_cast<std::size_t>(resident.objectSoid == accountSoid
-                                                   && resident.definitionId == accountDefinitionId);
-        characterMatches += static_cast<std::size_t>(
-            resident.objectSoid == characterSoid && resident.definitionId == characterDefinitionId);
-        for (std::size_t itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
-            if (resident.objectSoid == firstInstanceSoid + itemIndex) {
-                return false;
-            }
+    std::array<std::uint64_t, state::kRecordRewardGrantCapacity> residents{};
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < pending.rewardCount; ++i) {
+        const auto& reward = pending.rewards[i];
+        if (reward.kind == state::RecordRewardKind::characterInstance
+            || reward.appendedProfileResident) {
+            residents[count++] = reward.instanceSoid;
         }
     }
-    if (accountMatches != 1 || characterMatches != 1) {
-        return false;
-    }
-    family4Version = before.family4Version + 1;
-    return true;
+    return stage_record_reward_grant(before,
+                                     pending.accountSoid,
+                                     pending.characterSoid,
+                                     std::span(residents).first(count),
+                                     grant);
 }
 
-/** Stages one atomic record-reward manifest update. */
 bool stage_record_reward_grant(const SessionState& before,
                                std::uint64_t accountSoid,
                                std::uint64_t characterSoid,

@@ -166,13 +166,6 @@ finalize_profile_item_acquisition(const AccountState& account,
 [[nodiscard]] bool materialize_item_acquisition(const AccountState& current,
                                                 const PendingItemAcquisition& mutation,
                                                 AccountState& after) noexcept;
-/**
- * Rebuilds one package from installed policy and rejects any altered after-image.
- * @return False when the account moved or the rebuilt character differs from the mutation.
- */
-[[nodiscard]] bool materialize_direct_item_bundle(const AccountState& current,
-                                                  const PendingDirectItemBundle& mutation,
-                                                  AccountState& after) noexcept;
 [[nodiscard]] bool native_equipment_slot(const account::inventory::Item& item,
                                          std::uint8_t& slot) noexcept;
 [[nodiscard]] bool semantic_equipment_slot(std::uint8_t nativeSlot,

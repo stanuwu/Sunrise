@@ -119,12 +119,12 @@ bool open(std::string_view path,
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 2 adds account preferences and per-item seen state.
-        constexpr int kSchemaVersion = 2;
+        // Version 3 adds character-owned objective counters.
+        constexpr int kSchemaVersion = 3;
         constexpr int kApplicationId = 1397902921;
         int application = 0;
         Statement query("PRAGMA application_id");
-        ready = (version == 1 || version == kSchemaVersion) && query.step() == SQLITE_ROW
+        ready = (version >= 1 && version <= kSchemaVersion) && query.step() == SQLITE_ROW
                 && query.column(0, application) && application == kApplicationId;
     }
     if (ready && version == 1) {
@@ -137,6 +137,21 @@ bool open(std::string_view path,
                 "IN(0,1));")
             && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
             && execute("PRAGMA user_version=2") && transaction.commit();
+        if (ready) {
+            version = 2;
+        }
+    }
+    if (ready && version == 2) {
+        Transaction transaction;
+        // Account writes rebuild character rows before the outer transaction ends.
+        ready = transaction.ready()
+                && execute("CREATE TABLE character_objective_values ("
+                           "character_soid INTEGER NOT NULL REFERENCES characters(soid) "
+                           "DEFERRABLE INITIALLY DEFERRED,"
+                           "slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 32767),"
+                           "value INTEGER NOT NULL CHECK (value BETWEEN 0 AND 2147483647),"
+                           "PRIMARY KEY (character_soid,slot)) STRICT;")
+                && execute("PRAGMA user_version=3") && transaction.commit();
     }
     if (!ready) {
         shutdown();

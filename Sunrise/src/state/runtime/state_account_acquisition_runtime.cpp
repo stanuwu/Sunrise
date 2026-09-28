@@ -261,100 +261,6 @@ bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
         account, account, grantedDefinition.definitionHash, false, {.direct = true}, mutation);
 }
 
-/** Prepares a fixed Season wrapper expansion without exposing a partial package. */
-bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
-                                std::span<const std::uint16_t> itemDefinitionIndices,
-                                PendingDirectItemBundle& mutation) noexcept {
-    mutation = {};
-    build_data::season_pass::Package package{};
-    if (!build_data::find_season_pass_package(sourceDefinitionHash, package)
-        || itemDefinitionIndices.size() != package.itemCount) {
-        return false;
-    }
-
-    std::array<std::uint32_t, build_data::season_pass::kPackageItemCapacity> hashes{};
-    for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
-        const std::uint16_t definitionIndex = itemDefinitionIndices[index];
-        build_data::items::Definition definition{};
-        item_details::Definition detail{};
-        inventory_buckets::Descriptor bucket{};
-        if (!build_data::find_item_definition_index(definitionIndex, definition)
-            || definition.definitionHash != package.items[index]
-            || !build_data::find_configured_item_detail(definitionIndex, detail)
-            || detail.definitionIndex != definition.definitionIndex
-            || detail.definitionHash != definition.definitionHash
-            || detail.bucketId != definition.bucketId
-            || detail.instancedDefinitionState != item_details::InstancedDefinitionState::instanced
-            || !detail.equipmentSlot.has_value()
-            || !build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)
-            || bucket.arraySelector != inventory_buckets::ArraySelector::character) {
-            return false;
-        }
-        hashes[index] = definition.definitionHash;
-    }
-
-    const AccountState account = account_snapshot();
-    const std::size_t characterIndex = selected_character_index(account);
-    if (!account::valid(account) || characterIndex >= account.characterCount) {
-        return false;
-    }
-    const CharacterState& before = account.characters[characterIndex];
-    if (before.nextInventorySerial
-            > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())
-        || itemDefinitionIndices.size() > before.inventory.values.size() - before.inventory.count
-        || itemDefinitionIndices.size()
-               > static_cast<std::size_t>((std::numeric_limits<std::int32_t>::max)())
-                     - before.nextInventorySerial) {
-        return false;
-    }
-
-    std::uint64_t firstSoid = 0;
-    if (!next_item_instance_soid(account, firstSoid)
-        || itemDefinitionIndices.size() - 1U
-               > (std::numeric_limits<std::uint64_t>::max)() - firstSoid) {
-        return false;
-    }
-
-    CharacterState after = before;
-    const std::int32_t level = acquisition_level(before);
-    for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
-        authored_inventory::Item granted{};
-        granted.instanceSoid = firstSoid + index;
-        granted.definitionHash = hashes[index];
-        granted.level = level;
-        granted.quantity = 1;
-        granted.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
-        after.inventory.values[after.inventory.count++] = granted;
-    }
-
-    AccountState candidate = account;
-    candidate.characters[characterIndex] = after;
-    family4_loadout::ResolvedLoadout resolved{};
-    if (!account::valid(candidate)
-        || !family4_loadout::resolve(candidate, characterIndex, resolved)) {
-        return false;
-    }
-    for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
-        std::uint16_t row = 0;
-        std::uint8_t slot = 0;
-        if (!find_unequipped_row(resolved, firstSoid + index, row, slot)) {
-            return false;
-        }
-    }
-
-    mutation.beforeCharacter = before;
-    mutation.afterCharacter = after;
-    mutation.accountSoid = account.primarySoid;
-    mutation.characterSoid = before.soid;
-    mutation.firstInstanceSoid = firstSoid;
-    mutation.sourceDefinitionHash = sourceDefinitionHash;
-    mutation.characterIndex = characterIndex;
-    mutation.expectedInventoryCount = before.inventory.count;
-    mutation.itemCount = itemDefinitionIndices.size();
-    mutation.prepared = true;
-    return true;
-}
-
 /**
  * Takes the selected character's next inventory mutation serial under the State lock.
  * @param mutationSerial Receives the reserved serial; zero when nothing was reserved.
@@ -475,80 +381,6 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
            && row == mutation.inventoryRow && slot == mutation.equipmentSlot;
 }
 
-/** Rebuilds one package from installed policy and rejects any altered after-image. */
-[[nodiscard]] bool materialize_direct_item_bundle(const AccountState& current,
-                                                  const PendingDirectItemBundle& mutation,
-                                                  AccountState& after) noexcept {
-    build_data::season_pass::Package package{};
-    std::uint64_t firstSoid = 0;
-    if (!mutation.prepared
-        || !build_data::find_season_pass_package(mutation.sourceDefinitionHash, package)
-        || mutation.itemCount != package.itemCount || mutation.accountSoid == 0
-        || mutation.characterSoid == 0 || mutation.firstInstanceSoid == 0
-        || mutation.characterIndex >= current.characterCount
-        || mutation.expectedInventoryCount >= authored_inventory::kCharacterItemCapacity
-        || current.primarySoid != mutation.accountSoid
-        || !same_character(current.characters[mutation.characterIndex], mutation.beforeCharacter)
-        || !current.characters[mutation.characterIndex].selected
-        || current.characters[mutation.characterIndex].soid != mutation.characterSoid
-        || mutation.beforeCharacter.inventory.count != mutation.expectedInventoryCount
-        || mutation.itemCount
-               > mutation.beforeCharacter.inventory.values.size() - mutation.expectedInventoryCount
-        || mutation.beforeCharacter.nextInventorySerial
-               > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())
-        || mutation.itemCount > static_cast<std::size_t>((std::numeric_limits<std::int32_t>::max)())
-                                    - mutation.beforeCharacter.nextInventorySerial
-        || !next_item_instance_soid(current, firstSoid) || firstSoid != mutation.firstInstanceSoid
-        || mutation.itemCount - 1U > (std::numeric_limits<std::uint64_t>::max)() - firstSoid) {
-        return false;
-    }
-
-    CharacterState canonical = mutation.beforeCharacter;
-    const std::int32_t level = acquisition_level(canonical);
-    for (std::size_t index = 0; index < mutation.itemCount; ++index) {
-        build_data::items::Definition definition{};
-        item_details::Definition detail{};
-        inventory_buckets::Descriptor bucket{};
-        if (!build_data::find_item_definition_hash(package.items[index], definition)
-            || !build_data::find_configured_item_detail(definition.definitionIndex, detail)
-            || detail.definitionHash != definition.definitionHash
-            || detail.definitionIndex != definition.definitionIndex
-            || detail.bucketId != definition.bucketId
-            || detail.instancedDefinitionState != item_details::InstancedDefinitionState::instanced
-            || !detail.equipmentSlot.has_value()
-            || !build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)
-            || bucket.arraySelector != inventory_buckets::ArraySelector::character) {
-            return false;
-        }
-        authored_inventory::Item granted{};
-        granted.instanceSoid = firstSoid + index;
-        granted.definitionHash = package.items[index];
-        granted.level = level;
-        granted.quantity = 1;
-        granted.mutationSerial = static_cast<std::int32_t>(canonical.nextInventorySerial++);
-        canonical.inventory.values[canonical.inventory.count++] = granted;
-    }
-    if (!same_character(canonical, mutation.afterCharacter)) {
-        return false;
-    }
-
-    after = current;
-    after.characters[mutation.characterIndex] = canonical;
-    family4_loadout::ResolvedLoadout resolved{};
-    if (!account::valid(after)
-        || !family4_loadout::resolve(after, mutation.characterIndex, resolved)) {
-        return false;
-    }
-    for (std::size_t index = 0; index < mutation.itemCount; ++index) {
-        std::uint16_t row = 0;
-        std::uint8_t slot = 0;
-        if (!find_unequipped_row(resolved, firstSoid + index, row, slot)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 } // namespace runtime::detail
 
 /**
@@ -577,13 +409,6 @@ bool preview_item_acquisition(const PendingItemAcquisition& mutation,
         afterUnlocks.characterObjectValues[quest.row] = value;
     }
     return true;
-}
-
-/** Produces the full account after-image while a prepared package remains current. */
-bool preview_direct_item_bundle(const PendingDirectItemBundle& mutation,
-                                AccountState& after) noexcept {
-    after = {};
-    return materialize_direct_item_bundle(account_snapshot(), mutation, after);
 }
 
 /**

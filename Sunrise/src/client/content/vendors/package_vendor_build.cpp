@@ -20,9 +20,18 @@ namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
 namespace domain = state::build_data::vendors;
 
+/** One array a definition or a sale row declares, reduced to what the catalog stores. */
+struct ArrayView {
+    std::uint32_t base{};
+    std::uint32_t classId{};
+    std::uint16_t count{};
+};
+
 /** Every extracted row, kept off the caller stack. */
 struct Storage {
     std::vector<std::byte> blob{};
+    std::vector<std::byte> factionBlob{};
+    ArrayView factionRows{};
     std::array<domain::IndexEntry, domain::kIndexCapacity> index{};
     std::array<domain::Definition, domain::kDefinitionCapacity> definitions{};
     std::array<domain::SaleRow, domain::kSaleRowCapacity> saleRows{};
@@ -35,13 +44,6 @@ struct Storage {
     std::size_t conditionalRows{};
     /** Sale rows whose cost array did not read, kept but never charged. */
     std::size_t unreadableRows{};
-};
-
-/** One array a definition or a sale row declares, reduced to what the catalog stores. */
-struct ArrayView {
-    std::uint32_t base{};
-    std::uint32_t classId{};
-    std::uint16_t count{};
 };
 
 /** @param blob Source bytes. @param offset Field offset. @param value Receives the field. */
@@ -90,6 +92,17 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
               array.elementClass,
               static_cast<std::uint16_t>(array.count)};
     return true;
+}
+
+/** Reads the native faction rows used by vendor definition +18. */
+[[nodiscard]] bool
+read_factions(const reader::Source& source, reader::Scratch& scratch, Storage& storage) noexcept {
+    return reader::read_tag(source, scratch, kFactionTableTag, storage.factionBlob)
+           && read_array(std::span<const std::byte>{storage.factionBlob},
+                         kFactionArrayDescriptor,
+                         kFactionRowStride,
+                         storage.factionRows)
+           && storage.factionRows.count != 0 && storage.factionRows.classId == kFactionRowClass;
 }
 
 /**
@@ -281,6 +294,26 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
     definition.thirdRowBase = third.base;
     definition.thirdRowClass = third.classId;
     definition.thirdCount = third.count;
+    if (!read(blob, kVendorFactionIndexOffset, definition.factionIndexRaw)) {
+        return false;
+    }
+    if (definition.factionIndexRaw < storage.factionRows.count) {
+        const std::size_t at =
+            storage.factionRows.base
+            + static_cast<std::size_t>(definition.factionIndexRaw) * kFactionRowStride;
+        std::uint32_t progressionIndex = 0;
+        if (!read(std::span<const std::byte>{storage.factionBlob},
+                  at + kFactionHashOffset,
+                  definition.factionHash)
+            || !read(std::span<const std::byte>{storage.factionBlob},
+                     at + kFactionProgressionIndexOffset,
+                     progressionIndex)
+            || definition.factionHash == 0
+            || progressionIndex > (std::numeric_limits<std::uint16_t>::max)()) {
+            return false;
+        }
+        definition.factionProgressionIndex = static_cast<std::uint16_t>(progressionIndex);
+    }
     definition.saleRowOffset = static_cast<std::uint32_t>(storage.saleRowCount);
     definition.installedRowOffset = static_cast<std::uint32_t>(storage.installedRowCount);
     // A skipped definition must leave both banks exactly as it found them; an orphan sale row
@@ -338,6 +371,13 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
     }
     static Storage storage{};
     storage = {};
+    if (!read_factions(source, scratch, storage)) {
+        // A missing faction table removes reputation links, not ordinary vendor sales.
+        storage.factionRows = {};
+        core::log::write(core::log::Channel::state,
+                         core::log::Level::warn,
+                         "ev=build_data stage=vendors result=factions_unavailable");
+    }
     if (!read_index(source, scratch, storage)) {
         report(storage, 0, "index");
         return false;

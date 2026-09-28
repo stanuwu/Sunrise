@@ -54,13 +54,16 @@ bool exotic_catalysts_settled() noexcept {
  * @param table Located item index array within storage.child.
  * @param rowCount Starts at zero; receives the rows retained even if publication fails.
  * @param reason Receives the last stage reached or its failure reason.
- * @return True when this pass's required item domains are ready; failure may retain prior results.
+ * @return True when required non-reward item domains are ready. Failure may retain prior results.
  */
 bool build_item_rows(const reader::Source& source,
                      Storage& storage,
                      const tables::Array& table,
                      std::size_t& rowCount,
                      const char*& reason) noexcept {
+    const bool needRewards = !reward_definitions_settled();
+    const bool rewardStorageReady =
+        needRewards && storage.rewardBuild.begin_items(static_cast<std::size_t>(table.count));
     const bool needDefinitions = !state::build_data::item_definitions_ready();
     const bool needDetails = !state::build_data::configured_item_details_ready();
     const bool needSocketPlugs = !state::build_data::socket_plug_rules_ready();
@@ -71,7 +74,7 @@ bool build_item_rows(const reader::Source& source,
     const bool needDetailRows = needDetails || needSocketRows;
     // Bucket equipment slots are derived from this same complete item walk, so a partial retry
     // must still revisit the table even when definitions and detail domains already published.
-    const bool needRows = needDefinitions || needDetailRows || needBuckets;
+    const bool needRows = needDefinitions || needDetailRows || needBuckets || rewardStorageReady;
     bool published = !needRows;
     if (retainDetails && storage.details.size() != kDetailCapacity) {
         storage.details.assign(kDetailCapacity, build_details::Definition{});
@@ -111,6 +114,9 @@ bool build_item_rows(const reader::Source& source,
             || !tables::items::read_definition(std::span<const std::byte>{storage.definition},
                                                item)) {
             continue;
+        }
+        if (rewardStorageReady && itemClass == tables::kItemDefinitionClass) {
+            storage.rewardBuild.item(item.definitionIndex, item.definitionHash, storage.definition);
         }
         const std::uint32_t plugCategoryHash =
             corrected_plug_category(item.definitionHash, item.plugCategoryHash);
@@ -160,6 +166,9 @@ bool build_item_rows(const reader::Source& source,
             append_initial_plugs(item, table.count, storage.detailRequests);
         }
     }
+    // A reward refusal is reported by RewardBuild and does not block the other item domains.
+    const bool rewardsPublished =
+        !needRewards || (rewardStorageReady && storage.rewardBuild.publish());
     bool requestsFit = true;
     if (needRows) {
         // Every walked entry either published a row or was skipped, so the count of one
@@ -300,6 +309,10 @@ bool build_item_rows(const reader::Source& source,
         if (built) {
             report_ability_count(abilityCount);
         }
+    }
+    // Named last; later stages overwrite the reason as they start.
+    if (published && !rewardsPublished) {
+        reason = "rewards";
     }
     return published && state::build_data::item_definitions_ready()
            && state::build_data::configured_item_details_ready()
