@@ -101,10 +101,6 @@ constexpr std::uint8_t kPlayerOwnedIndexWidth = 1;
 constexpr std::uint8_t kPlayerSequenceWidth = 20;
 /** Value the decoder requires of the member's own player index. */
 constexpr std::uint64_t kPlayerOwnedIndexZero = 0;
-/** The profile group leads with one 32-bit value. */
-constexpr std::uint8_t kPlayerProfileValueWidth = 32;
-/** The player kind that follows it. */
-constexpr std::uint8_t kPlayerKindWidth = 3;
 /** Bias the player kind rides on the wire. The decoder subtracts it. */
 constexpr std::uint32_t kPlayerKindBias = 1;
 /** Largest player kind the message codec accepts. */
@@ -215,6 +211,63 @@ write_peer_delta(bits::Writer& writer, std::size_t index, const MembershipMember
            && writer.write(kEntryFieldAbsent, kFlagWidth);
 }
 
+// Widths the profile group declares on the wire: its leading 32-bit value, the 3-bit player
+// kind, one UTF-16 name unit, and sub-block A's remaining fields. The native record names none
+// of those last three, so they are numbered here by the order the codec reads them.
+constexpr std::uint8_t kProfileScalarWidth = 32;
+constexpr std::uint8_t kProfileSmallWidth = 3;
+constexpr std::uint8_t kProfileNameUnitWidth = 16;
+constexpr std::uint8_t kProfileSubA23Width = 6;
+constexpr std::uint8_t kProfileSubA4FirstWidth = 2;
+constexpr std::uint8_t kProfileSubA4SecondWidth = 6;
+
+/**
+ * Writes one name payload: its code units in the clear, then the terminator.
+ * The wire carries plain units; only the native record's own copy is obfuscated on the way
+ * in, and restored the same way coming back out.
+ */
+[[nodiscard]] bool write_profile_name(bits::Writer& writer,
+                                      const NativePlayerProfile& profile) noexcept {
+    for (std::size_t unit = 0; unit < profile.nameLength; ++unit) {
+        if (!writer.write(static_cast<std::uint64_t>(profile.name[unit]), kProfileNameUnitWidth)) {
+            return false;
+        }
+    }
+    // The native decoder consumes a terminator unless all 64 code units are occupied.
+    return profile.nameLength == profile.name.size() || writer.write(0, kProfileNameUnitWidth);
+}
+
+/**
+ * Writes the complete profile block of one player row -- every field the consumer copies.
+ * `complete_native_player_profile` gates the call: every optional B field, the name, the
+ * identity and the tail must already be present. Sub-block A follows B unconditionally, its
+ * presence flags forced true and its fields zero except the name, which duplicates B's.
+ */
+[[nodiscard]] bool write_player_profile(bits::Writer& writer,
+                                        const NativePlayerProfile& profile,
+                                        std::uint32_t value,
+                                        std::uint8_t kind) noexcept {
+    if (!complete_native_player_profile(profile)) {
+        return false;
+    }
+    if (!writer.write(value, kProfileScalarWidth)
+        || !writer.write(kind + kPlayerKindBias, kProfileSmallWidth)) {
+        return false;
+    }
+    if (!write_native_player_profile(writer, profile)) {
+        return false;
+    }
+    // Sub-block A's own name slot must byte-match the one just written for B.
+    if (!writer.write(1U, kFlagWidth) || !write_profile_name(writer, profile)
+        || !writer.write(1U, kFlagWidth) || !writer.write(kProfileSubAWire, kProfileSubA23Width)
+        || !writer.write(1U, kFlagWidth) || !writer.write(kProfileSubAWire, kProfileSubA23Width)
+        || !writer.write(1U, kFlagWidth) || !writer.write(kProfileSubAWire, kProfileSubA4FirstWidth)
+        || !writer.write(kProfileSubAWire, kProfileSubA4SecondWidth)) {
+        return false;
+    }
+    return write_native_player_tail(writer, profile);
+}
+
 /**
  * Writes one player-delta entry carrying an identity and, when the row has one, a profile group.
  * @param writer Open writer.
@@ -235,15 +288,11 @@ write_peer_delta(bits::Writer& writer, std::size_t index, const MembershipMember
     if (!player.hasProfile) {
         return true;
     }
-    PlayerBlockSoids soids{};
-    soids.present = true;
-    soids.accountSoid = player.accountSoid;
-    soids.characterSoid = player.characterSoid;
-    // The delta and the tail are not gated by the profile bit; the decoder reads all three.
-    return writer.write(player.profileValue, kPlayerProfileValueWidth)
-           && writer.write(player.profileKind + kPlayerKindBias, kPlayerKindWidth)
-           && write_player_block_soids(writer, soids) && write_player_block_delta_absent(writer)
-           && write_player_tail_cleared(writer);
+    NativePlayerProfile profile = player.nativeProfile;
+    profile.soids.present = true;
+    profile.soids.accountSoid = player.accountSoid;
+    profile.soids.characterSoid = player.characterSoid;
+    return write_player_profile(writer, profile, player.profileValue, player.profileKind);
 }
 
 } // namespace
@@ -355,7 +404,8 @@ bool write_membership_update(bits::Writer& writer, const MembershipUpdate& body)
     }
     for (const MembershipPlayer& player : body.players) {
         if (player.slot >= kPlayerCapacity || player.memberIndex >= kMemberCapacity
-            || player.profileKind > kPlayerKindMaximum) {
+            || player.profileKind > kPlayerKindMaximum
+            || (player.hasProfile && !valid_native_player_profile(player.nativeProfile))) {
             return false;
         }
     }

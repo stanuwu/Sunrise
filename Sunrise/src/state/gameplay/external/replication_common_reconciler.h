@@ -99,8 +99,8 @@ private:
     std::uint64_t ownerGeneration_{};
     std::uint8_t initialGeneration_{};
     std::uint8_t requestedGeneration_{};
-    std::uint8_t previousHostGeneration_{};
-    bool hasPreviousHostGeneration_{};
+    /** Prior host-authored wire epochs remain valid delayed common roots, never entity grants. */
+    std::uint8_t priorHostGenerationCount_{};
     std::uint64_t allocationDomain_{}, firstEntityEpochOrdinal_{};
     bool entityEpochConfirmed_{};
     Phase phase_{Phase::closed};

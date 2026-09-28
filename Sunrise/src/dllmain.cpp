@@ -5,6 +5,7 @@
 #include "client/hooks/egress/runtime.h"
 #include "client/hooks/network/investment/internal.h"
 #include "core/runtime/core_runtime.h"
+#include "core/settings/role.h"
 #include "steam/runtime/internal.h"
 #include "steam/runtime/runtime.h"
 
@@ -16,17 +17,24 @@ HMODULE g_module{};
 
 /** @return True when the egress guard and Core initialize from this DLL module. */
 extern "C" __declspec(dllexport) bool SunriseInitialize() noexcept {
-    if (!sunrise::client::hooks::egress::install() || !sunrise::core::initialize(g_module)) {
+    const auto role = sunrise::core::settings::role();
+    if (role == sunrise::core::settings::Role::invalid
+        || (sunrise::core::settings::activates_client_hooks(role)
+            && !sunrise::client::hooks::egress::install())
+        || !sunrise::core::initialize(g_module)) {
         return false;
     }
     // This export is one of two entry points; the guard reports once, whichever ran first.
-    sunrise::client::hooks::egress::report_installation();
+    if (sunrise::core::settings::activates_client_hooks(role)) {
+        sunrise::client::hooks::egress::report_installation();
+    }
     return true;
 }
 
 /** @return True when the guard is in place and Client hooks activate. */
 extern "C" __declspec(dllexport) bool SunriseActivateClient() noexcept {
-    return sunrise::client::hooks::egress::is_installed()
+    return sunrise::core::settings::activates_client_hooks(sunrise::core::settings::role())
+           && sunrise::client::hooks::egress::is_installed()
            && sunrise::steam::runtime::activate_main_once();
 }
 

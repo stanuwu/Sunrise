@@ -19,11 +19,11 @@ constexpr std::uint64_t kAmbassadorAssigned = 2;
 /** Member-slot fields are 6 bits at bias 1. */
 constexpr std::uint8_t kSlotBitWidth = 6;
 /**
- * Slot named by a record with no advertisement: bias 1, so wire 0 stores the no-member slot -1.
- * It must never store the client's own slot 0. A record naming slot 0 makes the client claim the
- * region, and the next differing slot then revokes it for good.
+ * Slot an unadvertised record names: reserved, so it can never be the recipient's own. The
+ * wire's actual no-member value would instead revoke the recipient's claim on whatever region
+ * it is standing in and force a re-plan, so an unadvertised record avoids it.
  */
-constexpr std::uint64_t kNoAmbassadorSlot = 0;
+constexpr std::uint8_t kReservedAmbassadorSlot = 1;
 /** Region publicity is 2 bits at bias 1, so wire 1 is private and wire 2 is public. */
 constexpr std::uint8_t kPublicBitWidth = 2;
 constexpr std::uint64_t kRegionPrivate = 1;
@@ -54,12 +54,20 @@ constexpr std::uint64_t kDescriptorCount = 128;
         : selfHostedHere
             ? static_cast<std::uint32_t>(snapshot.selfHostedRegion)
             : static_cast<std::uint32_t>(bubble) * static_cast<std::uint32_t>(kRegionStateCount);
+    // The reserved slot can never be the recipient's own. Asserted rather than assumed: a snapshot
+    // that somehow put the local member there falls back to naming slot 0, which is still not the
+    // recipient.
+    const std::uint64_t unadvertisedSlot =
+        (snapshot.localSlot == kReservedAmbassadorSlot ? std::uint64_t{0}
+                                                       : std::uint64_t{kReservedAmbassadorSlot})
+        + kSignedFieldBias;
     // An advertised record names the admitted ambassador. A self-hosted body names the client's
-    // own slot 0 on every record, which makes it claim each region. Otherwise a record names none.
+    // own slot on every record, which makes it claim each region. Every other record names the
+    // reserved slot, which leaves an existing claim alone.
     const std::uint64_t ambassadorSlot =
         citizen != nullptr ? static_cast<std::uint64_t>(citizen->ambassadorSlot) + kSignedFieldBias
-        : snapshot.selfHosted ? kSignedFieldBias
-                              : kNoAmbassadorSlot;
+        : snapshot.selfHosted ? static_cast<std::uint64_t>(snapshot.localSlot) + kSignedFieldBias
+                              : unadvertisedSlot;
     const bool isPublic = ((snapshot.regionPublicMask >> bubble) & 1U) != 0;
     bool encoded = writer.write(kRegionIndexBias + region, 32)
                    && writer.write(isPublic ? kRegionPublic : kRegionPrivate, kPublicBitWidth)
@@ -69,8 +77,13 @@ constexpr std::uint64_t kDescriptorCount = 128;
     // A lane says its member holds this transition token. An empty slot holds nothing.
     const std::uint32_t occupied = occupied_member_mask(snapshot);
     for (std::size_t member = 0; encoded && member < kRegionTokenCount; ++member) {
-        const bool filled = ((occupied >> member) & 1U) != 0;
-        encoded = writer.write(filled ? snapshot.transitionToken : 0U, 8);
+        const bool ownOrService =
+            (member == snapshot.localSlot || member == 1) && ((occupied >> member) & 1U) != 0;
+        const auto* peer = peer_at_slot(snapshot, member);
+        const auto token = ownOrService                       ? snapshot.transitionToken
+                           : peer && peer->hasTransitionToken ? peer->transitionToken
+                                                              : 0U;
+        encoded = writer.write(token, 8);
     }
     if (citizen == nullptr) {
         return encoded && writer.write(0, 8) && writer.write(0, 64);

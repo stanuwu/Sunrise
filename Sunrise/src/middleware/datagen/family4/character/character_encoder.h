@@ -15,12 +15,14 @@ namespace sunrise::middleware::datagen::family4::character {
  * @param resolvedLoadout Row-sorted inventory and equipment mappings for this character.
  * @param lightEvaluation Complete raw and aggregate equipment-light values.
  * @param output Exact runtime-mapped character-object storage.
+ * @param publicOnly Omits private progression, objectives and stackable quest items.
  * @return True when State, mappings, and the mapped object span fit the native layout.
  */
 [[nodiscard]] bool encode(const state::CharacterState& state,
                           const loadout::ResolvedLoadout& resolvedLoadout,
                           const state::equipment::light::Evaluation& lightEvaluation,
-                          std::span<std::byte> output) noexcept;
+                          std::span<std::byte> output,
+                          bool publicOnly = false) noexcept;
 
 /**
  * Character unlocks must match the live or prepared inventory view being encoded.

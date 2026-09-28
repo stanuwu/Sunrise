@@ -6,6 +6,7 @@
 #include "../gameplay/squad_entity_retirement.h"
 #include "host_runtime_ghost_link.h"
 #include "host_runtime_internal.h"
+#include "host_scriptable_owner.h"
 
 namespace sunrise::server::activity::host {
 namespace {
@@ -48,16 +49,17 @@ bool publication_input_boundary(const state::activity::SessionBinding& binding,
     return known;
 }
 
-/** Reads the one pending typed ClientRef body without changing its counter. */
-bool pending_scriptable_override(const state::activity::SessionBinding& binding,
-                                 PendingScriptableOverride& output) noexcept {
+/** Reads one pending body only for the ActivityClient generation that authorized it. */
+bool pending_scriptable_override_for_activity_client(const state::activity::SessionBinding& binding,
+                                                     std::uint64_t activityClientGeneration,
+                                                     PendingScriptableOverride& output) noexcept {
     output = {};
+    if (activityClientGeneration == 0) {
+        return false;
+    }
     AcquireSRWLockShared(&g_lock);
     const Instance* const instance = find_instance(binding);
-    const bool pending = instance != nullptr && instance->view.active
-                         && instance->view.outputPending
-                         && instance->view.outputKind == OutputKind::scriptableOverride
-                         && instance->pendingScriptable.revision != 0;
+    const bool pending = ownership::readable(instance, activityClientGeneration);
     if (pending) {
         output = instance->pendingScriptable;
         stamp_output_boundary(binding, output);
@@ -66,29 +68,19 @@ bool pending_scriptable_override(const state::activity::SessionBinding& binding,
     return pending;
 }
 
-/** Reads one pending body only for the ActivityClient generation that authorized it. */
-bool pending_scriptable_override_for_activity_client(const state::activity::SessionBinding& binding,
-                                                     std::uint64_t activityClientGeneration,
-                                                     PendingScriptableOverride& output) noexcept {
-    output = {};
+void retire_scriptable_client(const state::activity::SessionBinding& binding,
+                              std::uint64_t generation) noexcept {
+    if (generation == 0) {
+        return;
+    }
     AcquireSRWLockExclusive(&g_lock);
     Instance* const instance = find_instance(binding);
-    bool pending = instance != nullptr && instance->view.active && instance->view.outputPending
-                   && instance->view.outputKind == OutputKind::scriptableOverride
-                   && instance->pendingScriptable.revision != 0;
-    if (pending && instance->pendingScriptable.expectedActivityClientGeneration != 0
-        && instance->pendingScriptable.expectedActivityClientGeneration
-               != activityClientGeneration) {
-        const std::uint64_t revision = instance->pendingScriptable.revision;
-        cancel_pending(*instance, binding, revision);
-        pending = false;
+    if (ownership::owns(instance, generation)) {
+        cancel_pending(*instance, binding, instance->pendingScriptable.revision);
     }
-    if (pending) {
-        output = instance->pendingScriptable;
-        stamp_output_boundary(binding, output);
-    }
+    g_queuedControls -=
+        ownership::retire(std::span(g_pending).subspan(g_pendingRead), binding, generation);
     ReleaseSRWLockExclusive(&g_lock);
-    return pending;
 }
 
 /** Cancels one exact unstaged typed override revision without advancing its slot counter. */
@@ -115,7 +107,10 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
                              std::uint64_t sourceGeneration,
                              const PendingScriptableOverride& pending,
                              OutputStatus status) noexcept {
-    if (pending.revision == 0 || status == OutputStatus::idle || status == OutputStatus::pending
+    if (pending.revision == 0
+        || (pending.expectedActivityClientGeneration != 0
+            && pending.expectedActivityClientGeneration != sourceGeneration)
+        || status == OutputStatus::idle || status == OutputStatus::pending
         || status == OutputStatus::transportStaged || status == OutputStatus::canceled) {
         return;
     }
@@ -412,7 +407,11 @@ bool staged_scriptable_override(const state::activity::SessionBinding& binding,
 bool any_output_pending() noexcept {
     AcquireSRWLockShared(&g_lock);
     bool pending = false;
-    for (const Instance& instance : g_instances) {
+    for (const auto& owned : g_instances) {
+        if (!owned) {
+            continue;
+        }
+        const Instance& instance = *owned;
         pending =
             pending
             || (instance.occupied && instance.view.active
@@ -432,7 +431,11 @@ bool scriptable_auth_estate(const state::activity::SessionBinding& binding,
     }
     AcquireSRWLockShared(&g_lock);
     const Instance* instance = nullptr;
-    for (const Instance& candidate : g_instances) {
+    for (const auto& owned : g_instances) {
+        if (!owned) {
+            continue;
+        }
+        const Instance& candidate = *owned;
         if (candidate.occupied && same_binding(candidate.view.binding, binding)) {
             instance = &candidate;
             break;

@@ -31,6 +31,20 @@ __declspec(noinline) std::int64_t __fastcall transport_kind_body() noexcept {
     return result;
 }
 
+/** @return The session selector's original kind with SDR redirected to direct sockets. */
+__declspec(noinline) std::int64_t __fastcall transport_kind_session_body() noexcept {
+    coordinator::CallLease lease{};
+    coordinator::g_callIngress(
+        lease, HookSlot::transportKindSession, coordinator::ConsumerKind::none);
+    const std::int64_t result = [&]() noexcept {
+        const auto call = reinterpret_cast<TransportKind>(lease.original);
+        const std::int64_t value = call != nullptr ? call() : kSocketTransportKind;
+        return lease.accepting && value == kSdrTransportKind ? kSocketTransportKind : value;
+    }();
+    coordinator::g_callEgress();
+    return result;
+}
+
 /**
  * Reports current availability in place of the missing-certificate state.
  * @param self Steam networking authentication state.
@@ -81,6 +95,11 @@ __declspec(noinline) bool __fastcall set_certificate_body(void* self,
 /** @return The body itself. Internal linkage, so it cannot be a linker thunk. */
 void* transport_kind_entry_point() noexcept {
     return reinterpret_cast<void*>(&transport_kind_body);
+}
+
+/** @return The session body itself, including its own lifecycle lease. */
+void* transport_kind_session_entry_point() noexcept {
+    return reinterpret_cast<void*>(&transport_kind_session_body);
 }
 
 /** @return The body itself. Internal linkage, so it cannot be a linker thunk. */

@@ -17,6 +17,7 @@
 #include "../../../../gameplay/gameplay_advertisement.h"
 #include "../../../../gameplay/group/group_host_sessions.h"
 #include "activity_arrival.h"
+#include "activity_member_roster.h"
 #include "activity_mission_seed_roster.h"
 #include "internal.h"
 
@@ -494,11 +495,10 @@ build_roster_snapshot(Session& session,
     // carries matches nothing.
     snapshot.playerKey = published_player_key(session);
     snapshot.lifetime = lifetimeState;
-    // Hold the native spawn gate until the ws-702 world state reads 8. A spawn before the fade
-    // arms leaves the screen black.
+    // Each player owns its committed region readiness; a local writeback cannot ready peers.
     // A program that opens on a cutscene holds the spawn too, so no body exists to place.
     snapshot.awaitClientSync =
-        !client_in_world(session, refresh)
+        !client_region_ready(session, refresh)
         || state::activity::membership::program_spawn_hold(session.activity.source.sessionId);
     // Player_BindComponents walks every type-13 reference and the player datum can name any one of
     // them. So every participation record carries the same player key. Selecting the first slot
@@ -507,6 +507,15 @@ build_roster_snapshot(Session& session,
     // The participation record's `+0` latches only when the region index is known.
     snapshot.region = static_cast<std::uint32_t>(region.index);
     snapshot.hasRegion = true;
+    state::activity::membership::PendingMutation members{};
+    if (state::activity::membership::prepare_refresh(
+            session.activity.session.sessionId,
+            state::activity::membership::kAbsentRevision,
+            state::activity::membership::kMinimumRefreshBubble,
+            members)
+        && members.hasSnapshot) {
+        fill_member_roster(snapshot, members.memberDirectory, members.snapshot.identity.opaqueSoid);
+    }
     // The override names the slice set the client is in. The client applies a pair only there, and
     // a forced set with no point in that slice set leaves the biped picker with no transform.
     snapshot.spawnSliceSet =

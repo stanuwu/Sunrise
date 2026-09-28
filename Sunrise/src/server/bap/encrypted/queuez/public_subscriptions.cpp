@@ -1,0 +1,361 @@
+#include "public_subscriptions.h"
+
+#include <Windows.h>
+
+#include <algorithm>
+#include <limits>
+
+#include "../../../../core/settings/settings.h"
+#include "../../../../middleware/bap/family_subscription.h"
+#include "../../../../middleware/datagen/definitions.h"
+#include "../../../../middleware/secure_channel/runtime.h"
+#include "../../../../middleware/web_service/messages/opcode206.h"
+#include "../../../../state/account/public_profiles.h"
+#include "../../../../state/activity/fireteam.h"
+#include "../../internal.h"
+#include "../../proxy/proxy_routing.h"
+#include "../internal.h"
+#include "../push/queuez/queuez_update_frame.h"
+#include "../push/snapshot/snapshot.h"
+
+namespace sunrise::server::bap::encrypted::public_queuez {
+namespace {
+namespace datagen = middleware::datagen;
+namespace profiles = state::account::profiles;
+namespace snapshot = push::snapshot;
+
+/** Clears a prefix once its borrowed snapshot bytes have been consumed. */
+void clear_prefix(std::span<std::byte> buffer, std::size_t size) noexcept {
+    SecureZeroMemory(buffer.data(), (std::min)(buffer.size(), size));
+}
+
+// Every generated public family except unlocks, which never leave the local investment route.
+bool supported(std::uint32_t family) noexcept {
+    return family == datagen::kBannerFamily || family == datagen::kInspectionFamily
+           || family == datagen::kSocialRosterFamily || family == datagen::kRosterFamily
+           || family == datagen::kAccountFamily || family == datagen::kFireteamFamily
+           || family == datagen::kJoinFamily;
+}
+
+Subscription*
+find(Subscriptions& subscriptions, std::uint32_t family, std::uint64_t root) noexcept {
+    for (auto& entry : subscriptions.entries) {
+        if (entry.root == root && entry.family == family) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+std::uint32_t generation(Scratch& scratch, const Subscription& subscription) noexcept {
+    const auto own = profiles::generation(state::account_for_public_root(subscription.root));
+    if (own == 0) {
+        return own;
+    }
+    if (subscription.family == datagen::kFireteamFamily) {
+        return profiles::public_generation();
+    }
+    if (subscription.family == datagen::kSocialRosterFamily) {
+        // The roster row also carries the served account's seat and fireteam, and neither of
+        // those moves the projected profile. Folding them in is what refreshes the row on
+        // seating instead of leaving it stale until the owner's profile happens to change.
+        const auto mixed = own ^ snapshot::social_roster_revision(scratch, subscription.root);
+        return mixed != 0 ? mixed : 1U;
+    }
+    return own;
+}
+
+bool prepare(Scratch& scratch,
+             const Subscription& before,
+             std::int32_t version,
+             snapshot::Prepared& prepared,
+             std::uint64_t& character) noexcept {
+    const auto handle = state::account_for_public_root(before.root);
+    const state::ScopedAccount accountScope(handle, true);
+    character = profiles::banner_character(handle);
+    if (before.family == datagen::kBannerFamily) {
+        const auto previous = before.character != character ? before.character : 0;
+        if (!snapshot::prepare_banner(scratch, before.root, version, previous, prepared)) {
+            prepared.family = {
+                before.family, before.root, version, middleware::queuez::kFullSnapshotFlag, {}};
+        }
+    } else {
+        const middleware::queuez::Subscription subscription{before.family, before.root};
+        if (!snapshot::prepare_initial(scratch, subscription, {}, prepared)) {
+            return false;
+        }
+        prepared.family.version = version;
+    }
+    return true;
+}
+} // namespace
+
+Result consume(Session& session,
+               Scratch& scratch,
+               const middleware::bap::RequestFrame& request,
+               std::span<std::byte> response,
+               std::size_t& written) noexcept {
+    using middleware::bap::RequestService;
+    namespace web = middleware::web_service;
+    const bool webRequest =
+        request.serviceId == static_cast<std::uint16_t>(RequestService::webService)
+        || request.serviceId == static_cast<std::uint16_t>(RequestService::webServiceServer);
+    if (!core::settings::hosts_session()
+        || (!webRequest
+            && request.serviceId != static_cast<std::uint16_t>(RequestService::subscribeFamily)
+            && request.serviceId
+                   != static_cast<std::uint16_t>(RequestService::unsubscribeFamily))) {
+        return Result::notHandled;
+    }
+    middleware::queuez::Subscription selector{};
+    web::Message message{};
+    if (webRequest
+        && (!web::parse_request(request.body, message)
+            || message.opcode != web::messages::opcode206::kOpcode)) {
+        return Result::notHandled;
+    }
+    if (!session.authenticated || session.accountHandle == state::kInvalidAccount
+        || request.frameType != middleware::bap::FrameType::encrypted) {
+        return Result::failure;
+    }
+    const auto refuse = [&]() {
+        written = 0;
+        if (!webRequest) {
+            return Result::failure;
+        }
+        const ServiceRoute route{ResponseMode::reply,
+                                 request.serviceId
+                                         == static_cast<std::uint16_t>(RequestService::webService)
+                                     ? middleware::bap::ResponseService::webService
+                                     : middleware::bap::ResponseService::webServiceServer,
+                                 BodyCodec::empty};
+        std::array<std::byte, web::kEnvelopeHeaderSize + 1> body{};
+        std::size_t bodySize{}, size{};
+        if (!web::encode_response(message,
+                                  web::ResponseShape::statusOnly,
+                                  {.code = web::kRefusedStatusCode},
+                                  body,
+                                  bodySize)
+            || !reply::encode(scratch,
+                              route,
+                              request.taskId,
+                              session.sessionKey,
+                              session.sendNonce,
+                              std::span(body).first(bodySize),
+                              size)
+            || size > response.size()) {
+            return Result::failure;
+        }
+        std::copy_n(scratch.framed.begin(), size, response.begin());
+        middleware::secure_channel::advance_nonce(session.sendNonce);
+        written = size;
+        return Result::success;
+    };
+    if (!(webRequest ? web::messages::opcode206::parse_request(message, selector)
+                     : middleware::bap::family_subscription::parse(request.body, selector))) {
+        return refuse();
+    }
+    if (!supported(selector.familyType)) {
+        return Result::notHandled;
+    }
+    // The playing host's own investment remains on the original local SQLite route.
+    if (session.accountHandle == state::kLocalAccount
+        && proxy::is_local_root(selector.familyRootSoid)
+        && (selector.familyType == datagen::kBannerFamily
+            || selector.familyType == datagen::kRosterFamily
+            || selector.familyType == datagen::kAccountFamily)) {
+        return Result::notHandled;
+    }
+    written = 0;
+    if (selector.familyRootSoid == 0) {
+        return refuse();
+    }
+    const bool removing =
+        request.serviceId == static_cast<std::uint16_t>(RequestService::unsubscribeFamily);
+    auto* entry = find(session.publicSubscriptions, selector.familyType, selector.familyRootSoid);
+    if (!removing && !entry) {
+        const auto count =
+            std::count_if(session.publicSubscriptions.entries.begin(),
+                          session.publicSubscriptions.entries.end(),
+                          [&](const Subscription& value) {
+                              return value.root != 0 && value.family == selector.familyType;
+                          });
+        if (count >= kRootsPerFamily) {
+            return refuse();
+        }
+        for (auto& candidate : session.publicSubscriptions.entries) {
+            if (candidate.root == 0) {
+                entry = &candidate;
+                break;
+            }
+        }
+        if (!entry) {
+            return refuse();
+        }
+    }
+    Subscription staged = entry ? *entry : Subscription{};
+    const bool first = !removing && staged.root == 0;
+    if (first) {
+        staged.root = selector.familyRootSoid;
+        staged.family = static_cast<std::uint8_t>(selector.familyType);
+    }
+    using middleware::bap::ResponseService;
+    const auto responseService =
+        webRequest
+            ? (request.serviceId == static_cast<std::uint16_t>(RequestService::webService)
+                   ? ResponseService::webService
+                   : ResponseService::webServiceServer)
+            : (removing ? ResponseService::unsubscribeFamily : ResponseService::subscribeFamily);
+    const ServiceRoute route{ResponseMode::reply, responseService, BodyCodec::empty};
+    snapshot::Prepared prepared{};
+    bool publishedJoin = false;
+    const auto prepareSnapshot = [&]() {
+        std::uint64_t character{};
+        const auto current = generation(scratch, staged);
+        const bool changed = !first && current != 0 && current != staged.generation;
+        if (changed && staged.version == (std::numeric_limits<std::int32_t>::max)()) {
+            return false;
+        }
+        const auto version = staged.version + (changed ? 1 : 0);
+        if (!prepare(scratch, staged, version, prepared, character)) {
+            return false;
+        }
+        publishedJoin = staged.family == datagen::kJoinFamily && prepared.family.objects.size() > 1;
+        staged.version = version;
+        staged.character = !prepared.family.objects.empty() ? character : 0;
+        staged.generation = current;
+        return true;
+    };
+    // Match the local upstream path: WS-206 creates its family from the reply's first blob.
+    // Public projections keep the same account scope; no second copy is pushed for this fetch.
+    std::size_t bodySize{};
+    if (webRequest && !removing) {
+        if (!prepareSnapshot()) {
+            return refuse();
+        }
+        std::size_t snapshotSize{};
+        const std::array families{prepared.family};
+        const bool encoded =
+            middleware::queuez::encode_update(families, scratch.responsePayload, snapshotSize)
+            && web::messages::opcode206::encode_response(
+                message,
+                std::span(scratch.responsePayload).first(snapshotSize),
+                scratch.responseBody,
+                bodySize);
+        push::queuez_frame::clear_object_storage(
+            scratch, prepared.rawClearSize, prepared.compressedClearSize);
+        clear_prefix(scratch.responsePayload, snapshotSize);
+        if (!encoded) {
+            clear_prefix(scratch.responseBody, bodySize);
+            return refuse();
+        }
+    }
+    std::size_t size{};
+    const bool replyEncoded = reply::encode(scratch,
+                                            route,
+                                            request.taskId,
+                                            session.sessionKey,
+                                            session.sendNonce,
+                                            std::span(scratch.responseBody).first(bodySize),
+                                            size);
+    clear_prefix(scratch.responseBody, bodySize);
+    if (!replyEncoded) {
+        return Result::failure;
+    }
+    // Native subscribe replies use sealed scratch too. Prepare the pushed objects only after
+    // that reply is complete, so encryption cannot overwrite their borrowed compressed bytes.
+    if (!removing && !webRequest && !prepareSnapshot()) {
+        return Result::failure;
+    }
+    auto nonce = session.sendNonce;
+    middleware::secure_channel::advance_nonce(nonce);
+    if (!removing && !webRequest
+        && !push::queuez_frame::append_prepared_frame(
+            scratch, prepared, session.sessionKey, nonce, scratch.framed, size)) {
+        return Result::failure;
+    }
+    if (size > response.size()) {
+        return Result::failure;
+    }
+    std::copy_n(scratch.framed.begin(), size, response.begin());
+    if (entry) {
+        if (removing) {
+            *entry = {};
+        } else {
+            *entry = staged;
+        }
+    }
+    session.sendNonce = nonce;
+    written = size;
+    if (publishedJoin) {
+        const auto target = state::account_for_public_root(selector.familyRootSoid);
+        static_cast<void>(state::activity::fireteam::request_join(
+            state::account_primary_soid(session.accountHandle),
+            state::account_primary_soid(target)));
+    }
+    return Result::success;
+}
+
+bool poll(Session& session,
+          Scratch& scratch,
+          std::span<std::byte> response,
+          std::size_t& written,
+          bool& touchesScratch) noexcept {
+    written = 0;
+    if (!core::settings::hosts_session() || !session.authenticated) {
+        return false;
+    }
+    auto& subscriptions = session.publicSubscriptions;
+    const auto start = subscriptions.cursor;
+    for (std::size_t offset = 0; offset < subscriptions.entries.size(); ++offset) {
+        const auto index = (start + offset) % subscriptions.entries.size();
+        auto& entry = subscriptions.entries[index];
+        if (entry.root == 0) {
+            continue;
+        }
+        const auto current = generation(scratch, entry);
+        if (current == 0 || current == entry.generation) {
+            continue;
+        }
+        subscriptions.cursor =
+            static_cast<std::uint8_t>((index + 1) % subscriptions.entries.size());
+        if (entry.version == (std::numeric_limits<std::int32_t>::max)()) {
+            continue;
+        }
+        const auto version = entry.version + 1;
+        snapshot::Prepared prepared;
+        std::uint64_t character{};
+        touchesScratch = true;
+        if (!prepare(scratch, entry, version, prepared, character)) {
+            return false;
+        }
+        if (prepared.family.objects.empty()) {
+            entry.generation = current;
+            push::queuez_frame::clear_object_storage(
+                scratch, prepared.rawClearSize, prepared.compressedClearSize);
+            return false;
+        }
+        auto nonce = session.sendNonce;
+        std::size_t size{};
+        if (!push::queuez_frame::append_prepared_frame(
+                scratch, prepared, session.sessionKey, nonce, scratch.framed, size)
+            || size > response.size()) {
+            return false;
+        }
+        std::copy_n(scratch.framed.begin(), size, response.begin());
+        entry.generation = current;
+        entry.version = version;
+        entry.character = character;
+        session.sendNonce = nonce;
+        written = size;
+        if (entry.family == datagen::kJoinFamily && prepared.family.objects.size() > 1) {
+            const auto target = state::account_for_public_root(entry.root);
+            static_cast<void>(state::activity::fireteam::request_join(
+                state::account_primary_soid(session.accountHandle),
+                state::account_primary_soid(target)));
+        }
+        return true;
+    }
+    return false;
+}
+} // namespace sunrise::server::bap::encrypted::public_queuez

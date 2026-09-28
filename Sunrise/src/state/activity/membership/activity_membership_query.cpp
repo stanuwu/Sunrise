@@ -4,10 +4,51 @@
 
 #include <limits>
 
+#include "../../account/account_context.h"
 #include "../../runtime/storage/internal.h"
+#include "../member_context.h"
+#include "../member_selection.h"
 #include "../transactions/internal.h"
 
 namespace sunrise::state::activity::membership {
+namespace {
+/** Service work outside a client scope reads the primary simulation row. */
+template <class Record>
+auto selected_member(Record& record) noexcept -> decltype(member_state(record, 0)) {
+    if (!record.sharedMembers) {
+        return &record.membership;
+    }
+    const auto context = member_context();
+    const auto account = bound_account();
+    if (context.sessionId == 0 && account == kLocalAccount) {
+        return member_state(record, 0);
+    }
+    return member_state(record,
+                        member_row(record,
+                                   context.sessionId == record.sessionId ? context.memberKey : 0,
+                                   account_primary_soid(account)));
+}
+} // namespace
+
+std::uint32_t current_revision(const SessionBinding& binding) noexcept {
+    if (binding.sessionId == kAbsentSessionId || binding.createdRevision == 0) {
+        return kAbsentRevision;
+    }
+    std::uint32_t revision = kAbsentRevision;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const auto& state = runtime::storage::g_state.activity;
+    const auto target = activity::transactions::find_session(state, binding.sessionId);
+    if (target != kInvalidSessionSlot) {
+        const auto& record = state.sessions[target];
+        const auto* member = selected_member(record);
+        if (record.joined && record.createdRevision == binding.createdRevision && member != nullptr
+            && member->hasIdentity) {
+            revision = member->revision;
+        }
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return revision;
+}
 
 /** Tests whether the client has applied the current membership revision. */
 bool acknowledged(std::uint64_t sessionId) noexcept {
@@ -18,8 +59,8 @@ bool acknowledged(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const std::size_t target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        const MembershipState& membership = state.sessions[target].membership;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        const MembershipState& membership = *selected_member(state.sessions[target]);
         applied = membership.revision != kAbsentRevision
                   && membership.acknowledgedRevision == membership.revision;
     }
@@ -38,8 +79,8 @@ bool arm_host_teleport(std::uint64_t sessionId,
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
     ActivityState& state = runtime::storage::g_state.activity;
     const std::size_t target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        MembershipState& membership = state.sessions[target].membership;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        MembershipState& membership = *selected_member(state.sessions[target]);
         if (sliceSetIndex == kAbsentSliceSetIndex) {
             changed = membership.hasHostTeleport;
             membership.hasHostTeleport = false;
@@ -90,9 +131,9 @@ bool arm_hard_wipe(const SessionBinding& binding,
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
     ActivityState& state = runtime::storage::g_state.activity;
     const auto target = activity::transactions::find_session(state, binding.sessionId);
-    if (target != kInvalidSessionSlot
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr
         && state.sessions[target].createdRevision == binding.createdRevision) {
-        MembershipState& membership = state.sessions[target].membership;
+        MembershipState& membership = *selected_member(state.sessions[target]);
         HardWipeState& wipe = membership.hardWipe;
         if (wipe.requestKey == requestKey) {
             accepted = true;
@@ -120,8 +161,8 @@ bool hard_wipe_needs_publish(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const auto target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        const MembershipState& member = state.sessions[target].membership;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        const MembershipState& member = *selected_member(state.sessions[target]);
         const HardWipeState& wipe = member.hardWipe;
         pending = wipe.active
                   && (wipe.host.state == kHardWipeReleaseState
@@ -138,8 +179,8 @@ bool hard_wipe_start_unseen(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const auto target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        const MembershipState& member = state.sessions[target].membership;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        const MembershipState& member = *selected_member(state.sessions[target]);
         const HardWipeState& wipe = member.hardWipe;
         unseen = wipe.active && wipe.host.state != kHardWipeReleaseState
                  && (member.spawn.opaqueByte != wipe.host.opaqueByte
@@ -155,9 +196,9 @@ bool release_hard_wipe(const SessionBinding& binding, std::uint64_t requestKey) 
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
     ActivityState& state = runtime::storage::g_state.activity;
     const auto target = activity::transactions::find_session(state, binding.sessionId);
-    if (target != kInvalidSessionSlot
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr
         && state.sessions[target].createdRevision == binding.createdRevision) {
-        HardWipeState& wipe = state.sessions[target].membership.hardWipe;
+        HardWipeState& wipe = selected_member(state.sessions[target])->hardWipe;
         if (wipe.active && wipe.requestKey == requestKey) {
             wipe.release();
             accepted = true;
@@ -173,8 +214,8 @@ std::uint32_t checkpoint_spawn_hash(std::uint64_t sessionId, std::int32_t region
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const auto target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        const HardWipeState& wipe = state.sessions[target].membership.hardWipe;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        const HardWipeState& wipe = selected_member(state.sessions[target])->hardWipe;
         if (wipe.requestKey != 0 && wipe.region == region) {
             result = wipe.spawnSetHash;
         }
@@ -272,8 +313,8 @@ bool host_teleport_armed(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const std::size_t target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        const MembershipState& membership = state.sessions[target].membership;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        const MembershipState& membership = *selected_member(state.sessions[target]);
         // The spawn state is the arm after the client has moved. It still rides every body, but it
         // is no longer waiting on anything, so it must not keep forcing revisions.
         armed =
@@ -292,8 +333,8 @@ std::int32_t reported_region(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const std::size_t target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        region = state.sessions[target].membership.region.index;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        region = selected_member(state.sessions[target])->region.index;
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return region;
@@ -314,8 +355,8 @@ std::int32_t reported_slice_set(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const std::size_t target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        sliceSet = state.sessions[target].membership.teleport.sliceSetIndex;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        sliceSet = selected_member(state.sessions[target])->teleport.sliceSetIndex;
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return sliceSet;
@@ -330,30 +371,15 @@ ClientPlacement reported_placement(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const std::size_t target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        const MembershipState& membership = state.sessions[target].membership;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        const MembershipState& membership = *selected_member(state.sessions[target]);
         placement.region = membership.region.index;
         placement.currentRegion = membership.currentRegion.index;
         placement.bubble = membership.bubble;
         placement.bubbleRevision = membership.bubbleRevision;
-        placement.clientInWorld = membership.clientInWorld;
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return placement;
-}
-
-/** Records the world state the client's character write-back reports, on every joined session. */
-void note_client_writeback(bool inWorld) noexcept {
-    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    ActivityState& state = runtime::storage::g_state.activity;
-    for (SessionRecord& record : state.sessions) {
-        if (record.occupied && record.joined) {
-            // Store the report alone. Folding in the region held at this instant drops an arrival
-            // that lands before the region leg, and only the next write-back can restore it.
-            record.membership.clientInWorld = inWorld;
-        }
-    }
-    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
 }
 
 /** Names the region the client has instantiated. */
@@ -366,9 +392,10 @@ std::uint64_t live_region_session(std::uint64_t fallback) noexcept {
     std::uint64_t newest = kAbsentSessionId;
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     for (const SessionRecord& record : runtime::storage::g_state.activity.sessions) {
-        if (record.occupied && record.sessionId > newest
-            && (record.membership.region.index > kAbsentRegionIndex
-                || record.membership.currentRegion.index > kAbsentRegionIndex)) {
+        const auto* member = selected_member(record);
+        if (record.occupied && member && record.sessionId > newest
+            && (member->region.index > kAbsentRegionIndex
+                || member->currentRegion.index > kAbsentRegionIndex)) {
             newest = record.sessionId;
         }
     }
@@ -385,8 +412,9 @@ std::uint64_t member_key(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const std::size_t target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot && state.sessions[target].membership.hasIdentity) {
-        key = state.sessions[target].membership.identity.memberKey;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr
+        && selected_member(state.sessions[target])->hasIdentity) {
+        key = selected_member(state.sessions[target])->identity.memberKey;
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return key;
@@ -401,8 +429,9 @@ std::uint64_t join_identity(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const std::size_t target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot && state.sessions[target].membership.hasIdentity) {
-        identity = state.sessions[target].membership.identity.joinIdentity;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr
+        && selected_member(state.sessions[target])->hasIdentity) {
+        identity = selected_member(state.sessions[target])->identity.joinIdentity;
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return identity;

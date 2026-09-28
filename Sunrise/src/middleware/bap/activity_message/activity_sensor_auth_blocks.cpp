@@ -408,7 +408,8 @@ bool write_object_block(bits::Writer& writer,
                         std::uint16_t slotIndex,
                         std::uint8_t flags,
                         bool missionSeedOnly,
-                        bool carriesPlayerKey) noexcept {
+                        bool carriesPlayerKey,
+                        std::uint64_t playerKey) noexcept {
     const bool emitAuth = (flags & kSlotAuthFlag) != 0;
     const bool emitSense = (flags & kSlotSenseFlag) != 0;
     const AuthOverride* const override =
@@ -445,9 +446,10 @@ bool write_object_block(bits::Writer& writer,
         encoded =
             writer.write(1, kPresenceWidth) && writer.write(body > 0 ? 1U : 0U, kPresenceWidth);
         if (encoded && body > 0) {
-            encoded = override != nullptr
-                          ? write_packed(writer, *override)
-                          : write_auth_body(writer, snapshot, slotType, carriesPlayerKey);
+            encoded =
+                override != nullptr
+                    ? write_packed(writer, *override)
+                    : write_auth_body(writer, snapshot, slotType, carriesPlayerKey, playerKey);
         }
     }
     if (encoded && emitSense) {

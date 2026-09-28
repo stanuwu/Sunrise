@@ -136,5 +136,8 @@ void consume_container(const state::gameplay::Endpoint& from,
 void consume_established(const state::gameplay::Endpoint& from,
                          std::span<const std::byte> payload,
                          std::uint64_t now) noexcept;
+/** Restores an established participant channel from its own still-current native owner link. */
+void bind_participant(const state::gameplay::Endpoint& from,
+                      const state::gameplay::entity_identity::Source& ingress) noexcept;
 
 } // namespace sunrise::server::gameplay::peer

@@ -6,8 +6,11 @@
 #include <limits>
 
 #include "../../../core/logging/log.h"
+#include "../../../state/activity/member_context.h"
+#include "../../../state/activity/member_departure.h"
 #include "../../../state/activity/runtime.h"
 #include "../../gameplay/group/group_host_sessions.h"
+#include "../activity_transport_publication.h"
 #include "push/activity/internal.h"
 
 namespace sunrise::server::bap::encrypted {
@@ -44,10 +47,16 @@ void release_host_generations(AdvertisementRetains& retains) noexcept {
     retains = {};
 }
 
+/** Releases the old binding while a copied join reply may already own its replacement body. */
+void release_activity_ownership(Session& session, bool preserveJoinPublication) noexcept;
+
 /** Clears all connection state rebuilt by a successful activity join. */
 void reset_join_state(Session& session) noexcept {
+    clear_activity_transport(session);
     session.activityMemberKey = 0;
     session.activityJoinGeneration = 0;
+    session.activityJoinCorrelation = 0;
+    session.activityMemberSet = {};
     session.activityCharacterSoid = 0;
     session.activityKeepaliveDueTick = 0;
     session.activityClientIdentitySeenGeneration = 0;
@@ -93,12 +102,23 @@ bool reserve_activity_binding_generation(std::uint64_t& generation) noexcept {
 /** Captures the connection fields one service outcome carries. */
 ConnectionFields connection_fields(const ServiceOutcome& outcome) noexcept {
     ConnectionFields fields{};
+    fields.answersActivityStartup =
+        transaction_if<state::activity::PendingAllocation>(outcome) != nullptr;
+    fields.startupReservations = outcome.startupReservations;
     const auto* plan = transaction_if<activity_message::ActivityPlan>(outcome);
     if (plan == nullptr) {
         return fields;
     }
+    if (plan->mutationDomain == activity_message::MutationDomain::membership
+        && plan->membershipMutation.kind
+               == state::activity::membership::MutationKind::authoritative) {
+        fields.transportReport = plan->transportReport;
+        fields.transportBindingGeneration = plan->transportBindingGeneration;
+    }
     if (plan->delivery == activity_message::Delivery::joinNotifications) {
         fields.joinMemberKey = plan->entitySlotMutation.memberKey;
+        fields.joinCorrelation = plan->correlation;
+        fields.sharedJoin = plan->entitySlotMutation.shared;
         fields.joinCharacterSoid = plan->joinCharacterSoid;
         fields.joinIngress = plan->joinIngress;
         fields.joinsActivity = true;
@@ -130,12 +150,23 @@ void publish_connection_fields(Session& session,
                                const transactions::Publication& publication,
                                const ConnectionFields& fields) noexcept {
     if (publication.hasActivitySessionBinding) {
+        if (session.activity.bindingGeneration != publication.activity.bindingGeneration) {
+            server::activity::host::retire_scriptable_client(session.activity.session,
+                                                             session.activity.bindingGeneration);
+        }
         if (!publication.preservesActivitySessionBinding) {
-            release_activity_connection(session);
+            release_activity_ownership(
+                session, fields.joinsActivity && session.activityJoinMembershipStaged);
             session.activity = publication.activity;
             reset_join_state(session);
         }
         session.activity.bindingGeneration = publication.activity.bindingGeneration;
+    }
+    if (fields.answersActivityStartup && publication.hasActivitySessionBinding) {
+        session.activityStartupReservations = fields.startupReservations;
+        session.activityStartupReservations.sessionId = session.activity.session.sessionId;
+        session.activityStartupReservations.createdRevision =
+            session.activity.session.createdRevision;
     }
     if (fields.joinsActivity) {
         // The join burst may have staged its own membership directory; only a stale one goes.
@@ -144,10 +175,32 @@ void publish_connection_fields(Session& session,
         }
         release_host_generations(session.activityAdvertisementHeld);
         reset_join_state(session);
+        session.activity.replicationSequence = publication.activity.replicationSequence;
+        session.activity.replicationEpoch = publication.activity.replicationEpoch;
         session.activityMemberKey = fields.joinMemberKey;
         session.activityJoinGeneration = session.activity.bindingGeneration;
+        session.activityJoinCorrelation = fields.joinCorrelation;
         session.activityCharacterSoid = fields.joinCharacterSoid;
+        state::activity::JoinedMemberSet members{};
+        if (state::activity::joined_member_set(
+                session.activity.session, session.activityMemberKey, members)) {
+            session.activityMemberSet = members.keys;
+        }
+        // A committed native join supersedes this account's old ActivityClient on the same
+        // activity generation. Publish the replacement first so old-link retirement cannot
+        // withdraw its surviving member or release another region's owner.
+        for (auto& other : sessions()) {
+            if (&other != &session && other.id && other.authenticated
+                && other.accountHandle == session.accountHandle && other.activityJoinGeneration
+                && state::activity::same_binding(other.activity.session, session.activity.session)
+                && (other.activityMemberKey != session.activityMemberKey
+                    || other.activityJoinCorrelation != session.activityJoinCorrelation)) {
+                release_activity_connection(other);
+            }
+        }
     }
+    const state::activity::ScopedMemberContext currentMemberScope(
+        session.activity.session.sessionId, session.activityMemberKey);
     if (fields.retainsPatchEpoch) {
         session.activityPatchEpoch.value = fields.patchEpoch;
         session.activityPatchEpoch.bindingGeneration = session.activity.bindingGeneration;
@@ -156,6 +209,7 @@ void publish_connection_fields(Session& session,
     if (fields.receivesClientIdentity) {
         session.activityClientIdentitySeenGeneration = session.activity.bindingGeneration;
     }
+    publish_activity_transport(session, fields.transportBindingGeneration, fields.transportReport);
     // A join resets the roster container. Its first post-region state change rebuilds the
     // participation component against the published membership.
     if (fields.joinsActivity) {
@@ -172,18 +226,38 @@ void publish_connection_fields(Session& session,
             push::activity::adopt_join_membership_record(session);
         }
         state::activity::membership::PendingMutation seed{};
-        if (!push::activity::prepare_seed_identity(session.activity.session.sessionId,
-                                                   session.activityMemberKey,
-                                                   session.activityCharacterSoid,
-                                                   seed)
-            || !state::activity::membership::commit(seed)) {
+        if (!fields.sharedJoin
+            && (!push::activity::prepare_seed_identity(session.activity.session.sessionId,
+                                                       session.activityMemberKey,
+                                                       session.activityCharacterSoid,
+                                                       seed)
+                || !state::activity::membership::commit(seed))) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=activity stage=membership result=seed_fail");
         }
     }
+    if (fields.joinsActivity) {
+        static_cast<void>(activity_host_manager::admit_startup_reservations(
+            session.activityStartupReservations,
+            session.activity.session.sessionId,
+            session.activity.session.createdRevision,
+            state::account_primary_soid(session.accountHandle),
+            session.activityMemberKey,
+            session.activityCharacterSoid));
+    }
     // Reached only once the frame has been copied out, so this is the delivery the one-shot means.
-    if (session.activityJoinMembershipStaged || session.activityAdvertisementStaged.staged) {
+    const bool deliveredJoinMembership =
+        fields.joinsActivity && session.activityJoinMembershipStaged;
+    if (deliveredJoinMembership || session.activityAdvertisementStaged.staged) {
+        // A public or shared target burst delivers its membership body here, so adopting it gives
+        // this connection the revision cursor the keepalive reads. A second adopt is a no-op.
+        if (deliveredJoinMembership) {
+            push::activity::adopt_join_membership_record(session);
+        } else {
+            // Replies and refreshes keep their binding, but delivered the staged body too.
+            push::activity::commit_membership_body_record(session);
+        }
         note_activity_membership_delivery(session);
     }
     session.activityJoinMembershipStaged = false;
@@ -191,7 +265,9 @@ void publish_connection_fields(Session& session,
 
 /** Stages one body's retained host directory until the membership frame has an outcome. */
 void stage_activity_advertisement(Session& session, const AdvertisementRetains& retains) noexcept {
-    discard_staged_advertisement(session);
+    // The new membership body is already staged. Release only the previous directory here;
+    // the failure path discards both the body and its matching directory together.
+    release_host_generations(session.activityAdvertisementStaged.retains);
     session.activityAdvertisementStaged.retains = retains;
     session.activityAdvertisementStaged.staged = true;
 }
@@ -215,9 +291,40 @@ void discard_staged_advertisement(Session& session) noexcept {
     }
 }
 
-/** Releases every exact activity owner held by one BAP connection. */
-void release_activity_connection(Session& session) noexcept {
-    discard_staged_advertisement(session);
+namespace {
+void release_activity_ownership(Session& session, bool preserveJoinPublication) noexcept {
+    server::activity::host::retire_scriptable_client(session.activity.session,
+                                                     session.activity.bindingGeneration);
+    session.activityStartupReservations = {};
+    if (session.activityMemberKey && session.activityJoinGeneration != 0
+        && session.activityJoinGeneration == session.activity.bindingGeneration) {
+        bool retainedByPeer{};
+        for (const auto& other : sessions()) {
+            if (&other != &session && other.id && other.authenticated
+                && other.accountHandle == session.accountHandle
+                && other.activityMemberKey == session.activityMemberKey
+                && other.activityJoinGeneration != 0
+                && other.activityJoinGeneration == other.activity.bindingGeneration
+                && state::activity::same_binding(other.activity.session,
+                                                 session.activity.session)) {
+                retainedByPeer = true;
+                break;
+            }
+        }
+        if (!retainedByPeer) {
+            if (!state::activity::depart_member(session.activity.session,
+                                                state::account_primary_soid(session.accountHandle),
+                                                session.activityMemberKey)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=activity stage=disconnect_departure result=refused");
+            }
+        }
+    }
+    clear_activity_transport(session);
+    if (!preserveJoinPublication) {
+        discard_staged_advertisement(session);
+    }
     release_host_generations(session.activityAdvertisementHeld);
     if (session.activity.hostGeneration != 0) {
         server::gameplay::group::release_host_session(session.activity.hostGeneration);
@@ -226,6 +333,8 @@ void release_activity_connection(Session& session) noexcept {
         state::activity::release_binding(session.activity.session);
     }
     session.activity = {};
+    session.activityJoinCorrelation = 0;
+    session.activityMemberSet = {};
     authority_query::reset(session.activityAuthorityQuery, 0);
     authority_reset::reset(session.activityAuthorityReset, 0);
     session.activityPatchEpoch = {};
@@ -235,6 +344,13 @@ void release_activity_connection(Session& session) noexcept {
     session.activityClientIdentityPublishedGeneration = 0;
     session.activityRosterStaged.decodeMap = {};
     session.activityRosterDecode = {};
+}
+
+} // namespace
+
+/** Releases every exact activity owner held by one BAP connection. */
+void release_activity_connection(Session& session) noexcept {
+    release_activity_ownership(session, false);
 }
 
 /** Arms the owed Family-4 and banner re-pushes when the queuez publication asks for them. */

@@ -60,6 +60,12 @@ bool parse_join_request(std::span<const std::byte> input, JoinRequest& request) 
         return false;
     }
     parsed.characterSoid = read_character_soid(input);
+    encoding::bits::Reader reader(input);
+    if (!reader.skip(JoinRequestLayout::memberKey * 8)
+        || !telemetry::read_reservation_identity(reader, parsed.identity)
+        || parsed.identity.machineKey != parsed.memberKey) {
+        return false;
+    }
 
     request = parsed;
     return true;

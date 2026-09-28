@@ -40,6 +40,9 @@ void shutdown() noexcept;
 /** @return Endpoint published in the join descriptor. Zero when the channel is disabled. */
 [[nodiscard]] state::gameplay::Endpoint advertised() noexcept;
 
+/** Dedicated relay endpoint, zero unless the relay socket/topology is available. */
+[[nodiscard]] state::gameplay::Endpoint relay_endpoint() noexcept;
+
 /**
  * Reports the host port one activity-host row advertises.
  * Every row takes its own port. So the client never shares one channel between two hosts, and

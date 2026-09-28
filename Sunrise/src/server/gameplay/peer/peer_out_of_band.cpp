@@ -78,8 +78,8 @@ void answer_establish(const gp::Endpoint& to, const wire::ConnectEstablish& body
                                  {buffer.data(), size},
                                  writer.bit_count());
     if (queued) {
+        peer->establishQueued = true;
         peer->acknowledgementOwed = true;
-        peer->outbound.awaitingAcknowledgement = false;
     }
     ReleaseSRWLockExclusive(&g_lock);
     report(core::log::Level::info,
@@ -110,6 +110,7 @@ void answer_connect(const gp::Endpoint& from,
     std::array<std::uint64_t, gp::kSessionsPerLink> resetSessions{};
     std::size_t resetSessionCount = 0;
     gp::entity_identity::Source resetSource{};
+    bool refreshGroups = false;
 
     AcquireSRWLockExclusive(&g_lock);
     // Keyed by endpoint. The client holds one channel per host peer, so a second link would stamp
@@ -158,6 +159,8 @@ void answer_connect(const gp::Endpoint& from,
             | static_cast<std::uint32_t>(kFirstPacketSequence - 1);
     }
     if (peer != nullptr) {
+        refreshGroups =
+            fresh || !peer->remoteAddressPresent || peer->remoteAddress != request.address;
         peer->remoteConnectionSequence = request.channelId;
         peer->remoteTransportSequence = request.sequence;
         // The membership update must name the peer's own address, so its own blob is kept.
@@ -172,6 +175,11 @@ void answer_connect(const gp::Endpoint& from,
         response.sequence = peer->localTransportSequence;
     }
     ReleaseSRWLockExclusive(&g_lock);
+    // Group refresh takes its own lock and may later enqueue, so it follows the peer lock.
+    // Enqueue remains closed until this incarnation's connect-establish has been queued.
+    if (refreshGroups) {
+        group::refresh_endpoint(from);
+    }
     notify_external_outcomes(displaced, displacedCount);
     reset_transports(resetSessions.data(), resetSessionCount);
     reset_entity_source(resetSource);
@@ -295,7 +303,7 @@ void answer_join(const gp::Endpoint& from, const wire::JoinRequest& request) noe
             bound && group::publish_membership(from, request.joinId, machineId, request.sessionId);
         // The peer needs both before it finishes: the snapshot names it, and the parameter update
         // releases the latch its own tick waits on.
-        const bool parameters = bound && group::publish_join_parameters(request.sessionId);
+        const bool parameters = bound && group::publish_join_parameters(from, request.sessionId);
         // Nothing else names what the peer thinks it is joining.
         report(core::log::Level::info,
                "ev=gameplay stage=join result=admit build=%u..%u exe=%u session=0x%016llX "

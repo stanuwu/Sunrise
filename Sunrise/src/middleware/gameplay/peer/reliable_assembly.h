@@ -23,8 +23,8 @@ struct AssembledMessage {
 
 /**
  * Files one packet's records into a queue.
- * A record outside the buffered window is dropped. The sender retransmits it once the window
- * moves, so a queue that never drains shows up only as a rising drop count.
+ * A record outside the buffered window is refused. The window covers one maximum-sized packet;
+ * contiguous fragments retire into the assembly buffer before the next packet arrives.
  * @param records Records the packet carried, in wire order.
  * @param queue Queue receiving them.
  * @return How many records the window refused.
@@ -35,7 +35,8 @@ std::size_t accept_records(const QueueRecords& records,
 /**
  * Takes the next complete message off a queue.
  * A message is a contiguous run of fragments ending in a short one. An incomplete run stays
- * buffered until its missing fragment arrives.
+ * buffered until its missing fragment arrives. Contiguous prefixes leave the fragment window
+ * while awaiting the terminator. Oversized or malformed runs are discarded through that terminator.
  * @param queue Queue to drain.
  * @param output Receives the message and its decoded inner header.
  * @return True when one whole message was drained.

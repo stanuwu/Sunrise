@@ -188,7 +188,11 @@ LoadStatus load(const wchar_t* path,
         header.imageSize,
         header.configuredEquipmentHash,
     };
-    if (!(cachedBuild == expectedBuild)) {
+    // Equipment selects the client extraction inputs, so a changed loadout invalidates the cache
+    // like a changed executable does; every decoded domain and the payload checksum follow.
+    if (cachedBuild.imageTimestamp != expectedBuild.imageTimestamp
+        || cachedBuild.imageSize != expectedBuild.imageSize
+        || cachedBuild.configuredEquipmentHash != expectedBuild.configuredEquipmentHash) {
         return close_with(file, LoadStatus::stale);
     }
 

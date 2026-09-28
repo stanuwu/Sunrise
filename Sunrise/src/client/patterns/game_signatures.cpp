@@ -17,6 +17,14 @@ constexpr std::string_view kTransportKindText =
 /** Compiled pattern bytes of the signature text above. */
 constexpr auto kTransportKind = signature<signature_length(kTransportKindText)>(kTransportKindText);
 
+// The fireteam/posse create path uses its own transport selector.
+constexpr std::string_view kTransportKindSessionText =
+    "48 89 5C 24 ? 57 48 83 EC ? 80 3D ? ? ? ? 00 BF 01 00 00 00 8B DF 74 ? 48 8B 0D ? ? ? ? 48 "
+    "85 C9 74 ? 48 8B 01 FF 50 60 84 C0 B9 02 00 00 00 0F 44 D9 33 D2 8B CB E8 ? ? ? ? 84 C0 0F "
+    "44 DF 8B C3 48 8B 5C 24 ? 48 83 C4 ? 5F C3";
+constexpr auto kTransportKindSession =
+    signature<signature_length(kTransportKindSessionText)>(kTransportKindSessionText);
+
 // Matches the executor that receives every queued HTTP request descriptor.
 constexpr std::string_view kHttpExecuteRequestText =
     "48 8B C4 55 57 48 8D 68 ? 48 81 EC ? ? ? ? 48 89 70 ? 33 FF 48 8B F2 4C 89 70 ? 4C "
@@ -109,6 +117,7 @@ constexpr auto kLightValueToScalar =
 /** Game signatures in the exact target-slot order. */
 constexpr std::array kDefinitions{
     patterns::Pattern{"transport_kind", kTransportKind},
+    patterns::Pattern{"transport_kind_session", kTransportKindSession},
     patterns::Pattern{"http_execute_request", kHttpExecuteRequest},
     patterns::Pattern{"signon_readiness_failure", signon::kReadinessFailure},
     patterns::Pattern{"signon_readiness_ready", signon::kReadinessReady},

@@ -5,86 +5,12 @@
 #include <cstring>
 
 #include "../../../../../core/settings/settings.h"
+#include "../../../../../middleware/gameplay/nat/discovery.h"
 
 namespace sunrise::client::hooks::egress::winsock::discovery {
 namespace {
 
-/** Demonware discovery uses these two fixed destination ports. */
-constexpr std::uint16_t kFirstDiscoveryPort = 3074;
-constexpr std::uint16_t kSecondDiscoveryPort = 3075;
-/** A NatProbe request is two big-endian 16-bit fields. */
-constexpr std::size_t kNatProbeRequestSize = 4;
-/** The decoder needs the whole 128-bit NatProbe reply. */
-constexpr std::size_t kNatProbeReplySize = 16;
-/** The verified IP-discovery request is one type byte and a native-order version. */
-constexpr std::size_t kIpDiscoveryRequestSize = 3;
-/** Version 2 carries one address in 9 bytes. */
-constexpr std::size_t kIpDiscoveryReplySize = 9;
-/** NatProbe requests use this fixed big-endian magic value. */
-constexpr std::uint16_t kNatProbeMagic = 1;
-/** The verified NatProbe state machine sends request indices 1 and 2. */
-constexpr std::uint16_t kFirstNatProbeIndex = 1;
-constexpr std::uint16_t kSecondNatProbeIndex = 2;
-/** IP-discovery reply types fill this inclusive range. */
-constexpr unsigned kFirstIpDiscoveryType = 30;
-constexpr unsigned kLastIpDiscoveryType = 39;
-/** Version 2 picks the single-address IP-discovery reply. */
-constexpr std::uint16_t kIpDiscoveryReplyVersion = 2;
-/** NatProbe masks protect the echoed address and port fields. */
-constexpr std::uint32_t kNatProbeAddressMask = 0x76C3F6BC;
-constexpr std::uint16_t kNatProbePortMask = 0xF6BC;
-
-enum class RequestKind {
-    none,
-    natProbe,
-    ipDiscovery,
-};
-
-/** @return One big-endian 16-bit value from a verified request offset. */
-[[nodiscard]] std::uint16_t read_big_u16(std::span<const std::byte> input,
-                                         std::size_t offset) noexcept {
-    return static_cast<std::uint16_t>(std::to_integer<unsigned>(input[offset]) << 8U)
-           | static_cast<std::uint16_t>(std::to_integer<unsigned>(input[offset + 1]));
-}
-
-/** Writes one big-endian 16-bit value into fixed reply storage. */
-void write_big_u16(std::span<std::byte> output, std::size_t offset, std::uint16_t value) noexcept {
-    output[offset] = static_cast<std::byte>(value >> 8U);
-    output[offset + 1] = static_cast<std::byte>(value);
-}
-
-/** Writes one big-endian 32-bit value into fixed reply storage. */
-void write_big_u32(std::span<std::byte> output, std::size_t offset, std::uint32_t value) noexcept {
-    output[offset] = static_cast<std::byte>(value >> 24U);
-    output[offset + 1] = static_cast<std::byte>(value >> 16U);
-    output[offset + 2] = static_cast<std::byte>(value >> 8U);
-    output[offset + 3] = static_cast<std::byte>(value);
-}
-
-/** Writes one little-endian 16-bit value into fixed reply storage. */
-void write_little_u16(std::span<std::byte> output,
-                      std::size_t offset,
-                      std::uint16_t value) noexcept {
-    output[offset] = static_cast<std::byte>(value);
-    output[offset + 1] = static_cast<std::byte>(value >> 8U);
-}
-
-/** @return The verified discovery request kind, or none for unrelated bytes. */
-[[nodiscard]] RequestKind classify(std::span<const std::byte> payload) noexcept {
-    if (payload.size() == kNatProbeRequestSize && read_big_u16(payload, 0) == kNatProbeMagic) {
-        const std::uint16_t index = read_big_u16(payload, 2);
-        if (index == kFirstNatProbeIndex || index == kSecondNatProbeIndex) {
-            return RequestKind::natProbe;
-        }
-    }
-    if (payload.size() == kIpDiscoveryRequestSize) {
-        const unsigned type = std::to_integer<unsigned>(payload.front());
-        if (type >= kFirstIpDiscoveryType && type <= kLastIpDiscoveryType) {
-            return RequestKind::ipDiscovery;
-        }
-    }
-    return RequestKind::none;
-}
+namespace wire = middleware::gameplay::nat::discovery;
 
 /** @return True when the destination is one supported IPv4 discovery port. */
 [[nodiscard]] bool make_loopback_destination(const sockaddr* destination,
@@ -95,8 +21,7 @@ void write_little_u16(std::span<std::byte> output,
     }
     std::memcpy(&loopback, destination, sizeof(loopback));
     const std::uint16_t port = ntohs(loopback.sin_port);
-    if (loopback.sin_family != AF_INET
-        || (port != kFirstDiscoveryPort && port != kSecondDiscoveryPort)) {
+    if (loopback.sin_family != AF_INET || (port != wire::kFirstPort && port != wire::kSecondPort)) {
         return false;
     }
     loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -123,29 +48,6 @@ void normalize_client_address(sockaddr_in& client) noexcept {
     }
 }
 
-/** Builds one exact verified reply and returns its byte count. */
-[[nodiscard]] std::size_t build_reply(RequestKind kind,
-                                      std::span<const std::byte> request,
-                                      const sockaddr_in& client,
-                                      std::span<std::byte> reply) noexcept {
-    const std::uint32_t clientIp = ntohl(client.sin_addr.s_addr);
-    const std::uint16_t clientPort = ntohs(client.sin_port);
-    if (kind == RequestKind::natProbe) {
-        reply[0] = request[0];
-        reply[1] = request[1];
-        reply[2] = request[2];
-        reply[3] = request[3];
-        write_big_u32(reply, 4, clientIp ^ kNatProbeAddressMask);
-        write_big_u16(reply, 8, clientPort ^ kNatProbePortMask);
-        return kNatProbeReplySize;
-    }
-    reply[0] = request[0];
-    write_little_u16(reply, 1, kIpDiscoveryReplyVersion);
-    write_big_u32(reply, 3, clientIp);
-    write_little_u16(reply, 7, clientPort);
-    return kIpDiscoveryReplySize;
-}
-
 } // namespace
 
 /** @return Whether the request was handled and its replacement send result. */
@@ -159,9 +61,9 @@ Result handle(SOCKET socket,
     if (core::settings::get().client.externalServer.enabled) {
         return {};
     }
-    const RequestKind kind = classify(payload);
+    const auto kind = wire::classify(payload);
     sockaddr_in loopback{};
-    if (kind == RequestKind::none
+    if (kind == wire::Request::none
         || !make_loopback_destination(destination, destinationLength, loopback)) {
         return {};
     }
@@ -169,6 +71,21 @@ Result handle(SOCKET socket,
         return missing_send_result();
     }
 
+    if (core::settings::multiplayer()) {
+        const auto& address = core::settings::role() == core::settings::Role::host
+                                  ? core::settings::get().server.gameplay.transportAddress
+                                  : core::settings::get().server.upstream.address;
+        std::memcpy(&loopback.sin_addr, address.data(), address.size());
+        // The native probe must use the game's own UDP socket so the server observes its NAT
+        // mapping. Neither the client's wildcard bind nor a separate socket identifies it.
+        return {true,
+                sendTo(socket,
+                       reinterpret_cast<const char*>(payload.data()),
+                       static_cast<int>(payload.size()),
+                       flags,
+                       reinterpret_cast<const sockaddr*>(&loopback),
+                       sizeof loopback)};
+    }
     const SOCKET temporary = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (temporary == INVALID_SOCKET) {
         return Result{true, SOCKET_ERROR};
@@ -214,8 +131,9 @@ Result handle(SOCKET socket,
     }
     normalize_client_address(client);
 
-    std::array<std::byte, kNatProbeReplySize> reply{};
-    const std::size_t replySize = build_reply(kind, payload, client, reply);
+    std::array<std::byte, wire::kReplyCapacity> reply{};
+    const std::size_t replySize =
+        wire::reply(payload, ntohl(client.sin_addr.s_addr), ntohs(client.sin_port), reply);
     const int replyResult = sendTo(temporary,
                                    reinterpret_cast<const char*>(reply.data()),
                                    static_cast<int>(replySize),

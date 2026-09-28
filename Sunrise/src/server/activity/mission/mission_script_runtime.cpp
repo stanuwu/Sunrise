@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <limits>
+#include <memory>
 #include <new>
 #include <string_view>
 #include <vector>
@@ -725,7 +726,8 @@ void service(std::uint64_t now) noexcept {
 
 /** Copies every open instance row and every retained attach row for the panel. */
 void snapshot(DiagnosticsSnapshot& output) noexcept {
-    output = {};
+    std::destroy_at(&output);
+    std::construct_at(&output);
     AcquireSRWLockShared(&g_lock);
     output.enabled = g_enabled;
     output.pathReady = g_pathReady;

@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../member_context.h"
+#include "../../member_selection.h"
 #include "../activity_membership_query.h"
 
 namespace sunrise::state::activity::membership::transactions {
@@ -84,9 +86,13 @@ inline MembershipState merge(const MembershipState& state,
     // region record. The client owns the token again once the teleport is spent.
     const bool hostDrivesToken =
         state.hasHostTeleport && state.hostTeleport.state != kHostTeleportSpawnState;
-    if (update.hasTransitionToken && !hostDrivesToken) {
-        merged.transitionToken = update.transitionToken;
-        merged.hasTransitionToken = true;
+    if (update.hasTransitionToken) {
+        merged.nativeTransitionToken = update.transitionToken;
+        merged.transitionReported = true;
+        if (!hostDrivesToken) {
+            merged.transitionToken = update.transitionToken;
+            merged.hasTransitionToken = true;
+        }
     }
     if (update.hasSpawn) {
         merged.spawn = update.spawn;
@@ -94,6 +100,7 @@ inline MembershipState merge(const MembershipState& state,
     }
     if (update.hasTeleport) {
         merged.teleport = update.teleport;
+        merged.teleportReported = true;
     }
     // Both legs are kept exactly as reported, -1 included, because message 12 mirrors them back.
     // Where the player is comes from `player_region`, which prefers the current leg.
@@ -163,7 +170,10 @@ inline bool equal_authoritative(const MembershipState& first,
            && equal(first.hostTeleport, second.hostTeleport)
            && equal(first.currentRegion, second.currentRegion) && equal(first.region, second.region)
            && first.currentReported == second.currentReported
-           && first.pendingReported == second.pendingReported;
+           && first.pendingReported == second.pendingReported
+           && first.transitionReported == second.transitionReported
+           && first.nativeTransitionToken == second.nativeTransitionToken
+           && first.teleportReported == second.teleportReported;
 }
 
 /**

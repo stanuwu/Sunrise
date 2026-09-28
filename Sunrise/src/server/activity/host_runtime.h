@@ -1043,13 +1043,15 @@ actor_squad_binding_status(const state::activity::SessionBinding& binding,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation = nullptr) noexcept;
 
-/** Queues one type-31 arm, or a disarm, for an exact package-derived ClientRef. */
+/** Queues one generation-bound type-31 arm or disarm for an exact package-derived ClientRef. */
 [[nodiscard]] bool request_type31_override(const state::activity::SessionBinding& binding,
                                            const ScriptableTarget& target,
+                                           std::uint64_t expectedActivityClientGeneration,
                                            const ScriptableOutputReservation* reservation = nullptr,
                                            bool enabled = true) noexcept;
 
-/** Queues one type-31 pulse carried by the exact generated group in the current activity seed. */
+/** Queues one type-31 arm/disarm carried by the exact generated group in the current activity seed.
+ */
 [[nodiscard]] bool request_state_local_type31_override(
     const state::activity::SessionBinding& binding,
     const ScriptableTarget& target,
@@ -1178,7 +1180,10 @@ withdraw_scriptable_output(const state::activity::SessionBinding& binding,
                            std::uint64_t intentSequence,
                            std::uint64_t expectedRevision) noexcept;
 
-/** Applies queued client and operator events on the server service slice. */
+/**
+ * Applies queued client and operator events after admitting every retained activity's storage.
+ * A record allocation or capacity failure leaves the ordered input queue intact for a later slice.
+ */
 void service(std::uint64_t now) noexcept;
 
 /** Copies the latest complete diagnostic view. */
@@ -1242,18 +1247,18 @@ void read_mission_inputs_after(MissionInputCursor after, MissionInputRead& outpu
 [[nodiscard]] bool pending_incident(const state::activity::SessionBinding& binding,
                                     PendingIncident& output) noexcept;
 
-/** Reads the one pending typed ClientRef body without changing its counter. */
-[[nodiscard]] bool pending_scriptable_override(const state::activity::SessionBinding& binding,
-                                               PendingScriptableOverride& output) noexcept;
-
 /**
  * Reads an override for one exact ActivityClient generation.
- * A state-local request authorized by another generation is atomically canceled here.
+ * A request authorized by another generation remains pending for its own client.
  */
 [[nodiscard]] bool
 pending_scriptable_override_for_activity_client(const state::activity::SessionBinding& binding,
                                                 std::uint64_t activityClientGeneration,
                                                 PendingScriptableOverride& output) noexcept;
+
+/** Withdraws only queued and unstaged controls authorized by a retiring native client. */
+void retire_scriptable_client(const state::activity::SessionBinding& binding,
+                              std::uint64_t generation) noexcept;
 
 /** Cancels the exact instance's raw incident before any later transport staging. */
 [[nodiscard]] bool cancel_pending_incident(const state::activity::SessionBinding& binding) noexcept;

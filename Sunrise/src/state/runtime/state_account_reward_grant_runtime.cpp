@@ -235,7 +235,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
     if (rewards.empty() || rewards.size() > mutation.rewards.size()) {
         return false;
     }
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     const std::size_t characterIndex = selected_character_index(account);
     if (!account::valid(account) || !valid_profile_inventory(account)
         || characterIndex >= account.characterCount) {
@@ -376,7 +376,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
 bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
                                  AccountState& after) noexcept {
     after = {};
-    return materialize_record_reward(account_snapshot(), mutation, after);
+    return materialize_record_reward(bound_account_snapshot(), mutation, after);
 }
 
 /** Commits the shared reward after-image and claim together. */

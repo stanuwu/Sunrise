@@ -107,6 +107,7 @@ bool prepare_authoritative(const service::Request& request, ActivityPlan& plan) 
         return false;
     }
     plan.sessionId = request.sessionId;
+    plan.transportReport = parsed.transport;
     plan.regionMoved = plan.membershipMutation.movesRegion;
     plan.transitionStarted = plan.membershipMutation.movesTransitionToken;
     std::array<char, core::log::kLineCapacity> line{};

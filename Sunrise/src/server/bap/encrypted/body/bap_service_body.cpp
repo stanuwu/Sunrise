@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../core/settings/settings.h"
 #include "../../../../middleware/bap/account_translation/account_translation_response.h"
 #include "../../../../middleware/bap/activity_host/activity_host_response.h"
 #include "../../../../middleware/bap/certificate.h"
@@ -81,8 +82,19 @@ bool process(const ServiceRoute& route,
     case BodyCodec::empty:
         written = 0;
         return true;
+    case BodyCodec::registerRelayClient:
+        outcome.hasRelayRegistration = true;
+        written = 0;
+        return true;
+    case BodyCodec::initiateRelayConnection: {
+        written = 0;
+        middleware::bap::nat_relay::InitiateRelayConnection request{};
+        if (middleware::bap::nat_relay::decode_initiate(requestBody, request)) {
+            outcome.relayInitiate = request;
+        }
+        return true;
+    }
     case BodyCodec::accountTranslationResponse: {
-        const state::AccountState account = state::account_snapshot();
         std::uint64_t identity = 0;
         server::gameplay::group::HostSessionBinding host{};
         const bool parsed =
@@ -97,11 +109,18 @@ bool process(const ServiceRoute& route,
             parsed && identity != 0
             && server::gameplay::group::host_session_for_activity(identity, host)
             && host.target.sessionId == identity;
+        state::AccountHandle identityAccount = state::kInvalidAccount;
+        const bool legacyPairing = core::settings::role() == core::settings::Role::embedded
+                                   && !core::settings::get().server.upstream.enabled;
         const bool accountIdentity =
-            parsed && identity != 0 && !logicalHost && pairs_identity(identity);
+            parsed && identity != 0 && !logicalHost
+            && (legacyPairing
+                    ? pairs_identity(identity)
+                          && (identityAccount = state::bound_account()) != state::kInvalidAccount
+                    : state::account_handle_for_identity(identity, identityAccount));
         const std::uint64_t soid = zeroHandle        ? liveSession
                                    : logicalHost     ? host.target.sessionId
-                                   : accountIdentity ? account.primarySoid
+                                   : accountIdentity ? state::account_primary_soid(identityAccount)
                                                      : 0;
         std::array<char, core::log::kLineCapacity> line{};
         const int count = std::snprintf(line.data(),
@@ -129,7 +148,7 @@ bool process(const ServiceRoute& route,
         }
         bool hasAllocation = false;
         const bool encoded = activity_host_manager::encode_response(
-            requestBody, output, written, *allocation, hasAllocation);
+            requestBody, output, written, *allocation, hasAllocation, outcome.startupReservations);
         if (!encoded || !hasAllocation) {
             clear_transaction(outcome);
         }
@@ -144,6 +163,7 @@ bool process(const ServiceRoute& route,
         bool hasTransaction = false;
         const bool processed =
             activity_message::process(activity, rosterDecode, requestBody, *plan, hasTransaction);
+        outcome.hasRelayConnectivityFailure = processed && plan->hasRelayConnectivityFailure;
         if (!processed || !hasTransaction) {
             clear_transaction(outcome);
         }
@@ -202,6 +222,9 @@ bool process(const ServiceRoute& route,
                 return refuse_web_action(message, output, written);
             }
             outcome.hasChangeCharacter = true;
+            // Character selection clears the native cache without another WS702 report.
+            // Withdraw the old report only when this transition's response commits.
+            outcome.nativePresence = state::social::NativePresence{};
             return true;
         }
         state::investment::store::Transaction investmentTransaction;
@@ -234,6 +257,7 @@ bool process(const ServiceRoute& route,
             sunrise::server::bap::arm_account_resync_everywhere();
         }
         outcome.hasSubscription = webOutcome.hasSubscription;
+        outcome.nativePresence = webOutcome.nativePresence;
         outcome.hasRecordClaim = webOutcome.hasRecordClaim;
         outcome.hasArtifactReset = webOutcome.hasArtifactReset;
         outcome.artifactReset = webOutcome.artifactReset;

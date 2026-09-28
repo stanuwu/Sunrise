@@ -30,12 +30,18 @@ enum class WriteDisposition {
 [[nodiscard]] bool current_build_identity(std::uint64_t configuredEquipmentHash,
                                           BuildIdentity& identity) noexcept;
 
+/** Reads the deployed game image's PE identity without loading it into the server process. */
+[[nodiscard]] bool file_build_identity(const wchar_t* path,
+                                       std::uint64_t configuredEquipmentHash,
+                                       BuildIdentity& identity) noexcept;
+
 /**
  * Loads one exact cache file into fixed caller storage.
  * @param path Null-terminated cache path.
  * @param expectedBuild Current executable build identity.
  * @param output Fixed caller storage for all generated domains.
  * @param counts Receives every checked domain count.
+ * @param policy Shared catalogs validate the installed build independently of producer equipment.
  * @return Missing, loaded, stale, or invalid. Never leaves partial counts.
  */
 [[nodiscard]] LoadStatus load(const wchar_t* path,

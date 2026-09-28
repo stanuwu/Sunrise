@@ -193,7 +193,7 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
                               PendingItemAcquisition& mutation) noexcept {
     const std::lock_guard lock(investment::store::g_mutex);
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     build_data::collectibles::Definition collectible{};
     build_data::items::Definition grantedDefinition{};
     // A vendor row may name an item with no collectible, so the collectible steps are skipped
@@ -249,7 +249,7 @@ bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
                                        PendingItemAcquisition& mutation) noexcept {
     const std::lock_guard lock(investment::store::g_mutex);
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     build_data::items::Definition grantedDefinition{};
     if (!account::valid(account) || !valid_profile_inventory(account)
         || !build_data::find_item_definition_index(itemDefinitionIndex, grantedDefinition)
@@ -293,7 +293,7 @@ bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
         hashes[index] = definition.definitionHash;
     }
 
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     const std::size_t characterIndex = selected_character_index(account);
     if (!account::valid(account) || characterIndex >= account.characterCount) {
         return false;
@@ -564,7 +564,7 @@ bool preview_item_acquisition(const PendingItemAcquisition& mutation,
     const std::lock_guard lock(investment::store::g_mutex);
     after = {};
     afterUnlocks = {};
-    if (!materialize_item_acquisition(account_snapshot(), mutation, after)
+    if (!materialize_item_acquisition(bound_account_snapshot(), mutation, after)
         || !investment::store::read_unlocks(afterUnlocks,
                                             static_cast<int>(mutation.characterIndex))) {
         return false;
@@ -583,7 +583,7 @@ bool preview_item_acquisition(const PendingItemAcquisition& mutation,
 bool preview_direct_item_bundle(const PendingDirectItemBundle& mutation,
                                 AccountState& after) noexcept {
     after = {};
-    return materialize_direct_item_bundle(account_snapshot(), mutation, after);
+    return materialize_direct_item_bundle(bound_account_snapshot(), mutation, after);
 }
 
 /**
@@ -743,7 +743,7 @@ bool prepare_profile_item_acquisition(
     std::optional<std::span<const build_data::vendors::SaleCost>> price,
     PendingProfileItemAcquisition& mutation) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     build_data::collectibles::Definition collectible{};
     build_data::items::Definition item{};
     item_details::Definition detail{};
@@ -793,7 +793,7 @@ bool prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex
                                                std::int32_t quantity,
                                                PendingProfileItemAcquisition& mutation) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     build_data::items::Definition item{};
     item_details::Definition detail{};
     if (quantity <= 0 || !account::valid(account) || !valid_profile_inventory(account)
@@ -817,7 +817,7 @@ bool prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex
 bool preview_profile_item_acquisition(const PendingProfileItemAcquisition& mutation,
                                       AccountState& after) noexcept {
     after = {};
-    const AccountState current = account_snapshot();
+    const AccountState current = bound_account_snapshot();
     return materialize_profile_acquisition(current, mutation, after);
 }
 
