@@ -698,6 +698,7 @@ bool RewardBuild::read_item(std::uint32_t hash,
 bool RewardBuild::begin_items(std::size_t count) noexcept {
     unboundAcquiredFlags_ = 0;
     discardedAcquiredFlags_ = 0;
+    unreadItems_ = 0;
     // A refused load has already reported itself.
     if (!loaded_) {
         return false;
@@ -724,9 +725,30 @@ void RewardBuild::item(std::uint16_t index,
     }
 }
 
-bool RewardBuild::publish() noexcept {
+void RewardBuild::item_unread(std::uint16_t index) noexcept {
+    if (unreadItems_++ == 0) {
+        firstUnreadItem_ = index;
+    }
+}
+
+bool RewardBuild::publish(std::size_t catalogItemCount) noexcept {
     if (!loaded_) {
         return false;
+    }
+    // Publishing now would prune every entry that names an unread item.
+    if (unreadItems_ != 0) {
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::warn,
+                          "ev=pkg stage=rewards result=fail reason=item_read unread_items=%zu "
+                          "first_index=%u",
+                          unreadItems_,
+                          static_cast<unsigned>(firstUnreadItem_));
+        return false;
+    }
+    // A catalog that lost trailing rows is shorter than the table, and the cache pairs each of its
+    // items with one reward row.
+    if (catalogItemCount < items_.size()) {
+        items_.resize(catalogItemCount);
     }
     // Cleared first so the entry pass also drops draws of a cleared wrapper.
     for (auto& item : items_) {

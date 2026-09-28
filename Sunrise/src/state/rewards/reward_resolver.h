@@ -38,8 +38,8 @@ struct Context {
                             const Context& context,
                             bool& result) noexcept;
 
-/** How one resolution ended; ineligible means the saved unlocks left nothing to draw. */
-enum class Resolution : std::uint8_t { resolved, ineligible, refused };
+/** Ineligible: the saved unlocks left nothing to draw. Exceeded: this draw outgrew a bound. */
+enum class Resolution : std::uint8_t { resolved, ineligible, exceeded, refused };
 
 /** Plans an acquisition without changing State; retains wrappers opened separately. */
 [[nodiscard]] Resolution resolve(const Context& context,

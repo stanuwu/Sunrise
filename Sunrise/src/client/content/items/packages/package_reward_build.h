@@ -79,8 +79,10 @@ public:
     [[nodiscard]] bool begin_items(std::size_t count) noexcept;
     /** Records one item's wrapper and acquisition flag; an unreadable item stays unavailable. */
     void item(std::uint16_t index, std::uint32_t hash, std::span<const std::byte> blob) noexcept;
-    /** Drops rows naming items or pools that were not read, then publishes the banks. */
-    [[nodiscard]] bool publish() noexcept;
+    /** Notes an item whose definition failed to read; publication waits for a clean walk. */
+    void item_unread(std::uint16_t index) noexcept;
+    /** Trims item rows to the catalog, drops rows naming unread items or pools, then publishes. */
+    [[nodiscard]] bool publish(std::size_t catalogItemCount) noexcept;
 
 private:
     /** Appends one entry; a bank failure also names the bank and what refused it. */
@@ -95,6 +97,8 @@ private:
     bool supplementalMissing_{};
     std::size_t unboundAcquiredFlags_{};
     std::size_t discardedAcquiredFlags_{};
+    std::size_t unreadItems_{};
+    std::uint16_t firstUnreadItem_{};
     std::vector<state::build_data::rewards::Pool> pools_;
     std::vector<state::build_data::rewards::Entry> entries_;
     std::vector<state::build_data::rewards::Item> items_;

@@ -110,9 +110,18 @@ bool build_item_rows(const reader::Source& source,
         item.definitionHash = row.definitionHash;
         item.definitionIndex = static_cast<std::uint16_t>(index);
         std::uint32_t itemClass = 0;
-        if (!reader::read_tag(source, storage.scratch, row.targetTag, storage.definition, itemClass)
-            || !tables::items::read_definition(std::span<const std::byte>{storage.definition},
-                                               item)) {
+        if (!reader::read_tag(
+                source, storage.scratch, row.targetTag, storage.definition, itemClass)) {
+            // The published catalog read this row before, so its reward waits for a retry; a row
+            // the catalog lacks stays pruned from both.
+            state::build_data::items::Definition cataloged{};
+            if (rewardStorageReady
+                && state::build_data::find_item_definition_index(item.definitionIndex, cataloged)) {
+                storage.rewardBuild.item_unread(item.definitionIndex);
+            }
+            continue;
+        }
+        if (!tables::items::read_definition(std::span<const std::byte>{storage.definition}, item)) {
             continue;
         }
         if (rewardStorageReady && itemClass == tables::kItemDefinitionClass) {
@@ -166,9 +175,6 @@ bool build_item_rows(const reader::Source& source,
             append_initial_plugs(item, table.count, storage.detailRequests);
         }
     }
-    // A reward refusal is reported by RewardBuild and does not block the other item domains.
-    const bool rewardsPublished =
-        !needRewards || (rewardStorageReady && storage.rewardBuild.publish());
     bool requestsFit = true;
     if (needRows) {
         // Every walked entry either published a row or was skipped, so the count of one
@@ -184,6 +190,13 @@ bool build_item_rows(const reader::Source& source,
         published =
             state::build_data::publish_item_definitions(std::span(storage.rows).first(rowCount));
     }
+    // A reward refusal is reported by RewardBuild and does not block the other item domains.
+    // Rewards publish only beside the item catalog and at its row count, so both omit the same
+    // unread rows.
+    const bool rewardsPublished =
+        !needRewards
+        || (rewardStorageReady && state::build_data::item_definitions_ready()
+            && storage.rewardBuild.publish(state::build_data::item_definition_count()));
     if (!published) {
         reason = !detailStorageReady ? "detail_storage"
                  : !requestsFit      ? "detail_capacity"

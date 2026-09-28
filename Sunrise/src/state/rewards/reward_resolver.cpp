@@ -132,6 +132,8 @@ struct Resolver {
     AcquiredFlags& acquiredFlags;
     bool& excludedByUnlocks;
     bool& leafDrawn;
+    bool& leafFlagAcquired;
+    Resolution& failure;
     std::size_t wrapperDepth{};
     std::array<const definitions::Entry*, kDrawCapacity> selectedEntries{};
     std::array<std::uint32_t, kDrawCapacity> selectedCategories{};
@@ -273,6 +275,7 @@ struct Resolver {
             return draw(chosen->poolIndex, category, depth + 1, childTotal);
         }
         if (selectedCount == selectedEntries.size()) {
+            failure = Resolution::exceeded;
             return refuse(context, "reward_selection_capacity");
         }
         selectedEntries[selectedCount] = chosen;
@@ -329,18 +332,22 @@ struct Resolver {
                            acquiredFlags,
                            excludedByUnlocks,
                            childLeafDrawn,
+                           leafFlagAcquired,
+                           failure,
                            wrapperDepth + 1};
             if (!child.open_wrapper(item)) {
                 return false;
             }
-            // A child acquires its flag only when a draw inside it completed on a leaf row.
-            if (!childLeafDrawn) {
-                return true;
+            // A child's flag is set after opening whatever it drew, but only a child that drew
+            // a leaf row makes the resolution non-empty.
+            if (childLeafDrawn) {
+                leafDrawn = true;
+                leafFlagAcquired |= item.acquiredFlag != definitions::kAbsent;
             }
-            leafDrawn = true;
             return acquire_flag(item, true);
         }
         if (result.count == result.grants.size()) {
+            failure = Resolution::exceeded;
             return refuse(context, "grant_capacity");
         }
         leafDrawn = true;
@@ -389,7 +396,7 @@ bool resolve_item(definitions::View data,
                   std::uint16_t itemIndex,
                   std::uint32_t quantity,
                   Result& result,
-                  bool& ineligible) noexcept {
+                  Resolution& failure) noexcept {
     result = {};
     if (itemIndex >= data.items.size() || quantity == 0 || quantity > kMaximumQuantity) {
         return refuse(context, "reward_shape");
@@ -413,6 +420,7 @@ bool resolve_item(definitions::View data,
         AcquiredFlags acquiredFlags{};
         bool excludedByUnlocks = false;
         bool leafDrawn = false;
+        bool leafFlagAcquired = false;
         Resolver resolver{data,
                           context,
                           staged,
@@ -420,12 +428,15 @@ bool resolve_item(definitions::View data,
                           wrapperSeed,
                           acquiredFlags,
                           excludedByUnlocks,
-                          leafDrawn};
+                          leafDrawn,
+                          leafFlagAcquired,
+                          failure};
         if (!resolver.open_wrapper(item)) {
             return false;
         }
-        if (staged.count == 0 && staged.wrapperFlags.none()) {
-            ineligible = excludedByUnlocks && !leafDrawn;
+        if (staged.count == 0 && !leafFlagAcquired) {
+            failure =
+                excludedByUnlocks && !leafDrawn ? Resolution::ineligible : Resolution::refused;
             return refuse(context, "empty_reward");
         }
         if (!resolver.acquire_flag(item, true)) {
@@ -456,25 +467,21 @@ Resolution resolve(const Context& context,
         std::uint16_t item;
         std::uint32_t quantity;
         Result& result;
-        bool ineligible;
-    } request{context, itemIndex, quantity, result, false};
+        Resolution failure;
+    } request{context, itemIndex, quantity, result, Resolution::refused};
     result = {};
     if (context.refusal != nullptr) {
         *context.refusal = "reward_item";
     }
-    if (build_data::read_reward_definitions(&request,
-                                            [](void* raw, definitions::View data) noexcept {
-                                                auto& value = *static_cast<Request*>(raw);
-                                                return resolve_item(data,
-                                                                    value.context,
-                                                                    value.item,
-                                                                    value.quantity,
-                                                                    value.result,
-                                                                    value.ineligible);
-                                            })) {
+    if (build_data::read_reward_definitions(
+            &request, [](void* raw, definitions::View data) noexcept {
+                auto& value = *static_cast<Request*>(raw);
+                return resolve_item(
+                    data, value.context, value.item, value.quantity, value.result, value.failure);
+            })) {
         return Resolution::resolved;
     }
-    return request.ineligible ? Resolution::ineligible : Resolution::refused;
+    return request.failure;
 }
 
 } // namespace sunrise::state::reward_resolution

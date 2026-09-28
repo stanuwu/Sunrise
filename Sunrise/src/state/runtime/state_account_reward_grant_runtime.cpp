@@ -165,6 +165,43 @@ apply_reward_sockets(const item_details::Definition& detail,
                                 refusal);
 }
 
+/** Finds the kept unsocketed grant of this item, or null. */
+[[nodiscard]] reward_resolution::Grant* kept_stack(reward_resolution::Result& resolved,
+                                                   std::size_t kept,
+                                                   std::uint16_t itemIndex) noexcept {
+    for (std::size_t prior = 0; prior < kept; ++prior) {
+        auto& grant = resolved.grants[prior];
+        if (grant.itemIndex == itemIndex && grant.socketCount == 0) {
+            return &grant;
+        }
+    }
+    return nullptr;
+}
+
+/** Folds repeat draws of a stackable item into its first draw; false when one stack overflows. */
+[[nodiscard]] bool consolidate_stacks(reward_resolution::Result& resolved) noexcept {
+    std::size_t kept = 0;
+    for (std::size_t index = 0; index < resolved.count; ++index) {
+        const reward_resolution::Grant grant = resolved.grants[index];
+        item_details::Definition detail{};
+        const bool stackable =
+            grant.socketCount == 0
+            && build_data::find_configured_item_detail(grant.itemIndex, detail)
+            && detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable;
+        auto* const merged = stackable ? kept_stack(resolved, kept, grant.itemIndex) : nullptr;
+        if (merged == nullptr) {
+            resolved.grants[kept++] = grant;
+            continue;
+        }
+        if (static_cast<std::int64_t>(merged->quantity) + grant.quantity > detail.maxStackSize) {
+            return false;
+        }
+        merged->quantity += grant.quantity;
+    }
+    resolved.count = kept;
+    return true;
+}
+
 /** Classifies a catalog refusal: a verdict unless a catalog was cleared meanwhile. */
 [[nodiscard]] RewardPreparation catalog_refusal(const char*& reason) noexcept {
     if (build_data::item_definitions_ready() && build_data::reward_definitions_ready()) {
@@ -223,6 +260,12 @@ enum class PassResolution { claim, replay };
             reward.quantity,
             result)
         != reward_resolution::Resolution::resolved) {
+        return false;
+    }
+    if (!consolidate_stacks(result)) {
+        if (reason != nullptr) {
+            *reason = "stack_capacity";
+        }
         return false;
     }
     if (reward.socketCount != 0) {
@@ -387,12 +430,17 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
         itemIndex,
         quantity,
         resolved);
-    // The saved unlocks can change, so an empty draw they caused is retried, not retired.
-    if (resolution == reward_resolution::Resolution::ineligible) {
+    // Unlocks can change and another draw can fit, so these are retried, not retired.
+    if (resolution == reward_resolution::Resolution::ineligible
+        || resolution == reward_resolution::Resolution::exceeded) {
         return RewardPreparation::deferred;
     }
     if (resolution != reward_resolution::Resolution::resolved) {
         return catalog_refusal(reason);
+    }
+    reason = "stack_capacity";
+    if (!consolidate_stacks(resolved)) {
+        return RewardPreparation::deferred;
     }
     reason = "reward_placement";
     return prepare_resolved_reward(resolved, mutation, &reason);
