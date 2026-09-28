@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <vector>
 
 #include "../build_data/items/quest_initialization.h"
 #include "../build_data/records/definition.h"
@@ -244,6 +245,12 @@ struct PreparedRecordReward {
     std::uint8_t previousFlag{};
 };
 
+/** One consumed wrapper's acquisition flag and the value its preparation observed. */
+struct PreparedRewardFlag {
+    std::uint16_t index{};
+    std::uint8_t previousValue{};
+};
+
 /** A reward grant that claims no record carries this instead of a record row. */
 inline constexpr std::uint16_t kUnclaimedRecordIndex = 0xFFFFU;
 
@@ -256,6 +263,8 @@ struct PendingRecordRewardGrant {
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         afterProfileItems{};
     std::array<PreparedRecordReward, kRecordRewardGrantCapacity> rewards{};
+    /** Sorted acquisition flags from wrappers which opened without remaining in inventory. */
+    std::vector<PreparedRewardFlag> wrapperFlags;
     /** Record claimed with this grant, already written to the banks, or the unclaimed row. */
     std::uint16_t claimedRecordIndex{kUnclaimedRecordIndex};
     std::uint64_t accountSoid{};
@@ -784,7 +793,10 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 /** @return Seasonal XP published in the account progression bank. */
 [[nodiscard]] std::int32_t seasonal_experience() noexcept;
 
-/** Publishes every seasonal value the seeded XP and artifact ownership imply. */
+/**
+ * Publishes every seasonal value the seeded XP and artifact ownership imply.
+ * An owed earned-perk walk runs here too.
+ */
 [[nodiscard]] bool seed_seasonal_progression() noexcept;
 
 /** @return One-based Season of Arrivals rank the published XP earns. */
@@ -794,7 +806,8 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 [[nodiscard]] std::uint16_t artifact_power_bonus() noexcept;
 
 /**
- * Adds base XP to the seasonal lanes and republishes every value derived from the total.
+ * Adds base XP to the seasonal lanes and republishes every value derived from the total,
+ * including earned-perk flags when a rank is reached or a walk is owed.
  * @param amount Positive XP to grant.
  * @return False when the amount is not positive or the total would overflow.
  */

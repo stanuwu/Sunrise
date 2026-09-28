@@ -21,6 +21,8 @@ struct Session {
     std::array<bool, kCharacterCapacity> selected{};
     std::array<std::uint16_t, kCharacterCapacity> activities{};
     std::uint64_t signInSeconds{};
+    /** Set while an earned-perk walk is owed; a rolled-back transaction restores it. */
+    bool perkWalkOwed{true};
 };
 extern Session g_session;
 

@@ -8,7 +8,7 @@ namespace sunrise::state::build_data::rewards {
 void clear() noexcept;
 /** True once pool and item banks have been published. */
 [[nodiscard]] bool ready() noexcept;
-/** Checks bank ranges, item references and bounded acyclic pool traversal. */
+/** Checks bank ranges, item references and bounded acyclic pool and wrapper traversal. */
 [[nodiscard]] bool valid(View data) noexcept;
 /** Publishes validated banks together under the catalog lock. */
 [[nodiscard]] bool replace(View data) noexcept;

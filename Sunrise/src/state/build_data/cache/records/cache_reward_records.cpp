@@ -1,6 +1,17 @@
+#include <algorithm>
+
 #include "codec.h"
 
 namespace sunrise::state::build_data::cache::records {
+namespace {
+
+/** A selection slot past an item's count holds what a default selection encodes to. */
+bool unused_selection(const RewardSelectionRecord& record) noexcept {
+    const rewards::Selection unused{};
+    return record.categoryHash == unused.categoryHash && record.count == unused.count;
+}
+
+} // namespace
 
 /** Encodes one pool identity and its member range. */
 bool encode(const rewards::Pool& value, RewardPoolRecord& record) noexcept {
@@ -68,13 +79,20 @@ bool encode(const rewards::Item& value, RewardItemRecord& record) noexcept {
     return true;
 }
 
-/** Decodes one item's wrapper; the complete-domain validator checks its references. */
+/** Decodes one item's wrapper and checks its unused selections; references are checked later. */
 bool decode(const RewardItemRecord& record, rewards::Item& value) noexcept {
     value = {};
+    if (record.selectionCount > record.selections.size()) {
+        return false;
+    }
+    const auto unused = std::span(record.selections).subspan(record.selectionCount);
+    if (!std::all_of(unused.begin(), unused.end(), unused_selection)) {
+        return false;
+    }
     value.definitionHash = record.definitionHash;
     value.poolIndex = record.poolIndex;
     value.acquiredFlag = record.acquiredFlag;
-    for (std::size_t i = 0; i < value.selections.size(); ++i) {
+    for (std::size_t i = 0; i < record.selectionCount; ++i) {
         value.selections[i] = {record.selections[i].categoryHash, record.selections[i].count};
     }
     value.selectionCount = record.selectionCount;

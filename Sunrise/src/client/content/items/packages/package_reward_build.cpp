@@ -126,18 +126,42 @@ template <typename T> bool append(std::vector<T>& bank, T value, std::size_t cap
     }
 }
 
+/** Package reads can fail temporarily. Only decoded schema failures settle a domain. */
+enum class TableRead { loaded, readFailed, unsupported };
+
 /** Reads the table an investment-root slot names, checking its class when one is expected. */
-bool root_table(const reader::Source& source,
-                reader::Scratch& scratch,
-                std::span<const std::byte> root,
-                std::size_t slot,
-                std::vector<std::byte>& blob,
-                std::uint32_t expectedClass = 0) noexcept {
+TableRead root_table(const reader::Source& source,
+                     reader::Scratch& scratch,
+                     std::span<const std::byte> root,
+                     std::size_t slot,
+                     std::vector<std::byte>& blob,
+                     std::uint32_t expectedClass) noexcept {
     std::uint32_t tag = 0;
     std::uint32_t cls = 0;
-    return tables::slot_tag(root, slot, tag) && tables::package_of(tag) != tables::kAbsentPackageId
-           && reader::read_tag(source, scratch, tag, blob, cls)
-           && (expectedClass == 0 || cls == expectedClass);
+    if (!tables::slot_tag(root, slot, tag) || tables::package_of(tag) == tables::kAbsentPackageId) {
+        return TableRead::unsupported;
+    }
+    if (!reader::read_tag(source, scratch, tag, blob, cls)) {
+        return TableRead::readFailed;
+    }
+    return expectedClass == 0 || cls == expectedClass ? TableRead::loaded : TableRead::unsupported;
+}
+
+/** Required reward tables settle only after a decoded schema failure, leaving reads retryable. */
+bool load_reward_table(const reader::Source& source,
+                       reader::Scratch& scratch,
+                       std::span<const std::byte> root,
+                       std::size_t slot,
+                       std::vector<std::byte>& blob,
+                       std::uint32_t expectedClass,
+                       const char* reason) noexcept {
+    const auto result = root_table(source, scratch, root, slot, blob, expectedClass);
+    if (result == TableRead::unsupported) {
+        settle_unsupported(reason);
+    } else if (result == TableRead::readFailed) {
+        report_refusal(reason);
+    }
+    return result == TableRead::loaded;
 }
 
 /** Reads one entry's fixed fields; a negative or non-finite weight is refused. */
@@ -187,13 +211,14 @@ bool reward_definitions_settled() noexcept {
 
 bool RewardBuild::entry(std::span<const std::byte> blob,
                         std::size_t at,
-                        const char*& fullBank) noexcept {
+                        BankFailure& failure,
+                        const char*& reason) noexcept {
     domain::Entry out{};
-    bool instructionsFull = false;
+    failure = BankFailure::none;
     if (!read_reward_entry(blob, at, out)
         || !conditions.read(
-            blob, at + kEntryConditionOffset, instructions_, out.condition, instructionsFull)) {
-        fullBank = instructionsFull ? "instruction_capacity" : nullptr;
+            blob, at + kEntryConditionOffset, instructions_, out.condition, failure)) {
+        reason = failure == BankFailure::full ? "instruction_capacity" : "instruction_storage";
         return false;
     }
     out.supplementalMissing = supplementalMissing_ && out.supplementalIndex != domain::kAbsent;
@@ -207,18 +232,21 @@ bool RewardBuild::entry(std::span<const std::byte> blob,
     for (std::size_t i = 0; i < rows.count; ++i) {
         const auto offset = rows.dataOffset + i * kModifierStride;
         domain::Modifier modifier{};
-        if (!conditions.read(blob, offset, instructions_, modifier.condition, instructionsFull)
+        if (!conditions.read(blob, offset, instructions_, modifier.condition, failure)
             || !tables::read(blob, offset + kModifierValueIndexOffset, modifier.valueIndex)
             || !tables::read(blob, offset + kModifierValueOffset, modifier.value)
             || !std::isfinite(modifier.value)) {
-            fullBank = instructionsFull ? "instruction_capacity" : nullptr;
+            reason = failure == BankFailure::full ? "instruction_capacity" : "instruction_storage";
             return false;
         }
         if (modifiers_.size() >= domain::kModifierCapacity) {
-            fullBank = "modifier_capacity";
+            failure = BankFailure::full;
+            reason = "modifier_capacity";
             return false;
         }
         if (!append(modifiers_, modifier, domain::kModifierCapacity)) {
+            failure = BankFailure::storage;
+            reason = "modifier_storage";
             return false;
         }
     }
@@ -228,24 +256,35 @@ bool RewardBuild::entry(std::span<const std::byte> blob,
         return false;
     }
     if (count > domain::kSocketOverrideCapacity - sockets_.size()) {
-        fullBank = "socket_capacity";
+        failure = BankFailure::full;
+        reason = "socket_capacity";
         return false;
     }
     out.sockets = {static_cast<std::uint32_t>(sockets_.size()), static_cast<std::uint32_t>(count)};
     for (std::size_t i = 0; i < count; ++i) {
-        if (overrides[i].socketType == domain::kAbsent
-            || !append(sockets_, overrides[i], domain::kSocketOverrideCapacity)) {
+        if (overrides[i].socketType == domain::kAbsent) {
+            return false;
+        }
+        if (!append(sockets_, overrides[i], domain::kSocketOverrideCapacity)) {
+            failure = BankFailure::storage;
+            reason = "socket_storage";
             return false;
         }
     }
     if (entries_.size() >= domain::kEntryCapacity) {
-        fullBank = "entry_capacity";
+        failure = BankFailure::full;
+        reason = "entry_capacity";
         return false;
     }
-    return append(entries_, out, domain::kEntryCapacity);
+    if (!append(entries_, out, domain::kEntryCapacity)) {
+        failure = BankFailure::storage;
+        reason = "entry_storage";
+        return false;
+    }
+    return true;
 }
 
-void RewardConditions::load_class_flags(const reader::Source& source,
+bool RewardConditions::load_class_flags(const reader::Source& source,
                                         reader::Scratch& scratch,
                                         std::span<const std::byte> root) noexcept {
     classFlags_.fill(domain::kAbsent);
@@ -254,20 +293,21 @@ void RewardConditions::load_class_flags(const reader::Source& source,
     std::vector<std::byte> blob;
     tables::Array classRows{};
     tables::Array itemRows{};
-    if (!root_table(source, scratch, root, kClassSlot, classes, kClassTable)
-        || !tables::read_array(
+    if (!load_reward_table(source, scratch, root, kClassSlot, classes, kClassTable, "class_table")
+        || !load_reward_table(
+            source, scratch, root, tables::kItemTableSlot, index, 0, "class_item_table")) {
+        return false;
+    }
+    if (!tables::read_array(
             classes, tables::kTableArrayDescriptor, kClassRow, kClassStride, classRows)
         || classRows.count != classFlags_.size()
-        || !root_table(source, scratch, root, tables::kItemTableSlot, index)
         || !tables::read_array(index,
                                tables::kTableArrayDescriptor,
                                tables::kItemIndexTableClass,
                                tables::kItemIndexRowStride,
                                itemRows)) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::warn,
-                         "ev=pkg stage=class_flags result=skip reason=class_tables");
-        return;
+        settle_unsupported("class_schema");
+        return false;
     }
     for (std::size_t i = 0; i < classFlags_.size(); ++i) {
         std::uint16_t itemIndex = domain::kAbsent;
@@ -276,46 +316,60 @@ void RewardConditions::load_class_flags(const reader::Source& source,
         if (!tables::read(std::span<const std::byte>{classes},
                           classRows.dataOffset + i * kClassStride + kDefaultFinisherOffset,
                           itemIndex)
-            || !tables::index_row(index, itemRows, itemIndex, item)
-            || !reader::read_tag(source, scratch, item.targetTag, blob, cls)
-            || cls != tables::kItemDefinitionClass) {
-            core::log::writef(
-                core::log::Channel::client,
-                core::log::Level::warn,
-                "ev=pkg stage=class_flags class=%zu result=skip reason=default_finisher",
-                i);
-            continue;
+            || !tables::index_row(index, itemRows, itemIndex, item)) {
+            settle_unsupported("class_finisher_index");
+            return false;
         }
-        if (!read_class_flag(blob, classFlags_[i])) {
+        if (!reader::read_tag(source, scratch, item.targetTag, blob, cls)) {
             core::log::writef(core::log::Channel::client,
                               core::log::Level::warn,
-                              "ev=pkg stage=class_flags class=%zu result=skip reason=use_condition",
+                              "ev=pkg stage=class_flags class=%zu result=fail reason=finisher_read",
                               i);
+            return false;
+        }
+        if (cls != tables::kItemDefinitionClass || !read_class_flag(blob, classFlags_[i])) {
+            settle_unsupported("class_finisher_schema");
+            return false;
         }
     }
+    return true;
 }
 
 bool RewardConditions::load(const reader::Source& source,
                             reader::Scratch& scratch,
                             std::span<const std::byte> root,
                             const SlotMaps& maps) noexcept {
+    loaded_ = false;
     maps_ = &maps;
-    load_class_flags(source, scratch, root);
+    if (!load_class_flags(source, scratch, root)
+        || !load_reward_table(
+            source, scratch, root, kFlagSlot, flags_, kFlagTableClass, "flag_table")
+        || !load_reward_table(
+            source, scratch, root, kValueSlot, values_, kValueTableClass, "value_table")
+        || !load_reward_table(source,
+                              scratch,
+                              root,
+                              kExpressionSlot,
+                              expressions_,
+                              kExpressionTableClass,
+                              "expression_table")) {
+        return false;
+    }
     // Shared expressions are expanded before the runtime evaluates reward conditions.
-    loaded_ =
-        root_table(source, scratch, root, kFlagSlot, flags_, kFlagTableClass)
-        && tables::read_array(
+    if (!tables::read_array(
             flags_, tables::kTableArrayDescriptor, kFlagRowClass, kBindingStride, flagRows_)
-        && root_table(source, scratch, root, kValueSlot, values_, kValueTableClass)
-        && tables::read_array(
+        || !tables::read_array(
             values_, tables::kTableArrayDescriptor, kValueRowClass, kBindingStride, valueRows_)
-        && root_table(source, scratch, root, kExpressionSlot, expressions_, kExpressionTableClass)
-        && tables::read_array(expressions_,
-                              tables::kTableArrayDescriptor,
-                              kExpressionRowClass,
-                              kExpressionRowStride,
-                              expressionRows_);
-    return loaded_;
+        || !tables::read_array(expressions_,
+                               tables::kTableArrayDescriptor,
+                               kExpressionRowClass,
+                               kExpressionRowStride,
+                               expressionRows_)) {
+        settle_unsupported("condition_schema");
+        return false;
+    }
+    loaded_ = true;
+    return true;
 }
 
 bool RewardConditions::loaded() const noexcept {
@@ -373,7 +427,8 @@ bool RewardConditions::bind(std::uint32_t native,
 bool RewardConditions::append_expression(std::span<const std::byte> blob,
                                          std::size_t at,
                                          std::vector<domain::Instruction>& bank,
-                                         std::size_t depth) const noexcept {
+                                         std::size_t depth,
+                                         BankFailure& failure) const noexcept {
     tables::Array rows{};
     if (depth >= domain::kTraversalDepth
         || !tables::read_array(
@@ -395,15 +450,23 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
                                       expressionRows_.dataOffset + operand * kExpressionRowStride
                                           + kExpressionBodyOffset,
                                       bank,
-                                      depth + 1)
+                                      depth + 1,
+                                      failure)
                 || bank.size() == before) {
                 return false;
             }
             continue;
         }
         domain::Instruction instruction{};
-        if (!bind(native, operand, instruction) || !unlocks::valid(instruction)
-            || !append(bank, instruction, domain::kInstructionCapacity)) {
+        if (!bind(native, operand, instruction) || !unlocks::valid(instruction)) {
+            return false;
+        }
+        if (bank.size() >= domain::kInstructionCapacity) {
+            failure = BankFailure::full;
+            return false;
+        }
+        if (!append(bank, instruction, domain::kInstructionCapacity)) {
+            failure = BankFailure::storage;
             return false;
         }
     }
@@ -414,11 +477,10 @@ bool RewardConditions::read(std::span<const std::byte> blob,
                             std::size_t at,
                             std::vector<domain::Instruction>& bank,
                             domain::Range& range,
-                            bool& bankFull) const noexcept {
+                            BankFailure& failure) const noexcept {
     const auto first = bank.size();
-    bankFull = false;
-    if (!append_expression(blob, at, bank, 0)) {
-        bankFull = bank.size() >= domain::kInstructionCapacity;
+    failure = BankFailure::none;
+    if (!append_expression(blob, at, bank, 0, failure)) {
         bank.resize(first);
         return false;
     }
@@ -429,31 +491,36 @@ bool RewardConditions::read(std::span<const std::byte> blob,
 bool RewardConditions::read_list(std::span<const std::byte> blob,
                                  std::size_t at,
                                  std::span<domain::Instruction> output,
-                                 std::size_t& count) const noexcept {
+                                 std::size_t& count,
+                                 BankFailure& failure) const noexcept {
     count = 0;
+    failure = BankFailure::none;
     tables::Array rows{};
     std::vector<domain::Instruction> instructions;
     if (!tables::read_array(blob, at, kConditionClass, tables::kUnlockExpressionFieldSize, rows)) {
         return false;
     }
-    // The row's condition capacity below bounds this bank.
-    bool bankFull = false;
     for (std::size_t i = 0; i < rows.count; ++i) {
         domain::Range expression{};
         if (!read(blob,
                   rows.dataOffset + i * tables::kUnlockExpressionFieldSize,
                   instructions,
                   expression,
-                  bankFull)
+                  failure)
             || expression.count == 0) {
             return false;
         }
         // Every expression attached to a progression reward must hold.
-        if (i != 0
-            && !append(instructions,
-                       domain::Instruction{unlocks::Opcode::logicalAnd, unlocks::Bank::none, 0},
-                       output.size())) {
-            return false;
+        if (i != 0) {
+            if (instructions.size() >= output.size()) {
+                return false;
+            }
+            if (!append(instructions,
+                        domain::Instruction{unlocks::Opcode::logicalAnd, unlocks::Bank::none, 0},
+                        output.size())) {
+                failure = BankFailure::storage;
+                return false;
+            }
         }
         if (instructions.size() > output.size()) {
             return false;
@@ -504,12 +571,19 @@ bool RewardBuild::load(const reader::Source& source,
     tables::Array rows{};
     std::uint32_t supplementalTag = 0;
     // Conditions load first; the season pass binds through them even if the pools are refused.
-    if (!conditions.load(source, scratch, root, maps)
-        || !tables::slot_tag(root, kSupplementalRewardSlot, supplementalTag)
-        || !root_table(source, scratch, root, kPoolSlot, blob, kPoolClass)
-        || !tables::read_array(
+    if (!conditions.load(source, scratch, root, maps)) {
+        return false;
+    }
+    if (!tables::slot_tag(root, kSupplementalRewardSlot, supplementalTag)) {
+        settle_unsupported("supplemental_slot");
+        return false;
+    }
+    if (!load_reward_table(source, scratch, root, kPoolSlot, blob, kPoolClass, "pool_table")) {
+        return false;
+    }
+    if (!tables::read_array(
             blob, tables::kTableArrayDescriptor, kPoolRowClass, kPoolStride, rows)) {
-        settle_unsupported("tables");
+        settle_unsupported("pool_schema");
         return false;
     }
     if (rows.count == 0 || rows.count > domain::kPoolCapacity) {
@@ -530,11 +604,16 @@ bool RewardBuild::load(const reader::Source& source,
                 const auto beforeInstructions = instructions_.size();
                 const auto beforeModifiers = modifiers_.size();
                 const auto beforeSockets = sockets_.size();
-                const char* fullBank = nullptr;
-                if (!entry(blob, members.dataOffset + j * kEntryStride, fullBank)) {
-                    // Skipping past a full bank would publish a pool missing some of its entries.
-                    if (fullBank != nullptr) {
-                        settle_unsupported(fullBank);
+                auto failure = BankFailure::none;
+                const char* reason = nullptr;
+                if (!entry(blob, members.dataOffset + j * kEntryStride, failure, reason)) {
+                    // Skipping a bank failure would publish a pool missing some of its entries.
+                    if (failure == BankFailure::full) {
+                        settle_unsupported(reason);
+                        return false;
+                    }
+                    if (failure == BankFailure::storage) {
+                        report_refusal(reason);
                         return false;
                     }
                     instructions_.resize(beforeInstructions);
@@ -586,6 +665,8 @@ bool RewardBuild::read_item(std::uint32_t hash,
             ++unboundAcquiredFlags_;
         } else if (flag.bank == unlocks::Bank::account) {
             item.acquiredFlag = static_cast<std::uint16_t>(flag.operand);
+        } else {
+            ++discardedAcquiredFlags_;
         }
     }
     // A zero delta means the item is not a wrapper.
@@ -616,6 +697,7 @@ bool RewardBuild::read_item(std::uint32_t hash,
 
 bool RewardBuild::begin_items(std::size_t count) noexcept {
     unboundAcquiredFlags_ = 0;
+    discardedAcquiredFlags_ = 0;
     // A refused load has already reported itself.
     if (!loaded_) {
         return false;
@@ -682,12 +764,13 @@ bool RewardBuild::publish() noexcept {
     const std::size_t droppedEntries = entries_.size() - write;
     entries_.resize(write);
     sockets_.resize(socketWrite);
-    if (unboundAcquiredFlags_ != 0 || droppedEntries != 0) {
+    if (unboundAcquiredFlags_ != 0 || discardedAcquiredFlags_ != 0 || droppedEntries != 0) {
         core::log::writef(core::log::Channel::client,
                           core::log::Level::warn,
                           "ev=pkg stage=rewards result=partial unbound_acquired_flags=%zu "
-                          "dropped_entries=%zu",
+                          "discarded_acquired_flags=%zu dropped_entries=%zu",
                           unboundAcquiredFlags_,
+                          discardedAcquiredFlags_,
                           droppedEntries);
     }
     const domain::View graph{pools_, entries_, items_, instructions_, modifiers_, sockets_};

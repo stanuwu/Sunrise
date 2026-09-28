@@ -339,6 +339,7 @@ enum class WorldRewardKind : std::uint8_t {
 /** One reward earned in world, held until a Family-4 peer can publish it. */
 struct WorldRewardRequest {
     std::uint64_t id{};
+    std::uint32_t definitionHash{};
     std::int32_t quantity{};
     std::uint16_t itemDefinitionIndex{};
     WorldRewardKind kind{};

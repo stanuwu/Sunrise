@@ -1,10 +1,12 @@
 #pragma once
 
+#include <bitset>
+
 #include "../account/account_state.h"
 #include "../build_data/rewards/definition.h"
 #include "../unlocks/definition.h"
 
-namespace sunrise::state::rewards {
+namespace sunrise::state::reward_resolution {
 
 /** One item a resolved reward grants, with the socket overrides its row carries. */
 struct Grant {
@@ -18,6 +20,8 @@ struct Grant {
 struct Result {
     std::array<Grant, build_data::rewards::kGrantCapacity> grants{};
     std::size_t count{};
+    /** Consumed wrappers acquire flags without occupying inventory grant rows. */
+    std::bitset<unlocks::kAccountFlagCapacity> wrapperFlags{};
 };
 
 /** The seed belongs to the prepared server transaction, so validation repeats the same draw. */
@@ -43,4 +47,4 @@ enum class Resolution : std::uint8_t { resolved, ineligible, refused };
                                  std::uint32_t quantity,
                                  Result& result) noexcept;
 
-} // namespace sunrise::state::rewards
+} // namespace sunrise::state::reward_resolution

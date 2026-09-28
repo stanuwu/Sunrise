@@ -7,10 +7,18 @@
 #include "../build_data/runtime.h"
 #include "../unlocks/unlocks_expression.h"
 
-namespace sunrise::state::rewards {
+namespace sunrise::state::reward_resolution {
 namespace {
 
 namespace definitions = build_data::rewards;
+using AcquiredFlags = std::bitset<unlocks::kAccountFlagCapacity>;
+
+/** Completed acquisitions are visible to later draws without changing saved unlocks. */
+struct ConditionInputs {
+    const Context& context;
+    const AcquiredFlags* acquiredFlags{};
+};
+
 /** The empty category tag matches every wrapper selection. */
 constexpr std::uint32_t kEmptyTag = 0x811C9DC5U;
 /** Native wrappers retain up to 64 selections, including rows without an item grant. */
@@ -28,11 +36,13 @@ bool refuse(const Context& context, const char* reason) noexcept {
 
 /** Reads one validated flag from the caller's unlock banks or selected character. */
 bool read_flag(const void* raw, const unlocks::Instruction& instruction, bool& set) noexcept {
-    const auto& context = *static_cast<const Context*>(raw);
+    const auto& inputs = *static_cast<const ConditionInputs*>(raw);
+    const auto& context = inputs.context;
     const auto index = instruction.operand;
     switch (instruction.bank) {
     case unlocks::Bank::account:
-        set = context.unlocks.accountFlags[index] == unlocks::kFlagSet;
+        set = (inputs.acquiredFlags != nullptr && (*inputs.acquiredFlags)[index])
+              || context.unlocks.accountFlags[index] == unlocks::kFlagSet;
         return true;
     case unlocks::Bank::profile:
         set = context.unlocks.profileFlags[index] == unlocks::kFlagSet;
@@ -52,7 +62,7 @@ bool read_flag(const void* raw, const unlocks::Instruction& instruction, bool& s
 bool read_value(const void* raw,
                 const unlocks::Instruction& instruction,
                 std::int32_t& value) noexcept {
-    const auto& context = *static_cast<const Context*>(raw);
+    const auto& context = static_cast<const ConditionInputs*>(raw)->context;
     switch (instruction.bank) {
     case unlocks::Bank::account:
         value = context.unlocks.objectiveValues[instruction.operand];
@@ -68,7 +78,8 @@ bool read_value(const void* raw,
 /** An empty program is unconditional; external identities are not in the saved banks. */
 bool condition(std::span<const definitions::Instruction> program,
                const Context& context,
-               bool& result) noexcept {
+               bool& result,
+               const AcquiredFlags* acquiredFlags = nullptr) noexcept {
     result = program.empty();
     if (program.empty()) {
         return true;
@@ -83,20 +94,33 @@ bool condition(std::span<const definitions::Instruction> program,
                                                                       : "external_value");
         }
     }
-    const unlocks::Inputs inputs{read_flag, read_value, &context};
+    const ConditionInputs conditionInputs{context, acquiredFlags};
+    const unlocks::Inputs inputs{read_flag, read_value, &conditionInputs};
     return unlocks::evaluate(program, inputs, result) || refuse(context, "condition_shape");
 }
 
 bool condition(definitions::View data,
                definitions::Range expression,
                const Context& context,
-               bool& result) noexcept {
+               bool& result,
+               const AcquiredFlags& acquiredFlags) noexcept {
     if (!definitions::fits(expression, data.instructions)) {
         result = false;
         return refuse(context, "condition_shape");
     }
-    return condition(
-        data.instructions.subspan(expression.first, expression.count), context, result);
+    return condition(data.instructions.subspan(expression.first, expression.count),
+                     context,
+                     result,
+                     &acquiredFlags);
+}
+
+/** SplitMix64 supplies replayable wrapper seeds and wrapper-local draws. */
+std::uint64_t next_random(std::uint64_t& state) noexcept {
+    state += 0x9E3779B97F4A7C15ULL;
+    auto bits = state;
+    bits = (bits ^ (bits >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    bits = (bits ^ (bits >> 27)) * 0x94D049BB133111EBULL;
+    return bits ^ (bits >> 31);
 }
 
 struct Resolver {
@@ -104,19 +128,17 @@ struct Resolver {
     const Context& context;
     Result& result;
     std::uint64_t random;
+    std::uint64_t& wrapperSeed;
+    AcquiredFlags& acquiredFlags;
+    bool& excludedByUnlocks;
+    bool& leafDrawn;
+    std::size_t wrapperDepth{};
     std::array<const definitions::Entry*, kDrawCapacity> selectedEntries{};
     std::array<std::uint32_t, kDrawCapacity> selectedCategories{};
     std::size_t selectedCount{};
-    bool excludedByUnlocks{};
 
     double fraction() noexcept {
-        // SplitMix64 makes a prepared seed replayable without shared random state.
-        random += 0x9E3779B97F4A7C15ULL;
-        auto bits = random;
-        bits = (bits ^ (bits >> 30)) * 0xBF58476D1CE4E5B9ULL;
-        bits = (bits ^ (bits >> 27)) * 0x94D049BB133111EBULL;
-        bits ^= bits >> 31;
-        return static_cast<double>(bits >> 11) * 0x1.0p-53;
+        return static_cast<double>(next_random(random) >> 11) * 0x1.0p-53;
     }
 
     bool weight(const definitions::Entry& entry,
@@ -134,7 +156,7 @@ struct Resolver {
             }
         }
         bool enabled = false;
-        if (!condition(data, entry.condition, context, enabled)) {
+        if (!condition(data, entry.condition, context, enabled, acquiredFlags)) {
             return false;
         }
         if (!enabled) {
@@ -147,7 +169,7 @@ struct Resolver {
         }
         for (const auto& modifier :
              data.modifiers.subspan(entry.modifiers.first, entry.modifiers.count)) {
-            if (!condition(data, modifier.condition, context, enabled)) {
+            if (!condition(data, modifier.condition, context, enabled, acquiredFlags)) {
                 return false;
             }
             if (enabled) {
@@ -256,22 +278,72 @@ struct Resolver {
         selectedEntries[selectedCount] = chosen;
         selectedCategories[selectedCount++] = category;
         if (chosen->itemIndex == definitions::kAbsent) {
+            leafDrawn = true;
             return true;
         }
-        return append_grant(*chosen);
+        return acquire_item(*chosen);
     }
 
-    /** Appends the chosen leaf's item grant with the socket overrides its row carries. */
-    bool append_grant(const definitions::Entry& chosen) noexcept {
+    /** Completes one acquisition after its children have finished. */
+    bool acquire_flag(const definitions::Item& item, bool wrapper) noexcept {
+        if (item.acquiredFlag == definitions::kAbsent) {
+            return true;
+        }
+        if (item.acquiredFlag >= acquiredFlags.size()) {
+            return refuse(context, "acquisition_flag");
+        }
+        acquiredFlags.set(item.acquiredFlag);
+        if (wrapper) {
+            result.wrapperFlags.set(item.acquiredFlag);
+        }
+        return true;
+    }
+
+    /** Acquires a selected item, opening automatic wrappers before the next parent draw. */
+    bool acquire_item(const definitions::Entry& chosen) noexcept {
         if (chosen.quantity == 0 || chosen.quantity > kMaximumQuantity) {
             return refuse(context, "reward_quantity");
-        }
-        if (result.count == result.grants.size()) {
-            return refuse(context, "grant_capacity");
         }
         if (!definitions::fits(chosen.sockets, data.sockets)) {
             return refuse(context, "socket_range");
         }
+        const auto& item = data.items[chosen.itemIndex];
+        if (item.definitionHash == 0) {
+            return refuse(context, "item_unavailable");
+        }
+        if (item.poolIndex != definitions::kAbsent
+            && (item.flags & definitions::kOpenOnAcquisition) != 0) {
+            if (chosen.quantity != 1) {
+                return refuse(context, "wrapper_quantity");
+            }
+            // These sockets belong to the consumed instance, not its descendant items.
+            if (chosen.sockets.count != 0) {
+                return refuse(context, "wrapper_socket_override");
+            }
+            bool childLeafDrawn = false;
+            Resolver child{data,
+                           context,
+                           result,
+                           next_random(wrapperSeed),
+                           wrapperSeed,
+                           acquiredFlags,
+                           excludedByUnlocks,
+                           childLeafDrawn,
+                           wrapperDepth + 1};
+            if (!child.open_wrapper(item)) {
+                return false;
+            }
+            // A child acquires its flag only when a draw inside it completed on a leaf row.
+            if (!childLeafDrawn) {
+                return true;
+            }
+            leafDrawn = true;
+            return acquire_flag(item, true);
+        }
+        if (result.count == result.grants.size()) {
+            return refuse(context, "grant_capacity");
+        }
+        leafDrawn = true;
         auto& grant = result.grants[result.count++];
         grant.itemIndex = chosen.itemIndex;
         grant.quantity = static_cast<std::int32_t>(chosen.quantity);
@@ -281,6 +353,33 @@ struct Resolver {
         grant.socketCount = chosen.sockets.count;
         std::copy_n(
             data.sockets.begin() + chosen.sockets.first, grant.socketCount, grant.sockets.begin());
+        return acquire_flag(item, false);
+    }
+
+    /** Each wrapper owns its selection history and random stream; pool references share them. */
+    bool open_wrapper(const definitions::Item& item) noexcept {
+        if (wrapperDepth >= definitions::kTraversalDepth) {
+            return refuse(context, "wrapper_depth");
+        }
+        if (item.selectionCount == 0 || item.selectionCount > item.selections.size()) {
+            return refuse(context, "wrapper_selections");
+        }
+        for (std::size_t i = 0; i < item.selectionCount; ++i) {
+            const auto& declared = item.selections[i];
+            for (std::size_t j = 0; j < declared.count; ++j) {
+                double total = 0;
+                if (!pool_weight(item.poolIndex, declared.categoryHash, 0, total)) {
+                    return false;
+                }
+                // Completed acquisitions can leave fewer eligible members than requested.
+                if (total == 0) {
+                    break;
+                }
+                if (!draw(item.poolIndex, declared.categoryHash, 0, total)) {
+                    return false;
+                }
+            }
+        }
         return true;
     }
 };
@@ -310,29 +409,27 @@ bool resolve_item(definitions::View data,
         if (quantity != 1) {
             return refuse(context, "wrapper_quantity");
         }
-        if (item.selectionCount == 0 || item.selectionCount > item.selections.size()) {
-            return refuse(context, "wrapper_selections");
+        std::uint64_t wrapperSeed = context.seed;
+        AcquiredFlags acquiredFlags{};
+        bool excludedByUnlocks = false;
+        bool leafDrawn = false;
+        Resolver resolver{data,
+                          context,
+                          staged,
+                          context.seed,
+                          wrapperSeed,
+                          acquiredFlags,
+                          excludedByUnlocks,
+                          leafDrawn};
+        if (!resolver.open_wrapper(item)) {
+            return false;
         }
-        Resolver resolver{data, context, staged, context.seed};
-        for (std::size_t i = 0; i < item.selectionCount; ++i) {
-            const auto& declared = item.selections[i];
-            for (std::size_t j = 0; j < declared.count; ++j) {
-                double total = 0;
-                if (!resolver.pool_weight(item.poolIndex, declared.categoryHash, 0, total)) {
-                    return false;
-                }
-                // A fixed bundle can have fewer eligible members after an acquisition unlock.
-                if (total == 0) {
-                    break;
-                }
-                if (!resolver.draw(item.poolIndex, declared.categoryHash, 0, total)) {
-                    return false;
-                }
-            }
-        }
-        if (staged.count == 0) {
-            ineligible = resolver.excludedByUnlocks;
+        if (staged.count == 0 && staged.wrapperFlags.none()) {
+            ineligible = excludedByUnlocks && !leafDrawn;
             return refuse(context, "empty_reward");
+        }
+        if (!resolver.acquire_flag(item, true)) {
+            return false;
         }
     }
     result = staged;
@@ -380,4 +477,4 @@ Resolution resolve(const Context& context,
     return request.ineligible ? Resolution::ineligible : Resolution::refused;
 }
 
-} // namespace sunrise::state::rewards
+} // namespace sunrise::state::reward_resolution

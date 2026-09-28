@@ -15,6 +15,9 @@ namespace sunrise::client::content::items::packages {
 
 struct SlotMaps;
 
+/** A full reward bank settles the domain; failed storage is retried on a later pass. */
+enum class BankFailure : std::uint8_t { none, full, storage };
+
 /** Resolves expression references and unlock slots once for a package pass. */
 class RewardConditions {
 public:
@@ -34,21 +37,24 @@ public:
                             std::size_t at,
                             std::vector<state::build_data::rewards::Instruction>& bank,
                             state::build_data::rewards::Range& range,
-                            bool& bankFull) const noexcept;
+                            BankFailure& failure) const noexcept;
     /** Expands a list of expressions into one program where every expression must hold. */
     [[nodiscard]] bool read_list(std::span<const std::byte> blob,
                                  std::size_t at,
                                  std::span<state::build_data::rewards::Instruction> output,
-                                 std::size_t& count) const noexcept;
+                                 std::size_t& count,
+                                 BankFailure& failure) const noexcept;
 
 private:
     [[nodiscard]] bool append_expression(std::span<const std::byte> blob,
                                          std::size_t at,
                                          std::vector<state::build_data::rewards::Instruction>& bank,
-                                         std::size_t depth) const noexcept;
-    void load_class_flags(const middleware::content::packages::reader::Source& source,
-                          middleware::content::packages::reader::Scratch& scratch,
-                          std::span<const std::byte> root) noexcept;
+                                         std::size_t depth,
+                                         BankFailure& failure) const noexcept;
+    /** Reads every class binding before any reward condition can be published. */
+    [[nodiscard]] bool load_class_flags(const middleware::content::packages::reader::Source& source,
+                                        middleware::content::packages::reader::Scratch& scratch,
+                                        std::span<const std::byte> root) noexcept;
     std::array<std::uint16_t, state::kCharacterClassCount> classFlags_{};
     const SlotMaps* maps_{};
     bool loaded_{};
@@ -77,15 +83,18 @@ public:
     [[nodiscard]] bool publish() noexcept;
 
 private:
-    /** Appends one entry; fullBank names the bank that refused it, if any. */
-    [[nodiscard]] bool
-    entry(std::span<const std::byte> blob, std::size_t at, const char*& fullBank) noexcept;
+    /** Appends one entry; a bank failure also names the bank and what refused it. */
+    [[nodiscard]] bool entry(std::span<const std::byte> blob,
+                             std::size_t at,
+                             BankFailure& failure,
+                             const char*& reason) noexcept;
     [[nodiscard]] bool read_item(std::uint32_t hash,
                                  std::span<const std::byte> blob,
                                  state::build_data::rewards::Item& item) noexcept;
     bool loaded_{};
     bool supplementalMissing_{};
     std::size_t unboundAcquiredFlags_{};
+    std::size_t discardedAcquiredFlags_{};
     std::vector<state::build_data::rewards::Pool> pools_;
     std::vector<state::build_data::rewards::Entry> entries_;
     std::vector<state::build_data::rewards::Item> items_;

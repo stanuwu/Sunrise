@@ -29,9 +29,12 @@ inline constexpr std::size_t kSocketOverrideCapacity = 2048;
 inline constexpr std::size_t kSocketsPerItem = items::details::kInitialPlugCapacity;
 /** Category selections one wrapper declares. The most any shipped wrapper declares is four. */
 inline constexpr std::size_t kSelectionCapacity = 4;
-/** Rows one grant may publish: one push's 16-record character and profile change lists. */
+/** Grant rows one resolution may prepare: both change lists in full; perk rows use no list. */
 inline constexpr std::size_t kGrantCapacity = 32;
-/** Nested pools and referenced conditions share a bounded traversal depth. */
+/**
+ * Nested pools, automatic wrappers and referenced conditions share one traversal depth. The
+ * installed graph reaches 7.
+ */
 inline constexpr std::size_t kTraversalDepth = 32;
 
 struct Range {

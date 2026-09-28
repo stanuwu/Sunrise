@@ -63,8 +63,6 @@ selected_character(const state::AccountState& account) noexcept {
                                                std::span<std::byte> response,
                                                std::size_t& written,
                                                bool& touchesScratch) noexcept {
-    const std::unique_ptr<state::PendingRecordRewardGrant> pending(
-        new (std::nothrow) state::PendingRecordRewardGrant);
     const auto fail = [&](const char* reason) noexcept {
         report_reward_refusal("world_publish", request.itemDefinitionIndex, reason);
         return false;
@@ -73,13 +71,18 @@ selected_character(const state::AccountState& account) noexcept {
     if (response.size() < scratch.framed.size()) {
         return false;
     }
+    const std::unique_ptr<state::PendingRecordRewardGrant> pending(
+        new (std::nothrow) state::PendingRecordRewardGrant);
+    if (!pending) {
+        return fail("reward_allocation");
+    }
     std::uint64_t seed = 0;
     if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
         return fail("random_source");
     }
     const char* reason = "transaction";
     state::investment::store::Transaction transaction;
-    if (!pending || !transaction.ready()) {
+    if (!transaction.ready()) {
         return fail(reason);
     }
     const auto preparation =

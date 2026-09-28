@@ -1,12 +1,10 @@
-/** Family-4 reward updates: season pass packages and record rewards, one revision each. */
+/** Family-4 reward updates: record rewards, one revision each. */
 
 #include <algorithm>
 #include <cstddef>
 #include <limits>
-#include <optional>
 #include <span>
 
-#include "../../../../../middleware/datagen/definitions.h"
 #include "../../../../../middleware/datagen/family4/account/account_encoder.h"
 #include "../../../../../middleware/datagen/family4/account/layout.h"
 #include "../../../../../middleware/datagen/family4/character/character_encoder.h"
@@ -21,7 +19,7 @@ namespace sunrise::server::bap::encrypted::push::snapshot {
 
 namespace family4_datagen = middleware::datagen::family4;
 
-// Every row one reward grant publishes is named in the character or the profile change list.
+// The grant array holds both change lists in full; State bounds each list separately.
 static_assert(state::kRecordRewardGrantCapacity
               == family4_datagen::character::layout::kInventoryChangeRecordCapacity
                      + family4_datagen::account::layout::kProfileInventoryChangeRecordCapacity);
@@ -36,7 +34,7 @@ bool prepare_record_reward_grant(
     Prepared& prepared) noexcept {
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
-    if (!mutation.prepared || mutation.rewardCount == 0
+    if (!mutation.prepared || (mutation.rewardCount == 0 && mutation.wrapperFlags.empty())
         || mutation.rewardCount > mutation.rewards.size() || !queuez::valid(before)
         || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()

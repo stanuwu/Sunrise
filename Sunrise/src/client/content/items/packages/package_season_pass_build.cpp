@@ -20,7 +20,8 @@ bool read_season_reward(Storage& storage,
                         std::span<const std::byte> progressionTable,
                         const tables::Array& itemRows,
                         std::size_t at,
-                        domain::Reward& reward) noexcept {
+                        domain::Reward& reward,
+                        BankFailure& failure) noexcept {
     std::uint32_t rank = 0;
     std::uint32_t itemIndex = 0;
     std::uint32_t claimSlot = 0;
@@ -65,7 +66,8 @@ bool read_season_reward(Storage& storage,
             progressionTable,
             at + tables::kProgressionRewardConditionsOffset,
             reward.condition,
-            conditionCount)) {
+            conditionCount,
+            failure)) {
         return false;
     }
     reward.socketCount = static_cast<std::uint8_t>(socketCount);
@@ -137,7 +139,15 @@ bool build_season_pass(const reader::Source& source,
             rewards.dataOffset + static_cast<std::size_t>(row) * tables::kProgressionRewardStride;
         auto& reward = storage.seasonPassRewards[row];
         reward = {};
-        if (!read_season_reward(storage, progressionTable, itemRows, at, reward)) {
+        auto failure = BankFailure::none;
+        if (!read_season_reward(storage, progressionTable, itemRows, at, reward, failure)) {
+            // A row is left unavailable only for its data, never for failed storage.
+            if (failure == BankFailure::storage) {
+                core::log::write(core::log::Channel::client,
+                                 core::log::Level::warn,
+                                 "ev=pkg stage=season_pass result=fail reason=condition_storage");
+                return false;
+            }
             reward = {};
             ++skipped;
         }

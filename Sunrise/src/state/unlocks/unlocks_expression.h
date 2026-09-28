@@ -6,8 +6,8 @@
 
 namespace sunrise::state::unlocks {
 
-/** Stack slots one expression may use. The deepest installed reward condition needs nine. */
-inline constexpr std::size_t kExpressionStackCapacity = 16;
+/** Stack slots one expression may use. The deepest installed reward condition needs 20. */
+inline constexpr std::size_t kExpressionStackCapacity = 32;
 
 /** Opcodes the client's expression evaluator implements that the server evaluates. */
 enum class Opcode : std::uint8_t {

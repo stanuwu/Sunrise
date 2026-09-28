@@ -263,14 +263,14 @@ void report_perk_refusal(std::size_t index, const char* reason) noexcept {
                       reason);
 }
 
-/** Set while a perk walk is owed; only touched under g_mutex. */
-bool g_perkWalkOwed = true;
+// The walk skips an absent acquisition flag and an absent claim flag on one sentinel.
+static_assert(build_data::rewards::kAbsent == build_data::season_pass::kUnavailableFlagIndex);
 
-/** Earned perks set both flags in the transaction that publishes their qualifying rank. */
+/** Earned perks set both flags when their rank is reached or an owed walk runs. */
 bool grant_progress_flags(bool& walked) noexcept {
     if (!build_data::season_pass_ready() || !build_data::reward_definitions_ready()
         || !build_data::item_definitions_ready()) {
-        g_perkWalkOwed = true;
+        investment::store::g_session.perkWalkOwed = true;
         return true;
     }
     AccountState account;
@@ -309,9 +309,10 @@ bool grant_progress_flags(bool& walked) noexcept {
         }
         const char* reason = nullptr;
         bool eligible = false;
-        if (!rewards::eligible(std::span(reward.condition).first(reward.conditionCount),
-                               {flags, account.characters[character].characterClass, 0, &reason},
-                               eligible)) {
+        if (!reward_resolution::eligible(
+                std::span(reward.condition).first(reward.conditionCount),
+                {flags, account.characters[character].characterClass, 0, &reason},
+                eligible)) {
             report_perk_refusal(index, reason != nullptr ? reason : "perk_condition");
             continue;
         }
@@ -411,9 +412,10 @@ bool seed_seasonal_progression() noexcept {
     const bool published =
         publish_experience_lanes(experience) && publish_artifact_locked(family, mask, experience)
         && investment::store::write_family5(family)
-        && (!g_perkWalkOwed || grant_progress_flags(walked)) && transaction.commit();
+        && (!investment::store::g_session.perkWalkOwed || grant_progress_flags(walked))
+        && transaction.commit();
     if (published && walked) {
-        g_perkWalkOwed = false;
+        investment::store::g_session.perkWalkOwed = false;
     }
     investment::store::g_mutex.unlock();
     return published;
@@ -450,12 +452,12 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
         return false;
     }
     const std::int32_t previous = seasonal_experience();
-    if (previous < 0 || amount > (std::numeric_limits<std::int32_t>::max)() - previous) {
+    if (previous > (std::numeric_limits<std::int32_t>::max)() - amount) {
         return false;
     }
     const auto total = previous + amount;
-    const bool walkPerks =
-        g_perkWalkOwed || seasonal_rank_for(previous) != seasonal_rank_for(total);
+    const bool walkPerks = investment::store::g_session.perkWalkOwed
+                           || seasonal_rank_for(previous) != seasonal_rank_for(total);
 
     Family5State family;
     if (!investment::store::read_family5(family)) {
@@ -470,7 +472,7 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
                          && investment::store::write_family5(family)
                          && (!walkPerks || grant_progress_flags(walked)) && transaction.commit();
     if (granted && walked) {
-        g_perkWalkOwed = false;
+        investment::store::g_session.perkWalkOwed = false;
     }
     return granted;
 }

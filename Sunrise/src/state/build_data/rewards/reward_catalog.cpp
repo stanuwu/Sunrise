@@ -31,7 +31,7 @@ View view() noexcept {
             g_sockets.rows()};
 }
 
-/** Rejects a pool cycle or a nested path deeper than kTraversalDepth, memoizing subtree heights. */
+/** Rejects cycles and bounds combined pool and automatic-wrapper paths, memoizing heights. */
 bool valid_depth(View data,
                  std::size_t index,
                  std::array<std::uint8_t, kPoolCapacity>& heights,
@@ -48,13 +48,21 @@ bool valid_depth(View data,
     std::uint8_t height = 1;
     const Range range = data.pools[index].entries;
     for (const Entry& entry : data.entries.subspan(range.first, range.count)) {
-        if (entry.poolIndex == kAbsent) {
+        auto child = entry.poolIndex;
+        // Pool references take precedence over an item named by the same entry.
+        if (child == kAbsent && entry.itemIndex != kAbsent) {
+            const Item& item = data.items[entry.itemIndex];
+            if ((item.flags & kOpenOnAcquisition) != 0) {
+                child = item.poolIndex;
+            }
+        }
+        if (child == kAbsent) {
             continue;
         }
-        if (!valid_depth(data, entry.poolIndex, heights, depth + 1)) {
+        if (!valid_depth(data, child, heights, depth + 1)) {
             return false;
         }
-        height = (std::max)(height, static_cast<std::uint8_t>(heights[entry.poolIndex] + 1));
+        height = (std::max)(height, static_cast<std::uint8_t>(heights[child] + 1));
     }
     heights[index] = height;
     return true;
@@ -99,7 +107,7 @@ bool ready() noexcept {
     return g_pools.count() != 0 && g_items.count() != 0;
 }
 
-/** Checks bank ranges, item references and bounded acyclic pool traversal. */
+/** Checks bank ranges, item references and bounded acyclic pool and wrapper traversal. */
 bool valid(View data) noexcept {
     if (data.pools.empty() || data.pools.size() > kPoolCapacity || data.entries.empty()
         || data.entries.size() > kEntryCapacity || data.items.empty()

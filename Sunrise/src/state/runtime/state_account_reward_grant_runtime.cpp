@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <limits>
 
+#include "../../middleware/datagen/family4/account/layout.h"
+#include "../../middleware/datagen/family4/character/layout.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
@@ -26,9 +28,46 @@ namespace family4_loadout = middleware::datagen::family4::loadout;
 
 namespace {
 
+/** Prepares inventory rows and consumed-wrapper flags against the same account view. */
+[[nodiscard]] RewardPreparation
+prepare_reward_grant(std::span<const DirectRecordReward> rewards,
+                     std::uint16_t claimedRecordIndex,
+                     const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
+                     PendingRecordRewardGrant& mutation,
+                     const char** refusal) noexcept;
+
 [[nodiscard]] bool materialize_record_reward(const AccountState& current,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept;
+
+/** Each native change list must fit independently; unlock flags consume neither list. */
+[[nodiscard]] const char*
+reward_change_refusal(std::span<const PreparedRecordReward> rewards) noexcept {
+    std::size_t characterChanges = 0;
+    std::size_t profileChanges = 0;
+    for (const auto& reward : rewards) {
+        switch (reward.kind) {
+        case RecordRewardKind::characterInstance:
+        case RecordRewardKind::characterStack:
+            if (++characterChanges
+                > middleware::datagen::family4::character::layout::kInventoryChangeRecordCapacity) {
+                return "character_change_capacity";
+            }
+            break;
+        case RecordRewardKind::profileStack:
+            if (++profileChanges > middleware::datagen::family4::account::layout::
+                    kProfileInventoryChangeRecordCapacity) {
+                return "profile_change_capacity";
+            }
+            break;
+        case RecordRewardKind::accountUnlock:
+            break;
+        default:
+            return "reward_kind";
+        }
+    }
+    return nullptr;
+}
 
 /** A reward overrides socket types, so adding an ordinary lane cannot shift a fixed roll. */
 [[nodiscard]] bool
@@ -105,7 +144,7 @@ apply_reward_sockets(const item_details::Definition& detail,
     return true;
 }
 
-[[nodiscard]] RewardPreparation prepare_resolved_reward(const rewards::Result& resolved,
+[[nodiscard]] RewardPreparation prepare_resolved_reward(const reward_resolution::Result& resolved,
                                                         PendingRecordRewardGrant& mutation,
                                                         const char** refusal) noexcept {
     std::array<DirectRecordReward, kRecordRewardGrantCapacity> rows{};
@@ -119,8 +158,11 @@ apply_reward_sockets(const item_details::Definition& detail,
                    std::span(grant.sockets).first(grant.socketCount),
                    true};
     }
-    return prepare_record_reward_grant(
-        std::span(rows).first(resolved.count), kUnclaimedRecordIndex, mutation, refusal);
+    return prepare_reward_grant(std::span(rows).first(resolved.count),
+                                kUnclaimedRecordIndex,
+                                &resolved.wrapperFlags,
+                                mutation,
+                                refusal);
 }
 
 /** Classifies a catalog refusal: a verdict unless a catalog was cleared meanwhile. */
@@ -148,7 +190,7 @@ enum class PassResolution { claim, replay };
 [[nodiscard]] bool resolve_pass(const build_data::season_pass::Reward& reward,
                                 const AccountState& account,
                                 std::uint64_t seed,
-                                rewards::Result& result,
+                                reward_resolution::Result& result,
                                 PassResolution resolution,
                                 const char** reason = nullptr) noexcept {
     const auto character = selected_character_index(account);
@@ -168,17 +210,19 @@ enum class PassResolution { claim, replay };
         flags.accountFlags[reward.claimFlagIndex] = unlocks::kFlagClear;
     }
     bool enabled = false;
-    if (!rewards::eligible(std::span(reward.condition).first(reward.conditionCount),
-                           {flags, account.characters[character].characterClass, seed, reason},
-                           enabled)
+    if (!reward_resolution::eligible(
+            std::span(reward.condition).first(reward.conditionCount),
+            {flags, account.characters[character].characterClass, seed, reason},
+            enabled)
         || !enabled) {
         return false;
     }
-    if (rewards::resolve({flags, account.characters[character].characterClass, seed, reason},
-                         reward.itemIndex,
-                         reward.quantity,
-                         result)
-        != rewards::Resolution::resolved) {
+    if (reward_resolution::resolve(
+            {flags, account.characters[character].characterClass, seed, reason},
+            reward.itemIndex,
+            reward.quantity,
+            result)
+        != reward_resolution::Resolution::resolved) {
         return false;
     }
     if (reward.socketCount != 0) {
@@ -197,12 +241,18 @@ enum class PassResolution { claim, replay };
 [[nodiscard]] bool reward_matches(const build_data::season_pass::Reward& reward,
                                   const PendingSeasonPassReward& mutation) noexcept {
     const auto* grant = &mutation.grant;
-    rewards::Result expected{};
+    reward_resolution::Result expected{};
     if (!mutation.prepared || mutation.sourceDefinitionHash != reward.itemHash
         || !resolve_pass(
             reward, account_snapshot(), mutation.seed, expected, PassResolution::replay)
-        || expected.count != grant->rewardCount) {
+        || expected.count != grant->rewardCount
+        || expected.wrapperFlags.count() != grant->wrapperFlags.size()) {
         return false;
+    }
+    for (const auto& flag : grant->wrapperFlags) {
+        if (flag.index >= expected.wrapperFlags.size() || !expected.wrapperFlags[flag.index]) {
+            return false;
+        }
     }
     for (std::size_t i = 0; i < expected.count; ++i) {
         const auto& planned = expected.grants[i];
@@ -261,7 +311,7 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
         return false;
     }
     mutation.seed = seed;
-    rewards::Result resolved{};
+    reward_resolution::Result resolved{};
     reason = "reward_condition";
     if (!resolve_pass(
             reward, account_snapshot(), mutation.seed, resolved, PassResolution::claim, &reason)) {
@@ -331,17 +381,17 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
         || !investment::store::read_unlocks(flags, static_cast<int>(character))) {
         return RewardPreparation::deferred;
     }
-    rewards::Result resolved{};
-    const auto resolution =
-        rewards::resolve({flags, account.characters[character].characterClass, seed, &reason},
-                         itemIndex,
-                         quantity,
-                         resolved);
+    reward_resolution::Result resolved{};
+    const auto resolution = reward_resolution::resolve(
+        {flags, account.characters[character].characterClass, seed, &reason},
+        itemIndex,
+        quantity,
+        resolved);
     // The saved unlocks can change, so an empty draw they caused is retried, not retired.
-    if (resolution == rewards::Resolution::ineligible) {
+    if (resolution == reward_resolution::Resolution::ineligible) {
         return RewardPreparation::deferred;
     }
-    if (resolution != rewards::Resolution::resolved) {
+    if (resolution != reward_resolution::Resolution::resolved) {
         return catalog_refusal(reason);
     }
     reason = "reward_placement";
@@ -363,6 +413,17 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             || after.accountFlags[reward.acquiredFlag] != reward.previousFlag) {
             return false;
         }
+    }
+    for (std::size_t i = 0; i < mutation.wrapperFlags.size(); ++i) {
+        const auto& flag = mutation.wrapperFlags[i];
+        if (flag.index >= after.accountFlags.size() || flag.previousValue > unlocks::kFlagSet
+            || (i != 0 && mutation.wrapperFlags[i - 1].index >= flag.index)
+            || after.accountFlags[flag.index] != flag.previousValue) {
+            return false;
+        }
+    }
+    for (const auto& flag : mutation.wrapperFlags) {
+        after.accountFlags[flag.index] = unlocks::kFlagSet;
     }
     for (std::size_t i = 0; i < mutation.rewardCount; ++i) {
         const auto flag = mutation.rewards[i].acquiredFlag;
@@ -406,9 +467,11 @@ namespace {
 [[nodiscard]] bool materialize_record_reward(const AccountState& current,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept {
-    if (!mutation.prepared || mutation.rewardCount == 0
-        || mutation.rewardCount > mutation.rewards.size() || mutation.accountSoid == 0
-        || mutation.characterSoid == 0 || mutation.characterIndex >= current.characterCount
+    if (!mutation.prepared || (mutation.rewardCount == 0 && mutation.wrapperFlags.empty())
+        || mutation.rewardCount > mutation.rewards.size()
+        || reward_change_refusal(std::span(mutation.rewards).first(mutation.rewardCount)) != nullptr
+        || mutation.accountSoid == 0 || mutation.characterSoid == 0
+        || mutation.characterIndex >= current.characterCount
         || current.primarySoid != mutation.accountSoid
         || !same_character(current.characters[mutation.characterIndex], mutation.beforeCharacter)
         || !same_profile_inventory(
@@ -516,18 +579,50 @@ namespace {
     return true;
 }
 
-} // namespace
+/** Captures only flags carried by consumed wrappers; storage failure remains retryable. */
+[[nodiscard]] bool prepare_wrapper_flags(const std::bitset<unlocks::kAccountFlagCapacity>* flags,
+                                         PendingRecordRewardGrant& mutation,
+                                         const char*& reason) noexcept {
+    if (flags == nullptr) {
+        return true;
+    }
+    try {
+        mutation.wrapperFlags.reserve(flags->count());
+        for (std::size_t index = 0; index < flags->size(); ++index) {
+            if (!(*flags)[index]) {
+                continue;
+            }
+            reason = "wrapper_acquisition_flag";
+            std::int32_t before = 0;
+            if (!investment::store::read_unlock(investment::store::Bank::accountFlags,
+                                                static_cast<std::uint16_t>(index),
+                                                before)
+                || before < 0 || before > unlocks::kFlagSet) {
+                return false;
+            }
+            mutation.wrapperFlags.push_back(
+                {static_cast<std::uint16_t>(index), static_cast<std::uint8_t>(before)});
+        }
+    } catch (...) {
+        reason = "wrapper_flag_storage";
+        return false;
+    }
+    return true;
+}
 
-/** Prepares every reward over one cumulative account view. */
-RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
-                                              std::uint16_t claimedRecordIndex,
-                                              PendingRecordRewardGrant& mutation,
-                                              const char** refusal) noexcept {
+/** Prepares inventory rows and consumed-wrapper flags against the same account view. */
+RewardPreparation
+prepare_reward_grant(std::span<const DirectRecordReward> rewards,
+                     std::uint16_t claimedRecordIndex,
+                     const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
+                     PendingRecordRewardGrant& mutation,
+                     const char** refusal) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     reason = "reward_count";
     mutation = {};
-    if (rewards.empty() || rewards.size() > mutation.rewards.size()) {
+    if ((rewards.empty() && (wrapperFlags == nullptr || wrapperFlags->none()))
+        || rewards.size() > mutation.rewards.size()) {
         return RewardPreparation::unresolvable;
     }
     reason = "not_ready";
@@ -545,6 +640,9 @@ RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward
         return RewardPreparation::deferred;
     }
 
+    if (!prepare_wrapper_flags(wrapperFlags, mutation, reason)) {
+        return RewardPreparation::deferred;
+    }
     AccountState working = account;
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         reason = "item_identity";
@@ -715,6 +813,11 @@ RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward
         mutation.rewards[index] = prepared;
     }
 
+    reason = reward_change_refusal(std::span(mutation.rewards).first(rewards.size()));
+    if (reason != nullptr) {
+        // Only a wrapper draw can exceed a list, and its next draw may fit.
+        return RewardPreparation::deferred;
+    }
     reason = "loadout";
     // A full native bucket rejects the whole loadout; retry later.
     family4_loadout::ResolvedLoadout loadout{};
@@ -736,6 +839,16 @@ RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward
     reason = nullptr;
     mutation.prepared = true;
     return RewardPreparation::prepared;
+}
+
+} // namespace
+
+/** Prepares every direct reward over one cumulative account view. */
+RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
+                                              std::uint16_t claimedRecordIndex,
+                                              PendingRecordRewardGrant& mutation,
+                                              const char** refusal) noexcept {
+    return prepare_reward_grant(rewards, claimedRecordIndex, nullptr, mutation, refusal);
 }
 
 bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
@@ -765,6 +878,13 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
                 ready = investment::store::write_unlock(
                     investment::store::Bank::accountFlags, flag, unlocks::kFlagSet);
             }
+        }
+        for (const auto& flag : mutation.wrapperFlags) {
+            if (!ready) {
+                break;
+            }
+            ready = investment::store::write_unlock(
+                investment::store::Bank::accountFlags, flag.index, unlocks::kFlagSet);
         }
         ready = ready && transaction.commit();
     }

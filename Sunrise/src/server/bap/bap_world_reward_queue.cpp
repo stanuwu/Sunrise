@@ -126,6 +126,7 @@ bool current_world_reward(WorldRewardRequest& request) noexcept {
     while (state::investment::store::next_reward(saved)) {
         request = {};
         request.id = saved.id;
+        request.definitionHash = saved.definitionHash;
         request.quantity = saved.quantity;
         request.kind = static_cast<WorldRewardKind>(saved.kind);
         const bool itemsPublished = state::build_data::item_definitions_ready();
@@ -162,8 +163,17 @@ bool retire_world_reward(state::investment::store::Transaction& transaction,
                          const WorldRewardRequest& request,
                          const char* reason) noexcept {
     const bool retired = complete_world_reward(request.id) && transaction.commit();
-    report_reward_refusal(
-        "world_retire", request.itemDefinitionIndex, retired ? reason : "queue_commit");
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::warn,
+                      "ev=reward stage=world_retire id=%llu hash=0x%08X index=%u quantity=%d "
+                      "kind=%u result=%s reason=%s",
+                      static_cast<unsigned long long>(request.id),
+                      static_cast<unsigned>(request.definitionHash),
+                      static_cast<unsigned>(request.itemDefinitionIndex),
+                      static_cast<int>(request.quantity),
+                      static_cast<unsigned>(request.kind),
+                      retired ? "retired" : "kept",
+                      reason != nullptr ? reason : "unknown");
     return retired;
 }
 
