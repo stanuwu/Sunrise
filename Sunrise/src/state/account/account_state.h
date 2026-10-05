@@ -79,6 +79,10 @@ enum class CharacterClass : std::uint8_t {
     warlock = 2,
 };
 
+/** Number of character classes represented on the wire. */
+inline constexpr std::size_t kCharacterClassCount =
+    static_cast<std::size_t>(CharacterClass::warlock) + 1;
+
 /** Default movement entry. Each subclass offers 3, as entries 4, 5 and 6 of its group. */
 inline constexpr std::uint8_t kDefaultMovementAbilityEntry = 4;
 

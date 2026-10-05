@@ -380,10 +380,7 @@ void grant_random_moon_loot() noexcept {
         grant_lost_ghost_reward();
         // One found ghost pays this much seasonal experience.
         constexpr std::int32_t kBaseExperienceReward = 2500;
-        const bool queued = bap::arm_seasonal_experience_presentation(kBaseExperienceReward);
-        if (!queued) {
-            (void)state::grant_seasonal_experience(kBaseExperienceReward);
-        }
+        (void)bap::arm_seasonal_experience_presentation(kBaseExperienceReward);
     }
     return outcome;
 }

@@ -53,8 +53,13 @@ namespace {
            && counts.recordRewards <= output.recordRewards.size()
            && counts.progressionSteps <= output.progressionSteps.size()
            && counts.seasonPassRewards <= output.seasonPassRewards.size()
-           && counts.seasonPassPackages <= output.seasonPassPackages.size()
-           && counts.bounties <= output.bounties.size();
+           && counts.bounties <= output.bounties.size()
+           && counts.rewardPools <= output.rewardPools.size()
+           && counts.rewardEntries <= output.rewardEntries.size()
+           && counts.rewardItems <= output.rewardItems.size()
+           && counts.rewardInstructions <= output.rewardInstructions.size()
+           && counts.rewardModifiers <= output.rewardModifiers.size()
+           && counts.rewardSockets <= output.rewardSockets.size();
 }
 
 /** @return The header's row counts, as platform sizes. */
@@ -94,8 +99,13 @@ namespace {
         header.recordRewardCount,
         header.progressionStepCount,
         header.seasonPassRewardCount,
-        header.seasonPassPackageCount,
         header.bountyCount,
+        header.rewardPoolCount,
+        header.rewardEntryCount,
+        header.rewardItemCount,
+        header.rewardInstructionCount,
+        header.rewardModifierCount,
+        header.rewardSocketCount,
     };
 }
 
