@@ -233,6 +233,12 @@ void reset_lane0_adapter(const void*, std::uint64_t groupSessionId) noexcept {
     const bool accepted = external::prepare_scoped_entity_batch(
         store, source, batch, sequence, hasSequence, ordinal, mutation);
     ReleaseSRWLockExclusive(&g_transportLock);
+    if (accepted && mutation.detachedCount != 0) {
+        report(core::log::Level::debug,
+               "ev=entity_identity stage=anchor_prune detached=%u records=%zu",
+               static_cast<unsigned>(mutation.detachedCount),
+               external::entity_record_count(batch));
+    }
     return accepted;
 }
 
@@ -300,7 +306,7 @@ void observed_entity_adapter(const void* context,
         filtered->ignoredRecordMask.reset();
         projected = filtered.get();
     }
-    if (!accept_entity_batch(source.groupSessionId, *projected)) {
+    if (!accept_entity_batch(source, *projected)) {
         report(core::log::Level::debug,
                "ev=entity_identity stage=actor_projection result=unavailable");
     }

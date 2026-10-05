@@ -11,6 +11,7 @@
 #include "../../middleware/bap/activity_message/scene_events_auth.h"
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../middleware/bap/activity_message/squad_objective_auth.h"
+#include "../../middleware/bap/activity_message/volume_toggle_auth.h"
 #include "../../middleware/content/packages/tables/region_reader.h"
 #include "../../state/activity/runtime.h"
 #include "activity_sdk_device_internal.h"
@@ -503,8 +504,22 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
         slotType == middleware::bap::activity_message::scriptable_auth::kType2SlotType
         && authSchema == middleware::bap::activity_message::scriptable_auth::kType2Schema
         && middleware::bap::activity_message::scriptable_auth::validate_type2_body(body, bitCount);
+    auth::Type32VolumeBody volumeBody{};
+    bool volumeToggle = slotType == auth::kType32SlotType && authSchema == auth::kType32Schema
+                        && slot.componentClass == auth::kType32ComponentClass
+                        && auth::decode_type32_volume(body, bitCount, volumeBody)
+                        && volumeBody.registryKey == registryKey;
+    if (volumeToggle) {
+        // Validate the inner reference again at dispatch under the same SDK/owner binding.
+        const auto matches = std::count_if(slots.begin(), slots.end(), [&](const auto& target) {
+            return target.objectIndex == slot.objectIndex
+                   && target.slotType == auth::kVolumeSlotType
+                   && target.slotIndex == static_cast<std::uint16_t>(volumeBody.slotIndex);
+        });
+        volumeToggle = matches == 1;
+    }
     if (!typedSdkBody && !occupancy && !directive && !engagement && !publicEvent && !performance
-        && !combatant) {
+        && !combatant && !volumeToggle) {
         return Status::invalidBody;
     }
     return Status::ready;

@@ -99,6 +99,8 @@ bool Parser::level_value(std::string_view name, log::Level& output) noexcept {
         output = log::Level::info;
     } else if (name == "debug") {
         output = log::Level::debug;
+    } else if (name == "trace") {
+        output = log::Level::trace;
     } else if (name == "off") {
         output = log::Level::off;
     } else {

@@ -352,6 +352,36 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         }
         return;
     }
+    case lua_vm::IntentKind::setSquadAttachment: {
+        host::ScriptableOutputReservation reservation{};
+        if (!reserve_delivery(instance, reservation)) {
+            if (instance.programStatus == ProgramStatus::loaded) {
+                refuse_delivery(instance,
+                                "attachment_refused",
+                                "host_reservation_unavailable",
+                                host::EffectOutcome::refused);
+            }
+            return;
+        }
+        const devices::Status status =
+            devices::set_squad_attachment_reserved(instance.view,
+                                                   intent.firstRow,
+                                                   intent.secondRow,
+                                                   intent.sourceSpawnGeneration,
+                                                   intent.active,
+                                                   reservation);
+        if (status == devices::Status::queued) {
+            await_host_commit(instance, now, "attachment_enqueued");
+        } else if (!abandon_reserved_delivery(instance, reservation)) {
+            return;
+        } else {
+            refuse_delivery(instance,
+                            "attachment_refused",
+                            devices::status_name(status),
+                            host::EffectOutcome::refused);
+        }
+        return;
+    }
     case lua_vm::IntentKind::bindCombatantToSquad: {
         host::ScriptableOutputReservation reservation{};
         if (!reserve_delivery(instance, reservation)) {

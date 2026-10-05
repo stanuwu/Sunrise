@@ -116,11 +116,21 @@ constexpr std::int32_t kUncommittedCounter = 1;
 constexpr std::size_t kOccupancyAuthBitCount = 87;
 constexpr std::size_t kOccupancyAuthByteCount = 11;
 
-/** Volumes one filter may test; leaves room for the players, target and inside predicates. */
+/** Volumes one filter may test. Every predicate still shares the type-34 capacity. */
 constexpr std::size_t kMaximumFilterVolumes = 5;
 /** Type-34 predicate modes: 0 tests the flag or reference as given, 1 tests inside a volume. */
 constexpr std::int8_t kFilterModeDirect = 0;
 constexpr std::int8_t kFilterModeInside = 1;
+
+/** Appends one predicate. @return False when the type-34 body is already full. */
+[[nodiscard]] bool append_predicate(scriptable_auth::Type34Body& body,
+                                    const scriptable_auth::Type34Predicate& predicate) noexcept {
+    if (body.count >= scriptable_auth::kType34PredicateCapacity) {
+        return false;
+    }
+    body.predicates[body.count++] = predicate;
+    return true;
+}
 
 } // namespace
 
@@ -191,20 +201,24 @@ constexpr std::int8_t kFilterModeInside = 1;
     return queue_slot_auth(state, slot, darkness::kSchema, darkness::kBits, body);
 }
 
-/** Native typed object filters: players, one object, and volume intersection. */
+/**
+ * Native typed object filters: players, one or several objects, a squad, and volume intersection.
+ * Every predicate shares the type-34 capacity; a filter that would exceed it is refused.
+ */
 [[nodiscard]] int slot_set_object_filter(lua_State* state) {
     namespace auth = scriptable_auth;
     const auto* const handle =
         static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
     // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 4> kDeclared{
-        "players", "target", "inside", "inside_any"};
+    static constexpr std::array<std::string_view, 6> kDeclared{
+        "players", "target", "targets", "squad", "inside", "inside_any"};
     refuse_unknown_arguments(state, kDeclared);
     SlotDefinition slot{};
     if (!current_slot(state, *handle, slot) || slot.slotType != auth::kType34SlotType
         || slot.authSchema != auth::kType34Schema) {
         return luaL_error(state, "object filter requires an authored type-34 sensor");
     }
+    constexpr const char* kCapacityError = "object filter exceeds the type-34 predicate capacity";
     auth::Type34Body body{};
     lua_getfield(state, 2, "inside_any");
     const bool volumes = !lua_isnil(state, -1);
@@ -223,34 +237,77 @@ constexpr std::int8_t kFilterModeInside = 1;
                 || volume.slotType != auth::kType60SlotType) {
                 return luaL_error(state, "inside_any requires authored type-60 volumes");
             }
-            body.predicates[body.count++] =
-                auth::Type34ModeFlagSlotRef{kFilterModeDirect,
-                                            true,
-                                            {volume.registryKey,
-                                             static_cast<std::int8_t>(auth::kType60SlotType),
-                                             static_cast<std::int16_t>(volume.slotIndex)}};
+            if (!append_predicate(
+                    body,
+                    auth::Type34ModeFlagSlotRef{kFilterModeDirect,
+                                                true,
+                                                {volume.registryKey,
+                                                 static_cast<std::int8_t>(auth::kType60SlotType),
+                                                 static_cast<std::int16_t>(volume.slotIndex)}})) {
+                return luaL_error(state, kCapacityError);
+            }
             lua_pop(state, 1);
         }
     }
     lua_pop(state, 1);
-    if (optional_boolean_argument(state, "players", false)) {
-        body.predicates[body.count++] =
-            auth::Type34ModeOnlyB{static_cast<std::int8_t>(volumes ? 1 : 0)};
+    if (optional_boolean_argument(state, "players", false)
+        && !append_predicate(body, auth::Type34ModeOnlyB{static_cast<std::int8_t>(volumes)})) {
+        return luaL_error(state, kCapacityError);
     }
     auth::Type2LaneClientRef target{};
     if (!optional_slot_reference(state, "target", auth::kType4SlotType, target)) {
         return luaL_error(state, "filter target must be an authored type-4 object");
     }
-    if (target.slotIndex >= 0) {
-        body.predicates[body.count++] = auth::Type34ModeSlotRefC{kFilterModeDirect, target};
+    if (target.slotIndex >= 0
+        && !append_predicate(body, auth::Type34ModeSlotRefC{kFilterModeDirect, target})) {
+        return luaL_error(state, kCapacityError);
+    }
+    // Several authored objects at once (a beam hop-on names every crystal it tethers).
+    lua_getfield(state, 2, "targets");
+    if (!lua_isnil(state, -1)) {
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const std::size_t count = lua_rawlen(state, -1);
+        if (count == 0) {
+            return luaL_error(state, "targets must name at least one object");
+        }
+        for (std::size_t index = 1; index <= count; ++index) {
+            lua_rawgeti(state, -1, static_cast<lua_Integer>(index));
+            const auto* const targetHandle =
+                static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
+            SlotDefinition object{};
+            if (!current_slot(state, *targetHandle, object)
+                || object.slotType != auth::kType4SlotType
+                || object.slotIndex > auth_fields::kMaximumClientRefIndex) {
+                return luaL_error(state, "targets require authored type-4 objects");
+            }
+            if (!append_predicate(
+                    body,
+                    auth::Type34ModeSlotRefC{kFilterModeDirect,
+                                             {object.registryKey,
+                                              static_cast<std::int8_t>(auth::kType4SlotType),
+                                              static_cast<std::int16_t>(object.slotIndex)}})) {
+                return luaL_error(state, kCapacityError);
+            }
+            lua_pop(state, 1);
+        }
+    }
+    lua_pop(state, 1);
+    // A squad reference selects the boss a shield or tether hop-on hosts on.
+    auth::Type2LaneClientRef squad{};
+    if (!optional_slot_reference(state, "squad", format::kSquadSlotType, squad)) {
+        return luaL_error(state, "filter squad must be an authored type-1 squad");
+    }
+    if (squad.slotIndex >= 0
+        && !append_predicate(body, auth::Type34ModeSlotRefC{kFilterModeDirect, squad})) {
+        return luaL_error(state, kCapacityError);
     }
     auth::Type2LaneClientRef inside{};
     if (!optional_slot_reference(state, "inside", auth::kType60SlotType, inside)) {
         return luaL_error(state, "filter inside must be an authored type-60 volume");
     }
-    if (inside.slotIndex >= 0) {
-        body.predicates[body.count++] =
-            auth::Type34ModeFlagSlotRef{kFilterModeInside, false, inside};
+    if (inside.slotIndex >= 0
+        && !append_predicate(body, auth::Type34ModeFlagSlotRef{kFilterModeInside, false, inside})) {
+        return luaL_error(state, kCapacityError);
     }
     std::array<std::byte, auth::kType34MaximumByteCount> bytes{};
     std::size_t written = 0;

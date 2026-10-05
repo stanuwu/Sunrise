@@ -211,6 +211,7 @@ bool consume(Session& session,
              const middleware::bap::OuterFrame& outer,
              std::span<std::byte> response,
              std::size_t& written) noexcept {
+    const state::activity_sdk::CatalogPublicationGuard catalogPublication;
     written = 0;
     session.accountMutationPublished = false;
     if (!session.authenticated) {

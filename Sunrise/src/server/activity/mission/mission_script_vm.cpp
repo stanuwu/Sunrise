@@ -198,6 +198,7 @@ inline constexpr std::array<const char*, host::kEventKindCount> kEventHandlerNam
     "on_event_squad_provoked",
     "on_event_device_state",
     "on_event_region_changed",
+    "on_event_trigger_state",
 }};
 
 static_assert([] {

@@ -4,6 +4,7 @@
 
 #include "mission_script_lua_event_internal.h"
 #include "mission_script_lua_internal.h"
+#include "mission_trigger_observation.h"
 
 // The derived and internal event views. Every one carries mission_sequence. The Sense
 // edges also carry the slot identity; the phase, timer, world and session edges leave those fields
@@ -27,6 +28,28 @@ namespace {
         lua_pushnil(state);
     }
     return 1;
+}
+
+/** The producer copies these fields from the exact Sense observation, never an actor token. */
+[[nodiscard]] bool
+push_squad_generation_member(lua_State* state, const host::Event& event, std::string_view key) {
+    if (key == "spawn_generation") {
+        if (event.squadHasSpawnGeneration) {
+            lua_pushinteger(state, event.squadSpawnGeneration);
+        } else {
+            lua_pushnil(state);
+        }
+        return true;
+    }
+    if (key != "sense_generation") {
+        return false;
+    }
+    if (event.hasSenseGeneration) {
+        lua_pushinteger(state, event.senseGenerationPlusOne);
+    } else {
+        lua_pushnil(state);
+    }
+    return true;
 }
 
 /** The type-60 target read out of one type-31 player-trigger incident. */
@@ -74,19 +97,41 @@ push_trigger_member(lua_State* state, const host::Event& event, std::string_view
     return true;
 }
 
-/** Squad totals and native objective queries share the exact reported slot identity. */
+/**
+ * Squad totals and native objective queries share the exact reported slot identity. The counts
+ * stay integers so existing scripts can compare them; population_available says whether they are
+ * a reported population or zero placeholders for a report that carried none.
+ */
 [[nodiscard]] bool
 push_squad_state_member(lua_State* state, const host::Event& event, std::string_view key) {
     if (key == "task_cost") {
         lua_pushcfunction(state, &event_task_cost);
     } else if (key == "task_group") {
         lua_pushcfunction(state, &event_task_group);
+    } else if (key == "initial_observation") {
+        lua_pushboolean(state, event.initialObservation);
+    } else if (key == "registration_reset") {
+        lua_pushboolean(state, event.squadRegistrationReset);
+    } else if (key == "population_available") {
+        lua_pushboolean(state, event.squadPopulationAvailable);
     } else if (key == "alive_count") {
-        lua_pushinteger(state, event.squadAliveCount);
+        lua_pushinteger(state, event.squadPopulationAvailable ? event.squadAliveCount : 0);
+    } else if (key == "objective_revision") {
+        // Script-side assignment revision: one while a script assignment is retained, else zero.
+        lua_pushinteger(state, event.squadObjectiveRegistryKey != 0 ? 1 : 0);
+    } else if (key == "task_costs") {
+        lua_createtable(state, static_cast<int>(host::kSquadObjectiveGroupCount), 0);
+        for (unsigned group = 0; group < host::kSquadObjectiveGroupCount; ++group) {
+            if ((event.squadObjectiveCostMask & (1U << group)) == 0) {
+                continue;
+            }
+            lua_pushnumber(state, event.squadObjectiveCosts[group]);
+            lua_rawseti(state, -2, static_cast<lua_Integer>(group) + 1);
+        }
     } else if (key == "previous_alive_count") {
-        lua_pushinteger(state, event.squadPreviousAliveCount);
+        lua_pushinteger(state, event.squadPopulationAvailable ? event.squadPreviousAliveCount : 0);
     } else if (key == "removal_flag") {
-        lua_pushboolean(state, event.squadRemovalFlag ? 1 : 0);
+        lua_pushboolean(state, event.squadHasRemovalFlag && event.squadRemovalFlag);
     } else if (key == "slot_counts") {
         const std::size_t count = event.squadSlotCountLength;
         lua_createtable(state, static_cast<int>(count), 0);
@@ -115,10 +160,12 @@ push_entity_spawned_member(lua_State* state, const host::Event& event, std::stri
     return true;
 }
 
-/** The alive count after the death, and the count it replaced. */
+/** The alive count after the death, the count it replaced, and the squad's removal flag. */
 [[nodiscard]] bool
 push_entity_died_member(lua_State* state, const host::Event& event, std::string_view key) {
-    if (key == "alive_count") {
+    if (key == "removal_flag") {
+        lua_pushboolean(state, event.squadHasRemovalFlag && event.squadRemovalFlag);
+    } else if (key == "alive_count") {
         lua_pushinteger(state, event.squadAliveCount);
     } else if (key == "previous_alive_count") {
         lua_pushinteger(state, event.squadPreviousAliveCount);
@@ -277,6 +324,33 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
     return cinematic_started_index(state);
 }
 
+/** Reads a complete occupancy report or an explicit invalidation without inventing an edge. */
+[[nodiscard]] int trigger_state_index(lua_State* state) {
+    const host::Event& event = check_event(state, 1);
+    const std::string_view key = lua_string_view(state, 2);
+    if (push_common_member(state, event, key) || push_mission_sequence_member(state, event, key)
+        || push_slot_identity_member(state, event, key)
+        || push_squad_generation_member(state, event, key)) {
+        return 1;
+    }
+    if (key == "available") {
+        lua_pushboolean(state, event.triggerAvailable);
+    } else if (key == "continuity") {
+        lua_pushstring(state,
+                       trigger_observation::name(
+                           static_cast<trigger_observation::Continuity>(event.triggerContinuity)));
+    } else if (!event.triggerAvailable) {
+        lua_pushnil(state);
+    } else if (key == "occupied") {
+        lua_pushboolean(state, event.triggerOccupied);
+    } else if (push_trigger_member(state, event, key)) {
+        return 1;
+    } else {
+        lua_pushnil(state);
+    }
+    return 1;
+}
+
 /** Reports the accepted member generation and native movement-path state. */
 [[nodiscard]] int actor_path_index(lua_State* state) {
     const auto& event = check_event(state, 1);
@@ -401,7 +475,18 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
         }
         return 1;
     }
-    if (key == "generation") {
+    if (push_squad_generation_member(state, event, key)) {
+        return 1;
+    }
+    if (key == "initial_observation") {
+        lua_pushboolean(state, event.initialObservation);
+    } else if (key == "entry_index") {
+        lua_pushinteger(state, event.objectEntryIndex);
+    } else if (key == "spawn_mask_low") {
+        lua_pushinteger(state, event.objectSpawnMask[0]);
+    } else if (key == "spawn_mask_high") {
+        lua_pushinteger(state, event.objectSpawnMask[1]);
+    } else if (key == "generation") {
         lua_pushinteger(state, event.objectGeneration);
     } else if (key == "present" || key == "alive") {
         lua_pushboolean(state, event.objectPresent);
@@ -457,6 +542,7 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
     }
     if (event_surface_visible(state, event.kind)
         && (push_slot_identity_member(state, event, key)
+            || push_squad_generation_member(state, event, key)
             || push_squad_state_member(state, event, key))) {
         return 1;
     }
@@ -492,6 +578,7 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
     }
     if (event_surface_visible(state, event.kind)
         && (push_slot_identity_member(state, event, key)
+            || push_squad_generation_member(state, event, key)
             || push_entity_spawned_member(state, event, key))) {
         return 1;
     }
@@ -508,6 +595,7 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
     }
     if (event_surface_visible(state, event.kind)
         && (push_slot_identity_member(state, event, key)
+            || push_squad_generation_member(state, event, key)
             || push_entity_died_member(state, event, key))) {
         return 1;
     }
@@ -646,6 +734,7 @@ push_joined_revision_member(lua_State* state, const host::Event& event, std::str
 /** Installs the derived and internal view metatables. */
 void register_derived_event_metatables(lua_State* state) {
     register_metatable(state, kRegionChangedEventMetatable, &region_changed_index);
+    register_metatable(state, kTriggerStateEventMetatable, &trigger_state_index);
     register_metatable(state, kFireteamStateEventMetatable, &fireteam_state_index);
     register_metatable(state, kTriggerEnteredEventMetatable, &trigger_entered_index);
     register_metatable(state, kTriggerExitedEventMetatable, &trigger_exited_index);

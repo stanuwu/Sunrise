@@ -597,9 +597,29 @@ build_roster_snapshot(Session& session,
     if (pendingStateLocal && pendingGroupPosition >= snapshot.roster.groupCount) {
         return refuse_override("pending_group_position");
     }
+    // Echoed Sense becomes the client's acknowledged baseline and counter. Only a rebuilt group has
+    // lost that baseline. Echoing into a live group rewinds it to the host's last merged report,
+    // which lags reports still in flight: the client then replays old counters and omits changed
+    // fields, so a respawned carrier's population is never reported.
+    const auto rebuilt = [&session, &snapshot](std::uint32_t key) {
+        for (std::size_t index = 0; index < snapshot.roster.groupCount; ++index) {
+            const message::Group& group = snapshot.roster.groups[index];
+            if (group.key != key) {
+                continue;
+            }
+            for (const RosterGroupLease& groupLease : session.activityRosterGroupLeases) {
+                if (groupLease.used && groupLease.key == key) {
+                    return !groupLease.published
+                           || groupLease.publishedSequence != group.stateSequence;
+                }
+            }
+            return true;
+        }
+        return false;
+    };
     std::size_t senseCount = 0;
     for (const message::AuthOverride& auth : snapshot.authOverrides) {
-        if (auth.slotType != 1) {
+        if (auth.slotType != 1 || !rebuilt(auth.key)) {
             continue;
         }
         server::activity::host::SenseObservationKey key{};
@@ -665,6 +685,17 @@ build_roster_snapshot(Session& session,
         ++senseCount;
     }
     snapshot.senseOverrides = std::span(scratch.rosterSenseOverrides).first(senseCount);
+    // A discarded body restores the prior leases, so these marks commit only with the frame.
+    for (std::size_t index = 0; index < snapshot.roster.groupCount; ++index) {
+        const message::Group& group = snapshot.roster.groups[index];
+        for (RosterGroupLease& groupLease : session.activityRosterGroupLeases) {
+            if (groupLease.used && groupLease.key == group.key) {
+                groupLease.publishedSequence = group.stateSequence;
+                groupLease.published = true;
+                break;
+            }
+        }
+    }
     return RosterOutcome::published;
 }
 

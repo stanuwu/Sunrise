@@ -6,6 +6,7 @@
 #include "../gameplay/squad_entity_retirement.h"
 #include "host_runtime_ghost_link.h"
 #include "host_runtime_internal.h"
+#include "squad_attachment_ownership_validation.h"
 
 namespace sunrise::server::activity::host {
 namespace {
@@ -81,6 +82,20 @@ bool pending_scriptable_override_for_activity_client(const state::activity::Sess
                != activityClientGeneration) {
         const std::uint64_t revision = instance->pendingScriptable.revision;
         cancel_pending(*instance, binding, revision);
+        pending = false;
+    }
+    if (pending
+        && (!attachments::permits_source_write(instance->pendingScriptable,
+                                               instance->scriptableAuthEstate)
+            || (instance->pendingScriptable.squadAttachment
+                && (instance->pendingScriptable.byteCount > instance->pendingScriptable.body.size()
+                    || !attachments::admits(instance->pendingScriptable.target,
+                                            instance->pendingScriptable.squadAttachment,
+                                            instance->scriptableAuthEstate,
+                                            std::span(instance->pendingScriptable.body)
+                                                .first(instance->pendingScriptable.byteCount),
+                                            instance->pendingScriptable.bitCount))))) {
+        cancel_pending(*instance, binding, instance->pendingScriptable.revision);
         pending = false;
     }
     if (pending) {
@@ -310,7 +325,16 @@ void note_scriptable_transport_staged(const state::activity::SessionBinding& bin
     AcquireSRWLockExclusive(&g_lock);
     Instance* const instance = find_instance(binding);
     ScriptableGuard* guard = instance != nullptr ? find_guard(*instance, pending.target) : nullptr;
-    const bool nextCounter = staged_counter_matches(guard, pending);
+    const bool nextCounter =
+        staged_counter_matches(guard, pending) && pending.byteCount <= pending.body.size()
+        && (instance == nullptr
+            || attachments::permits_source_write(pending, instance->scriptableAuthEstate))
+        && (instance == nullptr || !pending.squadAttachment
+            || attachments::admits(pending.target,
+                                   pending.squadAttachment,
+                                   instance->scriptableAuthEstate,
+                                   std::span(pending.body).first(pending.byteCount),
+                                   pending.bitCount));
     if (instance != nullptr && nextCounter && instance->view.outputPending
         && instance->view.outputKind == OutputKind::scriptableOverride
         && same_pending(instance->pendingScriptable, pending)) {

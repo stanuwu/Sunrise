@@ -32,7 +32,7 @@ lane0_payload_codec() noexcept;
 
 /** Accepts one channel-2 batch only after the peer committed its external wrapper. */
 [[nodiscard]] bool
-accept_entity_batch(std::uint64_t groupSessionId,
+accept_entity_batch(const state::gameplay::entity_identity::Source& source,
                     const middleware::gameplay::external::EntityBatch& batch) noexcept;
 
 /** Decodes one lane-0 batch without assigning it to a peer session. */

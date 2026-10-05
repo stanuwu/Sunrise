@@ -192,6 +192,7 @@ bool consume_activity_keepalive(Session& session,
                                 std::span<std::byte> response,
                                 std::size_t& written,
                                 bool& touchesScratch) noexcept {
+    const state::activity_sdk::CatalogPublicationGuard catalogPublication;
     written = 0;
     const std::uint64_t now = GetTickCount64();
     const bool keepaliveDue = now >= session.activityKeepaliveDueTick;
@@ -239,6 +240,14 @@ bool consume_activity_keepalive(Session& session,
     // The arrival report (ws 702 world state 8) is answered by one roster built after it, on each
     // link whose delivered body still holds the wait bit. That answer raises `entered`.
     const bool arrivalDue = active && session.activityRosterAwaitClientSync && incidentClientReady;
+    // A script-selected state revision that has not reached the client's roster. Nothing else
+    // makes a roster due for it, so it would otherwise wait for the next solicited report.
+    const MissionSeedLease& missionSeed = session.activityMissionSeed;
+    const bool missionSeedDue =
+        active && missionSeed.configured
+        && missionSeed.bindingGeneration == session.activity.bindingGeneration
+        && missionSeed.revision != missionSeed.publishedRevision
+        && !missionSeed.regionArrivalPending && client_region_ready(session, nullptr);
     // The region the client holds, which is the one its advertisement must describe. The pending
     // leg alone names the region behind the player after a z-leg switch, and advertising that
     // hands the client an ambassadorship for a region it has left.
@@ -342,7 +351,7 @@ bool consume_activity_keepalive(Session& session,
     if (!active
         || (!keepaliveDue && !regionChanged && !hostStateDue && !scriptableDue && !incidentDue
             && !authorityResetDue && !authorityQueryDue && !hostTeleportDue && !retirementDue
-            && !arrivalDue)) {
+            && !arrivalDue && !missionSeedDue)) {
         return false;
     }
     touchesScratch = true;
@@ -357,7 +366,7 @@ bool consume_activity_keepalive(Session& session,
     // Only a changed Host value, retirement or the arrival answer can publish a standalone roster.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue) {
         bool appendedRoster = false;
-        if (hostStateDue || scriptableDue || retirementDue || arrivalDue) {
+        if (hostStateDue || scriptableDue || retirementDue || arrivalDue || missionSeedDue) {
             appendedRoster = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
             published = appendedRoster;
@@ -442,7 +451,8 @@ bool consume_activity_keepalive(Session& session,
                 SecureZeroMemory(&plan, sizeof plan);
             }
         }
-        if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue) {
+        if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue
+            || missionSeedDue) {
             published = append_roster_notification(
                             session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                         || published;
@@ -601,7 +611,8 @@ bool consume_activity_keepalive(Session& session,
     // push could have been read at all. Without it a correct body and a deduped one look the same.
     const std::uint32_t reportedRevision = refresh.snapshot.revision;
     SecureZeroMemory(&refresh, sizeof refresh);
-    if (appendedMembership || hostStateDue || scriptableDue || retirementDue || arrivalDue) {
+    if (appendedMembership || hostStateDue || scriptableDue || retirementDue || arrivalDue
+        || missionSeedDue) {
         published = append_roster_notification(
                         session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                     || published;

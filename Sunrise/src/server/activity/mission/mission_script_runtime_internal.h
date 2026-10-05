@@ -15,6 +15,7 @@
 #include "../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../state/activity_sdk/runtime.h"
 #include "../host_runtime.h"
+#include "mission_observation_epoch.h"
 #include "mission_script_actor_path_sense.h"
 #include "mission_script_combatant_damage_sense.h"
 #include "mission_script_device_sense.h"
@@ -24,6 +25,7 @@
 #include "mission_script_runtime.h"
 #include "mission_script_squad_sense.h"
 #include "mission_script_vm.h"
+#include "mission_trigger_observation.h"
 
 // What the mission-runtime translation units share: the instance table and service slice,
 // the attach pipeline, the two Host feeds and the VM callback, the panel rows, the delivery state
@@ -95,7 +97,7 @@ static_assert(kSquadObjectiveGroupCount == host::kSquadObjectiveGroupCount);
 /** Watched Ghost links, damage monitors, interactable objects and named actors per instance. */
 constexpr std::size_t kGhostObservationCapacity = kGhostLinkCapacity;
 constexpr std::size_t kDamageObservationCapacity = 8;
-constexpr std::size_t kObjectInteractionObservationCapacity = 64;
+constexpr std::size_t kObjectInteractionObservationCapacity = 160;
 constexpr std::size_t kActorPathObservationCapacity = 64;
 /** Watched device levels retained per instance. */
 constexpr std::size_t kDeviceObservationCapacity = 128;
@@ -110,10 +112,10 @@ constexpr std::uint64_t kHostCommitTimeoutMs = 2'000;
 
 /** Last occupancy seen for one watched volume, so only a change raises an event. */
 struct TriggerOccupancy final {
+    trigger_observation::Tracker tracker{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
-    bool occupied{};
     bool used{};
 };
 
@@ -158,6 +160,13 @@ struct DeviceObservation final {
 /** Last object and interaction level seen for one interactable object. */
 struct ObjectInteractionObservation final {
     ObjectInteractionLevel level{};
+    /** Sense sequence of the last accepted observation; the oldest row yields at capacity. */
+    std::uint64_t sequence{};
+    /**
+     * Set on a row recycled at capacity: its first report cannot tell a new interaction from one
+     * the evicted row already raised, so that report only records the interaction latch.
+     */
+    bool interactionBaseline{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -177,12 +186,25 @@ struct GhostObservation final {
 struct SquadObservation final {
     SquadObjectiveCosts objectiveCosts{};
     std::array<std::int32_t, host::kSquadSlotCapacity> slotCounts{};
+    /** Source, sequence and spawn-generation continuity of the last accepted report. */
+    observation_epoch::Cursor epoch{};
+    /** Sense record counter plus one of the last accepted report. */
+    std::uint32_t reportCounter{};
+    bool hasReportCounter{};
+    /** Spawn generation the squad Sense echoes from its placement Auth. */
+    std::int32_t spawnGeneration{};
+    bool hasSpawnGeneration{};
+    /** The alive count and removal flag below were reported, not defaulted. */
+    bool hasAlive{};
+    bool hasRemoval{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::int32_t aliveCount{};
     std::uint16_t slotIndex{};
     std::uint8_t slotCountLength{};
     bool removalFlag{};
+    std::uint32_t schemaRow{};
+    std::uint8_t slotType{};
     bool used{};
 };
 /** Last completion latch seen for one watched authored scene, so only the edge raises an event. */
@@ -249,9 +271,13 @@ struct RuntimeInstance final {
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
     std::array<CombatantDamageObservation, kSquadObservationCapacity> combatantDamageObservations{};
+    /** Damage levels replicated by authored entities, kept apart from the Type-2 Sense rows. */
+    std::array<CombatantDamageObservation, kSquadObservationCapacity> entityDamageObservations{};
     std::array<DeviceObservation, kDeviceObservationCapacity> deviceObservations{};
     std::array<ObjectInteractionObservation, kObjectInteractionObservationCapacity>
         objectInteractionObservations{};
+    /** Held region whose object levels are current; a region change re-baselines them. */
+    std::int32_t objectObservationHeldRegion{-1};
     std::array<ActorPathObservation, kActorPathObservationCapacity> actorPathObservations{};
     std::array<SceneObservation, kSceneObservationCapacity> sceneObservations{};
     std::array<ObjectiveObservation, kObjectiveObservationCapacity> objectiveObservations{};
@@ -313,7 +339,8 @@ void observe_player_life(RuntimeInstance& instance,
 
 /** Raises one event per watched trigger volume whose occupancy changed. */
 void push_trigger_edges(RuntimeInstance& instance,
-                        const host::SenseObservationSnapshot& sense) noexcept;
+                        const host::SenseObservationSnapshot& sense,
+                        std::uint64_t missionSequence) noexcept;
 /** Raises one dedicated type-31 edge from a decoded schema-0x8080879F msg-19 payload. */
 void push_player_trigger(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Raises one exact Type-6 start/finish edge from a decoded schema-0x808087BF msg-19 payload. */
@@ -327,6 +354,14 @@ void push_damage_edges(RuntimeInstance& instance,
 /** Raises observed Type-2 damage pools and lifecycle resets without inferring damage. */
 void push_combatant_damage_edges(RuntimeInstance& instance,
                                  const host::SenseObservationSnapshot& sense) noexcept;
+/** Raises a damage state from an entity's replicated damage levels (fractions of full). */
+void push_entity_damage(RuntimeInstance& instance,
+                        std::uint32_t registryKey,
+                        std::uint8_t slotType,
+                        std::uint16_t slotIndex,
+                        float primary,
+                        float secondary,
+                        std::uint64_t tick) noexcept;
 /** Raises current device values and sequence resets from accepted client reports. */
 void push_device_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;
