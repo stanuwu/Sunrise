@@ -35,8 +35,14 @@ bool prepare_initial(
     const bool hasDefinition =
         middleware::datagen::object_id(subscription.familyType, slotIndex, objectId);
     bool success = false;
-    if (subscription.familyType == queuez::kSocialRosterFamilyType && hasDefinition) {
+    if (subscription.familyType == middleware::datagen::kInspectionFamily && hasDefinition) {
+        success = prepare_inspection(scratch, subscription, reservation, staged);
+    } else if (subscription.familyType == queuez::kSocialRosterFamilyType && hasDefinition) {
         success = prepare_social_roster(scratch, subscription, objectId, reservation, staged);
+    } else if (subscription.familyType == middleware::datagen::kFireteamFamily && hasDefinition) {
+        success = prepare_fireteam(scratch, subscription, reservation, staged);
+    } else if (subscription.familyType == middleware::datagen::kJoinFamily && hasDefinition) {
+        success = prepare_join_descriptor(scratch, subscription, reservation, staged);
     } else if (subscription.familyType == kRosterFamilyType && hasDefinition) {
         success = prepare_roster(scratch, subscription, objectId, reservation, staged);
     } else if (subscription.familyType == kAccountFamilyType && hasDefinition) {

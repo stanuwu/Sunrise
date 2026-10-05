@@ -8,6 +8,7 @@
 #include "../../state/unlocks/definition.h"
 #include "../logging/log.h"
 #include "client/definition.h"
+#include "role.h"
 #include "server/definition.h"
 #include "steam/definition.h"
 
@@ -24,15 +25,24 @@ struct ActivitySdkGenerationSettings final {
  * Raise it when a key is renamed, removed, changes meaning, or must take a new default. Adding a
  * key needs no raise, because a missing key already takes its default.
  */
-inline constexpr std::uint32_t kSettingsVersion = 18;
+inline constexpr std::uint32_t kSettingsVersion = 19;
+
+/** IPv4 loopback address in network byte order, shared by settings and endpoint policy. */
+inline constexpr std::array<unsigned char, 4> kLoopbackOctets{127, 0, 0, 1};
 
 /** Parsed read-only process settings. */
 struct Settings {
     /**
-     * Layout version the file was written against. Zero means the key was missing, which is
-     * every file written before versioning. Checked against kSettingsVersion at load.
+     * Layout version supplied by the file, defaulting to kSettingsVersion when absent.
+     * Loading replaces older versioned files; compact unversioned files are preserved.
      */
     std::uint32_t version{};
+    /** Explicit permission to host or join multiplayer and allow its network endpoints. */
+    bool multiplayerEnabled{};
+    bool compactClient{};
+    bool compactHost{};
+    Role configuredRole{Role::embedded};
+    bool hasConfiguredRole{};
     /**
      * Completes released exotic weapon catalysts while resolving client item state.
      */
@@ -54,13 +64,18 @@ struct Settings {
 /** @return The complete default settings. */
 [[nodiscard]] Settings defaults() noexcept;
 
+/** Reason a settings document was refused. */
+enum class ParseFailure { none, invalidDocument, multiplayerOptInRequired };
+
 /**
  * Parses supported JSON settings on top of the defaults.
  * @param json Complete settings text.
  * @param output Receives the settings only after the whole document is valid.
+ * @param failure Optional specific refusal reason.
  * @return True when the document matches the supported settings.
  */
-[[nodiscard]] bool parse(std::string_view json, Settings& output) noexcept;
+[[nodiscard]] bool
+parse(std::string_view json, Settings& output, ParseFailure* failure = nullptr) noexcept;
 
 /**
  * Loads the settings file next to the module when it is there.
@@ -74,5 +89,10 @@ void shutdown() noexcept;
 
 /** @return Active read-only Core settings. */
 [[nodiscard]] const Settings& get() noexcept;
+
+/** Explicit opt-in enables native multiplayer adapters for a host or an upstream client. */
+[[nodiscard]] inline bool multiplayer() noexcept {
+    return get().multiplayerEnabled && (role() == Role::host || get().server.upstream.enabled);
+}
 
 } // namespace sunrise::core::settings

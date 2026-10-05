@@ -115,15 +115,44 @@ bool read_presence(encoding::bits::Reader& reader, bool& present) noexcept {
     return true;
 }
 
-/** Skips the whole opaque B2 branch and checks its dynamic count. */
-bool skip_opaque_root_branch(encoding::bits::Reader& reader) noexcept {
-    return skip_optional(reader, 6) && skip_optional(reader, 128U * 8U) && skip_optional(reader, 64)
-           && skip_optional(reader, 64) && skip_optional(reader, 64) && skip_optional(reader, 64)
-           && skip_optional(reader, 32) && skip_optional(reader, 32)
-           && skip_optional(reader, 8U * 8U) && skip_optional(reader, 32)
-           && skip_optional(reader, 86U * 8U) && skip_optional(reader, 86U * 8U)
-           && skip_optional(reader, 86U * 8U) && skip_optional(reader, 64U * 8U)
-           && skip_large_array(reader) && reader.skip(1);
+/** Keeps B2 fields 0, 10 and 11 from this exact sparse report. */
+bool read_transport_branch(encoding::bits::Reader& reader, TransportReport& report) noexcept {
+    report = {};
+    TransportReport parsed{};
+    std::uint64_t flags{};
+    const auto address = [&reader](auto& bytes, bool& present) noexcept {
+        if (!read_presence(reader, present)) {
+            return false;
+        }
+        if (!present) {
+            return true;
+        }
+        for (auto& byte : bytes) {
+            std::uint64_t value{};
+            if (!reader.read(8, value)) {
+                return false;
+            }
+            byte = static_cast<std::byte>(value);
+        }
+        return true;
+    };
+    // Each skip below is one B2 field at the width its schema declares, in declaration order.
+    // The `* 8` widths are byte-array fields; the bare ones are scalars.
+    constexpr std::size_t kAddressBits = gameplay::descriptor::kNetAddrSize * 8U;
+    const bool walked =
+        read_presence(reader, parsed.hasFlags) && (!parsed.hasFlags || reader.read(6, flags))
+        && skip_optional(reader, 128U * 8U) && skip_optional(reader, 64)
+        && skip_optional(reader, 64) && skip_optional(reader, 64) && skip_optional(reader, 64)
+        && skip_optional(reader, 32) && skip_optional(reader, 32) && skip_optional(reader, 8U * 8U)
+        && skip_optional(reader, 32) && address(parsed.alternate, parsed.hasAlternate)
+        && address(parsed.address, parsed.hasAddress) && skip_optional(reader, kAddressBits)
+        && skip_optional(reader, 64U * 8U) && skip_large_array(reader) && reader.skip(1);
+    if (!walked) {
+        return false;
+    }
+    parsed.flags = static_cast<std::uint8_t>(flags);
+    report = parsed;
+    return true;
 }
 
 /** Reads the D4 branch and keeps its optional transition token and both region legs. */

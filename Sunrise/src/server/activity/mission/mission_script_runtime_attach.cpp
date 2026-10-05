@@ -90,7 +90,8 @@ reload_authorization(const state::activity::SessionBinding& binding) noexcept {
 [[nodiscard]] bool still_exact(RuntimeInstance& instance) noexcept {
     server::bap::ActivityLinkView link{};
     lua_vm::WorldGenerationIdentity worldGeneration{};
-    return server::bap::activity_link_view(instance.view.binding, link)
+    return server::bap::activity_link_view(
+               instance.view.binding, instance.view.activityClientGeneration, link)
            && link.publicTarget == instance.publicTarget
            && sdk::revalidate(instance.view,
                               instance.view.binding,
@@ -105,12 +106,14 @@ reload_authorization(const state::activity::SessionBinding& binding) noexcept {
 }
 
 /**
- * Re-points one open program at the current ActivityClient generation.
+ * Rebuilds one open program view for its exact owning ActivityClient generation.
  * @return True when the instance holds an exact view of the same program.
  */
 [[nodiscard]] bool rebind_instance(RuntimeInstance& instance) noexcept {
     server::bap::ActivityLinkView link{};
-    if (!server::bap::activity_link_view(instance.view.binding, link) || !link.joined) {
+    if (!server::bap::activity_link_view(
+            instance.view.binding, instance.view.activityClientGeneration, link)
+        || !link.joined) {
         return false;
     }
     const sdk::Snapshot catalog = sdk::snapshot();
@@ -612,6 +615,7 @@ enum class InitialStateGate : std::uint8_t {
 
 /** Binds one host instance to a free slot once its link, SDK view and world view all resolve. */
 void attach_instance(const host::InstanceSnapshot& hostInstance,
+                     std::span<const state::activity::SessionRosterRow> roster,
                      const sdk::Snapshot& catalog,
                      std::uint64_t now) noexcept {
     if (find_instance(hostInstance.binding) != nullptr) {
@@ -623,7 +627,17 @@ void attach_instance(const host::InstanceSnapshot& hostInstance,
         return;
     }
     server::bap::ActivityLinkView link{};
-    if (!server::bap::activity_link_view(hostInstance.binding, link)) {
+    // Host snapshots are session-scoped and have no client owner yet. The lowest joined native
+    // member owns the session-wide program: the primary while present, so a guest sharing its
+    // binding cannot replace it, and the first remaining peer once the primary has left.
+    std::uint64_t memberKey{};
+    for (const auto& row : roster) {
+        if (row.joined && state::activity::same_binding(row.binding, hostInstance.binding)) {
+            memberKey = row.presentMemberKey;
+            break;
+        }
+    }
+    if (!server::bap::activity_link_view_for_member(hostInstance.binding, memberKey, link)) {
         report_attach_result(
             hostInstance.binding, AttachResult::noActivityLink, "no_activity_link");
         return;
@@ -751,7 +765,7 @@ void synchronize_instances(std::uint64_t now) noexcept {
             instance.occupied && is_active(diagnostics, instance.view.binding);
         const bool bindingRetained =
             instance.occupied && state::activity::binding_matches(instance.view.binding);
-        // A generation change only stales the view, so rebind and keep the program.
+        // Rebuild a stale SDK/world view only while the exact client owner remains live.
         if (instance.occupied && bindingActive && bindingRetained && !still_exact(instance)
             && rebind_instance(instance)) {
             log_line(core::log::Level::debug, &instance, "rebind", "generation");
@@ -777,7 +791,8 @@ void synchronize_instances(std::uint64_t now) noexcept {
     publish_fireteam_life(now);
     for (std::size_t index = 0; index < diagnostics.instanceCount; ++index) {
         if (diagnostics.instances[index].active) {
-            attach_instance(diagnostics.instances[index], catalog, now);
+            attach_instance(
+                diagnostics.instances[index], {roster.data(), rosterCount}, catalog, now);
         }
     }
 }

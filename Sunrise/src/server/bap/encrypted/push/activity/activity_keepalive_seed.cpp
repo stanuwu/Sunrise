@@ -20,7 +20,7 @@ constexpr std::int32_t kUnsetOpaque = -1;
 /** @return The fallback membership identity for one joining client key. */
 [[nodiscard]] state::activity::membership::Identity
 seed_identity(std::uint64_t memberKey, std::uint64_t characterSoid) noexcept {
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     state::activity::membership::Identity identity{};
     identity.memberKey = memberKey;
     identity.smallOpaque = kMemberSkipTest;

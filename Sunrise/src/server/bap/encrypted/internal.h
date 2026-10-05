@@ -29,6 +29,8 @@ namespace sunrise::server::bap::encrypted {
 enum class BodyCodec : std::uint8_t {
 
     empty,
+    registerRelayClient,
+    initiateRelayConnection,
 
     accountTranslationResponse,
 
@@ -155,6 +157,11 @@ struct SeasonPassRewardTransaction {
 /** Optional side effect produced while decoding one authenticated service body. */
 
 struct ServiceOutcome {
+    bool hasRelayRegistration{};
+    bool hasRelayConnectivityFailure{};
+    std::optional<middleware::bap::nat_relay::InitiateRelayConnection> relayInitiate;
+    activity_host_manager::PendingStartupReservations startupReservations{};
+    std::optional<state::social::NativePresence> nativePresence;
 
     bool hasSubscription{};
     /** The ws-206 reply already carries the family's first snapshot, so no push repeats it. */
@@ -529,7 +536,7 @@ void append_queuez_notification(Scratch& scratch,
 
 /**
  * Appends the family-zero banner pair as its own notification.
- * Sent twice per boot at the same version, which is what survives the state-1 DECLARED race.
+ * Sent twice per boot at the same version, which is what survives the state-1 `declared` race.
  * `after` records the delivery, or a later 504 move cannot name the record it must release.
  * @param scratch Lock-owned transform buffers.
  * @param before Queuez state the pair is delivered against.

@@ -1,8 +1,10 @@
+#include "../account/account_context.h"
 #include "store_internal.h"
 
 namespace sunrise::state::investment::store {
 
 sqlite3* g_database{};
+// Transactions hold this across nested store/statement operations, so the lock must be recursive.
 std::recursive_mutex g_mutex;
 Session g_session;
 std::uint64_t g_failureSerial{};
@@ -14,7 +16,7 @@ sqlite3_destructor_type copy_text() noexcept {
 
 /** SQL failures remain failures; no in-memory save replaces a failed disk write. */
 bool execute(const char* sql) noexcept {
-    const bool ready = g_database != nullptr
+    const bool ready = local_account_access() && g_database != nullptr
                        && sqlite3_exec(g_database, sql, nullptr, nullptr, nullptr) == SQLITE_OK;
     if (!ready) {
         ++g_failureSerial;
@@ -47,6 +49,10 @@ bool Transaction::commit() noexcept {
 
 /** The caller holds the database lock until this statement is destroyed. */
 Statement::Statement(const char* sql) noexcept {
+    if (!local_account_access()) {
+        ++g_failureSerial;
+        return;
+    }
     if (g_database != nullptr
         && sqlite3_prepare_v2(g_database, sql, -1, &statement_, nullptr) != SQLITE_OK) {
         sqlite3_finalize(statement_);
@@ -59,7 +65,8 @@ Statement::~Statement() {
     sqlite3_finalize(statement_);
 }
 int Statement::step() noexcept {
-    const int result = statement_ != nullptr ? sqlite3_step(statement_) : SQLITE_ERROR;
+    const int result =
+        local_account_access() && statement_ != nullptr ? sqlite3_step(statement_) : SQLITE_ERROR;
     if (result != SQLITE_ROW && result != SQLITE_DONE) {
         ++g_failureSerial;
     }
@@ -68,7 +75,8 @@ int Statement::step() noexcept {
 
 /** @return Borrowed text valid until the statement advances. */
 bool Statement::text(int column, std::string_view& value) const noexcept {
-    if (statement_ == nullptr || sqlite3_column_type(statement_, column) != SQLITE_TEXT) {
+    if (!local_account_access() || statement_ == nullptr
+        || sqlite3_column_type(statement_, column) != SQLITE_TEXT) {
         return false;
     }
     const auto* bytes = reinterpret_cast<const char*>(sqlite3_column_text(statement_, column));
@@ -86,7 +94,7 @@ bool open(std::string_view path,
           std::string_view settingsSchema,
           std::string_view settingsDefaults) noexcept {
     const std::lock_guard lock(g_mutex);
-    if (g_database != nullptr) {
+    if (!local_account_access() || g_database != nullptr) {
         return false;
     }
     const std::string filename(path);
@@ -147,6 +155,7 @@ bool open(std::string_view path,
 /** Saves are synchronous, so shutdown only closes the handle and discards session fields. */
 void shutdown() noexcept {
     const std::lock_guard lock(g_mutex);
+    // This process owns the database even when teardown runs under a public request scope.
     sqlite3_close_v2(g_database);
     g_database = nullptr;
     g_session = {};

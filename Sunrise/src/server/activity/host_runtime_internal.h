@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "host_runtime.h"
@@ -203,15 +204,19 @@ struct Instance final {
     bool occupied{};
 };
 
-/** Clears one instance member by member; a whole-value assignment puts 1 MiB on the stack. */
+/** Clears generation-owned data while retaining vector storage and avoiding a whole-record
+ * temporary. */
 inline void clear_instance(Instance& instance) noexcept {
     instance.view = {};
-    instance.senseObservations = {};
-    std::vector<SquadSenseRecord>{}.swap(instance.squadSense);
+    std::destroy_at(&instance.senseObservations);
+    std::construct_at(&instance.senseObservations);
+    // Inactive records reuse this capacity without allocating on the game service path.
+    instance.squadSense.clear();
     instance.squadSenseSourceGeneration = 0;
-    instance.sceneSenseTrace = {};
+    std::destroy_at(&instance.sceneSenseTrace);
+    std::construct_at(&instance.sceneSenseTrace);
     instance.scriptableGuards.fill({});
-    std::vector<PendingScriptableOverride>{}.swap(instance.scriptableAuthEstate);
+    instance.scriptableAuthEstate.clear();
     instance.pendingScriptable = {};
     instance.pendingScriptableTail.fill({});
     instance.pendingScriptableTailCount = 0;
@@ -222,7 +227,8 @@ inline void clear_instance(Instance& instance) noexcept {
 }
 
 extern SRWLOCK g_lock;
-extern std::array<Instance, kInstanceCapacity> g_instances;
+/** Lifetime-owned records, reused for inactive generations before allocating a new slot. */
+extern std::array<std::unique_ptr<Instance>, kInstanceCapacity> g_instances;
 /** Ordered reducer work grows with real input and fails only when allocation fails. */
 extern std::vector<PendingInput> g_pending;
 extern std::size_t g_pendingRead;

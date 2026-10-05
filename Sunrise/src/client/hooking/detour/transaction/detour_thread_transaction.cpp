@@ -67,6 +67,7 @@ void close_threads(Threads& threads) noexcept {
     for (std::size_t index = 0; index < threads.count; ++index) {
         CloseHandle(threads.handles[index]);
     }
+    process::freeze::release_process_locks(threads.processLocks);
     threads = {};
 }
 
@@ -307,10 +308,16 @@ enum class PassResult {
 /** Starts a Detours transaction and enlists process threads to a stable snapshot. */
 bool begin(Threads& threads) noexcept {
     threads = {};
-    // Detours suspends these threads at commit. Another suspender running at the same time
-    // would freeze this thread, and then neither side can finish.
+    // DetourUpdateThread suspends immediately and allocates a thread record on each call.
+    // Own the loader and heap before the first suspension, or a suspended heap owner can
+    // block the next allocation forever. The process freezer uses the same lock order.
     process::freeze::enter_exclusive();
+    if (!process::freeze::acquire_process_locks(threads.processLocks)) {
+        process::freeze::leave_exclusive();
+        return false;
+    }
     if (DetourTransactionBegin() != NO_ERROR) {
+        close_threads(threads);
         process::freeze::leave_exclusive();
         return false;
     }

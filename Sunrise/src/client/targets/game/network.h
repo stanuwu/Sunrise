@@ -10,6 +10,7 @@ namespace sunrise::client::targets::game::network {
 /** Unowned main-image entry points and storage required by the early network guard. */
 struct Targets {
     std::byte* transportKind{};
+    std::byte* transportKindSession{};
     std::byte* httpExecuteRequest{};
     std::byte* signOnReadinessFailure{};
     std::byte* signOnReadinessReady{};

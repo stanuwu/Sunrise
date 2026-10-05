@@ -4,12 +4,19 @@
 #include <cstdint>
 
 #include "../definition.h"
+#include "member_directory.h"
+
+namespace sunrise::state::activity::entity_slots {
+struct PendingMutation;
+}
 
 namespace sunrise::state::activity::membership {
 
 /** Snapshot and revision guards for one deferred membership operation. */
 struct PendingMutation final {
     Snapshot snapshot{};
+    reservations::Roster peerSnapshot{};
+    MemberDirectory memberDirectory{};
     /** A second copy, so a changed identity plan is caught before commit. */
     Identity identityGuard{};
     /** Sparse client-state input, kept whether or not a delivery snapshot exists. */
@@ -20,6 +27,8 @@ struct PendingMutation final {
     std::uint64_t expectedStateRevision{};
     std::uint64_t expectedRecordRevision{};
     std::uint64_t expectedPrimarySoid{};
+    std::uint64_t expectedMemberKey{};
+    std::size_t memberRow{entity_slots::kMemberLeaseRowCount};
     std::uint64_t refreshRequestGuard{};
     std::uint32_t requestedRevision{};
     std::uint32_t acknowledgement{};
@@ -41,6 +50,10 @@ struct PendingMutation final {
     bool movesTransitionToken{};
     bool prepared{};
 };
+
+/** Exact membership after-image of a validated native join and its deferred lease transaction. */
+[[nodiscard]] bool prepare_join_snapshot(const entity_slots::PendingMutation& join,
+                                         PendingMutation& mutation) noexcept;
 
 /**
  * Prepares one exact identity for a joined activity session.
@@ -85,6 +98,9 @@ struct PendingMutation final {
  * @return True when the published revision has been acknowledged.
  */
 [[nodiscard]] bool acknowledged(std::uint64_t sessionId) noexcept;
+
+/** Current recipient's publishable revision, or zero for an absent/replaced binding. */
+[[nodiscard]] std::uint32_t current_revision(const SessionBinding& binding) noexcept;
 
 /**
  * Arms or clears the host-named region the client teleports to.
@@ -197,17 +213,7 @@ struct ClientPlacement final {
     std::int32_t bubble{kMinimumRefreshBubble};
     /** Membership revision the refresh that named the bubble had applied. */
     std::uint32_t bubbleRevision{kAbsentRevision};
-    /** The client's last character write-back reported the in-world state. */
-    bool clientInWorld{};
 };
-
-/**
- * Records the world state the client's character write-back (ws 702) reports.
- * The field at objB `+12068` reads 8 in the world and 1 through a load, so the value decides
- * entry, not the send's timing. The region is a separate report, read where entry is tested.
- * @param inWorld True when the field carries the in-world value.
- */
-void note_client_writeback(bool inWorld) noexcept;
 
 /**
  * Reads the client's region legs and current bubble together.

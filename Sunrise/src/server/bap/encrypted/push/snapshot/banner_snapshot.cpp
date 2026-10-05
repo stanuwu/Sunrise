@@ -23,8 +23,10 @@ bool prepare_banner(Scratch& scratch,
                     std::int32_t version,
                     std::uint64_t previousCharacter,
                     Prepared& prepared) noexcept {
+    const state::ScopedAccountView accountScope(
+        state::account_for_subscription_root(familyRootSoid));
     const Reservation reservation = reserve_prior(scratch, prepared);
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     if (reservation.rawWriteOffset > scratch.plaintext.size()) {
         return false;
     }
@@ -135,7 +137,7 @@ bool prepare_character_appearance_refresh(Scratch& scratch,
         return report_failure("equip_appearance_reservation");
     }
 
-    state::AccountState account = state::account_snapshot();
+    state::AccountState account = state::bound_account_snapshot();
     if (refresh.characterSoid == 0 || afterCharacter.soid != refresh.characterSoid
         || characterIndex >= account.characterCount
         || account.characters[characterIndex].soid != refresh.characterSoid

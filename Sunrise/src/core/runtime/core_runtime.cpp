@@ -14,6 +14,7 @@
 #include "../../client/runtime/runtime.h"
 #include "../../middleware/runtime/middleware_runtime.h"
 #include "../../server/runtime/server_runtime.h"
+#include "../../state/account/account_platform.h"
 #include "../../state/activity_sdk/generated_world/catalog_manifest.h"
 #include "../../state/activity_sdk/runtime.h"
 #include "../../state/content_manifest/content_manifest_state_runtime.h"
@@ -44,7 +45,9 @@ constexpr std::wstring_view kInstalledPackagesDirectory = L"packages";
     if (!state::investment::store::initialize(module)) {
         return false;
     }
-    return state::investment::store::validate()
+    return state::investment::store::bind_identity(
+               state::account::platform::declared_account_soid(settings::get().steam.user.steamId))
+           && state::investment::store::validate()
            && state::initialize(module, settings::get().initialActivityDefaults);
 }
 
@@ -102,8 +105,9 @@ void initialize_activity_sdk(void* module) noexcept {
     }
     const HMODULE process = GetModuleHandleW(nullptr);
     path::Buffer packages;
-    if (process == nullptr || !path::module_directory(process, packages)
-        || !path::append(packages, kInstalledPackagesDirectory)) {
+    const bool located = process != nullptr && path::module_directory(process, packages)
+                         && path::append(packages, kInstalledPackagesDirectory);
+    if (!located) {
         log::write(log::Channel::core,
                    log::Level::error,
                    "ev=initialize stage=content_manifest result=fail");
@@ -177,7 +181,8 @@ bool initialize(void* module) noexcept {
             stage = "middleware";
         } else if (!server::initialize()) {
             stage = "server";
-        } else if (!client::initialize(module)) {
+        } else if (settings::activates_client_hooks(settings::role())
+                   && !client::initialize(module)) {
             stage = "client";
         }
     }
@@ -188,7 +193,9 @@ bool initialize(void* module) noexcept {
         // A logging-stage failure has no sinks left to carry it, and reports nothing.
         log::write_elapsed(log::Channel::core, "ev=initialize phase=complete", startedTick, "fail");
         // Reverse every stage because the failing expression may have completed earlier stages.
-        (void)client::shutdown();
+        if (settings::activates_client_hooks(settings::role())) {
+            (void)client::shutdown();
+        }
         server::shutdown();
         middleware::shutdown();
         state::content_manifest::shutdown();
@@ -214,7 +221,7 @@ bool shutdown() noexcept {
     if (!g_initialized.load(std::memory_order_acquire)) {
         return true;
     }
-    if (!client::shutdown()) {
+    if (settings::activates_client_hooks(settings::role()) && !client::shutdown()) {
         // Server and State must remain valid while any Client hook is attached.
         return false;
     }

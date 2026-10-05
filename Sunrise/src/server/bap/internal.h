@@ -10,6 +10,7 @@
 #include "../../middleware/bap/activity_message/activity_patch_epoch_parser.h"
 #include "../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
+#include "../../middleware/bap/activity_message/transport_report.h"
 #include "../../middleware/bap/frame.h"
 #include "../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../state/activity/bubble_authority/definition.h"
@@ -19,16 +20,22 @@
 #include "../../state/build_data/scenarios/definition.h"
 #include "../../state/gameplay/external/squad_entity_retirement.h"
 #include "../../state/runtime/runtime.h"
+#include "../../state/social/steam_roster.h"
 #include "../activity/host_runtime.h"
 #include "activity_authority_query_owner.h"
 #include "activity_authority_reset_owner.h"
+#include "activity_link_selection.h"
+#include "encrypted/activity_host_manager/activity_startup_reservations.h"
 #include "encrypted/queuez/definition.h"
+#include "encrypted/queuez/public_subscriptions.h"
+#include "nat_relay_service.h"
 #include "runtime.h"
 
 namespace sunrise::server::bap {
 
 /** One session per transport peer slot, so a connection id indexes this array directly. */
 inline constexpr std::size_t kSessionCount = client::network::kBapConnectionCount;
+static_assert(state::matchmaking::kContextCapacity >= kSessionCount);
 /**
  * A delivered activity frame defers the next silence-prevention write.
  * This is the host's own period. It is not the floor handed to the client, which is a separate
@@ -39,6 +46,9 @@ inline constexpr std::uint64_t kActivityKeepaliveIntervalMs = 2'000;
 /** Counts matching authenticated links while the caller already owns the BAP lock. */
 [[nodiscard]] std::size_t
 activity_link_count_locked(const state::activity::SessionBinding& binding) noexcept;
+/** Counts the exact authenticated recipient generation for read-only content projection. */
+[[nodiscard]] std::size_t activity_link_count_locked(const state::activity::SessionBinding& binding,
+                                                     std::uint64_t recipientGeneration) noexcept;
 
 // Top-level groups the client can hold; the largest installed scenario has 78 in every state.
 inline constexpr std::size_t kScenarioWideGroupCapacity =
@@ -46,6 +56,11 @@ inline constexpr std::size_t kScenarioWideGroupCapacity =
 
 /** Fixed scratch storage owned by the lock, kept off the Client thread's stack. */
 struct Scratch {
+    /** Reused account image and distinct decode staging; callers hold the BAP session lock. */
+    state::AccountState accountImage{};
+    state::AccountState accountDecode{};
+    /** Copy the live directory before mutation and commit only after the reply fits. */
+    state::social::Hub socialDirectory{};
     std::array<std::byte, client::network::kBapFrameCapacity> plaintext{};
     std::array<std::byte, client::network::kBapFrameCapacity> responseBody{};
     std::array<std::byte, client::network::kBapFrameCapacity> responsePayload{};
@@ -130,6 +145,7 @@ struct RosterPublication {
     state::activity::bubble_authority::Grant grant{};
     state::gameplay::squad_entity_retirement::RetirementPlan entityRetirement{};
     /** Epochs remain staged until both retirement and roster frames reach the caller. */
+    std::uint64_t retirementSequence{};
     std::uint8_t retirementPriorEpoch{};
     std::uint8_t retirementBaseEpoch{};
     std::uint8_t retirementEpoch{};
@@ -278,7 +294,9 @@ struct ActivityClientBinding {
     std::uint64_t hostGeneration{};
     /** Changes on every bind and rejoin, even when the session id stays the same. */
     std::uint64_t bindingGeneration{};
-    /** Epoch this host authored in the accepted join result. */
+    /** Last sequence queued on this ordered connection, not proof of client application. */
+    std::uint64_t replicationSequence{};
+    /** Low byte of the last sequence queued on this connection. */
     std::uint8_t replicationEpoch{};
     /** Private: last citizen region. Public: immutable region captured by the host binding. */
     std::int32_t advertisedRegion{-1};
@@ -341,6 +359,10 @@ enum class CharacterRefreshScope : std::uint8_t { none, records, recordsAndRoste
 
 /** Mutable transport state owned by one BAP connection. */
 struct Session {
+    /** Actual BAP TCP source; never accepted from published native address bytes. */
+    std::uint32_t remoteAddress{};
+    nat_relay::State relay{};
+    state::AccountHandle accountHandle{state::kInvalidAccount};
     std::uint64_t activityAdvertisementHostGeneration{};
     std::uint64_t acquisitionPresentationUntilTick{};
     std::array<encrypted::queuez::AcquisitionPresentationRow,
@@ -370,8 +392,15 @@ struct Session {
     std::uint64_t activityKeepaliveDueTick{};
     /** Client member key from the join request. It seeds the membership id. */
     std::uint64_t activityMemberKey{};
+    /** Sparse native transport report owned by this exact activity binding. */
+    middleware::bap::activity_message::TransportReport activityTransport{};
+    encrypted::activity_host_manager::PendingStartupReservations activityStartupReservations{};
     /** Binding generation whose entity-slot join committed, including a zero member key. */
     std::uint64_t activityJoinGeneration{};
+    /** Original native join correlation used for member-set rejoin notifications. */
+    std::uint32_t activityJoinCorrelation{};
+    std::array<std::uint64_t, state::activity::entity_slots::kMemberLeaseRowCount>
+        activityMemberSet{};
     /**
      * Character the join request named, or zero when it carried none.
      * The roster's participation key must be the character the client signed in on. The client
@@ -469,6 +498,7 @@ struct Session {
     MissionSeedLease activityMissionSeed{};
     /** Queuez versions and residents published only through this authenticated peer. */
     encrypted::queuez::SessionState queuez{};
+    encrypted::public_queuez::Subscriptions publicSubscriptions{};
     /** Tick count after which the owed Family-4 re-push may go out. */
     std::uint64_t family4RepushDueTick{};
     /** Root the owed re-push must use. */
@@ -485,6 +515,10 @@ struct Session {
     std::uint64_t socialRosterRepushRoot{};
     /** True while one family-two re-push is still owed to this peer. */
     bool socialRosterRepushArmed{};
+    /** Social registration this link owns. Zero until a sync request registers it. */
+    std::uint64_t socialSerial{};
+    /** Publication stamp this link has already been told about, for feed and notice alike. */
+    state::social::Stamp socialSentStamp{};
     /** Latest shared-account generation this peer has received. */
     std::uint64_t accountGeneration{};
     /** Newest shared-account generation owed as a full cross-peer refresh. */

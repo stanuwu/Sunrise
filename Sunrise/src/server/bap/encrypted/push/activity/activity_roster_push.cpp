@@ -20,6 +20,8 @@
 #include "../../../../activity/host_runtime.h"
 #include "../../../../gameplay/peer/peer_transport.h"
 #include "../../../../gameplay/squad_entity_retirement.h"
+#include "activity_member_departure_push.h"
+#include "activity_member_roster.h"
 #include "activity_notification_frame.h"
 #include "activity_roster_device_publication.h"
 #include "internal.h"
@@ -132,7 +134,9 @@ bool append_roster_notification(
         server::activity::host::pending_scriptable_override_for_activity_client(
             session.activity.session, session.activity.bindingGeneration, scriptablePending);
     const bool singleScriptableLink =
-        !hasScriptablePending || activity_link_count_locked(session.activity.session) == 1;
+        !hasScriptablePending
+        || activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
+               == 1;
     // A leave delta retires every group, so it carries no host state and no typed body. Both stay
     // owed and neither is spent on it.
     const bool ownsPending = hasScriptablePending && singleScriptableLink && !peerLeave;
@@ -273,12 +277,8 @@ bool append_roster_notification(
     // then deactivates each row while its owner is still valid and unregisters it cleanly.
     std::size_t retiredGroups = 0;
     if (peerLeave) {
-        for (std::size_t index = 0; index < snapshot.roster.groupCount; ++index) {
-            snapshot.roster.groups[index].retired = true;
-        }
+        retire_member_roster(snapshot);
         retiredGroups = snapshot.roster.groupCount;
-        snapshot.authOverrides = {};
-        snapshot.senseOverrides = {};
     }
     // The grant is picked here and committed only once the frame reaches the caller, so a
     // discarded body leaves the bubble ungranted and the next push retries it.
@@ -308,12 +308,13 @@ bool append_roster_notification(
     const std::size_t initialWritten = written;
     auto initialNonce = nonce;
     server::gameplay::squad_entity_retirement::RetirementPlan entityRetirement{};
+    std::uint64_t retirementSequence{};
+    const bool epochCurrent =
+        state::activity::replication_sequence(session.activity.session, retirementSequence)
+        && retirementSequence == session.activity.replicationSequence
+        && retirementSequence != (std::numeric_limits<std::uint64_t>::max)();
     const auto retirementPriorEpoch = session.activity.replicationEpoch;
-    const auto& epochRequest = session.activityReplicationEpoch;
-    const auto retirementBaseEpoch =
-        epochRequest.staged && epochRequest.bindingGeneration == session.activity.bindingGeneration
-            ? epochRequest.generation
-            : retirementPriorEpoch;
+    const auto retirementBaseEpoch = retirementPriorEpoch;
     const auto retirementEpoch = static_cast<std::uint8_t>(retirementBaseEpoch + 1U);
     std::size_t messageSize = 0;
     RosterDecodeMap decodeMap{};
@@ -327,14 +328,19 @@ bool append_roster_notification(
         && !stagedMissionSeed.regionArrivalPending;
     bool encoded = message::encode_sensor_auth_update(snapshot, scratch.responseBody, messageSize);
     const bool hasRetirement =
-        encoded && allowEntityRetirement
-        && (placedRetirementPending || (snapshot.hasGrant && enteringBubble))
+        encoded && (placedRetirementPending || (snapshot.hasGrant && enteringBubble))
         && server::gameplay::squad_entity_retirement::prepare_retirement(
             session.activity.session,
             session.activity.bindingGeneration,
             static_cast<std::uint8_t>(snapshot.region
                                       >> state::activity::bubble_authority::kSliceSetToBubbleShift),
             entityRetirement);
+    // A retirement-bearing roster must keep its grant and region cursor owed until the
+    // keepalive can atomically advance shared State immediately before copying the frame.
+    // Sending the roster alone would spend the entering-bubble trigger and strand its purge.
+    if (hasRetirement && (!allowEntityRetirement || !epochCurrent)) {
+        encoded = false;
+    }
     if (placedRetirementPending && allowEntityRetirement && !hasRetirement && !solicited) {
         encoded = false;
     }
@@ -371,7 +377,7 @@ bool append_roster_notification(
             session, snapshot, name, 0, kNoGrant, RosterOutcome::unchanged, bodyHash, forced);
         return false;
     }
-    if (hasRetirement) {
+    if (encoded && hasRetirement) {
         namespace control = middleware::bap::activity_message::host_control;
         const control::PurgeAuthorityBody retirement{
             .slots = entityRetirement.entities, .epoch = retirementEpoch, .reason = 0};
@@ -415,6 +421,7 @@ bool append_roster_notification(
         // `discard_staged_roster`.
         session.activityRosterStaged.grant = grant;
         session.activityRosterStaged.entityRetirement = entityRetirement;
+        session.activityRosterStaged.retirementSequence = retirementSequence;
         session.activityRosterStaged.retirementPriorEpoch = retirementPriorEpoch;
         session.activityRosterStaged.retirementBaseEpoch = retirementBaseEpoch;
         session.activityRosterStaged.retirementEpoch = retirementEpoch;
@@ -595,19 +602,7 @@ void commit_staged_roster(Session& session) noexcept {
         server::gameplay::squad_entity_retirement::commit_retirement(
             session.activityRosterStaged.entityRetirement);
         const auto& staged = session.activityRosterStaged;
-        session.activity.replicationEpoch = staged.retirementEpoch;
-        if (staged.retirementBaseEpoch != staged.retirementPriorEpoch) {
-            static_cast<void>(
-                server::gameplay::peer::commit_replication_epoch(session.activity.session,
-                                                                 session.activity.bindingGeneration,
-                                                                 staged.retirementPriorEpoch,
-                                                                 staged.retirementBaseEpoch));
-        }
-        static_cast<void>(
-            server::gameplay::peer::commit_replication_epoch(session.activity.session,
-                                                             session.activity.bindingGeneration,
-                                                             staged.retirementBaseEpoch,
-                                                             staged.retirementEpoch));
+        commit_replication_steps(session, staged.retirementSequence + 1);
         state::activity::bubble_authority::record_purge(session.activity.session.sessionId,
                                                         staged.entityRetirement.entities);
         auto& request = session.activityReplicationEpoch;

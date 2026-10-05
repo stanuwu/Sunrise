@@ -162,8 +162,22 @@ bool resolve(const state::AccountState& account,
              std::size_t selectedCharacterIndex,
              ResolvedLoadout& output) noexcept {
     if (account.characterCount > account.characters.size()
+        || selectedCharacterIndex >= account.characterCount) {
+        return false;
+    }
+    for (std::size_t index = 0; index < account.characterCount; ++index) {
+        if (account.characters[index].selected != (index == selectedCharacterIndex)) {
+            return false;
+        }
+    }
+    return resolve_character(account, selectedCharacterIndex, output);
+}
+
+bool resolve_character(const state::AccountState& account,
+                       std::size_t selectedCharacterIndex,
+                       ResolvedLoadout& output) noexcept {
+    if (account.characterCount > account.characters.size()
         || selectedCharacterIndex >= account.characterCount
-        || !account.characters[selectedCharacterIndex].selected
         || !state::build_data::item_definitions_ready()
         || !state::build_data::configured_item_details_ready()
         || !state::build_data::inventory_bucket_descriptors_ready()
@@ -190,9 +204,6 @@ bool resolve(const state::AccountState& account,
     for (std::size_t characterIndex = 0; characterIndex < account.characterCount;
          ++characterIndex) {
         const state::CharacterState& character = account.characters[characterIndex];
-        if (character.selected != (characterIndex == selectedCharacterIndex)) {
-            return false;
-        }
         for (std::size_t semanticIndex = 0; semanticIndex < character.equipment.slots.size();
              ++semanticIndex) {
             const std::optional<authored_inventory::Item>& authored =

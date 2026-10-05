@@ -7,6 +7,16 @@
 
 namespace sunrise::server::web_service {
 
+/**
+ * Stages local WS-702 presence using the scalar selected-character query and seen-item
+ * receipt. The caller supplies a fresh outcome. Refusal stages no presence; the enclosing
+ * BAP request publishes it only after committing its reply.
+ */
+[[nodiscard]] bool
+note_character_writeback(const middleware::web_service::Message& message,
+                         std::span<const state::account::inventory::PresentedItemRow> presentation,
+                         Outcome& outcome) noexcept;
+
 void select_character(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 void mutate_equipment(const middleware::web_service::Message& message,
                       bool unequip,

@@ -19,6 +19,7 @@ inline constexpr std::uint8_t kInitialReplicationEpoch = 0;
  * @param sessionId Allocated activity session id. Must not be zero.
  * @param peerHeardWindowMs 16-bit peer-heard window in milliseconds. Zero clears every peer bit.
  * @param keepaliveHintMs 16-bit keepalive hint in milliseconds.
+ * @param replicationEpoch Current session-wide replication generation.
  * @param output Caller-owned payload storage, unchanged on failure.
  * @param written Receives 757 on success, or zero on failure.
  * @return True when the session id is valid and the whole body fits.
@@ -27,6 +28,7 @@ inline constexpr std::uint8_t kInitialReplicationEpoch = 0;
                                       std::uint64_t sessionId,
                                       std::uint16_t peerHeardWindowMs,
                                       std::uint16_t keepaliveHintMs,
+                                      std::uint8_t replicationEpoch,
                                       std::span<std::byte> output,
                                       std::size_t& written) noexcept;
 

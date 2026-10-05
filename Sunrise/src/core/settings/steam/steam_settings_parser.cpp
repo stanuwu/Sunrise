@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <string_view>
 
+#include "../../../state/account/account_platform.h"
 #include "../../logging/log.h"
 #include "../parser.h"
 
@@ -194,6 +195,12 @@ resolve_language(std::string_view encoded) noexcept {
 } // namespace
 
 /** Parses Steam settings on top of the fixed defaults. */
+bool Parser::compact_persona(steam::User& output) noexcept {
+    std::string_view value;
+    return string(value) && decode_bounded_string(value, output.personaName);
+}
+
+/** Parses Steam settings on top of the fixed defaults. */
 bool Parser::steam_settings(steam::Settings& output) noexcept {
     if (!consume('{')) {
         return false;
@@ -241,6 +248,7 @@ bool Parser::steam_user_settings(steam::User& output) noexcept {
     }
     steam::User candidate = output;
     bool hasPersonaName = false;
+    bool hasSteamId = false;
     if (consume('}')) {
         return true;
     }
@@ -256,6 +264,13 @@ bool Parser::steam_user_settings(steam::User& output) noexcept {
                 return false;
             }
             hasPersonaName = true;
+        } else if (key == "steam_id") {
+            if (hasSteamId || !unsigned_value(candidate.steamId)
+                || !state::account::platform::valid(candidate.steamId)) {
+                return false;
+            }
+            hasSteamId = true;
+            candidate.hasConfiguredSteamId = true;
         } else if (!skip_value(0)) {
             return false;
         }

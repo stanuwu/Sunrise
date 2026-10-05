@@ -23,12 +23,34 @@ inline constexpr std::size_t kStreamCapacity = client::network::kBapFrameCapacit
 struct Peer {
     SOCKET socket{INVALID_SOCKET};
     std::uint32_t connectionId{};
+    std::uint32_t remoteAddress{};
+    bool inputDeferred{};
+    bool authenticated{};
+    std::uint64_t acceptedTick{};
+    std::uint64_t serviceTick{};
+    std::uint64_t inputStartedTick{};
+    std::uint64_t outputProgressTick{};
     std::size_t streamSize{};
     std::array<std::byte, kStreamCapacity> stream{};
     std::size_t outputOffset{};
     std::size_t outputSize{};
     std::array<std::byte, client::network::kBapFrameCapacity> output{};
 };
+
+/**
+ * Applies a chosen 30-second resource limit independently to authentication, partial-frame
+ * assembly and writes without progress. Locally deferred input pauses the assembly check.
+ * Expiry closes the peer through ordinary session cleanup; it can also exclude a slow peer.
+ */
+[[nodiscard]] inline bool expired(const Peer& peer, std::uint64_t now) noexcept {
+    constexpr std::uint64_t kDeadlineMs = 30'000;
+    const auto overdue = [now](std::uint64_t start) {
+        return now >= start && now - start >= kDeadlineMs;
+    };
+    return (!peer.authenticated && overdue(peer.acceptedTick))
+           || (peer.streamSize != 0 && !peer.inputDeferred && overdue(peer.inputStartedTick))
+           || (peer.outputSize != 0 && overdue(peer.outputProgressTick));
+}
 
 /** Nonblocking listener state serviced only while the lifecycle lock is held. */
 struct Listener {

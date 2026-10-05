@@ -68,7 +68,8 @@ void service(std::uint64_t now) noexcept;
  * @param sessionId Group-session id the peer named in its join request.
  * @return True when the update was queued on the peer's reliable channel.
  */
-[[nodiscard]] bool publish_join_parameters(std::uint64_t sessionId) noexcept;
+[[nodiscard]] bool publish_join_parameters(const state::gameplay::Endpoint& endpoint,
+                                           std::uint64_t sessionId) noexcept;
 
 /**
  * Reports whether replication may produce entity output for one peer.
@@ -94,6 +95,15 @@ void service(std::uint64_t now) noexcept;
  * @param endpoint Peer endpoint in host order, whose links the caller is already dropping.
  */
 void release_endpoint(const state::gameplay::Endpoint& endpoint) noexcept;
+
+/**
+ * Withdraws an account's native group rows, preserving other owners and shared hosts.
+ * @pre The caller holds the BAP lock and has closed the account's last authenticated link.
+ */
+void release_account(std::uint64_t accountSoid) noexcept;
+
+/** Refreshes retained native memberships after a channel rebuild or native address change. */
+void refresh_endpoint(const state::gameplay::Endpoint& endpoint) noexcept;
 
 /** Clears every group-session record. */
 void reset() noexcept;

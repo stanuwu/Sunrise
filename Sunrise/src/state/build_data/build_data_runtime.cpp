@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "../../core/filesystem/path.h"
+#include "../../core/logging/log.h"
 #include "../content/content_catalog.h"
 #include "../gameplay/external/entity_position_profiles.h"
 #include "abilities/ability_bucket_catalog.h"

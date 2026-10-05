@@ -41,11 +41,15 @@ void log_name_decision(NameOperation operation,
 [[nodiscard]] std::array<unsigned char, 4> redirect_octets() noexcept;
 
 /** Returns true only for an endpoint that is exactly the AF_INET redirect target. */
-[[nodiscard]] bool is_redirect_target(const sockaddr* address, int addressLength) noexcept;
+[[nodiscard]] bool is_redirect_target(const sockaddr* address,
+                                      int addressLength,
+                                      SOCKET socket = INVALID_SOCKET) noexcept;
 
 /** Copies one IPv4 endpoint and replaces only its address with the redirect target. */
-[[nodiscard]] bool
-redirect_ipv4(const sockaddr* address, int addressLength, sockaddr_in& redirected) noexcept;
+[[nodiscard]] bool redirect_ipv4(const sockaddr* address,
+                                 int addressLength,
+                                 sockaddr_in& redirected,
+                                 SOCKET socket = INVALID_SOCKET) noexcept;
 
 /** Returns true only when a connected socket's peer is the exact redirect target. */
 [[nodiscard]] bool has_redirect_target_peer(SOCKET socket) noexcept;

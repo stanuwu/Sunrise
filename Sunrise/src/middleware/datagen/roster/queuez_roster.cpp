@@ -10,7 +10,8 @@ namespace sunrise::middleware::datagen::roster {
 bool initialize(const state::AccountState& account, Block& block) noexcept {
     /** A missing biased 16-bit definition index is every bit set. */
     constexpr std::uint16_t kEmptyDefinitionIndex = (std::numeric_limits<std::uint16_t>::max)();
-    if (!state::account::valid(account) || account.characterCount > block.characters.size()) {
+    if (!state::account::valid_public(account)
+        || account.characterCount > block.characters.size()) {
         return false;
     }
     block = {};

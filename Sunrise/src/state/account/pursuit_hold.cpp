@@ -40,7 +40,7 @@ void report_classification(std::uint16_t itemDefinitionIndex,
 
 /** Reports whether an item is a pursuit the selected character already holds. */
 bool holds_pursuit(std::uint16_t itemDefinitionIndex) noexcept {
-    return holds_pursuit(account_snapshot(), itemDefinitionIndex);
+    return holds_pursuit(bound_account_snapshot(), itemDefinitionIndex);
 }
 
 /** The same rule, against an account view the caller already holds. */

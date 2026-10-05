@@ -10,7 +10,7 @@ namespace {
 /** 8 elements, low byte first, encode a member or host key. */
 constexpr std::size_t kMemberKeyByteCount = 8;
 /** The membership table has 32 fixed member slots. */
-constexpr std::size_t kMemberCount = 32;
+constexpr std::size_t kMemberCount = kMemberSlotCount;
 /** Each absent member adds 3 clear presence bits. */
 constexpr std::uint8_t kAbsentMemberBitCount = 3;
 /**
@@ -19,6 +19,10 @@ constexpr std::uint8_t kAbsentMemberBitCount = 3;
  * the owner-backed manager, which waits on a session a bubble host never gets.
  */
 constexpr std::uint32_t kField1Bias = 1;
+/** Ten bits at that bias, so the field spans -1 through its largest positive value. */
+constexpr std::uint8_t kField1Width = 10;
+constexpr std::int32_t kField1Minimum = -1;
+constexpr std::int32_t kField1Maximum = (1 << kField1Width) - 2;
 /** Member field 2 uses the signed 32-bit midpoint as its bias. */
 constexpr std::uint32_t kField2Bias = 0x80000000U;
 /** The member transition block's synchronisation byte is a plain 8-bit field. */
@@ -30,13 +34,16 @@ constexpr std::int32_t kLegStateBias = 1;
 constexpr std::uint8_t kLeaveReasonWire = 1;
 /** The nested identity block has presence bits on fields 0 through 14. */
 constexpr std::size_t kIdentityPresenceFieldCount = 15;
-/** The nested player blob is 19 bytes: 149 field bits and three zero pad bits. */
+/** The player blob includes the native assignment field and three zero tail pad bits. */
 constexpr std::uint16_t kPlayerBlobByteCount = 19;
+/** Zero tail bits round the player blob to its declared byte count. */
 constexpr std::uint8_t kPlayerBlobPadBits = 3;
-/** The blob's team byte is 6 bits at bias 1. It must equal participation snapshot byte 56, so
- *  wire 1 stores the same 0. */
-constexpr std::uint32_t kPlayerTeamWire = 1;
-constexpr std::uint8_t kPlayerTeamWidth = 6;
+/** Field 14 declares that blob's byte count in a 14-bit length. */
+constexpr std::uint8_t kPlayerBlobLengthWidth = 14;
+/** The blob writes the name twice, two bytes per unit, so one character adds four bytes. */
+constexpr std::uint32_t kPlayerBlobNameByteCount = 4;
+/** Native A.P2 must match participation record +56: logical zero at bias one. */
+constexpr std::uint8_t kPlayerAssignmentWire = 1;
 /** The remote member's player-state field zero carries the native-view gate. */
 constexpr std::uint8_t kRemoteViewGate = 0x10;
 /** Player-state field zero is a six-bit scalar. */
@@ -91,16 +98,31 @@ template <std::size_t Size>
     return true;
 }
 
-/**
- * Writes the nested 19-byte player blob.
- * Order: lead, header bit, the 136-byte block's four presence bits with the team byte present,
- * the 232-byte block's six clear bits, then the soid pair behind its presence bit.
- */
+/** Writes the player blob, including the assignment consumed by native participation sensing. */
 [[nodiscard]] bool write_player_blob(encoding::bits::Writer& writer,
-                                     const client_identity::ClientIdentity& identity) noexcept {
-    return writer.write(1, 3) && writer.write(0, 1) && writer.write(0, 1) && writer.write(1, 1)
-           && writer.write(kPlayerTeamWire, kPlayerTeamWidth) && writer.write(0, 2)
-           && writer.write(0, 6) && writer.write(1, 1) && writer.write(identity.accountSoid, 64)
+                                     const client_identity::ClientIdentity& identity,
+                                     std::span<const std::uint16_t> nameUnits,
+                                     bool named) noexcept {
+    const auto name = [&]() noexcept {
+        if (!writer.write(named ? 1U : 0U, 1)) {
+            return false;
+        }
+        if (!named) {
+            return true;
+        }
+        for (const auto unit : nameUnits) {
+            if (!writer.write(unit, 16)) {
+                return false;
+            }
+        }
+        return writer.write(0, 16);
+    };
+    // Blob fields in write order: a 3-bit kind, one clear presence bit, the name, a set presence
+    // bit, the 6-bit assignment, two clear bits, the name again, five clear bits, a set presence
+    // bit, the account and character SOIDs, and three zero tail pad bits.
+    return writer.write(1, 3) && writer.write(0, 1) && name() && writer.write(1, 1)
+           && writer.write(kPlayerAssignmentWire, 6) && writer.write(0, 2) && name()
+           && writer.write(0, 5) && writer.write(1, 1) && writer.write(identity.accountSoid, 64)
            && writer.write(identity.field5, 64) && writer.write(0, kPlayerBlobPadBits);
 }
 
@@ -117,17 +139,38 @@ template <std::size_t Size>
 [[nodiscard]] bool write_player_identity(encoding::bits::Writer& writer,
                                          const client_identity::ClientIdentity& identity,
                                          const RemoteViewMember* remote,
-                                         std::uint64_t activityHostId) noexcept {
+                                         std::uint64_t activityHostId,
+                                         const PeerMember* peer,
+                                         std::span<const std::uint16_t> localName) noexcept {
+    const bool named = peer != nullptr ? peer->hasName : !localName.empty();
+    const auto nameUnits =
+        peer != nullptr ? std::span(peer->name).first(peer->nameLength) : localName;
     for (std::size_t field = 0; field < kIdentityPresenceFieldCount; ++field) {
         const bool present =
             field == 3 || field == 4 || field == 5 || field == 14
             || (remote != nullptr
-                && (field == 0 || field == 1 || field == 2 || field == 11 || field == 13));
+                && (field == 0 || field == 1 || field == 2 || field == 11 || field == 13))
+            || (peer != nullptr
+                && ((field == 0 && peer->transport.hasFlags)
+                    || (field == 10 && peer->transport.hasAlternate)
+                    || (field == 11 && peer->transport.hasAddress)));
         if (!writer.write(present ? 1U : 0U, 1)) {
             return false;
         }
         if (field == 0 && remote != nullptr
             && !writer.write(kRemoteViewGate, kRemoteViewGateWidth)) {
+            return false;
+        }
+        if (field == 0 && peer != nullptr && peer->transport.hasFlags
+            && !writer.write(peer->transport.flags, kRemoteViewGateWidth)) {
+            return false;
+        }
+        if (field == 10 && peer != nullptr && peer->transport.hasAlternate
+            && !encoding::bits::write_raw(writer, peer->transport.alternate)) {
+            return false;
+        }
+        if (field == 11 && peer != nullptr && peer->transport.hasAddress
+            && !encoding::bits::write_raw(writer, peer->transport.address)) {
             return false;
         }
         if (field == 1 && remote != nullptr && !write_string(writer, remote->processSessionId)) {
@@ -153,7 +196,11 @@ template <std::size_t Size>
             return false;
         }
         if (field == 14
-            && (!writer.write(kPlayerBlobByteCount, 14) || !write_player_blob(writer, identity))) {
+            && (!writer.write(
+                    kPlayerBlobByteCount
+                        + (named ? kPlayerBlobNameByteCount * (nameUnits.size() + 1U) : 0U),
+                    kPlayerBlobLengthWidth)
+                || !write_player_blob(writer, identity, nameUnits, named))) {
             return false;
         }
     }
@@ -185,8 +232,7 @@ template <std::size_t Size>
 
 /**
  * Writes the member's transition block: the two region legs and the synchronisation byte.
- * Every slice-set transition blocks, with no timeout, until member-record `+10889` equals the
- * transition manager's token at `0x7FF742AE2250`.
+ * The client waits for the member's synchronization byte to match its transition-manager token.
  * @param writer Fixed-buffer writer sitting at the block's presence bit.
  * @param currentLeg The member's current region leg, present only for the local member.
  * @param pendingLeg The member's pending region leg, present only for the local member.
@@ -202,6 +248,19 @@ template <std::size_t Size>
            && writer.write(syncToken, kSyncTokenBitWidth) && writer.write(0, 1);
 }
 
+/** A human peer's sparse transition fields come only from that peer's native reports. */
+[[nodiscard]] bool write_peer_transition(encoding::bits::Writer& writer,
+                                         const PeerMember& peer) noexcept {
+    if (!has_peer_transition(peer)) {
+        return writer.write(0, 1);
+    }
+    return writer.write(1, 1) && write_region_leg(writer, peer.currentLeg)
+           && write_region_leg(writer, peer.pendingLeg) && writer.write(0, 1)
+           && writer.write(peer.hasSyncToken ? 1 : 0, 1)
+           && (!peer.hasSyncToken || writer.write(peer.syncToken, kSyncTokenBitWidth))
+           && writer.write(0, 1);
+}
+
 /** Writes one complete occupied member row. */
 [[nodiscard]] bool write_member(encoding::bits::Writer& writer,
                                 const client_identity::ClientIdentity& identity,
@@ -209,7 +268,9 @@ template <std::size_t Size>
                                 const RegionLeg& currentLeg,
                                 const RegionLeg& pendingLeg,
                                 std::uint8_t syncToken,
-                                std::uint64_t activityHostId) noexcept {
+                                std::uint64_t activityHostId,
+                                const PeerMember* peer = nullptr,
+                                std::span<const std::uint16_t> localName = {}) noexcept {
     const std::uint32_t field1Wire = std::bit_cast<std::uint32_t>(identity.field1) + kField1Bias;
     const std::uint32_t field2Wire = std::bit_cast<std::uint32_t>(identity.field2) + kField2Bias;
     return writer.write(1, 1) && write_member_key(writer, identity.memberKey)
@@ -217,8 +278,9 @@ template <std::size_t Size>
            && writer.write(identity.field3, 64) && writer.write(identity.accountSoid, 64)
            && writer.write(identity.field5, 64) && writer.write(identity.field6, 64)
            && writer.write(1, 1) && writer.write(1, 1)
-           && write_player_identity(writer, identity, remote, activityHostId)
-           && write_member_transition(writer, currentLeg, pendingLeg, syncToken)
+           && write_player_identity(writer, identity, remote, activityHostId, peer, localName)
+           && (peer != nullptr ? write_peer_transition(writer, *peer)
+                               : write_member_transition(writer, currentLeg, pendingLeg, syncToken))
            && writer.write(0, 1) && writer.write(0, 1) && writer.write(1, 1)
            && writer.write(kLeaveReasonWire, 5);
 }
@@ -279,6 +341,50 @@ template <std::size_t Size>
 /** Checks the fields that could otherwise encode outside their own wire width. */
 bool valid(const MembershipSnapshot& snapshot) noexcept {
     namespace authoritative = client_authoritative_data;
+    if (snapshot.localSlot >= kMemberCount || snapshot.localSlot == kServiceHostSlot
+        || snapshot.localNameLength > snapshot.localName.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < snapshot.localNameLength; ++i) {
+        if (snapshot.localName[i] == 0) {
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < snapshot.peers.size(); ++i) {
+        const auto& peer = snapshot.peers[i];
+        if (!peer.present) {
+            continue;
+        }
+        const auto slot = peer_slot(snapshot, i);
+        if (slot >= kMemberCount || slot == kServiceHostSlot || slot == snapshot.localSlot
+            || !valid_leg(peer.currentLeg) || !valid_leg(peer.pendingLeg)) {
+            return false;
+        }
+        if (!peer.identity.memberKey || !peer.identity.accountSoid || !peer.identity.field5
+            || peer.identity.field1 < kField1Minimum || peer.identity.field1 > kField1Maximum
+            || peer.nameLength > peer.name.size()
+            || (peer.transport.hasFlags
+                && peer.transport.flags > ((1U << kRemoteViewGateWidth) - 1U))
+            || peer.identity.memberKey == snapshot.identity.memberKey
+            || peer.identity.accountSoid == snapshot.identity.accountSoid
+            || (snapshot.remoteViewMember.present
+                && peer.identity.memberKey == snapshot.remoteViewMember.identity.memberKey)) {
+            return false;
+        }
+        for (std::size_t j = 0; j < i; ++j) {
+            if (snapshot.peers[j].present
+                && (peer.identity.memberKey == snapshot.peers[j].identity.memberKey
+                    || peer.identity.accountSoid == snapshot.peers[j].identity.accountSoid
+                    || slot == peer_slot(snapshot, j))) {
+                return false;
+            }
+        }
+        for (std::size_t j = 0; peer.hasName && j < peer.nameLength; ++j) {
+            if (peer.name[j] == 0) {
+                return false;
+            }
+        }
+    }
     return snapshot.teleport.sliceSetIndex >= authoritative::kAbsentSliceSetIndex
            && snapshot.teleport.sliceSetIndex <= authoritative::kMaximumSliceSetIndex
            && snapshot.selfHostedRegion < kRegionIndexBound
@@ -291,27 +397,38 @@ bool valid(const MembershipSnapshot& snapshot) noexcept {
 bool write_member_table(encoding::bits::Writer& writer,
                         const MembershipSnapshot& snapshot) noexcept {
     const RegionLeg absentLeg{};
-    bool encoded = writer.bit_count() == kMemberStartBit
-                   && write_member(writer,
+    bool encoded = writer.bit_count() == kMemberStartBit;
+    for (std::size_t slot = 0; encoded && slot < kMemberCount; ++slot) {
+        if (slot == snapshot.localSlot) {
+            encoded = write_member(writer,
                                    snapshot.identity,
                                    nullptr,
                                    snapshot.currentLeg,
                                    snapshot.pendingLeg,
                                    snapshot.teleport.token,
+                                   snapshot.activityHostId,
+                                   nullptr,
+                                   std::span(snapshot.localName).first(snapshot.localNameLength));
+        } else if (slot == 1 && snapshot.remoteViewMember.present) {
+            encoded = write_member(writer,
+                                   snapshot.remoteViewMember.identity,
+                                   &snapshot.remoteViewMember,
+                                   absentLeg,
+                                   absentLeg,
+                                   snapshot.teleport.token,
                                    snapshot.activityHostId);
-    std::size_t firstAbsent = 1;
-    if (encoded && snapshot.remoteViewMember.present) {
-        encoded = write_member(writer,
-                               snapshot.remoteViewMember.identity,
-                               &snapshot.remoteViewMember,
-                               absentLeg,
-                               absentLeg,
-                               snapshot.teleport.token,
-                               snapshot.activityHostId);
-        firstAbsent = 2;
-    }
-    for (std::size_t member = firstAbsent; encoded && member < kMemberCount; ++member) {
-        encoded = writer.write(0, kAbsentMemberBitCount);
+        } else if (const auto* peer = peer_at_slot(snapshot, slot)) {
+            encoded = write_member(writer,
+                                   peer->identity,
+                                   nullptr,
+                                   absentLeg,
+                                   absentLeg,
+                                   0,
+                                   snapshot.activityHostId,
+                                   peer);
+        } else {
+            encoded = writer.write(0, kAbsentMemberBitCount);
+        }
     }
     return encoded && writer.bit_count() + 1 == region_block_start_bit(snapshot);
 }

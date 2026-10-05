@@ -79,7 +79,7 @@ bool append_banner_notification(Scratch& scratch,
     // The pair names the first character when none is picked yet. The client's family-zero record
     // accepts a snapshot for about ten seconds, then clears the family and refuses every later
     // one, so holding the pair for the pick spends that window and the subscription times out.
-    if (state::account::banner_character_soid(state::account_snapshot()) == 0) {
+    if (state::account::banner_character_soid(state::bound_account_snapshot()) == 0) {
         return false;
     }
     snapshot::Prepared prepared{};
@@ -100,7 +100,7 @@ bool append_banner_notification(Scratch& scratch,
     // The Client now holds this pair, so the ladder owns it. Without this an unsubscribe leaves
     // family zero unrecorded and the next pick has no previous record to release.
     const std::uint64_t delivered =
-        state::account::banner_character_soid(state::account_snapshot());
+        state::account::banner_character_soid(state::bound_account_snapshot());
     if (!after.family0Active && delivered != 0) {
         after.family0Active = true;
         after.family0Character = delivered;
@@ -383,7 +383,7 @@ bool append_account_resync_appearance_notification(
     if (!before.family0Active) {
         return true;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const std::uint64_t selected = state::account::selected_character_soid(account);
     if (selected == 0) {
         return false;
@@ -426,7 +426,7 @@ bool append_account_resync_roster_notification(Scratch& scratch,
     if (!before.family3Active) {
         return true;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const std::uint64_t selected = state::account::selected_character_soid(account);
     std::size_t characterIndex = account.characterCount;
     for (std::size_t index = 0; index < account.characterCount; ++index) {

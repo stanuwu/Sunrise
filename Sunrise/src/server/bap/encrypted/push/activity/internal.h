@@ -17,6 +17,16 @@ namespace sunrise::server::bap::encrypted::push::activity {
 
 namespace message = middleware::bap::activity_message::sensor_auth_update;
 
+/** Retail sends 2 seconds. Held at the server push period so both sides share one cadence. */
+inline constexpr std::uint16_t kLocalKeepaliveHintMilliseconds = 2'000;
+/**
+ * Peer-heard window. The client marks a peer heard while `now - lastPeerRecv` is under this, so
+ * zero clears every peer bit forever. Two and a half times the keepalive cadence above.
+ */
+inline constexpr std::uint16_t kLocalPeerHeardWindowMilliseconds = 5'000;
+static_assert(kLocalPeerHeardWindowMilliseconds > kLocalKeepaliveHintMilliseconds,
+              "the window must outlast the cadence it measures, or no peer is ever heard");
+
 /** @return True when current msg 1 selects this exact authored region. */
 [[nodiscard]] constexpr bool
 msg1_selects_region(const state::build_data::scenarios::Definition& layout,
@@ -94,8 +104,15 @@ void discard_roster_body_record(const Session& session) noexcept;
 [[nodiscard]] bool repeats_delivered_membership_body(const Session& session,
                                                      std::span<const std::byte> body) noexcept;
 
-/** Keeps one staged membership body until its frame outcome is known. */
-void stage_membership_body_record(const Session& session, std::span<const std::byte> body) noexcept;
+/**
+ * Keeps one staged membership body until its frame outcome is known.
+ * @param sessionId Activity session whose membership revision this body carries.
+ * @param revision Membership revision encoded in the body.
+ */
+void stage_membership_body_record(const Session& session,
+                                  std::span<const std::byte> body,
+                                  std::uint64_t sessionId,
+                                  std::uint32_t revision) noexcept;
 
 /** Promotes the staged membership body to the delivered record. */
 void commit_membership_body_record(const Session& session) noexcept;
@@ -116,6 +133,20 @@ void report_roster_deferral(const Session& session,
                             std::uint64_t scriptableRevision) noexcept;
 
 /**
+ * Tests whether this connection has itself delivered one membership revision.
+ * The client applies one membership update per revision and the acknowledgement is stored on the
+ * member row, so a revision another link of the same member acknowledged would otherwise close the
+ * publish trigger for a link that never carried it.
+ * @param session Connection to test.
+ * @param sessionId Activity session the revision belongs to.
+ * @param revision Current membership revision of that session.
+ * @return True when this connection still owes the revision.
+ */
+[[nodiscard]] bool connection_owes_membership(const Session& session,
+                                              std::uint64_t sessionId,
+                                              std::uint32_t revision) noexcept;
+
+/**
  * Tests whether the installed packages author one region as private.
  * @param source Exact activity session the generated world is resolved for.
  * @param bindingGeneration Connection generation that binds it.
@@ -127,6 +158,11 @@ void report_roster_deferral(const Session& session,
 
 /** Same test for the connection's own activity session. */
 [[nodiscard]] bool private_region(const Session& session, std::int32_t region) noexcept;
+
+/** True only for an authored public region in this exact activity selection. */
+[[nodiscard]] bool public_region(const state::activity::SessionBinding& source,
+                                 std::uint64_t bindingGeneration,
+                                 std::int32_t region) noexcept;
 
 /**
  * Reads the authored publicity of every bubble from the installed packages.
@@ -189,17 +225,9 @@ struct RefreshReport final {
 client_placement(const Session& session, const RefreshReport* refresh) noexcept;
 
 /**
- * Tests whether the client has reported arrival in its instantiated region: its ws-702 world
- * state reached 8 while it holds the region it reported and no host move is waiting. This is
- * the report that releases the native spawn gate.
- * @param session Connection whose activity session the client reports on.
- * @param refresh Refresh being answered, or null.
- */
-[[nodiscard]] bool client_in_world(const Session& session, const RefreshReport* refresh) noexcept;
-
-/**
- * Tests whether the client's destination region is instantiated, before its arrival report.
- * This advances the loading lifetime. The spawn gate itself waits for `client_in_world`.
+ * Tests whether the client holds the region it reported and no host move is waiting.
+ * This committed-region report is the client's arrival fact; it releases the spawn gate and
+ * advances the loading lifetime.
  * @param session Connection whose activity session the client reports on.
  * @param refresh Refresh being answered, or null.
  */

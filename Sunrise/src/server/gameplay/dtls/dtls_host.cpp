@@ -23,7 +23,7 @@ namespace {
 namespace wire = middleware::gameplay::dtls;
 
 /** Concurrent associations. One citizen join needs one, and a retry reuses its endpoint. */
-constexpr std::size_t kAssociationCapacity = 8;
+constexpr std::size_t kAssociationCapacity = core::network_capacity::kConnections;
 /** An association that never reaches the key exchange is dropped after this many milliseconds. */
 constexpr std::uint64_t kHandshakeTimeout = 30000;
 
