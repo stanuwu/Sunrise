@@ -167,6 +167,7 @@
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_mission_script_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_sensor_events_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_session_overlay.cpp" />
+    <ClCompile Include="src\core\ui\hud\overlays\ui_hud_startup_hint_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_status_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\store\hud_settings_store.cpp" />
     <ClCompile Include="src\core\ui\textures\ui_texture_slots.cpp" />
@@ -1294,6 +1295,7 @@
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_mission_script_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_sensor_events_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_session_overlay.h" />
+    <ClInclude Include="src\core\ui\hud\overlays\ui_hud_startup_hint_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_status_overlay.h" />
     <ClInclude Include="src\core\ui\hud\store\hud_settings_store.h" />
     <ClInclude Include="src\core\ui\textures\ui_texture_slots.h" />

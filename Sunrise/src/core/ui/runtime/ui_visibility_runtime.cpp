@@ -63,4 +63,11 @@ bool toggle_for_key(UINT virtualKey) noexcept {
     return handled;
 }
 
+/** Closes the menu. A menu that is already closed or closing stays that way. */
+void hide() noexcept {
+    AcquireSRWLockExclusive(&g_visibilityLock);
+    g_state.visible = false;
+    ReleaseSRWLockExclusive(&g_visibilityLock);
+}
+
 } // namespace sunrise::core::ui::runtime

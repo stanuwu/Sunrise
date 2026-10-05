@@ -13,6 +13,7 @@
 #include "overlays/ui_hud_mission_script_overlay.h"
 #include "overlays/ui_hud_sensor_events_overlay.h"
 #include "overlays/ui_hud_session_overlay.h"
+#include "overlays/ui_hud_startup_hint_overlay.h"
 #include "overlays/ui_hud_status_overlay.h"
 #include "store/hud_settings_store.h"
 
@@ -48,6 +49,11 @@ constexpr std::size_t kSwitchCount = kOverlayCount + kStatusLineCount;
 /** Every overlay, in Overlay order. The menu lists them and the corner stacks them in it. */
 constexpr std::array<Entry, kOverlayCount> kOverlays{
     Entry{"Sunrise Card", "sunrise_card", "##sunrise_hud_card", &overlays::logo::draw, true},
+    Entry{"Startup Hint",
+          "startup_hint",
+          "##sunrise_hud_startup_hint",
+          &overlays::startup_hint::draw,
+          true},
     // Diagnostic overlays start off because an ordinary run does not need them on screen.
     Entry{
         "Current Status", "current_status", "##sunrise_hud_status", &overlays::status::draw, false},
@@ -136,18 +142,18 @@ void save_switches() noexcept {
  * Draws one overlay at a fixed position.
  * @param entry Overlay to draw.
  * @param position Top-left corner, in final framebuffer pixels.
- * @return Height the window took, which is known only after its content is submitted.
+ * @return Size the window took, which is known only after its content is submitted.
  */
-[[nodiscard]] float draw_overlay(const Entry& entry, const ImVec2& position) noexcept {
+[[nodiscard]] ImVec2 draw_overlay(const Entry& entry, const ImVec2& position) noexcept {
     ImGui::SetNextWindowPos(position, ImGuiCond_Always);
     const bool submitContents = ImGui::Begin(entry.windowId, nullptr, kOverlayFlags);
     if (submitContents) {
         entry.draw();
     }
     // Read inside the window, because the size belongs to it and not to the caller's window.
-    const float height = ImGui::GetWindowSize().y;
+    const ImVec2 size = ImGui::GetWindowSize();
     ImGui::End();
-    return height;
+    return size;
 }
 
 } // namespace
@@ -217,13 +223,32 @@ bool draw(bool interfaceEnabled) noexcept {
     const float margin = scaling::dpi::pixels(kViewportMargin);
     const float gap = scaling::dpi::pixels(kOverlayGap);
     ImVec2 position{viewport->WorkPos.x + margin, viewport->WorkPos.y + margin};
+    // The startup hint sits beside whichever overlay owns the top row, or on the corner when
+    // none does. It is drawn after the stack, once that row's width is known, and never moves
+    // the overlays stacked below.
+    ImVec2 hintPosition = position;
     bool drawn = false;
     for (std::size_t index = 0; index < kOverlayCount; ++index) {
-        if (!g_enabled[index]) {
+        if (!g_enabled[index] || static_cast<Overlay>(index) == Overlay::startupHint) {
             continue;
         }
-        position.y += draw_overlay(kOverlays[index], position) + gap;
+        const ImVec2 size = draw_overlay(kOverlays[index], position);
+        if (!drawn) {
+            hintPosition.x += size.x + gap;
+        }
+        position.y += size.y + gap;
         drawn = true;
+    }
+    constexpr auto hintIndex = static_cast<std::size_t>(Overlay::startupHint);
+    if (g_enabled[hintIndex]) {
+        const float progress = overlays::startup_hint::progress();
+        if (progress > 0.0F) {
+            // One style alpha fades the hint and everything drawn inside it together.
+            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, progress);
+            (void)draw_overlay(kOverlays[hintIndex], hintPosition);
+            ImGui::PopStyleVar();
+            drawn = true;
+        }
     }
     return drawn;
 }

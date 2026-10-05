@@ -27,6 +27,9 @@ public:
     /** Reads only the root version; a missing version is zero. */
     [[nodiscard]] bool parse_version(std::uint32_t& output) noexcept;
 
+    /** @return The settings name of a supported menu toggle key, or empty when it is not one. */
+    [[nodiscard]] static std::string_view ui_toggle_key_name(UINT virtualKey) noexcept;
+
 private:
     /** Parses the Core settings object. */
     [[nodiscard]] bool core(Settings& output) noexcept;
