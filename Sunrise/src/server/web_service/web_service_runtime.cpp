@@ -427,6 +427,7 @@ bool consume(std::span<const std::byte> request,
 
     middleware::web_service::ResponseShape shape{};
     resolve_response_shape(message.opcode, shape);
+    // WS901's extra Boolean has no known effect contract; keep it clear.
     middleware::web_service::StatusResponse status{};
     if (awaits_family4_version(message.opcode)) {
         // Nothing is published from here. A staged mutation re-encodes this with its own revision.

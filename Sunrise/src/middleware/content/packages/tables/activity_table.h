@@ -4,6 +4,7 @@
 
 #include "../../../../state/build_data/activities/activity_catalog.h"
 #include "definition_index_table.h"
+#include "field_reader.h"
 
 namespace sunrise::middleware::content::packages::tables::activities {
 /** Public activity index, NOT the package-definition index in root slot 29. */
@@ -31,26 +32,6 @@ template <class T>
     }
     std::memcpy(&value, bytes.data() + offset, sizeof(T));
     return true;
-}
-/**
- * Resolves a self-relative field.
- * @param field Offset of the 8-byte signed delta.
- * @param target Receives the resolved offset.
- * @return False when the delta is zero or the target falls outside the blob.
- */
-[[nodiscard]] inline bool
-relative(std::span<const std::byte> bytes, std::size_t field, std::size_t& target) noexcept {
-    std::int64_t delta{};
-    if (!read(bytes, field, delta) || delta == 0
-        || field > static_cast<std::size_t>((std::numeric_limits<std::int64_t>::max)())) {
-        return false;
-    }
-    const auto base = static_cast<std::int64_t>(field);
-    if (delta < -base || delta > (std::numeric_limits<std::int64_t>::max)() - base) {
-        return false;
-    }
-    target = static_cast<std::size_t>(base + delta);
-    return target < bytes.size();
 }
 /**
  * Parses the dense public activity table.

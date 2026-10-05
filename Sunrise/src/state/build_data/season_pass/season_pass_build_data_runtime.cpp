@@ -9,23 +9,21 @@ bool season_pass_ready() noexcept {
     return season_pass::count() != 0;
 }
 
-/** Publishes the season pass reward list and the wrapper items it grants, in one step. */
-bool publish_season_pass(std::span<const season_pass::Reward> rewards,
-                         std::span<const season_pass::Package> packages) noexcept {
+/** Publishes the season pass reward list with its fixed socket overrides. */
+bool publish_season_pass(std::span<const season_pass::Reward> rewards) noexcept {
     runtime::persistence::Transaction transaction;
     return transaction.active()
-           && transaction.finish(season_pass::replace(rewards, packages), season_pass::clear);
+           && transaction.finish(season_pass::replace(rewards), season_pass::clear);
+}
+
+/** Checks season pass rows against the catalog's publication rules. */
+bool valid_season_pass_rewards(std::span<const season_pass::Reward> rewards) noexcept {
+    return season_pass::valid(rewards);
 }
 
 /** Reads one season pass reward row. */
 bool find_season_pass_reward(std::uint16_t rewardIndex, season_pass::Reward& reward) noexcept {
     return season_pass::find(rewardIndex, reward);
-}
-
-/** Finds the item set one season pass wrapper opens into. */
-bool find_season_pass_package(std::uint32_t definitionHash,
-                              season_pass::Package& package) noexcept {
-    return season_pass::find_package(definitionHash, package);
 }
 
 /** @return Season pass reward rows in State. */

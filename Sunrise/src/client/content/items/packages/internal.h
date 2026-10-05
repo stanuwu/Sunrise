@@ -24,6 +24,7 @@
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/build_data/season_pass/definition.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "package_reward_build.h"
 
 namespace sunrise::client::content::items::packages {
 
@@ -70,9 +71,10 @@ static_assert(kUnmappedSlot
 /** Bank index per unlock slot, indexed by slot. The first mapping row of a slot wins. */
 using SlotMap = std::array<std::uint16_t, kSlotSpace>;
 
-/** The four maps one root's two unlock mapping tables carry. 256 KiB together. */
+/** Saved-bank indices resolved from the root's flag and value mapping tables. */
 struct SlotMaps {
     SlotMap accountFlag{};
+    SlotMap profileFlag{};
     SlotMap characterFlag{};
     SlotMap accountValue{};
     SlotMap characterValue{};
@@ -83,6 +85,8 @@ struct Storage {
     reader::Scratch scratch{};
     /** Read once per root. Every domain resolves its unlock slots through these. */
     SlotMaps slotMaps{};
+    /** Reward pools, wrappers and condition tables read alongside the item walk. */
+    RewardBuild rewardBuild{};
     /** Node rows held until the value slot and owned records are resolved. */
     std::array<state::build_data::nodes::Definition, state::build_data::nodes::kDefinitionCapacity>
         nodeRows{};
@@ -154,15 +158,11 @@ struct Storage {
                state::build_data::progressions::kStepCapacity>
         progressionSteps{};
     std::size_t progressionStepCount{};
-    /** Season pass reward rows and the wrapper items they grant. */
+    /** Season pass reward rows in native claim order. */
     std::array<state::build_data::season_pass::Reward,
                state::build_data::season_pass::kRewardCapacity>
         seasonPassRewards{};
-    std::array<state::build_data::season_pass::Package,
-               state::build_data::season_pass::kPackageCapacity>
-        seasonPassPackages{};
     std::size_t seasonPassRewardCount{};
-    std::size_t seasonPassPackageCount{};
     /** Repeatable bounty rows, keyed by the item-type pair their pool shares. */
     std::array<state::build_data::bounties::Definition,
                state::build_data::bounties::kDefinitionCapacity>
@@ -206,6 +206,9 @@ struct Storage {
 
 /** @return True when the catalyst catalog is published or cannot exist on this executable. */
 [[nodiscard]] bool exotic_catalysts_settled() noexcept;
+
+/** @return True when the reward graph is published or can never be. */
+[[nodiscard]] bool reward_definitions_settled() noexcept;
 
 /** Adds one native definition index to the deduplicated request set. */
 void request(std::uint16_t definitionIndex, DetailRequests& requested) noexcept;
@@ -324,7 +327,7 @@ read_investment_constants(const reader::Source& source,
 /**
  * Reads one root's two unlock mapping tables into the pass slot maps.
  * @param source Package source.
- * @param storage Pass storage receiving the four maps.
+ * @param storage Pass storage receiving the five maps.
  * @param root Investment root bytes.
  * @return True when both account maps read. A character map may stay unmapped.
  */
@@ -379,7 +382,7 @@ read_investment_constants(const reader::Source& source,
                                       std::span<state::build_data::progressions::Step> steps,
                                       std::size_t& stepCount) noexcept;
 
-/** Reads the season pass reward list and the wrapper items it grants. */
+/** Reads the season pass reward list, keeping an unreadable row as an unavailable one. */
 [[nodiscard]] bool build_season_pass(const reader::Source& source,
                                      Storage& storage,
                                      std::span<const std::byte> root) noexcept;

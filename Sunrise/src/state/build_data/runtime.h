@@ -23,6 +23,7 @@
 #include "nodes/definition.h"
 #include "progressions/definition.h"
 #include "records/definition.h"
+#include "rewards/definition.h"
 #include "scenarios/definition.h"
 #include "season_pass/definition.h"
 #include "sobjects/sobject_catalog.h"
@@ -390,13 +391,14 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
 [[nodiscard]] bool season_pass_ready() noexcept;
 
 /**
- * Publishes the season pass reward list and the wrapper items it grants, in one step.
+ * Publishes the season pass reward list with its fixed socket overrides.
  * @param rewards Complete reward rows in native reward order.
- * @param packages Complete wrapper packages.
  * @return True when the rows pass the checks and any needed cache write succeeds.
  */
-[[nodiscard]] bool publish_season_pass(std::span<const season_pass::Reward> rewards,
-                                       std::span<const season_pass::Package> packages) noexcept;
+[[nodiscard]] bool publish_season_pass(std::span<const season_pass::Reward> rewards) noexcept;
+
+/** Checks rows against the rules publish_season_pass applies to the whole list. */
+[[nodiscard]] bool valid_season_pass_rewards(std::span<const season_pass::Reward> rewards) noexcept;
 
 /**
  * Reads one season pass reward row.
@@ -407,17 +409,38 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
 [[nodiscard]] bool find_season_pass_reward(std::uint16_t rewardIndex,
                                            season_pass::Reward& reward) noexcept;
 
-/**
- * Finds the item set one season pass wrapper opens into.
- * @param definitionHash Authored wrapper item hash.
- * @param package Receives the wrapper and its items.
- * @return True when the catalog is ready and a wrapper carries that hash.
- */
-[[nodiscard]] bool find_season_pass_package(std::uint32_t definitionHash,
-                                            season_pass::Package& package) noexcept;
-
-/** @return Season pass reward rows in State. */
+/** @return Season pass reward rows in State, including unavailable rows. */
 [[nodiscard]] std::size_t season_pass_reward_count() noexcept;
+
+/** @return True when the reward pools and item wrappers are in State. */
+[[nodiscard]] bool reward_definitions_ready() noexcept;
+
+/**
+ * Publishes the complete reward graph in one step.
+ * @param definitions Pools, entries, item rows, conditions, modifiers and socket overrides.
+ * @return True when the graph passes the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool publish_reward_definitions(rewards::View definitions) noexcept;
+
+/** Checks a reward graph against the rules publish_reward_definitions applies. */
+[[nodiscard]] bool valid_reward_definitions(rewards::View definitions) noexcept;
+
+/**
+ * Reads one item's reward row.
+ * @param itemIndex Native item-definition index.
+ * @param item Receives the row.
+ * @return True when the catalog holds an extracted row for that item.
+ */
+[[nodiscard]] bool find_reward_item(std::uint16_t itemIndex, rewards::Item& item) noexcept;
+
+/**
+ * Lends the complete reward graph to one callback under the catalog's read lock.
+ * @param context Caller state passed through unchanged.
+ * @param consume Receives the graph, which stays valid only during the call.
+ * @return The callback's result, or false when no graph is published.
+ */
+[[nodiscard]] bool read_reward_definitions(void* context,
+                                           bool (*consume)(void*, rewards::View) noexcept) noexcept;
 
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;

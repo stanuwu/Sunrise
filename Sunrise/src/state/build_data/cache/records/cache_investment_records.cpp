@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "codec.h"
 
 namespace sunrise::state::build_data::cache::records {
@@ -5,6 +7,22 @@ namespace {
 
 /** Cache padding fields are always written as zero. */
 constexpr unsigned int kReservedFieldValue = 0;
+
+/** A condition slot past a pass row's count holds what a default instruction encodes to. */
+bool unused_condition(const RewardInstructionRecord& record) noexcept {
+    const rewards::Instruction unused{};
+    return record.opcode == static_cast<std::uint8_t>(unused.opcode)
+           && record.bank == static_cast<std::uint8_t>(unused.bank)
+           && record.reserved == kReservedFieldValue && record.operand == unused.operand;
+}
+
+/** A socket slot past a pass row's count holds what a default override encodes to. */
+bool unused_socket(const RewardSocketOverrideRecord& record) noexcept {
+    const rewards::SocketOverride unused{};
+    return record.socketType == unused.socketType && record.plugItem == unused.plugItem
+           && record.plugSet == unused.plugSet && record.rollSet == unused.rollSet
+           && record.selection == unused.selection;
+}
 
 } // namespace
 
@@ -65,16 +83,22 @@ bool encode(const progressions::Definition& value, ProgressionRecord& record) no
         value.stepOffset,
         value.stepCount,
         static_cast<std::uint8_t>(value.scope),
+        static_cast<std::uint8_t>(value.repeatLastStep),
     };
     return true;
 }
 
 /** Decodes one progression definition; the complete-domain validator checks its step range. */
 bool decode(const ProgressionRecord& record, progressions::Definition& value) noexcept {
+    value = {};
+    if (record.repeatLastStep > 1) {
+        return false;
+    }
     value = {record.definitionIndex,
              record.stepOffset,
              record.stepCount,
-             static_cast<progressions::Scope>(record.scope)};
+             static_cast<progressions::Scope>(record.scope),
+             record.repeatLastStep != 0};
     return true;
 }
 
@@ -90,7 +114,7 @@ bool decode(const ProgressionStepRecord& record, progressions::Step& value) noex
     return true;
 }
 
-/** Encodes one season pass reward row with its padding zeroed. */
+/** Encodes one season pass reward row with canonical unused socket slots. */
 bool encode(const season_pass::Reward& value, SeasonPassRewardRecord& record) noexcept {
     record = {};
     record.itemHash = value.itemHash;
@@ -98,13 +122,38 @@ bool encode(const season_pass::Reward& value, SeasonPassRewardRecord& record) no
     record.itemIndex = value.itemIndex;
     record.claimFlagIndex = value.claimFlagIndex;
     record.requiredRank = value.requiredRank;
+    record.socketCount = value.socketCount;
+    record.conditionCount = value.conditionCount;
+    if (record.conditionCount > record.condition.size()
+        || record.socketCount > record.sockets.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < record.conditionCount; ++i) {
+        if (!encode(value.condition[i], record.condition[i])) {
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < record.sockets.size(); ++i) {
+        if (!encode(i < record.socketCount ? value.sockets[i] : rewards::SocketOverride{},
+                    record.sockets[i])) {
+            return false;
+        }
+    }
     return true;
 }
 
-/** Decodes one season pass reward row after checking its padding. */
+/** Decodes one season pass reward row after checking its padding and unused slots. */
 bool decode(const SeasonPassRewardRecord& record, season_pass::Reward& value) noexcept {
     value = {};
-    if (record.reserved != decltype(record.reserved){}) {
+    if (record.reserved != decltype(record.reserved){}
+        || record.conditionCount > record.condition.size()
+        || record.socketCount > record.sockets.size()) {
+        return false;
+    }
+    const auto unusedConditions = std::span(record.condition).subspan(record.conditionCount);
+    const auto unusedSockets = std::span(record.sockets).subspan(record.socketCount);
+    if (!std::all_of(unusedConditions.begin(), unusedConditions.end(), unused_condition)
+        || !std::all_of(unusedSockets.begin(), unusedSockets.end(), unused_socket)) {
         return false;
     }
     value.itemHash = record.itemHash;
@@ -112,30 +161,18 @@ bool decode(const SeasonPassRewardRecord& record, season_pass::Reward& value) no
     value.itemIndex = record.itemIndex;
     value.claimFlagIndex = record.claimFlagIndex;
     value.requiredRank = record.requiredRank;
-    return true;
-}
-
-/** Encodes one season pass wrapper with its unused item slots zeroed. */
-bool encode(const season_pass::Package& value, SeasonPassPackageRecord& record) noexcept {
-    if (value.itemCount > value.items.size()) {
-        return false;
+    value.socketCount = record.socketCount;
+    value.conditionCount = record.conditionCount;
+    for (std::size_t i = 0; i < value.conditionCount; ++i) {
+        if (!decode(record.condition[i], value.condition[i])) {
+            return false;
+        }
     }
-    record = {};
-    record.definitionHash = value.definitionHash;
-    record.items = value.items;
-    record.itemCount = value.itemCount;
-    return true;
-}
-
-/** Decodes one season pass wrapper after checking its padding and item count. */
-bool decode(const SeasonPassPackageRecord& record, season_pass::Package& value) noexcept {
-    value = {};
-    if (record.reserved != decltype(record.reserved){} || record.itemCount > record.items.size()) {
-        return false;
+    for (std::size_t i = 0; i < value.socketCount; ++i) {
+        if (!decode(record.sockets[i], value.sockets[i])) {
+            return false;
+        }
     }
-    value.definitionHash = record.definitionHash;
-    value.items = record.items;
-    value.itemCount = record.itemCount;
     return true;
 }
 

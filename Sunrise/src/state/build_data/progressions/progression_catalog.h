@@ -30,6 +30,14 @@ void clear() noexcept;
                            std::span<const Step> steps) noexcept;
 
 /**
+ * Reads one definition by its native index.
+ * @param definitionIndex Native progression definition index.
+ * @param definition Receives the definition on success.
+ * @return False when the catalog does not hold the index.
+ */
+[[nodiscard]] bool find(std::uint16_t definitionIndex, Definition& definition) noexcept;
+
+/**
  * Copies the rank steps one progression declares, in rank order.
  * @param definitionIndex Native progression definition index.
  * @param output Caller-owned fixed row storage.

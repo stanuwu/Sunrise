@@ -42,6 +42,9 @@ bool encode(const vendors::Definition& value, VendorDefinitionRecord& record) no
     record.installedCount = value.installedCount;
     record.saleCount = value.saleCount;
     record.thirdCount = value.thirdCount;
+    record.factionIndexRaw = value.factionIndexRaw;
+    record.factionProgressionIndex = value.factionProgressionIndex;
+    record.factionHash = value.factionHash;
     return true;
 }
 
@@ -71,6 +74,9 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
     value.installedCount = record.installedCount;
     value.saleCount = record.saleCount;
     value.thirdCount = record.thirdCount;
+    value.factionIndexRaw = record.factionIndexRaw;
+    value.factionProgressionIndex = record.factionProgressionIndex;
+    value.factionHash = record.factionHash;
     return true;
 }
 

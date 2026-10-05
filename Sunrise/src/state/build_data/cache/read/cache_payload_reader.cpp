@@ -123,9 +123,14 @@ void clear(records::MutableDomains output) noexcept {
     std::fill(output.progressionSteps.begin(), output.progressionSteps.end(), progressions::Step{});
     std::fill(
         output.seasonPassRewards.begin(), output.seasonPassRewards.end(), season_pass::Reward{});
-    std::fill(
-        output.seasonPassPackages.begin(), output.seasonPassPackages.end(), season_pass::Package{});
     std::fill(output.bounties.begin(), output.bounties.end(), bounties::Definition{});
+    std::fill(output.rewardPools.begin(), output.rewardPools.end(), rewards::Pool{});
+    std::fill(output.rewardEntries.begin(), output.rewardEntries.end(), rewards::Entry{});
+    std::fill(output.rewardItems.begin(), output.rewardItems.end(), rewards::Item{});
+    std::fill(
+        output.rewardInstructions.begin(), output.rewardInstructions.end(), rewards::Instruction{});
+    std::fill(output.rewardModifiers.begin(), output.rewardModifiers.end(), rewards::Modifier{});
+    std::fill(output.rewardSockets.begin(), output.rewardSockets.end(), rewards::SocketOverride{});
 }
 
 /** Computes the exact file size for every record array. */
@@ -167,8 +172,13 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.recordRewards, sizeof(records::RecordRewardRecord), size)
            && add_records(counts.progressionSteps, sizeof(records::ProgressionStepRecord), size)
            && add_records(counts.seasonPassRewards, sizeof(records::SeasonPassRewardRecord), size)
-           && add_records(counts.seasonPassPackages, sizeof(records::SeasonPassPackageRecord), size)
-           && add_records(counts.bounties, sizeof(records::BountyRecord), size);
+           && add_records(counts.bounties, sizeof(records::BountyRecord), size)
+           && add_records(counts.rewardPools, sizeof(records::RewardPoolRecord), size)
+           && add_records(counts.rewardEntries, sizeof(records::RewardEntryRecord), size)
+           && add_records(counts.rewardItems, sizeof(records::RewardItemRecord), size)
+           && add_records(counts.rewardInstructions, sizeof(records::RewardInstructionRecord), size)
+           && add_records(counts.rewardModifiers, sizeof(records::RewardModifierRecord), size)
+           && add_records(counts.rewardSockets, sizeof(records::RewardSocketOverrideRecord), size);
 }
 
 /** Reads every payload array and checks the decoded domains as one transaction. */
@@ -283,11 +293,27 @@ bool read_payload(HANDLE file,
             && read_domain<records::SeasonPassRewardRecord>(
                 file, output.seasonPassRewards.first(counts.seasonPassRewards), checksum);
     valid = valid
-            && read_domain<records::SeasonPassPackageRecord>(
-                file, output.seasonPassPackages.first(counts.seasonPassPackages), checksum);
-    valid = valid
             && read_domain<records::BountyRecord>(
                 file, output.bounties.first(counts.bounties), checksum);
+    valid = valid
+            && read_domain<records::RewardPoolRecord>(
+                file, output.rewardPools.first(counts.rewardPools), checksum);
+    valid = valid
+            && read_domain<records::RewardEntryRecord>(
+                file, output.rewardEntries.first(counts.rewardEntries), checksum);
+    valid = valid
+            && read_domain<records::RewardItemRecord>(
+                file, output.rewardItems.first(counts.rewardItems), checksum);
+    valid = valid
+            && read_domain<records::RewardInstructionRecord>(
+                file, output.rewardInstructions.first(counts.rewardInstructions), checksum);
+    valid = valid
+            && read_domain<records::RewardModifierRecord>(
+                file, output.rewardModifiers.first(counts.rewardModifiers), checksum);
+    valid = valid
+            && read_domain<records::RewardSocketOverrideRecord>(
+                file, output.rewardSockets.first(counts.rewardSockets), checksum);
+
     if (!valid) {
         return false;
     }
@@ -330,8 +356,13 @@ bool read_payload(HANDLE file,
             output.recordRewards.first(counts.recordRewards),
             output.progressionSteps.first(counts.progressionSteps),
             output.seasonPassRewards.first(counts.seasonPassRewards),
-            output.seasonPassPackages.first(counts.seasonPassPackages),
             output.bounties.first(counts.bounties),
+            output.rewardPools.first(counts.rewardPools),
+            output.rewardEntries.first(counts.rewardEntries),
+            output.rewardItems.first(counts.rewardItems),
+            output.rewardInstructions.first(counts.rewardInstructions),
+            output.rewardModifiers.first(counts.rewardModifiers),
+            output.rewardSockets.first(counts.rewardSockets),
         });
 }
 

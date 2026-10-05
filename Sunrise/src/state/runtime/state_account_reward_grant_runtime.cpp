@@ -2,8 +2,6 @@
  * Grants that no purchase pays for: season pass rewards, record rewards, and the
  * default emote collection.
  */
-#include <Windows.h>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +10,7 @@
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
-#include "../progression/season_pass_reward_catalog.h"
+#include "../rewards/reward_resolver.h"
 #include "../unlocks/unlocks_records.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
@@ -32,51 +30,208 @@ namespace {
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept;
 
-/**
- * Checks that a staged grant is the one the authored reward row describes.
- * @param reward Authored season pass reward row.
- * @return False when the grant's item, quantity or bundle does not match the row.
- */
+/** A reward overrides socket types, so adding an ordinary lane cannot shift a fixed roll. */
+[[nodiscard]] bool
+apply_reward_sockets(const item_details::Definition& detail,
+                     std::span<const build_data::rewards::SocketOverride> overrides,
+                     authored_inventory::Sockets& sockets,
+                     const char** refusal = nullptr) noexcept {
+    const auto fail = [&](const char* reason) noexcept {
+        if (refusal != nullptr) {
+            *refusal = reason;
+        }
+        return false;
+    };
+    if (overrides.empty()) {
+        return true;
+    }
+    if (detail.ordinarySocketCount > sockets.plugs.size()) {
+        return fail("socket_layout");
+    }
+    authored_inventory::Sockets staged{};
+    staged.policy = authored_inventory::SocketPolicy::authored;
+    staged.plugCount = detail.ordinarySocketCount;
+    for (std::size_t lane = 0; lane < staged.plugCount; ++lane) {
+        const auto index = detail.initialPlugIndices[lane];
+        if (index == item_details::kUnavailableItemIndex) {
+            continue;
+        }
+        build_data::items::Definition plug{};
+        if (!build_data::find_item_definition_index(index, plug)) {
+            return fail("socket_layout");
+        }
+        staged.plugs[lane] = plug.definitionHash;
+    }
+    std::array<bool, item_details::kInitialPlugCapacity> replaced{};
+    for (const auto& override : overrides) {
+        if (override.plugSet != build_data::rewards::kAbsent) {
+            return fail("socket_plug_set");
+        }
+        if (override.rollSet != build_data::rewards::kAbsent) {
+            return fail("socket_roll_set");
+        }
+        // Zero selection preserves the initial plug in every lane of the named type.
+        const bool preserve =
+            override.plugItem == build_data::rewards::kAbsent && override.selection == 0;
+        if (!preserve && override.selection != build_data::rewards::kFixedPlugSelection) {
+            return fail("socket_selection");
+        }
+        build_data::items::Definition plug{};
+        if (!preserve && !build_data::find_item_definition_index(override.plugItem, plug)) {
+            return fail("socket_layout");
+        }
+        bool found = false;
+        for (std::size_t lane = 0; lane < staged.plugCount; ++lane) {
+            if (detail.socketTypes[lane] != override.socketType) {
+                continue;
+            }
+            if (replaced[lane] || (!preserve && found)) {
+                return fail("socket_layout");
+            }
+            replaced[lane] = true;
+            found = true;
+            if (!preserve) {
+                staged.plugs[lane] = plug.definitionHash;
+            }
+        }
+        if (!found) {
+            return fail("socket_layout");
+        }
+    }
+    if (!authored_inventory::valid(staged)) {
+        return fail("socket_layout");
+    }
+    sockets = staged;
+    return true;
+}
+
+[[nodiscard]] RewardPreparation prepare_resolved_reward(const rewards::Result& resolved,
+                                                        PendingRecordRewardGrant& mutation,
+                                                        const char** refusal) noexcept {
+    std::array<DirectRecordReward, kRecordRewardGrantCapacity> rows{};
+    if (resolved.count > rows.size()) {
+        return RewardPreparation::unresolvable;
+    }
+    for (std::size_t i = 0; i < resolved.count; ++i) {
+        const auto& grant = resolved.grants[i];
+        rows[i] = {grant.itemIndex,
+                   grant.quantity,
+                   std::span(grant.sockets).first(grant.socketCount),
+                   true};
+    }
+    return prepare_record_reward_grant(
+        std::span(rows).first(resolved.count), kUnclaimedRecordIndex, mutation, refusal);
+}
+
+/** Classifies a catalog refusal: a verdict unless a catalog was cleared meanwhile. */
+[[nodiscard]] RewardPreparation catalog_refusal(const char*& reason) noexcept {
+    if (build_data::item_definitions_ready() && build_data::reward_definitions_ready()) {
+        return RewardPreparation::unresolvable;
+    }
+    reason = "not_ready";
+    return RewardPreparation::deferred;
+}
+
+/** Wrappers and direct account perks bypass quest initialization. */
+bool uses_reward_definition(const build_data::items::Definition& item) noexcept {
+    build_data::rewards::Item reward{};
+    if (!build_data::find_reward_item(item.definitionIndex, reward)) {
+        return false;
+    }
+    return reward.poolIndex != build_data::rewards::kAbsent
+           || (item.bucketId == inventory_buckets::kPerkBucketId
+               && reward.acquiredFlag != build_data::rewards::kAbsent);
+}
+
+enum class PassResolution { claim, replay };
+
+[[nodiscard]] bool resolve_pass(const build_data::season_pass::Reward& reward,
+                                const AccountState& account,
+                                std::uint64_t seed,
+                                rewards::Result& result,
+                                PassResolution resolution,
+                                const char** reason = nullptr) noexcept {
+    const auto character = selected_character_index(account);
+    unlocks::Table flags{};
+    build_data::rewards::Item source{};
+    if (character >= account.characterCount
+        || !investment::store::read_unlocks(flags, static_cast<int>(character))
+        || !build_data::find_reward_item(reward.itemIndex, source)
+        || source.definitionHash != reward.itemHash || reward.socketCount > reward.sockets.size()
+        || reward.conditionCount > reward.condition.size()) {
+        return false;
+    }
+    if (reason != nullptr) {
+        *reason = "reward_condition";
+    }
+    if (resolution == PassResolution::replay && reward.claimFlagIndex < flags.accountFlags.size()) {
+        flags.accountFlags[reward.claimFlagIndex] = unlocks::kFlagClear;
+    }
+    bool enabled = false;
+    if (!rewards::eligible(std::span(reward.condition).first(reward.conditionCount),
+                           {flags, account.characters[character].characterClass, seed, reason},
+                           enabled)
+        || !enabled) {
+        return false;
+    }
+    if (rewards::resolve({flags, account.characters[character].characterClass, seed, reason},
+                         reward.itemIndex,
+                         reward.quantity,
+                         result)
+        != rewards::Resolution::resolved) {
+        return false;
+    }
+    if (reward.socketCount != 0) {
+        if (result.count != 1 || result.grants[0].itemIndex != reward.itemIndex) {
+            if (reason != nullptr) {
+                *reason = "socket_owner";
+            }
+            return false;
+        }
+        result.grants[0].sockets = reward.sockets;
+        result.grants[0].socketCount = reward.socketCount;
+    }
+    return true;
+}
+
 [[nodiscard]] bool reward_matches(const build_data::season_pass::Reward& reward,
                                   const PendingSeasonPassReward& mutation) noexcept {
-    if (!mutation.prepared || mutation.sourceDefinitionHash != reward.itemHash) {
+    const auto* grant = &mutation.grant;
+    rewards::Result expected{};
+    if (!mutation.prepared || mutation.sourceDefinitionHash != reward.itemHash
+        || !resolve_pass(
+            reward, account_snapshot(), mutation.seed, expected, PassResolution::replay)
+        || expected.count != grant->rewardCount) {
         return false;
     }
-    if (const auto* item = std::get_if<PendingItemAcquisition>(&mutation.grant)) {
-        if (reward.quantity != 1) {
+    for (std::size_t i = 0; i < expected.count; ++i) {
+        const auto& planned = expected.grants[i];
+        const auto& prepared = grant->rewards[i];
+        build_data::items::Definition definition{};
+        build_data::rewards::Item source{};
+        if (!build_data::find_item_definition_index(planned.itemIndex, definition)
+            || !build_data::find_reward_item(planned.itemIndex, source)
+            || prepared.definitionHash != definition.definitionHash
+            || prepared.quantity != planned.quantity
+            || prepared.acquiredFlag != source.acquiredFlag) {
             return false;
         }
-        if (reward.itemHash != progression::season_pass::kLegendaryEngramHash
-            && reward.itemHash != progression::season_pass::kExoticEngramHash) {
-            return item->acquiredDefinitionHash == reward.itemHash;
-        }
-        return progression::season_pass::contains_engram_reward(
-            reward.itemHash,
-            item->acquiredDefinitionHash,
-            static_cast<std::uint8_t>(item->afterCharacter.characterClass));
-    }
-    if (const auto* profile = std::get_if<PendingProfileItemAcquisition>(&mutation.grant)) {
-        return profile->acquiredDefinitionHash == reward.itemHash
-               && profile->acquiredQuantity - profile->previousQuantity
-                      == static_cast<std::int32_t>(reward.quantity);
-    }
-    if (const auto* bundle = std::get_if<PendingDirectItemBundle>(&mutation.grant)) {
-        build_data::season_pass::Package package{};
-        return reward.quantity == 1 && bundle->sourceDefinitionHash == reward.itemHash
-               && build_data::find_season_pass_package(reward.itemHash, package);
-    }
-    const auto* resources = std::get_if<PendingRecordRewardGrant>(&mutation.grant);
-    if (resources == nullptr || reward.quantity != 1
-        || reward.itemHash != progression::season_pass::kDestinationResourceBundleHash
-        || resources->rewardCount != progression::season_pass::kDestinationResourceHashes.size()) {
-        return false;
-    }
-    for (std::size_t index = 0; index < resources->rewardCount; ++index) {
-        if (resources->rewards[index].definitionHash
-                != progression::season_pass::kDestinationResourceHashes[index]
-            || resources->rewards[index].quantity
-                   != progression::season_pass::kDestinationResourceQuantity) {
-            return false;
+        if (planned.socketCount != 0) {
+            item_details::Definition detail{};
+            authored_inventory::Sockets sockets{};
+            if (prepared.kind != RecordRewardKind::characterInstance
+                || prepared.stateIndex >= grant->afterCharacter.inventory.count
+                || !build_data::find_configured_item_detail(planned.itemIndex, detail)
+                || !apply_reward_sockets(
+                    detail, std::span(planned.sockets).first(planned.socketCount), sockets)) {
+                return false;
+            }
+            const auto& installed =
+                grant->afterCharacter.inventory.values[prepared.stateIndex].sockets;
+            if (installed.policy != sockets.policy || installed.plugCount != sockets.plugCount
+                || installed.plugs != sockets.plugs) {
+                return false;
+            }
         }
     }
     return true;
@@ -84,34 +239,167 @@ namespace {
 
 } // namespace
 
-/** Commits a reward and its claim together after every outbound byte has been staged. */
-bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept {
-    const PendingConsumption consume{mutation};
+bool prepare_season_pass_reward(std::uint16_t rewardIndex,
+                                std::uint64_t seed,
+                                PendingSeasonPassReward& mutation,
+                                const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    reason = "reward_index";
+    mutation = {};
+    const std::lock_guard lock(investment::store::g_mutex);
     build_data::season_pass::Reward reward{};
-    if (!build_data::find_season_pass_reward(mutation.rewardIndex, reward)
-        || !reward_matches(reward, mutation)) {
-        revoke_season_pass_reward(mutation.rewardIndex);
+    if (!build_data::find_season_pass_reward(rewardIndex, reward)) {
         return false;
     }
+    reason = "rank";
+    if (reward.requiredRank > seasonal_rank()) {
+        return false;
+    }
+    reason = "already_claimed";
+    if (season_pass_reward_claimed(rewardIndex)) {
+        return false;
+    }
+    mutation.seed = seed;
+    rewards::Result resolved{};
+    reason = "reward_condition";
+    if (!resolve_pass(
+            reward, account_snapshot(), mutation.seed, resolved, PassResolution::claim, &reason)) {
+        return false;
+    }
+    reason = "reward_placement";
+    if (prepare_resolved_reward(resolved, mutation.grant, &reason) != RewardPreparation::prepared) {
+        return false;
+    }
+    reason = nullptr;
+    mutation.sourceDefinitionHash = reward.itemHash;
+    mutation.rewardIndex = rewardIndex;
+    mutation.prepared = true;
+    return true;
+}
 
-    investment::store::g_mutex.lock();
-    AccountState after{};
+ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept {
+    build_data::items::Definition item{};
+    if (!build_data::find_item_definition_index(itemIndex, item)) {
+        return ItemGrantRoute::unavailable;
+    }
+    if (uses_reward_definition(item)) {
+        return ItemGrantRoute::reward;
+    }
+    if (item.questInitialization.scope != build_data::items::QuestInitialization::Scope::none) {
+        return ItemGrantRoute::quest;
+    }
+    item_details::Definition detail{};
+    inventory_buckets::Descriptor bucket{};
+    if (!build_data::find_configured_item_detail(itemIndex, detail)
+        || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
+        return ItemGrantRoute::unavailable;
+    }
+    if (bucket.arraySelector == inventory_buckets::ArraySelector::profile
+        && detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable) {
+        return ItemGrantRoute::profile;
+    }
+    return bucket.arraySelector == inventory_buckets::ArraySelector::character
+               ? ItemGrantRoute::reward
+               : ItemGrantRoute::unavailable;
+}
+
+RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
+                                      std::uint32_t quantity,
+                                      std::uint64_t seed,
+                                      PendingRecordRewardGrant& mutation,
+                                      const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    reason = "not_ready";
+    mutation = {};
+    // Unpublished domains decide nothing; retry later.
+    if (!build_data::item_definitions_ready() || !build_data::reward_definitions_ready()) {
+        return RewardPreparation::deferred;
+    }
+    reason = "item_definition";
+    const std::lock_guard lock(investment::store::g_mutex);
+    build_data::items::Definition item{};
+    if (!build_data::find_item_definition_index(itemIndex, item)) {
+        return catalog_refusal(reason);
+    }
+    reason = "selected_character";
+    const AccountState account = account_snapshot();
+    const auto character = selected_character_index(account);
+    unlocks::Table flags{};
+    if (character >= account.characterCount
+        || !investment::store::read_unlocks(flags, static_cast<int>(character))) {
+        return RewardPreparation::deferred;
+    }
+    rewards::Result resolved{};
+    const auto resolution =
+        rewards::resolve({flags, account.characters[character].characterClass, seed, &reason},
+                         itemIndex,
+                         quantity,
+                         resolved);
+    // The saved unlocks can change, so an empty draw they caused is retried, not retired.
+    if (resolution == rewards::Resolution::ineligible) {
+        return RewardPreparation::deferred;
+    }
+    if (resolution != rewards::Resolution::resolved) {
+        return catalog_refusal(reason);
+    }
+    reason = "reward_placement";
+    return prepare_resolved_reward(resolved, mutation, &reason);
+}
+
+bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
+                            unlocks::Table& after) noexcept {
+    const std::lock_guard lock(investment::store::g_mutex);
+    if (!mutation.prepared || mutation.rewardCount > mutation.rewards.size()
+        || !investment::store::read_unlocks(after, static_cast<int>(mutation.characterIndex))) {
+        return false;
+    }
+    for (std::size_t i = 0; i < mutation.rewardCount; ++i) {
+        const auto& reward = mutation.rewards[i];
+        if (reward.acquiredFlag == build_data::rewards::kAbsent) {
+            continue;
+        }
+        if (reward.acquiredFlag >= after.accountFlags.size()
+            || after.accountFlags[reward.acquiredFlag] != reward.previousFlag) {
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < mutation.rewardCount; ++i) {
+        const auto flag = mutation.rewards[i].acquiredFlag;
+        if (flag != build_data::rewards::kAbsent) {
+            after.accountFlags[flag] = unlocks::kFlagSet;
+        }
+    }
+    const auto& claim = mutation.vendorReward;
+    if (claim.beforeCredits != 0) {
+        if (claim.rankCreditRow >= after.characterObjectValues.size()
+            || !vendor_rank_reward_current(claim)
+            || after.characterObjectValues[claim.rankCreditRow] != claim.beforeCredits) {
+            return false;
+        }
+        after.characterObjectValues[claim.rankCreditRow] = claim.beforeCredits - 1;
+    }
+    return true;
+}
+
+/** Revalidates the prepared reward under the lock that commits its inventory and flags. */
+bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept {
+    if (!mutation.prepared) {
+        return false;
+    }
+    const PendingConsumption consume{mutation};
     bool ready = false;
-    if (const auto* item = std::get_if<PendingItemAcquisition>(&mutation.grant)) {
-        ready = materialize_item_acquisition(investment::store::account(), *item, after);
-    } else if (const auto* profile = std::get_if<PendingProfileItemAcquisition>(&mutation.grant)) {
-        ready = materialize_profile_acquisition(investment::store::account(), *profile, after);
-    } else if (const auto* bundle = std::get_if<PendingDirectItemBundle>(&mutation.grant)) {
-        ready = materialize_direct_item_bundle(investment::store::account(), *bundle, after);
-    } else if (const auto* resources = std::get_if<PendingRecordRewardGrant>(&mutation.grant)) {
-        ready = materialize_record_reward(investment::store::account(), *resources, after);
+    {
+        investment::store::Transaction transaction;
+        build_data::season_pass::Reward reward{};
+        ready = transaction.ready()
+                && build_data::find_season_pass_reward(mutation.rewardIndex, reward)
+                && season_pass_reward_claimed(mutation.rewardIndex)
+                && reward.requiredRank <= seasonal_rank() && reward_matches(reward, mutation)
+                && commit_record_reward(mutation.grant) && transaction.commit();
     }
-    if (ready) {
-        ready = investment::store::write_account(after);
-    }
-    investment::store::g_mutex.unlock();
     if (!ready) {
-        // The claim was written when the reward was prepared, so a refused install undoes it.
         revoke_season_pass_reward(mutation.rewardIndex);
     }
     return ready;
@@ -157,8 +445,21 @@ namespace {
         inventory_buckets::Descriptor bucket{};
         if (reward.definitionHash == authored_inventory::kNoDefinitionHash || reward.quantity <= 0
             || reward.afterQuantity < reward.quantity || reward.mutationSerial < 0
-            || !build_data::find_item_definition_hash(reward.definitionHash, item)
-            || !build_data::find_configured_item_detail(item.definitionIndex, detail)
+            || !build_data::find_item_definition_hash(reward.definitionHash, item)) {
+            return false;
+        }
+        if (reward.kind == RecordRewardKind::accountUnlock) {
+            build_data::rewards::Item source{};
+            if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid != 0
+                || item.bucketId != build_data::inventory::buckets::kPerkBucketId
+                || !build_data::find_reward_item(item.definitionIndex, source)
+                || source.acquiredFlag == build_data::rewards::kAbsent
+                || source.acquiredFlag != reward.acquiredFlag) {
+                return false;
+            }
+            continue;
+        }
+        if (!build_data::find_configured_item_detail(item.definitionIndex, detail)
             || detail.definitionIndex != item.definitionIndex
             || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
             || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
@@ -166,7 +467,7 @@ namespace {
         }
         if (reward.kind == RecordRewardKind::characterInstance) {
             if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid == 0
-                || reward.appendedProfileResident || !detail.equipmentSlot.has_value()
+                || reward.appendedProfileResident
                 || detail.instancedDefinitionState
                        != item_details::InstancedDefinitionState::instanced
                 || bucket.arraySelector != inventory_buckets::ArraySelector::character
@@ -228,49 +529,108 @@ namespace {
 } // namespace
 
 /** Prepares every reward over one cumulative account view. */
-bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
-                                 std::uint16_t claimedRecordIndex,
-                                 PendingRecordRewardGrant& mutation) noexcept {
+RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
+                                              std::uint16_t claimedRecordIndex,
+                                              PendingRecordRewardGrant& mutation,
+                                              const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    reason = "reward_count";
     mutation = {};
     if (rewards.empty() || rewards.size() > mutation.rewards.size()) {
-        return false;
+        return RewardPreparation::unresolvable;
     }
+    reason = "not_ready";
+    // The loadout check needs these domains, so nothing is decided before they publish.
+    if (!build_data::item_definitions_ready() || !build_data::configured_item_details_ready()
+        || !build_data::inventory_bucket_descriptors_ready()
+        || !build_data::socket_entry_lists_ready()) {
+        return RewardPreparation::deferred;
+    }
+    reason = "account_state";
     const AccountState account = account_snapshot();
     const std::size_t characterIndex = selected_character_index(account);
     if (!account::valid(account) || !valid_profile_inventory(account)
         || characterIndex >= account.characterCount) {
-        return false;
+        return RewardPreparation::deferred;
     }
 
     AccountState working = account;
     for (std::size_t index = 0; index < rewards.size(); ++index) {
+        reason = "item_identity";
         const DirectRecordReward& requested = rewards[index];
         build_data::items::Definition item{};
         item_details::Definition detail{};
         inventory_buckets::Descriptor bucket{};
         if (requested.quantity <= 0
             || !build_data::find_item_definition_index(requested.itemDefinitionIndex, item)
-            || !build_data::find_configured_item_detail(requested.itemDefinitionIndex, detail)
+            || item.questInitialization.scope
+                   != build_data::items::QuestInitialization::Scope::none) {
+            return RewardPreparation::unresolvable;
+        }
+        PreparedRecordReward prepared{};
+        prepared.definitionHash = item.definitionHash;
+        prepared.quantity = requested.quantity;
+        if (requested.acquireUnlock) {
+            reason = "acquisition_flag";
+            // Only a resolved reward asks for its flag, so the graph is published.
+            build_data::rewards::Item source{};
+            if (!build_data::find_reward_item(item.definitionIndex, source)
+                || source.definitionHash != item.definitionHash) {
+                return RewardPreparation::unresolvable;
+            }
+            prepared.acquiredFlag = source.acquiredFlag;
+            if (source.acquiredFlag != build_data::rewards::kAbsent) {
+                std::int32_t before = 0;
+                // The saved flag refuses here, not the definition.
+                if (!investment::store::read_unlock(
+                        investment::store::Bank::accountFlags, source.acquiredFlag, before)
+                    || before < 0 || before > unlocks::kFlagSet) {
+                    return RewardPreparation::deferred;
+                }
+                prepared.previousFlag = static_cast<std::uint8_t>(before);
+            }
+        }
+        if (item.bucketId == build_data::inventory::buckets::kPerkBucketId) {
+            reason = "perk_acquisition";
+            if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
+                || !requested.sockets.empty()) {
+                return RewardPreparation::unresolvable;
+            }
+            prepared.kind = RecordRewardKind::accountUnlock;
+            prepared.afterQuantity = 1;
+            mutation.rewards[index] = prepared;
+            continue;
+        }
+        reason = "item_detail";
+        if (!build_data::find_configured_item_detail(requested.itemDefinitionIndex, detail)
             || detail.definitionIndex != item.definitionIndex
             || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
             || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
-            return false;
+            return RewardPreparation::unresolvable;
         }
+        reason = "duplicate_stack";
         if (detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable) {
             for (std::size_t prior = 0; prior < index; ++prior) {
                 if (mutation.rewards[prior].definitionHash == item.definitionHash) {
-                    return false;
+                    return RewardPreparation::unresolvable;
                 }
             }
         }
 
-        PreparedRecordReward prepared{};
-        prepared.definitionHash = item.definitionHash;
-        prepared.quantity = requested.quantity;
+        reason = "socket_owner";
+        if (!requested.sockets.empty()
+            && (bucket.arraySelector != inventory_buckets::ArraySelector::character
+                || detail.instancedDefinitionState
+                       != item_details::InstancedDefinitionState::instanced)) {
+            return RewardPreparation::unresolvable;
+        }
+        reason = "inventory_destination";
         if (bucket.arraySelector == inventory_buckets::ArraySelector::profile) {
-            if (detail.instancedDefinitionState
-                != item_details::InstancedDefinitionState::stackable) {
-                return false;
+            reason = "profile_capacity";
+            if (detail.instancedDefinitionState != item_details::InstancedDefinitionState::stackable
+                || requested.quantity > detail.maxStackSize) {
+                return RewardPreparation::unresolvable;
             }
             PendingProfileItemAcquisition staged{};
             const bool actionSource =
@@ -283,7 +643,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                                                    requested.quantity,
                                                    {.direct = true},
                                                    staged)) {
-                return false;
+                return RewardPreparation::deferred;
             }
             working.profileItems = staged.afterItems;
             working.profileItemCount = staged.afterItemCount;
@@ -296,13 +656,22 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
         } else if (bucket.arraySelector == inventory_buckets::ArraySelector::character
                    && detail.instancedDefinitionState
                           == item_details::InstancedDefinitionState::instanced) {
-            if (requested.quantity != 1 || !detail.equipmentSlot.has_value()) {
-                return false;
+            reason = "instance_quantity";
+            if (requested.quantity != 1) {
+                return RewardPreparation::unresolvable;
             }
+            reason = "instance_capacity";
             PendingItemAcquisition staged{};
             if (!finalize_item_acquisition(
                     working, working, item.definitionHash, false, {.direct = true}, staged)) {
-                return false;
+                return RewardPreparation::deferred;
+            }
+            if (!apply_reward_sockets(
+                    detail,
+                    requested.sockets,
+                    staged.afterCharacter.inventory.values[staged.inventoryIndex].sockets,
+                    &reason)) {
+                return RewardPreparation::unresolvable;
             }
             working.characters[characterIndex] = staged.afterCharacter;
             prepared.instanceSoid = staged.acquiredInstanceSoid;
@@ -316,11 +685,14 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                    && detail.instancedDefinitionState
                           == item_details::InstancedDefinitionState::stackable
                    && !detail.equipmentSlot.has_value()) {
+            reason = "character_stack_capacity";
             CharacterState& character = working.characters[characterIndex];
-            if (requested.quantity > detail.maxStackSize
-                || character.nextInventorySerial
-                       >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
-                return false;
+            if (requested.quantity > detail.maxStackSize) {
+                return RewardPreparation::unresolvable;
+            }
+            if (character.nextInventorySerial
+                >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+                return RewardPreparation::deferred;
             }
             std::size_t stackIndex = character.stacks.count;
             for (std::size_t candidate = 0; candidate < character.stacks.count; ++candidate) {
@@ -334,7 +706,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                 || (!appended
                     && character.stacks.values[stackIndex].quantity
                            > detail.maxStackSize - requested.quantity)) {
-                return false;
+                return RewardPreparation::deferred;
             }
             auto& stack = character.stacks.values[stackIndex];
             if (appended) {
@@ -348,15 +720,17 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
             prepared.mutationSerial = stack.mutationSerial;
             prepared.kind = RecordRewardKind::characterStack;
         } else {
-            return false;
+            return RewardPreparation::unresolvable;
         }
         mutation.rewards[index] = prepared;
     }
 
+    reason = "loadout";
+    // A full native bucket rejects the whole loadout; retry later.
     family4_loadout::ResolvedLoadout loadout{};
     if (!account::valid(working) || !valid_profile_inventory(working)
         || !family4_loadout::resolve(working, characterIndex, loadout)) {
-        return false;
+        return RewardPreparation::deferred;
     }
     mutation.beforeCharacter = account.characters[characterIndex];
     mutation.afterCharacter = working.characters[characterIndex];
@@ -369,8 +743,9 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
     mutation.beforeProfileItemCount = account.profileItemCount;
     mutation.afterProfileItemCount = working.profileItemCount;
     mutation.rewardCount = rewards.size();
+    reason = nullptr;
     mutation.prepared = true;
-    return true;
+    return RewardPreparation::prepared;
 }
 
 bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
@@ -381,14 +756,33 @@ bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
 
 /** Commits the shared reward after-image and claim together. */
 bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
-    const PendingConsumption consume{mutation};
-    investment::store::g_mutex.lock();
-    AccountState after{};
-    bool ready = materialize_record_reward(investment::store::account(), mutation, after);
-    if (ready) {
-        ready = investment::store::write_account(after);
+    if (!mutation.prepared) {
+        return false;
     }
-    investment::store::g_mutex.unlock();
+    const PendingConsumption consume{mutation};
+    bool ready = false;
+    {
+        investment::store::Transaction transaction;
+        AccountState after{};
+        unlocks::Table flags{};
+        ready = transaction.ready()
+                && materialize_record_reward(investment::store::account(), mutation, after)
+                && preview_reward_unlocks(mutation, flags)
+                && investment::store::write_account(after);
+        for (std::size_t i = 0; ready && i < mutation.rewardCount; ++i) {
+            const auto flag = mutation.rewards[i].acquiredFlag;
+            if (flag != build_data::rewards::kAbsent) {
+                ready = investment::store::write_unlock(
+                    investment::store::Bank::accountFlags, flag, unlocks::kFlagSet);
+            }
+        }
+        if (ready && mutation.vendorReward.beforeCredits > 0) {
+            ready = investment::store::write_unlock(investment::store::Bank::characterObjectValues,
+                                                    mutation.vendorReward.rankCreditRow,
+                                                    mutation.vendorReward.beforeCredits - 1);
+        }
+        ready = ready && transaction.commit();
+    }
     if (!ready && mutation.claimedRecordIndex != kUnclaimedRecordIndex) {
         // The claim was written when the reward was prepared, so a refused install undoes it.
         unlocks::records::revoke(mutation.claimedRecordIndex);

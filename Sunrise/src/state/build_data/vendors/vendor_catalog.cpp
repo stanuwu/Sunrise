@@ -5,6 +5,7 @@
 
 #include "../table.h"
 #include "core/threading/srw_lock.h"
+#include "vendor_gate_catalog.h"
 
 namespace sunrise::state::build_data::vendors {
 namespace {
@@ -137,6 +138,7 @@ template <typename Row>
 
 /** Clears the index, every held definition, and both row banks under the catalog lock. */
 void clear() noexcept {
+    clear_gates();
     const std::lock_guard guard(g_lock);
     g_index.clear();
     g_definitions.clear();
@@ -184,6 +186,8 @@ bool replace(std::span<const IndexEntry> index,
     if (!valid(index, definitions, saleRows, installedRows)) {
         return false;
     }
+    // Installed gate expressions must be rebuilt for the replacement rows.
+    clear_gates();
     const std::lock_guard guard(g_lock);
     // All four run with no short-circuit, so the set cannot be left half replaced. Capacity is
     // the only reason one can refuse, and valid() already checked it.

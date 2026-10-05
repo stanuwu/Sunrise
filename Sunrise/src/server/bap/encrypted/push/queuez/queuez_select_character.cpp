@@ -178,59 +178,6 @@ bool append_seasonal_experience_notification(
     return true;
 }
 
-/** Publishes every item in one rank-one class package as an ordinary acquisition. */
-bool append_season_pass_package_notification(
-    Scratch& scratch,
-    const queuez::SessionState& before,
-    const state::PendingDirectItemBundle& mutation,
-    std::uint16_t rewardIndex,
-    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
-    std::span<const std::byte, state::kAesKeySize> key,
-    std::span<const std::byte, state::kBapNonceSize> nonce,
-    std::span<std::byte> response,
-    std::size_t& written,
-    queuez::SessionState& after) noexcept {
-    after = before;
-    snapshot::Prepared prepared{};
-    const std::size_t itemCount = mutation.itemCount;
-    // The item objects are indexed below, and every new resident must fit the peer's manifest.
-    if (!snapshot::prepare_season_pass_package(
-            scratch, before, mutation, rewardIndex, acquisitionPresentationRows, prepared)
-        || itemCount == 0 || prepared.family.objects.size() != itemCount + 2U
-        || before.family4ResidentCount + itemCount > before.family4Residents.size()) {
-        return false;
-    }
-    for (std::size_t index = 0; index < itemCount; ++index) {
-        const middleware::queuez::Object& object = prepared.family.objects[index];
-        for (std::size_t residentIndex = 0; residentIndex < before.family4ResidentCount;
-             ++residentIndex) {
-            if (before.family4Residents[residentIndex].objectSoid == object.version) {
-                return false;
-            }
-        }
-        after.family4Residents[after.family4ResidentCount++] =
-            queuez::ResidentObject{object.version, object.id};
-    }
-    const middleware::queuez::Object& characterObject = prepared.family.objects[itemCount];
-    std::size_t characterMatches = 0;
-    for (std::size_t index = 0; index < before.family4ResidentCount; ++index) {
-        const queuez::ResidentObject& resident = before.family4Residents[index];
-        characterMatches +=
-            static_cast<std::size_t>(resident.objectSoid == characterObject.version
-                                     && resident.definitionId == characterObject.id);
-    }
-    if (characterMatches != 1) {
-        return false;
-    }
-    after.family4Version = prepared.family.version;
-    if (!queuez::valid(after)
-        || !queuez_frame::append_prepared(scratch, prepared, key, nonce, response, written)) {
-        after = before;
-        return false;
-    }
-    return true;
-}
-
 /** Publishes one prepared record-reward batch. */
 bool append_record_reward_notification(
     Scratch& scratch,
