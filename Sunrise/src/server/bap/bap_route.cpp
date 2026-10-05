@@ -48,6 +48,18 @@ void publish_account_mutation(Session& origin) noexcept {
     arm_account_resync_elsewhere(origin);
 }
 
+/**
+ * Owes every active peer one Family-5 snapshot after seasonal XP moved the artifact overrides.
+ * The Family-4 update that follows it makes the client rebuild the artifact view.
+ */
+void arm_artifact_refresh_everywhere() noexcept {
+    for (auto& peer : g_sessions) {
+        if (peer.id != 0 && peer.authenticated && peer.queuez.family4Active) {
+            peer.artifactRefreshArmed = true;
+        }
+    }
+}
+
 /** @param id Nonzero connection id. @return Matching open session, or null. */
 [[nodiscard]] Session* session_for(std::uint32_t id) noexcept {
     if (id == 0 || id > g_sessions.size()) {
@@ -370,8 +382,14 @@ void arm_acquisition_presentation_hold(Session& session) noexcept {
  * @return True when the XP was granted.
  */
 bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
+    const std::uint16_t bonusBefore = state::artifact_power_bonus();
     if (amount <= 0 || !state::grant_seasonal_experience(amount)) {
         return false;
+    }
+    arm_artifact_refresh_everywhere();
+    // A new artifact bonus moves every character's Power; only an account resync redraws it.
+    if (state::artifact_power_bonus() != bonusBefore) {
+        arm_account_resync_everywhere();
     }
     for (auto& peer : g_sessions) {
         if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active
@@ -383,6 +401,36 @@ bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
         return true;
     }
     // No peer can animate the gain, so the account image carries the new total instead.
+    arm_account_resync_everywhere();
+    return true;
+}
+
+/** Sizes the grant under the lock every seasonal XP grant holds, so none lands in between. */
+bool grant_seasonal_ranks(std::uint16_t ranks) noexcept {
+    const std::lock_guard lock(g_lock);
+    const std::int32_t amount = state::seasonal_experience_to_advance(ranks);
+    return amount > 0 && arm_seasonal_experience_presentation(amount);
+}
+
+/** Caps the grant under the same lock as the rank grants, so no other XP lands in between. */
+bool grant_seasonal_experience_capped(std::int32_t amount) noexcept {
+    const std::lock_guard lock(g_lock);
+    const std::int32_t granted = state::seasonal_experience_within_pass(amount);
+    return granted > 0 && arm_seasonal_experience_presentation(granted);
+}
+
+/** Zeroes seasonal XP, then republishes the account instead of presenting a gain. */
+bool reset_seasonal_progression() noexcept {
+    const std::lock_guard lock(g_lock);
+    if (!state::reset_seasonal_experience()) {
+        return false;
+    }
+    for (auto& peer : g_sessions) {
+        // A gain still queued would animate XP the reset just removed.
+        peer.pendingSeasonalExperienceAmount = 0;
+        peer.pendingSeasonalExperienceMutationSerial = 0;
+    }
+    arm_artifact_refresh_everywhere();
     arm_account_resync_everywhere();
     return true;
 }
