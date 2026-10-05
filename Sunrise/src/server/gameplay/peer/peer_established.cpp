@@ -10,10 +10,12 @@
 #include "../../../middleware/encoding/bit_writer.h"
 #include "../../../middleware/gameplay/external/common_state.h"
 #include "../../../middleware/gameplay/external/control_state_codec.h"
+#include "../../../middleware/gameplay/external/player_snapshot_codec.h"
 #include "../../../middleware/gameplay/peer/connect_messages.h"
 #include "../../../middleware/gameplay/peer/established_packet.h"
 #include "../../../middleware/gameplay/peer/packet_fragments.h"
 #include "../../../middleware/gameplay/peer/reliable_assembly.h"
+#include "../../activity/mission/mission_script_runtime.h"
 #include "../../bap/runtime.h"
 #include "../gameplay_log.h"
 #include "../group/group_host.h"
@@ -40,8 +42,6 @@ constexpr std::size_t kMessageReportCapacity = 8;
  * sequences ahead of its window, so this host must not send faster than the peer does.
  */
 constexpr std::uint64_t kResendInterval = 250;
-/** Reflected root 0x80806AE6 after its lane-presence bit. */
-constexpr std::size_t kPlayerSnapshotBits = 1373;
 
 /** Eight unique logical packet failures bound the replay sample. */
 constexpr std::size_t kRejectedPacketLimit = 8;
@@ -255,6 +255,7 @@ struct ParsedExternal {
     middleware::gameplay::external::SimulationEventBatch lane0{};
     middleware::gameplay::external::ControlStateBatch lane1{};
     middleware::gameplay::external::EntityBatch entities{};
+    middleware::gameplay::external::PlayerLane player{};
     bool commonPresent{};
 };
 
@@ -271,14 +272,6 @@ enum class ExternalReadResult : std::uint8_t {
 };
 
 using middleware::gameplay::external::read_flag;
-
-/** Reads or skips the receive-only player lane without retaining its local snapshot. */
-[[nodiscard]] bool read_player_lane(bits::Reader& reader) noexcept {
-    bool present = false;
-    bool trailingList = false;
-    return read_flag(reader, present)
-           && (!present || (reader.skip(kPlayerSnapshotBits) && read_flag(reader, trailingList)));
-}
 
 /** Reads common, channels 0 to 3, and filler. */
 [[nodiscard]] ExternalReadResult
@@ -335,7 +328,7 @@ read_external(std::span<const std::byte> payload,
             source, payload, bitOffset, lane2Offset, payload.size() * 8U - reader.remaining_bits());
         return ExternalReadResult::lane2;
     }
-    if (!read_player_lane(reader)) {
+    if (!middleware::gameplay::external::read_player_lane(reader, candidate.player)) {
         return ExternalReadResult::lane3;
     }
     wire::FillerTrailer filler{};
@@ -473,6 +466,11 @@ void consume_established(const gp::Endpoint& from,
     bool guardAccepted = false;
     bool externalExpected = false;
     bool externalValid = true;
+    // The sender's own position from an accepted channel 3, reported once the peer lock is
+    // released.
+    bool playerReported = false;
+    state::activity::SessionBinding playerBinding{};
+    std::uint64_t playerGeneration = 0;
     const char* externalFailure = "none";
     const std::unique_ptr<ParsedExternal> externalStorage(new (std::nothrow) ParsedExternal{});
     if (!externalStorage) {
@@ -684,6 +682,11 @@ void consume_established(const gp::Endpoint& from,
                                            ordinal,
                                            now);
             }
+            if (externalValid && external.player.present) {
+                playerReported = true;
+                playerBinding = peer->activityBinding;
+                playerGeneration = source.activityClientGeneration;
+            }
         }
     }
     // Authenticated transport receipts remain valid when an inbound application lane is refused.
@@ -717,6 +720,12 @@ void consume_established(const gp::Endpoint& from,
                static_cast<unsigned>(packet.connectionSequenceLow2),
                static_cast<unsigned>(expectedGuard));
         return;
+    }
+    if (playerReported) {
+        server::activity::mission::report_player_position(playerBinding,
+                                                          playerGeneration,
+                                                          external.player.snapshot.playerKey,
+                                                          external.player.snapshot.position);
     }
     if (!externalValid) {
         report(core::log::Level::debug,

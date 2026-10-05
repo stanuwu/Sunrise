@@ -211,6 +211,53 @@ void objective_task_counters(std::span<const sense_values::DecodedValue> body,
 
 } // namespace
 
+/** Finds the retained row for one watched volume, allocating a free row on a first report. */
+TriggerOccupancy* find_trigger_occupancy(RuntimeInstance& instance,
+                                         std::uint32_t registryKey,
+                                         std::uint32_t objectTag,
+                                         std::uint16_t slotIndex,
+                                         bool& created) noexcept {
+    created = false;
+    TriggerOccupancy* spare = nullptr;
+    for (TriggerOccupancy& retained : instance.triggerOccupancy) {
+        if (retained.used && retained.registryKey == registryKey && retained.objectTag == objectTag
+            && retained.slotIndex == slotIndex) {
+            return &retained;
+        }
+        if (!retained.used && spare == nullptr) {
+            spare = &retained;
+        }
+    }
+    if (spare == nullptr) {
+        log_line(core::log::Level::warn, &instance, "trigger", "watch_capacity");
+        return nullptr;
+    }
+    *spare = {};
+    spare->registryKey = registryKey;
+    spare->objectTag = objectTag;
+    spare->slotIndex = slotIndex;
+    spare->used = true;
+    created = true;
+    return spare;
+}
+
+/**
+ * Settles one volume's combined level after either source changed its own.
+ * @return True when the combined level is an edge. An initial empty level is only the baseline.
+ */
+bool settle_trigger_occupancy(TriggerOccupancy& row, bool created, bool firstLevelIsEdge) noexcept {
+    const bool occupied = row.clientOccupied || row.hostOccupied;
+    if (created) {
+        row.occupied = occupied;
+        return firstLevelIsEdge && occupied;
+    }
+    if (row.occupied == occupied) {
+        return false;
+    }
+    row.occupied = occupied;
+    return true;
+}
+
 /**
  * Raises one event per watched volume whose occupancy changed.
  * The client publishes occupancy as a level, so the edge is ours to derive. A volume seen for the
@@ -228,41 +275,26 @@ void push_trigger_edges(RuntimeInstance& instance,
         const std::span<const sense_values::DecodedValue> body(
             &sense.values[observation.firstValue], kTriggerOccupancyValueCount);
         const std::uint32_t root = observation.key.schemaRow;
-        const bool occupied = sense_flag(body, root, kTriggerAnyOrdinal);
-        TriggerOccupancy* slot = nullptr;
-        TriggerOccupancy* spare = nullptr;
-        for (TriggerOccupancy& retained : instance.triggerOccupancy) {
-            if (retained.used && retained.registryKey == observation.key.registryKey
-                && retained.objectTag == observation.key.objectTag
-                && retained.slotIndex == observation.key.slotIndex) {
-                slot = &retained;
-                break;
-            }
-            if (!retained.used && spare == nullptr) {
-                spare = &retained;
-            }
-        }
+        bool created = false;
+        TriggerOccupancy* const slot = find_trigger_occupancy(instance,
+                                                              observation.key.registryKey,
+                                                              observation.key.objectTag,
+                                                              observation.key.slotIndex,
+                                                              created);
         if (slot == nullptr) {
-            if (spare == nullptr) {
-                log_line(core::log::Level::warn, &instance, "trigger", "watch_capacity");
-                continue;
-            }
-            spare->registryKey = observation.key.registryKey;
-            spare->objectTag = observation.key.objectTag;
-            spare->slotIndex = observation.key.slotIndex;
-            spare->occupied = occupied;
-            spare->used = true;
             continue;
         }
-        if (slot->occupied == occupied) {
+        slot->clientOccupied = sense_flag(body, root, kTriggerAnyOrdinal);
+        slot->clientReported = true;
+        if (!settle_trigger_occupancy(*slot, created, false)) {
             continue;
         }
-        slot->occupied = occupied;
         host::Event event = sense_edge_event(instance, observation);
         event.triggerAll = sense_flag(body, root, kTriggerAllOrdinal);
         event.triggerCount = sense_number(body, root, kTriggerCountOrdinal);
         event.triggerValue = sense_number(body, root, kTriggerThresholdOrdinal);
-        event.kind = occupied ? host::EventKind::triggerEntered : host::EventKind::triggerExited;
+        event.kind =
+            slot->occupied ? host::EventKind::triggerEntered : host::EventKind::triggerExited;
         push_script_event(instance, event);
     }
 }
