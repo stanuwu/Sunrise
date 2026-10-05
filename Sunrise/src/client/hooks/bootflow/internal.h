@@ -28,4 +28,14 @@ void uninstall_world_step() noexcept;
 /** Detaches the lifetime gate probe. */
 void uninstall_lifetime_gate_probe() noexcept;
 
+/**
+ * Attaches the character-select hold, so the sign-in boot step stays on the character-select
+ * screen instead of falling through to orbit on its own.
+ * @return True when the target is found and the detour attaches.
+ */
+[[nodiscard]] bool install_character_select_hold() noexcept;
+
+/** Detaches the character-select hold. */
+void uninstall_character_select_hold() noexcept;
+
 } // namespace sunrise::client::hooks::bootflow
