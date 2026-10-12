@@ -12,6 +12,8 @@
 #include "../../../../middleware/bap/family_unsubscription.h"
 #include "../../../../middleware/bap/user_message/user_message_response.h"
 #include "../../../../middleware/encoding/byte_order.h"
+#include "../../../../middleware/web_service/messages/opcode501_request_codec.h"
+#include "../../../../middleware/web_service/messages/opcode502.h"
 #include "../../../../middleware/web_service/messages/opcode505/opcode505_codec.h"
 #include "../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../state/runtime/runtime.h"
@@ -203,6 +205,108 @@ bool process(const ServiceRoute& route,
             }
             outcome.hasChangeCharacter = true;
             return true;
+        }
+        // Character deletion. A refusal still answers with the status pair: the roster screen
+        // waits on the echoed transaction id, so a missing reply hangs it for the rest of the run.
+        if (middleware::web_service::parse_request(requestBody, message)
+            && message.opcode == middleware::web_service::messages::opcode502::kOpcode) {
+            const auto refuse = [&]() noexcept {
+                middleware::web_service::StatusResponse status{};
+                status.code = middleware::web_service::kRefusedStatusCode;
+                // A refused delete stages nothing, so the version wait must be told not to wait.
+                status.value = middleware::web_service::kNoFamily4Publication;
+                return middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPair,
+                    status,
+                    output,
+                    written);
+            };
+            middleware::web_service::messages::opcode502::Request deletion{};
+            if (!middleware::web_service::messages::opcode502::parse_request(message, deletion)
+                || deletion.characterSoid == 0
+                || !state::delete_character(deletion.characterSoid)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=ws502 stage=delete result=fail");
+                return refuse();
+            }
+            // The account is already changed and written (delete_character persists through the
+            // investment store internally), but the caller can still drop the frame afterwards --
+            // a stale entity lease, a refused commit, or a response that does not fit -- and the
+            // outcome flag at the end of this file only lands on the handled path. Without this
+            // the character is gone from disk while the client keeps a roster that names it.
+            sunrise::server::bap::arm_account_resync_everywhere();
+            // The roster shrank, and the client is still on the character-select step. Nothing
+            // here may move the selection: a selected character is a pick, and a pick is what
+            // leaves the screen for orbit, so the delete would skip the roster it just changed.
+            // The account object the armed resync re-encodes already carries the new roster count,
+            // so the reply only has to name the revision that resync will publish -- the same
+            // "name the following resync" contract the claim path below uses -- and the step waits
+            // on it instead of walking on. Left at its default the field reads as revision zero,
+            // which the wait blocks on, and the roster screen never finishes the delete it asked
+            // for.
+            std::int32_t deletionVersion = middleware::web_service::kNoFamily4Publication;
+            if (queuezState.family4Active
+                && queuezState.family4Version != (std::numeric_limits<std::int32_t>::max)()) {
+                deletionVersion = queuezState.family4Version + 1;
+            }
+            core::log::write(
+                core::log::Channel::server, core::log::Level::info, "ev=ws502 stage=delete result=ok");
+            middleware::web_service::StatusResponse deletionStatus{};
+            deletionStatus.value = deletionVersion;
+            return middleware::web_service::encode_response(
+                message,
+                middleware::web_service::ResponseShape::statusPair,
+                deletionStatus,
+                output,
+                written);
+        }
+        // Character creation. Both outcomes answer in opcode 501's own response shape, which
+        // carries the new SOID: the generic status pair omits that field and the Client fatally
+        // disconnects trying to decode it.
+        if (middleware::web_service::parse_request(requestBody, message)
+            && message.opcode == middleware::web_service::messages::opcode501::kOpcode) {
+            middleware::web_service::StatusResponse creationRefusal{};
+            creationRefusal.code = middleware::web_service::kRefusedStatusCode;
+            creationRefusal.value = middleware::web_service::kNoFamily4Publication;
+            middleware::web_service::messages::opcode501::Request creation{};
+            std::uint64_t characterSoid = 0;
+            if (!middleware::web_service::messages::opcode501::parse_request(message, creation)
+                || !state::create_character(creation.characterClass,
+                                            creation.gender,
+                                            creation.race,
+                                            creation.appearanceHeader,
+                                            characterSoid)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=ws501 stage=create result=fail");
+                return middleware::web_service::messages::opcode501::encode_response(
+                    message, creationRefusal, 0, output, written);
+            }
+            // As in the delete branch: the account is already changed and written, but the caller
+            // can still drop the frame, and the outcome flag only lands on the handled path.
+            sunrise::server::bap::arm_account_resync_everywhere();
+            // The new character joins the roster unselected (see create_character), and the client
+            // is still on the character-select step. Selecting it here would be a pick the player
+            // never made, and a pick is what leaves the step for orbit, so creation would skip the
+            // roster it just changed. The armed resync re-encodes the account object with the new
+            // roster count, so the reply only names the revision that resync will publish and the
+            // step waits on it. A change-character patch cannot do this: it refuses unless family
+            // three is in its normal phase, and the creation flow leaves it outside that phase, so
+            // the client would wait forever on a publication that was never staged.
+            std::int32_t creationVersion = middleware::web_service::kNoFamily4Publication;
+            if (queuezState.family4Active
+                && queuezState.family4Version != (std::numeric_limits<std::int32_t>::max)()) {
+                creationVersion = queuezState.family4Version + 1;
+            }
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             "ev=ws501 stage=create result=ok");
+            middleware::web_service::StatusResponse creationStatus{};
+            creationStatus.value = creationVersion;
+            return middleware::web_service::messages::opcode501::encode_response(
+                message, creationStatus, characterSoid, output, written);
         }
         state::investment::store::Transaction investmentTransaction;
         if (!investmentTransaction.ready()) {

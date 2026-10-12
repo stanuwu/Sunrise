@@ -22,7 +22,9 @@ bool read_characters(AccountState& output) noexcept {
                           character.contentBypass,
                           character.equippedTitleRecordIndex,
                           character.acquiredSubclassAbilityMask,
-                          character.nextInventorySerial)
+                          character.nextInventorySerial,
+                          character.appearanceHeader,
+                          character.appearanceHeaderValid)
             || slot != output.characterCount || slot >= output.characters.size()) {
             return false;
         }
@@ -60,7 +62,7 @@ bool read_rewards(AccountState& output) noexcept {
 
 /** Characters are saved before their items to satisfy foreign keys. */
 bool write_characters(const AccountState& value) noexcept {
-    Statement rows("INSERT INTO characters VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    Statement rows("INSERT INTO characters VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     for (std::size_t slot = 0; slot < value.characterCount; ++slot) {
         const auto& character = value.characters[slot];
         if (!rows.write(slot,
@@ -75,7 +77,9 @@ bool write_characters(const AccountState& value) noexcept {
                         character.contentBypass,
                         character.equippedTitleRecordIndex,
                         character.acquiredSubclassAbilityMask,
-                        character.nextInventorySerial)) {
+                        character.nextInventorySerial,
+                        character.appearanceHeader,
+                        character.appearanceHeaderValid)) {
             return false;
         }
     }

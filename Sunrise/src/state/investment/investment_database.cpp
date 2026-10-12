@@ -119,13 +119,15 @@ bool open(std::string_view path,
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 2 adds account preferences and per-item seen state.
-        constexpr int kSchemaVersion = 2;
+        // Version 3 adds the per-character appearance header. Version 2 added account
+        // preferences and per-item seen state.
+        constexpr int kSchemaVersion = 3;
         constexpr int kApplicationId = 1397902921;
         int application = 0;
         Statement query("PRAGMA application_id");
-        ready = (version == 1 || version == kSchemaVersion) && query.step() == SQLITE_ROW
-                && query.column(0, application) && application == kApplicationId;
+        ready = (version == 1 || version == 2 || version == kSchemaVersion)
+                && query.step() == SQLITE_ROW && query.column(0, application)
+                && application == kApplicationId;
     }
     if (ready && version == 1) {
         Transaction transaction;
@@ -137,6 +139,25 @@ bool open(std::string_view path,
                 "IN(0,1));")
             && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
             && execute("PRAGMA user_version=2") && transaction.commit();
+        if (ready) {
+            version = 2;
+        }
+    }
+    if (ready && version == 2) {
+        Transaction transaction;
+        // A character predating this column has no captured header; the zero blob is never
+        // read, since appearance_header_valid stays 0 and both encoders fall back to the fixed
+        // default header for it.
+        ready = transaction.ready()
+                // SQLite's ADD COLUMN refuses a non-constant default (zeroblob(36) included),
+                // so the fill value has to be a literal blob, not a function call.
+                && execute(
+                    "ALTER TABLE characters ADD COLUMN appearance_header BLOB NOT NULL "
+                    "DEFAULT (X'000000000000000000000000000000000000000000000000000000000000"
+                    "000000000000') CHECK (length(appearance_header) = 36);"
+                    "ALTER TABLE characters ADD COLUMN appearance_header_valid INTEGER "
+                    "NOT NULL DEFAULT 0 CHECK (appearance_header_valid IN (0, 1));")
+                && execute("PRAGMA user_version=3") && transaction.commit();
     }
     if (!ready) {
         shutdown();

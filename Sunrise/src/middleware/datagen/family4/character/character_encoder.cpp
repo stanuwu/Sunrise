@@ -271,9 +271,10 @@ bool encode(const state::CharacterState& state,
     object.identity.race = static_cast<std::int8_t>(state.race);
     object.identity.gender = static_cast<std::int8_t>(state.gender);
     object.identity.characterClass = static_cast<std::int8_t>(state.characterClass);
-    std::memcpy(object.customisationHeader.data(),
-                character_record::layout::kHeaderBlockBytes.data(),
-                character_record::layout::kHeaderBlockBytes.size());
+    const auto& headerSource = state.appearanceHeaderValid
+                                   ? state.appearanceHeader
+                                   : character_record::layout::kHeaderBlockBytes;
+    std::memcpy(object.customisationHeader.data(), headerSource.data(), headerSource.size());
     object.lastOrbitedDestination = state.lastOrbitedDestination;
     // No previous activity is tracked, and a zero here would name the orbit activity.
     object.previousActivityIndex = kAbsentActivityIndex;

@@ -1,5 +1,5 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -20,7 +20,9 @@ CREATE TABLE characters (
     content_bypass INTEGER NOT NULL CHECK (content_bypass IN (0, 1)),
     equipped_title INTEGER NOT NULL CHECK (equipped_title BETWEEN 0 AND 65535),
     acquired_subclass_mask INTEGER NOT NULL,
-    next_inventory_serial INTEGER NOT NULL CHECK (next_inventory_serial BETWEEN 0 AND 4294967295)
+    next_inventory_serial INTEGER NOT NULL CHECK (next_inventory_serial BETWEEN 0 AND 4294967295),
+    appearance_header BLOB NOT NULL CHECK (length(appearance_header) = 36),
+    appearance_header_valid INTEGER NOT NULL CHECK (appearance_header_valid IN (0, 1))
 ) STRICT;
 
 CREATE TABLE items (
