@@ -269,15 +269,29 @@ void report_release_refusal(const service::Request& request,
                                                                 plan.membershipMutation)) {
             return refuse("ev=activity stage=join result=refused reason=membership_snapshot");
         }
-    } else if (plan.bindingIntent == BindingIntent::publicTarget
-               && state::activity::binding_matches(plan.publicHost.source)) {
-        // Embedded solo retains the local member table; only shared targets own peers.
-        static_cast<void>(
-            state::activity::membership::prepare_refresh(plan.publicHost.source.sessionId,
-                                                         kCurrentRevision,
-                                                         kNoBubble,
-                                                         plan.membershipMutation));
-    } else if (plan.bindingIntent == BindingIntent::preserveCurrent) {
+        // The burst encoder follows the body kind: a current private link carries its seed,
+        // any target carries the joined table.
+        plan.joinMembershipBody = plan.bindingIntent == BindingIntent::preserveCurrent
+                                          && binding.role == ActivityClientRole::privateCurrent
+                                      ? JoinMembershipBody::privateSeed
+                                      : JoinMembershipBody::publicSource;
+        return true;
+    }
+    // Embedded solo retains the local member table; only shared targets own peers. The body is
+    // the private source session's member table, sent verbatim, because only it names a member
+    // the client recognises as the local player.
+    const state::activity::SessionBinding* source = nullptr;
+    if (plan.bindingIntent == BindingIntent::publicTarget) {
+        source = &plan.publicHost.source;
+    } else if (binding.role == ActivityClientRole::publicTarget) {
+        source = &binding.source;
+    }
+    if (source != nullptr && state::activity::binding_matches(*source)) {
+        plan.joinMembershipBody = JoinMembershipBody::publicSource;
+        static_cast<void>(state::activity::membership::prepare_refresh(
+            source->sessionId, kCurrentRevision, kNoBubble, plan.membershipMutation));
+    } else if (plan.bindingIntent == BindingIntent::preserveCurrent
+               && binding.role == ActivityClientRole::privateCurrent) {
         // A private join's burst carries the seed membership; the commit lands the same seed.
         plan.joinMembershipBody = JoinMembershipBody::privateSeed;
         static_cast<void>(

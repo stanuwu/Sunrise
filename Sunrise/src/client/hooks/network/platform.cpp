@@ -37,15 +37,17 @@ __declspec(noinline) std::int64_t __fastcall transport_kind_body() noexcept {
 
 /** @return The session selector's original kind with SDR redirected to direct sockets. */
 __declspec(noinline) std::int64_t __fastcall transport_kind_session_body() noexcept {
-    coordinator::CallLease lease{};
+    coordinator::CallLease lease;
     coordinator::g_callIngress(
         lease, HookSlot::transportKindSession, coordinator::ConsumerKind::none);
-    const std::int64_t result = [&]() noexcept {
+    std::int64_t result{};
+    __try {
         const auto call = reinterpret_cast<TransportKind>(lease.original);
         const std::int64_t value = call != nullptr ? call() : kSocketTransportKind;
-        return lease.accepting && value == kSdrTransportKind ? kSocketTransportKind : value;
-    }();
-    coordinator::g_callEgress();
+        result = lease.accepting && value == kSdrTransportKind ? kSocketTransportKind : value;
+    } __finally {
+        coordinator::g_callEgress();
+    }
     return result;
 }
 

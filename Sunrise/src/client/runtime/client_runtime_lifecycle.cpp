@@ -66,20 +66,15 @@ bool shutdown() noexcept {
     }
     // Stop game-tick producers before clearing their input, world and object accessors.
     if (!hooks::teleport::uninstall()) {
-        ReleaseSRWLockExclusive(&runtime::g_lock);
-        return false;
-    }
-    // Detached after presentation, so no later frame can apply the cursor policy.
-    hooks::cursor::uninstall();
-    hooks::polled_input::uninstall();
-    diagnostics::test_input::uninstall();
-    if (!hooks::teleport::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
                          "ev=shutdown stage=teleport_studio result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
+    // Detached after presentation, so no later frame can apply the cursor policy.
+    hooks::cursor::uninstall();
+    hooks::polled_input::uninstall();
     if (!hooks::world_objects::uninstall()) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
