@@ -158,13 +158,26 @@ CreditGateKind credit_gate(const build_data::vendors::InteractionGate& interacti
     row = 0;
     const auto program = std::span{interaction.condition.program.instructions}.first(
         interaction.condition.program.count);
-    if (program.size() < 2 || program[0].opcode != vendors::Opcode::loadValue
-        || program[1].opcode != vendors::Opcode::constant || program[1].operand != 0) {
+    if (program.empty() || program[0].opcode != vendors::Opcode::loadValue) {
         return CreditGateKind::unrelated;
     }
-    if (program.size() < 3 || program[0].operand < 0
-        || program[0].operand > (std::numeric_limits<std::uint16_t>::max)()
-        || program[2].opcode != vendors::Opcode::greaterThan) {
+    std::size_t prefixLength = 0;
+    if (program.size() >= 3 && program[1].opcode == vendors::Opcode::constant
+        && program[1].operand == 0 && program[2].opcode == vendors::Opcode::greaterThan) {
+        prefixLength = 3;
+    } else if (program.size() >= 4 && program[1].opcode == vendors::Opcode::constant
+               && program[1].operand == 1 && program[2].opcode == vendors::Opcode::lessThan
+               && program[3].opcode == vendors::Opcode::logicalNot) {
+        prefixLength = 4;
+    } else if (program.size() >= 2 && program[1].opcode == vendors::Opcode::constant
+               && (program[1].operand == 0 || program[1].operand == 1)) {
+        return CreditGateKind::malformed;
+    } else {
+        return CreditGateKind::unrelated;
+    }
+
+    if (program[0].operand < 0
+        || program[0].operand > (std::numeric_limits<std::uint16_t>::max)()) {
         return CreditGateKind::malformed;
     }
     const auto slot = static_cast<std::uint16_t>(program[0].operand);
@@ -185,7 +198,7 @@ CreditGateKind credit_gate(const build_data::vendors::InteractionGate& interacti
         return CreditGateKind::malformed;
     }
     row = found->row;
-    const auto remainder = program.subspan(3);
+    const auto remainder = program.subspan(prefixLength);
     if (std::any_of(remainder.begin(), remainder.end(), [](const auto& instruction) {
             return instruction.opcode == vendors::Opcode::lessThan
                    || instruction.opcode == vendors::Opcode::lessOrEqual;
