@@ -32,9 +32,8 @@ struct ArrayView {
 };
 
 /**
- * 20 priority vendor hashes (re_report.pdf §70.25.1) guaranteed to be loaded
- * before arbitrary sequential fill so that critical gameplay vendors are never
- * crowded out by high-index catalog entries.
+ * 20 core gameplay vendors guaranteed to be loaded before arbitrary sequential
+ * fill so that priority vendors are never crowded out by high-index catalog entries.
  */
 constexpr std::array<std::uint32_t, 20> kPriorityVendors = {
     0x0ED2CB2FU, // The Drifter
