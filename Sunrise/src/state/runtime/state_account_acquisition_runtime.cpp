@@ -432,7 +432,7 @@ constexpr std::uint16_t kWarmindValueSlot = 12624;
 }
 
 [[nodiscard]] bool settle_legacy_content_override(std::uint32_t definitionHash) noexcept {
-    const auto slot = legacy_campaign_value_slot(definitionHash);
+    const std::uint16_t slot = legacy_campaign_value_slot(definitionHash);
     if (slot == 0) {
         return true;
     }
