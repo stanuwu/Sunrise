@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
-#include <memory>
 #include <span>
 #include <vector>
 
@@ -59,7 +58,7 @@ constexpr std::array<std::uint32_t, 20> kPriorityVendors = {
 };
 
 [[nodiscard]] constexpr bool is_priority_vendor(std::uint32_t hash) noexcept {
-    for (const auto priority : kPriorityVendors) {
+    for (const std::uint32_t priority : kPriorityVendors) {
         if (priority == hash) {
             return true;
         }
@@ -502,6 +501,126 @@ void report(const Storage& storage, std::size_t skipped, const char* result) noe
     }
 }
 
+/**
+ * Reads all priority vendor definitions into the supplied pass storage.
+ * @param source Package directory and borrowed block keys.
+ * @param scratch Lock-owned block storage.
+ * @param index Full vendor index to scan.
+ * @param indexCount Number of valid entries in index.
+ * @param pass Pass storage pre-populated with faction data; receives definitions and rows.
+ * @return Number of priority entries that could not be read or fit.
+ */
+std::size_t
+fill_priority_vendors(const reader::Source& source,
+                      reader::Scratch& scratch,
+                      const std::array<domain::IndexEntry, domain::kIndexCapacity>& index,
+                      std::size_t indexCount,
+                      Storage& pass) noexcept {
+    std::size_t skipped = 0;
+    for (std::size_t row = 0; row < indexCount; ++row) {
+        const domain::IndexEntry entry = index[row];
+        if (!is_priority_vendor(entry.definitionHash)) {
+            continue;
+        }
+        if (read_definition(source, scratch, entry, pass)) {
+            continue;
+        }
+        ++skipped;
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=build_data stage=vendors result=skip_priority hash=0x%08X row=%zu",
+                          entry.definitionHash,
+                          row);
+    }
+    return skipped;
+}
+
+/**
+ * Reads non-priority vendor definitions into the supplied pass storage up to capacity limits.
+ * @param source Package directory and borrowed block keys.
+ * @param scratch Lock-owned block storage.
+ * @param index Full vendor index to scan.
+ * @param indexCount Number of valid entries in index.
+ * @param priorityPass Completed priority pass; its counts set the remaining capacity.
+ * @param pass Pass storage pre-populated with faction data and capped limits; receives definitions.
+ * @return Number of sequential entries that could not be read or fit.
+ */
+std::size_t
+fill_sequential_vendors(const reader::Source& source,
+                        reader::Scratch& scratch,
+                        const std::array<domain::IndexEntry, domain::kIndexCapacity>& index,
+                        std::size_t indexCount,
+                        const Storage& priorityPass,
+                        Storage& pass) noexcept {
+    std::size_t skipped = 0;
+    for (std::size_t row = 0; row < indexCount; ++row) {
+        const domain::IndexEntry entry = index[row];
+        if (is_priority_vendor(entry.definitionHash)) {
+            continue;
+        }
+        if (read_definition(source, scratch, entry, pass)) {
+            continue;
+        }
+        ++skipped;
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=build_data stage=vendors result=skip hash=0x%08X row=%zu "
+                          "definitions=%zu sale=%zu",
+                          entry.definitionHash,
+                          row,
+                          priorityPass.definitionCount + pass.definitionCount,
+                          priorityPass.saleRowCount + pass.saleRowCount);
+    }
+    return skipped;
+}
+
+/**
+ * Merges two completed pass Storage objects into dest in strictly ascending catalog-index order.
+ * Offsets in each definition are rebased to the destination's running counts before insertion.
+ * @param priorityPass Completed priority-vendor pass.
+ * @param sequentialPass Completed sequential-vendor pass.
+ * @param dest Receives all definitions and rows in ascending index order.
+ */
+void merge_vendor_catalogs(const Storage& priorityPass,
+                           const Storage& sequentialPass,
+                           Storage& dest) noexcept {
+    std::size_t priorityIdx = 0;
+    std::size_t sequentialIdx = 0;
+    while (priorityIdx < priorityPass.definitionCount
+           || sequentialIdx < sequentialPass.definitionCount) {
+        const bool takePriority = (sequentialIdx >= sequentialPass.definitionCount)
+                                  || (priorityIdx < priorityPass.definitionCount
+                                      && priorityPass.definitions[priorityIdx].index
+                                             < sequentialPass.definitions[sequentialIdx].index);
+
+        const Storage& src = takePriority ? priorityPass : sequentialPass;
+        std::size_t& srcIdx = takePriority ? priorityIdx : sequentialIdx;
+
+        domain::Definition def = src.definitions[srcIdx];
+        const std::size_t srcSaleOffset = def.saleRowOffset;
+        const std::size_t srcInstalledOffset = def.installedRowOffset;
+
+        def.saleRowOffset = static_cast<std::uint32_t>(dest.saleRowCount);
+        def.installedRowOffset = static_cast<std::uint32_t>(dest.installedRowCount);
+
+        if (def.saleCount > 0) {
+            std::copy_n(
+                &src.saleRows[srcSaleOffset], def.saleCount, &dest.saleRows[dest.saleRowCount]);
+            dest.saleRowCount += def.saleCount;
+        }
+        if (def.installedCount > 0) {
+            std::copy_n(&src.installedRows[srcInstalledOffset],
+                        def.installedCount,
+                        &dest.installedRows[dest.installedRowCount]);
+            dest.installedRowCount += def.installedCount;
+        }
+        dest.definitions[dest.definitionCount++] = def;
+        ++srcIdx;
+    }
+    dest.conditionalRows = priorityPass.conditionalRows + sequentialPass.conditionalRows;
+    dest.unreadableRows = priorityPass.unreadableRows + sequentialPass.unreadableRows;
+}
+
 } // namespace
 
 /** Extracts and publishes the vendor catalog from the installed packages. */
@@ -525,94 +644,29 @@ bool build(const reader::Source& source,
         return false;
     }
 
-    auto priorityStorage = std::make_unique<Storage>();
-    priorityStorage->factionBlob = storage.factionBlob;
-    priorityStorage->factionRows = storage.factionRows;
-
-    std::size_t skipped = 0;
     // Pass 1: Extract priority vendor definitions first to guarantee capacity.
-    for (std::size_t row = 0; row < storage.indexCount; ++row) {
-        const domain::IndexEntry entry = storage.index[row];
-        if (!is_priority_vendor(entry.definitionHash)) {
-            continue;
-        }
-        if (read_definition(source, scratch, entry, *priorityStorage)) {
-            continue;
-        }
-        ++skipped;
-        core::log::writef(core::log::Channel::state,
-                          core::log::Level::warn,
-                          "ev=build_data stage=vendors result=skip_priority hash=0x%08X row=%zu",
-                          entry.definitionHash,
-                          row);
-    }
+    static Storage priorityStorage{};
+    priorityStorage = {};
+    priorityStorage.factionBlob = storage.factionBlob;
+    priorityStorage.factionRows = storage.factionRows;
+    std::size_t skipped =
+        fill_priority_vendors(source, scratch, storage.index, storage.indexCount, priorityStorage);
 
     // Pass 2: Fill remaining capacity with non-priority vendors.
-    auto sequentialStorage = std::make_unique<Storage>();
-    sequentialStorage->factionBlob = storage.factionBlob;
-    sequentialStorage->factionRows = storage.factionRows;
-    sequentialStorage->maxDefinitions =
-        domain::kDefinitionCapacity - priorityStorage->definitionCount;
-    sequentialStorage->maxSaleRows = domain::kSaleRowCapacity - priorityStorage->saleRowCount;
-    sequentialStorage->maxInstalledRows =
-        domain::kInstalledRowCapacity - priorityStorage->installedRowCount;
-
-    for (std::size_t row = 0; row < storage.indexCount; ++row) {
-        const domain::IndexEntry entry = storage.index[row];
-        if (is_priority_vendor(entry.definitionHash)) {
-            continue;
-        }
-        if (read_definition(source, scratch, entry, *sequentialStorage)) {
-            continue;
-        }
-        ++skipped;
-        core::log::writef(core::log::Channel::state,
-                          core::log::Level::warn,
-                          "ev=build_data stage=vendors result=skip hash=0x%08X row=%zu "
-                          "definitions=%zu sale=%zu",
-                          entry.definitionHash,
-                          row,
-                          priorityStorage->definitionCount + sequentialStorage->definitionCount,
-                          priorityStorage->saleRowCount + sequentialStorage->saleRowCount);
-    }
+    static Storage sequentialStorage{};
+    sequentialStorage = {};
+    sequentialStorage.factionBlob = storage.factionBlob;
+    sequentialStorage.factionRows = storage.factionRows;
+    sequentialStorage.maxDefinitions =
+        domain::kDefinitionCapacity - priorityStorage.definitionCount;
+    sequentialStorage.maxSaleRows = domain::kSaleRowCapacity - priorityStorage.saleRowCount;
+    sequentialStorage.maxInstalledRows =
+        domain::kInstalledRowCapacity - priorityStorage.installedRowCount;
+    skipped += fill_sequential_vendors(
+        source, scratch, storage.index, storage.indexCount, priorityStorage, sequentialStorage);
 
     // Pass 3: Merge priority and sequential vendors in strictly ascending index order.
-    std::size_t priorityIdx = 0;
-    std::size_t sequentialIdx = 0;
-    while (priorityIdx < priorityStorage->definitionCount
-           || sequentialIdx < sequentialStorage->definitionCount) {
-        const bool takePriority = (sequentialIdx >= sequentialStorage->definitionCount)
-                                  || (priorityIdx < priorityStorage->definitionCount
-                                      && priorityStorage->definitions[priorityIdx].index
-                                             < sequentialStorage->definitions[sequentialIdx].index);
-
-        Storage& src = takePriority ? *priorityStorage : *sequentialStorage;
-        std::size_t& srcIdx = takePriority ? priorityIdx : sequentialIdx;
-
-        domain::Definition def = src.definitions[srcIdx];
-        const std::size_t srcSaleOffset = def.saleRowOffset;
-        const std::size_t srcInstalledOffset = def.installedRowOffset;
-
-        def.saleRowOffset = static_cast<std::uint32_t>(storage.saleRowCount);
-        def.installedRowOffset = static_cast<std::uint32_t>(storage.installedRowCount);
-
-        if (def.saleCount > 0) {
-            std::copy_n(&src.saleRows[srcSaleOffset],
-                        def.saleCount,
-                        &storage.saleRows[storage.saleRowCount]);
-            storage.saleRowCount += def.saleCount;
-        }
-        if (def.installedCount > 0) {
-            std::copy_n(&src.installedRows[srcInstalledOffset],
-                        def.installedCount,
-                        &storage.installedRows[storage.installedRowCount]);
-            storage.installedRowCount += def.installedCount;
-        }
-        storage.definitions[storage.definitionCount++] = def;
-        ++srcIdx;
-    }
-    storage.conditionalRows = priorityStorage->conditionalRows + sequentialStorage->conditionalRows;
-    storage.unreadableRows = priorityStorage->unreadableRows + sequentialStorage->unreadableRows;
+    merge_vendor_catalogs(priorityStorage, sequentialStorage, storage);
 
     const bool published = state::build_data::publish_vendor_catalog(
         std::span(storage.index).first(storage.indexCount),
