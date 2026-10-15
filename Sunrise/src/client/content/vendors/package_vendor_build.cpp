@@ -502,12 +502,12 @@ void report(const Storage& storage, std::size_t skipped, const char* result) noe
 }
 
 /**
- * Reads all priority vendor definitions into the supplied pass storage.
+ * Reads priority vendor definitions into destination storage.
  * @param source Package directory and borrowed block keys.
  * @param scratch Lock-owned block storage.
  * @param index Full vendor index to scan.
  * @param indexCount Number of valid entries in index.
- * @param pass Pass storage pre-populated with faction data; receives definitions and rows.
+ * @param destination Pre-populated with faction data; receives definitions and rows.
  * @return Number of priority entries that could not be read or fit.
  */
 std::size_t
@@ -515,14 +515,14 @@ fill_priority_vendors(const reader::Source& source,
                       reader::Scratch& scratch,
                       const std::array<domain::IndexEntry, domain::kIndexCapacity>& index,
                       std::size_t indexCount,
-                      Storage& pass) noexcept {
+                      Storage& destination) noexcept {
     std::size_t skipped = 0;
     for (std::size_t row = 0; row < indexCount; ++row) {
         const domain::IndexEntry entry = index[row];
         if (!is_priority_vendor(entry.definitionHash)) {
             continue;
         }
-        if (read_definition(source, scratch, entry, pass)) {
+        if (read_definition(source, scratch, entry, destination)) {
             continue;
         }
         ++skipped;
@@ -536,13 +536,13 @@ fill_priority_vendors(const reader::Source& source,
 }
 
 /**
- * Reads non-priority vendor definitions into the supplied pass storage up to capacity limits.
+ * Reads non-priority vendor definitions into destination storage up to capacity limits.
  * @param source Package directory and borrowed block keys.
  * @param scratch Lock-owned block storage.
  * @param index Full vendor index to scan.
  * @param indexCount Number of valid entries in index.
- * @param priorityPass Completed priority pass; its counts set the remaining capacity.
- * @param pass Pass storage pre-populated with faction data and capped limits; receives definitions.
+ * @param priority Prior storage whose counts determine remaining capacity.
+ * @param destination Pre-populated with faction data and capped limits; receives definitions.
  * @return Number of sequential entries that could not be read or fit.
  */
 std::size_t
@@ -550,15 +550,15 @@ fill_sequential_vendors(const reader::Source& source,
                         reader::Scratch& scratch,
                         const std::array<domain::IndexEntry, domain::kIndexCapacity>& index,
                         std::size_t indexCount,
-                        const Storage& priorityPass,
-                        Storage& pass) noexcept {
+                        const Storage& priority,
+                        Storage& destination) noexcept {
     std::size_t skipped = 0;
     for (std::size_t row = 0; row < indexCount; ++row) {
         const domain::IndexEntry entry = index[row];
         if (is_priority_vendor(entry.definitionHash)) {
             continue;
         }
-        if (read_definition(source, scratch, entry, pass)) {
+        if (read_definition(source, scratch, entry, destination)) {
             continue;
         }
         ++skipped;
@@ -568,32 +568,31 @@ fill_sequential_vendors(const reader::Source& source,
                           "definitions=%zu sale=%zu",
                           entry.definitionHash,
                           row,
-                          priorityPass.definitionCount + pass.definitionCount,
-                          priorityPass.saleRowCount + pass.saleRowCount);
+                          priority.definitionCount + destination.definitionCount,
+                          priority.saleRowCount + destination.saleRowCount);
     }
     return skipped;
 }
 
 /**
- * Merges two completed pass Storage objects into dest in strictly ascending catalog-index order.
- * Offsets in each definition are rebased to the destination's running counts before insertion.
- * @param priorityPass Completed priority-vendor pass.
- * @param sequentialPass Completed sequential-vendor pass.
+ * Merges priority and sequential vendor rows into dest in strictly ascending catalog order.
+ * Offsets in each definition are rebased to the destination running counts before insertion.
+ * @param priority Priority-vendor definitions and rows.
+ * @param sequential Sequential-vendor definitions and rows.
  * @param dest Receives all definitions and rows in ascending index order.
  */
-void merge_vendor_catalogs(const Storage& priorityPass,
-                           const Storage& sequentialPass,
+void merge_vendor_catalogs(const Storage& priority,
+                           const Storage& sequential,
                            Storage& dest) noexcept {
     std::size_t priorityIdx = 0;
     std::size_t sequentialIdx = 0;
-    while (priorityIdx < priorityPass.definitionCount
-           || sequentialIdx < sequentialPass.definitionCount) {
-        const bool takePriority = (sequentialIdx >= sequentialPass.definitionCount)
-                                  || (priorityIdx < priorityPass.definitionCount
-                                      && priorityPass.definitions[priorityIdx].index
-                                             < sequentialPass.definitions[sequentialIdx].index);
+    while (priorityIdx < priority.definitionCount || sequentialIdx < sequential.definitionCount) {
+        const bool takePriority = (sequentialIdx >= sequential.definitionCount)
+                                  || (priorityIdx < priority.definitionCount
+                                      && priority.definitions[priorityIdx].index
+                                             < sequential.definitions[sequentialIdx].index);
 
-        const Storage& src = takePriority ? priorityPass : sequentialPass;
+        const Storage& src = takePriority ? priority : sequential;
         std::size_t& srcIdx = takePriority ? priorityIdx : sequentialIdx;
 
         domain::Definition def = src.definitions[srcIdx];
@@ -617,8 +616,8 @@ void merge_vendor_catalogs(const Storage& priorityPass,
         dest.definitions[dest.definitionCount++] = def;
         ++srcIdx;
     }
-    dest.conditionalRows = priorityPass.conditionalRows + sequentialPass.conditionalRows;
-    dest.unreadableRows = priorityPass.unreadableRows + sequentialPass.unreadableRows;
+    dest.conditionalRows = priority.conditionalRows + sequential.conditionalRows;
+    dest.unreadableRows = priority.unreadableRows + sequential.unreadableRows;
 }
 
 } // namespace
@@ -644,7 +643,7 @@ bool build(const reader::Source& source,
         return false;
     }
 
-    // Pass 1: Extract priority vendor definitions first to guarantee capacity.
+    // Priority vendor definitions are extracted first to guarantee capacity.
     static Storage priorityStorage{};
     priorityStorage = {};
     priorityStorage.factionBlob = storage.factionBlob;
@@ -652,7 +651,7 @@ bool build(const reader::Source& source,
     std::size_t skipped =
         fill_priority_vendors(source, scratch, storage.index, storage.indexCount, priorityStorage);
 
-    // Pass 2: Fill remaining capacity with non-priority vendors.
+    // Remaining capacity is filled with non-priority vendors.
     static Storage sequentialStorage{};
     sequentialStorage = {};
     sequentialStorage.factionBlob = storage.factionBlob;
@@ -665,7 +664,7 @@ bool build(const reader::Source& source,
     skipped += fill_sequential_vendors(
         source, scratch, storage.index, storage.indexCount, priorityStorage, sequentialStorage);
 
-    // Pass 3: Merge priority and sequential vendors in strictly ascending index order.
+    // Definitions and rows are merged in strictly ascending index order.
     merge_vendor_catalogs(priorityStorage, sequentialStorage, storage);
 
     const bool published = state::build_data::publish_vendor_catalog(
