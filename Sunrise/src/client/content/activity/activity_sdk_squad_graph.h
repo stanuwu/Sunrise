@@ -52,6 +52,8 @@ struct GraphSpawner final {
     bool complete{};
     /** The rule row standing for the spawner's own point set, when it carries one. */
     bool hasInlinePointSet{};
+    /** Both native references are absent and canonical parsing proved no inline fallback. */
+    bool requiresSelectedRule{};
     std::uint32_t inlineRuleRow{format::kAbsentIndex};
 };
 

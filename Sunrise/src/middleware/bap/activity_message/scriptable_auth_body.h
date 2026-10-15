@@ -552,7 +552,7 @@ struct Type23Body final {
 struct Type68Preset final {
     std::uint32_t nameHash{};
     std::int32_t elementIndex{};
-    /** Native directive state: 0 enters, 1 completes, and 2 uses the alternate exit state. */
+    /** Native directive state: -1 disables, 0 enters, 1 completes, 2 exits. */
     std::int8_t state{};
     bool visible{true};
     /** Lane progress values, current then maximum first; the HUD reads them as a counter. */

@@ -59,6 +59,7 @@ namespace tables = middleware::content::packages::tables;
         || left.secondaryComponentClass != right.secondaryComponentClass
         || left.members.size() != right.members.size()
         || left.hasInlinePointSet != right.hasInlinePointSet
+        || left.inlinePointSetInspected != right.inlinePointSetInspected
         || left.inlinePointSetOffset != right.inlinePointSetOffset
         || left.inlinePlacementComponentOffset != right.inlinePlacementComponentOffset
         || left.inlineInitialPointIndex != right.inlineInitialPointIndex
@@ -132,6 +133,7 @@ parse_spawner(std::uint32_t tag, std::span<const std::byte> blob, SpawnerFact& o
         if (!tables::authored_squad_inline_point_set(blob, tag, source, inlinePresent, inlineSet)) {
             return false;
         }
+        output.inlinePointSetInspected = true;
         if (inlinePresent) {
             if (inlineSet.points.count >= format::kAbsentIndex) {
                 return false;

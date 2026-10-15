@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "scriptable_auth_internal.h"
+#include "volume_toggle_auth.h"
 
 // The fixed-width scriptable-auth bodies that drive device state: authored objects, device
 // channels, configured-action pulses, triggers and timers. Each family has one encoder and one
@@ -451,6 +452,45 @@ bool encode_type24(const Type24Body& body,
         return false;
     }
     writtenBits = bits;
+    return true;
+}
+
+/**
+ * Encodes one schema-0x8080955A body: registry key (32 bits), volume slot type + 1 (7), slot index
+ * + 32768 (16), then state + 1 (2), where state 1 turns the volume on and 0 turns it off.
+ */
+bool encode_type32_volume(const Type32VolumeBody& body,
+                          std::span<std::byte> output,
+                          std::size_t& written) noexcept {
+    written = 0;
+    if (body.registryKey == 0 || body.registryKey == 0xFFFFFFFFU || body.slotIndex < 0
+        || output.size() < kType32ByteCount) {
+        return false;
+    }
+    bits::Writer writer(output.first(kType32ByteCount));
+    return writer.write(body.registryKey, 32) && writer.write(kVolumeSlotType + 1U, 7)
+           && writer.write(static_cast<std::uint32_t>(body.slotIndex) + kSigned16Bias, 16)
+           && writer.write(body.active ? 2U : 1U, 2) && writer.bit_count() == kType32BitCount
+           && writer.finish(written) && written == kType32ByteCount;
+}
+
+/** Decodes one volume toggle; the no-op state, a non-volume target and nonzero padding fail. */
+bool decode_type32_volume(std::span<const std::byte> input,
+                          std::size_t bitCount,
+                          Type32VolumeBody& body) noexcept {
+    if (bitCount != kType32BitCount || input.size() != kType32ByteCount) {
+        return false;
+    }
+    bits::Reader reader(input);
+    std::uint64_t key = 0, type = 0, index = 0, state = 0;
+    if (!reader.read(32, key) || key == 0 || key == 0xFFFFFFFFU || !reader.read(7, type)
+        || type != kVolumeSlotType + 1U || !reader.read(16, index) || index < kSigned16Bias
+        || !reader.read(2, state) || (state != 1 && state != 2) || !finish_padding(reader)) {
+        return false;
+    }
+    body = {static_cast<std::uint32_t>(key),
+            static_cast<std::int16_t>(index - kSigned16Bias),
+            state == 2};
     return true;
 }
 

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <shared_mutex>
 
 #include "../../state/activity/runtime.h"

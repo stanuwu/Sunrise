@@ -52,6 +52,9 @@ enum class FieldGroupId : std::uint8_t {
     ghostLink,
     squadProvoked,
     fireteam,
+    senseGeneration,
+    squadRemoval,
+    triggerLevel,
     count,
 };
 
@@ -116,6 +119,16 @@ inline constexpr ValueSpec kTaskGroupReturns[]{
 };
 inline constexpr ValueSpec kAppliedRequestArguments[]{
     {.name = "channel", .kind = ValueKind::enumValue, .ref = "device_channels"}};
+inline constexpr ValueSpec kTaskCosts[]{
+    {.kind = ValueKind::table,
+     .element = kNumber,
+     .note = "reported cost per task group, keyed from 1; a group without one is absent"}};
+inline constexpr ValueSpec kContinuity[]{
+    {.kind = ValueKind::string,
+     .note = "baseline, consecutive, duplicate, conflict, gap, reset, missing_counter, wrap or "
+             "invalid"}};
+inline constexpr ValueSpec kOptionalBoolean[]{{.kind = ValueKind::boolean, .optional = true}};
+inline constexpr std::string_view kUnavailableLevel = "nil when available is false";
 
 // --- Field groups ------------------------------------------------------------------------------
 // Members of each group, then the group itself.
@@ -220,8 +233,14 @@ inline constexpr MemberSpec kSquadStateFields[]{
      .arguments = kTaskGroupQueryArguments,
      .returns = kTaskGroupReturns,
      .note = "the group the squad holds for this objective"},
-    field("removal_flag", kBoolean),
     field("slot_counts", kIntegerList),
+    field("initial_observation", kBoolean, "a baseline report; it never proves a death"),
+    field("registration_reset", kBoolean, "the counter went back or the spawn generation changed"),
+    field("population_available",
+          kBoolean,
+          "false when the counts are zero placeholders for a report without them"),
+    field("objective_revision", kInteger, "1 while a script objective assignment is retained"),
+    field("task_costs", kTaskCosts),
 };
 inline constexpr MemberSpec kEntitySpawnedFields[]{
     field("member_slot", kInteger),
@@ -294,6 +313,10 @@ inline constexpr MemberSpec kObjectFields[]{
     field("owner_known", kBoolean),
     field("has_owner", kBoolean),
     field("owner_key", kOptionalDecimal, "nil without an owner"),
+    field("initial_observation", kBoolean, "first report of this generation"),
+    field("entry_index", kInteger, "authored entry the object instantiated"),
+    field("spawn_mask_low", kInteger),
+    field("spawn_mask_high", kInteger),
 };
 inline constexpr MemberSpec kGhostLinkFields[]{
     field("generation", kInteger),
@@ -309,6 +332,22 @@ inline constexpr MemberSpec kFireteamFields[]{
     field("alive_count", kInteger),
     field("dead_count", kInteger),
     field("unknown_count", kInteger),
+};
+inline constexpr MemberSpec kSenseGenerationFields[]{
+    field("spawn_generation",
+          kOptionalInteger,
+          "spawn generation the squad Sense echoes from its placement; nil when unreported"),
+    field("sense_generation", kOptionalInteger, "msg-6 record counter plus one; nil when absent"),
+};
+inline constexpr MemberSpec kSquadRemovalFields[]{
+    field("removal_flag", kBoolean, "false when the report did not carry it")};
+inline constexpr MemberSpec kTriggerLevelFields[]{
+    field("available", kBoolean, "the report carried a complete occupancy level"),
+    field("continuity", kContinuity),
+    field("occupied", kOptionalBoolean, kUnavailableLevel),
+    field("member_count", kOptionalInteger, kUnavailableLevel),
+    field("value", kOptionalInteger, kUnavailableLevel),
+    field("all_inside", kOptionalBoolean, kUnavailableLevel),
 };
 
 /** Every field group, indexed by FieldGroupId. */
@@ -350,6 +389,9 @@ inline constexpr std::array<FieldGroup, static_cast<std::size_t>(FieldGroupId::c
         {"ghost_link", kGhostLinkFields},
         {"squad_provoked", kSquadProvokedFields},
         {"fireteam", kFireteamFields},
+        {"sense_generation", kSenseGenerationFields},
+        {"squad_removal", kSquadRemovalFields},
+        {"trigger_level", kTriggerLevelFields},
     }};
 
 /** @return The address of one field group, for an event's group list. */
@@ -391,15 +433,29 @@ inline constexpr const FieldGroup* kPhaseGroups[]{
     group(G::common), group(G::missionSequence), group(G::phase), group(G::stateRevision)};
 inline constexpr const FieldGroup* kTriggerGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::trigger)};
+inline constexpr const FieldGroup* kTriggerStateGroups[]{group(G::common),
+                                                         group(G::missionSequence),
+                                                         group(G::slotIdentity),
+                                                         group(G::senseGeneration),
+                                                         group(G::triggerLevel)};
 inline constexpr const FieldGroup* kSquadStateGroups[]{group(G::common),
                                                        group(G::missionSequence),
                                                        group(G::slotIdentity),
+                                                       group(G::senseGeneration),
                                                        group(G::squadAlive),
+                                                       group(G::squadRemoval),
                                                        group(G::squadState)};
-inline constexpr const FieldGroup* kEntitySpawnedGroups[]{
-    group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::entitySpawned)};
-inline constexpr const FieldGroup* kEntityDiedGroups[]{
-    group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::squadAlive)};
+inline constexpr const FieldGroup* kEntitySpawnedGroups[]{group(G::common),
+                                                          group(G::missionSequence),
+                                                          group(G::slotIdentity),
+                                                          group(G::senseGeneration),
+                                                          group(G::entitySpawned)};
+inline constexpr const FieldGroup* kEntityDiedGroups[]{group(G::common),
+                                                       group(G::missionSequence),
+                                                       group(G::slotIdentity),
+                                                       group(G::senseGeneration),
+                                                       group(G::squadAlive),
+                                                       group(G::squadRemoval)};
 inline constexpr const FieldGroup* kSceneFinishedGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::sceneFinished)};
 inline constexpr const FieldGroup* kObjectiveProgressGroups[]{group(G::common),
@@ -420,8 +476,11 @@ inline constexpr const FieldGroup* kGhostLinkGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::ghostLink)};
 inline constexpr const FieldGroup* kActorPathGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::actorPath)};
-inline constexpr const FieldGroup* kObjectGroups[]{
-    group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::object)};
+inline constexpr const FieldGroup* kObjectGroups[]{group(G::common),
+                                                   group(G::missionSequence),
+                                                   group(G::slotIdentity),
+                                                   group(G::senseGeneration),
+                                                   group(G::object)};
 inline constexpr const FieldGroup* kFireteamGroups[]{
     group(G::common), group(G::missionSequence), group(G::fireteam)};
 inline constexpr const FieldGroup* kDamageGroups[]{
@@ -597,6 +656,13 @@ inline constexpr EventSpec kEvents[]{
     {39, "DEVICE_STATE", "on_event_device_state", "SunriseDeviceStateEvent", kDeviceGroups},
     {40, "REGION_CHANGED", "on_event_region_changed", "SunriseRegionChangedEvent", kRegionGroups},
     {41, "SCENE_OUTPUT", "on_event_scene_output", "SunriseSceneOutputEvent", kSceneOutputGroups},
+    {42,
+     "TRIGGER_STATE",
+     "on_event_trigger_state",
+     "SunriseTriggerStateEvent",
+     kTriggerStateGroups,
+     "every accepted occupancy report, including baselines and invalidations; entered and "
+     "exited still fire on a proven change"},
 };
 
 // --- Program table -----------------------------------------------------------------------------

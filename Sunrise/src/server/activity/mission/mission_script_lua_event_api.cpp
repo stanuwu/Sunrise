@@ -28,6 +28,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "triggerEntered";
     case host::EventKind::triggerExited:
         return "triggerExited";
+    case host::EventKind::triggerState:
+        return "triggerState";
     case host::EventKind::squadState:
         return "squadState";
     case host::EventKind::squadProvoked:

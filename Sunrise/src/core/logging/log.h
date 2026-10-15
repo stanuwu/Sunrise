@@ -26,6 +26,8 @@ enum class Level : unsigned char {
     warn,
     info,
     debug,
+    /** Per-row dumps, such as every roster Auth on every push. Off at the default threshold. */
+    trace,
     off,
 };
 

@@ -129,6 +129,15 @@ play_combatant_sequence_reserved(const state::activity_sdk::BoundView& view,
     const host::ScriptableOutputReservation& reservation,
     host::ScriptableOverrideKind kind = host::ScriptableOverrideKind::sdkAuth) noexcept;
 
+/** Selects or clears the squad a type-26 attachment follows, for one placement spawn generation. */
+[[nodiscard]] Status
+set_squad_attachment_reserved(const state::activity_sdk::BoundView& view,
+                              std::uint32_t slotRow,
+                              std::uint32_t sourceRow,
+                              std::uint64_t sourceSpawnGeneration,
+                              bool active,
+                              const host::ScriptableOutputReservation& reservation) noexcept;
+
 /**
  * Instantiates or removes package-authored type-4 entries, one push for the whole run.
  * A row is dropped, not refused, when the client's state does not hold it, or when it names a

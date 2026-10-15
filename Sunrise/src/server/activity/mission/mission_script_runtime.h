@@ -93,6 +93,18 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
                            std::uint32_t registryKey,
                            std::uint16_t slotIndex) noexcept;
 
+/**
+ * Publishes an authored actor's replicated damage levels as a damageState event when they change.
+ * Levels are ten-bit fractions of full (1023).
+ */
+void report_squad_damage(const state::activity::SessionBinding& binding,
+                         std::uint64_t sourceGeneration,
+                         std::uint32_t registryKey,
+                         std::uint8_t slotType,
+                         std::uint16_t slotIndex,
+                         std::uint16_t health,
+                         std::uint16_t shield) noexcept;
+
 /** Starts the server mission-script manager when its setting is enabled. */
 void initialize() noexcept;
 /** Writes the authored controller path, `<name>/<name>.lua`, for one 1-based SDK activity row. */

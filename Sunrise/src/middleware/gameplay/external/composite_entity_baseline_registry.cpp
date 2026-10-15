@@ -1,4 +1,5 @@
 #include <array>
+#include <bitset>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -370,6 +371,43 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
         }
         return context.registry->slots[slot];
     };
+    // The client's anchor pass runs before its remove pass: an entity that receives a record
+    // detaches to root every descendant that received none in the same batch. A parent sent as a
+    // direct element therefore loses its children, and they outlive its removal as roots.
+    std::bitset<kMaximumEntitySlot + 1U> recorded{};
+    for (std::size_t index = 0; index < count; ++index) {
+        if (!candidate.ignoredRecordMask.test(index)) {
+            recorded.set(entity_record_at(batch, index).token.slot);
+        }
+    }
+    const auto& retained = context.registry->slots;
+    for (std::size_t slot = 0; slot < retained.size(); ++slot) {
+        if (recorded.test(slot) || !retained[slot].occupied || !retained[slot].anchorPresent) {
+            continue;
+        }
+        // The walk detaches such a child without descending into it, so the child's own subtree
+        // moves with it: only the direct parent's record matters.
+        const EntityToken parent = retained[slot].anchor;
+        bool detach = false;
+        if (recorded.test(parent.slot)) {
+            const auto& staged = current_slot(parent.slot);
+            detach = staged.occupied && staged.incarnation == parent.incarnation;
+        }
+        if (!detach) {
+            continue;
+        }
+        if (changes == kEntityBatchCapacity) {
+            return false;
+        }
+        auto& change = change_at(changes++);
+        change.slot = static_cast<std::uint16_t>(slot);
+        change.expected = retained[slot];
+        change.replacement = change.expected;
+        change.replacement.anchor = {};
+        change.replacement.anchorPresent = false;
+        change.replacement.anchorOrder = 0;
+        ++candidate.detachedCount;
+    }
     std::array<EntityToken, kEntityBatchCapacity> terminals{};
     std::size_t terminalCount = 0;
     const auto append_terminal = [&](EntityToken token) {

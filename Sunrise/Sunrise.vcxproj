@@ -2215,6 +2215,12 @@
     <ClInclude Include="src\middleware\bap\activity_message\interactable_object_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\mission_auth_patch.h" />
     <ClInclude Include="src\middleware\bap\activity_message\mission_effect_auth.h" />
+    <ClInclude Include="src\client\content\activity\activity_sdk_spawn_reference.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\squad_attachment_auth.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\volume_toggle_auth.h" />
+    <ClInclude Include="src\server\activity\mission\mission_observation_epoch.h" />
+    <ClInclude Include="src\server\activity\mission\mission_trigger_observation.h" />
+    <ClInclude Include="src\server\activity\squad_attachment_ownership_validation.h" />
     <ClInclude Include="src\middleware\bap\activity_message\music_section_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\roster_presence.h" />
     <ClInclude Include="src\middleware\bap\activity_message\scene_events_auth.h" />
