@@ -35,4 +35,7 @@ void shutdown() noexcept;
  */
 [[nodiscard]] bool toggle_for_key(UINT virtualKey) noexcept;
 
+/** Closes the menu. A menu that is already closed or closing stays that way. */
+void hide() noexcept;
+
 } // namespace sunrise::core::ui::runtime

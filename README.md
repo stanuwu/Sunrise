@@ -12,6 +12,14 @@ Destiny 2 Offline Preservation Mod
 - [Documentation](https://projectsunrise.dev/docs/)
 - [Discord](https://discord.gg/22JS6et5k9)
 
+## Opening the overlay
+
+After launching Destiny 2, press Insert to open or close the Sunrise overlay
+
+Insert is the default key and can be changed in `bin\x64\Sunrise\settings.json`
+
+See the [FAQ](https://projectsunrise.dev/faq/) for more information
+
 ## Features
 - Load into any Destination (matchmade activities are currently broken)
 - Script Missions

@@ -46,6 +46,16 @@ bool Parser::ui_toggle_key_value(std::string_view name, UINT& output) noexcept {
     return false;
 }
 
+/** Names one Windows SDK virtual key with the setting that selects it. */
+std::string_view Parser::ui_toggle_key_name(UINT virtualKey) noexcept {
+    for (const KeyName& entry : kToggleKeys) {
+        if (entry.virtualKey == virtualKey) {
+            return entry.name;
+        }
+    }
+    return {};
+}
+
 /** Parses the in-game UI boot and input policy. */
 bool Parser::client_ui_settings(ui::runtime::Settings& output) noexcept {
     if (!consume('{')) {

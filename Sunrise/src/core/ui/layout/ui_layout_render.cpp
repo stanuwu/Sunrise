@@ -9,6 +9,7 @@
 #include "../components/logo/ui_logo_component.h"
 #include "../components/section/ui_section_component.h"
 #include "../modules/registry/ui_module_registry.h"
+#include "../runtime/ui_visibility_runtime.h"
 #include "../scaling/dpi/ui_dpi_scaling.h"
 #include "navigation/ui_layout_navigation.h"
 #include "ui_layout_lifecycle.h"
@@ -58,6 +59,12 @@ constexpr float kTitleTextRatio = 1.5F;
 constexpr float kHalfExtent = 2.0F;
 /** The surface names the tool with the same wordmark the HUD card carries. */
 constexpr char kTitle[] = "SUNRISE";
+/** The hidden close action label is scoped by the main window. */
+constexpr char kCloseWidgetId[] = "##close";
+/** The close cross spans this fraction of its button, so it reads as a glyph and not a frame. */
+constexpr float kCloseCrossRatio = 0.5F;
+/** One pixel keeps the close cross as thin as the body text. */
+constexpr float kCloseCrossThickness = 1.0F;
 
 /**
  * Copies one display name into null-terminated component storage.
@@ -119,8 +126,15 @@ void draw_companion_windows() noexcept {
     }
 }
 
-/** Draws the animated logo, then the name and version, on one title row. */
-void draw_title() noexcept {
+/**
+ * Draws the animated logo, then the name and version, on one title row, with a close action
+ * at its far end.
+ * @return True when the close action was pressed.
+ */
+[[nodiscard]] bool draw_title() noexcept {
+    // The row edges are taken before it opens, so the close action can sit at its far end.
+    const ImVec2 rowOrigin = ImGui::GetCursorScreenPos();
+    const float rowRight = rowOrigin.x + ImGui::GetContentRegionAvail().x;
     const float extent = scaling::dpi::pixels(kTitleLogoExtent);
     const bool logoDrawn = components::logo::draw(extent);
     if (logoDrawn) {
@@ -144,6 +158,31 @@ void draw_title() noexcept {
     ImGui::SetCursorPosY(
         titleY + ((std::max)(titleHeight - ImGui::GetTextLineHeight(), 0.0F) / kHalfExtent));
     ImGui::TextDisabled(SUNRISE_VER_STRING);
+
+    // A cross at the right edge of the title row, centered on it. It stays on the row the logo
+    // opened, like the version, so the row and the separator below keep their places.
+    ImGui::SameLine();
+    const float buttonExtent = ImGui::GetFontSize();
+    const float rowHeight = logoDrawn ? extent : titleHeight;
+    const ImVec2 buttonPosition{
+        rowRight - buttonExtent,
+        rowOrigin.y + ((std::max)(rowHeight - buttonExtent, 0.0F) / kHalfExtent)};
+    ImGui::SetCursorScreenPos(buttonPosition);
+    const bool pressed = ImGui::InvisibleButton(kCloseWidgetId, {buttonExtent, buttonExtent});
+
+    // Muted like the version until hovered, then white like the title.
+    const ImU32 color =
+        ImGui::GetColorU32(ImGui::IsItemHovered() ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    const float half = buttonExtent * kCloseCrossRatio / kHalfExtent;
+    const ImVec2 center{buttonPosition.x + (buttonExtent / kHalfExtent),
+                        buttonPosition.y + (buttonExtent / kHalfExtent)};
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const float thickness = scaling::dpi::pixels(kCloseCrossThickness);
+    drawList->AddLine(
+        {center.x - half, center.y - half}, {center.x + half, center.y + half}, color, thickness);
+    drawList->AddLine(
+        {center.x + half, center.y - half}, {center.x - half, center.y + half}, color, thickness);
+    return pressed;
 }
 
 } // namespace
@@ -186,7 +225,10 @@ bool render(bool visible) noexcept {
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, progress);
     const bool submitContents = ImGui::Begin("Sunrise", nullptr, kMainWindowFlags);
     if (submitContents) {
-        draw_title();
+        // The close action only ever hides, so a surface already closing stays closed.
+        if (draw_title()) {
+            runtime::hide();
+        }
         ImGui::Separator();
 
         const StateSnapshot state = snapshot();

@@ -8,6 +8,8 @@ namespace sunrise::core::ui::hud {
 enum class Overlay : std::uint8_t {
     /** The Sunrise name, version and animated logo. */
     logoCard,
+    /** How to open the menu, shown once beside the card shortly after start. */
+    startupHint,
     /** Where the player is: activity, bubble, slice set and closest spawn. */
     currentStatus,
     /** The instances of the session the player is in. */
