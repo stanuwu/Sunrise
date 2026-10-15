@@ -2,7 +2,11 @@
 
 #include <algorithm>
 #include <limits>
+#include <shared_mutex>
+#include <span>
 
+#include "../../core/threading/srw_lock.h"
+#include "../../middleware/crypto/random_bytes.h"
 #include "../build_data/progressions/progression_catalog.h"
 #include "../build_data/rewards/reward_catalog.h"
 #include "../build_data/vendors/reconstructed_rank_claim_links.h"
@@ -20,6 +24,16 @@ constexpr std::size_t kExperienceLane = 0;
 
 /** Reply zero completes the supported normal reward interactions. */
 constexpr std::uint16_t kAcceptRewardReply = 0;
+/** Session-scoped answered vendor interactions. */
+constexpr std::size_t kAnsweredInteractionsCapacity = 256;
+std::array<std::uint32_t, kAnsweredInteractionsCapacity> g_answeredInteractions{};
+std::size_t g_answeredInteractionsCount = 0;
+core::threading::SrwLock g_answeredInteractionsLock;
+
+[[nodiscard]] std::uint32_t pack_answered_interaction(std::uint16_t vendorIndex,
+                                                      std::uint16_t interactionIndex) noexcept {
+    return (static_cast<std::uint32_t>(vendorIndex) << 16) | interactionIndex;
+}
 
 /** Saved unlocks and Family-5 overrides visible to one native vendor gate. */
 struct GateValues {
@@ -699,6 +713,9 @@ prepare_vendor_rank_reward_interaction(std::uint16_t vendorIndex,
                                        std::uint16_t replyIndex,
                                        PendingRecordRewardGrant& mutation) noexcept {
     mutation = {};
+    if (is_vendor_interaction_answered(vendorIndex, interactionIndex)) {
+        return VendorReputationDisposition::refused;
+    }
     build_data::vendors::IndexEntry entry{};
     if (!build_data::vendors::find_index(vendorIndex, entry)) {
         return VendorReputationDisposition::notApplicable;
@@ -794,6 +811,37 @@ bool vendor_rank_reward_current(const VendorRankRewardClaim& claim) noexcept {
         return false;
     }
     return true;
+}
+
+void mark_vendor_interaction_answered(std::uint16_t vendorIndex,
+                                      std::uint16_t interactionIndex) noexcept {
+    const auto packed = pack_answered_interaction(vendorIndex, interactionIndex);
+    std::unique_lock lock(g_answeredInteractionsLock);
+    for (std::size_t i = 0; i < g_answeredInteractionsCount; ++i) {
+        if (g_answeredInteractions[i] == packed) {
+            return;
+        }
+    }
+    if (g_answeredInteractionsCount < g_answeredInteractions.size()) {
+        g_answeredInteractions[g_answeredInteractionsCount++] = packed;
+    }
+}
+
+bool is_vendor_interaction_answered(std::uint16_t vendorIndex,
+                                    std::uint16_t interactionIndex) noexcept {
+    const auto packed = pack_answered_interaction(vendorIndex, interactionIndex);
+    std::shared_lock lock(g_answeredInteractionsLock);
+    for (std::size_t i = 0; i < g_answeredInteractionsCount; ++i) {
+        if (g_answeredInteractions[i] == packed) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void reset_answered_vendor_interactions() noexcept {
+    std::unique_lock lock(g_answeredInteractionsLock);
+    g_answeredInteractionsCount = 0;
 }
 
 } // namespace sunrise::state

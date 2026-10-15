@@ -114,6 +114,10 @@ struct ItemAcquisitionTransaction {
     std::unique_ptr<state::PendingItemAcquisition> pending{};
 
     queuez::ItemAcquisition update{};
+
+    std::int32_t answeredVendor{-1};
+
+    std::int32_t answeredInteraction{-1};
 };
 
 /** Profile acquisition and its exact account/resident QueueZ after-image. */
@@ -123,6 +127,10 @@ struct ProfileItemAcquisitionTransaction {
     std::unique_ptr<state::PendingProfileItemAcquisition> pending{};
 
     queuez::ProfileItemAcquisition update{};
+
+    std::int32_t answeredVendor{-1};
+
+    std::int32_t answeredInteraction{-1};
 };
 
 /** Dismantle mutation and its exact QueueZ after-image. */

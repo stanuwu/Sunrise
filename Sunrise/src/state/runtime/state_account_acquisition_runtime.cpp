@@ -408,6 +408,53 @@ bool preview_item_acquisition(const PendingItemAcquisition& mutation,
     return true;
 }
 
+namespace {
+
+constexpr std::uint32_t kRedWarHomecomingHash = 0x37DD26F0U;
+constexpr std::uint32_t kCurseOfOsirisGatewayHash = 0x6706D3ECU;
+constexpr std::uint32_t kWarmindIceAndShadowHash = 0xF5B78E7FU;
+
+constexpr std::uint16_t kRedWarValueSlot = 12578;
+constexpr std::uint16_t kCurseOfOsirisValueSlot = 12609;
+constexpr std::uint16_t kWarmindValueSlot = 12624;
+
+[[nodiscard]] std::uint16_t legacy_campaign_value_slot(std::uint32_t definitionHash) noexcept {
+    switch (definitionHash) {
+    case kRedWarHomecomingHash:
+        return kRedWarValueSlot;
+    case kCurseOfOsirisGatewayHash:
+        return kCurseOfOsirisValueSlot;
+    case kWarmindIceAndShadowHash:
+        return kWarmindValueSlot;
+    default:
+        return 0;
+    }
+}
+
+[[nodiscard]] bool settle_legacy_content_override(std::uint32_t definitionHash) noexcept {
+    const auto slot = legacy_campaign_value_slot(definitionHash);
+    if (slot == 0) {
+        return true;
+    }
+    Family5State family{};
+    if (!investment::store::read_family5(family)) {
+        return false;
+    }
+    for (std::size_t i = 0; i < family.valueCount; ++i) {
+        if (family.values[i].slot == slot) {
+            family.values[i].value = 1;
+            return investment::store::write_family5(family);
+        }
+    }
+    if (family.valueCount < family.values.size()) {
+        family.values[family.valueCount++] = {slot, 1};
+        return investment::store::write_family5(family);
+    }
+    return false;
+}
+
+} // namespace
+
 /**
  * Inventory and first-step state share one transaction; failure rolls both back.
  * @param mutation Prepared grant consumed on either success or failure.
@@ -427,6 +474,9 @@ bool commit_item_acquisition(PendingItemAcquisition& mutation) noexcept {
     if (quest.scope != Quest::Scope::none
         && prepared.previousQuestValue == build_data::items::kUnsetQuestValue
         && !investment::store::write_unlock(quest_bank(quest), quest.row, quest.value)) {
+        return false;
+    }
+    if (!settle_legacy_content_override(prepared.acquiredDefinitionHash)) {
         return false;
     }
     return transaction.commit();
@@ -631,7 +681,10 @@ bool commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) no
     const bool ready =
         materialize_profile_acquisition(investment::store::account(), prepared, candidate);
     if (ready) {
-        if (!investment::store::write_account(candidate)) {
+        investment::store::Transaction transaction;
+        if (!transaction.ready() || !investment::store::write_account(candidate)
+            || !settle_legacy_content_override(prepared.acquiredDefinitionHash)
+            || !transaction.commit()) {
             investment::store::g_mutex.unlock();
             return false;
         }

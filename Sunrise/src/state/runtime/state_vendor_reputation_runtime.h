@@ -73,4 +73,13 @@ prepare_vendor_rank_reward_interaction(std::uint16_t vendorIndex,
                                        PendingRecordRewardGrant& mutation) noexcept;
 [[nodiscard]] bool vendor_rank_reward_current(const VendorRankRewardClaim& claim) noexcept;
 
+/** Marks an interaction answered for the current session. */
+void mark_vendor_interaction_answered(std::uint16_t vendorIndex,
+                                      std::uint16_t interactionIndex) noexcept;
+/** Returns true if the interaction was already answered during this session. */
+[[nodiscard]] bool is_vendor_interaction_answered(std::uint16_t vendorIndex,
+                                                  std::uint16_t interactionIndex) noexcept;
+/** Clears all session-scoped answered interactions. */
+void reset_answered_vendor_interactions() noexcept;
+
 } // namespace sunrise::state
