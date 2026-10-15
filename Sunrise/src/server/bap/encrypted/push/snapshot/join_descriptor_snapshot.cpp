@@ -17,7 +17,8 @@ namespace descriptor = middleware::gameplay::descriptor;
 bool join_silo(std::uint64_t& silo) noexcept {
     state::build_data::BuildIdentity build{};
     // This service runs inside the game process, whose own image owns the native join silo.
-    return state::build_data::cache::current_build_identity(0, build)
+    // The silo keys on the image fields alone, so neither hash is needed.
+    return state::build_data::cache::current_build_identity(0, 0, build)
            && state::build_data::static_join_silo(build, silo);
 }
 

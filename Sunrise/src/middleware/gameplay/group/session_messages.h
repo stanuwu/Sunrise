@@ -29,6 +29,8 @@ enum class SessionMessageId : std::uint8_t {
 /** Declared decoded sizes the registry holds for the ids this host sends. */
 inline constexpr std::uint32_t kLeaveAcknowledgeSize = 8;
 /** See kLeaveAcknowledgeSize. */
+inline constexpr std::uint32_t kPeerEstablishSize = 8;
+/** See kLeaveAcknowledgeSize. */
 inline constexpr std::uint32_t kTimeSynchronizeSize = 48;
 /** See kLeaveAcknowledgeSize. */
 inline constexpr std::uint32_t kMembershipUpdateSize = 31104;

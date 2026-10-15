@@ -7,7 +7,11 @@
 namespace sunrise::core::settings::parser {
 
 /** @param input Complete JSON text, borrowed and never changed. */
-Parser::Parser(std::string_view input) noexcept : json::Reader(input) {}
+Parser::Parser(std::string_view input) noexcept : json::Reader(input), text_(input) {}
+
+bool Parser::quoted_value() const noexcept {
+    return position() < text_.size() && text_[position()] == '"';
+}
 
 /** Reads the version without interpreting settings from an older schema. */
 bool Parser::parse_version(std::uint32_t& output, bool* compact) noexcept {
@@ -38,9 +42,7 @@ bool Parser::parse_version(std::uint32_t& output, bool* compact) noexcept {
         } else {
             whitespace();
             if (compact
-                && (key == "persona"
-                    || ((key == "server" || key == "host") && position_ < input_.size()
-                        && input_[position_] == '"'))) {
+                && (key == "persona" || ((key == "server" || key == "host") && quoted_value()))) {
                 *compact = true;
             }
             if (!skip_value(0)) {
@@ -140,7 +142,7 @@ bool Parser::parse_root(Settings& output) noexcept {
                 return false;
             }
             whitespace();
-            if (position_ < input_.size() && input_[position_] == '"') {
+            if (quoted_value()) {
                 if (!compact_endpoint(output.client.serverEndpoint)) {
                     return false;
                 }

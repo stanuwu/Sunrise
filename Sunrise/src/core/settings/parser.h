@@ -27,6 +27,8 @@ public:
     [[nodiscard]] bool parse_version(std::uint32_t& output, bool* compact = nullptr) noexcept;
 
 private:
+    /** @return True when the next unread byte opens a string, for the compact forms. */
+    [[nodiscard]] bool quoted_value() const noexcept;
     /** Host text, its dotted-quad octets and a port, at the widths both endpoints declare. */
     [[nodiscard]] bool
     bap_endpoint(std::array<char, client::server_endpoint::kHostCapacity>& host,
@@ -74,6 +76,11 @@ private:
     [[nodiscard]] static bool level_value(std::string_view name, log::Level& output) noexcept;
     /** @return Channel index for the token, or Channel::count when it names none. */
     [[nodiscard]] static std::size_t channel_index(std::string_view name) noexcept;
+    /** Maps one settings key name to a Windows SDK virtual key from the supported menu set. */
+    [[nodiscard]] static bool ui_toggle_key_value(std::string_view name, UINT& output) noexcept;
+
+    /** The reader's input, kept because the reader offers no look-ahead. */
+    std::string_view text_;
 };
 
 } // namespace sunrise::core::settings::parser
