@@ -865,20 +865,6 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
     // A row of -1 says the tile is not a sale row at all, so the installed array answers it.
     // Reading the slot as a sale row here would grant whatever sits at that row.
     const bool rowless = row < 0;
-    if (rowless && request.vendorIndex >= 0
-        && request.vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
-        && request.slotIndex >= 0
-        && request.slotIndex <= (std::numeric_limits<std::uint16_t>::max)()
-        && state::is_vendor_interaction_answered(static_cast<std::uint16_t>(request.vendorIndex),
-                                                 static_cast<std::uint16_t>(request.slotIndex))) {
-        report_purchase(quest::kOpcode,
-                        "fail",
-                        "interaction_answered",
-                        request.vendorIndex,
-                        row,
-                        kUnavailableDefinitionIndex);
-        return;
-    }
     // A rowless 904 is an interaction reply, so its slot names the interaction, not a sale row:
     // it has no category and no price.
     state::build_data::vendors::SaleRow sale{};
@@ -900,14 +886,6 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
         return;
     }
     settle_vendor_row(message, quest::kOpcode, request.vendorIndex, row, sale, outcome);
-    if (rowless && outcome.mutation.index() != 0 && request.vendorIndex >= 0
-        && request.vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
-        && request.slotIndex >= 0
-        && request.slotIndex <= (std::numeric_limits<std::uint16_t>::max)()) {
-        outcome.answeredInteraction =
-            state::AnsweredVendorInteraction{static_cast<std::uint16_t>(request.vendorIndex),
-                                             static_cast<std::uint16_t>(request.slotIndex)};
-    }
 }
 
 /**

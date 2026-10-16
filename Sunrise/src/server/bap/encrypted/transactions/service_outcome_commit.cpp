@@ -397,6 +397,12 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         const bool willExhaustCredit = vendorReward.beforeCredits == 1;
         const bool hasVendorInteraction =
             vendorReward.beforeCredits > 0 && vendorReward.replyIndex.has_value();
+        if (willExhaustCredit && hasVendorInteraction
+            && !state::reserve_answered_vendor_interaction(vendorReward.vendorIndex,
+                                                           vendorReward.interactionIndex)) {
+            reason = "tracker_capacity";
+            return false;
+        }
         const bool committed =
             report_commit(state::commit_record_reward(*transaction->pending),
                           "ev=record_reward stage=transaction_commit result=fail");

@@ -500,7 +500,14 @@ bool consume(Session& session,
         if (!retirementValid) {
             commitReason = "entity_retirement_stale";
         }
-        handled = fits && retirementValid
+        const bool trackerReady = !outcome.answeredInteraction.has_value()
+                                  || state::reserve_answered_vendor_interaction(
+                                      outcome.answeredInteraction->vendorIndex,
+                                      outcome.answeredInteraction->interactionIndex);
+        if (!trackerReady) {
+            commitReason = "tracker_capacity";
+        }
+        handled = fits && retirementValid && trackerReady
                   && transactions::commit(outcome, publication, commitReason)
                   && (!investmentTransaction || investmentTransaction->commit());
         if (!handled) {
@@ -509,7 +516,7 @@ bool consume(Session& session,
         }
         if (handled) {
             if (outcome.answeredInteraction) {
-                state::mark_vendor_interaction_answered(
+                (void)state::mark_vendor_interaction_answered(
                     outcome.answeredInteraction->vendorIndex,
                     outcome.answeredInteraction->interactionIndex);
             }

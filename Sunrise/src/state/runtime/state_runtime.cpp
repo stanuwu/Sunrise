@@ -376,7 +376,7 @@ bool publish_bootstrap_token(std::span<const std::byte> token) noexcept {
  * and updates every character the account owns.
  */
 void publish_sign_in_time(std::uint64_t seconds) noexcept {
-    reset_answered_vendor_interactions();
+    reset_answered_vendor_interactions(seconds);
     investment::store::set_sign_in_time(seconds);
 }
 

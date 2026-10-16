@@ -27,6 +27,7 @@ constexpr std::size_t kExperienceLane = 0;
 constexpr std::uint16_t kAcceptRewardReply = 0;
 /** Session-scoped answered vendor interactions. */
 std::vector<std::uint32_t> g_answeredInteractions;
+std::uint64_t g_currentSessionId = 0;
 core::threading::SrwLock g_answeredInteractionsLock;
 
 [[nodiscard]] std::uint32_t pack_answered_interaction(std::uint16_t vendorIndex,
@@ -751,19 +752,25 @@ bool commit_vendor_reputation(PendingVendorReputation& mutation) noexcept {
 
 /**
  * Scans installed vendor sales for a unique zero-cost reward package matching the interaction.
+ * Evaluates gate conditions across multiple candidates to resolve multi-sale vendors.
  * @param vendorIndex Installed vendor selector.
  * @param vendor Installed vendor definition.
  * @param interaction Installed interaction gate defining category and index.
+ * @param replyIndex Optional reply index within the interaction.
  * @param saleIndex Receives the matching sale index on unique resolution.
  * @return True when exactly one matching reward sale is found.
  */
 bool find_unique_rank_reward_sale(std::uint16_t vendorIndex,
                                   const build_data::vendors::Definition& vendor,
                                   const build_data::vendors::InteractionGate& interaction,
+                                  std::optional<std::uint16_t> replyIndex,
                                   std::uint16_t& saleIndex) noexcept {
     saleIndex = 0;
-    std::optional<std::uint16_t> matchedSale{};
-    std::size_t matchCount = 0;
+    struct CandidateSale {
+        std::uint16_t saleIndex{};
+        RewardSaleBinding binding{};
+    };
+    std::vector<CandidateSale> candidates;
     for (std::size_t saleIdx = 0; saleIdx < vendor.saleCount; ++saleIdx) {
         build_data::vendors::SaleRow sale{};
         if (!build_data::vendors::sale_row(vendor, static_cast<std::uint16_t>(saleIdx), sale)) {
@@ -780,13 +787,26 @@ bool find_unique_rank_reward_sale(std::uint16_t vendorIndex,
                 == VendorReputationDisposition::prepared
             && binding.interaction.index == interaction.index
             && binding.categoryIndex == interaction.categoryIndex) {
-            matchedSale = static_cast<std::uint16_t>(saleIdx);
-            ++matchCount;
+            candidates.push_back(CandidateSale{static_cast<std::uint16_t>(saleIdx), binding});
         }
     }
-    if (matchCount == 1 && matchedSale) {
-        saleIndex = *matchedSale;
+    if (candidates.size() == 1) {
+        saleIndex = candidates.front().saleIndex;
         return true;
+    }
+    if (candidates.size() > 1) {
+        std::optional<std::uint16_t> activeSale{};
+        std::size_t activeCount = 0;
+        for (const auto& candidate : candidates) {
+            if (reward_gates_pass(candidate.binding, replyIndex)) {
+                activeSale = candidate.saleIndex;
+                ++activeCount;
+            }
+        }
+        if (activeCount == 1 && activeSale) {
+            saleIndex = *activeSale;
+            return true;
+        }
     }
     return false;
 }
@@ -834,7 +854,8 @@ prepare_vendor_rank_reward_interaction(std::uint16_t vendorIndex,
     if (hasInteraction && gateKind == CreditGateKind::claim
         && build_data::vendors::find(entry.definitionHash, vendor)) {
         std::uint16_t matchedSaleIndex = 0;
-        if (find_unique_rank_reward_sale(vendorIndex, vendor, interaction, matchedSaleIndex)) {
+        if (find_unique_rank_reward_sale(
+                vendorIndex, vendor, interaction, replyIndex, matchedSaleIndex)) {
             targetSaleIndex = matchedSaleIndex;
             targetCategoryIndex = interaction.categoryIndex;
             targetInteractionIndex = interaction.index;
@@ -943,18 +964,47 @@ bool vendor_rank_reward_current(const VendorRankRewardClaim& claim) noexcept {
     return true;
 }
 
-void mark_vendor_interaction_answered(std::uint16_t vendorIndex,
+bool reserve_answered_vendor_interaction(std::uint16_t vendorIndex,
+                                         std::uint16_t interactionIndex) noexcept {
+    const std::uint32_t packed = pack_answered_interaction(vendorIndex, interactionIndex);
+    try {
+        std::unique_lock lock(g_answeredInteractionsLock);
+        for (const auto existing : g_answeredInteractions) {
+            if (existing == packed) {
+                return true;
+            }
+        }
+        if (g_answeredInteractions.size() >= g_answeredInteractions.capacity()) {
+            const std::size_t nextCapacity =
+                g_answeredInteractions.capacity() == 0 ? 16 : g_answeredInteractions.capacity() * 2;
+            g_answeredInteractions.reserve(nextCapacity);
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool mark_vendor_interaction_answered(std::uint16_t vendorIndex,
                                       std::uint16_t interactionIndex) noexcept {
     const std::uint32_t packed = pack_answered_interaction(vendorIndex, interactionIndex);
     try {
         std::unique_lock lock(g_answeredInteractionsLock);
         for (const auto existing : g_answeredInteractions) {
             if (existing == packed) {
-                return;
+                return true;
             }
         }
+        if (g_answeredInteractions.size() >= g_answeredInteractions.capacity()) {
+            const std::size_t nextCapacity =
+                g_answeredInteractions.capacity() == 0 ? 16 : g_answeredInteractions.capacity() * 2;
+            g_answeredInteractions.reserve(nextCapacity);
+        }
         g_answeredInteractions.push_back(packed);
-    } catch (...) {}
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 bool is_vendor_interaction_answered(std::uint16_t vendorIndex,
@@ -969,9 +1019,15 @@ bool is_vendor_interaction_answered(std::uint16_t vendorIndex,
     return false;
 }
 
-void reset_answered_vendor_interactions() noexcept {
+void reset_answered_vendor_interactions(std::uint64_t sessionId) noexcept {
     std::unique_lock lock(g_answeredInteractionsLock);
+    g_currentSessionId = sessionId;
     g_answeredInteractions.clear();
+}
+
+std::uint64_t current_answered_vendor_session() noexcept {
+    std::shared_lock lock(g_answeredInteractionsLock);
+    return g_currentSessionId;
 }
 
 } // namespace sunrise::state
