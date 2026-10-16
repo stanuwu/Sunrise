@@ -144,8 +144,12 @@ bool gate_passes(const build_data::vendors::Gate& gate,
 
 enum class CreditGateKind { unrelated, claim, warning, malformed };
 
+/** Instructions consumed by the direct and inverted positive-credit prefixes. */
+constexpr std::size_t kDirectCreditPrefixSize = 3;
+constexpr std::size_t kInvertedCreditPrefixSize = 4;
+
 /**
- * Resolves a native VALUE[credit] > 0 prefix without treating a level warning as a claim.
+ * Resolves a supported positive-credit prefix without treating a level warning as a claim.
  * @param interaction Installed interaction gate.
  * @param row Receives the saved character credit row.
  * @return The supported claim shape, a warning branch, an unrelated gate or malformed input.
@@ -154,19 +158,21 @@ CreditGateKind credit_gate(const build_data::vendors::InteractionGate& interacti
                            std::uint16_t& row) noexcept {
     namespace vendors = build_data::vendors;
     row = 0;
-    const auto program = std::span{interaction.condition.program.instructions}.first(
-        interaction.condition.program.count);
+    const std::span<const unlocks::Instruction> program =
+        std::span{interaction.condition.program.instructions}.first(
+            interaction.condition.program.count);
     if (program.empty() || program[0].opcode != vendors::Opcode::loadValue) {
         return CreditGateKind::unrelated;
     }
     std::size_t prefixLength = 0;
-    if (program.size() >= 3 && program[1].opcode == vendors::Opcode::constant
+    if (program.size() >= kDirectCreditPrefixSize && program[1].opcode == vendors::Opcode::constant
         && program[1].operand == 0 && program[2].opcode == vendors::Opcode::greaterThan) {
-        prefixLength = 3;
-    } else if (program.size() >= 4 && program[1].opcode == vendors::Opcode::constant
-               && program[1].operand == 1 && program[2].opcode == vendors::Opcode::lessThan
+        prefixLength = kDirectCreditPrefixSize;
+    } else if (program.size() >= kInvertedCreditPrefixSize
+               && program[1].opcode == vendors::Opcode::constant && program[1].operand == 1
+               && program[2].opcode == vendors::Opcode::lessThan
                && program[3].opcode == vendors::Opcode::logicalNot) {
-        prefixLength = 4;
+        prefixLength = kInvertedCreditPrefixSize;
     } else if (program.size() >= 2 && program[1].opcode == vendors::Opcode::constant
                && (program[1].operand == 0 || program[1].operand == 1)) {
         return CreditGateKind::malformed;
@@ -178,11 +184,11 @@ CreditGateKind credit_gate(const build_data::vendors::InteractionGate& interacti
         || program[0].operand > (std::numeric_limits<std::uint16_t>::max)()) {
         return CreditGateKind::malformed;
     }
-    const auto slot = static_cast<std::uint16_t>(program[0].operand);
-    const auto inputs =
+    const std::uint16_t slot = static_cast<std::uint16_t>(program[0].operand);
+    const std::span<const vendors::GateInput> inputs =
         std::span{interaction.condition.inputs}.first(interaction.condition.inputCount);
     const vendors::GateInput* found = nullptr;
-    for (const auto& input : inputs) {
+    for (const vendors::GateInput& input : inputs) {
         if (input.opcode != vendors::Opcode::loadValue || input.slot != slot) {
             continue;
         }
@@ -196,11 +202,12 @@ CreditGateKind credit_gate(const build_data::vendors::InteractionGate& interacti
         return CreditGateKind::malformed;
     }
     row = found->row;
-    const auto remainder = program.subspan(prefixLength);
-    if (std::any_of(remainder.begin(), remainder.end(), [](const auto& instruction) {
-            return instruction.opcode == vendors::Opcode::lessThan
-                   || instruction.opcode == vendors::Opcode::lessOrEqual;
-        })) {
+    const std::span<const unlocks::Instruction> remainder = program.subspan(prefixLength);
+    if (std::any_of(
+            remainder.begin(), remainder.end(), [](const unlocks::Instruction& instruction) {
+                return instruction.opcode == vendors::Opcode::lessThan
+                       || instruction.opcode == vendors::Opcode::lessOrEqual;
+            })) {
         return CreditGateKind::warning;
     }
     return CreditGateKind::claim;
