@@ -318,11 +318,8 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     if (auto* transaction = transaction_if<ItemAcquisitionTransaction>(outcome)) {
         const bool committed = transaction->pending != nullptr
                                && state::commit_item_acquisition(*transaction->pending);
-        if (committed && transaction->answeredVendor >= 0
-            && transaction->answeredInteraction >= 0) {
-            state::mark_vendor_interaction_answered(
-                static_cast<std::uint16_t>(transaction->answeredVendor),
-                static_cast<std::uint16_t>(transaction->answeredInteraction));
+        if (committed && transaction->answeredInteraction) {
+            outcome.answeredInteraction = transaction->answeredInteraction;
         }
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
@@ -359,11 +356,8 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     if (auto* transaction = transaction_if<ProfileItemAcquisitionTransaction>(outcome)) {
         const bool committed = transaction->pending != nullptr
                                && state::commit_profile_item_acquisition(*transaction->pending);
-        if (committed && transaction->answeredVendor >= 0
-            && transaction->answeredInteraction >= 0) {
-            state::mark_vendor_interaction_answered(
-                static_cast<std::uint16_t>(transaction->answeredVendor),
-                static_cast<std::uint16_t>(transaction->answeredInteraction));
+        if (committed && transaction->answeredInteraction) {
+            outcome.answeredInteraction = transaction->answeredInteraction;
         }
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
@@ -399,16 +393,18 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         if (transaction->pending == nullptr) {
             return false;
         }
-        // The grant's staged frame already carries its XP total, so only the roster can be owed.
-        bool artifactBonusMoved = false;
-        if (!report_commit(state::commit_record_reward(*transaction->pending, &artifactBonusMoved),
-                           "ev=record_reward stage=transaction_commit result=fail")) {
-            return false;
+        const auto& vendorReward = transaction->pending->vendorReward;
+        const bool willExhaustCredit = vendorReward.beforeCredits == 1;
+        const bool hasVendorInteraction =
+            vendorReward.vendorIndex != 0 || vendorReward.interactionIndex != 0;
+        const bool committed =
+            report_commit(state::commit_record_reward(*transaction->pending),
+                          "ev=record_reward stage=transaction_commit result=fail");
+        if (committed && willExhaustCredit && hasVendorInteraction) {
+            outcome.answeredInteraction = state::AnsweredVendorInteraction{
+                vendorReward.vendorIndex, vendorReward.interactionIndex};
         }
-        if (artifactBonusMoved) {
-            bap::arm_social_roster_repush_everywhere();
-        }
-        return true;
+        return committed;
     }
     return true;
 }

@@ -73,6 +73,13 @@ prepare_vendor_rank_reward_interaction(std::uint16_t vendorIndex,
                                        PendingRecordRewardGrant& mutation) noexcept;
 [[nodiscard]] bool vendor_rank_reward_current(const VendorRankRewardClaim& claim) noexcept;
 
+/** Identifies an interaction answered during this session. */
+struct AnsweredVendorInteraction {
+    std::uint16_t vendorIndex{};
+    std::uint16_t interactionIndex{};
+    bool operator==(const AnsweredVendorInteraction&) const = default;
+};
+
 /** Marks an interaction answered for the current session. */
 void mark_vendor_interaction_answered(std::uint16_t vendorIndex,
                                       std::uint16_t interactionIndex) noexcept;

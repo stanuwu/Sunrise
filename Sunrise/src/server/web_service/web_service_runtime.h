@@ -44,9 +44,8 @@ struct Outcome {
     state::ArtifactResetResult artifactReset{};
     /** A WS-701 carried the profile-setup completion marker and State refused it. */
     bool profileSetupRefused{};
-    /** Answered vendor interaction for this action session (-1 if none). */
-    std::int32_t answeredVendor{-1};
-    std::int32_t answeredInteraction{-1};
+    /** Answered vendor interaction staged until durable transaction commit. */
+    std::optional<state::AnsweredVendorInteraction> answeredInteraction{};
     /** A request prepares at most one State mutation and allocates only that exact payload. */
     using Mutation = std::variant<std::monostate,
                                   std::unique_ptr<state::PendingPostmasterClaim>,

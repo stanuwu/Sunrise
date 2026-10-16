@@ -1077,12 +1077,6 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation, bool* artifactBonu
         }
         ready = ready && transaction.commit();
     }
-    if (ready
-        && (mutation.vendorReward.vendorIndex != 0
-            || mutation.vendorReward.interactionIndex != 0)) {
-        state::mark_vendor_interaction_answered(mutation.vendorReward.vendorIndex,
-                                                mutation.vendorReward.interactionIndex);
-    }
     if (!ready && mutation.claimedRecordIndex != kUnclaimedRecordIndex) {
         // The claim was written when the reward was prepared, so a refused install undoes it.
         unlocks::records::revoke(mutation.claimedRecordIndex);

@@ -107,61 +107,51 @@ struct ArtifactPurchaseTransaction {
     queuez::EquipmentSwap update{};
 };
 
-/** Character acquisition and its exact QueueZ after-image. */
-
+/**
+ * Character acquisition, its exact QueueZ after-image, and optional answered vendor interaction
+ * staged until durable transaction commit.
+ */
 struct ItemAcquisitionTransaction {
-
     std::unique_ptr<state::PendingItemAcquisition> pending{};
-
     queuez::ItemAcquisition update{};
-
-    std::int32_t answeredVendor{-1};
-
-    std::int32_t answeredInteraction{-1};
+    /** Answered vendor interaction staged until durable transaction commit. */
+    std::optional<state::AnsweredVendorInteraction> answeredInteraction{};
 };
 
-/** Profile acquisition and its exact account/resident QueueZ after-image. */
-
+/**
+ * Profile acquisition, its exact account/resident QueueZ after-image, and optional answered vendor
+ * interaction staged until durable transaction commit.
+ */
 struct ProfileItemAcquisitionTransaction {
-
     std::unique_ptr<state::PendingProfileItemAcquisition> pending{};
-
     queuez::ProfileItemAcquisition update{};
-
-    std::int32_t answeredVendor{-1};
-
-    std::int32_t answeredInteraction{-1};
+    /** Answered vendor interaction staged until durable transaction commit. */
+    std::optional<state::AnsweredVendorInteraction> answeredInteraction{};
 };
 
 /** Dismantle mutation and its exact QueueZ after-image. */
-
 struct ItemDismantleTransaction {
-
     std::unique_ptr<state::PendingItemDismantle> pending{};
-
     queuez::ItemDismantle update{};
 };
 
-/** Record-claim reward batch and its exact Queuez after-image. */
-
+/**
+ * Record-claim reward batch and its exact Queuez after-image.
+ * If claiming a vendor rank reward, any exhausted interaction is staged in ServiceOutcome
+ * upon commit and marked answered only after the outer transaction commits.
+ */
 struct RecordRewardGrantTransaction {
-
     std::unique_ptr<state::PendingRecordRewardGrant> pending{};
-
     queuez::RecordRewardGrant update{};
 };
 
 /** Season reward grant plus the exact Queuez after-image promised by opcode 2400. */
-
 struct SeasonPassRewardTransaction {
-
     std::unique_ptr<state::PendingSeasonPassReward> pending{};
-
     queuez::RecordRewardGrant update{};
 };
 
 /** Optional side effect produced while decoding one authenticated service body. */
-
 struct ServiceOutcome {
     bool hasRelayRegistration{};
     bool hasRelayConnectivityFailure{};
@@ -172,29 +162,18 @@ struct ServiceOutcome {
     bool hasSubscription{};
     /** The ws-206 reply already carries the family's first snapshot, so no push repeats it. */
     bool subscriptionAnswered{};
-
     /** A Triumph claim changed the account flag bank and its image has to follow. */
-
     bool hasRecordClaim{};
-
     bool hasArtifactReset{};
-
-    /** A Store wallet sync committed a new generation, which the account object publishes. */
-    bool hasStoreSync{};
-
-    std::uint32_t storeSyncRevision{};
-
     state::ArtifactResetResult artifactReset{};
-
     middleware::queuez::Subscription subscription{};
-
     bool hasUnsubscription{};
-
     middleware::bap::family_unsubscription::Request unsubscription{};
-
     bool hasChangeCharacter{};
-
     bool hasSelectCharacter{};
+    /** Vendor interaction marked answered only after the enclosing investment transaction commits.
+     */
+    std::optional<state::AnsweredVendorInteraction> answeredInteraction{};
 
     /** A 504 pick or a 502 delete changed the selected character, even with no move staged. */
     bool selectionMoved{};

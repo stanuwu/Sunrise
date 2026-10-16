@@ -600,7 +600,6 @@ bool process(const ServiceRoute& route,
             }
             transaction->pending =
                 web_service::take_mutation<state::PendingItemAcquisition>(webOutcome);
-            transaction->answeredVendor = webOutcome.answeredVendor;
             transaction->answeredInteraction = webOutcome.answeredInteraction;
         }
         if (profileItemAcquisition != nullptr) {
@@ -636,7 +635,6 @@ bool process(const ServiceRoute& route,
             }
             transaction->pending =
                 web_service::take_mutation<state::PendingProfileItemAcquisition>(webOutcome);
-            transaction->answeredVendor = webOutcome.answeredVendor;
             transaction->answeredInteraction = webOutcome.answeredInteraction;
         }
         if (itemDismantle != nullptr) {
