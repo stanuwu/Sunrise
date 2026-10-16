@@ -4,6 +4,7 @@
 #include <limits>
 #include <shared_mutex>
 #include <span>
+#include <vector>
 
 #include "../../core/threading/srw_lock.h"
 #include "../../middleware/crypto/random_bytes.h"
@@ -25,9 +26,7 @@ constexpr std::size_t kExperienceLane = 0;
 /** Reply zero completes the supported normal reward interactions. */
 constexpr std::uint16_t kAcceptRewardReply = 0;
 /** Session-scoped answered vendor interactions. */
-constexpr std::size_t kAnsweredInteractionsCapacity = 256;
-std::array<std::uint32_t, kAnsweredInteractionsCapacity> g_answeredInteractions{};
-std::size_t g_answeredInteractionsCount = 0;
+std::vector<std::uint32_t> g_answeredInteractions;
 core::threading::SrwLock g_answeredInteractionsLock;
 
 [[nodiscard]] std::uint32_t pack_answered_interaction(std::uint16_t vendorIndex,
@@ -336,11 +335,15 @@ bool find_dynamic_rank_credit_row(const build_data::vendors::Definition& vendor,
         }
         std::uint16_t candidateRow = 0;
         if (credit_gate(candidate, candidateRow) == CreditGateKind::claim) {
+            if (dynamicRow != 0 && dynamicRow != candidateRow) {
+                creditRow = 0;
+                return false;
+            }
             dynamicRow = candidateRow;
             ++claimCount;
         }
     }
-    if (claimCount == 1) {
+    if (claimCount > 0 && dynamicRow != 0) {
         creditRow = dynamicRow;
         return true;
     }
@@ -518,6 +521,16 @@ VendorReputationDisposition resolve_reputation_turn_in(std::uint16_t vendorIndex
         std::uint16_t dynamicCreditRow = 0;
         if (find_dynamic_rank_credit_row(vendor, dynamicCreditRow)) {
             award.rankCreditRow = dynamicCreditRow;
+        } else {
+            for (std::size_t index = 0; index < vendor.thirdCount; ++index) {
+                build_data::vendors::InteractionGate candidate{};
+                std::uint16_t candidateRow = 0;
+                if (build_data::vendors::find_interaction_gate(
+                        vendor.definitionHash, static_cast<std::uint16_t>(index), candidate)
+                    && credit_gate(candidate, candidateRow) == CreditGateKind::claim) {
+                    return VendorReputationDisposition::refused;
+                }
+            }
         }
     }
     award.repeatLastStep = progression.repeatLastStep;
@@ -933,23 +946,23 @@ bool vendor_rank_reward_current(const VendorRankRewardClaim& claim) noexcept {
 void mark_vendor_interaction_answered(std::uint16_t vendorIndex,
                                       std::uint16_t interactionIndex) noexcept {
     const std::uint32_t packed = pack_answered_interaction(vendorIndex, interactionIndex);
-    std::unique_lock lock(g_answeredInteractionsLock);
-    for (std::size_t i = 0; i < g_answeredInteractionsCount; ++i) {
-        if (g_answeredInteractions[i] == packed) {
-            return;
+    try {
+        std::unique_lock lock(g_answeredInteractionsLock);
+        for (const auto existing : g_answeredInteractions) {
+            if (existing == packed) {
+                return;
+            }
         }
-    }
-    if (g_answeredInteractionsCount < g_answeredInteractions.size()) {
-        g_answeredInteractions[g_answeredInteractionsCount++] = packed;
-    }
+        g_answeredInteractions.push_back(packed);
+    } catch (...) {}
 }
 
 bool is_vendor_interaction_answered(std::uint16_t vendorIndex,
                                     std::uint16_t interactionIndex) noexcept {
     const std::uint32_t packed = pack_answered_interaction(vendorIndex, interactionIndex);
     std::shared_lock lock(g_answeredInteractionsLock);
-    for (std::size_t i = 0; i < g_answeredInteractionsCount; ++i) {
-        if (g_answeredInteractions[i] == packed) {
+    for (const auto existing : g_answeredInteractions) {
+        if (existing == packed) {
             return true;
         }
     }
@@ -958,7 +971,7 @@ bool is_vendor_interaction_answered(std::uint16_t vendorIndex,
 
 void reset_answered_vendor_interactions() noexcept {
     std::unique_lock lock(g_answeredInteractionsLock);
-    g_answeredInteractionsCount = 0;
+    g_answeredInteractions.clear();
 }
 
 } // namespace sunrise::state

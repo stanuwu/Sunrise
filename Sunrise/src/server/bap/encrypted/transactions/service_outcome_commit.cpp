@@ -396,7 +396,7 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         const auto& vendorReward = transaction->pending->vendorReward;
         const bool willExhaustCredit = vendorReward.beforeCredits == 1;
         const bool hasVendorInteraction =
-            vendorReward.vendorIndex != 0 || vendorReward.interactionIndex != 0;
+            vendorReward.beforeCredits > 0 && vendorReward.replyIndex.has_value();
         const bool committed =
             report_commit(state::commit_record_reward(*transaction->pending),
                           "ev=record_reward stage=transaction_commit result=fail");

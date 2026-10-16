@@ -900,7 +900,7 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
         return;
     }
     settle_vendor_row(message, quest::kOpcode, request.vendorIndex, row, sale, outcome);
-    if (rowless && request.vendorIndex >= 0
+    if (rowless && outcome.mutation.index() != 0 && request.vendorIndex >= 0
         && request.vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
         && request.slotIndex >= 0
         && request.slotIndex <= (std::numeric_limits<std::uint16_t>::max)()) {

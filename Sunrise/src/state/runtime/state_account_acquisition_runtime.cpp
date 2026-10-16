@@ -675,22 +675,17 @@ bool commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) no
     if (!valid_profile_mutation_shape(prepared)) {
         return false;
     }
-
-    investment::store::g_mutex.lock();
-    AccountState candidate{};
-    const bool ready =
-        materialize_profile_acquisition(investment::store::account(), prepared, candidate);
-    if (ready) {
-        investment::store::Transaction transaction;
-        if (!transaction.ready() || !investment::store::write_account(candidate)
-            || !settle_legacy_content_override(prepared.acquiredDefinitionHash)
-            || !transaction.commit()) {
-            investment::store::g_mutex.unlock();
-            return false;
-        }
+    investment::store::Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
     }
-    investment::store::g_mutex.unlock();
-    return ready;
+    AccountState candidate{};
+    if (!materialize_profile_acquisition(investment::store::account(), prepared, candidate)
+        || !investment::store::write_account(candidate)
+        || !settle_legacy_content_override(prepared.acquiredDefinitionHash)) {
+        return false;
+    }
+    return transaction.commit();
 }
 
 } // namespace sunrise::state
