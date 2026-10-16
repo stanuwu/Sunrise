@@ -600,7 +600,6 @@ bool process(const ServiceRoute& route,
             }
             transaction->pending =
                 web_service::take_mutation<state::PendingItemAcquisition>(webOutcome);
-            transaction->answeredInteraction = webOutcome.answeredInteraction;
         }
         if (profileItemAcquisition != nullptr) {
             // Actionable profile stacks may add a resident in the same revision.
@@ -635,7 +634,6 @@ bool process(const ServiceRoute& route,
             }
             transaction->pending =
                 web_service::take_mutation<state::PendingProfileItemAcquisition>(webOutcome);
-            transaction->answeredInteraction = webOutcome.answeredInteraction;
         }
         if (itemDismantle != nullptr) {
             // Promise the revision carrying the character update and any resident release.

@@ -73,25 +73,4 @@ prepare_vendor_rank_reward_interaction(std::uint16_t vendorIndex,
                                        PendingRecordRewardGrant& mutation) noexcept;
 [[nodiscard]] bool vendor_rank_reward_current(const VendorRankRewardClaim& claim) noexcept;
 
-/** Identifies an interaction answered during this session. */
-struct AnsweredVendorInteraction {
-    std::uint16_t vendorIndex{};
-    std::uint16_t interactionIndex{};
-    bool operator==(const AnsweredVendorInteraction&) const = default;
-};
-
-/** Guarantees capacity exists to track an answered interaction without failing. */
-[[nodiscard]] bool reserve_answered_vendor_interaction(std::uint16_t vendorIndex,
-                                                       std::uint16_t interactionIndex) noexcept;
-/** Marks an interaction answered for the current session. */
-[[nodiscard]] bool mark_vendor_interaction_answered(std::uint16_t vendorIndex,
-                                                    std::uint16_t interactionIndex) noexcept;
-/** Returns true if the interaction was already answered during this session. */
-[[nodiscard]] bool is_vendor_interaction_answered(std::uint16_t vendorIndex,
-                                                  std::uint16_t interactionIndex) noexcept;
-/** Clears all session-scoped answered interactions and records active session identity. */
-void reset_answered_vendor_interactions(std::uint64_t sessionId = 0) noexcept;
-/** Returns the active session identity for answered vendor interactions. */
-[[nodiscard]] std::uint64_t current_answered_vendor_session() noexcept;
-
 } // namespace sunrise::state

@@ -107,51 +107,53 @@ struct ArtifactPurchaseTransaction {
     queuez::EquipmentSwap update{};
 };
 
-/**
- * Character acquisition, its exact QueueZ after-image, and optional answered vendor interaction
- * staged until durable transaction commit.
- */
+/** Character acquisition and its exact QueueZ after-image. */
+
 struct ItemAcquisitionTransaction {
+
     std::unique_ptr<state::PendingItemAcquisition> pending{};
+
     queuez::ItemAcquisition update{};
-    /** Answered vendor interaction staged until durable transaction commit. */
-    std::optional<state::AnsweredVendorInteraction> answeredInteraction{};
 };
 
-/**
- * Profile acquisition, its exact account/resident QueueZ after-image, and optional answered vendor
- * interaction staged until durable transaction commit.
- */
+/** Profile acquisition and its exact account/resident QueueZ after-image. */
+
 struct ProfileItemAcquisitionTransaction {
+
     std::unique_ptr<state::PendingProfileItemAcquisition> pending{};
+
     queuez::ProfileItemAcquisition update{};
-    /** Answered vendor interaction staged until durable transaction commit. */
-    std::optional<state::AnsweredVendorInteraction> answeredInteraction{};
 };
 
 /** Dismantle mutation and its exact QueueZ after-image. */
+
 struct ItemDismantleTransaction {
+
     std::unique_ptr<state::PendingItemDismantle> pending{};
+
     queuez::ItemDismantle update{};
 };
 
-/**
- * Record-claim reward batch and its exact Queuez after-image.
- * If claiming a vendor rank reward, any exhausted interaction is staged in ServiceOutcome
- * upon commit and marked answered only after the outer transaction commits.
- */
+/** Record-claim reward batch and its exact Queuez after-image. */
+
 struct RecordRewardGrantTransaction {
+
     std::unique_ptr<state::PendingRecordRewardGrant> pending{};
+
     queuez::RecordRewardGrant update{};
 };
 
 /** Season reward grant plus the exact Queuez after-image promised by opcode 2400. */
+
 struct SeasonPassRewardTransaction {
+
     std::unique_ptr<state::PendingSeasonPassReward> pending{};
+
     queuez::RecordRewardGrant update{};
 };
 
 /** Optional side effect produced while decoding one authenticated service body. */
+
 struct ServiceOutcome {
     bool hasRelayRegistration{};
     bool hasRelayConnectivityFailure{};
@@ -162,17 +164,24 @@ struct ServiceOutcome {
     bool hasSubscription{};
     /** The ws-206 reply already carries the family's first snapshot, so no push repeats it. */
     bool subscriptionAnswered{};
+
     /** A Triumph claim changed the account flag bank and its image has to follow. */
+
     bool hasRecordClaim{};
+
     bool hasArtifactReset{};
+
     state::ArtifactResetResult artifactReset{};
+
     middleware::queuez::Subscription subscription{};
+
     bool hasUnsubscription{};
+
     middleware::bap::family_unsubscription::Request unsubscription{};
+
     bool hasChangeCharacter{};
+
     bool hasSelectCharacter{};
-    /** Vendor interaction marked answered after the enclosing investment transaction commits. */
-    std::optional<state::AnsweredVendorInteraction> answeredInteraction{};
 
     /** A 504 pick or a 502 delete changed the selected character, even with no move staged. */
     bool selectionMoved{};
@@ -223,15 +232,22 @@ template <typename Transaction, typename... Args>
 [[nodiscard]] Transaction* emplace_transaction(ServiceOutcome& outcome, Args&&... args) noexcept {
 
     static_assert(std::is_nothrow_constructible_v<Transaction, Args...>);
+
     outcome.transaction.template emplace<std::monostate>();
+
     auto storage =
+
         std::unique_ptr<Transaction>{new (std::nothrow) Transaction(std::forward<Args>(args)...)};
+
     if (storage == nullptr) {
 
         return nullptr;
     }
+
     auto* transaction = storage.get();
+
     outcome.transaction.template emplace<std::unique_ptr<Transaction>>(std::move(storage));
+
     return transaction;
 }
 
@@ -242,6 +258,7 @@ template <typename Transaction>
 [[nodiscard]] Transaction* transaction_if(ServiceOutcome& outcome) noexcept {
 
     auto* storage = std::get_if<std::unique_ptr<Transaction>>(&outcome.transaction);
+
     return storage == nullptr ? nullptr : storage->get();
 }
 
@@ -252,6 +269,7 @@ template <typename Transaction>
 [[nodiscard]] const Transaction* transaction_if(const ServiceOutcome& outcome) noexcept {
 
     const auto* storage = std::get_if<std::unique_ptr<Transaction>>(&outcome.transaction);
+
     return storage == nullptr ? nullptr : storage->get();
 }
 

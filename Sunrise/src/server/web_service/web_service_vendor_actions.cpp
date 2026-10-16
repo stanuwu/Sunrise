@@ -20,7 +20,6 @@
 #include "../../state/build_data/vendors/repeatable_triggers.h"
 #include "../../state/build_data/vendors/vendor_catalog.h"
 #include "../../state/runtime/runtime.h"
-#include "../../state/runtime/state_vendor_reputation_runtime.h"
 #include "internal_actions.h"
 #include "web_service_actions.h"
 

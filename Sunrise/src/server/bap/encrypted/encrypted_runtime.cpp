@@ -500,14 +500,7 @@ bool consume(Session& session,
         if (!retirementValid) {
             commitReason = "entity_retirement_stale";
         }
-        const bool trackerReady = !outcome.answeredInteraction.has_value()
-                                  || state::reserve_answered_vendor_interaction(
-                                      outcome.answeredInteraction->vendorIndex,
-                                      outcome.answeredInteraction->interactionIndex);
-        if (!trackerReady) {
-            commitReason = "tracker_capacity";
-        }
-        handled = fits && retirementValid && trackerReady
+        handled = fits && retirementValid
                   && transactions::commit(outcome, publication, commitReason)
                   && (!investmentTransaction || investmentTransaction->commit());
         if (!handled) {
@@ -515,11 +508,6 @@ bool consume(Session& session,
                 frame.serviceId, "commit", fits ? commitReason : "frame_capacity");
         }
         if (handled) {
-            if (outcome.answeredInteraction) {
-                (void)state::mark_vendor_interaction_answered(
-                    outcome.answeredInteraction->vendorIndex,
-                    outcome.answeredInteraction->interactionIndex);
-            }
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
             written = framedSize;
             if (outcome.nativePresence) {

@@ -2,14 +2,10 @@
 
 #include <algorithm>
 #include <limits>
-#include <shared_mutex>
 #include <span>
-#include <vector>
 
-#include "../../core/threading/srw_lock.h"
 #include "../../middleware/crypto/random_bytes.h"
 #include "../build_data/progressions/progression_catalog.h"
-#include "../build_data/rewards/reward_catalog.h"
 #include "../build_data/vendors/reconstructed_rank_claim_links.h"
 #include "../build_data/vendors/reputation_sale_catalog.h"
 #include "../build_data/vendors/vendor_catalog.h"
@@ -22,18 +18,6 @@ namespace {
 
 /** Native progression level walks read experience from lane zero. */
 constexpr std::size_t kExperienceLane = 0;
-
-/** Reply zero completes the supported normal reward interactions. */
-constexpr std::uint16_t kAcceptRewardReply = 0;
-/** Session-scoped answered vendor interactions. */
-std::vector<std::uint32_t> g_answeredInteractions;
-std::uint64_t g_currentSessionId = 0;
-core::threading::SrwLock g_answeredInteractionsLock;
-
-[[nodiscard]] std::uint32_t pack_answered_interaction(std::uint16_t vendorIndex,
-                                                      std::uint16_t interactionIndex) noexcept {
-    return (static_cast<std::uint32_t>(vendorIndex) << 16) | interactionIndex;
-}
 
 /** Saved unlocks and Family-5 overrides visible to one native vendor gate. */
 struct GateValues {
@@ -212,12 +196,11 @@ CreditGateKind credit_gate(const build_data::vendors::InteractionGate& interacti
         return CreditGateKind::malformed;
     }
     row = found->row;
-    const std::span<const unlocks::Instruction> remainder = program.subspan(prefixLength);
-    if (std::any_of(
-            remainder.begin(), remainder.end(), [](const unlocks::Instruction& instruction) {
-                return instruction.opcode == vendors::Opcode::lessThan
-                       || instruction.opcode == vendors::Opcode::lessOrEqual;
-            })) {
+    const auto remainder = program.subspan(prefixLength);
+    if (std::any_of(remainder.begin(), remainder.end(), [](const auto& instruction) {
+            return instruction.opcode == vendors::Opcode::lessThan
+                   || instruction.opcode == vendors::Opcode::lessOrEqual;
+        })) {
         return CreditGateKind::warning;
     }
     return CreditGateKind::claim;
@@ -315,40 +298,6 @@ bool find_rank_claim_interaction(const build_data::vendors::Definition& vendor,
         }
     }
     return found;
-}
-
-/**
- * Scans third-array interaction gates for a unique credit claim row when no link is reconstructed.
- * @param vendor Installed vendor definition.
- * @param creditRow Receives the saved character credit row on unique resolution.
- * @return True when exactly one claim gate is found.
- */
-bool find_dynamic_rank_credit_row(const build_data::vendors::Definition& vendor,
-                                  std::uint16_t& creditRow) noexcept {
-    creditRow = 0;
-    std::uint16_t dynamicRow = 0;
-    std::size_t claimCount = 0;
-    for (std::size_t index = 0; index < vendor.thirdCount; ++index) {
-        build_data::vendors::InteractionGate candidate{};
-        if (!build_data::vendors::find_interaction_gate(
-                vendor.definitionHash, static_cast<std::uint16_t>(index), candidate)) {
-            continue;
-        }
-        std::uint16_t candidateRow = 0;
-        if (credit_gate(candidate, candidateRow) == CreditGateKind::claim) {
-            if (dynamicRow != 0 && dynamicRow != candidateRow) {
-                creditRow = 0;
-                return false;
-            }
-            dynamicRow = candidateRow;
-            ++claimCount;
-        }
-    }
-    if (claimCount > 0 && dynamicRow != 0) {
-        creditRow = dynamicRow;
-        return true;
-    }
-    return false;
 }
 
 /**
@@ -511,27 +460,11 @@ VendorReputationDisposition resolve_reputation_turn_in(std::uint16_t vendorIndex
     award.costQuantity = sale.costQuantity;
     award.experience = static_cast<std::int32_t>(experience);
     award.progressionIndex = progressionIndex;
-    const build_data::vendors::ReconstructedRankClaimLink* link =
-        vendors::find_reconstructed_rank_claim_link(entry.definitionHash);
+    const auto* link = vendors::find_reconstructed_rank_claim_link(entry.definitionHash);
     if (link != nullptr) {
         vendors::InteractionGate interaction{};
         if (!reconstructed_credit_gate(*link, interaction, award.rankCreditRow)) {
             return VendorReputationDisposition::refused;
-        }
-    } else {
-        std::uint16_t dynamicCreditRow = 0;
-        if (find_dynamic_rank_credit_row(vendor, dynamicCreditRow)) {
-            award.rankCreditRow = dynamicCreditRow;
-        } else {
-            for (std::size_t index = 0; index < vendor.thirdCount; ++index) {
-                build_data::vendors::InteractionGate candidate{};
-                std::uint16_t candidateRow = 0;
-                if (build_data::vendors::find_interaction_gate(
-                        vendor.definitionHash, static_cast<std::uint16_t>(index), candidate)
-                    && credit_gate(candidate, candidateRow) == CreditGateKind::claim) {
-                    return VendorReputationDisposition::refused;
-                }
-            }
         }
     }
     award.repeatLastStep = progression.repeatLastStep;
@@ -751,67 +684,6 @@ bool commit_vendor_reputation(PendingVendorReputation& mutation) noexcept {
 }
 
 /**
- * Scans installed vendor sales for a unique zero-cost reward package matching the interaction.
- * Evaluates gate conditions across multiple candidates to resolve multi-sale vendors.
- * @param vendorIndex Installed vendor selector.
- * @param vendor Installed vendor definition.
- * @param interaction Installed interaction gate defining category and index.
- * @param replyIndex Optional reply index within the interaction.
- * @param saleIndex Receives the matching sale index on unique resolution.
- * @return True when exactly one matching reward sale is found.
- */
-bool find_unique_rank_reward_sale(std::uint16_t vendorIndex,
-                                  const build_data::vendors::Definition& vendor,
-                                  const build_data::vendors::InteractionGate& interaction,
-                                  std::optional<std::uint16_t> replyIndex,
-                                  std::uint16_t& saleIndex) noexcept {
-    saleIndex = 0;
-    struct CandidateSale {
-        std::uint16_t saleIndex{};
-        RewardSaleBinding binding{};
-    };
-    std::vector<CandidateSale> candidates;
-    for (std::size_t saleIdx = 0; saleIdx < vendor.saleCount; ++saleIdx) {
-        build_data::vendors::SaleRow sale{};
-        if (!build_data::vendors::sale_row(vendor, static_cast<std::uint16_t>(saleIdx), sale)) {
-            continue;
-        }
-        if (sale.categoryIndex != interaction.categoryIndex) {
-            continue;
-        }
-        if (sale.costCount != 0 || sale.priceState != build_data::vendors::PriceState::plain) {
-            continue;
-        }
-        RewardSaleBinding binding{};
-        if (resolve_reward_sale(vendorIndex, static_cast<std::uint16_t>(saleIdx), binding)
-                == VendorReputationDisposition::prepared
-            && binding.interaction.index == interaction.index
-            && binding.categoryIndex == interaction.categoryIndex) {
-            candidates.push_back(CandidateSale{static_cast<std::uint16_t>(saleIdx), binding});
-        }
-    }
-    if (candidates.size() == 1) {
-        saleIndex = candidates.front().saleIndex;
-        return true;
-    }
-    if (candidates.size() > 1) {
-        std::optional<std::uint16_t> activeSale{};
-        std::size_t activeCount = 0;
-        for (const auto& candidate : candidates) {
-            if (reward_gates_pass(candidate.binding, replyIndex)) {
-                activeSale = candidate.saleIndex;
-                ++activeCount;
-            }
-        }
-        if (activeCount == 1 && activeSale) {
-            saleIndex = *activeSale;
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
  * Resolves a supported rowless reply through the same settlement as its package sale.
  * @param vendorIndex Installed vendor selector.
  * @param interactionIndex Rowless interaction selector.
@@ -825,65 +697,28 @@ prepare_vendor_rank_reward_interaction(std::uint16_t vendorIndex,
                                        std::uint16_t replyIndex,
                                        PendingRecordRewardGrant& mutation) noexcept {
     mutation = {};
-    if (is_vendor_interaction_answered(vendorIndex, interactionIndex)) {
-        return VendorReputationDisposition::refused;
-    }
     build_data::vendors::IndexEntry entry{};
     if (!build_data::vendors::find_index(vendorIndex, entry)) {
         return VendorReputationDisposition::notApplicable;
     }
-    build_data::vendors::InteractionGate interaction{};
-    const bool hasInteraction = build_data::vendors::find_interaction_gate(
-        entry.definitionHash, interactionIndex, interaction);
-
-    std::uint16_t interactionCreditRow = 0;
-    const CreditGateKind gateKind =
-        hasInteraction ? credit_gate(interaction, interactionCreditRow) : CreditGateKind::unrelated;
-
-    if (gateKind == CreditGateKind::warning || gateKind == CreditGateKind::malformed) {
-        return VendorReputationDisposition::refused;
-    }
-
-    // Attempt dynamic reply matching by scanning the vendor's installed sales for a unique
-    // matching reward package within the interaction's category.
-    std::optional<std::uint16_t> targetSaleIndex{};
-    std::int32_t targetCategoryIndex = build_data::vendors::kAbsentCategoryIndex;
-    std::uint16_t targetInteractionIndex = interactionIndex;
-
-    build_data::vendors::Definition vendor{};
-    if (hasInteraction && gateKind == CreditGateKind::claim
-        && build_data::vendors::find(entry.definitionHash, vendor)) {
-        std::uint16_t matchedSaleIndex = 0;
-        if (find_unique_rank_reward_sale(
-                vendorIndex, vendor, interaction, replyIndex, matchedSaleIndex)) {
-            targetSaleIndex = matchedSaleIndex;
-            targetCategoryIndex = interaction.categoryIndex;
-            targetInteractionIndex = interaction.index;
+    const auto* link =
+        build_data::vendors::find_reconstructed_rank_claim_link(entry.definitionHash);
+    if (link == nullptr || link->interactionIndex != interactionIndex) {
+        build_data::vendors::InteractionGate interaction{};
+        std::uint16_t row = 0;
+        if (build_data::vendors::find_interaction_gate(
+                entry.definitionHash, interactionIndex, interaction)
+            && credit_gate(interaction, row) != CreditGateKind::unrelated) {
+            return VendorReputationDisposition::refused;
         }
+        return VendorReputationDisposition::notApplicable;
     }
-
-    // Fall back to reconstructed rank claim links if dynamic matching was unmapped or ambiguous.
-    if (!targetSaleIndex) {
-        const build_data::vendors::ReconstructedRankClaimLink* link =
-            build_data::vendors::find_reconstructed_rank_claim_link(entry.definitionHash);
-        if (link != nullptr && link->interactionIndex == interactionIndex) {
-            targetSaleIndex = link->saleIndex;
-            targetCategoryIndex = link->categoryIndex;
-            targetInteractionIndex = link->interactionIndex;
-        } else {
-            if (gateKind != CreditGateKind::unrelated) {
-                return VendorReputationDisposition::refused;
-            }
-            return VendorReputationDisposition::notApplicable;
-        }
-    }
-
     const char* reason = nullptr;
-    const VendorReputationDisposition disposition =
-        prepare_rank_reward(vendorIndex, *targetSaleIndex, replyIndex, mutation, reason);
+    const auto disposition =
+        prepare_rank_reward(vendorIndex, link->saleIndex, replyIndex, mutation, reason);
     if (disposition != VendorReputationDisposition::prepared
-        || mutation.vendorReward.interactionIndex != targetInteractionIndex
-        || mutation.vendorReward.categoryIndex != targetCategoryIndex) {
+        || mutation.vendorReward.interactionIndex != link->interactionIndex
+        || mutation.vendorReward.categoryIndex != link->categoryIndex) {
         mutation = {};
         return VendorReputationDisposition::refused;
     }
@@ -962,72 +797,6 @@ bool vendor_rank_reward_current(const VendorRankRewardClaim& claim) noexcept {
         return false;
     }
     return true;
-}
-
-bool reserve_answered_vendor_interaction(std::uint16_t vendorIndex,
-                                         std::uint16_t interactionIndex) noexcept {
-    const std::uint32_t packed = pack_answered_interaction(vendorIndex, interactionIndex);
-    try {
-        std::unique_lock lock(g_answeredInteractionsLock);
-        for (const auto existing : g_answeredInteractions) {
-            if (existing == packed) {
-                return true;
-            }
-        }
-        if (g_answeredInteractions.size() >= g_answeredInteractions.capacity()) {
-            const std::size_t nextCapacity =
-                g_answeredInteractions.capacity() == 0 ? 16 : g_answeredInteractions.capacity() * 2;
-            g_answeredInteractions.reserve(nextCapacity);
-        }
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool mark_vendor_interaction_answered(std::uint16_t vendorIndex,
-                                      std::uint16_t interactionIndex) noexcept {
-    const std::uint32_t packed = pack_answered_interaction(vendorIndex, interactionIndex);
-    try {
-        std::unique_lock lock(g_answeredInteractionsLock);
-        for (const auto existing : g_answeredInteractions) {
-            if (existing == packed) {
-                return true;
-            }
-        }
-        if (g_answeredInteractions.size() >= g_answeredInteractions.capacity()) {
-            const std::size_t nextCapacity =
-                g_answeredInteractions.capacity() == 0 ? 16 : g_answeredInteractions.capacity() * 2;
-            g_answeredInteractions.reserve(nextCapacity);
-        }
-        g_answeredInteractions.push_back(packed);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool is_vendor_interaction_answered(std::uint16_t vendorIndex,
-                                    std::uint16_t interactionIndex) noexcept {
-    const std::uint32_t packed = pack_answered_interaction(vendorIndex, interactionIndex);
-    std::shared_lock lock(g_answeredInteractionsLock);
-    for (const auto existing : g_answeredInteractions) {
-        if (existing == packed) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void reset_answered_vendor_interactions(std::uint64_t sessionId) noexcept {
-    std::unique_lock lock(g_answeredInteractionsLock);
-    g_currentSessionId = sessionId;
-    g_answeredInteractions.clear();
-}
-
-std::uint64_t current_answered_vendor_session() noexcept {
-    std::shared_lock lock(g_answeredInteractionsLock);
-    return g_currentSessionId;
 }
 
 } // namespace sunrise::state

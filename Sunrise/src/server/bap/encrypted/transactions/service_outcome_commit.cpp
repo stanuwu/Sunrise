@@ -9,7 +9,6 @@
 #include "../../../../state/activity/runtime.h"
 #include "../../../../state/matchmaking/matchmaking_state.h"
 #include "../../../../state/runtime/runtime.h"
-#include "../../../../state/runtime/state_vendor_reputation_runtime.h"
 #include "../bap_connection_publication.h"
 #include "../internal.h"
 
@@ -318,9 +317,6 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     if (auto* transaction = transaction_if<ItemAcquisitionTransaction>(outcome)) {
         const bool committed = transaction->pending != nullptr
                                && state::commit_item_acquisition(*transaction->pending);
-        if (committed && transaction->answeredInteraction) {
-            outcome.answeredInteraction = transaction->answeredInteraction;
-        }
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
                          committed ? "ev=acquire stage=transaction_commit result=ok"
@@ -356,9 +352,6 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     if (auto* transaction = transaction_if<ProfileItemAcquisitionTransaction>(outcome)) {
         const bool committed = transaction->pending != nullptr
                                && state::commit_profile_item_acquisition(*transaction->pending);
-        if (committed && transaction->answeredInteraction) {
-            outcome.answeredInteraction = transaction->answeredInteraction;
-        }
         core::log::write(core::log::Channel::server,
                          committed ? core::log::Level::debug : core::log::Level::warn,
                          committed ? "ev=profile_acquire stage=transaction_commit result=ok"
@@ -390,27 +383,9 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     }
     if (auto* transaction = transaction_if<RecordRewardGrantTransaction>(outcome)) {
         reason = "record_reward";
-        if (transaction->pending == nullptr) {
-            return false;
-        }
-        const auto& vendorReward = transaction->pending->vendorReward;
-        const bool willExhaustCredit = vendorReward.beforeCredits == 1;
-        const bool hasVendorInteraction =
-            vendorReward.beforeCredits > 0 && vendorReward.replyIndex.has_value();
-        if (willExhaustCredit && hasVendorInteraction
-            && !state::reserve_answered_vendor_interaction(vendorReward.vendorIndex,
-                                                           vendorReward.interactionIndex)) {
-            reason = "tracker_capacity";
-            return false;
-        }
-        const bool committed =
-            report_commit(state::commit_record_reward(*transaction->pending),
-                          "ev=record_reward stage=transaction_commit result=fail");
-        if (committed && willExhaustCredit && hasVendorInteraction) {
-            outcome.answeredInteraction = state::AnsweredVendorInteraction{
-                vendorReward.vendorIndex, vendorReward.interactionIndex};
-        }
-        return committed;
+        return transaction->pending != nullptr
+               && report_commit(state::commit_record_reward(*transaction->pending),
+                                "ev=record_reward stage=transaction_commit result=fail");
     }
     return true;
 }

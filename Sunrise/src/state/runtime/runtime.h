@@ -686,9 +686,8 @@ void shutdown() noexcept;
 [[nodiscard]] bool publish_bootstrap_token(std::span<const std::byte> token) noexcept;
 
 /**
- * Records when the account signed in and resets session-scoped answered vendor interactions.
- * Every character record publishes this as its last applied daily and weekly reset, and each
- * successful SignOn begins a new answered-interaction session.
+ * Records when the account signed in.
+ * Every character record publishes this as its last applied daily and weekly reset.
  * @param seconds Unix seconds taken when the SignOn success is answered.
  */
 void publish_sign_in_time(std::uint64_t seconds) noexcept;

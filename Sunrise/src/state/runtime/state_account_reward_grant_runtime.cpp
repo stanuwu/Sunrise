@@ -22,7 +22,6 @@
 #include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
-#include "state_vendor_reputation_runtime.h"
 #include "storage/internal.h"
 
 namespace sunrise::state {
