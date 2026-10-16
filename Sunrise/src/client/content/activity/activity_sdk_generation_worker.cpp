@@ -684,6 +684,9 @@ void service() noexcept {
         work->scenarioDirectory = g_scenarioDirectory;
         work->catalogPath = g_catalogPath;
         work->packPath = g_packPath;
+        // Treat the previously generated estate as the persistent cache for reuse.
+        work->cacheScenarioDirectory = g_scenarioDirectory;
+        work->cacheCatalogPath = g_catalogPath;
         // The live pass compiles the decoder cache against the running client executable.
         core::path::Buffer executable;
         const DWORD copied = GetModuleFileNameW(
