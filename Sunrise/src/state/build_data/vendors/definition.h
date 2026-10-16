@@ -28,6 +28,8 @@ inline constexpr std::size_t kThirdRowStride = 80;
 inline constexpr std::size_t kSaleCostRowStride = 48;
 /** Element class of a sale row's cost array. */
 inline constexpr std::uint32_t kSaleCostRowClass = 0x80807865U;
+/** A vendor without a resolved faction has no progression index to award. */
+inline constexpr std::uint16_t kUnavailableFactionProgressionIndex = 0xFFFFU;
 
 /** Wrapper class of the vendor index blob. */
 inline constexpr std::uint32_t kIndexWrapperClass = 0x8080784AU;
@@ -83,6 +85,12 @@ struct Definition {
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t thirdCount{};
+    /** Raw vendor definition +18; some vendors carry an out-of-range no-faction value. */
+    std::uint16_t factionIndexRaw{};
+    /** Faction definition hash resolved through `factionIndexRaw`, or zero when unresolved. */
+    std::uint32_t factionHash{};
+    /** Native faction row +4; unavailable when the vendor has no faction row. */
+    std::uint16_t factionProgressionIndex{kUnavailableFactionProgressionIndex};
 };
 
 /** A cost entry naming no item carries this. */

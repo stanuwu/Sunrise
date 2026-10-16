@@ -1,6 +1,5 @@
 /** Vendor, bounty, exchange and quest actions the web service prepares from one request. */
 
-#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -636,9 +635,7 @@ constexpr std::uint32_t kAbsentNameHash = 0x811C9DC5U;
 }
 
 /**
- * Settles one resolved vendor row, in the order a row's behaviours are tried.
- * A row is a bounty roll, an exchange or a grant. The row does not say which, so each is tried in
- * turn and the first that claims the row owns it. Both vendor opcodes end here.
+ * The first matching behavior owns the sale, including a refused placeholder action.
  * @param message Request being answered.
  * @param opcode Opcode to report under.
  * @param vendorIndex Vendor the request names.
@@ -670,6 +667,55 @@ void settle_vendor_row(const middleware::web_service::Message& message,
         return;
     }
     const std::span<const vendor_domain::SaleCost> price = vendor_domain::cost_entries(row);
+
+    if (vendorIndex >= 0 && rowIndex >= 0
+        && vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
+        && rowIndex <= (std::numeric_limits<std::uint16_t>::max)()) {
+        auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+        if (reward == nullptr) {
+            report_purchase(opcode, "fail", "storage", vendorIndex, rowIndex, itemDefinitionIndex);
+            return;
+        }
+        const char* refusal = "storage";
+        const auto disposition =
+            state::prepare_vendor_rank_reward_sale(static_cast<std::uint16_t>(vendorIndex),
+                                                   static_cast<std::uint16_t>(rowIndex),
+                                                   *reward,
+                                                   &refusal);
+        if (disposition == state::VendorReputationDisposition::prepared) {
+            report_purchase(
+                opcode, "ok", "rank_reward", vendorIndex, rowIndex, itemDefinitionIndex);
+            return;
+        }
+        clear_mutation(outcome);
+        if (disposition == state::VendorReputationDisposition::refused) {
+            report_purchase(opcode, "fail", refusal, vendorIndex, rowIndex, itemDefinitionIndex);
+            return;
+        }
+    }
+    if (vendorIndex >= 0 && rowIndex >= 0
+        && vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
+        && rowIndex <= (std::numeric_limits<std::uint16_t>::max)()) {
+        auto* reputation = emplace_mutation<state::PendingVendorReputation>(outcome);
+        if (reputation == nullptr) {
+            report_purchase(opcode, "fail", "storage", vendorIndex, rowIndex, itemDefinitionIndex);
+            return;
+        }
+        const auto disposition =
+            state::prepare_vendor_reputation(static_cast<std::uint16_t>(vendorIndex),
+                                             static_cast<std::uint16_t>(rowIndex),
+                                             *reputation);
+        if (disposition == state::VendorReputationDisposition::prepared) {
+            report_purchase(opcode, "ok", "reputation", vendorIndex, rowIndex, itemDefinitionIndex);
+            return;
+        }
+        clear_mutation(outcome);
+        if (disposition == state::VendorReputationDisposition::refused) {
+            report_purchase(
+                opcode, "fail", "reputation", vendorIndex, rowIndex, itemDefinitionIndex);
+            return;
+        }
+    }
     std::uint16_t rolledBounty = kUnavailableDefinitionIndex;
     if (roll_vendor_bounty(vendorIndex, categoryIndex, rolledBounty)) {
         report_purchase(opcode,
@@ -727,8 +773,9 @@ void settle_vendor_row(const middleware::web_service::Message& message,
 }
 
 /**
- * Prepares one opcode-904 quest acquire.
- * A quest names a vendor row exactly as a purchase does and takes the same grant path.
+ * Routes opcode 904 to rowless rank claims or sale-backed vendor acquisition.
+ * @param message Decoded Web Service envelope.
+ * @param outcome Receives the prepared mutation; no inventory is committed here.
  */
 void acquire_quest(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     namespace quest = middleware::web_service::messages::opcode904;
@@ -749,6 +796,54 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
         return;
     }
     const std::int32_t row = request.saleIndex;
+    // Logical -1 is the only absent sale marker; all three selectors must be nonnegative.
+    if (row < quest::kAbsentSaleIndex || request.vendorIndex < 0 || request.slotIndex < 0
+        || request.third < 0) {
+        report_purchase(quest::kOpcode,
+                        "fail",
+                        "selectors",
+                        request.vendorIndex,
+                        row,
+                        kUnavailableDefinitionIndex);
+        return;
+    }
+    if (row == quest::kAbsentSaleIndex) {
+        auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+        if (reward == nullptr) {
+            clear_mutation(outcome);
+            report_purchase(quest::kOpcode,
+                            "fail",
+                            "reward_prepare",
+                            request.vendorIndex,
+                            row,
+                            kUnavailableDefinitionIndex);
+            return;
+        }
+        const auto disposition = state::prepare_vendor_rank_reward_interaction(
+            static_cast<std::uint16_t>(request.vendorIndex),
+            static_cast<std::uint16_t>(request.slotIndex),
+            static_cast<std::uint16_t>(request.third),
+            *reward);
+        if (disposition == state::VendorReputationDisposition::prepared) {
+            report_purchase(quest::kOpcode,
+                            "ok",
+                            "rank_reward",
+                            request.vendorIndex,
+                            row,
+                            kUnavailableDefinitionIndex);
+            return;
+        }
+        clear_mutation(outcome);
+        if (disposition == state::VendorReputationDisposition::refused) {
+            report_purchase(quest::kOpcode,
+                            "fail",
+                            "rank_reward",
+                            request.vendorIndex,
+                            row,
+                            kUnavailableDefinitionIndex);
+            return;
+        }
+    }
     const char* reason = "unknown";
     // A row of -1 says the tile is not a sale row at all, so the installed array answers it.
     // Reading the slot as a sale row here would grant whatever sits at that row.
@@ -777,9 +872,7 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
 }
 
 /**
- * Prepares one opcode-901 vendor purchase, for any Tower vendor.
- * The sale row names an item-definition index, so this hands over to the Collections grant, and
- * the row's own cost is charged with it: a purchase that cannot pay grants nothing.
+ * Prepares one installed vendor sale through the shared settlement path.
  */
 void purchase_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     namespace purchase = middleware::web_service::messages::opcode901;

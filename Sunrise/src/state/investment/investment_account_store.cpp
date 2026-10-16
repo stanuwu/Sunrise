@@ -142,8 +142,10 @@ bool write_account(const AccountState& value) noexcept {
     }
     Statement accountRow("INSERT OR REPLACE INTO account VALUES (1,?,?)");
     if (!accountRow.write(value.primarySoid, value.profileSetupCompleted)
-        || !write_characters(value) || !write_inventory(value) || !write_settings(value.settings)
-        || !transaction.commit()) {
+        || !write_characters(value)
+        || !execute("DELETE FROM character_objective_values "
+                    "WHERE character_soid NOT IN (SELECT soid FROM characters)")
+        || !write_inventory(value) || !write_settings(value.settings) || !transaction.commit()) {
         return false;
     }
     for (std::size_t index = 0; index < value.characters.size(); ++index) {

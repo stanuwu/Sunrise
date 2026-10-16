@@ -236,15 +236,6 @@ prepare_profile_item_acquisition(Scratch& scratch,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
     Prepared& prepared) noexcept;
 
-/** Builds one package increment containing its new instances, character, and account objects. */
-[[nodiscard]] bool prepare_season_pass_package(
-    Scratch& scratch,
-    const queuez::SessionState& before,
-    const state::PendingDirectItemBundle& mutation,
-    std::uint16_t rewardIndex,
-    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
-    Prepared& prepared) noexcept;
-
 /** Builds one atomic record-reward batch in resident, character, account order. */
 [[nodiscard]] bool prepare_record_reward_grant(
     Scratch& scratch,

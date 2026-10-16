@@ -47,3 +47,5 @@
 /** Account preferences have their own schema and seed data in the save. */
 #define IDR_ACCOUNT_SETTINGS_SCHEMA 109
 #define IDR_ACCOUNT_SETTINGS_DEFAULTS 110
+/** Build-scoped vendor turn-in definitions are static content, not player-save rows. */
+#define IDR_VENDOR_REPUTATION_CONTENT 111

@@ -1,6 +1,6 @@
 /**
- * Opcode 904 acquires a quest or other pursuit from a vendor.
- * Three 16-bit fields biased by 0x8000 (vendor, clicked slot, one always zero), then a 32-bit
+ * Opcode 904 carries vendor acquisitions and interaction replies, including rank claims.
+ * Three 16-bit selectors biased by 0x8000, then a 32-bit
  * field biased by 0x80000000 naming the sale row, then one trailing byte that is skipped.
  */
 
@@ -23,7 +23,7 @@ constexpr std::size_t kTrailingLimit = 8;
 
 } // namespace
 
-/** Decodes one quest-acquire request body. */
+/** Decodes one vendor acquisition or interaction request body. */
 bool parse_request(const Message& message, Request& output) noexcept {
     if (message.opcode != kOpcode) {
         return false;

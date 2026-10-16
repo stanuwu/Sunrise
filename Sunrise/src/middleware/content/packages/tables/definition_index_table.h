@@ -30,6 +30,8 @@ inline constexpr std::uint16_t kAbsentPackageId = 0xFFFFU;
 
 /** Element class of the item index table inside the investment container. */
 inline constexpr std::uint32_t kItemIndexTableClass = 0x80807BE8U;
+/** Serialized width of one item-index row; byte zero carries the definition hash. */
+inline constexpr std::size_t kItemIndexRowStride = 24;
 /** Serialized item definition class, distinct from the item index table class. */
 inline constexpr std::uint32_t kItemDefinitionClass = 0x80807BEAU;
 /** Investment root slot of the records and lore table. */
@@ -103,6 +105,8 @@ inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
 inline constexpr std::uint32_t kUnlockReadFlagOpcode = 1;
 /** The opcode that pushes a literal. */
 inline constexpr std::uint32_t kUnlockLiteralOpcode = 11;
+/** The opcode that expands a shared expression row. Its operand is the row index. */
+inline constexpr std::uint32_t kUnlockExpressionOpcode = 12;
 /** The opcode that tests greater than or equal. */
 inline constexpr std::uint32_t kUnlockGreaterEqualOpcode = 14;
 /** High half every installed array marker and element class carries. */
@@ -123,6 +127,11 @@ inline constexpr std::size_t kNodeExpressionFieldAlternate = 48;
 /** Records a node owns, four bytes each as a row then a gate. */
 inline constexpr std::size_t kNodeChildRecordField = 136;
 inline constexpr std::size_t kNodeChildRecordStride = 4;
+/**
+ * Array descriptor of the profile flag mapping table, between the account (+8) and character (+40)
+ * maps. Profile flags are account-wide but saved in their own bank, not the account flag bank.
+ */
+inline constexpr std::size_t kProfileFlagMapDescriptor = 24;
 /** Array descriptor of the character object's flag mapping table, sized to that bank. */
 inline constexpr std::size_t kCharacterFlagMapDescriptor = 40;
 /** Array descriptor of the character object's value mapping table, sized to that bank. */
@@ -202,6 +211,8 @@ inline constexpr std::uint32_t kProgressionTableClass = 0x80807CDDU;
 inline constexpr std::size_t kProgressionRowStride = 88;
 /** A progression definition names the object array holding its record here. */
 inline constexpr std::size_t kProgressionScopeOffset = 4;
+/** A progression definition repeats its final step when this byte is one. */
+inline constexpr std::size_t kProgressionRepeatLastStepOffset = 5;
 /** Rank steps a progression declares: the experience each rank costs, in rank order. */
 inline constexpr std::size_t kProgressionStepField = 24;
 inline constexpr std::uint32_t kProgressionStepRowClass = 0x80807CEDU;
@@ -216,9 +227,14 @@ inline constexpr std::size_t kProgressionRewardItemIndexOffset = 4;
 inline constexpr std::size_t kProgressionRewardQuantityOffset = 8;
 /** Unlock flag slot a reward's claim sets. The slots run dense in reward order. */
 inline constexpr std::size_t kProgressionRewardClaimSlotOffset = 20;
-/** Items a wrapper item opens into, two bytes each as an item-definition index. */
+/** Eligibility expressions and socket overrides carried by one progression reward. */
+inline constexpr std::size_t kProgressionRewardConditionsOffset = 24;
+inline constexpr std::size_t kProgressionRewardSocketsOffset = 40;
+/** Item-definition field containing the wrapper's gear-set array. */
 inline constexpr std::size_t kGearsetItemField = 392;
+/** Element class of one gear-set item-index row. */
 inline constexpr std::uint32_t kGearsetItemRowClass = 0x808087DBU;
+/** Serialized width of one gear-set item index. */
 inline constexpr std::size_t kGearsetItemStride = 2;
 
 /** Expression that makes one collectible acquired, which a purchase or a grant sets. */
@@ -276,6 +292,13 @@ using RowVisitor = bool (*)(void* context, std::uint32_t index, const IndexRow& 
 [[nodiscard]] bool find_optional_array_at(std::span<const std::byte> blob,
                                           std::size_t descriptorOffset,
                                           Array& output) noexcept;
+
+/** Reads an optional typed array and checks every fixed-stride row lies in its blob. */
+[[nodiscard]] bool read_array(std::span<const std::byte> blob,
+                              std::size_t at,
+                              std::uint32_t elementClass,
+                              std::size_t stride,
+                              Array& rows) noexcept;
 
 /**
  * Finds the first array whose header names one element class.

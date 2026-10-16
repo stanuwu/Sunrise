@@ -7,6 +7,10 @@
 #include "../../../../middleware/queuez/subscription.h"
 #include "definition.h"
 
+namespace sunrise::state {
+struct PendingRecordRewardGrant;
+}
+
 namespace sunrise::server::bap::encrypted::queuez {
 
 /** @return True when one peer queuez state is canonical for the implemented versions. */
@@ -158,14 +162,6 @@ namespace sunrise::server::bap::encrypted::queuez {
                                           bool updatesAccount,
                                           ItemAcquisition& acquisition) noexcept;
 
-/** Validates one same-version bundle append and returns the revision its response may promise. */
-[[nodiscard]] bool stage_direct_item_bundle(const SessionState& before,
-                                            std::uint64_t accountSoid,
-                                            std::uint64_t characterSoid,
-                                            std::uint64_t firstInstanceSoid,
-                                            std::size_t itemCount,
-                                            std::int32_t& family4Version) noexcept;
-
 /**
  * Stages one Family-4 version increment for a full resident account-object upsert.
  * A profile row with a nonzero action-source SOID must already be resident when its stack grows,
@@ -190,6 +186,11 @@ namespace sunrise::server::bap::encrypted::queuez {
                                              std::uint64_t accountSoid,
                                              std::uint64_t characterSoid,
                                              std::span<const std::uint64_t> appendedResidents,
+                                             RecordRewardGrant& grant) noexcept;
+
+/** Stages a prepared record-reward grant, appending the residents its new instances need. */
+[[nodiscard]] bool stage_record_reward_grant(const SessionState& before,
+                                             const state::PendingRecordRewardGrant& pending,
                                              RecordRewardGrant& grant) noexcept;
 
 /**

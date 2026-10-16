@@ -21,6 +21,7 @@
 #include "../../nodes/node_catalog.h"
 #include "../../progressions/progression_catalog.h"
 #include "../../records/record_catalog.h"
+#include "../../rewards/reward_catalog.h"
 #include "../../runtime.h"
 #include "../../scenarios/scenario_catalog.h"
 #include "../../season_pass/season_pass_catalog.h"
@@ -92,6 +93,12 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && season_pass::snapshot(scratch.seasonPassRewards, counts.seasonPassRewards)
            && season_pass::snapshot_packages(scratch.seasonPassPackages, counts.seasonPassPackages)
            && bounties::snapshot(scratch.bounties, counts.bounties)
+           && rewards::snapshot(scratch.rewardPools, counts.rewardPools)
+           && rewards::snapshot(scratch.rewardEntries, counts.rewardEntries)
+           && rewards::snapshot(scratch.rewardItems, counts.rewardItems)
+           && rewards::snapshot(scratch.rewardInstructions, counts.rewardInstructions)
+           && rewards::snapshot(scratch.rewardModifiers, counts.rewardModifiers)
+           && rewards::snapshot(scratch.rewardSockets, counts.rewardSockets)
            && records::snapshot(scratch.records, counts.records)
            && records::snapshot_objectives(scratch.recordObjectives, counts.recordObjectives)
            && records::snapshot_intervals(scratch.recordIntervals, counts.recordIntervals)
@@ -125,9 +132,10 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && season_pass_ready() && repeatable_bounties_ready()
-           && record_definitions_ready() && node_definitions_ready() && sobject_definitions_ready()
-           && scenario_layouts_ready() && spawn_sets_ready() && hash_names_ready()
-           && vendor_catalog_ready() && gameplay::entity_position_profiles::available()
+           && reward_definitions_ready() && record_definitions_ready() && node_definitions_ready()
+           && sobject_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
+           && hash_names_ready() && vendor_catalog_ready()
+           && gameplay::entity_position_profiles::available()
            && gameplay::entity_object_types::available() && constants::find(published);
 }
 
@@ -270,6 +278,14 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         seasonPassRewards,
         seasonPassPackages,
         bountyRows,
+        ensure_scratch<rewards::Pool, rewards::kPoolCapacity>(state.rewardPoolScratch),
+        ensure_scratch<rewards::Entry, rewards::kEntryCapacity>(state.rewardEntryScratch),
+        ensure_scratch<rewards::Item, rewards::kItemCapacity>(state.rewardItemScratch),
+        ensure_scratch<rewards::Instruction, rewards::kInstructionCapacity>(
+            state.rewardInstructionScratch),
+        ensure_scratch<rewards::Modifier, rewards::kModifierCapacity>(state.rewardModifierScratch),
+        ensure_scratch<rewards::SocketOverride, rewards::kSocketOverrideCapacity>(
+            state.rewardSocketScratch),
     };
 }
 
@@ -301,6 +317,12 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.seasonPassRewardScratch);
     release_bank(state.seasonPassPackageScratch);
     release_bank(state.bountyScratch);
+    release_bank(state.rewardPoolScratch);
+    release_bank(state.rewardEntryScratch);
+    release_bank(state.rewardItemScratch);
+    release_bank(state.rewardInstructionScratch);
+    release_bank(state.rewardModifierScratch);
+    release_bank(state.rewardSocketScratch);
     release_bank(state.recordScratch);
     release_bank(state.recordObjectiveScratch);
     release_bank(state.recordIntervalScratch);
@@ -405,6 +427,15 @@ cache::records::Domains occupied_domains(Context& state,
         std::span<const season_pass::Package>{state.seasonPassPackageScratch.data(),
                                               counts.seasonPassPackages},
         std::span<const bounties::Definition>{state.bountyScratch.data(), counts.bounties},
+        std::span<const rewards::Pool>{state.rewardPoolScratch.data(), counts.rewardPools},
+        std::span<const rewards::Entry>{state.rewardEntryScratch.data(), counts.rewardEntries},
+        std::span<const rewards::Item>{state.rewardItemScratch.data(), counts.rewardItems},
+        std::span<const rewards::Instruction>{state.rewardInstructionScratch.data(),
+                                              counts.rewardInstructions},
+        std::span<const rewards::Modifier>{state.rewardModifierScratch.data(),
+                                           counts.rewardModifiers},
+        std::span<const rewards::SocketOverride>{state.rewardSocketScratch.data(),
+                                                 counts.rewardSockets},
     };
 }
 

@@ -21,6 +21,7 @@
 #include "nodes/node_catalog.h"
 #include "progressions/progression_catalog.h"
 #include "records/record_catalog.h"
+#include "rewards/reward_catalog.h"
 #include "runtime.h"
 #include "runtime/build_data_catalog_runtime.h"
 #include "runtime/domain_markers.h"
@@ -30,6 +31,7 @@
 #include "sobjects/sobject_catalog.h"
 #include "socket_entry_lists/socket_entry_list_catalog.h"
 #include "spawn_sets/spawn_set_catalog.h"
+#include "vendors/reputation_sale_catalog.h"
 #include "vendors/vendor_catalog.h"
 
 namespace sunrise::state::build_data {
@@ -78,6 +80,11 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         return false;
     }
     persistenceState.enabled = true;
+    if (!vendors::load_reputation_sales(module)) {
+        runtime::persistence::clear_locked(persistenceState);
+        ReleaseSRWLockExclusive(&persistenceState.lock);
+        return false;
+    }
 
     cache::records::DomainCounts counts{};
     const cache::LoadStatus status =
@@ -119,6 +126,12 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     };
     if (!constants::replace(cachedConstants) || !content::replace(domains.named) || !content::seal()
         || !items::replace(domains.items) || !collectibles::replace(domains.collectibles)
+        || !rewards::replace({domains.rewardPools,
+                              domains.rewardEntries,
+                              domains.rewardItems,
+                              domains.rewardInstructions,
+                              domains.rewardModifiers,
+                              domains.rewardSockets})
         || !material_requirements::replace(domains.materialRequirementSets)
         || !inventory::buckets::replace(domains.inventoryBuckets)
         || !socket_entry_lists::replace(domains.socketEntryLists)

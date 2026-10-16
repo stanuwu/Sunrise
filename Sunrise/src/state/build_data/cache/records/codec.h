@@ -90,13 +90,39 @@ namespace sunrise::state::build_data::cache::records {
 [[nodiscard]] bool encode(const progressions::Step& value, ProgressionStepRecord& record) noexcept;
 [[nodiscard]] bool decode(const ProgressionStepRecord& record, progressions::Step& value) noexcept;
 
+/**
+ * Encodes one season pass reward into its canonical disk form.
+ * @param value Runtime reward row.
+ * @param record Receives the disk row; may be partial on failure.
+ * @return False when counts or nested reward data are invalid.
+ */
 [[nodiscard]] bool encode(const season_pass::Reward& value,
                           SeasonPassRewardRecord& record) noexcept;
+
+/**
+ * Decodes one canonical season pass reward.
+ * @param record Disk row to validate and decode.
+ * @param value Receives the runtime row; may be partial on failure.
+ * @return False when padding, counts, or nested reward data are invalid.
+ */
 [[nodiscard]] bool decode(const SeasonPassRewardRecord& record,
                           season_pass::Reward& value) noexcept;
 
+/**
+ * Encodes one season pass wrapper into its canonical disk form.
+ * @param value Runtime wrapper package.
+ * @param record Receives the disk row; unchanged when the item count is invalid.
+ * @return False when the item count exceeds fixed storage.
+ */
 [[nodiscard]] bool encode(const season_pass::Package& value,
                           SeasonPassPackageRecord& record) noexcept;
+
+/**
+ * Decodes one canonical season pass wrapper.
+ * @param record Disk row to validate and decode.
+ * @param value Receives the runtime package, or is cleared on failure.
+ * @return False when padding or the item count is invalid.
+ */
 [[nodiscard]] bool decode(const SeasonPassPackageRecord& record,
                           season_pass::Package& value) noexcept;
 
@@ -164,5 +190,22 @@ namespace sunrise::state::build_data::cache::records {
                           VendorInstalledRowRecord& record) noexcept;
 [[nodiscard]] bool decode(const VendorInstalledRowRecord& record,
                           vendors::InstalledRow& value) noexcept;
+
+[[nodiscard]] bool encode(const rewards::Pool& value, RewardPoolRecord& record) noexcept;
+[[nodiscard]] bool decode(const RewardPoolRecord& record, rewards::Pool& value) noexcept;
+[[nodiscard]] bool encode(const rewards::Entry& value, RewardEntryRecord& record) noexcept;
+[[nodiscard]] bool decode(const RewardEntryRecord& record, rewards::Entry& value) noexcept;
+[[nodiscard]] bool encode(const rewards::Item& value, RewardItemRecord& record) noexcept;
+[[nodiscard]] bool decode(const RewardItemRecord& record, rewards::Item& value) noexcept;
+[[nodiscard]] bool encode(const rewards::Instruction& value,
+                          RewardInstructionRecord& record) noexcept;
+[[nodiscard]] bool decode(const RewardInstructionRecord& record,
+                          rewards::Instruction& value) noexcept;
+[[nodiscard]] bool encode(const rewards::Modifier& value, RewardModifierRecord& record) noexcept;
+[[nodiscard]] bool decode(const RewardModifierRecord& record, rewards::Modifier& value) noexcept;
+[[nodiscard]] bool encode(const rewards::SocketOverride& value,
+                          RewardSocketOverrideRecord& record) noexcept;
+[[nodiscard]] bool decode(const RewardSocketOverrideRecord& record,
+                          rewards::SocketOverride& value) noexcept;
 
 } // namespace sunrise::state::build_data::cache::records
