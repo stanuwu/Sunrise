@@ -51,6 +51,7 @@ struct ResolverContext final {
 class MirrorBuilder final {
 public:
     state::gameplay::entity_identity::ActorSourceReference actorSource{};
+    /** Pools by their compiled plan position; a pool the update omits stays unknown. */
     state::gameplay::entity_identity::DamagePools damage{};
     /** Opens an empty fixed-capacity bit writer. */
     MirrorBuilder() noexcept : writer_(bytes_) {}
@@ -82,6 +83,15 @@ public:
         candidate.byteCount = static_cast<std::uint16_t>(sizeof(header) + byteCount);
         candidate.actorSource = actorSource;
         candidate.damage = damage;
+        // The health and shield levels read the same plan positions, so an update that omits
+        // the health pool never reports its shield level as health.
+        namespace identities = state::gameplay::entity_identity;
+        candidate.damageKnown = damage.present[identities::kHealthPoolIndex];
+        candidate.damageHealth =
+            candidate.damageKnown ? damage.levels[identities::kHealthPoolIndex] : std::uint16_t{};
+        candidate.damageShield = damage.present[identities::kShieldPoolIndex]
+                                     ? damage.levels[identities::kShieldPoolIndex]
+                                     : std::uint16_t{};
         output = candidate;
         return true;
     }

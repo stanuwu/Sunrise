@@ -71,8 +71,6 @@ inline constexpr std::size_t kHealthPoolIndex = 0;
 inline constexpr std::size_t kShieldPoolIndex = 1;
 /** The compiled damage component stores each pool as a ten-bit level. */
 inline constexpr unsigned kDamagePoolLevelBits = 10;
-/** Largest raw level a ten-bit damage pool can carry. */
-inline constexpr std::uint16_t kDamagePoolLevelMaximum = (1U << kDamagePoolLevelBits) - 1U;
 
 /** Raw ten-bit pools from a completely decoded damage component. Missing pools stay unknown. */
 struct DamagePools final {

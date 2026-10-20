@@ -210,9 +210,10 @@ observe_entity_damage(void* context,
 [[nodiscard]] float normalised_level(const state::gameplay::entity_identity::DamagePools& pools,
                                      std::size_t pool) noexcept {
     namespace identities = state::gameplay::entity_identity;
-    return pools.present[pool] ? static_cast<float>(pools.levels[pool])
-                                     / static_cast<float>(identities::kDamagePoolLevelMaximum)
-                               : kUnknownDamageLevel;
+    return pools.present[pool]
+               ? static_cast<float>(pools.levels[pool])
+                     / static_cast<float>(middleware::gameplay::external::kDamageLevelFull)
+               : kUnknownDamageLevel;
 }
 
 /** Forgets one link's published pools and its capacity warning; a replacement source starts over.

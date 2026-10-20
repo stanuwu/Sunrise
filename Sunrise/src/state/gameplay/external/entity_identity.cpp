@@ -46,7 +46,7 @@ bool valid_actor_source(const Observation& value) noexcept {
 bool valid_observation(const Observation& value) noexcept {
     for (std::size_t pool = 0; pool < value.damage.levels.size(); ++pool) {
         if (value.damage.present[pool]
-            && (value.damage.levels[pool] > kDamagePoolLevelMaximum || value.type != 0
+            && ((value.damage.levels[pool] >> kDamagePoolLevelBits) != 0 || value.type != 0
                 || value.action == Action::remove)) {
             return false;
         }

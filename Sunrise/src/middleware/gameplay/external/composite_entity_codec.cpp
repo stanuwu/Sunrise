@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -32,14 +31,7 @@ constexpr std::uint8_t kNullableU32AliasType = 21;
 /** In mode one, field type 37 is a plain nested walk of kNestedCustomSchema. */
 constexpr std::uint8_t kNestedCustomType = 37;
 /** The type-37 schema: a 19-bit real and a 5-bit int8, 24 bits in all. */
-constexpr std::uint32_t kNestedCustomSchema = generated::C808092ff::kClass;
-/** The damage component replicates each level pool as its own walk of kDamagePoolSchema. */
-constexpr std::uint32_t kDamageComponent = generated::UnknownDamageComponent::kClass;
-/** One pool level; its single field is the only value it decodes. */
-constexpr std::uint32_t kDamagePoolSchema = generated::C80804c5c::kClass;
-/** Pool 0 is health and pool 1 the shield. */
-constexpr std::uint8_t kHealthPool = 0;
-constexpr std::uint8_t kShieldPool = 1;
+constexpr std::uint32_t kNestedCustomSchema = 0x808092FFU;
 
 /** Resolves one schema only when it supports the selected codec family. */
 [[nodiscard]] bool
@@ -583,8 +575,7 @@ runtime_schema(const CompositeEntityCodecContext& context, std::uint32_t handle)
             const auto pool = resolverContext.damagePool;
             if (value.occurrence != 0
                 || value.width != state::gameplay::entity_identity::kDamagePoolLevelBits
-                || value.unsignedValue > state::gameplay::entity_identity::kDamagePoolLevelMaximum
-                || mirror.damage.present[pool]) {
+                || value.unsignedValue > kDamageLevelFull || mirror.damage.present[pool]) {
                 return false;
             }
             mirror.damage.levels[pool] = static_cast<std::uint16_t>(value.unsignedValue);
