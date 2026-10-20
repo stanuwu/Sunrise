@@ -14,6 +14,7 @@
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/datagen/definitions.h"
 #include "../../../../../middleware/datagen/presence/presence_record_encoder.h"
+#include "../../../../../state/account/account_context.h"
 #include "../../../../../state/account/inventory/inventory_state.h"
 #include "../../../../../state/activity/destination/activity_destination_snapshot.h"
 #include "../../../../../state/activity/fireteam.h"
@@ -209,6 +210,14 @@ bool prepare_social_roster(Scratch& scratch,
     }
     member.groupKey = facts.groupKey;
     member.memberCount = facts.memberCount;
+    // The client reads the score as a signed 32-bit value; the store never publishes it negative.
+    // A remote account's scope cannot read private SQLite, so its score is zero without a store
+    // read that would fail and count as a store failure.
+    const std::uint32_t storedScore =
+        state::local_account_access() ? state::unlocks::records::score() : 0U;
+    member.triumphScore = static_cast<std::int32_t>(
+        (std::min)(storedScore,
+                   static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())));
 
     Prepared staged{};
     std::size_t objectCount = 0;
