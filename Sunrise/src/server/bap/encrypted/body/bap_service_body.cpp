@@ -427,7 +427,7 @@ bool process(const ServiceRoute& route,
                 return refuse_web_action(message, output, written);
             }
         }
-        const auto* reputation =
+        const state::PendingVendorReputation* reputation =
             web_service::mutation_if<state::PendingVendorReputation>(webOutcome);
         if (reputation != nullptr) {
             if (!queuezState.family4Active || queuezState.family4RootSoid != reputation->accountSoid

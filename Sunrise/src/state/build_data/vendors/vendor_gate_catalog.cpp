@@ -20,7 +20,8 @@ bool g_ready{};
         || gate.inputCount > gate.inputs.size() || gate.inputCount > gate.program.count) {
         return false;
     }
-    const auto program = std::span{gate.program.instructions}.first(gate.program.count);
+    const std::span<const unlocks::Instruction> program{gate.program.instructions.data(),
+                                                        gate.program.count};
     return std::all_of(program.begin(), program.end(), unlocks::valid);
 }
 
@@ -51,9 +52,10 @@ template <typename Row>
                             std::uint16_t index,
                             Row& output) noexcept {
     output = {};
-    const auto found = std::find_if(rows.begin(), rows.end(), [&](const Row& row) {
-        return row.vendorHash == vendorHash && row.index == index;
-    });
+    const typename std::span<const Row>::iterator found =
+        std::find_if(rows.begin(), rows.end(), [&](const Row& row) {
+            return row.vendorHash == vendorHash && row.index == index;
+        });
     if (found == rows.end()) {
         return false;
     }
@@ -71,13 +73,13 @@ bool replace_gates(std::span<const InteractionGate> interactions,
     }
     if (std::any_of(interactions.begin(),
                     interactions.end(),
-                    [](const auto& row) {
+                    [](const InteractionGate& row) {
                         return !valid_gate(row.condition)
                                || !std::all_of(row.replyConditions.begin(),
                                                row.replyConditions.end(),
                                                valid_gate);
                     })
-        || std::any_of(sales.begin(), sales.end(), [](const auto& row) {
+        || std::any_of(sales.begin(), sales.end(), [](const SaleGates& row) {
                return !valid_gate(row.admission) || !valid_gate(row.selection);
            })) {
         return false;

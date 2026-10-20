@@ -34,9 +34,9 @@ bool build_progressions(const reader::Source& source,
             stepCount = 0;
             return false;
         }
-        const auto scope =
+        const std::uint8_t scope =
             std::to_integer<std::uint8_t>(table[at + tables::kProgressionScopeOffset]);
-        const auto repeatLastStep =
+        const std::uint8_t repeatLastStep =
             std::to_integer<std::uint8_t>(table[at + tables::kProgressionRepeatLastStepOffset]);
         if (repeatLastStep > 1) {
             count = 0;

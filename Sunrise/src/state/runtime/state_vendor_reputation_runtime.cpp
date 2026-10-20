@@ -30,10 +30,12 @@ struct GateValues {
 const build_data::vendors::GateInput* gate_input(const GateValues& values,
                                                  build_data::vendors::Opcode opcode,
                                                  std::uint16_t slot) noexcept {
-    const auto inputs = std::span{values.gate.inputs}.first(values.gate.inputCount);
-    const auto found = std::find_if(inputs.begin(), inputs.end(), [&](const auto& input) {
-        return input.opcode == opcode && input.slot == slot;
-    });
+    const std::span<const build_data::vendors::GateInput> inputs{values.gate.inputs.data(),
+                                                                 values.gate.inputCount};
+    const std::span<const build_data::vendors::GateInput>::iterator found = std::find_if(
+        inputs.begin(), inputs.end(), [&](const build_data::vendors::GateInput& input) {
+            return input.opcode == opcode && input.slot == slot;
+        });
     return found == inputs.end() ? nullptr : &*found;
 }
 
@@ -45,12 +47,13 @@ const build_data::vendors::GateInput* gate_input(const GateValues& values,
  * @return False when the slot has no supported source.
  */
 bool gate_flag(const void* context, const unlocks::Instruction& instruction, bool& set) noexcept {
-    const auto& values = *static_cast<const GateValues*>(context);
+    const GateValues& values = *static_cast<const GateValues*>(context);
     if (instruction.operand > (std::numeric_limits<std::uint16_t>::max)()) {
         return false;
     }
-    const auto slot = static_cast<std::uint16_t>(instruction.operand);
-    const auto* input = gate_input(values, build_data::vendors::Opcode::flag, slot);
+    const std::uint16_t slot = static_cast<std::uint16_t>(instruction.operand);
+    const build_data::vendors::GateInput* input =
+        gate_input(values, build_data::vendors::Opcode::flag, slot);
     if (input == nullptr) {
         return false;
     }
@@ -101,12 +104,13 @@ bool gate_flag(const void* context, const unlocks::Instruction& instruction, boo
 bool gate_value(const void* context,
                 const unlocks::Instruction& instruction,
                 std::int32_t& value) noexcept {
-    const auto& values = *static_cast<const GateValues*>(context);
+    const GateValues& values = *static_cast<const GateValues*>(context);
     if (instruction.operand > (std::numeric_limits<std::uint16_t>::max)()) {
         return false;
     }
-    const auto slot = static_cast<std::uint16_t>(instruction.operand);
-    const auto* input = gate_input(values, build_data::vendors::Opcode::loadValue, slot);
+    const std::uint16_t slot = static_cast<std::uint16_t>(instruction.operand);
+    const build_data::vendors::GateInput* input =
+        gate_input(values, build_data::vendors::Opcode::loadValue, slot);
     if (input == nullptr) {
         return false;
     }
@@ -152,7 +156,8 @@ bool gate_passes(const build_data::vendors::Gate& gate,
     GateValues values{gate, family, banks};
     const unlocks::Inputs inputs{gate_flag, gate_value, &values};
     bool result = false;
-    const auto program = std::span{gate.program.instructions}.first(gate.program.count);
+    const std::span<const unlocks::Instruction> program{gate.program.instructions.data(),
+                                                        gate.program.count};
     return std::all_of(program.begin(), program.end(), unlocks::valid)
            && unlocks::evaluate(program, inputs, result) && result;
 }
@@ -402,7 +407,7 @@ VendorReputationDisposition resolve_reward_sale(std::uint16_t vendorIndex,
 bool reward_gates_pass(const RewardSaleBinding& binding,
                        std::optional<std::uint16_t> replyIndex) noexcept {
     // The reconstructed rowless links cover only single-reply interactions.
-    const auto& replies = binding.interaction.replyConditions;
+    const std::vector<build_data::vendors::Gate>& replies = binding.interaction.replyConditions;
     if (replyIndex && (replies.size() != 1 || *replyIndex >= replies.size())) {
         return false;
     }
@@ -413,7 +418,7 @@ bool reward_gates_pass(const RewardSaleBinding& binding,
         || !account::valid(account)) {
         return false;
     }
-    const auto selected = runtime::detail::selected_character_index(account);
+    const std::size_t selected = runtime::detail::selected_character_index(account);
     return selected < account.characterCount
            && investment::store::read_unlocks(banks, static_cast<int>(selected))
            && gate_passes(binding.interaction.condition, family, banks)
@@ -470,7 +475,7 @@ VendorReputationDisposition resolve_reputation_turn_in(std::uint16_t vendorIndex
     std::array<std::uint16_t, build_data::progressions::kDefinitionCapacity> slots{};
     std::size_t count = 0;
     build_data::progressions::Definition progression{};
-    const auto progressionIndex = vendor.factionProgressionIndex;
+    const std::uint16_t progressionIndex = vendor.factionProgressionIndex;
     const std::int64_t experience =
         static_cast<std::int64_t>(costs.front().quantity) * authored.experiencePerUnit;
     if (progressionIndex == vendors::kUnavailableFactionProgressionIndex
@@ -489,7 +494,8 @@ VendorReputationDisposition resolve_reputation_turn_in(std::uint16_t vendorIndex
     award.costQuantity = costs.front().quantity;
     award.experience = static_cast<std::int32_t>(experience);
     award.progressionIndex = progressionIndex;
-    const auto* link = vendors::find_reconstructed_rank_claim_link(entry.definitionHash);
+    const vendors::ReconstructedRankClaimLink* link =
+        vendors::find_reconstructed_rank_claim_link(entry.definitionHash);
     if (link != nullptr) {
         vendors::InteractionGate interaction{};
         if (!reconstructed_credit_gate(*link, interaction, award.rankCreditRow)) {
@@ -505,14 +511,14 @@ VendorReputationDisposition resolve_reputation_turn_in(std::uint16_t vendorIndex
             || std::any_of(
                 steps.begin(),
                 steps.begin() + static_cast<std::ptrdiff_t>(count),
-                [](const auto& step) { return step.cost <= 0; })) {
+                [](const build_data::progressions::Step& step) { return step.cost <= 0; })) {
             return VendorReputationDisposition::refused;
         }
         award.rankStepCount = count;
         std::transform(steps.begin(),
                        steps.begin() + static_cast<std::ptrdiff_t>(count),
                        award.rankStepCosts.begin(),
-                       [](const auto& step) { return step.cost; });
+                       [](const build_data::progressions::Step& step) { return step.cost; });
     }
     return VendorReputationDisposition::prepared;
 }
@@ -527,12 +533,13 @@ bool charge_materials(AccountState& account, const VendorReputationAward& award)
     std::uint32_t remaining = award.costQuantity;
     std::size_t write = 0;
     for (std::size_t read = 0; read < account.profileItemCount; ++read) {
-        auto item = account.profileItems[read];
+        account::inventory::ProfileItem item = account.profileItems[read];
         if (item.definitionHash == award.costHash) {
             if (item.instanceSoid != 0 || item.quantity <= 0) {
                 return false;
             }
-            const auto charged = (std::min)(remaining, static_cast<std::uint32_t>(item.quantity));
+            const std::uint32_t charged =
+                (std::min)(remaining, static_cast<std::uint32_t>(item.quantity));
             item.quantity -= static_cast<std::int32_t>(charged);
             remaining -= charged;
         }
@@ -565,7 +572,7 @@ bool rank_at_experience(const VendorReputationAward& award,
     }
     std::int64_t remaining = experience;
     for (std::size_t step = 0; step < award.rankStepCount; ++step) {
-        const auto cost = award.rankStepCosts[step];
+        const std::int32_t cost = award.rankStepCosts[step];
         if (cost <= 0) {
             return false;
         }
@@ -597,14 +604,15 @@ bool grant_rank_rewards(unlocks::Table& banks,
     if (beforeExperience < 0 || award.experience <= 0) {
         return false;
     }
-    const auto afterExperience = static_cast<std::int64_t>(beforeExperience) + award.experience;
+    const std::int64_t afterExperience =
+        static_cast<std::int64_t>(beforeExperience) + award.experience;
     std::int64_t beforeRank = 0, afterRank = 0;
     if (!rank_at_experience(award, beforeExperience, beforeRank)
         || !rank_at_experience(award, afterExperience, afterRank) || afterRank < beforeRank) {
         return false;
     }
-    const auto count = afterRank - beforeRank;
-    auto& credits = banks.characterObjectValues[award.rankCreditRow];
+    const std::int64_t count = afterRank - beforeRank;
+    std::int32_t& credits = banks.characterObjectValues[award.rankCreditRow];
     if (credits < 0 || count > (std::numeric_limits<std::int32_t>::max)() - credits) {
         return false;
     }
@@ -630,7 +638,8 @@ VendorReputationDisposition prepare_rank_reward(std::uint16_t vendorIndex,
     mutation = {};
     const std::lock_guard lock(investment::store::g_mutex);
     RewardSaleBinding binding{};
-    const auto disposition = resolve_reward_sale(vendorIndex, saleIndex, binding);
+    const VendorReputationDisposition disposition =
+        resolve_reward_sale(vendorIndex, saleIndex, binding);
     if (disposition != VendorReputationDisposition::prepared) {
         return disposition;
     }
@@ -683,7 +692,8 @@ VendorReputationDisposition prepare_vendor_reputation(std::uint16_t vendorIndex,
                                                       PendingVendorReputation& mutation) noexcept {
     mutation = {};
     VendorReputationAward award{};
-    const auto disposition = resolve_reputation_turn_in(vendorIndex, saleIndex, award);
+    const VendorReputationDisposition disposition =
+        resolve_reputation_turn_in(vendorIndex, saleIndex, award);
     if (disposition != VendorReputationDisposition::prepared) {
         return disposition;
     }
@@ -694,19 +704,19 @@ VendorReputationDisposition prepare_vendor_reputation(std::uint16_t vendorIndex,
         || !runtime::detail::valid_profile_inventory(account)) {
         return VendorReputationDisposition::refused;
     }
-    const auto selected = runtime::detail::selected_character_index(account);
+    const std::size_t selected = runtime::detail::selected_character_index(account);
     if (selected >= account.characterCount || account.primarySoid == 0
         || !investment::store::read_unlocks(banks, static_cast<int>(selected))) {
         return VendorReputationDisposition::refused;
     }
-    const auto before = banks.characterProgressions[award.progressionIndex];
+    const unlocks::ProgressionLanes before = banks.characterProgressions[award.progressionIndex];
     if (before[kExperienceLane] < 0
         || before[kExperienceLane]
                > (std::numeric_limits<std::int32_t>::max)() - award.experience) {
         return VendorReputationDisposition::refused;
     }
     AccountState after = account;
-    const auto beforeCredits = banks.characterObjectValues[award.rankCreditRow];
+    const std::int32_t beforeCredits = banks.characterObjectValues[award.rankCreditRow];
     if (!charge_materials(after, award)
         || !grant_rank_rewards(banks, award, before[kExperienceLane])) {
         return VendorReputationDisposition::refused;
@@ -753,7 +763,7 @@ bool commit_vendor_reputation(PendingVendorReputation& mutation) noexcept {
         || !investment::store::read_unlocks(banks, static_cast<int>(mutation.characterIndex))) {
         return false;
     }
-    auto& progression = banks.characterProgressions[award.progressionIndex];
+    unlocks::ProgressionLanes& progression = banks.characterProgressions[award.progressionIndex];
     if (progression != mutation.beforeProgression || progression[kExperienceLane] < 0
         || (award.rankStepCount != 0
             && banks.characterObjectValues[award.rankCreditRow] != mutation.beforeRankCredits)
@@ -787,7 +797,7 @@ prepare_vendor_rank_reward_interaction(std::uint16_t vendorIndex,
     if (!build_data::vendors::find_index(vendorIndex, entry)) {
         return VendorReputationDisposition::notApplicable;
     }
-    const auto* link =
+    const build_data::vendors::ReconstructedRankClaimLink* link =
         build_data::vendors::find_reconstructed_rank_claim_link(entry.definitionHash);
     if (link == nullptr || link->interactionIndex != interactionIndex) {
         build_data::vendors::InteractionGate interaction{};
@@ -800,7 +810,7 @@ prepare_vendor_rank_reward_interaction(std::uint16_t vendorIndex,
         return VendorReputationDisposition::notApplicable;
     }
     const char* reason = nullptr;
-    const auto disposition =
+    const VendorReputationDisposition disposition =
         prepare_rank_reward(vendorIndex, link->saleIndex, replyIndex, mutation, reason);
     if (disposition != VendorReputationDisposition::prepared
         || mutation.vendorReward.interactionIndex != link->interactionIndex
@@ -824,7 +834,7 @@ VendorReputationDisposition prepare_vendor_rank_reward_sale(std::uint16_t vendor
                                                             PendingRecordRewardGrant& mutation,
                                                             const char** refusal) noexcept {
     const char* unused = nullptr;
-    auto& reason = refusal != nullptr ? *refusal : unused;
+    const char*& reason = refusal != nullptr ? *refusal : unused;
     return prepare_rank_reward(vendorIndex, saleIndex, std::nullopt, mutation, reason);
 }
 

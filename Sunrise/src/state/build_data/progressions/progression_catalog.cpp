@@ -65,7 +65,7 @@ bool replace(std::span<const Definition> definitions, std::span<const Step> step
 bool find(std::uint16_t definitionIndex, Definition& definition) noexcept {
     definition = {};
     const std::shared_lock guard(g_lock);
-    const auto rows = g_definitions.rows();
+    const std::span<const Definition> rows = g_definitions.rows();
     if (definitionIndex >= rows.size()) {
         return false;
     }

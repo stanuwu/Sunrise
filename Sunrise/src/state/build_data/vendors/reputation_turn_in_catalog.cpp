@@ -19,6 +19,11 @@ core::threading::SrwLock g_lock;
 std::array<ReputationTurnIn, kReputationTurnInCapacity> g_turnIns{};
 std::size_t g_turnInCount{};
 
+/** @return The authored identity fields in catalog sort order. */
+[[nodiscard]] std::array<std::uint32_t, 3> turn_in_key(const ReputationTurnIn& turnIn) noexcept {
+    return {turnIn.factionHash, turnIn.placeholderHash, turnIn.costHash};
+}
+
 /**
  * Copies the DLL's SQL resource into a terminated buffer for SQLite.
  * @param module DLL holding the content resource.
@@ -27,7 +32,7 @@ std::size_t g_turnInCount{};
  */
 bool resource_sql(void* module, std::string& sql) noexcept {
     sql.clear();
-    const auto loaded = static_cast<HMODULE>(module);
+    const HMODULE loaded = static_cast<HMODULE>(module);
     if (loaded == nullptr) {
         return false;
     }
@@ -38,7 +43,7 @@ bool resource_sql(void* module, std::string& sql) noexcept {
     }
     const DWORD size = SizeofResource(loaded, found);
     const HGLOBAL data = LoadResource(loaded, found);
-    const auto* bytes = data != nullptr ? static_cast<const char*>(LockResource(data)) : nullptr;
+    const char* bytes = data != nullptr ? static_cast<const char*>(LockResource(data)) : nullptr;
     if (size == 0 || bytes == nullptr) {
         return false;
     }
@@ -60,7 +65,7 @@ bool column(sqlite3_stmt* statement, int index, Value& output, std::int64_t mini
     if (sqlite3_column_type(statement, index) != SQLITE_INTEGER) {
         return false;
     }
-    const auto value = sqlite3_column_int64(statement, index);
+    const sqlite3_int64 value = sqlite3_column_int64(statement, index);
     if (value < minimum || value > (std::numeric_limits<Value>::max)()) {
         return false;
     }
@@ -88,9 +93,6 @@ bool read_turn_ins(sqlite3* database,
     }
     int status = SQLITE_OK;
     bool valid = true;
-    const auto key = [](const ReputationTurnIn& turnIn) {
-        return std::array{turnIn.factionHash, turnIn.placeholderHash, turnIn.costHash};
-    };
     while ((status = sqlite3_step(statement)) == SQLITE_ROW) {
         if (count == turnIns.size()) {
             valid = false;
@@ -101,7 +103,7 @@ bool read_turn_ins(sqlite3* database,
                 && column(statement, 1, turnIn.placeholderHash, 1)
                 && column(statement, 2, turnIn.costHash, 1)
                 && column(statement, 3, turnIn.experiencePerUnit, 1);
-        if (!valid || (count != 0 && key(turnIns[count - 1]) >= key(turnIn))) {
+        if (!valid || (count != 0 && turn_in_key(turnIns[count - 1]) >= turn_in_key(turnIn))) {
             valid = false;
             break;
         }

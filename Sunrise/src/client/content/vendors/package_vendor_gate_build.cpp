@@ -57,7 +57,7 @@ struct NativeProgram {
         return false;
     }
     for (std::size_t index = 0; index < rows.count; ++index) {
-        const auto at = rows.dataOffset + index * tables::kUnlockInstructionStride;
+        const std::size_t at = rows.dataOffset + index * tables::kUnlockInstructionStride;
         std::uint32_t nativeOpcode = 0;
         std::int32_t operand = 0;
         unlocks::Opcode opcode{};
@@ -96,8 +96,8 @@ read_program(std::span<const std::byte> blob, std::size_t field, NativeProgram& 
     }
     NativeProgram parsed{};
     for (std::size_t index = 0; index < rows.count; ++index) {
-        const auto at = rows.dataOffset + index * tables::kUnlockExpressionFieldSize;
-        const auto before = parsed.count;
+        const std::size_t at = rows.dataOffset + index * tables::kUnlockExpressionFieldSize;
+        const std::size_t before = parsed.count;
         if (!append_program(blob, at, parsed) || parsed.count == before) {
             return false;
         }
@@ -112,40 +112,53 @@ read_program(std::span<const std::byte> blob, std::size_t field, NativeProgram& 
     return true;
 }
 
+/**
+ * Applies one native slot map while rejecting conflicting saved-bank mappings.
+ * @param map Native slot-to-row map.
+ * @param slot Validated native slot.
+ * @param bank Saved bank named by the map.
+ * @param output Binding updated when the slot is mapped.
+ * @return False when another saved bank already claimed the slot.
+ */
+[[nodiscard]] bool select_bank(std::span<const std::uint16_t> map,
+                               std::uint16_t slot,
+                               domain::GateBank bank,
+                               domain::GateInput& output) noexcept {
+    if (map[slot] == kUnmappedRow) {
+        return true;
+    }
+    if (output.bank != domain::GateBank::external) {
+        return false;
+    }
+    output.bank = bank;
+    output.row = map[slot];
+    return true;
+}
+
 /** Binds one input to at most one saved bank; unmapped slots require Family-5 values. */
 [[nodiscard]] bool bind_input(const NativeInstruction& instruction,
                               const GateMaps& maps,
                               domain::GateInput& output) noexcept {
     output = {};
-    const auto slot = instruction.operand;
-    if (slot < 0 || static_cast<std::size_t>(slot) >= maps.accountFlag.size()
-        || static_cast<std::size_t>(slot) >= maps.profileFlag.size()
-        || static_cast<std::size_t>(slot) >= maps.characterFlag.size()
-        || static_cast<std::size_t>(slot) >= maps.accountValue.size()
-        || static_cast<std::size_t>(slot) >= maps.characterValue.size()) {
+    const std::int32_t operand = instruction.operand;
+    if (operand < 0 || static_cast<std::size_t>(operand) >= maps.accountFlag.size()
+        || static_cast<std::size_t>(operand) >= maps.profileFlag.size()
+        || static_cast<std::size_t>(operand) >= maps.characterFlag.size()
+        || static_cast<std::size_t>(operand) >= maps.accountValue.size()
+        || static_cast<std::size_t>(operand) >= maps.characterValue.size()) {
         return false;
     }
+    const std::uint16_t slot = static_cast<std::uint16_t>(operand);
     output.opcode = instruction.opcode;
-    output.slot = static_cast<std::uint16_t>(slot);
+    output.slot = slot;
     output.bank = domain::GateBank::external;
-    const auto select = [&](std::span<const std::uint16_t> map, domain::GateBank bank) {
-        if (map[slot] == kUnmappedRow) {
-            return true;
-        }
-        if (output.bank != domain::GateBank::external) {
-            return false;
-        }
-        output.bank = bank;
-        output.row = map[slot];
-        return true;
-    };
     if (instruction.opcode == domain::Opcode::flag) {
-        return select(maps.accountFlag, domain::GateBank::accountFlag)
-               && select(maps.profileFlag, domain::GateBank::profileFlag)
-               && select(maps.characterFlag, domain::GateBank::characterFlag);
+        return select_bank(maps.accountFlag, slot, domain::GateBank::accountFlag, output)
+               && select_bank(maps.profileFlag, slot, domain::GateBank::profileFlag, output)
+               && select_bank(maps.characterFlag, slot, domain::GateBank::characterFlag, output);
     }
-    return select(maps.accountValue, domain::GateBank::accountValue)
-           && select(maps.characterValue, domain::GateBank::characterValue);
+    return select_bank(maps.accountValue, slot, domain::GateBank::accountValue, output)
+           && select_bank(maps.characterValue, slot, domain::GateBank::characterValue, output);
 }
 
 /** Resolves only the input instructions an expression actually reads. */
@@ -154,10 +167,10 @@ bind_gate(const NativeProgram& program, const GateMaps& maps, domain::Gate& gate
     gate = {};
     gate.program.count = program.count;
     for (std::size_t row = 0; row < program.count; ++row) {
-        const auto& instruction = program.instructions[row];
+        const NativeInstruction& instruction = program.instructions[row];
         const bool readsSlot = instruction.opcode == domain::Opcode::flag
                                || instruction.opcode == domain::Opcode::loadValue;
-        auto& bound = gate.program.instructions[row];
+        unlocks::Instruction& bound = gate.program.instructions[row];
         // Keep the native slot so a Family-5 override can precede its saved-bank mapping.
         bound = {instruction.opcode,
                  readsSlot ? unlocks::Bank::external : unlocks::Bank::none,
@@ -168,10 +181,11 @@ bind_gate(const NativeProgram& program, const GateMaps& maps, domain::Gate& gate
         if (!readsSlot) {
             continue;
         }
-        const auto inputs = std::span{gate.inputs}.first(gate.inputCount);
-        const auto found = std::find_if(inputs.begin(), inputs.end(), [&](const auto& input) {
-            return input.opcode == instruction.opcode && input.slot == instruction.operand;
-        });
+        const std::span<domain::GateInput> inputs{gate.inputs.data(), gate.inputCount};
+        const std::span<domain::GateInput>::iterator found =
+            std::find_if(inputs.begin(), inputs.end(), [&](const domain::GateInput& input) {
+                return input.opcode == instruction.opcode && input.slot == instruction.operand;
+            });
         if (found != inputs.end()) {
             continue;
         }
@@ -235,8 +249,8 @@ bind_gate(const NativeProgram& program, const GateMaps& maps, domain::Gate& gate
         return false;
     }
     std::vector<domain::SaleGates> ownSales;
-    for (const auto row : candidates) {
-        const auto at = saleRows.dataOffset + row * domain::kSaleRowStride;
+    for (const std::uint16_t row : candidates) {
+        const std::size_t at = saleRows.dataOffset + row * domain::kSaleRowStride;
         domain::SaleRow sale{};
         NativeProgram admission{}, selection{};
         domain::SaleGates gates{};
@@ -254,12 +268,12 @@ bind_gate(const NativeProgram& program, const GateMaps& maps, domain::Gate& gate
     }
     std::vector<domain::InteractionGate> ownInteractions;
     for (std::size_t row = 0; row < interactionRows.count; ++row) {
-        const auto at = interactionRows.dataOffset + row * domain::kThirdRowStride;
+        const std::size_t at = interactionRows.dataOffset + row * domain::kThirdRowStride;
         std::int32_t category = 0;
         if (!tables::read(bytes, at + kInteractionCategoryOffset, category)) {
             return false;
         }
-        if (std::none_of(ownSales.begin(), ownSales.end(), [&](const auto& sale) {
+        if (std::none_of(ownSales.begin(), ownSales.end(), [&](const domain::SaleGates& sale) {
                 return sale.categoryIndex == category;
             })) {
             continue;
@@ -310,7 +324,7 @@ bool build_gates(const reader::Source& source,
     std::vector<domain::SaleGates> sales;
     std::size_t skipped = 0;
     for (std::size_t row = 0; row < count; ++row) {
-        const auto& vendor = definitions[row];
+        const domain::Definition& vendor = definitions[row];
         if (vendor.factionProgressionIndex == domain::kUnavailableFactionProgressionIndex) {
             continue;
         }

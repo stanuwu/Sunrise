@@ -676,13 +676,14 @@ void settle_vendor_row(const middleware::web_service::Message& message,
     if (vendorIndex >= 0 && rowIndex >= 0
         && vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
         && rowIndex <= (std::numeric_limits<std::uint16_t>::max)()) {
-        auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+        state::PendingRecordRewardGrant* reward =
+            emplace_mutation<state::PendingRecordRewardGrant>(outcome);
         if (reward == nullptr) {
             report_purchase(opcode, "fail", "storage", vendorIndex, rowIndex, itemDefinitionIndex);
             return;
         }
         const char* refusal = "storage";
-        const auto disposition =
+        const state::VendorReputationDisposition disposition =
             state::prepare_vendor_rank_reward_sale(static_cast<std::uint16_t>(vendorIndex),
                                                    static_cast<std::uint16_t>(rowIndex),
                                                    *reward,
@@ -701,12 +702,13 @@ void settle_vendor_row(const middleware::web_service::Message& message,
     if (vendorIndex >= 0 && rowIndex >= 0
         && vendorIndex <= (std::numeric_limits<std::uint16_t>::max)()
         && rowIndex <= (std::numeric_limits<std::uint16_t>::max)()) {
-        auto* reputation = emplace_mutation<state::PendingVendorReputation>(outcome);
+        state::PendingVendorReputation* reputation =
+            emplace_mutation<state::PendingVendorReputation>(outcome);
         if (reputation == nullptr) {
             report_purchase(opcode, "fail", "storage", vendorIndex, rowIndex, itemDefinitionIndex);
             return;
         }
-        const auto disposition =
+        const state::VendorReputationDisposition disposition =
             state::prepare_vendor_reputation(static_cast<std::uint16_t>(vendorIndex),
                                              static_cast<std::uint16_t>(rowIndex),
                                              *reputation);
@@ -824,7 +826,8 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
         return;
     }
     if (row == quest::kAbsentSaleIndex) {
-        auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+        state::PendingRecordRewardGrant* reward =
+            emplace_mutation<state::PendingRecordRewardGrant>(outcome);
         if (reward == nullptr) {
             clear_mutation(outcome);
             report_purchase(quest::kOpcode,
@@ -835,11 +838,12 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
                             kUnavailableDefinitionIndex);
             return;
         }
-        const auto disposition = state::prepare_vendor_rank_reward_interaction(
-            static_cast<std::uint16_t>(request.vendorIndex),
-            static_cast<std::uint16_t>(request.slotIndex),
-            static_cast<std::uint16_t>(request.third),
-            *reward);
+        const state::VendorReputationDisposition disposition =
+            state::prepare_vendor_rank_reward_interaction(
+                static_cast<std::uint16_t>(request.vendorIndex),
+                static_cast<std::uint16_t>(request.slotIndex),
+                static_cast<std::uint16_t>(request.third),
+                *reward);
         if (disposition == state::VendorReputationDisposition::prepared) {
             report_purchase(quest::kOpcode,
                             "ok",

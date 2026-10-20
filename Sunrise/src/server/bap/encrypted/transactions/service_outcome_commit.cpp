@@ -344,7 +344,8 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         reason = "item_state";
         return committed;
     }
-    if (auto* reputation = transaction_if<state::PendingVendorReputation>(outcome)) {
+    if (state::PendingVendorReputation* reputation =
+            transaction_if<state::PendingVendorReputation>(outcome)) {
         reason = "vendor_reputation";
         return report_commit(state::commit_vendor_reputation(*reputation),
                              "ev=vendor_reputation stage=transaction_commit result=fail");
