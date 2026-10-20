@@ -818,7 +818,7 @@
     <ClCompile Include="src\state\build_data\cache\records\cache_spawn_set_records.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_vendor_records.cpp" />
     <ClCompile Include="src\state\build_data\vendors\vendor_catalog.cpp" />
-    <ClCompile Include="src\state\build_data\vendors\reputation_sale_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\vendors\reputation_turn_in_catalog.cpp" />
     <ClCompile Include="src\state\build_data\vendors\artifact_sale_view.cpp" />
     <ClCompile Include="src\state\unlocks\unlocks_expression.cpp" />
     <ClCompile Include="src\state\build_data\vendors\vendor_gate_catalog.cpp" />
@@ -2514,7 +2514,7 @@
     <ClInclude Include="src\state\build_data\vendors\vendor_catalog.h" />
     <ClInclude Include="src\state\unlocks\unlocks_expression.h" />
     <ClInclude Include="src\state\build_data\vendors\reconstructed_rank_claim_links.h" />
-    <ClInclude Include="src\state\build_data\vendors\reputation_sale_catalog.h" />
+    <ClInclude Include="src\state\build_data\vendors\reputation_turn_in_catalog.h" />
     <ClInclude Include="src\state\build_data\vendors\vendor_gate_catalog.h" />
     <ClInclude Include="src\client\content\vendors\layout.h" />
     <ClInclude Include="src\client\content\vendors\vendor_build.h" />

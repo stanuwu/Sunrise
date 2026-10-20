@@ -90,7 +90,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         return false;
     }
     persistenceState.enabled = true;
-    if (!vendors::load_reputation_sales(module)) {
+    if (!vendors::load_reputation_turn_ins(module)) {
         runtime::persistence::clear_locked(persistenceState);
         ReleaseSRWLockExclusive(&persistenceState.lock);
         return false;

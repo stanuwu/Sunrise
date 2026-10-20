@@ -20,12 +20,100 @@ namespace {
 namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
 namespace domain = state::build_data::vendors;
+namespace unlocks = state::unlocks;
 
 /** The native slot maps mark unmapped positions with the all-ones row value. */
 constexpr std::uint16_t kUnmappedRow = 0xFFFFU;
+/** Native class of an eight-byte unlock instruction in an interaction or sale gate. */
+constexpr std::uint32_t kInstructionClass = 0x80807D31U;
+/** Native class of a sale gate list's sixteen-byte expression descriptors. */
+constexpr std::uint32_t kProgramListClass = 0x80807D2FU;
+
+/** One unbound opcode and native slot or literal read from a vendor row. */
+struct NativeInstruction {
+    unlocks::Opcode opcode{};
+    std::int32_t operand{};
+};
+
+/** Native instruction storage before unlock slots are mapped to saved banks. */
+struct NativeProgram {
+    std::array<NativeInstruction, domain::kVendorProgramCapacity> instructions{};
+    std::size_t count{};
+};
+
+/**
+ * Appends one native instruction array, refusing unknown opcodes and capacity overflow.
+ * @param blob Vendor definition bytes.
+ * @param field Array descriptor offset.
+ * @param program Accumulates the decoded instructions.
+ * @return False when the array cannot be decoded within the fixed capacity.
+ */
+[[nodiscard]] bool append_program(std::span<const std::byte> blob,
+                                  std::size_t field,
+                                  NativeProgram& program) noexcept {
+    tables::Array rows{};
+    if (!tables::read_array(blob, field, kInstructionClass, tables::kUnlockInstructionStride, rows)
+        || rows.count > program.instructions.size() - program.count) {
+        return false;
+    }
+    for (std::size_t index = 0; index < rows.count; ++index) {
+        const auto at = rows.dataOffset + index * tables::kUnlockInstructionStride;
+        std::uint32_t nativeOpcode = 0;
+        std::int32_t operand = 0;
+        unlocks::Opcode opcode{};
+        if (!tables::read(blob, at, nativeOpcode)
+            || !tables::read(blob, at + tables::kUnlockInstructionOperandOffset, operand)
+            || !unlocks::decode_opcode(nativeOpcode, opcode)) {
+            return false;
+        }
+        program.instructions[program.count++] = {opcode, operand};
+    }
+    return true;
+}
+
+/** Reads one interaction's direct native instruction array. */
+[[nodiscard]] bool
+read_program(std::span<const std::byte> blob, std::size_t field, NativeProgram& output) noexcept {
+    output = {};
+    return append_program(blob, field, output);
+}
+
+/**
+ * Joins a sale's authored program list with postfix AND.
+ * @param blob Vendor definition bytes.
+ * @param field Program-list descriptor offset.
+ * @param output Receives the complete program, or remains empty on failure.
+ * @return False when a listed program is empty, malformed or over capacity.
+ */
+[[nodiscard]] bool read_program_list(std::span<const std::byte> blob,
+                                     std::size_t field,
+                                     NativeProgram& output) noexcept {
+    output = {};
+    tables::Array rows{};
+    if (!tables::read_array(
+            blob, field, kProgramListClass, tables::kUnlockExpressionFieldSize, rows)) {
+        return false;
+    }
+    NativeProgram parsed{};
+    for (std::size_t index = 0; index < rows.count; ++index) {
+        const auto at = rows.dataOffset + index * tables::kUnlockExpressionFieldSize;
+        const auto before = parsed.count;
+        if (!append_program(blob, at, parsed) || parsed.count == before) {
+            return false;
+        }
+        if (index != 0) {
+            if (parsed.count == parsed.instructions.size()) {
+                return false;
+            }
+            parsed.instructions[parsed.count++] = {unlocks::Opcode::logicalAnd, 0};
+        }
+    }
+    output = parsed;
+    return true;
+}
 
 /** Binds one input to at most one saved bank; unmapped slots require Family-5 values. */
-[[nodiscard]] bool bind_input(const domain::Instruction& instruction,
+[[nodiscard]] bool bind_input(const NativeInstruction& instruction,
                               const GateMaps& maps,
                               domain::GateInput& output) noexcept {
     output = {};
@@ -62,13 +150,22 @@ constexpr std::uint16_t kUnmappedRow = 0xFFFFU;
 
 /** Resolves only the input instructions an expression actually reads. */
 [[nodiscard]] bool
-bind_gate(const domain::Program& program, const GateMaps& maps, domain::Gate& gate) noexcept {
+bind_gate(const NativeProgram& program, const GateMaps& maps, domain::Gate& gate) noexcept {
     gate = {};
-    gate.program = program;
+    gate.program.count = program.count;
     for (std::size_t row = 0; row < program.count; ++row) {
         const auto& instruction = program.instructions[row];
-        if (instruction.opcode != domain::Opcode::flag
-            && instruction.opcode != domain::Opcode::loadValue) {
+        const bool readsSlot = instruction.opcode == domain::Opcode::flag
+                               || instruction.opcode == domain::Opcode::loadValue;
+        auto& bound = gate.program.instructions[row];
+        // Keep the native slot so a Family-5 override can precede its saved-bank mapping.
+        bound = {instruction.opcode,
+                 readsSlot ? unlocks::Bank::external : unlocks::Bank::none,
+                 static_cast<std::uint32_t>(instruction.operand)};
+        if (!unlocks::valid(bound)) {
+            return false;
+        }
+        if (!readsSlot) {
             continue;
         }
         const auto inputs = std::span{gate.inputs}.first(gate.inputCount);
@@ -91,16 +188,16 @@ bind_gate(const domain::Program& program, const GateMaps& maps, domain::Gate& ga
 [[nodiscard]] bool reward_package(const domain::SaleRow& sale) noexcept {
     state::build_data::items::Definition item{};
     state::build_data::rewards::Item reward{};
-    return sale.categoryIndex != domain::kAbsentCategoryIndex && sale.costQuantity == 0
-           && sale.costItemIndex == domain::kAbsentCostItem
+    return sale.categoryIndex != domain::kAbsentCategoryIndex
+           && sale.priceState == domain::PriceState::plain && domain::cost_entries(sale).empty()
            && state::build_data::find_item_definition_index(sale.itemIndex, item)
-           && state::build_data::rewards::find_item(sale.itemIndex, reward)
+           && state::build_data::find_reward_item(sale.itemIndex, reward)
            && item.definitionHash == reward.definitionHash
            && reward.poolIndex != state::build_data::rewards::kAbsent
            && (reward.flags & state::build_data::rewards::kOpenOnAcquisition) != 0;
 }
 
-/** Reads one vendor's relevant sale and matching interaction gates as one unit. */
+/** Reads one vendor's matching package-sale, interaction and reply gates as one unit. */
 [[nodiscard]] bool read_vendor(const reader::Source& source,
                                reader::Scratch& scratch,
                                const GateMaps& maps,
@@ -141,11 +238,11 @@ bind_gate(const domain::Program& program, const GateMaps& maps, domain::Gate& ga
     for (const auto row : candidates) {
         const auto at = saleRows.dataOffset + row * domain::kSaleRowStride;
         domain::SaleRow sale{};
-        domain::Program admission{}, selection{};
+        NativeProgram admission{}, selection{};
         domain::SaleGates gates{};
         if (!domain::sale_row(vendor, row, sale)
-            || !domain::read_program_list(bytes, at + kSaleAdmissionField, admission)
-            || !domain::read_program_list(bytes, at + kSaleSelectionField, selection)
+            || !read_program_list(bytes, at + kSaleAdmissionField, admission)
+            || !read_program_list(bytes, at + kSaleSelectionField, selection)
             || !bind_gate(admission, maps, gates.admission)
             || !bind_gate(selection, maps, gates.selection)) {
             return false;
@@ -167,11 +264,23 @@ bind_gate(const domain::Program& program, const GateMaps& maps, domain::Gate& ga
             })) {
             continue;
         }
-        domain::Program condition{};
+        NativeProgram condition{};
         domain::InteractionGate gate{};
-        if (!domain::read_program(bytes, at + kInteractionConditionField, condition)
-            || !bind_gate(condition, maps, gate.condition)) {
+        tables::Array replies{};
+        if (!read_program(bytes, at + kInteractionConditionField, condition)
+            || !bind_gate(condition, maps, gate.condition)
+            || !tables::read_array(
+                bytes, at + kInteractionReplyField, kReplyRowClass, kReplyRowStride, replies)) {
             return false;
+        }
+        for (std::size_t reply = 0; reply < replies.count; ++reply) {
+            NativeProgram program{};
+            domain::Gate replyCondition{};
+            if (!read_program(bytes, replies.dataOffset + reply * kReplyRowStride, program)
+                || !bind_gate(program, maps, replyCondition)) {
+                return false;
+            }
+            gate.replyConditions.push_back(replyCondition);
         }
         gate.vendorHash = vendor.definitionHash;
         gate.index = static_cast<std::uint16_t>(row);

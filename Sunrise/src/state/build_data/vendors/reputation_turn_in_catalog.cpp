@@ -1,4 +1,4 @@
-#include "reputation_sale_catalog.h"
+#include "reputation_turn_in_catalog.h"
 
 #include <Windows.h>
 
@@ -16,11 +16,11 @@ namespace sunrise::state::build_data::vendors {
 namespace {
 
 core::threading::SrwLock g_lock;
-std::array<ReputationSale, kReputationSaleCapacity> g_sales{};
-std::size_t g_saleCount{};
+std::array<ReputationTurnIn, kReputationTurnInCapacity> g_turnIns{};
+std::size_t g_turnInCount{};
 
 /**
- * Copy the DLL's SQL resource into a terminated buffer for SQLite.
+ * Copies the DLL's SQL resource into a terminated buffer for SQLite.
  * @param module DLL holding the content resource.
  * @param sql Receives SQL; cleared on failure.
  * @return False when the resource is missing or empty.
@@ -32,7 +32,7 @@ bool resource_sql(void* module, std::string& sql) noexcept {
         return false;
     }
     const HRSRC found =
-        FindResourceW(loaded, MAKEINTRESOURCEW(IDR_VENDOR_REPUTATION_CONTENT), RT_RCDATA);
+        FindResource(loaded, MAKEINTRESOURCE(IDR_FACTION_TURN_IN_CONTENT), RT_RCDATA);
     if (found == nullptr) {
         return false;
     }
@@ -47,7 +47,7 @@ bool resource_sql(void* module, std::string& sql) noexcept {
 }
 
 /**
- * Reject SQLite integers outside the destination type's range.
+ * Rejects SQLite integers outside the destination type's range.
  * @tparam Value Integral destination type.
  * @param statement Active row statement.
  * @param index Selected column.
@@ -69,48 +69,43 @@ bool column(sqlite3_stmt* statement, int index, Value& output, std::int64_t mini
 }
 
 /**
- * Accept only a nonempty, sorted, bounded set of complete sale rows.
+ * Reads a sorted, nonempty set of complete faction turn-in relationships.
  * @param database Temporary content database.
- * @param sales Receives rows; never published on failure.
+ * @param turnIns Receives rows; never published on failure.
  * @param count Receives the number of rows read.
  * @return False when any row or the query is invalid.
  */
-bool read_sales(sqlite3* database,
-                std::array<ReputationSale, kReputationSaleCapacity>& sales,
-                std::size_t& count) noexcept {
+bool read_turn_ins(sqlite3* database,
+                   std::array<ReputationTurnIn, kReputationTurnInCapacity>& turnIns,
+                   std::size_t& count) noexcept {
     count = 0;
     constexpr char kQuery[] =
-        "SELECT vendor_hash, sale_index, faction_hash, placeholder_hash, cost_hash, "
-        "category_index, cost_quantity, xp_per_unit FROM reputation_sales "
-        "ORDER BY vendor_hash, sale_index";
+        "SELECT faction_hash, placeholder_hash, cost_hash, xp_per_unit "
+        "FROM faction_turn_ins ORDER BY faction_hash, placeholder_hash, cost_hash";
     sqlite3_stmt* statement = nullptr;
     if (sqlite3_prepare_v2(database, kQuery, -1, &statement, nullptr) != SQLITE_OK) {
         return false;
     }
     int status = SQLITE_OK;
     bool valid = true;
+    const auto key = [](const ReputationTurnIn& turnIn) {
+        return std::array{turnIn.factionHash, turnIn.placeholderHash, turnIn.costHash};
+    };
     while ((status = sqlite3_step(statement)) == SQLITE_ROW) {
-        if (count == sales.size()) {
+        if (count == turnIns.size()) {
             valid = false;
             break;
         }
-        ReputationSale sale{};
-        valid = column(statement, 0, sale.vendorHash, 1) && column(statement, 1, sale.saleIndex, 0)
-                && column(statement, 2, sale.factionHash, 1)
-                && column(statement, 3, sale.placeholderHash, 1)
-                && column(statement, 4, sale.costHash, 1)
-                && column(statement, 5, sale.categoryIndex, 0)
-                && column(statement, 6, sale.costQuantity, 1)
-                && column(statement, 7, sale.experiencePerUnit, 1);
-        if (!valid
-            || (count != 0
-                && (sales[count - 1].vendorHash > sale.vendorHash
-                    || (sales[count - 1].vendorHash == sale.vendorHash
-                        && sales[count - 1].saleIndex >= sale.saleIndex)))) {
+        ReputationTurnIn turnIn{};
+        valid = column(statement, 0, turnIn.factionHash, 1)
+                && column(statement, 1, turnIn.placeholderHash, 1)
+                && column(statement, 2, turnIn.costHash, 1)
+                && column(statement, 3, turnIn.experiencePerUnit, 1);
+        if (!valid || (count != 0 && key(turnIns[count - 1]) >= key(turnIn))) {
             valid = false;
             break;
         }
-        sales[count++] = sale;
+        turnIns[count++] = turnIn;
     }
     const bool complete = valid && status == SQLITE_DONE && count != 0;
     const int finalized = sqlite3_finalize(statement);
@@ -119,13 +114,9 @@ bool read_sales(sqlite3* database,
 
 } // namespace
 
-/**
- * Publish only complete content sales, independent of player-save SQLite.
- * @param module DLL holding the content resource.
- * @return False when SQL or any sale row is invalid.
- */
-bool load_reputation_sales(void* module) noexcept {
-    clear_reputation_sales();
+/** Publishes only a complete build-scoped faction turn-in catalog. */
+bool load_reputation_turn_ins(void* module) noexcept {
+    clear_reputation_turn_ins();
     std::string sql;
     if (!resource_sql(module, sql)) {
         return false;
@@ -135,60 +126,49 @@ bool load_reputation_sales(void* module) noexcept {
         sqlite3_close(database);
         return false;
     }
-    std::array<ReputationSale, kReputationSaleCapacity> sales{};
+    std::array<ReputationTurnIn, kReputationTurnInCapacity> turnIns{};
     std::size_t count = 0;
     const bool complete =
         sqlite3_exec(database, sql.c_str(), nullptr, nullptr, nullptr) == SQLITE_OK
-        && read_sales(database, sales, count);
+        && read_turn_ins(database, turnIns, count);
     const int closed = sqlite3_close(database);
     if (!complete || closed != SQLITE_OK) {
         return false;
     }
     const std::lock_guard guard(g_lock);
-    g_sales = sales;
-    g_saleCount = count;
+    g_turnIns = turnIns;
+    g_turnInCount = count;
     return true;
 }
 
 /** Clears the small content catalog under its reader lock. */
-void clear_reputation_sales() noexcept {
+void clear_reputation_turn_ins() noexcept {
     const std::lock_guard guard(g_lock);
-    g_sales = {};
-    g_saleCount = 0;
+    g_turnIns = {};
+    g_turnInCount = 0;
 }
 
-/**
- * Copy one exact vendor sale under the catalog lock.
- * @param vendorHash Installed vendor hash.
- * @param saleIndex Sale selector within that vendor.
- * @param sale Receives the row, or an empty row when absent.
- * @return True when the row exists.
- */
-bool find_reputation_sale(std::uint32_t vendorHash,
-                          std::uint16_t saleIndex,
-                          ReputationSale& sale) noexcept {
-    sale = {};
+bool find_reputation_turn_in(std::uint32_t factionHash,
+                             std::uint32_t placeholderHash,
+                             std::uint32_t costHash,
+                             ReputationTurnIn& turnIn) noexcept {
+    turnIn = {};
     const std::shared_lock guard(g_lock);
-    for (std::size_t index = 0; index < g_saleCount; ++index) {
-        if (g_sales[index].vendorHash == vendorHash && g_sales[index].saleIndex == saleIndex) {
-            sale = g_sales[index];
+    for (std::size_t index = 0; index < g_turnInCount; ++index) {
+        const ReputationTurnIn& candidate = g_turnIns[index];
+        if (candidate.factionHash == factionHash && candidate.placeholderHash == placeholderHash
+            && candidate.costHash == costHash) {
+            turnIn = candidate;
             return true;
         }
     }
     return false;
 }
 
-/**
- * Keep a known turn-in placeholder out of ordinary item acquisition.
- * @param vendorHash Installed vendor hash.
- * @param placeholderHash Requested item hash.
- * @return True when this vendor uses the item as a turn-in placeholder.
- */
-bool is_reputation_placeholder(std::uint32_t vendorHash, std::uint32_t placeholderHash) noexcept {
+bool is_reputation_placeholder(std::uint32_t placeholderHash) noexcept {
     const std::shared_lock guard(g_lock);
-    for (std::size_t index = 0; index < g_saleCount; ++index) {
-        if (g_sales[index].vendorHash == vendorHash
-            && g_sales[index].placeholderHash == placeholderHash) {
+    for (std::size_t index = 0; index < g_turnInCount; ++index) {
+        if (g_turnIns[index].placeholderHash == placeholderHash) {
             return true;
         }
     }

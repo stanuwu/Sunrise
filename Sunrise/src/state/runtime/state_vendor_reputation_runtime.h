@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "../account/account_state.h"
 #include "../build_data/progressions/definition.h"
 #include "../unlocks/definition.h"
@@ -56,6 +58,8 @@ struct VendorRankRewardClaim {
     std::uint16_t itemIndex{};
     std::uint16_t poolIndex{};
     std::uint16_t interactionIndex{};
+    /** Rowless claims revalidate this reply; a sale-backed request has no reply selector. */
+    std::optional<std::uint16_t> replyIndex;
     /** Saved rank-credit row rechecked before preview or commit. */
     std::uint16_t rankCreditRow{};
 };

@@ -16,8 +16,12 @@ bool g_ready{};
 
 /** A reader must never span past one published gate's fixed storage. */
 [[nodiscard]] bool valid_gate(const Gate& gate) noexcept {
-    return gate.program.count <= gate.program.instructions.size()
-           && gate.inputCount <= gate.inputs.size() && gate.inputCount <= gate.program.count;
+    if (gate.program.count > gate.program.instructions.size()
+        || gate.inputCount > gate.inputs.size() || gate.inputCount > gate.program.count) {
+        return false;
+    }
+    const auto program = std::span{gate.program.instructions}.first(gate.program.count);
+    return std::all_of(program.begin(), program.end(), unlocks::valid);
 }
 
 /** @tparam Row Vendor-keyed gate row. @param rows Candidate bank. @return False for a duplicate. */
@@ -67,7 +71,12 @@ bool replace_gates(std::span<const InteractionGate> interactions,
     }
     if (std::any_of(interactions.begin(),
                     interactions.end(),
-                    [](const auto& row) { return !valid_gate(row.condition); })
+                    [](const auto& row) {
+                        return !valid_gate(row.condition)
+                               || !std::all_of(row.replyConditions.begin(),
+                                               row.replyConditions.end(),
+                                               valid_gate);
+                    })
         || std::any_of(sales.begin(), sales.end(), [](const auto& row) {
                return !valid_gate(row.admission) || !valid_gate(row.selection);
            })) {
