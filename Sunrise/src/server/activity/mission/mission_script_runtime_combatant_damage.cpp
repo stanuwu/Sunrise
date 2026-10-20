@@ -486,12 +486,23 @@ void push_combatant_damage_edges(RuntimeInstance& instance,
  * combatant with the same authored index apart.
  */
 void push_entity_damage(RuntimeInstance& instance,
+                        std::uint64_t sourceGeneration,
                         std::uint32_t registryKey,
                         std::uint8_t slotType,
                         std::uint16_t slotIndex,
                         float primary,
                         float secondary,
                         std::uint64_t tick) noexcept {
+    // The entity poll alone publishes a combatant's own levels, read from its pinned link with
+    // their lifetime. This path keeps the other keys, a combatant raised to its squad and other
+    // slot types, each only from the link that simulates it, as Sense reports are admitted. Every
+    // link's source also lists replica copies of targets another client simulates.
+    const OutputClientRef target{
+        .registryKey = registryKey, .slotIndex = slotIndex, .slotType = slotType};
+    if (slotType == kCombatantDamageSlotType || sourceGeneration == 0
+        || simulating_link(instance, target) != sourceGeneration) {
+        return;
+    }
     host::SenseObservationKey key{};
     key.registryKey = registryKey;
     key.objectTag = slotType;
@@ -503,6 +514,7 @@ void push_entity_damage(RuntimeInstance& instance,
         log_line(core::log::Level::warn, &instance, "combatant_damage", "watch_capacity");
         return;
     }
+    claim_row(*row, sourceGeneration, true);
     if (row->level.observed && row->level.primary == primary && row->level.secondary == secondary) {
         return;
     }

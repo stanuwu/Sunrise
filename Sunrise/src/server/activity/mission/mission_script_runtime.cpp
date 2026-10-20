@@ -323,7 +323,7 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
 /**
  * Queues one replicated damage level for a squad slot, once per change.
  * @param binding Activity generation that accepted the entity update.
- * @param sourceGeneration ActivityClient generation that owns the policy.
+ * @param sourceGeneration ActivityClient generation of the link that sent the entity update.
  * @param registryKey Authored registry key.
  * @param slotType Authored slot type: the squad's, or the combatant's own.
  * @param slotIndex Authored slot index.
@@ -345,20 +345,17 @@ void report_squad_damage(const state::activity::SessionBinding& binding,
     }
     AcquireSRWLockExclusive(&g_lock);
     auto* instance = find_instance(binding);
-    if (instance != nullptr && instance->view.activityClientGeneration == sourceGeneration) {
+    // A level that finds no mission, or comes from a link that does not simulate its target, is
+    // dropped without a log line: every update of every link reaches this call.
+    if (instance != nullptr) {
         push_entity_damage(*instance,
+                           sourceGeneration,
                            registryKey,
                            slotType,
                            slotIndex,
                            static_cast<float>(health) / static_cast<float>(full),
                            static_cast<float>(shield) / static_cast<float>(full),
                            GetTickCount64());
-    } else {
-        // Nothing else records a level that finds no mission.
-        log_line(core::log::Level::debug,
-                 instance,
-                 "combatant_damage",
-                 instance == nullptr ? "no_instance" : "stale_generation");
     }
     ReleaseSRWLockExclusive(&g_lock);
 }

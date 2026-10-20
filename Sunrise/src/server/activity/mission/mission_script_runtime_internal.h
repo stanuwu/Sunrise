@@ -564,8 +564,13 @@ void push_entity_damage_edges(RuntimeInstance& instance, std::uint64_t now) noex
 /** Raises observed Type-2 damage pools and lifecycle resets without inferring damage. */
 void push_combatant_damage_edges(RuntimeInstance& instance,
                                  const host::SenseObservationSnapshot& sense) noexcept;
-/** Raises a damage state from an entity's replicated damage levels (fractions of full). */
+/**
+ * Raises a damage state from an entity's replicated damage levels (fractions of full), admitted
+ * only for a key the entity poll does not publish and only from the link that simulates it.
+ * @param sourceGeneration ActivityClient generation of the link that sent the levels.
+ */
 void push_entity_damage(RuntimeInstance& instance,
+                        std::uint64_t sourceGeneration,
                         std::uint32_t registryKey,
                         std::uint8_t slotType,
                         std::uint16_t slotIndex,
