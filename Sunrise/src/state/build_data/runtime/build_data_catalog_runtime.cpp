@@ -23,6 +23,7 @@
 #include "../socket_entry_lists/socket_entry_list_catalog.h"
 #include "../spawn_sets/spawn_set_catalog.h"
 #include "../starter_sets/starter_set_catalog.h"
+#include "../vendors/reputation_turn_in_catalog.h"
 #include "../vendors/vendor_catalog.h"
 #include "domain_markers.h"
 #include "persistence/publication_transaction.h"
@@ -383,6 +384,7 @@ void clear_catalogs() noexcept {
     rollback_spawn_catalog_publication();
     rollback_name_catalog_publication();
     vendors::clear();
+    vendors::clear_reputation_turn_ins();
     constants::clear();
     starter_sets::clear();
 }

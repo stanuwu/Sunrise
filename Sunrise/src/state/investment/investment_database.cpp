@@ -79,6 +79,14 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
     return true;
 }
 
+/** Reads one bounded schema count used to distinguish the two legacy version-3 layouts. */
+bool schema_count(const char* queryText, int maximum, int& count) noexcept {
+    count = -1;
+    Statement query(queryText);
+    return query.step() == SQLITE_ROW && query.column(0, count) && count >= 0 && count <= maximum
+           && query.step() == SQLITE_DONE;
+}
+
 /**
  * Opens the save, creating it from the bundled SQL or upgrading an older schema in place.
  * A new database gets the schema and every default in one durable transaction.
@@ -132,15 +140,14 @@ bool open(std::string_view path,
                 && !characterStarter.empty() && execute(starterText.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 3 adds the appearance header and the starter tables. Version 2 added account
-        // preferences and per-item seen state.
-        constexpr int kSchemaVersion = 3;
+        // Version 4 unifies version-3 saves that added appearance data or objective counters.
+        // Version 2 added account preferences and per-item seen state.
+        constexpr int kSchemaVersion = 4;
         constexpr int kApplicationId = 1397902921;
         int application = 0;
         Statement query("PRAGMA application_id");
-        ready = (version == 1 || version == 2 || version == kSchemaVersion)
-                && query.step() == SQLITE_ROW && query.column(0, application)
-                && application == kApplicationId;
+        ready = (version >= 1 && version <= kSchemaVersion) && query.step() == SQLITE_ROW
+                && query.column(0, application) && application == kApplicationId;
     }
     if (ready && version == 1) {
         Transaction transaction;
@@ -166,8 +173,67 @@ bool open(std::string_view path,
                            "000000000000') CHECK (length(appearance_header) = 36);"
                            "ALTER TABLE characters ADD COLUMN appearance_header_valid INTEGER "
                            "NOT NULL DEFAULT 0 CHECK (appearance_header_valid IN (0, 1));")
-                && execute(starterText.c_str()) && execute("PRAGMA user_version=3")
-                && transaction.commit();
+                && execute(starterText.c_str())
+                && execute("CREATE TABLE character_objective_values ("
+                           "character_soid INTEGER NOT NULL REFERENCES characters(soid) "
+                           "DEFERRABLE INITIALLY DEFERRED,"
+                           "slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 32767),"
+                           "value INTEGER NOT NULL CHECK (value BETWEEN 0 AND 2147483647),"
+                           "PRIMARY KEY (character_soid,slot)) STRICT;")
+                && execute("PRAGMA user_version=4") && transaction.commit();
+        if (ready) {
+            version = 4;
+        }
+    }
+    if (ready && version == 3) {
+        constexpr int kAppearanceColumnCount = 2;
+        constexpr int kStarterTableCount = 2;
+        constexpr int kObjectiveTableCount = 1;
+        int appearanceColumns = 0;
+        int starterTables = 0;
+        int objectiveTables = 0;
+        ready = schema_count("SELECT count(*) FROM pragma_table_info('characters') WHERE name IN "
+                             "('appearance_header','appearance_header_valid')",
+                             kAppearanceColumnCount,
+                             appearanceColumns)
+                && schema_count("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN "
+                                "('starter_character','starter_items')",
+                                kStarterTableCount,
+                                starterTables)
+                && schema_count("SELECT count(*) FROM sqlite_master WHERE type='table' AND "
+                                "name='character_objective_values'",
+                                kObjectiveTableCount,
+                                objectiveTables)
+                && (appearanceColumns == 0 || appearanceColumns == kAppearanceColumnCount)
+                && (starterTables == 0 || starterTables == kStarterTableCount)
+                && ((appearanceColumns == 0) == (starterTables == 0))
+                && (appearanceColumns == kAppearanceColumnCount
+                    || objectiveTables == kObjectiveTableCount);
+        if (ready) {
+            Transaction transaction;
+            ready = transaction.ready();
+            if (ready && appearanceColumns == 0) {
+                // Older characters keep the fixed default header: their zero blob is invalid.
+                ready =
+                    !characterStarter.empty()
+                    && execute("ALTER TABLE characters ADD COLUMN appearance_header BLOB NOT NULL "
+                               "DEFAULT "
+                               "(X'0000000000000000000000000000000000000000000000000000000000000000"
+                               "00000000') CHECK (length(appearance_header) = 36);"
+                               "ALTER TABLE characters ADD COLUMN appearance_header_valid INTEGER "
+                               "NOT NULL DEFAULT 0 CHECK (appearance_header_valid IN (0, 1));")
+                    && execute(starterText.c_str());
+            }
+            if (ready && objectiveTables == 0) {
+                ready = execute("CREATE TABLE character_objective_values ("
+                                "character_soid INTEGER NOT NULL REFERENCES characters(soid) "
+                                "DEFERRABLE INITIALLY DEFERRED,"
+                                "slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 32767),"
+                                "value INTEGER NOT NULL CHECK (value BETWEEN 0 AND 2147483647),"
+                                "PRIMARY KEY (character_soid,slot)) STRICT;");
+            }
+            ready = ready && execute("PRAGMA user_version=4") && transaction.commit();
+        }
     }
     if (!ready) {
         shutdown();

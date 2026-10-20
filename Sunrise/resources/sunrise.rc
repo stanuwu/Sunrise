@@ -63,3 +63,4 @@ IDR_ACCOUNT_SETTINGS_SCHEMA RCDATA "database/account_settings_schema.sql"
 IDR_ACCOUNT_SETTINGS_DEFAULTS RCDATA "database/account_settings_defaults.sql"
 
 IDR_CHARACTER_STARTER RCDATA "database/character_starter.sql"
+IDR_FACTION_TURN_IN_CONTENT RCDATA "database/faction_turn_in_content.sql"

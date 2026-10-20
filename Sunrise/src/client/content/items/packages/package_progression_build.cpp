@@ -34,8 +34,15 @@ bool build_progressions(const reader::Source& source,
             stepCount = 0;
             return false;
         }
-        const auto scope =
+        const std::uint8_t scope =
             std::to_integer<std::uint8_t>(table[at + tables::kProgressionScopeOffset]);
+        const std::uint8_t repeatLastStep =
+            std::to_integer<std::uint8_t>(table[at + tables::kProgressionRepeatLastStepOffset]);
+        if (repeatLastStep > 1) {
+            count = 0;
+            stepCount = 0;
+            return false;
+        }
         domain::Definition& definition = output[count];
         // Any scope beyond the two replicated objects belongs to an object this server does not
         // push, so it claims no slot in either array.
@@ -44,7 +51,8 @@ bool build_progressions(const reader::Source& source,
                       0,
                       scope <= static_cast<std::uint8_t>(domain::Scope::character)
                           ? static_cast<domain::Scope>(scope)
-                          : domain::Scope::unreplicated};
+                          : domain::Scope::unreplicated,
+                      repeatLastStep != 0};
         tables::Array ladder{};
         if (!tables::find_optional_array_at(table, at + tables::kProgressionStepField, ladder)) {
             count = 0;

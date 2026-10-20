@@ -13,6 +13,7 @@
 #include "../build_data/vendors/definition.h"
 #include "../unlocks/definition.h"
 #include "state.h"
+#include "state_vendor_reputation_runtime.h"
 
 namespace sunrise::state::unlocks {
 struct Table;
@@ -271,6 +272,7 @@ struct PendingRecordRewardGrant {
     std::size_t beforeProfileItemCount{};
     std::size_t afterProfileItemCount{};
     std::size_t rewardCount{};
+    VendorRankRewardClaim vendorReward{};
     bool prepared{};
 };
 

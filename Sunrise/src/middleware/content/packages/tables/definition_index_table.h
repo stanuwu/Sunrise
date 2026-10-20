@@ -209,6 +209,8 @@ inline constexpr std::uint32_t kProgressionTableClass = 0x80807CDDU;
 inline constexpr std::size_t kProgressionRowStride = 88;
 /** A progression definition names the object array holding its record here. */
 inline constexpr std::size_t kProgressionScopeOffset = 4;
+/** A progression definition repeats its final step when this byte is one. */
+inline constexpr std::size_t kProgressionRepeatLastStepOffset = 5;
 /** Rank steps a progression declares: the experience each rank costs, in rank order. */
 inline constexpr std::size_t kProgressionStepField = 24;
 inline constexpr std::uint32_t kProgressionStepRowClass = 0x80807CEDU;

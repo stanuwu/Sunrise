@@ -326,6 +326,26 @@ bool process(const ServiceRoute& route,
                 return refuse_web_action(message, output, written);
             }
         }
+        const state::PendingVendorReputation* reputation =
+            web_service::mutation_if<state::PendingVendorReputation>(webOutcome);
+        if (reputation != nullptr) {
+            if (!queuezState.family4Active || queuezState.family4RootSoid != reputation->accountSoid
+                || queuezState.family4Version == (std::numeric_limits<std::int32_t>::max)()
+                || emplace_transaction<state::PendingVendorReputation>(outcome, *reputation)
+                       == nullptr) {
+                return refuse_web_action(message, output, written);
+            }
+            // The next account image carries both the material debit and character progression.
+            middleware::web_service::StatusResponse status{};
+            status.value = queuezState.family4Version + 1;
+            middleware::web_service::ResponseShape shape{};
+            web_service::resolve_response_shape(message.opcode, shape);
+            if (!middleware::web_service::encode_response(
+                    message, shape, status, output, written)) {
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+        }
         if (equipmentSwap != nullptr) {
             // Promise the Family-4 revision carrying this optimistic equip.
             auto* transaction = emplace_transaction<EquipmentSwapTransaction>(outcome);

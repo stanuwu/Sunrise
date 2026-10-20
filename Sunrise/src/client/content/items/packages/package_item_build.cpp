@@ -9,6 +9,7 @@
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/build_data/activities/activity_catalog.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/build_data/vendors/vendor_gate_catalog.h"
 #include "../../activity/activity_catalog_build.h"
 #include "../../activity/entity_position_profile_build.h"
 #include "../../hash_names/hash_name_build.h"
@@ -50,7 +51,7 @@ namespace {
 bool ready() noexcept {
     return root_domains_ready() && state::build_data::scenario_layouts_ready()
            && state::build_data::spawn_sets_ready() && state::build_data::hash_names_ready()
-           && state::build_data::vendor_catalog_ready()
+           && state::build_data::vendor_catalog_ready() && state::build_data::vendors::gates_ready()
            && content::activity::entity_position_profiles::ready()
            && (state::build_data::activities::ready()
                || state::build_data::activities::extraction_failed());
@@ -91,7 +92,7 @@ bool build() noexcept {
             return true;
         }
     }
-    if (root_domains_ready()) {
+    if (root_domains_ready() && state::build_data::vendors::gates_ready()) {
         SecureZeroMemory(&keys, sizeof keys);
         return ready();
     }
@@ -129,7 +130,7 @@ bool build() noexcept {
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
                 || !state::build_data::season_pass_ready() || !reward_definitions_settled()
-                || !exotic_catalysts_settled()) {
+                || !exotic_catalysts_settled() || !state::build_data::vendors::gates_ready()) {
                 reason = "unlock_maps";
                 if (!read_unlock_slot_maps(
                         source, storage, std::span<const std::byte>{storage.root})) {
@@ -248,7 +249,9 @@ bool build() noexcept {
                                             table)
                       && table.elementClass == tables::kItemIndexTableClass;
         }
-        if (located && build_item_rows(source, storage, table, rowCount, reason)) {
+        const bool rowsBuilt = located && !root_domains_ready()
+                               && build_item_rows(source, storage, table, rowCount, reason);
+        if (rowsBuilt) {
             if (!build_material_requirements(
                     source, storage, std::span<const std::byte>{storage.root}, table.count)) {
                 reason = "materials";
@@ -262,6 +265,15 @@ bool build() noexcept {
                 (void)state::build_data::publish_repeatable_bounties(
                     std::span(storage.bountyRows).first(storage.bountyCount));
             }
+        }
+        if (root_domains_ready() && !state::build_data::vendors::gates_ready()) {
+            reason = "vendor_gates";
+            const content::vendors::GateMaps maps{storage.slotMaps.accountFlag,
+                                                  storage.slotMaps.profileFlag,
+                                                  storage.slotMaps.characterFlag,
+                                                  storage.slotMaps.accountValue,
+                                                  storage.slotMaps.characterValue};
+            (void)content::vendors::build_gates(source, storage.scratch, maps);
         }
     }
     SecureZeroMemory(&keys, sizeof keys);

@@ -83,16 +83,22 @@ bool encode(const progressions::Definition& value, ProgressionRecord& record) no
         value.stepOffset,
         value.stepCount,
         static_cast<std::uint8_t>(value.scope),
+        static_cast<std::uint8_t>(value.repeatLastStep),
     };
     return true;
 }
 
 /** Decodes one progression definition; the complete-domain validator checks its step range. */
 bool decode(const ProgressionRecord& record, progressions::Definition& value) noexcept {
+    value = {};
+    if (record.repeatLastStep > 1) {
+        return false;
+    }
     value = {record.definitionIndex,
              record.stepOffset,
              record.stepCount,
-             static_cast<progressions::Scope>(record.scope)};
+             static_cast<progressions::Scope>(record.scope),
+             record.repeatLastStep != 0};
     return true;
 }
 
