@@ -37,7 +37,7 @@ find_device_observation(RuntimeInstance& instance, const host::SenseObservationK
 
 /**
  * Publishes current device levels only when accepted client reports change them. Every client
- * that holds a device body applies it, so only the link the body was staged on reports for it.
+ * that holds a device body applies it, so only the link that simulates the device reports for it.
  * @param instance Bound mission instance retaining previous device levels.
  * @param sense Accepted observations of one link.
  */
@@ -83,6 +83,7 @@ void push_device_edges(RuntimeInstance& instance,
         report.objectTag = observation.key.objectTag;
         report.registryKey = observation.key.registryKey;
         report.slotIndex = observation.key.slotIndex;
+        report.admitted = true;
         for (std::size_t channel = 0; channel < incoming.channels.size(); ++channel) {
             const auto& value = incoming.channels[channel];
             report.channels[channel] = {

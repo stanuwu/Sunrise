@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "../../../core/network_capacity.h"
+
 namespace sunrise::state::activity::mission {
 
 /** One activity generation retains at most 512 script variables. */
@@ -141,6 +143,11 @@ struct DeviceReport final {
     std::uint32_t objectTag{};
     std::uint32_t registryKey{};
     std::uint16_t slotIndex{};
+    /**
+     * The report came from the link that simulates the device now, so an unconfirmed request on it
+     * follows that link. The mission runtime sends only admitted reports.
+     */
+    bool admitted{};
 };
 
 /** Only channels carried by a transported Auth body can renew a device report owner. */
@@ -159,6 +166,9 @@ struct DevicePublicationBoundary final {
     std::uint64_t sourceGeneration{};
     std::uint64_t inputSequence{};
     std::uint64_t clientMessageSequence{};
+    /** Every generation one authenticated link of the activity owned when the frame was built. */
+    std::array<std::uint64_t, core::network_capacity::kActivityPlayers> liveGenerations{};
+    std::uint8_t liveGenerationCount{};
 };
 
 /** Exact SDK program identity bound to one activity-session generation. */
