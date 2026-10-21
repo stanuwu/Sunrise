@@ -551,10 +551,14 @@ void publish_peers(Vm& vm, std::span<const PeerSession> peers) noexcept;
 /** Publishes the durable native attempt before any script callback reads it. */
 void publish_attempt(Vm& vm, state::activity::mission::AttemptState attempt) noexcept;
 /** Copies the latest native device requests without exposing their sequences to Lua. */
-[[nodiscard]] bool
-publish_device_requests(Vm& vm,
-                        std::span<const state::activity::mission::DeviceRequestReport> requests,
-                        std::uint64_t currentActivityClientGeneration) noexcept;
+[[nodiscard]] bool publish_device_requests(
+    Vm& vm, std::span<const state::activity::mission::DeviceRequestReport> requests) noexcept;
+/**
+ * Names the links whose device requests read as applied. A request is applied only by a report
+ * from the link it was pinned to, so one pinned to a link that has left is not read as applied.
+ */
+[[nodiscard]] bool publish_device_sources(Vm& vm,
+                                          std::span<const std::uint64_t> generations) noexcept;
 
 /** Copies the retained Ghost-link levels so a reloaded program can re-read them. */
 void publish_ghost_levels(Vm& vm, std::span<const GhostLinkRow> levels) noexcept;

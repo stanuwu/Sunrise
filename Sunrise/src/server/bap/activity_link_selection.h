@@ -14,6 +14,15 @@ activity_link_for_generation_locked(const state::activity::SessionBinding& bindi
                                     std::size_t& count) noexcept;
 
 /**
+ * Tests one link as a joined carrier for the binding's single mission program: authenticated, on
+ * the exact binding and destination, and, when private, joined for its current generation. Caller
+ * holds the BAP session lock.
+ */
+[[nodiscard]] bool
+joined_mission_link_locked(const Session& session,
+                           const state::activity::SessionBinding& binding) noexcept;
+
+/**
  * Selects a joined transport for the one shared mission program, without changing gameplay
  * authority.
  */

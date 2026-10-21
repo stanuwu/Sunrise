@@ -508,9 +508,11 @@ void record_delivered_target(const state::activity::SessionBinding& binding,
                 binding.sessionId,
                 generation,
                 {pending.target.registryKey, pending.target.slotIndex, pending.target.slotType});
+            // A squad's body lives on the one link it was staged on, so this delivery re-pins the
+            // squad: its rows on any link go. Other squads keep their links' rows.
             std::erase_if(g_targets, [&](const Target& row) {
                 return row.session == binding.sessionId
-                       && (row.revision != binding.createdRevision || row.generation != generation
+                       && (row.revision != binding.createdRevision
                            || (row.eligibility.squad.key == pending.target.registryKey
                                && row.eligibility.squad.index == pending.target.slotIndex));
             });

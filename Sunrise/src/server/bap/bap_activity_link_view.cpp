@@ -57,6 +57,26 @@ void fill_link_view(const Session& session, ActivityLinkView& output) noexcept {
     output.playerKey = encrypted::push::activity::published_player_key(session);
 }
 
+/**
+ * A private member link joined for its current generation. Mission outputs run on a member's
+ * private activity, so only these links can carry one.
+ */
+[[nodiscard]] bool private_route_locked(const Session& session,
+                                        const state::activity::SessionBinding& binding) noexcept {
+    return session.activity.role == ActivityClientRole::privateCurrent
+           && joined_mission_link_locked(session, binding);
+}
+
+/** Copies one selected link's common-root inputs. */
+void copy_replication_view(const Session& session, ActivityReplicationView& output) noexcept {
+    output.binding = session.activity.session;
+    output.patchEpoch = session.activityPatchEpoch.value;
+    output.activityClientGeneration = session.activity.bindingGeneration;
+    output.groupSessionId = session.activity.groupSessionId;
+    output.memberId = session.activityMemberKey;
+    output.replicationEpoch = session.activity.replicationEpoch;
+}
+
 } // namespace
 
 /** Region index this connection's msg-5 builder selects. */
@@ -105,6 +125,73 @@ bool mission_activity_link_view(const state::activity::SessionBinding& binding,
         fill_link_view(*session, output);
     }
     return session != nullptr;
+}
+
+std::size_t mission_route_candidates(const state::activity::SessionBinding& binding,
+                                     std::span<const std::uint64_t> preferred,
+                                     std::uint64_t routeGeneration,
+                                     std::span<ActivityLinkView> output) noexcept {
+    if (!binding.sessionId || !binding.createdRevision) {
+        return 0;
+    }
+    const std::shared_lock lock(session_lock());
+    std::size_t count = 0;
+    const auto listed = [&](std::uint64_t generation) noexcept {
+        return std::any_of(output.begin(),
+                           output.begin() + static_cast<std::ptrdiff_t>(count),
+                           [generation](const ActivityLinkView& view) noexcept {
+                               return view.activityClientGeneration == generation;
+                           });
+    };
+    const auto append = [&](const Session& session) noexcept {
+        std::size_t matching = 0;
+        // A generation two links claim is ambiguous, so neither of them carries output.
+        if (activity_link_for_generation_locked(
+                binding, session.activity.bindingGeneration, matching)
+            != &session) {
+            return;
+        }
+        output[count] = {};
+        fill_link_view(session, output[count]);
+        output[count].matchingLinks = 1;
+        ++count;
+    };
+    const auto append_generation = [&](std::uint64_t generation) noexcept {
+        if (generation == 0 || count == output.size() || listed(generation)) {
+            return;
+        }
+        for (const Session& session : sessions()) {
+            if (session.activity.bindingGeneration == generation
+                && private_route_locked(session, binding)) {
+                append(session);
+                return;
+            }
+        }
+    };
+    for (const std::uint64_t generation : preferred) {
+        append_generation(generation);
+    }
+    append_generation(routeGeneration);
+    // Ascending generation keeps the order stable as players arrive, like the route itself.
+    std::uint64_t previousGeneration = 0;
+    while (count < output.size()) {
+        const Session* next = nullptr;
+        for (const Session& session : sessions()) {
+            const std::uint64_t generation = session.activity.bindingGeneration;
+            if (generation > previousGeneration && private_route_locked(session, binding)
+                && (next == nullptr || generation < next->activity.bindingGeneration)) {
+                next = &session;
+            }
+        }
+        if (next == nullptr) {
+            break;
+        }
+        previousGeneration = next->activity.bindingGeneration;
+        if (!listed(previousGeneration)) {
+            append(*next);
+        }
+    }
+    return count;
 }
 
 bool activity_link_view(const state::activity::SessionBinding& binding,

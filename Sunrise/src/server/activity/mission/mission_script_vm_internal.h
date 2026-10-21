@@ -108,7 +108,8 @@ struct CallFrame final {
 struct Impl final {
     state::activity::mission::AttemptState attempt{};
     std::vector<state::activity::mission::DeviceRequestReport> deviceRequests{};
-    std::uint64_t deviceRequestGeneration{};
+    /** Links whose device requests read as applied: the route and every joined private link. */
+    std::vector<std::uint64_t> deviceRequestSources{};
     std::vector<state::activity::mission::SquadPopulation> squadPopulations{};
     /** Ghost-link levels the runtime last published, readable outside their own callback. */
     std::array<GhostLinkRow, kGhostLinkCapacity> ghostLevels{};

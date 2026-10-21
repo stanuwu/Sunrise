@@ -483,6 +483,34 @@ bool scriptable_auth_estate(const state::activity::SessionBinding& binding,
     return copied;
 }
 
+bool scriptable_auth_pins(const state::activity::SessionBinding& binding,
+                          std::span<ScriptablePin> output,
+                          std::size_t& count) noexcept {
+    count = 0;
+    AcquireSRWLockShared(&g_lock);
+    const Instance* const instance = find_instance(binding);
+    bool copied = true;
+    if (instance != nullptr && instance->view.active) {
+        const std::vector<PendingScriptableOverride>& estate = instance->scriptableAuthEstate;
+        copied = estate.size() <= output.size();
+        // Never filter by ActivityClient generation: it advances on region advertisements.
+        for (std::size_t index = 0; copied && index < estate.size(); ++index) {
+            const ScriptableTarget& target = estate[index].target;
+            output[index] = {
+                .expectedActivityClientGeneration = estate[index].expectedActivityClientGeneration,
+                .registryKey = target.registryKey,
+                .objectTag = target.objectTag,
+                .slotIndex = target.slotIndex,
+                .slotType = target.slotType,
+                .kind = estate[index].kind,
+            };
+        }
+        count = copied ? estate.size() : 0;
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return copied;
+}
+
 namespace detail {
 
 /** Encodes one type-31 arm or disarm. */

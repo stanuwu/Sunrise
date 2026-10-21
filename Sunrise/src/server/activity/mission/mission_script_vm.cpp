@@ -662,14 +662,23 @@ void publish_attempt(Vm& vm, state::activity::mission::AttemptState attempt) noe
 
 /** Copies native device request facts into the current VM attachment. */
 bool publish_device_requests(
-    Vm& vm,
-    std::span<const state::activity::mission::DeviceRequestReport> requests,
-    std::uint64_t currentActivityClientGeneration) noexcept {
+    Vm& vm, std::span<const state::activity::mission::DeviceRequestReport> requests) noexcept {
     Impl& impl = VmAccess::get(vm);
-    impl.deviceRequestGeneration = currentActivityClientGeneration;
     try {
         impl.deviceRequests.assign(requests.begin(), requests.end());
     } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return true;
+}
+
+/** Copies the links whose device requests read as applied into the current VM attachment. */
+bool publish_device_sources(Vm& vm, std::span<const std::uint64_t> generations) noexcept {
+    Impl& impl = VmAccess::get(vm);
+    try {
+        impl.deviceRequestSources.assign(generations.begin(), generations.end());
+    } catch (const std::bad_alloc&) {
+        impl.deviceRequestSources.clear();
         return false;
     }
     return true;

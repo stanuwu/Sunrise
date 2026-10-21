@@ -18,6 +18,7 @@ bool observe_population(
     }
     mission_state::SquadPopulationReport report{};
     report.attemptGeneration = instance.dispatchAttemptGeneration;
+    report.sourceGeneration = observation.sourceGeneration;
     report.inputSequence = instance.dispatchInputSequence;
     report.clientMessageSequence = observation.clientMessageSequence;
     report.objectTag = observation.key.objectTag;

@@ -36,14 +36,14 @@ find_device_observation(RuntimeInstance& instance, const host::SenseObservationK
 } // namespace
 
 /**
- * Publishes current device levels only when accepted client reports change them.
+ * Publishes current device levels only when accepted client reports change them. Every client
+ * that holds a device body applies it, so only the link the body was staged on reports for it.
  * @param instance Bound mission instance retaining previous device levels.
- * @param sense Accepted observations for its current client generation.
+ * @param sense Accepted observations of one link.
  */
 void push_device_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept {
-    if (sense.sourceGeneration != instance.view.activityClientGeneration
-        || sense.observationCount > sense.observations.size()
+    if (sense.observationCount > sense.observations.size()
         || sense.valueCount > sense.values.size()) {
         return;
     }
@@ -53,7 +53,8 @@ void push_device_edges(RuntimeInstance& instance,
             || observation.key.slotType != kDeviceSenseSlotType
             || observation.key.senseSchema != kDeviceSenseSchema
             || observation.firstValue > sense.valueCount
-            || observation.valueCount > sense.valueCount - observation.firstValue) {
+            || observation.valueCount > sense.valueCount - observation.firstValue
+            || !admitted_report(instance, observation.key, sense.sourceGeneration)) {
             continue;
         }
         auto* const row = find_device_observation(instance, observation.key);
@@ -61,6 +62,7 @@ void push_device_edges(RuntimeInstance& instance,
             log_line(core::log::Level::warn, &instance, "device_state", "watch_capacity");
             continue;
         }
+        claim_row(*row, sense.sourceGeneration, false);
         const bool first = !row->level.observed;
         bool reset = false;
         const auto body =

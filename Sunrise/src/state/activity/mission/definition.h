@@ -51,10 +51,15 @@ struct AttemptState final {
 /** Squad Sense publishes a six-bit alive count. */
 inline constexpr std::int32_t kMaximumSquadAlive = 63;
 
-/** Count evidence belongs to one transported placement and its echoed spawn generation. */
+/**
+ * Count evidence belongs to one transported placement and its echoed spawn generation, as the
+ * client of the link that carried the placement reports it.
+ */
 struct SquadPopulation final {
     std::uint64_t requestKey{};
     std::uint64_t attemptGeneration{};
+    /** Link the placement was staged on; only its client simulates the squad. */
+    std::uint64_t sourceGeneration{};
     std::uint64_t inputSequenceAtStage{};
     std::uint64_t clientMessageSequenceAtStage{};
     std::uint64_t lastInputSequence{};
@@ -75,6 +80,8 @@ struct SquadPopulation final {
 /** Only present generation, alive and created fields can update a population observation. */
 struct SquadPopulationReport final {
     std::uint64_t attemptGeneration{};
+    /** Link whose client sent the report. */
+    std::uint64_t sourceGeneration{};
     std::uint64_t inputSequence{};
     std::uint64_t clientMessageSequence{};
     std::uint32_t objectTag{};

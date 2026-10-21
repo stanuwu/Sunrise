@@ -11,12 +11,14 @@
 
 #include "../../../core/filesystem/path.h"
 #include "../../../core/logging/log.h"
+#include "../../../state/activity/entity_slots/member_leases.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
 #include "../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../state/activity_sdk/runtime.h"
 #include "../host_runtime.h"
 #include "mission_member_life.h"
+#include "mission_output_route.h"
 #include "mission_script_actor_path_sense.h"
 #include "mission_script_combatant_damage_sense.h"
 #include "mission_script_device_sense.h"
@@ -110,6 +112,8 @@ constexpr std::size_t kObjectiveTaskCapacity = 24;
 constexpr std::uint64_t kTransportTimeoutMs = 15'000;
 /** How long an enqueued Host output may take to reach the reducer before it is reconciled. */
 constexpr std::uint64_t kHostCommitTimeoutMs = 2'000;
+/** The route, which may not be joined, then every joined private link of the party. */
+constexpr std::size_t kLiveLinkCapacity = state::activity::entity_slots::kMemberLeaseRowCount + 1;
 
 /** Last occupancy seen for one watched volume, so only a change raises an edge. */
 struct TriggerOccupancy final {
@@ -125,6 +129,8 @@ struct TriggerOccupancy final {
 /** Last movement and delivery level seen for one named actor, so only a change raises an event. */
 struct ActorPathObservation final {
     ActorPathLevel level{};
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -133,6 +139,8 @@ struct ActorPathObservation final {
 
 /** Last health, shield and revision seen for one damage monitor. */
 struct DamageObservation final {
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -145,24 +153,30 @@ struct DamageObservation final {
 /** Last damage-pool observation for one exact Type-2 source. */
 struct CombatantDamageObservation final {
     CombatantDamageLevel level{};
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
     bool used{};
 };
 
-/** Last published pools of one entity the selected owner's admitted source reports. */
+/** Last published pools of one entity an admitted entity source reports. */
 struct EntityDamageObservation final {
     state::gameplay::entity_identity::Token token{};
     state::gameplay::entity_identity::ActorSourceReference actorSource{};
     state::gameplay::entity_identity::DamagePools damage{};
     std::uint64_t allocationDomain{};
+    /** Link whose entity source reported it. Network slots are unique only within one source. */
+    std::uint64_t sourceGeneration{};
     std::uint8_t allocationSequence{}, allocationEpoch{};
     bool used{};
 };
 /** Last reported current values for one exact Type-23 source. */
 struct DeviceObservation final {
     DeviceLevel level{};
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -172,6 +186,8 @@ struct DeviceObservation final {
 /** Last object and interaction level seen for one interactable object. */
 struct ObjectInteractionObservation final {
     ObjectInteractionLevel level{};
+    /** Link whose reports the shared object state was read from. */
+    std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -191,6 +207,8 @@ struct GhostObservation final {
 struct SquadObservation final {
     SquadObjectiveCosts objectiveCosts{};
     std::array<std::int32_t, host::kSquadSlotCapacity> slotCounts{};
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::int32_t aliveCount{};
@@ -208,6 +226,8 @@ struct SquadObservation final {
 struct SceneObservation final {
     /** Output keys this run has reported. A scene's Sense list holds at most 32 keys. */
     std::array<std::uint32_t, 32> outputs{};
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     /** Activation token of the run the outputs belong to; a new token starts a new run. */
@@ -221,6 +241,8 @@ struct SceneObservation final {
 /** Last task counters seen for one watched objective sensor, so only a rise raises an event. */
 struct ObjectiveObservation final {
     std::array<std::array<std::uint8_t, kObjectiveTaskCapacity>, kObjectiveCapacity> counters{};
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -247,6 +269,13 @@ struct MemberInputState final {
     bool present{};
 };
 
+/** The entity source last polled for one link. */
+struct EntityDamageSource final {
+    state::gameplay::entity_identity::Source source{};
+    /** Set once this source's rows ran out, so its warning is logged once. */
+    bool atCapacity{};
+};
+
 /** Everything one bound mission program owns: its VM, views, delivery state and counters. */
 struct RuntimeInstance final {
     mission_state::AttemptState attempt{};
@@ -255,11 +284,25 @@ struct RuntimeInstance final {
     lua_vm::Vm vm{};
     sdk::BoundView view{};
     generated::GeneratedWorldView worldView{};
-    state::gameplay::entity_identity::Source damageEntitySource{};
-    /** Entities of damageEntitySource whose pools were published; they reset with it. */
+    /**
+     * Pins of the binding's retained Auth bodies, copied once per Sense dispatch that reads shared
+     * simulation and once per entity poll. They say which link simulates each target, so every
+     * admission in that pass reads one copy.
+     */
+    std::array<host::ScriptablePin, host::kScriptablePinCapacity> pins{};
+    std::size_t pinCount{};
+    /** The full retained bodies, copied only for a squad edge that reads its objective. */
+    std::vector<host::PendingScriptableOverride> estate{};
+    /** Set once `estate` holds the copy of the pass the pins belong to. */
+    bool estateCopied{};
+    /** The route and every joined private link of the binding, read once per service pass. */
+    std::array<std::uint64_t, kLiveLinkCapacity> liveLinks{};
+    std::size_t liveLinkCount{};
+    /** The entity source last polled for each link, at most one per ActivityClient generation. */
+    std::array<EntityDamageSource, state::gameplay::entity_identity::kSourceCapacity>
+        damageEntitySources{};
+    /** Entities whose pools were published, each under its source; they reset with it. */
     std::array<EntityDamageObservation, kSquadObservationCapacity> entityDamageObservations{};
-    /** Set once the retained rows ran out for this source, so the warning is logged once. */
-    bool entityDamageAtCapacity{};
     std::uint64_t nextEntityDamageTick{};
     lua_vm::ProgramIdentity identity{};
     mission_state::ProgramKey programKey{};
@@ -291,6 +334,9 @@ struct RuntimeInstance final {
     std::array<DeviceObservation, kDeviceObservationCapacity> deviceObservations{};
     std::array<ObjectInteractionObservation, kObjectInteractionObservationCapacity>
         objectInteractionObservations{};
+    /** Object state is world state, so it keeps one history: the link that simulates the object. */
+    std::array<ObjectInteractionObservation, kObjectInteractionObservationCapacity>
+        objectStateObservations{};
     std::array<ActorPathObservation, kActorPathObservationCapacity> actorPathObservations{};
     std::array<SceneObservation, kSceneObservationCapacity> sceneObservations{};
     std::array<ObjectiveObservation, kObjectiveObservationCapacity> objectiveObservations{};
@@ -345,8 +391,7 @@ inline void reset_member_observations(RuntimeInstance& instance) noexcept {
         member.objectInteractionObservations.fill({});
     }
     instance.entityDamageObservations.fill({});
-    instance.entityDamageAtCapacity = false;
-    instance.damageEntitySource = {};
+    instance.damageEntitySources.fill({});
     instance.nextEntityDamageTick = 0;
 }
 
@@ -354,10 +399,92 @@ inline void reset_member_observations(RuntimeInstance& instance) noexcept {
 inline void reset_shared_observations(RuntimeInstance& instance) noexcept {
     clear_sense_levels(instance);
     instance.entityDamageObservations.fill({});
-    instance.entityDamageAtCapacity = false;
-    instance.damageEntitySource = {};
+    instance.damageEntitySources.fill({});
     instance.nextEntityDamageTick = 0;
     instance.activeRegion = -1;
+}
+
+/**
+ * The program's view through another joined link of its binding. The host applies an output in the
+ * bubble that owns its target, and the link whose client holds that bubble carries it; the
+ * program's route is only one such link.
+ */
+[[nodiscard]] inline sdk::BoundView routed_view(const RuntimeInstance& instance,
+                                                std::uint64_t generation) noexcept {
+    sdk::BoundView view = instance.view;
+    view.activityClientGeneration = generation;
+    return view;
+}
+
+/** @return The route and every joined private link this service pass read. */
+[[nodiscard]] inline std::span<const std::uint64_t>
+live_links(const RuntimeInstance& instance) noexcept {
+    return std::span(instance.liveLinks).first(instance.liveLinkCount);
+}
+
+/** @return The pins this pass copied. */
+[[nodiscard]] inline std::span<const host::ScriptablePin>
+pass_pins(const RuntimeInstance& instance) noexcept {
+    return std::span(instance.pins).first(instance.pinCount);
+}
+
+/** @return The link that simulates one target, read from this pass's pins and live links. */
+[[nodiscard]] inline std::uint64_t simulating_link(const RuntimeInstance& instance,
+                                                   const OutputClientRef& ref) noexcept {
+    return admitted_generation(
+        pass_pins(instance), ref, instance.view.activityClientGeneration, live_links(instance));
+}
+
+/** @return The ClientRef one Sense report names. */
+[[nodiscard]] inline OutputClientRef
+report_client_ref(const host::SenseObservationKey& key) noexcept {
+    return {.registryKey = key.registryKey, .slotIndex = key.slotIndex, .slotType = key.slotType};
+}
+
+/**
+ * Admits one shared simulation report against the pins copied for this pass.
+ * @return True when the report came from the link that simulates its target.
+ */
+[[nodiscard]] inline bool admitted_report(const RuntimeInstance& instance,
+                                          const host::SenseObservationKey& key,
+                                          std::uint64_t sourceGeneration) noexcept {
+    return sourceGeneration != 0
+           && sourceGeneration == simulating_link(instance, report_client_ref(key));
+}
+
+/**
+ * The actor-command policy row is this program's one registration for a squad, made on the link
+ * the command was carried by, so a provocation from any link that can still carry the program's
+ * output is the squad's own. The lane latches the squad and never reports it again.
+ * @param sourceGeneration ActivityClient generation that owns the policy.
+ * @return True when the provocation is admitted.
+ */
+[[nodiscard]] inline bool admitted_provocation(const RuntimeInstance& instance,
+                                               std::uint64_t sourceGeneration) noexcept {
+    const auto live = live_links(instance);
+    return sourceGeneration != 0
+           && (sourceGeneration == instance.view.activityClientGeneration
+               || std::find(live.begin(), live.end(), sourceGeneration) != live.end());
+}
+
+/**
+ * Hands a retained row to the link whose report was admitted. Another link's levels are not this
+ * link's, so a rejoin or re-delivery that re-pins the target starts the row over as a first
+ * sighting instead of comparing against them.
+ * @param allocatedUsed The used flag a newly allocated row of this table carries.
+ */
+template <typename Row>
+void claim_row(Row& row, std::uint64_t sourceGeneration, bool allocatedUsed) noexcept {
+    if (row.sourceGeneration == sourceGeneration) {
+        return;
+    }
+    Row fresh{};
+    fresh.sourceGeneration = sourceGeneration;
+    fresh.registryKey = row.registryKey;
+    fresh.objectTag = row.objectTag;
+    fresh.slotIndex = row.slotIndex;
+    fresh.used = allocatedUsed;
+    row = fresh;
 }
 
 /** Writes one bounded mission-script diagnostic line. Fields are key=value, error is free text. */
@@ -393,8 +520,7 @@ void push_actor_path_edges(RuntimeInstance& instance,
 /** Raises one event per damage monitor whose health, shield or revision changed. */
 void push_damage_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;
-/** Raises the entity pools of the selected owner's admitted source that changed since the last
- * poll. */
+/** Raises the entity pools that changed since the last poll, each from its simulating link. */
 void push_entity_damage_edges(RuntimeInstance& instance, std::uint64_t now) noexcept;
 /** @return True while a queued entity damage event still names its admitted source and allocation.
  */
@@ -421,6 +547,19 @@ void push_ghost_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept;
 /** Hands the VM the retained Ghost-link levels, so a callback can read one it did not receive. */
 void publish_ghost_levels(RuntimeInstance& instance) noexcept;
+/** @return True when a Sense snapshot carries a report whose admission reads the pins. */
+[[nodiscard]] bool reads_pins(const host::SenseObservationSnapshot& sense) noexcept;
+/**
+ * Reads the route and every joined private link of the binding into the instance.
+ * @return True when the set differs from the one read before.
+ */
+[[nodiscard]] bool read_live_links(RuntimeInstance& instance) noexcept;
+/**
+ * Tells the VM which links' device requests it may read as applied: the live links last read. A
+ * request pinned to a link that has left reads as not applied.
+ * @return False when the list could not be retained.
+ */
+[[nodiscard]] bool publish_device_sources(const RuntimeInstance& instance, lua_vm::Vm& vm) noexcept;
 /** Raises the squad state, spawn and death events derived from one msg 6 body. */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept;
@@ -487,6 +626,37 @@ void persist_mission_fault(RuntimeInstance& instance) noexcept;
 /** Faults both the VM and the exact server-owned mission record. */
 void fault_instance(RuntimeInstance& instance, std::string_view reason) noexcept;
 
+/**
+ * Copies the pins of the binding's retained bodies for this pass. Sense is a sparse delta, so a
+ * report that could not be admitted would leave its row behind for good; a failed copy faults.
+ * @return False when the copy failed and the instance was faulted.
+ */
+[[nodiscard]] inline bool copy_pins(RuntimeInstance& instance) noexcept {
+    instance.estateCopied = false;
+    if (host::scriptable_auth_pins(instance.view.binding, instance.pins, instance.pinCount)) {
+        return true;
+    }
+    fault_instance(instance, "retained pin copy failed");
+    return false;
+}
+
+/**
+ * Copies the full retained bodies once for the pass the pins belong to.
+ * @return False when the copy failed and the instance was faulted.
+ */
+[[nodiscard]] inline bool copy_estate(RuntimeInstance& instance) noexcept {
+    if (instance.estateCopied) {
+        return true;
+    }
+    if (!host::scriptable_auth_estate(
+            instance.view.binding, instance.view.activityClientGeneration, instance.estate)) {
+        fault_instance(instance, "retained estate copy failed");
+        return false;
+    }
+    instance.estateCopied = true;
+    return true;
+}
+
 // The delivery unit owns these. The runtime unit's service slice calls into them.
 
 /** @return now plus delay, saturated at the maximum instead of wrapping. */
@@ -542,8 +712,9 @@ void report_intent_status(RuntimeInstance& instance,
 // The dispatch unit owns this. The runtime unit's service slice calls it.
 
 /** Resolves a durable SDK actor command through the installed native policy. */
-[[nodiscard]] ActorCommandPolicyStatus
-dispatch_actor_command(const RuntimeInstance& instance, const lua_vm::Intent& intent) noexcept;
+[[nodiscard]] ActorCommandPolicyStatus dispatch_actor_command(const RuntimeInstance& instance,
+                                                              const lua_vm::Intent& intent,
+                                                              std::uint64_t generation) noexcept;
 
 /** Raises one queued intent, or advances the delivery already in flight. */
 void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept;

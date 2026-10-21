@@ -1000,6 +1000,29 @@ pending_scriptable_tail(const state::activity::SessionBinding& binding,
                                           std::uint64_t activityClientGeneration,
                                           std::vector<PendingScriptableOverride>& output) noexcept;
 
+/** What admission reads of one retained Auth body: its ClientRef, its kind and its link. */
+struct ScriptablePin final {
+    /** ActivityClient generation the body was staged on. */
+    std::uint64_t expectedActivityClientGeneration{};
+    std::uint32_t registryKey{};
+    std::uint32_t objectTag{};
+    std::uint16_t slotIndex{};
+    std::uint8_t slotType{};
+    ScriptableOverrideKind kind{ScriptableOverrideKind::type23};
+};
+
+/** Every retained body is staged against one exact ClientRef counter, which bounds the estate. */
+inline constexpr std::size_t kScriptablePinCapacity = kScriptableGuardCapacity;
+
+/**
+ * Copies the pin of every retained Auth body of one binding, without the body bytes.
+ * @param count Receives the number of rows written.
+ * @return False when the estate does not fit the output; nothing is written then.
+ */
+[[nodiscard]] bool scriptable_auth_pins(const state::activity::SessionBinding& binding,
+                                        std::span<ScriptablePin> output,
+                                        std::size_t& count) noexcept;
+
 /** Queues a native objective decision after both SDK slot identities are validated. */
 [[nodiscard]] bool
 request_squad_objective(const state::activity::SessionBinding& binding,

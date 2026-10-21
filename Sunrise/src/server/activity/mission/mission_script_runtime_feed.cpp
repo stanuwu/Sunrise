@@ -504,14 +504,21 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
                                   const host::ClientMessageSnapshot* clientMessage,
                                   std::uint64_t now) noexcept {
     if (instance.programStatus == ProgramStatus::missing
-        && event.kind == host::EventKind::senseUpdate && sense != nullptr
-        && sense->sourceGeneration == instance.view.activityClientGeneration) {
-        push_squad_edges(instance, *sense);
+        && event.kind == host::EventKind::senseUpdate && sense != nullptr) {
+        // Without a program only squad baselines are seeded, and each from its simulating link.
+        if (reads_pins(*sense) && copy_pins(instance)) {
+            push_squad_edges(instance, *sense);
+        }
         return lua_vm::CallStatus::inactive;
     }
     if (instance.programStatus != ProgramStatus::loaded || !eligible_event(instance, event)
         || (event.damageFromEntity && !current_entity_damage(event))) {
         return lua_vm::CallStatus::inactive;
+    }
+    // Every shared report and Ghost level this dispatch raises reads the same copy.
+    if (event.kind == host::EventKind::senseUpdate && sense != nullptr && reads_pins(*sense)
+        && !copy_pins(instance)) {
+        return lua_vm::CallStatus::scriptError;
     }
     ++instance.eventsSeen;
     // The three region numbers the script is about to read. A report restates only the leg it
@@ -564,17 +571,16 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         push_trigger_edges(instance, *sense);
         push_ghost_edges(instance, *sense);
         push_object_interaction_edges(instance, *sense);
-        // Shared counters/actor feedback keep one observation stream. Member-local levels
-        // above use separate source histories and cannot impersonate shared simulation output.
-        if (sense->sourceGeneration == instance.view.activityClientGeneration) {
-            push_damage_edges(instance, *sense);
-            push_actor_path_edges(instance, *sense);
-            push_squad_edges(instance, *sense);
-            push_combatant_damage_edges(instance, *sense);
-            push_device_edges(instance, *sense);
-            push_scene_edges(instance, *sense);
-            push_objective_edges(instance, *sense);
-        }
+        // Shared counters and actor feedback keep one observation stream per target: the link
+        // that simulates it. Member-local levels above use separate source histories and cannot
+        // impersonate shared simulation output.
+        push_damage_edges(instance, *sense);
+        push_actor_path_edges(instance, *sense);
+        push_squad_edges(instance, *sense);
+        push_combatant_damage_edges(instance, *sense);
+        push_device_edges(instance, *sense);
+        push_scene_edges(instance, *sense);
+        push_objective_edges(instance, *sense);
     }
     instance.dispatchAttemptGeneration = 0;
     instance.dispatchInputSequence = 0;

@@ -26,6 +26,16 @@ const Session* activity_link_for_generation_locked(const state::activity::Sessio
     }
     return count == 1 ? selected : nullptr;
 }
+bool joined_mission_link_locked(const Session& session,
+                                const state::activity::SessionBinding& binding) noexcept {
+    return session.id != 0 && session.authenticated && session.activity.bindingGeneration != 0
+           && session.activity.role != ActivityClientRole::none
+           && state::activity::same_binding(session.activity.session, binding)
+           && state::activity::transactions::same_destination(session.activity.session.destination,
+                                                              binding.destination)
+           && (session.activity.role != ActivityClientRole::privateCurrent
+               || session.activityJoinGeneration == session.activity.bindingGeneration);
+}
 const Session* mission_activity_link_locked(const state::activity::SessionBinding& binding,
                                             std::size_t& count) noexcept {
     count = 0;
@@ -34,13 +44,7 @@ const Session* mission_activity_link_locked(const state::activity::SessionBindin
     }
     const Session* selected = nullptr;
     for (const auto& session : sessions()) {
-        if (!session.id || !session.authenticated || !session.activity.bindingGeneration
-            || session.activity.role == ActivityClientRole::none
-            || !state::activity::same_binding(session.activity.session, binding)
-            || !state::activity::transactions::same_destination(
-                session.activity.session.destination, binding.destination)
-            || (session.activity.role == ActivityClientRole::privateCurrent
-                && session.activityJoinGeneration != session.activity.bindingGeneration)) {
+        if (!joined_mission_link_locked(session, binding)) {
             continue;
         }
         // This chooses a BAP delivery route, not the client that simulates the enemies.

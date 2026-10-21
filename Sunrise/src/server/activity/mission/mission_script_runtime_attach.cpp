@@ -378,6 +378,13 @@ enum class InitialStateGate : std::uint8_t {
         return AttachResult::programError;
     }
     instance.programStatus = ProgramStatus::loaded;
+    // on_load and on_start may read a device request as applied, which needs the live links now.
+    static_cast<void>(read_live_links(instance));
+    if (!publish_device_sources(instance, instance.vm)) {
+        lua_vm::fault(instance.vm, "device request source allocation failed");
+        instance.programStatus = ProgramStatus::programError;
+        return AttachResult::programError;
+    }
     // The first read records the current peers, so a reattach never replays them.
     push_session_roster_edges(instance);
     instance.initialStateDeclared =

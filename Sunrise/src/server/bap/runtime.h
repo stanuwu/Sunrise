@@ -174,6 +174,21 @@ activity_link_count(const state::activity::SessionBinding& binding) noexcept;
 [[nodiscard]] bool mission_activity_link_view(const state::activity::SessionBinding& binding,
                                               ActivityLinkView& output) noexcept;
 
+/**
+ * Lists the joined private links that can carry the mission program's output. The host applies an
+ * output in the bubble that owns its target, so the link whose client holds that bubble carries it;
+ * the program's route is only one of them.
+ * @param preferred Generations listed first, in this order, when each is a joined private link.
+ * @param routeGeneration The program's route, listed next under the same condition.
+ * @param output Receives those, then the other links by ascending generation, each once; public
+ * targets, unjoined links and generations two links claim are left out.
+ * @return The number of views written, at most output.size().
+ */
+[[nodiscard]] std::size_t mission_route_candidates(const state::activity::SessionBinding& binding,
+                                                   std::span<const std::uint64_t> preferred,
+                                                   std::uint64_t routeGeneration,
+                                                   std::span<ActivityLinkView> output) noexcept;
+
 /** Exact committed player identity; duplicate or loading links do not supply life evidence. */
 [[nodiscard]] bool mission_member_link_view(const state::activity::SessionBinding& binding,
                                             const state::activity::membership::Identity& identity,

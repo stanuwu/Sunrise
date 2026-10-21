@@ -80,10 +80,14 @@ mission_input_allowed(host::EventKind kind, bool selectedSource, bool currentMem
                         && live.activityClientGeneration == event.sourceGeneration;
         break;
     }
+    // Entity damage keeps the generation of the entity source it was read from, because the
+    // dispatch revalidates that source. The poll already admitted it from the link that simulates
+    // its combatant, so any joined link of the binding may carry it.
     server::bap::ActivityLinkView selected{};
     const bool selectedSource =
         event.sourceGeneration != 0
-        && event.sourceGeneration == instance.view.activityClientGeneration
+        && (event.sourceGeneration == instance.view.activityClientGeneration
+            || event.damageFromEntity)
         && server::bap::activity_link_view(instance.view.binding, event.sourceGeneration, selected)
         && selected.joined;
     if (!mission_input_allowed(event.kind, selectedSource, currentMember)) {

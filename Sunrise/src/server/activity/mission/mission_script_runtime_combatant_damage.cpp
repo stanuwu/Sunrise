@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdio>
 #include <span>
 
@@ -94,21 +95,25 @@ namespace {
 /** What one poll of the entity registry carries through the walk and out of the lock. */
 struct EntityDamageScan final {
     RuntimeInstance* instance{};
+    /** Link whose entity source this walk reads. */
+    std::uint64_t sourceGeneration{};
     std::array<state::gameplay::entity_identity::Identity, kSquadObservationCapacity> changed{};
     std::size_t changedCount{};
     std::size_t overflow{};
 };
 
 /**
- * Retains each entity under its network slot; a reused slot replaces the earlier incarnation.
+ * Retains each entity under its source's network slot; a reused slot replaces the earlier
+ * incarnation.
  * @return The matching or free row, or null at capacity.
  */
 [[nodiscard]] EntityDamageObservation*
 find_entity_damage(RuntimeInstance& instance,
+                   std::uint64_t sourceGeneration,
                    state::gameplay::entity_identity::Token token) noexcept {
     EntityDamageObservation* spare = nullptr;
     for (auto& row : instance.entityDamageObservations) {
-        if (row.used && row.token.slot == token.slot) {
+        if (row.used && row.sourceGeneration == sourceGeneration && row.token.slot == token.slot) {
             return &row;
         }
         if (!row.used && spare == nullptr) {
@@ -134,7 +139,8 @@ observe_entity_damage(void* context,
             && !row.damage.present[identities::kShieldPoolIndex])) {
         return true;
     }
-    EntityDamageObservation* const retained = find_entity_damage(*scan.instance, row.token);
+    EntityDamageObservation* const retained =
+        find_entity_damage(*scan.instance, scan.sourceGeneration, row.token);
     if (retained == nullptr) {
         ++scan.overflow;
         return true;
@@ -151,6 +157,7 @@ observe_entity_damage(void* context,
     retained->allocationDomain = row.allocationDomain;
     retained->allocationSequence = row.allocationSequence;
     retained->allocationEpoch = row.allocationEpoch;
+    retained->sourceGeneration = scan.sourceGeneration;
     retained->used = true;
     // Every changed row owns a retained row, so the retained capacity bounds this array too.
     if (scan.changedCount < scan.changed.size()) {
@@ -191,67 +198,124 @@ observe_entity_damage(void* context,
                                : kUnknownDamageLevel;
 }
 
-/** Forgets the source's published pools; a replacement source reports levels of its own. */
-void reset_entity_damage(RuntimeInstance& instance) noexcept {
-    instance.entityDamageObservations.fill({});
-    instance.entityDamageAtCapacity = false;
-    instance.damageEntitySource = {};
+/** Forgets one link's published pools and its capacity warning; a replacement source starts over.
+ */
+void reset_entity_damage(RuntimeInstance& instance, std::uint64_t sourceGeneration) noexcept {
+    for (auto& row : instance.entityDamageObservations) {
+        if (row.used && row.sourceGeneration == sourceGeneration) {
+            row = {};
+        }
+    }
+    for (auto& retained : instance.damageEntitySources) {
+        if (retained.source.activityClientGeneration == sourceGeneration) {
+            retained = {};
+        }
+    }
+}
+
+/** @return The source retained for one link, or null when none is. */
+[[nodiscard]] EntityDamageSource* retained_entity_source(RuntimeInstance& instance,
+                                                         std::uint64_t sourceGeneration) noexcept {
+    for (auto& retained : instance.damageEntitySources) {
+        if (retained.source.activityClientGeneration == sourceGeneration) {
+            return &retained;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * Lists the links whose entity sources one poll reads: the route, then each live link a retained
+ * body is pinned to, because the client holding a target's body simulates its entities.
+ * @return The number of generations written.
+ */
+[[nodiscard]] std::size_t entity_damage_generations(const RuntimeInstance& instance,
+                                                    std::span<std::uint64_t> output) noexcept {
+    std::size_t count = 0;
+    const auto add = [&](std::uint64_t generation) noexcept {
+        const auto written = output.begin() + static_cast<std::ptrdiff_t>(count);
+        if (generation != 0 && count < output.size()
+            && std::find(output.begin(), written, generation) == written) {
+            output[count++] = generation;
+        }
+    };
+    add(instance.view.activityClientGeneration);
+    const auto live = live_links(instance);
+    for (const host::ScriptablePin& pin : pass_pins(instance)) {
+        if (std::find(live.begin(), live.end(), pin.expectedActivityClientGeneration)
+            != live.end()) {
+            add(pin.expectedActivityClientGeneration);
+        }
+    }
+    return count;
+}
+
+/**
+ * @return The link whose entity source speaks for one combatant, by the same chain its Sense
+ * reports are admitted by. Another link's copy of it is not its simulation.
+ */
+[[nodiscard]] std::uint64_t
+entity_damage_generation(const RuntimeInstance& instance,
+                         const state::gameplay::entity_identity::Identity& row) noexcept {
+    return simulating_link(instance,
+                           {.registryKey = row.actorSource.key,
+                            .slotIndex = row.actorSource.index,
+                            .slotType = row.actorSource.type});
 }
 
 } // namespace
 
-/** Publishes changed pools only from the selected mission owner's unique admitted view. */
-static void push_entity_damage_edges(RuntimeInstance& instance,
-                                     const state::build_data::scriptables::Snapshot& world,
-                                     std::uint64_t now) noexcept {
+/** Publishes changed pools of one link's unique admitted entity source. */
+static void
+push_source_damage_edges(RuntimeInstance& instance,
+                         const state::build_data::scriptables::Snapshot& world,
+                         std::uint64_t generation,
+                         std::span<const state::gameplay::entity_identity::Source> sources,
+                         std::uint64_t now) noexcept {
     namespace identities = state::gameplay::entity_identity;
-    if (now < instance.nextEntityDamageTick) {
-        return;
-    }
-    instance.nextEntityDamageTick = now + kEntityDamagePollIntervalMs;
-    if (!state::activity::binding_matches(instance.view.binding)) {
-        return;
-    }
-    std::array<identities::Source, identities::kSourceCapacity> sources{};
-    const auto count = gameplay::entity_identities::sources(
-        instance.view.binding.sessionId, instance.view.binding.createdRevision, sources);
-    if (count > sources.size()) {
-        return;
-    }
     identities::Source source{};
     std::size_t matches = 0;
-    for (std::size_t index = 0; index < count; ++index) {
-        if (sources[index].activityClientGeneration == instance.view.activityClientGeneration) {
-            source = sources[index];
+    for (const identities::Source& candidate : sources) {
+        if (candidate.activityClientGeneration == generation) {
+            source = candidate;
             ++matches;
         }
     }
+    EntityDamageSource* retained = retained_entity_source(instance, generation);
     if (matches != 1) {
-        if (instance.damageEntitySource != identities::Source{}) {
-            reset_entity_damage(instance);
+        if (retained != nullptr) {
+            reset_entity_damage(instance, generation);
         }
         return;
     }
-    if (source != instance.damageEntitySource) {
-        reset_entity_damage(instance);
-        instance.damageEntitySource = source;
+    if (retained == nullptr || retained->source != source) {
+        reset_entity_damage(instance, generation);
+        retained = retained_entity_source(instance, 0);
+        if (retained == nullptr) {
+            return;
+        }
+        retained->source = source;
     }
     EntityDamageScan scan{};
     scan.instance = &instance;
+    scan.sourceGeneration = generation;
     if (gameplay::entity_identities::visit_source(source, observe_entity_damage, &scan)
         != identities::Result::unchanged) {
         return;
     }
-    if (scan.overflow != 0 && !instance.entityDamageAtCapacity) {
-        instance.entityDamageAtCapacity = true;
+    if (scan.overflow != 0 && !retained->atCapacity) {
+        retained->atCapacity = true;
         log_line(core::log::Level::warn, &instance, "entity_damage", "watch_capacity");
     }
     for (const identities::Identity& row : std::span(scan.changed).first(scan.changedCount)) {
         const auto* const object = unique_combatant(world, row.actorSource);
-        if (object == nullptr) {
+        // A withheld row stays retained, so this link's later changes still compare against it.
+        if (object == nullptr || entity_damage_generation(instance, row) != generation) {
             continue;
         }
         auto event = state_edge_event(instance);
+        // The event keeps its entity source's link, which the dispatch revalidates.
+        event.sourceGeneration = generation;
         event.kind = host::EventKind::damageState;
         event.tick = now;
         event.sequence = row.revision;
@@ -273,6 +337,39 @@ static void push_entity_damage_edges(RuntimeInstance& instance,
     }
 }
 
+/** Polls the entity source of every link that simulates a target, forgetting links that left. */
+static void push_entity_damage_edges(RuntimeInstance& instance,
+                                     const state::build_data::scriptables::Snapshot& world,
+                                     std::uint64_t now) noexcept {
+    namespace identities = state::gameplay::entity_identity;
+    if (now < instance.nextEntityDamageTick) {
+        return;
+    }
+    instance.nextEntityDamageTick = now + kEntityDamagePollIntervalMs;
+    if (!state::activity::binding_matches(instance.view.binding) || !copy_pins(instance)) {
+        return;
+    }
+    std::array<identities::Source, identities::kSourceCapacity> sources{};
+    const auto count = gameplay::entity_identities::sources(
+        instance.view.binding.sessionId, instance.view.binding.createdRevision, sources);
+    if (count > sources.size()) {
+        return;
+    }
+    std::array<std::uint64_t, identities::kSourceCapacity> generations{};
+    const auto polled =
+        std::span(generations).first(entity_damage_generations(instance, generations));
+    for (const EntityDamageSource& retained : instance.damageEntitySources) {
+        const std::uint64_t generation = retained.source.activityClientGeneration;
+        if (generation != 0
+            && std::find(polled.begin(), polled.end(), generation) == polled.end()) {
+            reset_entity_damage(instance, generation);
+        }
+    }
+    for (const std::uint64_t generation : polled) {
+        push_source_damage_edges(instance, world, generation, std::span(sources).first(count), now);
+    }
+}
+
 void push_entity_damage_edges(RuntimeInstance& instance, std::uint64_t now) noexcept {
     if (const auto* world = instance.worldView.snapshot()) {
         push_entity_damage_edges(instance, *world, now);
@@ -282,12 +379,11 @@ void push_entity_damage_edges(RuntimeInstance& instance, std::uint64_t now) noex
 /**
  * Raises damage-state observations without inferring actor attachment or provocation.
  * @param instance Bound mission instance retaining prior combatant levels.
- * @param sense Accepted observations for the current client generation.
+ * @param sense Accepted observations of one link; only the link simulating a combatant reports it.
  */
 void push_combatant_damage_edges(RuntimeInstance& instance,
                                  const host::SenseObservationSnapshot& sense) noexcept {
-    if (sense.sourceGeneration != instance.view.activityClientGeneration
-        || sense.observationCount > sense.observations.size()
+    if (sense.observationCount > sense.observations.size()
         || sense.valueCount > sense.values.size()) {
         return;
     }
@@ -297,7 +393,8 @@ void push_combatant_damage_edges(RuntimeInstance& instance,
             || observation.key.slotType != kCombatantDamageSlotType
             || observation.key.senseSchema != kCombatantDamageSenseSchema
             || observation.firstValue > sense.valueCount
-            || observation.valueCount > sense.valueCount - observation.firstValue) {
+            || observation.valueCount > sense.valueCount - observation.firstValue
+            || !admitted_report(instance, observation.key, sense.sourceGeneration)) {
             continue;
         }
         auto* const row = find_slot_row(instance.combatantDamageObservations, observation.key);
@@ -305,6 +402,7 @@ void push_combatant_damage_edges(RuntimeInstance& instance,
             log_line(core::log::Level::warn, &instance, "combatant_damage", "watch_capacity");
             continue;
         }
+        claim_row(*row, sense.sourceGeneration, true);
         const auto body =
             std::span(sense.values).subspan(observation.firstValue, observation.valueCount);
         if (!update_combatant_damage(row->level, body, observation.key.schemaRow)) {

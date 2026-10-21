@@ -14,12 +14,13 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <span>
 #include <string_view>
 #include <vector>
 
 #include "../../../core/logging/log.h"
 #include "../../../core/settings/settings.h"
-#include "../../../middleware/gameplay/external/external_entity_codec.h"
+#include "../../../state/activity/entity_slots/member_leases.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
 #include "../../bap/runtime.h"
@@ -282,6 +283,11 @@ void push_script_event(RuntimeInstance& instance, const host::Event& event) noex
 
 /**
  * Queues an exact host-policy transition without consuming a client mission-input sequence.
+ * The policy may sit on any link that carries the program's output, so `admitted_provocation`
+ * decides which links' provocations are the squad's own.
+ * Lock order: the lane-0 receive path calls this under the peer lock, and `service` takes the
+ * peer lock under this one through the actor-command policy. Both run only on the server
+ * service thread, so the two orders cannot deadlock; moving either path to another thread would.
  * @param binding Activity generation that accepted the damage.
  * @param sourceGeneration ActivityClient generation that owns the policy.
  * @param registryKey Authored squad registry key.
@@ -297,13 +303,14 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
     }
     AcquireSRWLockExclusive(&g_lock);
     auto* instance = find_instance(binding);
-    if (instance != nullptr && instance->view.activityClientGeneration == sourceGeneration) {
+    if (instance != nullptr && admitted_provocation(*instance, sourceGeneration)) {
         host::Event event{};
         event.kind = host::EventKind::squadProvoked;
         event.binding = binding;
         event.sequence = instance->missionStateRevision;
         event.missionSequence = instance->lastMissionSequence;
-        event.sourceGeneration = sourceGeneration;
+        // Lua and `eligible_event` read shared simulation as the route's input.
+        event.sourceGeneration = instance->view.activityClientGeneration;
         event.tick = GetTickCount64();
         event.firstRegistryKey = registryKey;
         event.firstSlotType = sdk::format::kSquadSlotType;
@@ -374,6 +381,7 @@ void clear_sense_levels(RuntimeInstance& instance) noexcept {
     instance.entityDamageObservations = {};
     instance.deviceObservations = {};
     instance.objectInteractionObservations = {};
+    instance.objectStateObservations = {};
     instance.actorPathObservations = {};
     instance.sceneObservations = {};
     instance.objectiveObservations = {};
@@ -390,9 +398,12 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     }
     lua_vm::close(instance.vm);
     instance.worldView = {};
+    instance.pinCount = 0;
+    std::vector<host::PendingScriptableOverride>{}.swap(instance.estate);
+    instance.estateCopied = false;
+    instance.liveLinkCount = 0;
     instance.entityDamageObservations.fill({});
-    instance.entityDamageAtCapacity = false;
-    instance.damageEntitySource = {};
+    instance.damageEntitySources.fill({});
     instance.nextEntityDamageTick = 0;
     instance.view = {};
     instance.identity = {};
@@ -478,8 +489,7 @@ void accept_mission_state(RuntimeInstance& instance,
         instance.pendingTimerEvent = {};
     }
     lua_vm::publish_attempt(instance.vm, snapshot.state.attempt);
-    if (!lua_vm::publish_device_requests(
-            instance.vm, snapshot.state.deviceRequests, instance.view.activityClientGeneration)) {
+    if (!lua_vm::publish_device_requests(instance.vm, snapshot.state.deviceRequests)) {
         lua_vm::fault(instance.vm, "device request snapshot allocation failed");
         instance.programStatus = ProgramStatus::programError;
     }
@@ -489,6 +499,38 @@ void accept_mission_state(RuntimeInstance& instance,
         instance.programStatus = ProgramStatus::programError;
     }
     accept_compare_fields(instance, snapshot);
+}
+
+/**
+ * The links a target's pin still counts on: the route, which stands even for a public target, and
+ * every joined private link. They change only when a link joins, leaves or rejoins, so one read
+ * per service pass serves every admission and device read in it.
+ */
+bool read_live_links(RuntimeInstance& instance) noexcept {
+    std::array<bap::ActivityLinkView, state::activity::entity_slots::kMemberLeaseRowCount> links{};
+    const std::size_t linkCount = bap::mission_route_candidates(
+        instance.view.binding, {}, instance.view.activityClientGeneration, links);
+    std::array<std::uint64_t, kLiveLinkCapacity> live{};
+    std::size_t count = 0;
+    live[count++] = instance.view.activityClientGeneration;
+    for (const bap::ActivityLinkView& link : std::span(links).first(linkCount)) {
+        if (link.activityClientGeneration != instance.view.activityClientGeneration) {
+            live[count++] = link.activityClientGeneration;
+        }
+    }
+    const auto next = std::span(live).first(count);
+    const bool changed = !std::ranges::equal(next, live_links(instance));
+    instance.liveLinks = live;
+    instance.liveLinkCount = count;
+    return changed;
+}
+
+/**
+ * A device request is pinned to the link that carried it, and only that link's report applies it.
+ * The script reads it as applied while that link is still live.
+ */
+bool publish_device_sources(const RuntimeInstance& instance, lua_vm::Vm& vm) noexcept {
+    return lua_vm::publish_device_sources(vm, live_links(instance));
 }
 
 /** Copies the committed attempt, revision, cursors, phase and intent head into the instance. */
@@ -778,6 +820,15 @@ void service(std::uint64_t now) noexcept {
         return;
     }
     timed_step("synchronize", [now] { synchronize_instances(now); });
+    timed_step("links", [] {
+        for (RuntimeInstance& instance : g_instances) {
+            if (instance.occupied && read_live_links(instance)
+                && instance.programStatus == ProgramStatus::loaded
+                && !publish_device_sources(instance, instance.vm)) {
+                fault_instance(instance, "device request source allocation failed");
+            }
+        }
+    });
     timed_step("starts", [now] { service_pending_starts(now); });
     timed_step("delivery_events", [now] { consume_delivery_events(now); });
     timed_step("inputs", [now] { consume_mission_inputs(now); });
