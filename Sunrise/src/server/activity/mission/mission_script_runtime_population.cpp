@@ -11,14 +11,16 @@ namespace sunrise::server::activity::mission {
 bool observe_population(
     RuntimeInstance& instance,
     const host::SenseObservation& observation,
-    std::span<const middleware::bap::activity_message::sense_update::DecodedValue>
-        values) noexcept {
+    std::span<const middleware::bap::activity_message::sense_update::DecodedValue> values,
+    bool moved) noexcept {
     if (instance.dispatchAttemptGeneration == 0 || instance.dispatchInputSequence == 0) {
         return true;
     }
     mission_state::SquadPopulationReport report{};
     report.attemptGeneration = instance.dispatchAttemptGeneration;
     report.sourceGeneration = observation.sourceGeneration;
+    // Every report reaching here is the simulating link's, so each one may move the population.
+    report.admitted = true;
     report.inputSequence = instance.dispatchInputSequence;
     report.clientMessageSequence = observation.clientMessageSequence;
     report.objectTag = observation.key.objectTag;
@@ -52,7 +54,7 @@ bool observe_population(
         report.createdKnown = total <= kMaximumCounter;
         report.created = static_cast<std::int32_t>(report.createdKnown ? total : 0);
     }
-    if (!report.aliveKnown && !report.generationKnown && !report.createdKnown) {
+    if (!moved && !report.aliveKnown && !report.generationKnown && !report.createdKnown) {
         return true;
     }
     mission_state::Snapshot snapshot{};

@@ -59,5 +59,14 @@ void commit_retirement(const RetirementPlan&) noexcept;
 void record_delivered_target(const state::activity::SessionBinding&,
                              std::uint64_t generation,
                              const activity::host::PendingScriptableOverride&) noexcept;
+/**
+ * Moves a squad's target to the link that delivered its body while that link is live, else to the
+ * link whose report was admitted for the squad, so that link's next abdication captures it.
+ * @param live The route and every joined private link of the binding.
+ */
+void follow_squad(const state::activity::SessionBinding&,
+                  std::uint64_t generation,
+                  state::gameplay::entity_identity::SquadReference,
+                  std::span<const std::uint64_t> live) noexcept;
 void reset() noexcept;
 } // namespace sunrise::server::gameplay::squad_entity_retirement

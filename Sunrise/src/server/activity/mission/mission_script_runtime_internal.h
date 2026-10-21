@@ -170,6 +170,10 @@ struct EntityDamageObservation final {
     /** Link whose entity source reported it. Network slots are unique only within one source. */
     std::uint64_t sourceGeneration{};
     std::uint8_t allocationSequence{}, allocationEpoch{};
+    /** Set while these pools are not their combatant's simulation, so a re-pin publishes them. */
+    bool withheld{};
+    /** Set when the last poll of the source found the entity still listed. */
+    bool listed{};
     bool used{};
 };
 /** Last reported current values for one exact Type-23 source. */
@@ -203,10 +207,25 @@ struct GhostObservation final {
     bool used{};
 };
 
+/** The squad levels one row's edges were last derived from. */
+struct SquadPublishedLevels final {
+    SquadObjectiveCosts objectiveCosts{};
+    std::array<std::int32_t, host::kSquadSlotCapacity> slotCounts{};
+    std::int32_t aliveCount{};
+    std::uint8_t slotCountLength{};
+    bool removalFlag{};
+    bool operator==(const SquadPublishedLevels&) const = default;
+};
+
 /** Last squad counters seen for one watched object, so only a change raises an event. */
 struct SquadObservation final {
     SquadObjectiveCosts objectiveCosts{};
     std::array<std::int32_t, host::kSquadSlotCapacity> slotCounts{};
+    /**
+     * A link's deltas are folded into the levels above while another link simulates the squad, so
+     * its next admitted report compares with what the script last saw, not with the fold.
+     */
+    SquadPublishedLevels published{};
     /** Link whose reports these levels were read from. */
     std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
@@ -326,6 +345,13 @@ struct RuntimeInstance final {
     host::Event pendingTimerEvent{};
     std::array<TriggerOccupancy, kTriggerOccupancyCapacity> triggerOccupancy{};
     std::array<SquadObservation, kSquadObservationCapacity> squadObservations{};
+    /**
+     * The levels each other link reported for a squad it does not simulate. Squad Sense restates
+     * only the fields that moved, so a re-pin takes over the new link's own complete levels.
+     */
+    std::array<SquadObservation, kSquadObservationCapacity> squadShadows{};
+    /** Set once a shadow found no row, so its warning is logged once until a row frees. */
+    bool squadShadowAtCapacity{};
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
     std::array<CombatantDamageObservation, kSquadObservationCapacity> combatantDamageObservations{};
@@ -522,9 +548,13 @@ void push_damage_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;
 /** Raises the entity pools that changed since the last poll, each from its simulating link. */
 void push_entity_damage_edges(RuntimeInstance& instance, std::uint64_t now) noexcept;
-/** @return True while a queued entity damage event still names its admitted source and allocation.
+/**
+ * Revalidates a queued entity damage event against its source, its allocation and the link that
+ * simulates its combatant now. A refused copy is withheld again, so its link publishes it later.
+ * @return True while the event may still reach the script.
  */
-[[nodiscard]] bool current_entity_damage(const host::Event& event) noexcept;
+[[nodiscard]] bool current_entity_damage(RuntimeInstance& instance,
+                                         const host::Event& event) noexcept;
 /** Raises observed Type-2 damage pools and lifecycle resets without inferring damage. */
 void push_combatant_damage_edges(RuntimeInstance& instance,
                                  const host::SenseObservationSnapshot& sense) noexcept;
@@ -590,11 +620,17 @@ template <typename Row, std::size_t N>
     return spare;
 }
 
-/** Retains generation-qualified population facts before the derived squad callback. */
+/**
+ * Retains generation-qualified population facts before the derived squad callback.
+ * Only the link that simulates the squad reports here, so the population follows that link.
+ * @param moved The squad's levels were last read from another link, so the report moves the
+ * population even when it restates no count.
+ */
 [[nodiscard]] bool observe_population(
     RuntimeInstance& instance,
     const host::SenseObservation& observation,
-    std::span<const middleware::bap::activity_message::sense_update::DecodedValue> values) noexcept;
+    std::span<const middleware::bap::activity_message::sense_update::DecodedValue> values,
+    bool moved) noexcept;
 /** Raises one event per watched authored scene that latched complete. */
 void push_scene_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept;

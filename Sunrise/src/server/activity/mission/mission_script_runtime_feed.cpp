@@ -512,7 +512,7 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         return lua_vm::CallStatus::inactive;
     }
     if (instance.programStatus != ProgramStatus::loaded || !eligible_event(instance, event)
-        || (event.damageFromEntity && !current_entity_damage(event))) {
+        || (event.damageFromEntity && !current_entity_damage(instance, event))) {
         return lua_vm::CallStatus::inactive;
     }
     // Every shared report and Ghost level this dispatch raises reads the same copy.

@@ -375,6 +375,8 @@ void note_vm_status(RuntimeInstance& instance,
 void clear_sense_levels(RuntimeInstance& instance) noexcept {
     instance.triggerOccupancy = {};
     instance.squadObservations = {};
+    instance.squadShadows = {};
+    instance.squadShadowAtCapacity = false;
     instance.ghostObservations = {};
     instance.damageObservations = {};
     instance.combatantDamageObservations = {};

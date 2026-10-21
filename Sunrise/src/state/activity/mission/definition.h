@@ -58,7 +58,7 @@ inline constexpr std::int32_t kMaximumSquadAlive = 63;
 struct SquadPopulation final {
     std::uint64_t requestKey{};
     std::uint64_t attemptGeneration{};
-    /** Link the placement was staged on; only its client simulates the squad. */
+    /** Link whose client simulates the squad: the one it was staged on, until a re-pin moves it. */
     std::uint64_t sourceGeneration{};
     std::uint64_t inputSequenceAtStage{};
     std::uint64_t clientMessageSequenceAtStage{};
@@ -94,6 +94,11 @@ struct SquadPopulationReport final {
     bool aliveKnown{};
     bool createdKnown{};
     bool initialized{};
+    /**
+     * The report came from the link that simulates the squad now, so its population follows it.
+     * The mission runtime sends only admitted reports; another is a replica's and moves nothing.
+     */
+    bool admitted{};
 };
 
 /** Type-23 reports position, power and lock as three independent channels. */

@@ -10,6 +10,7 @@
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../state/activity_sdk/scene_triggers.h"
+#include "../../gameplay/squad_entity_retirement.h"
 #include "../activity_sdk_mission_runtime.h"
 #include "mission_script_runtime_internal.h"
 #include "mission_script_runtime_objective.h"
@@ -32,6 +33,13 @@ constexpr std::uint16_t kDamageRevisionOrdinal = 2;
 constexpr std::uint16_t kSceneTokenOrdinal = 0;
 /** Root ordinal of the authored scene's completion latch. A zero-width boolean. */
 constexpr std::uint16_t kSceneCompletionOrdinal = 1;
+/** The block's ordinal 1 is its one-bit client flag, which separates it from the task list. */
+constexpr std::uint16_t kObjectiveBlockFlagOrdinal = 1;
+constexpr std::uint8_t kObjectiveBlockFlagWidth = 1;
+/** The client clamps a task counter here, so nothing above it is reachable. */
+constexpr std::int32_t kObjectiveTaskCountLimit = 80;
+/** Room for one squad takeover's log fields: two keys, two generations and two flags. */
+constexpr std::size_t kSquadTakeoverFieldCapacity = 128;
 
 namespace sense_values = middleware::bap::activity_message::sense_update;
 namespace scenes = activity_sdk_mission;
@@ -93,27 +101,42 @@ sense_value(std::span<const sense_values::DecodedValue> body,
     return event;
 }
 
-/** @return The retained record for one squad, allocating on a first observation. */
-[[nodiscard]] SquadObservation* find_squad(RuntimeInstance& instance,
-                                           const host::SenseObservationKey& key) noexcept {
-    SquadObservation* spare = nullptr;
+/** @return The retained record for one squad, or null before its first observation. */
+template <typename Key>
+[[nodiscard]] SquadObservation* retained_squad(RuntimeInstance& instance, const Key& key) noexcept {
     for (SquadObservation& retained : instance.squadObservations) {
         if (retained.used && retained.registryKey == key.registryKey
             && retained.objectTag == key.objectTag && retained.slotIndex == key.slotIndex) {
             return &retained;
         }
-        if (!retained.used && spare == nullptr) {
+    }
+    return nullptr;
+}
+
+/** @return True when a squad row holds no member, alive or ever created, so it can be reused. */
+[[nodiscard]] bool empty_squad(const SquadObservation& row) noexcept {
+    return row.aliveCount == 0
+           && std::all_of(row.slotCounts.begin(), row.slotCounts.end(), [](std::int32_t count) {
+                  return count == 0;
+              });
+}
+
+/** @return The retained record for one squad, allocating on a first observation. */
+[[nodiscard]] SquadObservation* find_squad(RuntimeInstance& instance,
+                                           const host::SenseObservationKey& key) noexcept {
+    if (SquadObservation* const retained = retained_squad(instance, key)) {
+        return retained;
+    }
+    SquadObservation* spare = nullptr;
+    for (SquadObservation& retained : instance.squadObservations) {
+        if (!retained.used) {
             spare = &retained;
+            break;
         }
     }
     if (spare == nullptr) {
         for (SquadObservation& retained : instance.squadObservations) {
-            bool empty = retained.aliveCount == 0;
-            for (const auto count : retained.slotCounts) {
-                empty = empty && count == 0;
-            }
-            if (empty) {
-                retained = {};
+            if (empty_squad(retained)) {
                 spare = &retained;
                 break;
             }
@@ -123,6 +146,8 @@ sense_value(std::span<const sense_values::DecodedValue> body,
         log_line(core::log::Level::warn, &instance, "squad", "watch_capacity");
         return nullptr;
     }
+    // An unused row can still name the link that last claimed it; a first sighting has none.
+    *spare = {};
     spare->registryKey = key.registryKey;
     spare->objectTag = key.objectTag;
     spare->slotIndex = key.slotIndex;
@@ -554,12 +579,234 @@ void publish_ghost_levels(RuntimeInstance& instance) noexcept {
     lua_vm::publish_ghost_levels(instance.vm, std::span(rows).first(count));
 }
 
+namespace {
+
+/** One squad report read over a row's levels; a report restates only the fields that moved. */
+struct SquadLevels final {
+    std::array<std::int32_t, host::kSquadSlotCapacity> counts{};
+    std::int32_t alive{};
+    std::uint8_t countLength{};
+    bool removal{};
+    bool costsChanged{};
+    /** False when the report restated no level the row keeps. */
+    bool reported{};
+};
+
+/** Merges one report's objective costs into the row and reads its other levels over the row's. */
+[[nodiscard]] SquadLevels read_squad_levels(SquadObservation& row,
+                                            std::span<const sense_values::DecodedValue> body,
+                                            std::uint32_t root) noexcept {
+    SquadLevels levels{};
+    levels.costsChanged = update_squad_objective_costs(row.objectiveCosts, body, root);
+    // Cost-only deltas retain combat counts; they must never manufacture a death.
+    levels.alive = row.aliveCount;
+    const bool hasAlive = read_squad_alive(body, root, levels.alive);
+    levels.removal = sense_flag(body, root, kSquadRemovalOrdinal);
+    levels.counts = row.slotCounts;
+    levels.countLength = row.slotCountLength;
+    std::array<std::int32_t, host::kSquadSlotCapacity> incomingCounts{};
+    const auto incomingLength = read_squad_created_counts(body, incomingCounts);
+    if (incomingLength != 0) {
+        levels.counts = incomingCounts;
+        levels.countLength = incomingLength;
+    }
+    levels.reported = hasAlive || levels.costsChanged || incomingLength != 0;
+    return levels;
+}
+
+void store_squad_levels(SquadObservation& row, const SquadLevels& levels) noexcept {
+    row.aliveCount = levels.alive;
+    row.removalFlag = levels.removal;
+    row.slotCounts = levels.counts;
+    row.slotCountLength = levels.countLength;
+}
+
+/** @return The levels a row holds now, as its edges read them. */
+[[nodiscard]] SquadPublishedLevels current_squad_levels(const SquadObservation& row) noexcept {
+    return {.objectiveCosts = row.objectiveCosts,
+            .slotCounts = row.slotCounts,
+            .aliveCount = row.aliveCount,
+            .slotCountLength = row.slotCountLength,
+            .removalFlag = row.removalFlag};
+}
+
+/** @return True when one generation is a live link of this pass. */
+[[nodiscard]] bool live_link(const RuntimeInstance& instance, std::uint64_t generation) noexcept {
+    const auto live = live_links(instance);
+    return std::find(live.begin(), live.end(), generation) != live.end();
+}
+
+/**
+ * @return A shadow whose squad no pin of this pass names and no main row holds. Only a later
+ * delivery can make it its link's baseline, so it is the first used shadow to give way.
+ */
+[[nodiscard]] SquadObservation* unclaimed_shadow(RuntimeInstance& instance) noexcept {
+    const auto pins = pass_pins(instance);
+    for (SquadObservation& shadow : instance.squadShadows) {
+        if (shadow.used && retained_squad(instance, shadow) == nullptr
+            && std::none_of(pins.begin(), pins.end(), [&shadow](const host::ScriptablePin& pin) {
+                   return pin.registryKey == shadow.registryKey;
+               })) {
+            return &shadow;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * @return One link's shadow of a squad. With `allocate`, a missing one takes a free row, else a row
+ * whose link left, else a row whose squad holds no member and no objective cost, since a sparse
+ * delta never restates those, else an unclaimed squad's row; null when there is none.
+ */
+template <typename Key>
+[[nodiscard]] SquadObservation* find_squad_shadow(RuntimeInstance& instance,
+                                                  const Key& key,
+                                                  std::uint64_t sourceGeneration,
+                                                  bool allocate) noexcept {
+    SquadObservation* spare = nullptr;
+    SquadObservation* departed = nullptr;
+    SquadObservation* empty = nullptr;
+    for (SquadObservation& shadow : instance.squadShadows) {
+        if (!shadow.used) {
+            if (spare == nullptr) {
+                spare = &shadow;
+            }
+            continue;
+        }
+        if (shadow.sourceGeneration == sourceGeneration && shadow.registryKey == key.registryKey
+            && shadow.objectTag == key.objectTag && shadow.slotIndex == key.slotIndex) {
+            return &shadow;
+        }
+        if (departed == nullptr && !live_link(instance, shadow.sourceGeneration)) {
+            departed = &shadow;
+        }
+        if (empty == nullptr && empty_squad(shadow)
+            && shadow.objectiveCosts == SquadObjectiveCosts{}) {
+            empty = &shadow;
+        }
+    }
+    if (!allocate) {
+        return nullptr;
+    }
+    SquadObservation* row = spare;
+    if (row == nullptr) {
+        row = departed != nullptr ? departed : empty;
+    }
+    if (row == nullptr) {
+        row = unclaimed_shadow(instance);
+    }
+    if (row == nullptr) {
+        // Every later report of a squad without a shadow lands here too.
+        if (!instance.squadShadowAtCapacity) {
+            log_line(core::log::Level::warn, &instance, "squad", "shadow_capacity");
+        }
+        instance.squadShadowAtCapacity = true;
+        return nullptr;
+    }
+    instance.squadShadowAtCapacity = false;
+    *row = {};
+    row->sourceGeneration = sourceGeneration;
+    row->registryKey = key.registryKey;
+    row->objectTag = key.objectTag;
+    row->slotIndex = key.slotIndex;
+    return row;
+}
+
+/**
+ * Keeps a link's squad levels while another link simulates the squad, raising nothing. A link whose
+ * levels are still the squad's row keeps them there, so each link's levels live in one row and a
+ * takeover moves them whole. A link that left never simulates the squad again.
+ */
+void shadow_squad_report(RuntimeInstance& instance,
+                         const host::SenseObservation& observation,
+                         std::span<const sense_values::DecodedValue> body,
+                         std::uint64_t sourceGeneration) noexcept {
+    if (!live_link(instance, sourceGeneration)) {
+        return;
+    }
+    SquadObservation* shadow = retained_squad(instance, observation.key);
+    if (shadow == nullptr || shadow->sourceGeneration != sourceGeneration) {
+        shadow = find_squad_shadow(instance, observation.key, sourceGeneration, true);
+    }
+    if (shadow == nullptr) {
+        return;
+    }
+    const SquadLevels levels = read_squad_levels(*shadow, body, observation.key.schemaRow);
+    if (!levels.reported) {
+        return;
+    }
+    shadow->used = true;
+    store_squad_levels(*shadow, levels);
+}
+
+/** Logs a squad row changing links, so a boot log shows each re-pin window. */
+void log_squad_takeover(const RuntimeInstance& instance,
+                        const SquadObservation& row,
+                        std::uint64_t sourceGeneration,
+                        bool shadowed,
+                        bool kept) noexcept {
+    std::array<char, kSquadTakeoverFieldCapacity> fields{};
+    const int written = std::snprintf(fields.data(),
+                                      fields.size(),
+                                      "registry=%08X slot=%u from=%llu to=%llu shadow=%d kept=%d",
+                                      row.registryKey,
+                                      static_cast<unsigned>(row.slotIndex),
+                                      static_cast<unsigned long long>(row.sourceGeneration),
+                                      static_cast<unsigned long long>(sourceGeneration),
+                                      shadowed ? 1 : 0,
+                                      kept ? 1 : 0);
+    if (written > 0 && static_cast<std::size_t>(written) < fields.size()) {
+        log_line(core::log::Level::info,
+                 &instance,
+                 "squad",
+                 "takeover",
+                 {fields.data(), static_cast<std::size_t>(written)});
+    }
+}
+
+/**
+ * Hands a squad's row to the link whose report was admitted. That link's own levels are the ones it
+ * reported while another link simulated the squad, so its shadow becomes the row, and the displaced
+ * levels become their link's one shadow, in case that link simulates the squad again.
+ * @return True when the row took over levels the link had reported.
+ */
+[[nodiscard]] bool take_over_squad(RuntimeInstance& instance,
+                                   SquadObservation& row,
+                                   std::uint64_t sourceGeneration) noexcept {
+    SquadObservation* const shadow = find_squad_shadow(instance, row, sourceGeneration, false);
+    SquadObservation taken{};
+    if (shadow != nullptr) {
+        taken = *shadow;
+        *shadow = {};
+    }
+    bool kept = false;
+    if (row.used && live_link(instance, row.sourceGeneration)) {
+        if (SquadObservation* const displaced =
+                find_squad_shadow(instance, row, row.sourceGeneration, true)) {
+            *displaced = row;
+            kept = true;
+        }
+    }
+    // A first sighting claims an unused row from no link; only a used row changes hands.
+    if (row.used) {
+        log_squad_takeover(instance, row, sourceGeneration, shadow != nullptr, kept);
+    }
+    if (shadow == nullptr) {
+        claim_row(row, sourceGeneration, false);
+        return false;
+    }
+    row = taken;
+    return true;
+}
+
+} // namespace
+
 /**
  * Raises the squad events derived from one msg 6 body.
  * The client publishes levels, so a first sighting of a source only records them. After that a
  * slot count that rose is the only spawn signal, and the alive count falling is the only death
  * signal. Only the link that simulates the squad reports its levels; a replica's counts would
- * interleave with them.
+ * interleave with them, so they are kept apart as that link's shadow.
  */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept {
@@ -568,66 +815,66 @@ void push_squad_edges(RuntimeInstance& instance,
         if (observation.sourceGeneration != sense.sourceGeneration
             || observation.key.slotType != format::kSquadSlotType
             || observation.key.senseSchema != format::kSquadSenseSchema
-            || observation.firstValue + observation.valueCount > sense.valueCount
-            || !admitted_report(instance, observation.key, sense.sourceGeneration)) {
+            || observation.firstValue + observation.valueCount > sense.valueCount) {
             continue;
         }
         const std::span<const sense_values::DecodedValue> body(
             &sense.values[observation.firstValue], observation.valueCount);
         const std::uint32_t root = observation.key.schemaRow;
-        if (!observe_population(instance, observation, body)) {
+        if (!admitted_report(instance, observation.key, sense.sourceGeneration)) {
+            if (sense.sourceGeneration != 0) {
+                shadow_squad_report(instance, observation, body, sense.sourceGeneration);
+            }
+            continue;
+        }
+        // The placement's count evidence and its retirement follow the squad to the link that
+        // simulates it now.
+        const SquadObservation* const retained = retained_squad(instance, observation.key);
+        const bool moved =
+            retained != nullptr && retained->sourceGeneration != sense.sourceGeneration;
+        server::gameplay::squad_entity_retirement::follow_squad(
+            instance.view.binding,
+            sense.sourceGeneration,
+            {observation.key.registryKey, observation.key.slotIndex, observation.key.slotType},
+            live_links(instance));
+        if (!observe_population(instance, observation, body, moved)) {
             return;
         }
+        // Accepting the population can start a new attempt, which clears every row.
         SquadObservation* const squad = find_squad(instance, observation.key);
         if (squad == nullptr) {
             continue;
         }
-        claim_row(*squad, sense.sourceGeneration, false);
-        const bool costsChanged = update_squad_objective_costs(squad->objectiveCosts, body, root);
-        // Cost-only deltas retain combat counts; they must never manufacture a death.
-        std::int32_t alive = squad->aliveCount;
-        const bool hasAlive = read_squad_alive(body, root, alive);
-        const bool removal = sense_flag(body, root, kSquadRemovalOrdinal);
-        auto counts = squad->slotCounts;
-        auto countLength = squad->slotCountLength;
-        std::array<std::int32_t, host::kSquadSlotCapacity> incomingCounts{};
-        const auto incomingLength = read_squad_created_counts(body, incomingCounts);
-        if (incomingLength != 0) {
-            counts = incomingCounts;
-            countLength = incomingLength;
-        }
-        if (!hasAlive && !costsChanged && incomingLength == 0) {
+        const bool rebaselined = squad->sourceGeneration != sense.sourceGeneration
+                                 && take_over_squad(instance, *squad, sense.sourceGeneration);
+        const SquadLevels levels = read_squad_levels(*squad, body, root);
+        const SquadPublishedLevels& published = squad->published;
+        // A fold leaves the row ahead of the script, so a delta that restates nothing raises it.
+        if (!rebaselined && !levels.reported && current_squad_levels(*squad) == published) {
             continue;
         }
-        const bool first = !squad->used;
+        // Levels taken over at a re-pin are a baseline, so they raise no spawn or death.
+        const bool first = rebaselined || !squad->used;
         squad->used = true;
-        squad->populationKnown = squad->populationKnown || hasAlive;
-        // An absent spawn generation keeps the last one reported, like the other retained levels.
-        const sense_values::DecodedValue* const spawn =
-            sense_value(body, root, kSquadSpawnGenerationOrdinal);
-        if (spawn != nullptr && spawn->present && spawn->signedValue >= 0
-            && spawn->signedValue <= kMaximumCounter) {
-            squad->spawnGeneration = static_cast<std::int32_t>(spawn->signedValue);
-            squad->hasSpawnGeneration = true;
-        }
-        const std::int32_t previousAlive = first ? 0 : squad->aliveCount;
-        const bool changed =
-            costsChanged || first || squad->aliveCount != alive || squad->removalFlag != removal
-            || squad->slotCountLength != countLength || squad->slotCounts != counts;
+        const std::int32_t previousAlive = first ? 0 : published.aliveCount;
+        const bool changed = first || squad->objectiveCosts != published.objectiveCosts
+                             || published.aliveCount != levels.alive
+                             || published.removalFlag != levels.removal
+                             || published.slotCountLength != levels.countLength
+                             || published.slotCounts != levels.counts;
         if (!changed) {
+            store_squad_levels(*squad, levels);
             continue;
         }
         host::Event state = shared_edge_event(instance, observation);
         state.squadObjectiveCosts = squad->objectiveCosts.values;
         state.squadObjectiveCostMask = squad->objectiveCosts.known;
         state.squadObjectiveRevision = squad->objectiveCosts.revision;
-        state.squadAliveCount = alive;
+        state.squadAliveCount = levels.alive;
         state.squadPreviousAliveCount = previousAlive;
-        state.squadPopulationAvailable = squad->populationKnown;
-        state.squadRemovalFlag = removal;
-        state.squadSlotCounts = counts;
-        state.squadSlotCountLength = countLength;
-        state.initialObservation = first;
+        state.squadRemovalFlag = levels.removal;
+        state.squadSlotCounts = levels.counts;
+        state.squadSlotCountLength = levels.countLength;
         state.kind = host::EventKind::squadState;
         if (instance.programStatus == ProgramStatus::loaded) {
             if (!qualify_objective_costs(instance, state)) {
@@ -638,35 +885,32 @@ void push_squad_edges(RuntimeInstance& instance,
 
         // A replacement source starts from its own levels, so only a rise after the first sighting
         // is a spawn.
-        for (std::uint8_t slot = 0; !first && slot < countLength; ++slot) {
+        for (std::uint8_t slot = 0; !first && slot < levels.countLength; ++slot) {
             const std::int32_t previous =
-                slot < squad->slotCountLength ? squad->slotCounts[slot] : 0;
-            if (counts[slot] <= previous) {
+                slot < published.slotCountLength ? published.slotCounts[slot] : 0;
+            if (levels.counts[slot] <= previous) {
                 continue;
             }
             host::Event spawned = shared_edge_event(instance, observation);
             spawned.squadSlotOrdinal = slot;
-            spawned.squadSlotValue = counts[slot];
+            spawned.squadSlotValue = levels.counts[slot];
             spawned.squadPreviousSlotValue = previous;
             spawned.kind = host::EventKind::entitySpawned;
             if (instance.programStatus == ProgramStatus::loaded) {
                 push_script_event(instance, spawned);
             }
         }
-        if (!first && alive < squad->aliveCount) {
+        if (!first && levels.alive < published.aliveCount) {
             host::Event died = shared_edge_event(instance, observation);
-            died.squadAliveCount = alive;
-            died.squadPreviousAliveCount = squad->aliveCount;
-            died.squadRemovalFlag = removal;
+            died.squadAliveCount = levels.alive;
+            died.squadPreviousAliveCount = published.aliveCount;
             died.kind = host::EventKind::entityDied;
             if (instance.programStatus == ProgramStatus::loaded) {
                 push_script_event(instance, died);
             }
         }
-        squad->aliveCount = alive;
-        squad->removalFlag = removal;
-        squad->slotCounts = counts;
-        squad->slotCountLength = countLength;
+        store_squad_levels(*squad, levels);
+        squad->published = current_squad_levels(*squad);
     }
 }
 
