@@ -32,7 +32,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 73;
+inline constexpr std::uint32_t kCacheFormatVersion = 74;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -97,6 +97,7 @@ struct Header {
     std::uint32_t vendorDefinitionCount{};
     std::uint32_t vendorSaleRowCount{};
     std::uint32_t vendorInstalledRowCount{};
+    std::uint32_t vendorTransferRuleCount{};
     std::uint32_t positionProfileCount{};
     std::uint32_t objectTypeCount{};
     std::uint32_t recordObjectiveCount{};
@@ -277,7 +278,7 @@ struct InventoryBucketRecord {
     std::uint16_t firstSlot{};
     std::uint16_t slotCount{};
     std::int8_t equipmentSlot{inventory::buckets::kUnavailableEquipmentSlot};
-    std::uint8_t reserved{};
+    std::uint8_t policyFlags{};
 };
 
 /** Disk form of the buckets one subclass publishes under one ability selection. */
@@ -558,12 +559,14 @@ struct VendorDefinitionRecord {
     std::uint32_t thirdRowClass{};
     std::uint32_t saleRowOffset{};
     std::uint32_t installedRowOffset{};
+    std::uint32_t transferRuleOffset{};
     std::uint32_t resetIntervalRaw{};
     std::uint32_t resetPhaseRaw{};
     std::uint16_t index{};
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t thirdCount{};
+    std::uint16_t transferRuleCount{};
 };
 
 /** Disk form of one cost entry of a vendor sale row. */
@@ -590,6 +593,12 @@ struct VendorSaleRowRecord {
 /** Disk form of one vendor category row. */
 struct VendorInstalledRowRecord {
     std::uint32_t definitionHash{};
+};
+
+/** Disk form of one vendor transfer rule. */
+struct VendorTransferRuleRecord {
+    std::uint8_t sourceBucket{};
+    std::uint8_t destinationBucket{};
 };
 
 /** Disk form of one roster group object and its slots. */
@@ -674,7 +683,7 @@ static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 44 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 45 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)
                      + sizeof(gameplay::entity_position_profiles::Fingerprint));
 static_assert(sizeof(SpawnPointRecord)
@@ -682,12 +691,13 @@ static_assert(sizeof(SpawnPointRecord)
                      + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorIndexRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorDefinitionRecord)
-              == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));
+              == 15 * sizeof(std::uint32_t) + 5 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorSaleCostRecord) == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorSaleRowRecord)
               == sizeof(std::int32_t) + vendors::kSaleCostCapacity * sizeof(VendorSaleCostRecord)
                      + 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorInstalledRowRecord) == sizeof(std::uint32_t));
+static_assert(sizeof(VendorTransferRuleRecord) == 2 * sizeof(std::uint8_t));
 static_assert(sizeof(HashNameRecord)
               == hash_names::kNameLength + sizeof(std::uint32_t) + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(ScenarioRecord)

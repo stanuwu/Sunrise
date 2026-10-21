@@ -27,14 +27,18 @@ struct Storage {
     std::array<domain::Definition, domain::kDefinitionCapacity> definitions{};
     std::array<domain::SaleRow, domain::kSaleRowCapacity> saleRows{};
     std::array<domain::InstalledRow, domain::kInstalledRowCapacity> installedRows{};
+    std::array<domain::TransferRule, domain::kTransferRuleCapacity> transferRules{};
     std::size_t indexCount{};
     std::size_t definitionCount{};
     std::size_t saleRowCount{};
     std::size_t installedRowCount{};
+    std::size_t transferRuleCount{};
     /** Sale rows whose price depends on an expression, kept but never charged. */
     std::size_t conditionalRows{};
     /** Sale rows whose cost array did not read, kept but never charged. */
     std::size_t unreadableRows{};
+    /** Definitions whose transfer array did not read, kept with no transfer rules. */
+    std::size_t unreadableTransfers{};
 
     /** Only published prefixes are visible; extraction fully assigns each new row. */
     void reset() noexcept {
@@ -43,8 +47,10 @@ struct Storage {
         definitionCount = 0;
         saleRowCount = 0;
         installedRowCount = 0;
+        transferRuleCount = 0;
         conditionalRows = 0;
         unreadableRows = 0;
+        unreadableTransfers = 0;
     }
 };
 
@@ -247,7 +253,36 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
 }
 
 /**
- * Reads one vendor definition and both of its row arrays.
+ * Reads every transfer rule of one definition into the flat bank.
+ * @param blob Whole definition blob.
+ * @param definition Definition receiving its rule count; its bank offset is already set.
+ * @param storage Pass storage receiving the rules.
+ * @return True when the array is absent, or has the rule class, fits the bank, and every rule is
+ *         inside the blob. Otherwise the definition keeps no rules and the bank is left as found.
+ */
+[[nodiscard]] bool read_transfer_rules(std::span<const std::byte> blob,
+                                       domain::Definition& definition,
+                                       Storage& storage) noexcept {
+    definition.transferRuleCount = 0;
+    ArrayView transfers{};
+    if (!read_array(blob, kTransferArrayDescriptor, sizeof(domain::TransferRule), transfers)
+        || (transfers.count != 0 && transfers.classId != domain::kTransferRuleClass)
+        || transfers.count > domain::kTransferRuleCapacity - storage.transferRuleCount) {
+        return false;
+    }
+    for (std::size_t row = 0; row < transfers.count; ++row) {
+        const std::size_t at = transfers.base + (row * sizeof(domain::TransferRule));
+        if (!read(blob, at, storage.transferRules[storage.transferRuleCount + row])) {
+            return false;
+        }
+    }
+    definition.transferRuleCount = transfers.count;
+    storage.transferRuleCount += transfers.count;
+    return true;
+}
+
+/**
+ * Reads one vendor definition and every row array it owns.
  * @param source Package directory and borrowed block keys.
  * @param scratch Lock-owned block storage.
  * @param entry Index row naming the definition.
@@ -292,16 +327,27 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
     definition.thirdCount = third.count;
     definition.saleRowOffset = static_cast<std::uint32_t>(storage.saleRowCount);
     definition.installedRowOffset = static_cast<std::uint32_t>(storage.installedRowCount);
-    // A skipped definition must leave both banks exactly as it found them; an orphan sale row
+    definition.transferRuleOffset = static_cast<std::uint32_t>(storage.transferRuleCount);
+    // A skipped definition must leave the banks exactly as it found them; an orphan sale row
     // shifts the next definition's offset and `valid()` then rejects the whole set.
     const std::size_t saleRowsBefore = storage.saleRowCount;
     const std::size_t installedRowsBefore = storage.installedRowCount;
+    const std::size_t transferRulesBefore = storage.transferRuleCount;
+    // An unreadable transfer array costs this vendor its transfers alone, never its sales.
+    if (!read_transfer_rules(blob, definition, storage)) {
+        ++storage.unreadableTransfers;
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=build_data stage=vendors result=unreadable_transfers hash=0x%08X",
+                          definition.definitionHash);
+    }
     if (!read(blob, kResetIntervalOffset, definition.resetIntervalRaw)
         || !read(blob, kResetPhaseOffset, definition.resetPhaseRaw)
         || !read_sale_rows(blob, definition, storage)
         || !read_installed_rows(blob, definition, storage)) {
         storage.saleRowCount = saleRowsBefore;
         storage.installedRowCount = installedRowsBefore;
+        storage.transferRuleCount = transferRulesBefore;
         return false;
     }
     storage.definitions[storage.definitionCount] = definition;
@@ -321,17 +367,21 @@ void report(const Storage& storage, std::size_t skipped, const char* result) noe
                                       line.size(),
                                       "ev=build_data stage=vendors index=%zu definitions=%zu "
                                       "sale=%zu conditional=%zu unreadable=%zu installed=%zu "
-                                      "skipped=%zu result=%s",
+                                      "transfers=%zu unreadable_transfers=%zu skipped=%zu "
+                                      "result=%s",
                                       storage.indexCount,
                                       storage.definitionCount,
                                       storage.saleRowCount,
                                       storage.conditionalRows,
                                       storage.unreadableRows,
                                       storage.installedRowCount,
+                                      storage.transferRuleCount,
+                                      storage.unreadableTransfers,
                                       skipped,
                                       result);
     if (written > 0) {
-        const bool clean = storage.indexCount != 0 && skipped == 0 && storage.unreadableRows == 0;
+        const bool clean = storage.indexCount != 0 && skipped == 0 && storage.unreadableRows == 0
+                           && storage.unreadableTransfers == 0;
         core::log::write(core::log::Channel::state,
                          clean ? core::log::Level::info : core::log::Level::warn,
                          {line.data(), static_cast<std::size_t>(written)});
@@ -373,7 +423,8 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
         std::span(storage.index).first(storage.indexCount),
         std::span(storage.definitions).first(storage.definitionCount),
         std::span(storage.saleRows).first(storage.saleRowCount),
-        std::span(storage.installedRows).first(storage.installedRowCount));
+        std::span(storage.installedRows).first(storage.installedRowCount),
+        std::span(storage.transferRules).first(storage.transferRuleCount));
     report(storage, skipped, published ? "ok" : "publish");
     return published;
 }

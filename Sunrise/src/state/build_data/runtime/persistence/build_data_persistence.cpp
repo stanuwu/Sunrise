@@ -115,6 +115,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && vendors::snapshot_sale_rows(scratch.vendorSaleRows, counts.vendorSaleRows)
            && vendors::snapshot_installed_rows(scratch.vendorInstalledRows,
                                                counts.vendorInstalledRows)
+           && vendors::snapshot_transfer_rules(scratch.vendorTransferRules,
+                                               counts.vendorTransferRules)
            && gameplay::entity_position_profiles::snapshot(
                scratch.positionProfiles, counts.positionProfiles, *scratch.positionFingerprint)
            && gameplay::entity_object_types::snapshot(
@@ -224,6 +226,9 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
     const auto vendorInstalledRows =
         ensure_scratch<vendors::InstalledRow, vendors::kInstalledRowCapacity>(
             state.vendorInstalledRowScratch);
+    const auto vendorTransferRules =
+        ensure_scratch<vendors::TransferRule, vendors::kTransferRuleCapacity>(
+            state.vendorTransferRuleScratch);
     const auto progressionSteps = ensure_scratch<progressions::Step, progressions::kStepCapacity>(
         state.progressionStepScratch);
     const auto seasonPassRewards =
@@ -263,6 +268,7 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         vendorDefinitions,
         vendorSaleRows,
         vendorInstalledRows,
+        vendorTransferRules,
         positionProfiles,
         &state.positionFingerprint,
         ensure_scratch<gameplay::entity_object_types::Row,
@@ -333,6 +339,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.vendorDefinitionScratch);
     release_bank(state.vendorSaleRowScratch);
     release_bank(state.vendorInstalledRowScratch);
+    release_bank(state.vendorTransferRuleScratch);
     release_bank(state.positionProfileScratch);
     release_bank(state.objectTypeScratch);
     state.positionFingerprint = {};
@@ -404,6 +411,8 @@ cache::records::Domains occupied_domains(Context& state,
         std::span<const vendors::SaleRow>{state.vendorSaleRowScratch.data(), counts.vendorSaleRows},
         std::span<const vendors::InstalledRow>{state.vendorInstalledRowScratch.data(),
                                                counts.vendorInstalledRows},
+        std::span<const vendors::TransferRule>{state.vendorTransferRuleScratch.data(),
+                                               counts.vendorTransferRules},
         std::span<const gameplay::entity_position_profiles::Row>{
             state.positionProfileScratch.data(), counts.positionProfiles},
         state.positionFingerprint,

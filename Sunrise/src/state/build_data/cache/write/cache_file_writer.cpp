@@ -41,6 +41,7 @@ namespace {
            && domains.vendorDefinitions.size() <= kMaximumCount
            && domains.vendorSaleRows.size() <= kMaximumCount
            && domains.vendorInstalledRows.size() <= kMaximumCount
+           && domains.vendorTransferRules.size() <= kMaximumCount
            && domains.positionProfiles.size() <= kMaximumCount
            && domains.objectTypes.size() <= kMaximumCount
            && domains.recordObjectives.size() <= kMaximumCount

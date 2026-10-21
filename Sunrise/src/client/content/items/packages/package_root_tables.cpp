@@ -201,6 +201,14 @@ bool build_buckets(const reader::Source& source,
         descriptors[index].slotCount = static_cast<std::uint16_t>(slotCount);
         descriptors[index].arraySelector = static_cast<buckets::ArraySelector>(
             std::to_integer<std::uint8_t>(blob[base + tables::kBucketArraySelectorOffset]));
+        const auto fifo = std::to_integer<std::uint8_t>(blob[base + tables::kBucketFifoOffset]);
+        const auto noTransfer =
+            std::to_integer<std::uint8_t>(blob[base + tables::kBucketNoTransferOnEvictionOffset]);
+        if (fifo > 1 || noTransfer > 1) {
+            return false;
+        }
+        descriptors[index].policyFlags =
+            (fifo ? buckets::kFifo : 0) | (noTransfer ? buckets::kNoTransferOnEviction : 0);
     }
     std::array<std::int8_t, buckets::kDescriptorCapacity> equipmentSlots{};
     if (!read_bucket_equipment_slots(

@@ -34,7 +34,16 @@ inline constexpr std::uint8_t kPerkBucketId = 37;
 inline constexpr std::size_t kDescriptorCapacity = kUnavailableBucketId;
 /** Signed -1 marks a bucket that has no equipment slot. */
 inline constexpr std::int8_t kUnavailableEquipmentSlot = -1;
-/** The packed descriptor holds routing, an optional equipment slot, and one reserved byte. */
+/** A full bucket with this policy discards its oldest row to admit a new one. */
+inline constexpr std::uint8_t kFifo = 1;
+/**
+ * A full bucket with this policy never hands its overflow to Lost Items. The shipped build sets
+ * it only on the FIFO perk bucket.
+ */
+inline constexpr std::uint8_t kNoTransferOnEviction = 2;
+/** Every policy bit the extractor accepts. */
+inline constexpr std::uint8_t kPolicyMask = kFifo | kNoTransferOnEviction;
+/** The packed descriptor holds routing, an optional equipment slot, and acquisition policy. */
 inline constexpr std::size_t kDescriptorByteSize = 8;
 
 /** Packed routing record for one checked runtime inventory bucket. */
@@ -44,7 +53,7 @@ struct Descriptor {
     std::uint16_t firstSlot{};
     std::uint16_t slotCount{};
     std::int8_t equipmentSlot{kUnavailableEquipmentSlot};
-    std::uint8_t reserved{};
+    std::uint8_t policyFlags{};
 };
 
 static_assert(sizeof(Descriptor) == kDescriptorByteSize);

@@ -14,6 +14,8 @@ inline constexpr std::size_t kInstalledArrayDescriptor = 32;
 inline constexpr std::size_t kSaleArrayDescriptor = 48;
 /** A vendor definition holds its unnamed third array descriptor here. */
 inline constexpr std::size_t kThirdArrayDescriptor = 80;
+/** A vendor definition holds its transfer rule array descriptor here. */
+inline constexpr std::size_t kTransferArrayDescriptor = 96;
 /** Raw reset interval. Its unit, epoch and scope are open, so it is stored unconverted. */
 inline constexpr std::size_t kResetIntervalOffset = 20;
 /** Raw reset phase, paired with the interval. */

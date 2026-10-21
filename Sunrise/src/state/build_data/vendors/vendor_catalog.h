@@ -8,22 +8,24 @@
 
 namespace sunrise::state::build_data::vendors {
 
-/** Clears the index, every held definition, and both row banks. */
+/** Clears the index, every held definition, and every row bank. */
 void clear() noexcept;
 
 /**
  * Checks one complete vendor catalog in canonical order.
- * All four arrays check together, because a definition names its rows by range.
+ * All five arrays check together, because a definition names its rows by range.
  * @param index Candidate index rows, dense and in ascending index order.
  * @param definitions Candidate definitions in ascending index order.
  * @param saleRows Candidate flat sale bank in definition then row order.
  * @param installedRows Candidate flat installed bank in definition then row order.
+ * @param transferRules Candidate flat transfer bank in definition then row order.
  * @return True when every count, range, class, offset and ordering rule holds.
  */
 [[nodiscard]] bool valid(std::span<const IndexEntry> index,
                          std::span<const Definition> definitions,
                          std::span<const SaleRow> saleRows,
-                         std::span<const InstalledRow> installedRows) noexcept;
+                         std::span<const InstalledRow> installedRows,
+                         std::span<const TransferRule> transferRules) noexcept;
 
 /**
  * Replaces the complete vendor catalog in one step.
@@ -31,12 +33,14 @@ void clear() noexcept;
  * @param definitions Complete definitions, which may be empty.
  * @param saleRows Complete flat sale bank.
  * @param installedRows Complete flat installed bank.
+ * @param transferRules Complete flat transfer bank.
  * @return True when the catalog passes validation and fits fixed State storage.
  */
 [[nodiscard]] bool replace(std::span<const IndexEntry> index,
                            std::span<const Definition> definitions,
                            std::span<const SaleRow> saleRows,
-                           std::span<const InstalledRow> installedRows) noexcept;
+                           std::span<const InstalledRow> installedRows,
+                           std::span<const TransferRule> transferRules) noexcept;
 
 /**
  * Finds one index row by the vendor definition hash.
@@ -104,6 +108,16 @@ sale_row(const Definition& definition, std::size_t row, SaleRow& output) noexcep
 installed_row(const Definition& definition, std::size_t row, InstalledRow& output) noexcept;
 
 /**
+ * Reads one transfer rule of one definition, under the catalog lock.
+ * @param definition Definition whose range is read.
+ * @param row Rule ordinal inside that definition.
+ * @param output Receives the rule, or a cleared rule when the definition does not own it.
+ * @return True when the definition owns that rule.
+ */
+[[nodiscard]] bool
+transfer_rule(const Definition& definition, std::size_t row, TransferRule& output) noexcept;
+
+/**
  * Copies every index row in ascending index order.
  * @param output Caller-owned fixed row storage.
  * @param count Receives the copied row count, or zero when output is too small.
@@ -136,6 +150,15 @@ installed_row(const Definition& definition, std::size_t row, InstalledRow& outpu
 [[nodiscard]] bool snapshot_installed_rows(std::span<InstalledRow> output,
                                            std::size_t& count) noexcept;
 
+/**
+ * Copies the whole flat transfer bank.
+ * @param output Caller-owned fixed row storage.
+ * @param count Receives the copied row count, or zero when output is too small.
+ * @return True when output can hold every row.
+ */
+[[nodiscard]] bool snapshot_transfer_rules(std::span<TransferRule> output,
+                                           std::size_t& count) noexcept;
+
 /** @return The index row count, read under the lock. */
 [[nodiscard]] std::size_t count() noexcept;
 
@@ -147,5 +170,8 @@ installed_row(const Definition& definition, std::size_t row, InstalledRow& outpu
 
 /** @return The flat installed bank row count, read under the lock. */
 [[nodiscard]] std::size_t installed_row_count() noexcept;
+
+/** @return The flat transfer bank row count, read under the lock. */
+[[nodiscard]] std::size_t transfer_rule_count() noexcept;
 
 } // namespace sunrise::state::build_data::vendors

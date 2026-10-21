@@ -83,7 +83,7 @@ bool valid(std::span<const Descriptor> descriptors) noexcept {
     bool hasEquipmentSlot = false;
     for (const Descriptor& descriptor : descriptors) {
         if (descriptor.bucketId == kUnavailableBucketId || occupied[descriptor.bucketId]
-            || descriptor.reserved != 0 || !range_fits(descriptor)
+            || (descriptor.policyFlags & ~kPolicyMask) != 0 || !range_fits(descriptor)
             || !equipment_slot_fits(descriptor)) {
             return false;
         }
