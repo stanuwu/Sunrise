@@ -6,6 +6,7 @@
 
 #include "../../encoding/bit_writer.h"
 #include "../../gameplay/descriptor/join_descriptor.h"
+#include "../../gameplay/group/native_player_profile.h"
 #include "activity_client_identity_parser.h"
 #include "client_authoritative_data.h"
 
@@ -17,6 +18,11 @@ inline constexpr std::uint32_t kMessageType = 12;
 inline constexpr std::size_t kMemberSlotCount = 32;
 /** Slot one belongs to the service host, so no peer may claim it. */
 inline constexpr std::uint8_t kServiceHostSlot = 1;
+/**
+ * Code units one player-name field carries before the terminator the writer appends. The native
+ * field holds `kNativePlayerNameCapacity` UTF-16 code units, terminator included.
+ */
+inline constexpr std::size_t kPlayerNameUnitCount = gameplay::group::kNativePlayerNameCapacity - 1;
 /** One serialized NetAddr, in bits, which is how every transport field is budgeted. */
 inline constexpr std::size_t kTransportAddressBitCount = gameplay::descriptor::kNetAddrSize * 8U;
 /** One local player and an explicit empty view mask use 30,085 meaningful bits. */
@@ -99,7 +105,7 @@ struct PeerMember final {
     bool hasTransitionToken{};
     bool hasSyncToken{};
     /** Reflected peer name, as code units. The writer appends the terminator after them. */
-    std::array<std::uint16_t, 63> name{};
+    std::array<std::uint16_t, kPlayerNameUnitCount> name{};
     std::uint8_t nameLength{};
     bool hasName{};
     bool present{};
@@ -119,7 +125,7 @@ struct MembershipSnapshot final {
     std::uint8_t localSlot{};
     client_identity::ClientIdentity identity{};
     /** The recipient's own name belongs in both native player-name fields too. */
-    std::array<std::uint16_t, 63> localName{};
+    std::array<std::uint16_t, kPlayerNameUnitCount> localName{};
     std::uint8_t localNameLength{};
     /**
      * Activity Host id every member row publishes as player-state field 4.
