@@ -394,6 +394,7 @@ bool prepare_item_acquisition(
         || mutation.accountSoid == 0 || mutation.accountSoid != acquisition.accountSoid
         || mutation.characterSoid != acquisition.characterSoid
         || mutation.acquiredInstanceSoid != acquisition.acquiredInstanceSoid
+        || mutation.evictedInstanceSoid != acquisition.evictedInstanceSoid
         // Profile inventory and account-scoped quest values both require the account object.
         || (mutation.updates_account() && !acquisition.updatesAccount)
         || acquisition.accountSoid != acquisition.after.family4RootSoid
@@ -573,6 +574,12 @@ bool prepare_item_acquisition(
     // order, dropping the character reference before releasing the item.
     std::swap(staged.objects[0], staged.objects[1]);
 
+    if (acquisition.evictedInstanceSoid != 0) {
+        staged.objects[objectCount++] = {acquisition.itemInstanceDefinitionId,
+                                         acquisition.evictedInstanceSoid,
+                                         middleware::queuez::Encoding::oodle,
+                                         {}};
+    }
     staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
     staged.family = middleware::queuez::Family{
         kAccountFamilyType,

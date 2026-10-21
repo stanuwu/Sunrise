@@ -14,6 +14,12 @@
 
 namespace sunrise::server::bap::encrypted::push::snapshot {
 
+/** Builds the character revision moving a saved Lost Items resident. */
+[[nodiscard]] bool prepare_postmaster_claim(Scratch& scratch,
+                                            const queuez::EquipmentSwap& update,
+                                            const state::PendingPostmasterClaim& mutation,
+                                            Prepared& prepared) noexcept;
+
 /** Initial family snapshots start at version zero. */
 inline constexpr std::int32_t kInitialFamilyVersion = 0;
 /** Family three carries the account roster selected by Web Service subscription. */

@@ -93,13 +93,15 @@ bool valid(const Sockets& sockets) noexcept {
 /** Checks one whole authored item without reading installed build data. */
 bool valid(const Item& item) noexcept {
     return item.instanceSoid != 0 && item.definitionHash != kNoDefinitionHash && item.level >= 0
-           && item.quantity > 0 && item.mutationSerial >= 0 && valid(item.sockets);
+           && item.quantity > 0 && item.mutationSerial >= 0 && valid(item.sockets)
+           && (item.placement == ItemPlacement::inventory
+               || (item.placement == ItemPlacement::lostItems && item.quantity == 1));
 }
 
 /** Checks every item present in the fixed semantic equipment array. */
 bool valid(const Equipment& equipment) noexcept {
     for (const std::optional<Item>& item : equipment.slots) {
-        if (item.has_value() && !valid(*item)) {
+        if (item.has_value() && (!valid(*item) || item->placement != ItemPlacement::inventory)) {
             return false;
         }
     }
@@ -116,14 +118,15 @@ bool valid(const CharacterItems& items) noexcept {
             if (!valid(items.values[index])) {
                 return false;
             }
-        } else if (items.values[index].instanceSoid != 0) {
+        } else if (items.values[index].instanceSoid != 0
+                   || items.values[index].placement != ItemPlacement::inventory) {
             return false;
         }
     }
     return true;
 }
 
-/** Checks a dense, definition-unique character stack list. */
+/** Checks a dense character stack list with distinct mutation identities. */
 bool valid(const CharacterStacks& items) noexcept {
     if (items.count > items.values.size()) {
         return false;
@@ -141,7 +144,7 @@ bool valid(const CharacterStacks& items) noexcept {
             return false;
         }
         for (std::size_t prior = 0; prior < index; ++prior) {
-            if (items.values[prior].definitionHash == item.definitionHash) {
+            if (items.values[prior].mutationSerial == item.mutationSerial) {
                 return false;
             }
         }

@@ -34,6 +34,16 @@ inline constexpr std::uint8_t kPerkBucketId = 37;
 inline constexpr std::size_t kDescriptorCapacity = kUnavailableBucketId;
 /** Signed -1 marks a bucket that has no equipment slot. */
 inline constexpr std::int8_t kUnavailableEquipmentSlot = -1;
+/**
+ * Lost Items. The shipped Postmaster vendors return this FIFO character bucket (21 slots) to an
+ * item's authored bucket, and no shipped item definition is authored into it.
+ */
+inline constexpr std::uint8_t kLostItemsBucketId = 34;
+/**
+ * The shipped build authors 148 definitions into this character bucket: engrams, plus the
+ * packages and unnamed wrappers that are opened the same way.
+ */
+inline constexpr std::uint8_t kEngramBucketId = 31;
 /** A full bucket with this policy discards its oldest row to admit a new one. */
 inline constexpr std::uint8_t kFifo = 1;
 /**

@@ -43,8 +43,11 @@ bool prepare_record_reward_grant(
         || update.accountSoid != before.family4RootSoid
         || update.after.family4Version != before.family4Version + 1
         || update.appendedResidentCount > mutation.rewardCount
+        || update.releasedResidentCount > update.releasedResidents.size()
+        || update.releasedResidentCount > before.family4ResidentCount
         || update.after.family4ResidentCount
-               != before.family4ResidentCount + update.appendedResidentCount
+               != before.family4ResidentCount - update.releasedResidentCount
+                      + update.appendedResidentCount
         || update.accountDefinitionId != before.family4Residents.front().definitionId
         || update.characterDefinitionId == 0 || update.itemInstanceDefinitionId == 0) {
         return report_failure("record_reward_session");
@@ -65,6 +68,9 @@ bool prepare_record_reward_grant(
     family4_datagen::loadout::ResolvedInstances residents{};
     for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
         const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
+        if (!reward.retained) {
+            continue;
+        }
         if (reward.kind == state::RecordRewardKind::characterInstance) {
             std::size_t matches = 0;
             for (std::size_t itemIndex = 0; itemIndex < selected.loadout.itemCount; ++itemIndex) {
@@ -110,7 +116,9 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_resident_count");
     }
     for (std::size_t index = 0; index < residents.itemCount; ++index) {
-        const auto& expected = update.after.family4Residents[before.family4ResidentCount + index];
+        const auto& expected =
+            update.after.family4Residents[before.family4ResidentCount - update.releasedResidentCount
+                                          + index];
         if (expected.objectSoid != residents.items[index].instance.instanceSoid
             || expected.definitionId != update.itemInstanceDefinitionId) {
             return report_failure("record_reward_resident_order");
@@ -163,6 +171,9 @@ bool prepare_record_reward_grant(
     std::size_t characterChanges = 0;
     for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
         const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
+        if (!reward.retained) {
+            continue;
+        }
         if (reward.kind == state::RecordRewardKind::profileStack
             || reward.kind == state::RecordRewardKind::accountUnlock) {
             continue;
@@ -238,6 +249,9 @@ bool prepare_record_reward_grant(
     std::size_t profileChanges = 0;
     for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
         const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
+        if (!reward.retained) {
+            continue;
+        }
         if (reward.kind != state::RecordRewardKind::profileStack) {
             continue;
         }
@@ -284,6 +298,17 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_account_object");
     }
 
+    std::size_t objectCount = residentCursor + 2U;
+    for (const auto soid :
+         std::span(update.releasedResidents).first(update.releasedResidentCount)) {
+        if (objectCount == staged.objects.size()) {
+            clear_after(scratch, reservation);
+            return report_failure("record_reward_releases");
+        }
+        staged.objects[objectCount++] = {
+            update.itemInstanceDefinitionId, soid, middleware::queuez::Encoding::oodle, {}};
+    }
+
     staged.rawClearSize =
         (std::max)(reservation.rawClearSize,
                    reservation.rawWriteOffset
@@ -294,7 +319,7 @@ bool prepare_record_reward_grant(
         update.accountSoid,
         update.after.family4Version,
         0,
-        std::span(staged.objects).first(residentCursor + 2U),
+        std::span(staged.objects).first(objectCount),
     };
     if (!commit(staged, prepared)) {
         clear_after(scratch, reservation);

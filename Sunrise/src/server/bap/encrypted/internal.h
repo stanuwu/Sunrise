@@ -63,6 +63,12 @@ struct EquipmentSwapTransaction {
     queuez::EquipmentSwap update{};
 };
 
+/** Lost Items claim and its promised character revision. */
+struct PostmasterClaimTransaction {
+    std::unique_ptr<state::PendingPostmasterClaim> pending{};
+    queuez::EquipmentSwap update{};
+};
+
 /** Socket mutation and the exact QueueZ after-image promised by its response. */
 
 struct SocketPlugTransaction {
@@ -185,6 +191,7 @@ struct ServiceOutcome {
                                      std::unique_ptr<queuez::SelectCharacter>,
 
                                      std::unique_ptr<EquipmentSwapTransaction>,
+                                     std::unique_ptr<PostmasterClaimTransaction>,
 
                                      std::unique_ptr<SubclassSelectionTransaction>,
 
@@ -390,6 +397,16 @@ process(const ServiceRoute& route,
 /** Owns server-initiated encrypted frames appended after correlated replies. */
 
 namespace push {
+
+/** Publishes a Postmaster move without a second acquisition. */
+[[nodiscard]] bool
+append_postmaster_claim_notification(Scratch& scratch,
+                                     const queuez::EquipmentSwap& update,
+                                     const state::PendingPostmasterClaim& mutation,
+                                     std::span<const std::byte, state::kAesKeySize> key,
+                                     std::span<const std::byte, state::kBapNonceSize> nonce,
+                                     std::span<std::byte> response,
+                                     std::size_t& written) noexcept;
 
 /**
  * Canonicalizes the account before any family builder reads it.

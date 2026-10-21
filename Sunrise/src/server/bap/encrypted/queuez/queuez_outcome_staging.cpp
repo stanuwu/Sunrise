@@ -103,6 +103,7 @@ bool stage_service_outcome(Scratch& scratch,
     const auto* changeCharacter = transaction_if<ChangeCharacter>(outcome);
     const auto* selectCharacter = transaction_if<SelectCharacter>(outcome);
     const auto* equipment = transaction_if<EquipmentSwapTransaction>(outcome);
+    const auto* postmasterClaim = transaction_if<PostmasterClaimTransaction>(outcome);
     const auto* subclassSelection = transaction_if<SubclassSelectionTransaction>(outcome);
     const auto* itemState = transaction_if<ItemStateTransaction>(outcome);
     const auto* artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome);
@@ -152,6 +153,27 @@ bool stage_service_outcome(Scratch& scratch,
         }
         middleware::secure_channel::advance_nonce(nonce);
         after = changeCharacter->after;
+    } else if (postmasterClaim != nullptr) {
+        const auto& update = postmasterClaim->update;
+        if (!postmasterClaim->pending || !valid(update.after)
+            || update.characterSoid != postmasterClaim->pending->characterSoid
+            || update.after.family4RootSoid != before.family4RootSoid
+            || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
+            || update.after.family4Version != before.family4Version + 1
+            || !push::append_postmaster_claim_notification(
+                scratch, update, *postmasterClaim->pending, key, nonce, response, written)) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=queuez stage=postmaster_claim result=fail");
+            return false;
+        }
+        middleware::secure_channel::advance_nonce(nonce);
+        after = update.after;
+        // The claim revision carries no presentation rows, so a running acquisition hold ends.
+        if (preserveAcquisitionPresentation) {
+            publication.updatesAcquisitionPresentationRows = true;
+            publication.acquisitionPresentationRowCount = 0;
+        }
     } else if (equipment != nullptr) {
         // Body processing already staged this exact after-image so the correlated opcode-403
         // response could promise its version. Reuse it here; staging a second revision would make

@@ -591,4 +591,42 @@ bool prepare_artifact_item_refresh(Scratch& scratch,
     return true;
 }
 
+bool prepare_postmaster_claim(Scratch& scratch,
+                              const queuez::EquipmentSwap& update,
+                              const state::PendingPostmasterClaim& mutation,
+                              Prepared& prepared) noexcept {
+    const Reservation reservation = reserve_prior(scratch, prepared);
+    if (reservation.rawWriteOffset > scratch.plaintext.size()
+        || reservation.compressedWriteOffset > scratch.sealed.size()) {
+        return report_failure("postmaster_reservation");
+    }
+    auto account = std::unique_ptr<state::AccountState>{new (std::nothrow) state::AccountState};
+    if (!account || !state::preview_postmaster_claim(mutation, *account)
+        || mutation.characterSoid != update.characterSoid
+        || account->primarySoid != update.after.family4RootSoid) {
+        return report_failure("postmaster_mutation");
+    }
+    Resolved selected{};
+    const auto selectedIndex = find_character_index(*account);
+    if (!selectedIndex || *selectedIndex != mutation.characterIndex
+        || !resolve(*account, mutation.characterIndex, selected)
+        || selected.characterObjectId != update.characterDefinitionId) {
+        return report_failure("postmaster_selection");
+    }
+    const auto raw = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
+    if (raw.size() < family4_datagen::character::layout::kObjectSize) {
+        return report_failure("postmaster_storage");
+    }
+    const auto bytes = raw.first(family4_datagen::character::layout::kObjectSize);
+    if (!family4_datagen::character::encode(account->characters[mutation.characterIndex],
+                                            selected.loadout,
+                                            selected.lightEvaluation,
+                                            bytes)) {
+        return report_failure("postmaster_character");
+    }
+    // No acquisition overlay: the source's old Lost Items row must become empty in this revision.
+    return finish_character_upsert(
+        scratch, reservation, bytes, update, "postmaster_object", "postmaster_snapshot", prepared);
+}
+
 } // namespace sunrise::server::bap::encrypted::push::snapshot

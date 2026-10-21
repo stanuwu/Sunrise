@@ -79,6 +79,72 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
     return true;
 }
 
+static_assert(account::inventory::kCharacterItemCapacity == 333);
+static_assert(account::inventory::kCharacterStackCapacity == 333);
+
+/** Widens saved row bounds to the character ABI and adds item placement, keeping socket rows. */
+static bool migrate_lost_items_storage() noexcept {
+    // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
+    // no account readers exist yet; restore enforcement after the savepoint ends on either path.
+    if (!execute("PRAGMA foreign_keys=OFF")) {
+        return false;
+    }
+    const bool migrated = []() noexcept {
+        Transaction transaction;
+        if (!transaction.ready() || !execute(R"sql(
+CREATE TABLE items_v4 (
+    character_slot INTEGER NOT NULL REFERENCES characters(slot),
+    location INTEGER NOT NULL CHECK (location IN (0, 1)),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    instance_soid INTEGER NOT NULL UNIQUE,
+    definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
+    level INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    flags INTEGER NOT NULL CHECK (flags BETWEEN 0 AND 7),
+    socket_policy INTEGER NOT NULL CHECK (socket_policy IN (0, 1)),
+    plug_count INTEGER NOT NULL CHECK (plug_count BETWEEN 0 AND 12),
+    movement_ability INTEGER NOT NULL,
+    grenade_ability INTEGER NOT NULL,
+    super_ability INTEGER NOT NULL,
+    melee_ability INTEGER NOT NULL,
+    class_ability INTEGER NOT NULL,
+    seen INTEGER NOT NULL CHECK (seen IN (0, 1)),
+    placement INTEGER NOT NULL CHECK (placement IN (0, 1)),
+    PRIMARY KEY (character_slot, location, position),
+    CHECK ((location = 0 AND position < 17 AND placement = 0)
+           OR (location = 1 AND position < 333)),
+    CHECK (placement = 0 OR quantity = 1)
+) STRICT;
+INSERT INTO items_v4 SELECT items.*, 0 FROM items;
+DROP TABLE items;
+ALTER TABLE items_v4 RENAME TO items;
+CREATE TABLE character_stacks_v4 (
+    character_slot INTEGER NOT NULL REFERENCES characters(slot),
+    position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 332),
+    definition_hash INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    PRIMARY KEY (character_slot, position)
+) STRICT;
+INSERT INTO character_stacks_v4 SELECT * FROM character_stacks;
+DROP TABLE character_stacks;
+ALTER TABLE character_stacks_v4 RENAME TO character_stacks;
+PRAGMA user_version=4;
+)sql")) {
+            return false;
+        }
+        // Only the rebuilt tables and the sockets that reference them are rechecked.
+        Statement items("PRAGMA foreign_key_check(items)");
+        Statement stacks("PRAGMA foreign_key_check(character_stacks)");
+        Statement sockets("PRAGMA foreign_key_check(sockets)");
+        return items.step() == SQLITE_DONE && stacks.step() == SQLITE_DONE
+               && sockets.step() == SQLITE_DONE && transaction.commit();
+    }();
+    const bool enforced = execute("PRAGMA foreign_keys=ON");
+    return migrated && enforced;
+}
+
 /**
  * Opens the save, creating it from the bundled SQL or upgrading an older schema in place.
  * A new database gets the schema and every default in one durable transaction.
@@ -132,15 +198,14 @@ bool open(std::string_view path,
                 && !characterStarter.empty() && execute(starterText.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 3 adds the appearance header and the starter tables. Version 2 added account
-        // preferences and per-item seen state.
-        constexpr int kSchemaVersion = 3;
+        // Version 4 adds saved item placement and room for Lost Items. Version 3 added the
+        // appearance header and the starter tables; version 2 account preferences and seen state.
+        constexpr int kSchemaVersion = 4;
         constexpr int kApplicationId = 1397902921;
         int application = 0;
         Statement query("PRAGMA application_id");
-        ready = (version == 1 || version == 2 || version == kSchemaVersion)
-                && query.step() == SQLITE_ROW && query.column(0, application)
-                && application == kApplicationId;
+        ready = (version >= 1 && version <= kSchemaVersion) && query.step() == SQLITE_ROW
+                && query.column(0, application) && application == kApplicationId;
     }
     if (ready && version == 1) {
         Transaction transaction;
@@ -168,6 +233,12 @@ bool open(std::string_view path,
                            "NOT NULL DEFAULT 0 CHECK (appearance_header_valid IN (0, 1));")
                 && execute(starterText.c_str()) && execute("PRAGMA user_version=3")
                 && transaction.commit();
+        if (ready) {
+            version = 3;
+        }
+    }
+    if (ready && version == 3) {
+        ready = migrate_lost_items_storage();
     }
     if (!ready) {
         shutdown();

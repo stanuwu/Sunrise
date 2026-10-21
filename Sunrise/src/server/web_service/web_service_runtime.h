@@ -38,6 +38,7 @@ struct Outcome {
     bool profileSetupRefused{};
     /** A request prepares at most one State mutation and allocates only that exact payload. */
     using Mutation = std::variant<std::monostate,
+                                  std::unique_ptr<state::PendingPostmasterClaim>,
                                   std::unique_ptr<state::PendingEquipmentSwap>,
                                   std::unique_ptr<state::PendingSubclassSelection>,
                                   std::unique_ptr<state::PendingItemAcquisition>,

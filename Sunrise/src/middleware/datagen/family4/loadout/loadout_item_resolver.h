@@ -35,4 +35,8 @@ struct Candidate {
                                 bool requireEquipmentSlot,
                                 Candidate& output) noexcept;
 
+/** Resolves the installed Lost Items range and its eviction policy. */
+[[nodiscard]] bool
+resolve_lost_items_bucket(state::build_data::inventory::buckets::Descriptor& output) noexcept;
+
 } // namespace sunrise::middleware::datagen::family4::loadout

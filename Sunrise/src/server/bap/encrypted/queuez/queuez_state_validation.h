@@ -152,7 +152,8 @@ namespace sunrise::server::bap::encrypted::queuez {
  * @param characterSoid Selected resident character receiving the item.
  * @param acquiredInstanceSoid Fresh item-instance SOID absent from the resident manifest.
  * @param updatesAccount True when the account object rides the same increment.
- * @param acquisition Gets the exact +1 version and appended resident after-image.
+ * @param evictedInstanceSoid FIFO resident to release, or zero.
+ * @param acquisition Gets the exact +1 version and resident after-image.
  * @return True when both schemas resolve and the manifest has one free resident slot.
  */
 [[nodiscard]] bool stage_item_acquisition(const SessionState& before,
@@ -160,6 +161,7 @@ namespace sunrise::server::bap::encrypted::queuez {
                                           std::uint64_t characterSoid,
                                           std::uint64_t acquiredInstanceSoid,
                                           bool updatesAccount,
+                                          std::uint64_t evictedInstanceSoid,
                                           ItemAcquisition& acquisition) noexcept;
 
 /**

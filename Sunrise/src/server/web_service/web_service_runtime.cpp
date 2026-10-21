@@ -13,6 +13,7 @@
 #include "../../middleware/web_service/messages/opcode205.h"
 #include "../../middleware/web_service/messages/opcode206.h"
 #include "../../middleware/web_service/messages/opcode2400.h"
+#include "../../middleware/web_service/messages/opcode405.h"
 #include "../../middleware/web_service/messages/opcode501_codec.h"
 #include "../../middleware/web_service/messages/opcode502.h"
 #include "../../middleware/web_service/messages/opcode503.h"
@@ -447,6 +448,8 @@ bool consume(std::span<const std::byte> request,
         purchase_item(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode904::kOpcode) {
         acquire_quest(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode405::kOpcode) {
+        claim_postmaster_item(message, outcome);
     } else {
         dispatched = false;
     }

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "../../../../state/account/inventory/postmaster_policy.h"
 #include "../../../../state/build_data/runtime.h"
 #include "subclass_socket_selection.h"
 
@@ -157,6 +158,11 @@ bool resolve_item(const authored_inventory::Item& authored,
         return false;
     }
 
+    if (authored.placement == authored_inventory::ItemPlacement::lostItems
+        && (requireEquipmentSlot || !authored_inventory::lost_items_supported(authored, itemDetail)
+            || !resolve_lost_items_bucket(bucket))) {
+        return false;
+    }
     Candidate candidate{};
     candidate.bucket = bucket;
     // Slot zero for a slotless item is safe: the encoder reads `equipmentSlot` only when `equipped`
@@ -200,6 +206,20 @@ bool resolve_item(const authored_inventory::Item& authored,
                           candidate.item.instance.socketEntryStates,
                           candidate.item.instance.socketSelectors);
     output = candidate;
+    return true;
+}
+
+bool resolve_lost_items_bucket(build_buckets::Descriptor& output) noexcept {
+    build_buckets::Descriptor bucket{};
+    if (!state::build_data::find_inventory_bucket_descriptor(build_buckets::kLostItemsBucketId,
+                                                             bucket)
+        || bucket.bucketId != build_buckets::kLostItemsBucketId
+        || bucket.arraySelector != build_buckets::ArraySelector::character || bucket.slotCount == 0
+        || bucket.equipmentSlot != build_buckets::kUnavailableEquipmentSlot
+        || (bucket.policyFlags & build_buckets::kPolicyMask) != build_buckets::kFifo) {
+        return false;
+    }
+    output = bucket;
     return true;
 }
 

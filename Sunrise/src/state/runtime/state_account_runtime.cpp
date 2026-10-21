@@ -323,6 +323,9 @@ bool prepare_equipment_swap(std::uint64_t requestedInstanceSoid,
     }
 
     const authored_inventory::Item& requested = before.inventory.values[inventoryIndex];
+    if (requested.placement != authored_inventory::ItemPlacement::inventory) {
+        return false;
+    }
     std::uint8_t requestedNativeSlot = 0;
     std::size_t equipmentSlotIndex = authored_inventory::kEquipmentSlotCount;
     ResolvedPosition requestedPosition{};

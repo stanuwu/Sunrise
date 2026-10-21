@@ -390,12 +390,43 @@ bool stage_subclass_selection(const SessionState& before,
     return staged;
 }
 
+/** Removes the one item-instance resident with this SOID, keeping the remaining order stable. */
+[[nodiscard]] static bool release_item_resident(SessionState& state, std::uint64_t soid) noexcept {
+    std::uint32_t definition = 0;
+    if (!middleware::datagen::object_id(
+            kAccountFamilyType, middleware::datagen::kItemInstanceSlot, definition)
+        || state.family4ResidentCount > state.family4Residents.size()) {
+        return false;
+    }
+    std::size_t found = state.family4ResidentCount;
+    for (std::size_t index = 0; index < state.family4ResidentCount; ++index) {
+        const auto& resident = state.family4Residents[index];
+        if (resident.objectSoid != soid) {
+            continue;
+        }
+        if (resident.definitionId != definition || found != state.family4ResidentCount) {
+            return false;
+        }
+        found = index;
+    }
+    if (found == state.family4ResidentCount) {
+        return false;
+    }
+    std::move(state.family4Residents.begin() + static_cast<std::ptrdiff_t>(found) + 1,
+              state.family4Residents.begin()
+                  + static_cast<std::ptrdiff_t>(state.family4ResidentCount),
+              state.family4Residents.begin() + static_cast<std::ptrdiff_t>(found));
+    state.family4Residents[--state.family4ResidentCount] = {};
+    return true;
+}
+
 /** Stages the character upsert and appended resident required by one new item instance. */
 bool stage_item_acquisition(const SessionState& before,
                             std::uint64_t accountSoid,
                             std::uint64_t characterSoid,
                             std::uint64_t acquiredInstanceSoid,
                             bool updatesAccount,
+                            std::uint64_t evictedInstanceSoid,
                             ItemAcquisition& acquisition) noexcept {
     acquisition = {};
     std::uint32_t accountDefinitionId = 0;
@@ -404,7 +435,9 @@ bool stage_item_acquisition(const SessionState& before,
     if (!valid(before) || !before.family4Active || before.family4RootSoid == 0 || accountSoid == 0
         || accountSoid != before.family4RootSoid || characterSoid == 0 || acquiredInstanceSoid == 0
         || before.family4ResidentCount == 0
-        || before.family4ResidentCount >= before.family4Residents.size()
+        || before.family4ResidentCount > before.family4Residents.size()
+        || (before.family4ResidentCount == before.family4Residents.size()
+            && evictedInstanceSoid == 0)
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || !middleware::datagen::object_id(
             kAccountFamilyType, middleware::datagen::kAccountSlot, accountDefinitionId)
@@ -434,8 +467,13 @@ bool stage_item_acquisition(const SessionState& before,
     }
 
     acquisition.after = before;
+    if (evictedInstanceSoid != 0
+        && !release_item_resident(acquisition.after, evictedInstanceSoid)) {
+        return false;
+    }
+    acquisition.evictedInstanceSoid = evictedInstanceSoid;
     ++acquisition.after.family4Version;
-    acquisition.after.family4Residents[before.family4ResidentCount] =
+    acquisition.after.family4Residents[acquisition.after.family4ResidentCount] =
         ResidentObject{acquiredInstanceSoid, itemInstanceDefinitionId};
     ++acquisition.after.family4ResidentCount;
     acquisition.accountDefinitionId = accountDefinitionId;
@@ -485,16 +523,49 @@ bool stage_record_reward_grant(const SessionState& before,
     std::size_t count = 0;
     for (std::size_t i = 0; i < pending.rewardCount; ++i) {
         const auto& reward = pending.rewards[i];
+        if (!reward.retained) {
+            continue;
+        }
         if (reward.kind == state::RecordRewardKind::characterInstance
             || reward.appendedProfileResident) {
             residents[count++] = reward.instanceSoid;
         }
     }
-    return stage_record_reward_grant(before,
-                                     pending.accountSoid,
-                                     pending.characterSoid,
-                                     std::span(residents).first(count),
-                                     grant);
+    SessionState retained = before;
+    std::array<std::uint64_t, state::kRecordRewardGrantCapacity> released{};
+    std::size_t releasedCount = 0;
+    const auto& priorItems = pending.beforeCharacter.inventory;
+    const auto& nextItems = pending.afterCharacter.inventory;
+    if (!valid(before) || priorItems.count > priorItems.values.size()
+        || nextItems.count > nextItems.values.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < priorItems.count; ++index) {
+        const auto& prior = priorItems.values[index];
+        const auto remains = [&](const auto& item) {
+            return item.instanceSoid == prior.instanceSoid;
+        };
+        if (std::any_of(nextItems.values.begin(),
+                        nextItems.values.begin() + static_cast<std::ptrdiff_t>(nextItems.count),
+                        remains)) {
+            continue;
+        }
+        if (releasedCount == released.size()
+            || !release_item_resident(retained, prior.instanceSoid)) {
+            return false;
+        }
+        released[releasedCount++] = prior.instanceSoid;
+    }
+    if (!stage_record_reward_grant(retained,
+                                   pending.accountSoid,
+                                   pending.characterSoid,
+                                   std::span(residents).first(count),
+                                   grant)) {
+        return false;
+    }
+    grant.releasedResidents = released;
+    grant.releasedResidentCount = releasedCount;
+    return true;
 }
 
 bool stage_record_reward_grant(const SessionState& before,
