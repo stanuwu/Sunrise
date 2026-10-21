@@ -9,6 +9,7 @@
 #include "../../../../../core/settings/settings.h"
 #include "../../../../../middleware/bap/activity_message/activity_replication_epoch_encoder.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
+#include "../../../../../state/activity/bubble_authority/runtime.h"
 #include "../../../../../state/activity/definition.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/activity/runtime.h"
@@ -28,6 +29,7 @@
 #include "activity_member_departure_push.h"
 #include "activity_membership_push.h"
 #include "activity_notification_frame.h"
+#include "activity_roster_grant.h"
 #include "activity_roster_push.h"
 #include "internal.h"
 #include "mission_entity_allocation.h"
@@ -72,6 +74,12 @@ void drive_cinematic_hold(Session& session, std::uint64_t now) noexcept {
     }
 }
 
+/**
+ * A roster owed only for a released bubble's grant waits this long before it is built again, so
+ * a body that cannot carry the grant is not rebuilt on every pump. A roster owed for anything
+ * else still carries the grant at once.
+ */
+constexpr std::uint64_t kGrantRetryIntervalMs = 250;
 /**
  * Retry cadence for a membership body held while its advertisement is still being allocated.
  * The allocation lands in the next service slice, so this is short. Leaving the keepalive due
@@ -129,17 +137,38 @@ constexpr std::uint32_t kCurrentRevision = 0;
 }
 
 /**
- * Tests whether a pending placed reset can carry its purge on a roster built now.
- * The roster refuses an unsolicited body without that purge.
- * @param session Connection whose roster region and identities are read.
- * @return True when the purge prepares for the bubble the roster names.
+ * Asks the question the roster this keepalive schedules would ask: whether the bubble the client
+ * holds is owed to this link. The body moves the client into that bubble when it is not the one
+ * the last roster published, as `advance_region_epoch` decides it.
+ * @param ready The client holds a slice set and no host move is due.
  */
-[[nodiscard]] bool placed_purge_ready(const Session& session) noexcept {
-    // The region the roster builder resolves, so the purge is prepared for the same bubble.
-    const EffectiveRegion region =
-        selected_effective_region(session, effective_region(session.activity.session).arrival);
-    if (region.index < 0) {
-        return false;
+[[nodiscard]] bool owes_shared_grant(const Session& session, bool ready) noexcept {
+    const GrantRequest request =
+        grant_request({.sharedBubbles = true,
+                       .regionReady = ready,
+                       .heldRegion = state::activity::membership::instantiated_region(
+                           client_placement(session, nullptr))});
+    const bool entering =
+        request.region >= 0
+        && (request.region >> state::activity::bubble_authority::kSliceSetToBubbleShift)
+               != session.activityRosterRegionBubble;
+    state::activity::bubble_authority::Grant grant{};
+    return state::activity::bubble_authority::select_shared_grant(
+        session.activity.session.sessionId,
+        session.activity.bindingGeneration,
+        request.region,
+        state::activity::membership::reported_region(session.activity.session.sessionId),
+        entering,
+        grant);
+}
+
+/** Preserves a pending incident's backoff until it succeeds or disappears. */
+void update_incident_retry(
+    Session& session, std::uint64_t now, bool hasPending, bool due, bool transportStaged) noexcept {
+    if (!hasPending || (due && transportStaged)) {
+        session.activityIncidentRetryDueTick = 0;
+    } else if (due) {
+        session.activityIncidentRetryDueTick = now + kIncidentRetryIntervalMs;
     }
     server::gameplay::squad_entity_retirement::RetirementPlan plan{};
     return server::gameplay::squad_entity_retirement::prepare_retirement(
@@ -346,13 +375,29 @@ bool consume_activity_keepalive(Session& session,
         active && session.activityPatchEpoch.seen
         && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
         && mission_entity_allocation_owed(session, false);
+    // A bubble its holder abdicated is owed to a client still inside it, and that client's link
+    // may owe nothing else, so the grant alone schedules the roster that carries it. A sole link
+    // renews on its own region reports. The question is the one the roster asks, so a roster that
+    // would refuse the grant is never scheduled for it.
+    const bool grantDue =
+        active && session.activityPatchEpoch.seen
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
+        && now >= session.activityGrantRetryDueTick
+        && activity_link_count_locked(session.activity.session)
+               >= state::activity::bubble_authority::kSharedLinkCount
+        && owes_shared_grant(session, incidentClientReady);
     if (!active
         || (!keepaliveDue && !regionChanged && !hostStateDue && !estateDue && !scriptableDue
             && !incidentDue && !authorityResetDue && !authorityQueryDue && !hostTeleportDue
-            && !retirementDue && !arrivalDue && !membershipDue && !missionAllocationDue)) {
+            && !retirementDue && !arrivalDue && !membershipDue && !missionAllocationDue
+            && !grantDue)) {
         return false;
     }
     touchesScratch = true;
+    if (grantDue) {
+        // A delivered grant ends the debt, so the tick only spaces out the attempts that fail.
+        session.activityGrantRetryDueTick = now + kGrantRetryIntervalMs;
+    }
 
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;
@@ -367,7 +412,7 @@ bool consume_activity_keepalive(Session& session,
     if (!keepaliveDue && !regionChanged && !hostTeleportDue && !membershipDue) {
         bool appendedRoster = false;
         if (hostStateDue || estateDue || scriptableDue || retirementDue || arrivalDue
-            || missionAllocationDue) {
+            || missionAllocationDue || grantDue) {
             appendedRoster = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
         }
@@ -445,8 +490,7 @@ bool consume_activity_keepalive(Session& session,
             published = appended || published;
             SecureZeroMemory(&plan, sizeof plan);
         }
-        if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue
-            || missionSeedDue) {
+        if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue || grantDue) {
             published = append_roster_notification(
                             session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                         || published;
@@ -615,7 +659,7 @@ bool consume_activity_keepalive(Session& session,
     const std::uint32_t reportedRevision = refresh.snapshot.revision;
     SecureZeroMemory(&refresh, sizeof refresh);
     if (appendedMembership || hostStateDue || estateDue || scriptableDue || retirementDue
-        || arrivalDue) {
+        || arrivalDue || grantDue) {
         published = append_roster_notification(
                         session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                     || published;

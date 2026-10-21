@@ -496,6 +496,10 @@ struct Session {
     authority_reset::Owner activityAuthorityReset{};
     /** Operator incident held until the complete encrypted frame reaches the transport caller. */
     IncidentPublication activityIncidentStaged{};
+    /** Earliest tick at which a refused incident frame may be rebuilt. */
+    std::uint64_t activityIncidentRetryDueTick{};
+    /** Earliest tick at which a roster owed only for a released bubble's grant may be rebuilt. */
+    std::uint64_t activityGrantRetryDueTick{};
     /** Host rows retained by the last delivered host directory. */
     AdvertisementRetains activityAdvertisementHeld{};
     /** Host rows retained by a staged membership body until publication is known. */

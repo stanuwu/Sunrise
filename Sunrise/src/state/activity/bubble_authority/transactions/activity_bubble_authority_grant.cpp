@@ -5,6 +5,17 @@
 #include "../runtime.h"
 
 namespace sunrise::state::activity::bubble_authority {
+namespace {
+
+/** A renewed grant must differ from the client's retained token and skip zero. */
+[[nodiscard]] std::uint16_t next_token(const AuthorityState& authority,
+                                       std::uint8_t bubble) noexcept {
+    const std::uint16_t issued = authority.issuedTokens[bubble];
+    return issued < kMaximumGrantToken ? static_cast<std::uint16_t>(issued + 1)
+                                       : kInitialGrantToken;
+}
+
+} // namespace
 
 /** Picks the bubble to hand this session, if one is owed. */
 bool select_grant(std::uint64_t sessionId,
@@ -25,11 +36,43 @@ bool select_grant(std::uint64_t sessionId,
         const AuthorityState& authority = state.sessions[target].bubbleAuthority;
         const std::uint16_t previous = authority.grantTokens[bubble];
         if (previous == 0 || (enteringBubble && !authority.held[bubble])) {
-            // A renewed grant must differ from the client's retained token and skip zero.
-            const std::uint16_t issued = authority.issuedTokens[bubble];
             grant.bubble = bubble;
-            grant.token = issued < kMaximumGrantToken ? static_cast<std::uint16_t>(issued + 1)
-                                                      : kInitialGrantToken;
+            grant.token = next_token(authority, bubble);
+            owed = true;
+        }
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return owed;
+}
+
+/** Picks the bubble a link that shares its session may be granted, if one is owed. */
+bool select_shared_grant(std::uint64_t sessionId,
+                         std::uint64_t generation,
+                         std::int32_t sliceSetIndex,
+                         std::int32_t pendingRegion,
+                         bool enteringBubble,
+                         Grant& grant) noexcept {
+    grant = {};
+    if (sessionId == kAbsentSessionId || generation == 0 || sliceSetIndex < 0
+        || sliceSetIndex > kMaximumGrantSliceSetIndex) {
+        return false;
+    }
+    const auto bubble = static_cast<std::uint8_t>(sliceSetIndex >> kSliceSetToBubbleShift);
+    bool owed = false;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot && bubble < kFallbackBubble) {
+        const AuthorityState& authority = state.sessions[target].bubbleAuthority;
+        // Until its switch report lands, the releaser's placement still names the bubble while its
+        // pending leg names the one it is heading to.
+        const bool headingAway =
+            pendingRegion >= 0 && (pendingRegion >> kSliceSetToBubbleShift) != bubble;
+        const bool mayRetake =
+            enteringBubble || !headingAway || authority.releasedBy[bubble] != generation;
+        if (authority.grantTokens[bubble] == 0 || (!authority.held[bubble] && mayRetake)) {
+            grant.bubble = bubble;
+            grant.token = next_token(authority, bubble);
             owed = true;
         }
     }
@@ -38,7 +81,7 @@ bool select_grant(std::uint64_t sessionId,
 }
 
 /** Records a bubble as granted so it is not granted twice. */
-void record_grant(std::uint64_t sessionId, const Grant& grant) noexcept {
+void record_grant(std::uint64_t sessionId, std::uint64_t generation, const Grant& grant) noexcept {
     if (sessionId == kAbsentSessionId || grant.bubble >= kAuthoritySlotCount || grant.token == 0) {
         return;
     }
@@ -49,6 +92,43 @@ void record_grant(std::uint64_t sessionId, const Grant& grant) noexcept {
         state.sessions[target].bubbleAuthority.grantTokens[grant.bubble] = grant.token;
         state.sessions[target].bubbleAuthority.issuedTokens[grant.bubble] = grant.token;
         state.sessions[target].bubbleAuthority.held[grant.bubble] = true;
+        state.sessions[target].bubbleAuthority.holders[grant.bubble] = generation;
+        state.sessions[target].bubbleAuthority.releasedBy[grant.bubble] = 0;
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+}
+
+/** Copies which link holds each bubble of one session. */
+void grant_holders(std::uint64_t sessionId, GrantHolders& output) noexcept {
+    output = {};
+    if (sessionId == kAbsentSessionId) {
+        return;
+    }
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot) {
+        output = state.sessions[target].bubbleAuthority.holders;
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+}
+
+/** Releases every bubble one link holds, keeping each bubble's tokens. */
+void release_holder(std::uint64_t sessionId, std::uint64_t generation) noexcept {
+    if (sessionId == kAbsentSessionId || generation == 0) {
+        return;
+    }
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot) {
+        AuthorityState& authority = state.sessions[target].bubbleAuthority;
+        for (std::size_t bubble = 0; bubble < kAuthoritySlotCount; ++bubble) {
+            if (authority.holders[bubble] == generation) {
+                authority.held[bubble] = false;
+                authority.holders[bubble] = 0;
+            }
+        }
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
 }
@@ -70,7 +150,12 @@ void record_abdication(std::uint64_t sessionId,
     const std::size_t target = activity::transactions::find_session(state, sessionId);
     if (target != kInvalidSessionSlot) {
         AuthorityState& authority = state.sessions[target].bubbleAuthority;
+        // An abdication of a bubble nobody holds keeps the link that last released it.
+        if (authority.holders[bubble] != 0) {
+            authority.releasedBy[bubble] = authority.holders[bubble];
+        }
         authority.held[bubble] = false;
+        authority.holders[bubble] = 0;
         if (mask != nullptr) {
             auto& released = authority.releasedEntities[bubble];
             for (std::size_t index = 0; index < released.size(); ++index) {
@@ -169,6 +254,8 @@ void clear_grants(std::uint64_t sessionId) noexcept {
         AuthorityState& authority = state.sessions[target].bubbleAuthority;
         authority.grantTokens = {};
         authority.held = {};
+        authority.holders = {};
+        authority.releasedBy = {};
         authority.releasedEntities = {};
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);

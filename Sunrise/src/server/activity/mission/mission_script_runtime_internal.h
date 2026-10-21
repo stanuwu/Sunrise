@@ -663,6 +663,15 @@ void persist_mission_fault(RuntimeInstance& instance) noexcept;
 void fault_instance(RuntimeInstance& instance, std::string_view reason) noexcept;
 
 /**
+ * Moves each pin of a one-bubble target to the link holding that bubble's grant, so a target's
+ * outputs and the admission of its reports name the client that simulates it. The retained body
+ * itself stays as delivered: every private link's roster carries the whole estate.
+ * @param pins Pins copied from the binding's retained bodies, rewritten in place.
+ */
+void follow_bubble_grants(const RuntimeInstance& instance,
+                          std::span<host::ScriptablePin> pins) noexcept;
+
+/**
  * Copies the pins of the binding's retained bodies for this pass. Sense is a sparse delta, so a
  * report that could not be admitted would leave its row behind for good; a failed copy faults.
  * @return False when the copy failed and the instance was faulted.
@@ -670,6 +679,7 @@ void fault_instance(RuntimeInstance& instance, std::string_view reason) noexcept
 [[nodiscard]] inline bool copy_pins(RuntimeInstance& instance) noexcept {
     instance.estateCopied = false;
     if (host::scriptable_auth_pins(instance.view.binding, instance.pins, instance.pinCount)) {
+        follow_bubble_grants(instance, std::span(instance.pins).first(instance.pinCount));
         return true;
     }
     fault_instance(instance, "retained pin copy failed");

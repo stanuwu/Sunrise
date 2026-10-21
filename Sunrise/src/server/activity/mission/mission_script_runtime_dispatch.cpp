@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
+#include "../../../state/activity/bubble_authority/runtime.h"
 #include "../../../state/activity/entity_slots/member_leases.h"
 #include "../../../state/activity/membership/activity_membership_query.h"
 #include "../../../state/activity/membership/mission_party.h"
@@ -288,13 +289,26 @@ void finish_reserved_scene(RuntimeInstance& instance,
 }
 
 /**
+ * Moves each pin of a one-bubble target to the link holding that bubble's grant, once
+ * `holders_route_pins` says a holder can move one.
+ * @param holders Each bubble's holder generation, zero for none.
+ * @param pins Pins copied from the binding's retained bodies, rewritten in place.
+ */
+void follow_holders(const RuntimeInstance& instance,
+                    const state::activity::bubble_authority::GrantHolders& holders,
+                    std::span<host::ScriptablePin> pins) noexcept;
+
+/**
  * Reads the links where retained bodies for an intent's target already live. An actor command
  * follows only its own squad's body: the policy rows it opens are keyed by that link.
+ * @param holders Each bubble's grant holder, which a one-bubble target's pin follows.
  * @return The number of pinned generations written.
  */
-[[nodiscard]] std::size_t intent_pins(const RuntimeInstance& instance,
-                                      const lua_vm::Intent& intent,
-                                      RoutePins& output) noexcept {
+[[nodiscard]] std::size_t
+intent_pins(const RuntimeInstance& instance,
+            const lua_vm::Intent& intent,
+            const state::activity::bubble_authority::GrantHolders& holders,
+            RoutePins& output) noexcept {
     if (instance.view.catalog == nullptr) {
         return 0;
     }
@@ -311,6 +325,7 @@ void finish_reserved_scene(RuntimeInstance& instance,
         || !host::scriptable_auth_pins(instance.view.binding, estate, estateCount)) {
         return 0;
     }
+    follow_holders(instance, holders, std::span(estate).first(estateCount));
     return retained_pins(std::span(estate).first(estateCount),
                          *ref,
                          parent,
@@ -373,11 +388,75 @@ void finish_reserved_scene(RuntimeInstance& instance,
     return bubbles;
 }
 
+/**
+ * The bubbles one retained body's target belongs to, read the way `target_bubbles` reads an
+ * intent's: a squad body's authored bubble, else every bubble its object occurs in.
+ */
+[[nodiscard]] BubbleMask pin_bubbles(const sdk::BoundView& view,
+                                     const host::ScriptablePin& pin) noexcept {
+    const auto slots = view.catalog->slots();
+    const auto squadRows = view.catalog->squads();
+    const format::Scenario* const scenario = sdk::bound_scenario(view);
+    BubbleMask bubbles{};
+    for (std::size_t row = 0; row < slots.size(); ++row) {
+        const std::optional<OutputClientRef> ref =
+            slot_client_ref(view, static_cast<std::uint32_t>(row));
+        if (!ref.has_value() || !same_client_ref(pin, *ref)) {
+            continue;
+        }
+        if (pin.kind == host::ScriptableOverrideKind::squad) {
+            for (std::size_t squadRow = 0; squadRow < squadRows.size(); ++squadRow) {
+                std::uint8_t bubble = 0;
+                if (squadRows[squadRow].slotIndex == row
+                    && squads::authored_bubble(view, static_cast<std::uint32_t>(squadRow), bubble)
+                           == squads::Status::ready) {
+                    bubbles |= bubble_bit(bubble);
+                }
+            }
+            continue;
+        }
+        if (scenario == nullptr) {
+            continue;
+        }
+        for (const format::Occurrence& occurrence :
+             sdk::scenario_occurrences(*view.catalog, *scenario)) {
+            if (occurrence.objectIndex == slots[row].objectIndex) {
+                bubbles |= occurrence_bubble(view, occurrence);
+            }
+        }
+    }
+    return bubbles;
+}
+
+/** Moves each pin of a one-bubble target to the link holding that bubble's grant. */
+void follow_holders(const RuntimeInstance& instance,
+                    const state::activity::bubble_authority::GrantHolders& holders,
+                    std::span<host::ScriptablePin> pins) noexcept {
+    const auto live = live_links(instance);
+    if (instance.view.catalog == nullptr || !holders_route_pins(live.size())) {
+        return;
+    }
+    for (host::ScriptablePin& pin : pins) {
+        pin.expectedActivityClientGeneration = grant_holder_pin(
+            pin.expectedActivityClientGeneration, pin_bubbles(instance.view, pin), holders, live);
+    }
+}
+
+/** @return Each bubble's grant holder, all zero while fewer than two links are live. */
+[[nodiscard]] state::activity::bubble_authority::GrantHolders
+live_grant_holders(const RuntimeInstance& instance) noexcept {
+    state::activity::bubble_authority::GrantHolders holders{};
+    if (holders_route_pins(live_links(instance).size())) {
+        state::activity::bubble_authority::grant_holders(instance.view.binding.sessionId, holders);
+    }
+    return holders;
+}
+
 /** @return The link an actor command's squad body lives on, or the program's route. */
 [[nodiscard]] std::uint64_t actor_command_generation(const RuntimeInstance& instance,
                                                      const lua_vm::Intent& intent) noexcept {
     RoutePins pins{};
-    const std::size_t pinCount = intent_pins(instance, intent, pins);
+    const std::size_t pinCount = intent_pins(instance, intent, live_grant_holders(instance), pins);
     RouteCandidates candidates{};
     const std::size_t count =
         server::bap::mission_route_candidates(instance.view.binding,
@@ -411,16 +490,19 @@ template <typename Result, typename Adapter>
                                             std::uint64_t& carrier,
                                             const Adapter& adapter) noexcept {
     const std::uint64_t route = instance.view.activityClientGeneration;
+    // One read orders the links and moves the pins, so both name the same holders.
+    const state::activity::bubble_authority::GrantHolders holders = live_grant_holders(instance);
     RoutePins pins{};
     // A placement may move its squad's pin, so only its bubble orders it.
-    const std::size_t pinCount =
-        intent.kind == lua_vm::IntentKind::placeSquad ? 0 : intent_pins(instance, intent, pins);
+    const std::size_t pinCount = intent.kind == lua_vm::IntentKind::placeSquad
+                                     ? 0
+                                     : intent_pins(instance, intent, holders, pins);
     const auto pinned = std::span(pins).first(pinCount);
     RouteCandidates candidates{};
     const auto ordered = std::span(candidates)
                              .first(server::bap::mission_route_candidates(
                                  instance.view.binding, pinned, route, candidates));
-    promote_bubble_holders(ordered, pinned, target_bubbles(instance.view, intent));
+    promote_bubble_holders(ordered, pinned, target_bubbles(instance.view, intent), holders);
     return walk_links(std::span<const server::bap::ActivityLinkView>(ordered),
                       route,
                       policy,
@@ -431,6 +513,12 @@ template <typename Result, typename Adapter>
 }
 
 } // namespace
+
+/** Moves each pin of a one-bubble target to the link holding that bubble's grant. */
+void follow_bubble_grants(const RuntimeInstance& instance,
+                          std::span<host::ScriptablePin> pins) noexcept {
+    follow_holders(instance, live_grant_holders(instance), pins);
+}
 
 /** Raises one queued intent, or advances the delivery already in flight. */
 void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {

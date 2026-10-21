@@ -1,12 +1,14 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
+#include "../../../state/activity/bubble_authority/definition.h"
 #include "../../../state/build_data/scenarios/definition.h"
 #include "../../bap/runtime.h"
 #include "../host_runtime.h"
@@ -132,22 +134,80 @@ admitted_generation(std::span<const host::ScriptablePin> estate,
 }
 
 /**
+ * A grant holder can move a pin only once two links are live: with one, every live holder is that
+ * link, and a pin naming no live link already falls back to it.
+ * @param liveLinks The route and every joined private link of the binding.
+ */
+[[nodiscard]] constexpr bool holders_route_pins(std::size_t liveLinks) noexcept {
+    return liveLinks >= state::activity::bubble_authority::kSharedLinkCount;
+}
+
+/**
+ * The link one retained body's target is simulated on. The client holding a bubble's grant runs
+ * that bubble's simulation, so a target of exactly one bubble follows that bubble's live holder,
+ * whichever link its body was staged on. A target of several bubbles, or of a bubble nobody
+ * holds, keeps its pin.
+ * @param pinned Generation the body was staged on.
+ * @param bubbles The target's bubbles.
+ * @param holders Each bubble's holder generation, zero for none.
+ * @param live The route and every joined private link of the binding.
+ * @return The generation the pin names from now on.
+ */
+[[nodiscard]] inline std::uint64_t grant_holder_pin(std::uint64_t pinned,
+                                                    BubbleMask bubbles,
+                                                    std::span<const std::uint64_t> holders,
+                                                    std::span<const std::uint64_t> live) noexcept {
+    if (std::popcount(bubbles) != 1) {
+        return pinned;
+    }
+    const auto bubble = static_cast<std::size_t>(std::countr_zero(bubbles));
+    const std::uint64_t holder = bubble < holders.size() ? holders[bubble] : 0;
+    return holder != 0 && std::find(live.begin(), live.end(), holder) != live.end() ? holder
+                                                                                    : pinned;
+}
+
+/** @return True when one link holds the grant of one of the target's bubbles. */
+[[nodiscard]] inline bool holds_target_grant(const server::bap::ActivityLinkView& link,
+                                             BubbleMask bubbles,
+                                             std::span<const std::uint64_t> holders) noexcept {
+    for (std::size_t bubble = 0; bubble < holders.size(); ++bubble) {
+        if ((bubbles & bubble_bit(static_cast<std::uint32_t>(bubble))) != 0 && holders[bubble] != 0
+            && holders[bubble] == link.activityClientGeneration) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Moves the links that hold one of the target's bubbles ahead of the route, after the pinned
- * links. A link counts by the region its client reports. A link known only by its arrival slice
- * set counts for a bubble no reporting link holds, since its client may still be loading there.
- * Every group keeps its order, so the route stays first among the holders.
+ * links. The link holding the bubble's grant comes first, because its client is the one that
+ * simulates the bubble and so the only one whose reports for the target are admitted. Then a link
+ * counts by the region its client reports. A link known only by its arrival slice set counts for a
+ * bubble no reporting link holds, since its client may still be loading there. Every group keeps
+ * its order, so the route stays first among the reporting holders.
  * @param candidates Joined links, pinned first, then the route, then the rest.
  * @param pins Pinned generations; the leading candidates among them stay in place.
  * @param bubbles The target's bubbles; none leaves the order unchanged.
+ * @param holders Each bubble's grant holder generation, zero for none.
  */
 inline void promote_bubble_holders(std::span<server::bap::ActivityLinkView> candidates,
                                    std::span<const std::uint64_t> pins,
-                                   BubbleMask bubbles) noexcept {
+                                   BubbleMask bubbles,
+                                   std::span<const std::uint64_t> holders) noexcept {
     std::size_t next = 0;
     while (next < candidates.size()
            && std::find(pins.begin(), pins.end(), candidates[next].activityClientGeneration)
                   != pins.end()) {
         ++next;
+    }
+    for (std::size_t index = next; index < candidates.size(); ++index) {
+        if (holds_target_grant(candidates[index], bubbles, holders)) {
+            std::rotate(candidates.begin() + static_cast<std::ptrdiff_t>(next),
+                        candidates.begin() + static_cast<std::ptrdiff_t>(index),
+                        candidates.begin() + static_cast<std::ptrdiff_t>(index + 1));
+            ++next;
+        }
     }
     BubbleMask reported{};
     for (const server::bap::ActivityLinkView& link : candidates) {

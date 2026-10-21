@@ -20,11 +20,47 @@ namespace sunrise::state::activity::bubble_authority {
                                 bool enteringBubble = false) noexcept;
 
 /**
+ * Picks the bubble a link that shares its session may be granted, if one is owed. A bubble nobody
+ * holds is owed to a link whose client holds it. The link that released it takes it back only while
+ * its pending leg names no other bubble, or on a body that moves its client into it.
+ * @param sessionId Joined activity session.
+ * @param generation ActivityClient generation of the asking link.
+ * @param sliceSetIndex Slice set the client holds.
+ * @param pendingRegion Pending leg the client last committed, negative for none.
+ * @param enteringBubble Whether this body moves the client into that slice set's bubble.
+ * @param grant Gets the bubble and its token.
+ * @return True when a bubble is owed.
+ */
+[[nodiscard]] bool select_shared_grant(std::uint64_t sessionId,
+                                       std::uint64_t generation,
+                                       std::int32_t sliceSetIndex,
+                                       std::int32_t pendingRegion,
+                                       bool enteringBubble,
+                                       Grant& grant) noexcept;
+
+/**
  * Records a bubble as granted so it is not granted twice.
  * @param sessionId Joined activity session.
+ * @param generation ActivityClient generation of the link the grant went out on.
  * @param grant Bubble and token that went out.
  */
-void record_grant(std::uint64_t sessionId, const Grant& grant) noexcept;
+void record_grant(std::uint64_t sessionId, std::uint64_t generation, const Grant& grant) noexcept;
+
+/**
+ * Copies which link holds each bubble of one session.
+ * @param sessionId Joined activity session.
+ * @param output Receives each bubble's holder generation, all zero for an unknown session.
+ */
+void grant_holders(std::uint64_t sessionId, GrantHolders& output) noexcept;
+
+/**
+ * Releases every bubble one link holds, for a link that leaves its session or changes its
+ * generation without abdicating them. The tokens stay, so the next grant differs from any mirror a
+ * client kept.
+ * @param sessionId Joined activity session.
+ * @param generation ActivityClient generation of the link that left.
+ */
+void release_holder(std::uint64_t sessionId, std::uint64_t generation) noexcept;
 
 /**
  * Releases authority while preserving the token the client last received.

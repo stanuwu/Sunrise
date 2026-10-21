@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "../../../core/logging/log.h"
+#include "../../../state/activity/bubble_authority/runtime.h"
 #include "../../../state/activity/member_context.h"
 #include "../../../state/activity/member_departure.h"
 #include "../../../state/activity/runtime.h"
@@ -41,6 +42,33 @@ void release_host_generations(AdvertisementRetains& retains) noexcept {
     retains = {};
 }
 
+/**
+ * Leaves the bubbles one link holds to the clients still inside them, for a link that stops being
+ * this generation without abdicating them. Only another account's link can be inside them, so a
+ * solo client's grant row stays as it was.
+ */
+void release_shared_grants(const Session& session) noexcept {
+    const state::activity::SessionBinding& binding = session.activity.session;
+    if (session.activity.bindingGeneration == 0
+        || binding.sessionId == state::activity::kAbsentSessionId) {
+        return;
+    }
+    for (const Session& other : sessions()) {
+        if (&other != &session && other.id != 0 && other.authenticated
+            && other.accountHandle != session.accountHandle
+            && other.activity.role != ActivityClientRole::none
+            && other.activity.bindingGeneration != 0
+            && state::activity::same_binding(other.activity.session, binding)) {
+            state::activity::bubble_authority::release_holder(binding.sessionId,
+                                                              session.activity.bindingGeneration);
+            return;
+        }
+    }
+}
+
+/** Releases the old binding while a copied join reply may already own its replacement body. */
+void release_activity_ownership(Session& session, bool preserveJoinPublication) noexcept;
+
 /** Clears all connection state rebuilt by a successful activity join. */
 void reset_join_state(Session& session) noexcept {
     clear_activity_transport(session);
@@ -68,6 +96,8 @@ void reset_join_state(Session& session) noexcept {
     authority_query::reset(session.activityAuthorityQuery, session.activity.bindingGeneration);
     authority_reset::reset(session.activityAuthorityReset, session.activity.bindingGeneration);
     session.activityIncidentStaged = {};
+    session.activityIncidentRetryDueTick = 0;
+    session.activityGrantRetryDueTick = 0;
     session.activityRosterReason = 0;
     session.activityRosterStaged = {};
     session.activityRosterDecode = {};
@@ -147,6 +177,7 @@ void publish_connection_fields(Session& session,
         if (session.activity.bindingGeneration != publication.activity.bindingGeneration) {
             server::activity::host::retire_scriptable_client(session.activity.session,
                                                              session.activity.bindingGeneration);
+            release_shared_grants(session);
         }
         if (!publication.preservesActivitySessionBinding) {
             release_activity_connection(session);
@@ -284,6 +315,7 @@ void discard_staged_advertisement(Session& session) noexcept {
 void release_activity_connection(Session& session) noexcept {
     server::activity::host::retire_scriptable_client(session.activity.session,
                                                      session.activity.bindingGeneration);
+    release_shared_grants(session);
     session.activityStartupReservations = {};
     if (session.activityMemberKey && session.activityJoinGeneration != 0
         && session.activityJoinGeneration == session.activity.bindingGeneration) {

@@ -27,6 +27,7 @@
 #include "activity_member_roster.h"
 #include "activity_notification_frame.h"
 #include "activity_roster_device_publication.h"
+#include "activity_roster_grant.h"
 #include "internal.h"
 #include "mission_entity_allocation.h"
 
@@ -466,23 +467,36 @@ bool append_roster_notification(
     // The grant is picked here and committed only once the frame reaches the caller, so a
     // discarded body leaves the bubble ungranted and the next push retries it.
     state::activity::bubble_authority::Grant grant{};
-    // Authority is granted for the bubble the client is heading to, so it is in place before the
-    // slice-set switch, and for the one it is in otherwise. The wire bubble is unsigned, then
-    // checked as signed; an out-of-range value becomes negative and fails.
-    const std::int32_t pendingRegion =
-        state::activity::membership::reported_region(session.activity.session.sessionId);
     const bool enteringBubble = session.activityRosterRegionBubble >= 0
                                 && session.activityRosterRegionBubble != initialRegionBubble;
-    const std::int32_t grantRegion =
-        enteringBubble
-            ? static_cast<std::int32_t>(snapshot.region)
-            : (pendingRegion >= 0 ? pendingRegion : static_cast<std::int32_t>(snapshot.region));
+    // The held region comes from the report being answered, because a switch report's body
+    // publishes the region behind the player. The wire bubble is unsigned, then checked as signed;
+    // an out-of-range value becomes negative and fails.
+    const bool sharedBubbles = activity_link_count_locked(session.activity.session)
+                               >= state::activity::bubble_authority::kSharedLinkCount;
+    const std::int32_t pendingRegion =
+        state::activity::membership::reported_region(session.activity.session.sessionId);
+    const GrantRequest grantRequest =
+        grant_request({.sharedBubbles = sharedBubbles,
+                       .regionReady = client_region_ready(session, refresh),
+                       .heldRegion = state::activity::membership::instantiated_region(
+                           client_placement(session, refresh)),
+                       .enteringBubble = enteringBubble,
+                       .bodyRegion = static_cast<std::int32_t>(snapshot.region),
+                       .pendingRegion = pendingRegion});
+    // Links that share a session also ask who released the bubble; a sole link keeps its rule.
+    const std::uint64_t sessionId = session.activity.session.sessionId;
     if (!peerLeave && !placedRetirementPending
-        && state::activity::bubble_authority::select_grant(
-            session.activity.session.sessionId,
-            grantRegion,
-            grant,
-            enteringBubble || client_region_ready(session, refresh))) {
+        && (sharedBubbles
+                ? state::activity::bubble_authority::select_shared_grant(
+                      sessionId,
+                      session.activity.bindingGeneration,
+                      grantRequest.region,
+                      pendingRegion,
+                      enteringBubble,
+                      grant)
+                : state::activity::bubble_authority::select_grant(
+                      sessionId, grantRequest.region, grant, grantRequest.renewReleased))) {
         snapshot.hasGrant = true;
         snapshot.grant.bubble = grant.bubble;
         snapshot.grant.token = grant.token;
@@ -523,14 +537,20 @@ bool append_roster_notification(
     encoded =
         encoded
         && (!allocationOwed || prepare_mission_entity_allocation(session, entitySlotAllocation));
-    const bool hasRetirement =
-        encoded && (placedRetirementPending || (snapshot.hasGrant && enteringBubble))
-        && server::gameplay::squad_entity_retirement::prepare_retirement(
-            session.activity.session,
-            session.activity.bindingGeneration,
-            static_cast<std::uint8_t>(snapshot.region
-                                      >> state::activity::bubble_authority::kSliceSetToBubbleShift),
-            entityRetirement);
+    // A renewal retires what this link released in the bubble it renews. That is the granted
+    // bubble, which a switch report's body region does not name once links share a session.
+    const auto retirementBubble =
+        snapshot.hasGrant
+            ? grant.bubble
+            : static_cast<std::uint8_t>(
+                  snapshot.region >> state::activity::bubble_authority::kSliceSetToBubbleShift);
+    const bool hasRetirement = encoded
+                               && (placedRetirementPending || (snapshot.hasGrant && enteringBubble))
+                               && server::gameplay::squad_entity_retirement::prepare_retirement(
+                                   session.activity.session,
+                                   session.activity.bindingGeneration,
+                                   retirementBubble,
+                                   entityRetirement);
     // A retirement-bearing roster must keep its grant and region cursor owed until the
     // keepalive can atomically advance shared State immediately before copying the frame.
     // Sending the roster alone would spend the entering-bubble trigger and strand its purge.
@@ -835,6 +855,7 @@ void commit_staged_roster(Session& session) noexcept {
     }
     if (session.activityRosterStaged.hasGrant) {
         state::activity::bubble_authority::record_grant(session.activity.session.sessionId,
+                                                        session.activity.bindingGeneration,
                                                         session.activityRosterStaged.grant);
     }
     if (session.activityRosterStaged.hasHostState) {
