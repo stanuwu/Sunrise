@@ -401,6 +401,7 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     lua_vm::close(instance.vm);
     instance.worldView = {};
     instance.pinCount = 0;
+    std::vector<PinBubbleRow>{}.swap(instance.pinBubbles);
     std::vector<host::PendingScriptableOverride>{}.swap(instance.estate);
     instance.estateCopied = false;
     instance.liveLinkCount = 0;

@@ -81,6 +81,14 @@ namespace {
     if (generated_world::resolve(view, worldView) != generated_world::BindStatus::ready) {
         return false;
     }
+    // The pin bubbles depend only on the catalog and scenario, and the catalog is the same here.
+    if (view.scenarioRow != instance.view.scenarioRow) {
+        std::vector<PinBubbleRow> pinBubbles{};
+        if (!bind_pin_bubbles(view, pinBubbles)) {
+            return false;
+        }
+        instance.pinBubbles = std::move(pinBubbles);
+    }
     const bool sourceChanged =
         view.activityClientGeneration != instance.view.activityClientGeneration;
     instance.view = std::move(view);
@@ -491,7 +499,14 @@ void attach_instance(const host::InstanceSnapshot& hostInstance,
         report_attach_result(hostInstance.binding, AttachResult::capacity, "capacity", &view);
         return;
     }
+    std::vector<PinBubbleRow> pinBubbles{};
+    if (!bind_pin_bubbles(view, pinBubbles)) {
+        report_attach_result(
+            hostInstance.binding, AttachResult::capacity, "pin_bubble_capacity", view.activityRow);
+        return;
+    }
     instance->view = std::move(view);
+    instance->pinBubbles = std::move(pinBubbles);
     instance->worldView = std::move(worldView);
     instance->publicTarget = link.publicTarget;
     instance->playerKey = link.playerKey;

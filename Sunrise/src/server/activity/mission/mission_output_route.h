@@ -2,24 +2,33 @@
 
 #include <algorithm>
 #include <bit>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <new>
 #include <optional>
 #include <span>
+#include <vector>
 
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../../state/activity/bubble_authority/definition.h"
+#include "../../../state/activity_sdk/format.h"
 #include "../../../state/build_data/scenarios/definition.h"
 #include "../../bap/runtime.h"
 #include "../host_runtime.h"
 
 namespace sunrise::server::activity::mission {
 
+namespace format = state::activity_sdk::format;
+
 /** The wire ClientRef one output names: its object's registry key and one slot inside it. */
 struct OutputClientRef final {
     std::uint32_t registryKey{};
     std::uint16_t slotIndex{};
     std::uint8_t slotType{};
+    /** ClientRefs order by registry key, then slot, then slot type, so a sorted table finds one. */
+    auto operator<=>(const OutputClientRef&) const = default;
 };
 
 /** One bit per authored bubble ordinal. */
@@ -164,6 +173,153 @@ admitted_generation(std::span<const host::ScriptablePin> estate,
     const std::uint64_t holder = bubble < holders.size() ? holders[bubble] : 0;
     return holder != 0 && std::find(live.begin(), live.end(), holder) != live.end() ? holder
                                                                                     : pinned;
+}
+
+/**
+ * Reads the wire ClientRef one catalog slot names from the slot and its object.
+ * @return None for a row past the slots, an object past the objects, or a slot or slot type too
+ * wide for the wire.
+ */
+[[nodiscard]] inline std::optional<OutputClientRef>
+slot_row_client_ref(std::span<const format::Slot> slots,
+                    std::span<const format::Object> objects,
+                    std::uint32_t slotRow) noexcept {
+    if (slotRow >= slots.size() || slots[slotRow].objectIndex >= objects.size()
+        || slots[slotRow].slotIndex > (std::numeric_limits<std::uint16_t>::max)()
+        || slots[slotRow].slotType > (std::numeric_limits<std::uint8_t>::max)()) {
+        return std::nullopt;
+    }
+    return OutputClientRef{objects[slots[slotRow].objectIndex].objectKey,
+                           static_cast<std::uint16_t>(slots[slotRow].slotIndex),
+                           static_cast<std::uint8_t>(slots[slotRow].slotType)};
+}
+
+/**
+ * The bubble one occurrence of the bound scenario belongs to. An occurrence or bubble of another
+ * scenario belongs to none.
+ * @param scenarioRow The bound scenario.
+ */
+[[nodiscard]] inline BubbleMask occurrence_bubble(std::span<const format::Bubble> bubbles,
+                                                  std::uint32_t scenarioRow,
+                                                  const format::Occurrence& occurrence) noexcept {
+    if (occurrence.scenarioIndex != scenarioRow || occurrence.bubbleIndex >= bubbles.size()
+        || bubbles[occurrence.bubbleIndex].scenarioIndex != scenarioRow) {
+        return {};
+    }
+    return bubble_bit(bubbles[occurrence.bubbleIndex].bubbleOrdinal);
+}
+
+/** One ClientRef of the bound catalog and the bubbles a retained body of it belongs to. */
+struct PinBubbleRow final {
+    OutputClientRef ref{};
+    /** A squad body's: the authored bubble of every squad on a slot with this ClientRef. */
+    BubbleMask squadBubbles{};
+    /** Any other body's: every bubble the bound scenario places a slot's object in. */
+    BubbleMask objectBubbles{};
+};
+
+/** The catalog rows the pin bubbles of one bound scenario are read from. */
+struct PinBubbleRows final {
+    std::span<const format::Slot> slots{};
+    std::span<const format::Object> objects{};
+    std::span<const format::Squad> squads{};
+    std::span<const format::Bubble> bubbles{};
+    /** The bound scenario's occurrences, empty when none is bound. */
+    std::span<const format::Occurrence> occurrences{};
+    std::uint32_t scenarioRow{format::kAbsentIndex};
+};
+
+/**
+ * Reads, once per bound catalog and scenario, the bubbles a retained body of each ClientRef
+ * belongs to: a squad body's are the authored bubbles of the squads on its slots, and any other
+ * body's are every bubble its slots' objects occur in, in any state. Several slot rows naming one
+ * ClientRef add up. A ClientRef in no bubble is left out, so a lookup reads it as none.
+ * @param squadBubble Reads one squad row's authored bubble ordinal, and returns false for a squad
+ * of another scenario or one whose occurrence names no bubble.
+ * @param output Receives one row per ClientRef, sorted by ClientRef.
+ * @return False when the table could not be allocated; the output is then empty.
+ */
+template <typename SquadBubble>
+[[nodiscard]] bool build_pin_bubble_table(const PinBubbleRows& rows,
+                                          const SquadBubble& squadBubble,
+                                          std::vector<PinBubbleRow>& output) noexcept {
+    output.clear();
+    try {
+        for (std::size_t squadRow = 0; squadRow < rows.squads.size(); ++squadRow) {
+            std::uint8_t bubble = 0;
+            const std::optional<OutputClientRef> ref =
+                squadBubble(static_cast<std::uint32_t>(squadRow), bubble)
+                    ? slot_row_client_ref(rows.slots, rows.objects, rows.squads[squadRow].slotIndex)
+                    : std::nullopt;
+            if (ref.has_value()) {
+                output.push_back({.ref = *ref, .squadBubbles = bubble_bit(bubble)});
+            }
+        }
+        std::vector<BubbleMask> objectBubbles(rows.objects.size());
+        for (const format::Occurrence& occurrence : rows.occurrences) {
+            if (occurrence.objectIndex < objectBubbles.size()) {
+                objectBubbles[occurrence.objectIndex] |=
+                    occurrence_bubble(rows.bubbles, rows.scenarioRow, occurrence);
+            }
+        }
+        for (std::size_t slotRow = 0; slotRow < rows.slots.size(); ++slotRow) {
+            const std::uint32_t object = rows.slots[slotRow].objectIndex;
+            const std::optional<OutputClientRef> ref =
+                object < objectBubbles.size() && objectBubbles[object] != 0
+                    ? slot_row_client_ref(
+                          rows.slots, rows.objects, static_cast<std::uint32_t>(slotRow))
+                    : std::nullopt;
+            if (ref.has_value()) {
+                output.push_back({.ref = *ref, .objectBubbles = objectBubbles[object]});
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        std::vector<PinBubbleRow>{}.swap(output);
+        return false;
+    }
+    std::sort(
+        output.begin(), output.end(), [](const PinBubbleRow& left, const PinBubbleRow& right) {
+            return left.ref < right.ref;
+        });
+    std::size_t kept = 0;
+    for (std::size_t index = 0; index < output.size(); ++index) {
+        if (kept != 0 && output[kept - 1].ref == output[index].ref) {
+            output[kept - 1].squadBubbles |= output[index].squadBubbles;
+            output[kept - 1].objectBubbles |= output[index].objectBubbles;
+        } else {
+            output[kept++] = output[index];
+        }
+    }
+    output.resize(kept);
+    // The rows live as long as the instance, so they are copied into storage of their own size and
+    // the capacity left over from building them is returned.
+    try {
+        std::vector<PinBubbleRow>(output.begin(), output.end()).swap(output);
+    } catch (const std::bad_alloc&) {
+        std::vector<PinBubbleRow>{}.swap(output);
+        return false;
+    }
+    return true;
+}
+
+/**
+ * The bubbles one retained body's target belongs to, read the way `target_bubbles` reads an
+ * intent's: a squad body's authored bubble, else every bubble its object occurs in.
+ * @param table The bound scenario's rows from `build_pin_bubble_table`.
+ */
+[[nodiscard]] inline BubbleMask pin_bubbles(std::span<const PinBubbleRow> table,
+                                            const host::ScriptablePin& pin) noexcept {
+    const OutputClientRef ref{pin.registryKey, pin.slotIndex, pin.slotType};
+    const auto found = std::lower_bound(
+        table.begin(),
+        table.end(),
+        ref,
+        [](const PinBubbleRow& row, const OutputClientRef& wanted) { return row.ref < wanted; });
+    if (found == table.end() || found->ref != ref) {
+        return {};
+    }
+    return pin.kind == host::ScriptableOverrideKind::squad ? found->squadBubbles
+                                                           : found->objectBubbles;
 }
 
 /** @return True when one link holds the grant of one of the target's bubbles. */

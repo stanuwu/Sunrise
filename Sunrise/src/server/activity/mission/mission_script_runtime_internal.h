@@ -310,6 +310,12 @@ struct RuntimeInstance final {
      */
     std::array<host::ScriptablePin, host::kScriptablePinCapacity> pins{};
     std::size_t pinCount{};
+    /**
+     * The bubbles a retained body of each ClientRef belongs to, read from the catalog once when
+     * the view binds its catalog and scenario, so following the grant holders costs each pin one
+     * lookup instead of a walk over the catalog.
+     */
+    std::vector<PinBubbleRow> pinBubbles{};
     /** The full retained bodies, copied only for a squad edge that reads its objective. */
     std::vector<host::PendingScriptableOverride> estate{};
     /** Set once `estate` holds the copy of the pass the pins belong to. */
@@ -661,6 +667,14 @@ void accept_mission_state(RuntimeInstance& instance,
 void persist_mission_fault(RuntimeInstance& instance) noexcept;
 /** Faults both the VM and the exact server-owned mission record. */
 void fault_instance(RuntimeInstance& instance, std::string_view reason) noexcept;
+
+/**
+ * Reads the pin bubbles of a view's bound catalog and scenario, which are all they depend on.
+ * @param output Receives the table, empty for a view with no catalog.
+ * @return False when the table could not be allocated.
+ */
+[[nodiscard]] bool bind_pin_bubbles(const sdk::BoundView& view,
+                                    std::vector<PinBubbleRow>& output) noexcept;
 
 /**
  * Moves each pin of a one-bubble target to the link holding that bubble's grant, so a target's

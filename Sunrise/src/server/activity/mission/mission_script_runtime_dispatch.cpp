@@ -276,16 +276,7 @@ void finish_reserved_scene(RuntimeInstance& instance,
 /** Reads the wire ClientRef one catalog slot names from the slot and its object. */
 [[nodiscard]] std::optional<OutputClientRef> slot_client_ref(const sdk::BoundView& view,
                                                              std::uint32_t slotRow) noexcept {
-    const auto slots = view.catalog->slots();
-    const auto objects = view.catalog->objects();
-    if (slotRow >= slots.size() || slots[slotRow].objectIndex >= objects.size()
-        || slots[slotRow].slotIndex > (std::numeric_limits<std::uint16_t>::max)()
-        || slots[slotRow].slotType > (std::numeric_limits<std::uint8_t>::max)()) {
-        return std::nullopt;
-    }
-    return OutputClientRef{objects[slots[slotRow].objectIndex].objectKey,
-                           static_cast<std::uint16_t>(slots[slotRow].slotIndex),
-                           static_cast<std::uint8_t>(slots[slotRow].slotType)};
+    return slot_row_client_ref(view.catalog->slots(), view.catalog->objects(), slotRow);
 }
 
 /**
@@ -333,17 +324,6 @@ intent_pins(const RuntimeInstance& instance,
                          output);
 }
 
-/** @return The bubble one occurrence of the bound scenario belongs to, or none. */
-[[nodiscard]] BubbleMask occurrence_bubble(const sdk::BoundView& view,
-                                           const format::Occurrence& occurrence) noexcept {
-    const auto bubbles = view.catalog->bubbles();
-    if (occurrence.scenarioIndex != view.scenarioRow || occurrence.bubbleIndex >= bubbles.size()
-        || bubbles[occurrence.bubbleIndex].scenarioIndex != view.scenarioRow) {
-        return {};
-    }
-    return bubble_bit(bubbles[occurrence.bubbleIndex].bubbleOrdinal);
-}
-
 /**
  * The bubbles whose holder can apply an intent's output: a squad's authored bubble, an explicit
  * scene occurrence's bubble, else every bubble the target's object has an occurrence in, in any
@@ -366,7 +346,8 @@ intent_pins(const RuntimeInstance& instance,
     case lua_vm::IntentKind::activateAuthoredScene: {
         const auto occurrences = view.catalog->occurrences();
         return intent.firstRow < occurrences.size()
-                   ? occurrence_bubble(view, occurrences[intent.firstRow])
+                   ? occurrence_bubble(
+                         view.catalog->bubbles(), view.scenarioRow, occurrences[intent.firstRow])
                    : BubbleMask{};
     }
     default:
@@ -382,47 +363,7 @@ intent_pins(const RuntimeInstance& instance,
     for (const format::Occurrence& occurrence :
          sdk::scenario_occurrences(*view.catalog, *scenario)) {
         if (occurrence.objectIndex == slots[row].objectIndex) {
-            bubbles |= occurrence_bubble(view, occurrence);
-        }
-    }
-    return bubbles;
-}
-
-/**
- * The bubbles one retained body's target belongs to, read the way `target_bubbles` reads an
- * intent's: a squad body's authored bubble, else every bubble its object occurs in.
- */
-[[nodiscard]] BubbleMask pin_bubbles(const sdk::BoundView& view,
-                                     const host::ScriptablePin& pin) noexcept {
-    const auto slots = view.catalog->slots();
-    const auto squadRows = view.catalog->squads();
-    const format::Scenario* const scenario = sdk::bound_scenario(view);
-    BubbleMask bubbles{};
-    for (std::size_t row = 0; row < slots.size(); ++row) {
-        const std::optional<OutputClientRef> ref =
-            slot_client_ref(view, static_cast<std::uint32_t>(row));
-        if (!ref.has_value() || !same_client_ref(pin, *ref)) {
-            continue;
-        }
-        if (pin.kind == host::ScriptableOverrideKind::squad) {
-            for (std::size_t squadRow = 0; squadRow < squadRows.size(); ++squadRow) {
-                std::uint8_t bubble = 0;
-                if (squadRows[squadRow].slotIndex == row
-                    && squads::authored_bubble(view, static_cast<std::uint32_t>(squadRow), bubble)
-                           == squads::Status::ready) {
-                    bubbles |= bubble_bit(bubble);
-                }
-            }
-            continue;
-        }
-        if (scenario == nullptr) {
-            continue;
-        }
-        for (const format::Occurrence& occurrence :
-             sdk::scenario_occurrences(*view.catalog, *scenario)) {
-            if (occurrence.objectIndex == slots[row].objectIndex) {
-                bubbles |= occurrence_bubble(view, occurrence);
-            }
+            bubbles |= occurrence_bubble(view.catalog->bubbles(), view.scenarioRow, occurrence);
         }
     }
     return bubbles;
@@ -437,8 +378,11 @@ void follow_holders(const RuntimeInstance& instance,
         return;
     }
     for (host::ScriptablePin& pin : pins) {
-        pin.expectedActivityClientGeneration = grant_holder_pin(
-            pin.expectedActivityClientGeneration, pin_bubbles(instance.view, pin), holders, live);
+        pin.expectedActivityClientGeneration =
+            grant_holder_pin(pin.expectedActivityClientGeneration,
+                             pin_bubbles(instance.pinBubbles, pin),
+                             holders,
+                             live);
     }
 }
 
@@ -518,6 +462,27 @@ template <typename Result, typename Adapter>
 void follow_bubble_grants(const RuntimeInstance& instance,
                           std::span<host::ScriptablePin> pins) noexcept {
     follow_holders(instance, live_grant_holders(instance), pins);
+}
+
+/** Reads the pin bubbles of a view's bound catalog and scenario. */
+bool bind_pin_bubbles(const sdk::BoundView& view, std::vector<PinBubbleRow>& output) noexcept {
+    if (view.catalog == nullptr) {
+        std::vector<PinBubbleRow>{}.swap(output);
+        return true;
+    }
+    const format::Scenario* const scenario = sdk::bound_scenario(view);
+    return build_pin_bubble_table(
+        {.slots = view.catalog->slots(),
+         .objects = view.catalog->objects(),
+         .squads = view.catalog->squads(),
+         .bubbles = view.catalog->bubbles(),
+         .occurrences = scenario != nullptr ? sdk::scenario_occurrences(*view.catalog, *scenario)
+                                            : std::span<const format::Occurrence>{},
+         .scenarioRow = view.scenarioRow},
+        [&view](std::uint32_t squadRow, std::uint8_t& bubble) noexcept {
+            return squads::authored_bubble(view, squadRow, bubble) == squads::Status::ready;
+        },
+        output);
 }
 
 /** Raises one queued intent, or advances the delivery already in flight. */
