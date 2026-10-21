@@ -27,6 +27,7 @@
 #include "activity_authority_reset_owner.h"
 #include "activity_link_selection.h"
 #include "encrypted/activity_host_manager/activity_startup_reservations.h"
+#include "encrypted/push/activity/activity_roster_grant.h"
 #include "encrypted/queuez/definition.h"
 #include "encrypted/queuez/public_subscriptions.h"
 #include "nat_relay_service.h"
@@ -166,6 +167,8 @@ struct RosterPublication {
     std::uint8_t retirementPriorEpoch{};
     std::uint8_t retirementBaseEpoch{};
     std::uint8_t retirementEpoch{};
+    /** Released entities this body's shared grant claims from the bubble's previous holder. */
+    encrypted::push::activity::HandoverClaim handoverClaim{};
     /** Squad Sense this body's grant hands over, seeded as the recipient's own on delivery. */
     HandoverSquadSense handedSquads{};
     bool priorRosterOwedForEpoch{};

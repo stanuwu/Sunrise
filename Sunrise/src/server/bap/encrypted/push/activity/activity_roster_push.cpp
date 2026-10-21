@@ -572,6 +572,24 @@ bool append_roster_notification(
     if (placedRetirementPending && allowEntityRetirement && !hasRetirement && !solicited) {
         encoded = false;
     }
+    // A private link granted a bubble another link released adopts what that link simulated
+    // there, which would otherwise stay frozen as replicas nobody runs.
+    HandoverClaim handoverClaim{};
+    state::activity::bubble_authority::EntitySlotMask released{};
+    if (encoded && snapshot.hasGrant && sharedBubbles
+        && session.activity.role == ActivityClientRole::privateCurrent
+        && state::activity::bubble_authority::snapshot_released_entities(
+            sessionId, grant.bubble, released)) {
+        handoverClaim =
+            handover_claim({.sharedBubbles = sharedBubbles,
+                            .granted = true,
+                            .bubble = grant.bubble,
+                            .recipient = session.activity.bindingGeneration,
+                            .releasedBy = releaser,
+                            .released = &released,
+                            .purged = hasRetirement ? &entityRetirement.entities : nullptr,
+                            .heldEpoch = session.activity.replicationEpoch});
+    }
     // An unsolicited body identical to the last delivered one is skipped. A solicited one never
     // is. The repeat check knows only this host's own history, and a slice-set teardown clears
     // the client's mirror without telling us, which is exactly when it asks again.
@@ -657,6 +675,25 @@ bool append_roster_notification(
                                            nonce,
                                            response,
                                            written);
+    // The claim follows the grant it belongs to; the nonce advance below covers the last frame.
+    if (encoded && handoverClaim.pending) {
+        namespace control = middleware::bap::activity_message::host_control;
+        middleware::secure_channel::advance_nonce(nonce);
+        const control::ClaimAuthorityBody claim{.slots = handoverClaim.slots,
+                                                .epoch = handoverClaim.epoch,
+                                                .reason = kClaimAuthorityReason};
+        std::array<std::byte, control::kClaimAuthorityByteCount> claimBytes{};
+        std::size_t claimSize{};
+        encoded = control::encode_claim_authority(claim, claimBytes, claimSize)
+                  && append_notification_frame(scratch,
+                                               session.activity.session.sessionId,
+                                               control::kClaimAuthorityMessageType,
+                                               std::span(claimBytes).first(claimSize),
+                                               key,
+                                               nonce,
+                                               response,
+                                               written);
+    }
     // The frame contains a complete roster, not a delta against this host map. Capture the exact
     // group order only after both encoders accept it. A malformed identity map refuses the whole
     // attempt, and the rollback below removes the staged bytes and counters.
@@ -680,6 +717,7 @@ bool append_roster_notification(
         session.activityRosterStaged.retirementPriorEpoch = retirementPriorEpoch;
         session.activityRosterStaged.retirementBaseEpoch = retirementBaseEpoch;
         session.activityRosterStaged.retirementEpoch = retirementEpoch;
+        session.activityRosterStaged.handoverClaim = handoverClaim;
         session.activityRosterStaged.handedSquads = handedSquads;
         session.activityRosterStaged.decodeMap = decodeMap;
         session.activityRosterStaged.bindingGeneration = session.activity.bindingGeneration;
@@ -774,29 +812,43 @@ bool append_roster_notification(
     return encoded;
 }
 
+namespace {
+
+/** A claim names the epoch its client held when it was built, so a later step makes it stale. */
+[[nodiscard]] bool staged_claim_current(const Session& session) noexcept {
+    const auto& staged = session.activityRosterStaged;
+    return !staged.staged || !staged.handoverClaim.pending
+           || (staged.bindingGeneration == session.activity.bindingGeneration
+               && staged.handoverClaim.heldEpoch == session.activity.replicationEpoch);
+}
+
+} // namespace
+
 bool validate_staged_roster(const Session& session) noexcept {
     const auto& staged = session.activityRosterStaged;
-    return !staged.staged || !staged.entityRetirement.pending
-           || (staged.bindingGeneration == session.activity.bindingGeneration
-               && staged.retirementPriorEpoch == session.activity.replicationEpoch
-               && server::gameplay::squad_entity_retirement::validate_retirement(
-                   session.activity.session,
-                   session.activity.bindingGeneration,
-                   staged.entityRetirement));
+    return staged_claim_current(session)
+           && (!staged.staged || !staged.entityRetirement.pending
+               || (staged.bindingGeneration == session.activity.bindingGeneration
+                   && staged.retirementPriorEpoch == session.activity.replicationEpoch
+                   && server::gameplay::squad_entity_retirement::validate_retirement(
+                       session.activity.session,
+                       session.activity.bindingGeneration,
+                       staged.entityRetirement)));
 }
 
 /** Retained identities cannot change between final validation and the caller copy. */
 bool begin_staged_roster_publication(
     const Session& session, server::gameplay::entity_identities::PublicationLease& lease) noexcept {
     const auto& staged = session.activityRosterStaged;
-    return !staged.staged || !staged.entityRetirement.pending
-           || (staged.bindingGeneration == session.activity.bindingGeneration
-               && staged.retirementPriorEpoch == session.activity.replicationEpoch
-               && server::gameplay::squad_entity_retirement::begin_retirement_publication(
-                   session.activity.session,
-                   session.activity.bindingGeneration,
-                   staged.entityRetirement,
-                   lease));
+    return staged_claim_current(session)
+           && (!staged.staged || !staged.entityRetirement.pending
+               || (staged.bindingGeneration == session.activity.bindingGeneration
+                   && staged.retirementPriorEpoch == session.activity.replicationEpoch
+                   && server::gameplay::squad_entity_retirement::begin_retirement_publication(
+                       session.activity.session,
+                       session.activity.bindingGeneration,
+                       staged.entityRetirement,
+                       lease)));
 }
 
 namespace {
@@ -865,6 +917,14 @@ void commit_staged_roster(Session& session) noexcept {
             request.pending = false;
             request.staged = false;
         }
+    }
+    if (const auto& claim = session.activityRosterStaged.handoverClaim; claim.pending) {
+        // Delivered entities are no longer released, and the previous holder's captured trees
+        // for them are this link's live entities now, so its renewal must not purge them.
+        state::activity::bubble_authority::record_claim(
+            session.activity.session.sessionId, claim.bubble, claim.slots);
+        server::gameplay::squad_entity_retirement::returned_slots(
+            session.activity.session, claim.releasedBy, claim.slots);
     }
     if (const auto& handed = session.activityRosterStaged.handedSquads; handed.count != 0) {
         // The recipient's next delta is relative to the state it was just handed.
