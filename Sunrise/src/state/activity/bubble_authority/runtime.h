@@ -54,9 +54,16 @@ void record_grant(std::uint64_t sessionId, std::uint64_t generation, const Grant
 void grant_holders(std::uint64_t sessionId, GrantHolders& output) noexcept;
 
 /**
+ * Copies which link released each bubble last, until the bubble is granted again.
+ * @param sessionId Joined activity session.
+ * @param output Receives each bubble's releasing generation, zero while none is pending.
+ */
+void grant_releasers(std::uint64_t sessionId, GrantHolders& output) noexcept;
+
+/**
  * Releases every bubble one link holds, for a link that leaves its session or changes its
  * generation without abdicating them. The tokens stay, so the next grant differs from any mirror a
- * client kept.
+ * client kept, and the link is recorded as each bubble's releaser.
  * @param sessionId Joined activity session.
  * @param generation ActivityClient generation of the link that left.
  */

@@ -8,11 +8,15 @@
 #include "../../../../../middleware/bap/activity_message/darkness_zone_auth.h"
 #include "../../../../../middleware/bap/activity_message/ghost_link_sense.h"
 #include "../../../../../middleware/content/packages/tables/region_reader.h"
+#include "../../../../../state/activity/bubble_authority/runtime.h"
 #include "../../../../../state/activity/defaults/activity_defaults_snapshot.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
+#include "../../../../../state/activity/mission/runtime.h"
 #include "../../../../../state/activity/runtime.h"
+#include "../../../../../state/activity_sdk/runtime.h"
 #include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/runtime/runtime.h"
+#include "../../../../activity/activity_sdk_squad_runtime.h"
 #include "../../../../gameplay/gameplay_advertisement.h"
 #include "../../../../gameplay/group/group_host_sessions.h"
 #include "../../../activity_mission_seed_lease.h"
@@ -517,23 +521,39 @@ build_roster_snapshot(Session& session,
         return refuse_override("pending_group_position");
     }
     // Only this recipient's own native recovery reports are replayed. Retire departed
-    // connections without letting a newer guest evict another live member's reports.
-    std::array<std::uint64_t, core::network_capacity::kConnections> liveSources{};
+    // connections without letting a newer guest evict another live member's reports. A departed
+    // holder's reports stay until the bubble it released is granted again.
+    namespace authority = state::activity::bubble_authority;
+    std::array<std::uint64_t, core::network_capacity::kConnections + authority::kAuthoritySlotCount>
+        liveSources{};
     std::size_t liveCount{};
     bool completeSources = true;
     for (const auto& peer : sessions()) {
         if (!mission_seed_recipient(peer, session.activity.session)) {
             continue;
         }
-        if (liveCount == liveSources.size()) {
+        if (liveCount == core::network_capacity::kConnections) {
             completeSources = false;
             break;
         }
         liveSources[liveCount++] = peer.activity.bindingGeneration;
     }
+    authority::GrantHolders releasers{};
+    authority::grant_releasers(session.activity.session.sessionId, releasers);
+    for (const std::uint64_t releaser : releasers) {
+        if (releaser != 0) {
+            liveSources[liveCount++] = releaser;
+        }
+    }
     if (completeSources) {
+        // Reports are stamped with the attempt they arrived in, read the same way.
+        state::activity::mission::InputSequenceSnapshot attempt{};
+        static_cast<void>(
+            state::activity::mission::input_sequence_snapshot(session.activity.session, attempt));
         server::activity::host::retain_squad_sense_generations(
-            session.activity.session, std::span(liveSources).first(liveCount));
+            session.activity.session,
+            std::span(liveSources).first(liveCount),
+            attempt.attemptGeneration);
     }
     std::size_t senseCount = 0;
     for (const message::AuthOverride& auth : snapshot.authOverrides) {
@@ -604,6 +624,130 @@ build_roster_snapshot(Session& session,
     }
     snapshot.senseOverrides = std::span(scratch.rosterSenseOverrides).first(senseCount);
     return RosterOutcome::published;
+}
+
+namespace {
+
+/**
+ * @return True when one squad slot names a squad authored in the given bubble. A slot that more
+ * than one squad row places counts when any of them is.
+ */
+[[nodiscard]] bool squad_in_bubble(const state::activity_sdk::BoundView& view,
+                                   const server::activity::host::SenseObservationKey& squad,
+                                   std::uint8_t bubble) noexcept {
+    namespace squads = server::activity::activity_sdk_squads;
+    const auto rows = view.catalog->squads();
+    const auto slots = view.catalog->slots();
+    const auto objects = view.catalog->objects();
+    for (std::size_t row = 0; row < rows.size(); ++row) {
+        const std::uint32_t slotRow = rows[row].slotIndex;
+        if (slotRow >= slots.size() || slots[slotRow].objectIndex >= objects.size()
+            || objects[slots[slotRow].objectIndex].objectKey != squad.registryKey
+            || slots[slotRow].slotIndex != squad.slotIndex
+            || slots[slotRow].slotType != squad.slotType) {
+            continue;
+        }
+        std::uint8_t authored = 0;
+        if (squads::authored_bubble(view, static_cast<std::uint32_t>(row), authored)
+                == squads::Status::ready
+            && authored == bubble) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+namespace {
+
+/** @return How many slots of the roster declare this squad's Sense; the encoder needs one. */
+[[nodiscard]] std::size_t
+sense_slots(const message::Roster& roster,
+            const server::activity::host::SenseObservationKey& squad) noexcept {
+    std::size_t matches = 0;
+    for (const message::Group& group : std::span(roster.groups).first(roster.groupCount)) {
+        if (group.key != squad.registryKey || group.objectTag != squad.objectTag) {
+            continue;
+        }
+        for (std::size_t slot = 0; slot < group.slotTypes.size(); ++slot) {
+            if (group.slotTypes[slot] == squad.slotType
+                && group.slotIndices[slot] == squad.slotIndex
+                && (group.slotFlags[slot] & message::kSlotSenseFlag) != 0) {
+                ++matches;
+            }
+        }
+    }
+    return matches;
+}
+
+} // namespace
+
+void append_handover_squad_sense(const Session& session,
+                                 Scratch& scratch,
+                                 message::Snapshot& snapshot,
+                                 std::uint8_t bubble,
+                                 std::uint64_t releaser,
+                                 HandoverSquadSense& output) noexcept {
+    namespace sdk = state::activity_sdk;
+    namespace squadSense = middleware::bap::activity_message::squad_sense;
+    output = {};
+    output.releaser = releaser;
+    const sdk::Snapshot catalog = sdk::snapshot();
+    sdk::BoundView view{};
+    const sdk::Selection selection{session.activity.session, 1, session.activity.bindingGeneration};
+    if (catalog == nullptr || sdk::resolve(catalog, selection, view) != sdk::Status::ready
+        || view.catalog == nullptr) {
+        return;
+    }
+    // The releaser's and the recipient's records name every squad either ran, with or without an
+    // Auth in this body.
+    std::array<server::activity::host::SenseObservationKey, kHandoverSquadCapacity> released{};
+    const std::size_t releasedCount = server::activity::host::handover_squad_sense_keys(
+        session.activity.session, session.activity.bindingGeneration, releaser, released);
+    std::size_t count = snapshot.senseOverrides.size();
+    for (const auto& key : std::span(released).first(releasedCount)) {
+        if (key.slotType != squadSense::kSlotType || key.senseSchema != squadSense::kSchema
+            || !squad_in_bubble(view, key, bubble) || sense_slots(snapshot.roster, key) != 1) {
+            continue;
+        }
+        squadSense::State recovered{};
+        if (!server::activity::host::snapshot_handover_squad_sense(
+                session.activity.session,
+                session.activity.bindingGeneration,
+                releaser,
+                key,
+                recovered)) {
+            continue;
+        }
+        // The handover replaces this body's replay of the recipient's older own record.
+        const auto present = std::span(scratch.rosterSenseOverrides).first(count);
+        const auto existing =
+            std::find_if(present.begin(), present.end(), [&](const message::SenseOverride& sense) {
+                return sense.key == key.registryKey && sense.objectTag == key.objectTag
+                       && sense.slotIndex == key.slotIndex && sense.slotType == key.slotType;
+            });
+        if (existing == present.end() && count == scratch.rosterSenseOverrides.size()) {
+            continue;
+        }
+        message::SenseOverride sense{};
+        // A body that does not encode is left out; the recipient then starts the squad natively.
+        if (!squadSense::encode(recovered, sense.body, sense.byteCount, sense.bitCount)) {
+            continue;
+        }
+        sense.key = key.registryKey;
+        sense.objectTag = key.objectTag;
+        sense.slotIndex = key.slotIndex;
+        sense.slotType = key.slotType;
+        sense.counter = recovered.counter;
+        if (existing != present.end()) {
+            *existing = sense;
+        } else {
+            scratch.rosterSenseOverrides[count++] = sense;
+        }
+        output.keys[output.count++] = key;
+    }
+    snapshot.senseOverrides = std::span(scratch.rosterSenseOverrides).first(count);
 }
 
 /** The player key this link's message 5 binds: the join character's SOID, or its identity. */

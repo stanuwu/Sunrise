@@ -51,11 +51,11 @@ struct AuthorityState final {
      */
     GrantHolders holders{};
     /**
-     * Generation that held each bubble when an abdication last released it, zero once it is
-     * granted again. A client abdicates only a bubble it holds, so this is the abdicating link,
-     * whose committed placement still names the bubble until its switch report lands; while its
-     * pending leg names another bubble it takes this one back only on a body that moves its
-     * client into it.
+     * Generation that held each bubble when an abdication or its departure last released it, zero
+     * once it is granted again. A client abdicates only a bubble it holds, so this is the
+     * abdicating link, whose committed placement still names the bubble until its switch report
+     * lands; while its pending leg names another bubble it takes this one back only on a body that
+     * moves its client into it.
      */
     std::array<std::uint64_t, kAuthoritySlotCount> releasedBy{};
     /** Released entities remain pending until their exact claim is delivered. */

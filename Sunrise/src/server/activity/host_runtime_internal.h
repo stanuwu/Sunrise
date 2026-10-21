@@ -183,6 +183,15 @@ struct SquadSenseRecord final {
     SenseObservationKey key{};
     middleware::bap::activity_message::squad_sense::State state{};
     std::uint64_t sourceGeneration{};
+    /** Mission attempt the state was reported in; a checkpoint restart re-places every squad. */
+    std::uint64_t attemptGeneration{};
+    /** Instance-wide merge order, so a holder change replays the newest simulating report. */
+    std::uint64_t mergeSequence{};
+    /**
+     * The source withdrew its state. Its last valid state stays only as the baseline the link that
+     * takes over the squad's bubble is reconciled to; it is never replayed to its own source.
+     */
+    bool withdrawn{};
 };
 
 /** Mutable per-instance storage kept behind the runtime lock. */
@@ -190,6 +199,7 @@ struct Instance final {
     InstanceSnapshot view{};
     SenseObservationSnapshot senseObservations{};
     std::vector<SquadSenseRecord> squadSense{};
+    std::uint64_t squadSenseSequence{};
     SceneSenseTrace sceneSenseTrace{};
     std::array<ScriptableGuard, kScriptableGuardCapacity> scriptableGuards{};
     /** Latest delivered body for every full ClientRef, re-emitted by every later msg-5 body. */
@@ -211,6 +221,7 @@ inline void clear_instance(Instance& instance) noexcept {
     std::destroy_at(&instance.senseObservations);
     std::construct_at(&instance.senseObservations);
     instance.squadSense.clear();
+    instance.squadSenseSequence = 0;
     std::destroy_at(&instance.sceneSenseTrace);
     std::construct_at(&instance.sceneSenseTrace);
     instance.scriptableGuards.fill({});

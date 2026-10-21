@@ -390,9 +390,15 @@ struct SenseObservationKey final {
     std::uint8_t slotType{};
 };
 
-/** Retires recovery reports only after their native connections have left the binding. */
+/**
+ * Retires recovery reports once their native connections have left the binding, and every report
+ * from an attempt before the current one: a checkpoint restart re-places the squads they describe.
+ * @param generations Sources whose reports stay.
+ * @param attemptGeneration The binding's current mission attempt.
+ */
 void retain_squad_sense_generations(const state::activity::SessionBinding& binding,
-                                    std::span<const std::uint64_t> generations) noexcept;
+                                    std::span<const std::uint64_t> generations,
+                                    std::uint64_t attemptGeneration) noexcept;
 
 /** Copies the squad's merged recovery state for this exact ActivityClient generation. */
 [[nodiscard]] bool
@@ -400,6 +406,47 @@ snapshot_squad_sense(const state::activity::SessionBinding& binding,
                      std::uint64_t sourceGeneration,
                      const SenseObservationKey& key,
                      middleware::bap::activity_message::squad_sense::State& output) noexcept;
+
+/**
+ * Copies the keys of every squad the releasing link or the recipient reported, once each, for the
+ * link granted a released bubble.
+ * @param recipientGeneration The link being granted the bubble.
+ * @param releaserGeneration The link that released the bubble; it may be the recipient itself.
+ * @param output Receives keys in report order.
+ * @return The number of keys written, at most `output.size()`.
+ */
+[[nodiscard]] std::size_t handover_squad_sense_keys(const state::activity::SessionBinding& binding,
+                                                    std::uint64_t recipientGeneration,
+                                                    std::uint64_t releaserGeneration,
+                                                    std::span<SenseObservationKey> output) noexcept;
+
+/**
+ * Copies the bubble's state for one squad, for the link granted the released bubble: the newest
+ * valid state its releaser or the recipient itself reported, withdrawn or not. The client that
+ * takes the bubble over resumes every squad. A client walking back into a bubble it unloaded gets
+ * its cleared encounters, which stay dead; its other squads start natively. A recipient whose own
+ * live report is the newest is owed nothing; every body replays it.
+ * @param recipientGeneration The link being granted the bubble.
+ * @param releaserGeneration The link that held the bubble before it; it may be the recipient.
+ * @return True when the recipient is owed the state.
+ */
+[[nodiscard]] bool snapshot_handover_squad_sense(
+    const state::activity::SessionBinding& binding,
+    std::uint64_t recipientGeneration,
+    std::uint64_t releaserGeneration,
+    const SenseObservationKey& key,
+    middleware::bap::activity_message::squad_sense::State& output) noexcept;
+
+/**
+ * Makes the state a delivered grant body handed over the recipient's own record, so its later
+ * deltas merge onto the state it resumed from and every later body replays it.
+ * @param keys The squads the body handed over.
+ * @return The number of records seeded.
+ */
+std::size_t seed_handover_squad_sense(const state::activity::SessionBinding& binding,
+                                      std::uint64_t recipientGeneration,
+                                      std::uint64_t releaserGeneration,
+                                      std::span<const SenseObservationKey> keys) noexcept;
 
 /** What the msg-5 builder needs to publish one type-65 Sense root. */
 struct GhostLinkLevel final {

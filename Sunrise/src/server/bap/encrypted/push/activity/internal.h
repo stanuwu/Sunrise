@@ -261,6 +261,22 @@ client_placement(const Session& session, const RefreshReport* refresh) noexcept;
 /** The player key this link's message 5 binds: the join character's SOID, or its identity. */
 [[nodiscard]] std::uint64_t published_player_key(const Session& session) noexcept;
 
+/**
+ * Reconciles the link a body grants a released bubble to: each squad of that bubble gets the
+ * newest Sense its releasing holder or this link reported, so the new holder resumes the squad,
+ * and a client walking back into a cleared encounter finds it cleared, instead of placing it
+ * again. The body's own replay of the squad, if any, is replaced.
+ * @param bubble The bubble this body grants.
+ * @param releaser The link that held the bubble before; it may be this link.
+ * @param output Receives the squads handed over.
+ */
+void append_handover_squad_sense(const Session& session,
+                                 Scratch& scratch,
+                                 message::Snapshot& snapshot,
+                                 std::uint8_t bubble,
+                                 std::uint64_t releaser,
+                                 HandoverSquadSense& output) noexcept;
+
 /** Restores the roster counters for a discarded publication without changing its retained lease. */
 void rollback_staged_roster_state(Session& session) noexcept;
 

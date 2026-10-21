@@ -113,6 +113,21 @@ void grant_holders(std::uint64_t sessionId, GrantHolders& output) noexcept {
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
 }
 
+/** Copies which link released each bubble of one session last. */
+void grant_releasers(std::uint64_t sessionId, GrantHolders& output) noexcept {
+    output = {};
+    if (sessionId == kAbsentSessionId) {
+        return;
+    }
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot) {
+        output = state.sessions[target].bubbleAuthority.releasedBy;
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+}
+
 /** Releases every bubble one link holds, keeping each bubble's tokens. */
 void release_holder(std::uint64_t sessionId, std::uint64_t generation) noexcept {
     if (sessionId == kAbsentSessionId || generation == 0) {
@@ -127,6 +142,8 @@ void release_holder(std::uint64_t sessionId, std::uint64_t generation) noexcept 
             if (authority.holders[bubble] == generation) {
                 authority.held[bubble] = false;
                 authority.holders[bubble] = 0;
+                // The link that takes the bubble over next resumes from the leaver's state.
+                authority.releasedBy[bubble] = generation;
             }
         }
     }

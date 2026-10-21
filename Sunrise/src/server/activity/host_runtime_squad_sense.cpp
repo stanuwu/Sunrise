@@ -29,21 +29,29 @@ void retain_squad_sense(Instance& instance, const SenseInput& input) noexcept {
                        && record.key.slotType == object.slotType
                        && record.key.slotIndex == object.slotIndex);
         });
-        squadSense::State merged =
-            found == instance.squadSense.end() ? squadSense::State{} : found->state;
+        // A withdrawn record, or one from an earlier attempt, holds an old state; the source's
+        // next report starts a new one.
+        squadSense::State merged = found == instance.squadSense.end() || found->withdrawn
+                                           || found->attemptGeneration != input.attemptGeneration
+                                       ? squadSense::State{}
+                                       : found->state;
         if (!squadSense::merge(merged, object, std::span(packet.values).first(packet.valueCount))) {
             continue;
         }
-        // The owning client can withdraw its initialized state. That invalidation must not
-        // leave an old recovery body publishable, and never erases a different member's body.
+        // The owning client can withdraw its initialized state. That invalidation must not leave
+        // an old recovery body publishable to that client, and never touches a different member's
+        // body. The last valid state stays for the link that takes over the squad's bubble.
         if (!merged.valid) {
             if (found != instance.squadSense.end()) {
-                instance.squadSense.erase(found);
+                found->withdrawn = true;
             }
             continue;
         }
         if (found != instance.squadSense.end()) {
             found->state = merged;
+            found->withdrawn = false;
+            found->attemptGeneration = input.attemptGeneration;
+            found->mergeSequence = ++instance.squadSenseSequence;
         } else if (instance.squadSense.size()
                    < kScriptableGuardCapacity
                          * state::activity::entity_slots::kMemberLeaseRowCount) {
@@ -54,7 +62,12 @@ void retain_squad_sense(Instance& instance, const SenseInput& input) noexcept {
                                           object.slotIndex,
                                           object.slotType};
             try {
-                instance.squadSense.push_back({key, merged, input.sourceGeneration});
+                instance.squadSense.push_back({key,
+                                               merged,
+                                               input.sourceGeneration,
+                                               input.attemptGeneration,
+                                               ++instance.squadSenseSequence,
+                                               false});
             } catch (const std::bad_alloc&) {
                 return;
             }
@@ -66,12 +79,14 @@ void retain_squad_sense(Instance& instance, const SenseInput& input) noexcept {
 using namespace detail;
 
 void retain_squad_sense_generations(const state::activity::SessionBinding& binding,
-                                    std::span<const std::uint64_t> generations) noexcept {
+                                    std::span<const std::uint64_t> generations,
+                                    std::uint64_t attemptGeneration) noexcept {
     AcquireSRWLockExclusive(&g_lock);
     if (auto* instance = find_instance(binding)) {
         std::erase_if(instance->squadSense, [&](const auto& record) {
-            return std::find(generations.begin(), generations.end(), record.sourceGeneration)
-                   == generations.end();
+            return record.attemptGeneration != attemptGeneration
+                   || std::find(generations.begin(), generations.end(), record.sourceGeneration)
+                          == generations.end();
         });
     }
     ReleaseSRWLockExclusive(&g_lock);
@@ -92,7 +107,8 @@ bool snapshot_squad_sense(const state::activity::SessionBinding& binding,
                 && record.key.registryKey == key.registryKey
                 && record.key.objectTag == key.objectTag
                 && record.key.senseSchema == key.senseSchema && record.key.slotType == key.slotType
-                && record.key.slotIndex == key.slotIndex && record.state.valid) {
+                && record.key.slotIndex == key.slotIndex && record.state.valid
+                && !record.withdrawn) {
                 output = record.state;
                 found = true;
                 break;
@@ -101,6 +117,170 @@ bool snapshot_squad_sense(const state::activity::SessionBinding& binding,
     }
     ReleaseSRWLockShared(&g_lock);
     return found;
+}
+
+namespace {
+
+[[nodiscard]] bool same_squad(const SenseObservationKey& left,
+                              const SenseObservationKey& right) noexcept {
+    return left.registryKey == right.registryKey && left.objectTag == right.objectTag
+           && left.senseSchema == right.senseSchema && left.slotType == right.slotType
+           && left.slotIndex == right.slotIndex;
+}
+
+template <typename Records>
+[[nodiscard]] auto* find_record(Records& records,
+                                std::uint64_t sourceGeneration,
+                                const SenseObservationKey& key) noexcept {
+    decltype(&records.front()) found = nullptr;
+    for (auto& record : records) {
+        if (record.sourceGeneration == sourceGeneration && same_squad(record.key, key)) {
+            found = &record;
+            break;
+        }
+    }
+    return found;
+}
+
+/** Root scalar 3 is the squad's alive count; its created-count list says members were placed. */
+constexpr std::size_t kAliveScalar = 3;
+
+/** @return True when the squad placed members and none is alive: a cleared encounter. */
+[[nodiscard]] bool
+cleared(const middleware::bap::activity_message::squad_sense::State& state) noexcept {
+    const auto& alive = state.scalars[kAliveScalar];
+    if (!alive.present || alive.raw != 0 || !state.countsPresent) {
+        return false;
+    }
+    const std::size_t length =
+        (std::min)(static_cast<std::size_t>(state.count), state.counts.size());
+    return std::any_of(state.counts.begin(),
+                       state.counts.begin() + static_cast<std::ptrdiff_t>(length),
+                       [](std::int32_t created) { return created > 0; });
+}
+
+/**
+ * The bubble's truth for one squad is the newest valid state its releaser or the recipient
+ * reported, withdrawn or not. The recipient is owed that state unless it is its own live record,
+ * which every body replays. A recipient that unloaded the squad, by withdrawing it or by releasing
+ * the bubble itself, reloads it: a cleared encounter stays cleared for it, and any other squad
+ * starts natively, since its members went with the unload.
+ * @return The record whose state the recipient is owed, or null.
+ */
+[[nodiscard]] const SquadSenseRecord* handover_owed(const SquadSenseRecord* released,
+                                                    const SquadSenseRecord* own) noexcept {
+    const SquadSenseRecord* truth =
+        released != nullptr && released->state.valid ? released : nullptr;
+    if (own != nullptr && own->state.valid
+        && (truth == nullptr || own->mergeSequence > truth->mergeSequence)) {
+        truth = own;
+    }
+    if (truth == nullptr || (truth == own && !own->withdrawn)) {
+        return nullptr;
+    }
+    const bool reloads = own != nullptr && (own->withdrawn || own == released);
+    return reloads && !cleared(truth->state) ? nullptr : truth;
+}
+
+} // namespace
+
+std::size_t handover_squad_sense_keys(const state::activity::SessionBinding& binding,
+                                      std::uint64_t recipientGeneration,
+                                      std::uint64_t releaserGeneration,
+                                      std::span<SenseObservationKey> output) noexcept {
+    std::size_t count = 0;
+    AcquireSRWLockShared(&g_lock);
+    if (const Instance* const instance = find_instance(binding);
+        instance != nullptr && recipientGeneration != 0 && releaserGeneration != 0) {
+        for (const SquadSenseRecord& record : instance->squadSense) {
+            if (count == output.size()) {
+                break;
+            }
+            const bool source = record.sourceGeneration == releaserGeneration
+                                || record.sourceGeneration == recipientGeneration;
+            const auto listed = output.first(count);
+            if (source && record.state.valid
+                && std::none_of(listed.begin(), listed.end(), [&](const auto& key) {
+                       return same_squad(key, record.key);
+                   })) {
+                output[count++] = record.key;
+            }
+        }
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return count;
+}
+
+/**
+ * The releaser's last valid state is the bubble's truth even though it withdrew it at the
+ * crossing that released the bubble, and so is the recipient's own withdrawn state when it is the
+ * newer one: the recipient walks back into an encounter it cleared.
+ */
+bool snapshot_handover_squad_sense(
+    const state::activity::SessionBinding& binding,
+    std::uint64_t recipientGeneration,
+    std::uint64_t releaserGeneration,
+    const SenseObservationKey& key,
+    middleware::bap::activity_message::squad_sense::State& output) noexcept {
+    output = {};
+    const SquadSenseRecord* owed = nullptr;
+    AcquireSRWLockShared(&g_lock);
+    const Instance* const instance = find_instance(binding);
+    if (instance != nullptr && recipientGeneration != 0 && releaserGeneration != 0) {
+        const SquadSenseRecord* const released =
+            find_record(instance->squadSense, releaserGeneration, key);
+        const SquadSenseRecord* const own =
+            find_record(instance->squadSense, recipientGeneration, key);
+        owed = handover_owed(released, own);
+        if (owed != nullptr) {
+            output = owed->state;
+        }
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return owed != nullptr;
+}
+
+std::size_t seed_handover_squad_sense(const state::activity::SessionBinding& binding,
+                                      std::uint64_t recipientGeneration,
+                                      std::uint64_t releaserGeneration,
+                                      std::span<const SenseObservationKey> keys) noexcept {
+    std::size_t seeded = 0;
+    if (recipientGeneration == 0 || releaserGeneration == 0) {
+        return seeded;
+    }
+    AcquireSRWLockExclusive(&g_lock);
+    if (Instance* const instance = find_instance(binding)) {
+        for (const SenseObservationKey& key : keys) {
+            const SquadSenseRecord* const released =
+                find_record(instance->squadSense, releaserGeneration, key);
+            SquadSenseRecord* const own =
+                find_record(instance->squadSense, recipientGeneration, key);
+            const SquadSenseRecord* const owed = handover_owed(released, own);
+            if (owed == nullptr) {
+                continue;
+            }
+            SquadSenseRecord seed = *owed;
+            seed.sourceGeneration = recipientGeneration;
+            seed.withdrawn = false;
+            seed.mergeSequence = ++instance->squadSenseSequence;
+            if (own != nullptr) {
+                *own = seed;
+            } else if (instance->squadSense.size()
+                       < kScriptableGuardCapacity
+                             * state::activity::entity_slots::kMemberLeaseRowCount) {
+                try {
+                    instance->squadSense.push_back(seed);
+                } catch (const std::bad_alloc&) {
+                    break;
+                }
+            } else {
+                continue;
+            }
+            ++seeded;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+    return seeded;
 }
 
 } // namespace sunrise::server::activity::host

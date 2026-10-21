@@ -141,6 +141,16 @@ struct RosterGroupLease {
 inline constexpr std::size_t kRosterGroupLeaseCapacity =
     middleware::bap::activity_message::sensor_auth_update::kPublishedGroupCapacity;
 
+/** Squads one grant body hands to its recipient; more than this keep their native start. */
+inline constexpr std::size_t kHandoverSquadCapacity = 128;
+
+/** The squad Sense a body granting a released bubble carries from the bubble's releaser. */
+struct HandoverSquadSense final {
+    std::array<activity::host::SenseObservationKey, kHandoverSquadCapacity> keys{};
+    std::size_t count{};
+    std::uint64_t releaser{};
+};
+
 /**
  * What one staged roster body owes State, and the counters to put back if it is discarded.
  * A bubble is offered once, and each group revision may rebuild that registry key. Counters and
@@ -156,6 +166,8 @@ struct RosterPublication {
     std::uint8_t retirementPriorEpoch{};
     std::uint8_t retirementBaseEpoch{};
     std::uint8_t retirementEpoch{};
+    /** Squad Sense this body's grant hands over, seeded as the recipient's own on delivery. */
+    HandoverSquadSense handedSquads{};
     bool priorRosterOwedForEpoch{};
     /** Exact decode identities carried by this staged complete roster snapshot. */
     RosterDecodeMap decodeMap{};

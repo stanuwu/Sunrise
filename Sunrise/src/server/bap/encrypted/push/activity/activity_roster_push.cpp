@@ -486,6 +486,9 @@ bool append_roster_notification(
                        .pendingRegion = pendingRegion});
     // Links that share a session also ask who released the bubble; a sole link keeps its rule.
     const std::uint64_t sessionId = session.activity.session.sessionId;
+    // Read before the grant commits, which clears the bubble's releaser.
+    std::uint64_t releaser = 0;
+    HandoverSquadSense handedSquads{};
     if (!peerLeave && !placedRetirementPending
         && (sharedBubbles
                 ? state::activity::bubble_authority::select_shared_grant(
@@ -500,6 +503,15 @@ bool append_roster_notification(
         snapshot.hasGrant = true;
         snapshot.grant.bubble = grant.bubble;
         snapshot.grant.token = grant.token;
+        // A released bubble, abdicated or left, resumes from its newest squad Sense: the previous
+        // holder's, or this link's own when it walks back into an encounter it cleared.
+        state::activity::bubble_authority::GrantHolders releasers{};
+        state::activity::bubble_authority::grant_releasers(sessionId, releasers);
+        releaser = grant.bubble < releasers.size() ? releasers[grant.bubble] : 0;
+        if (releaser != 0) {
+            append_handover_squad_sense(
+                session, scratch, snapshot, grant.bubble, releaser, handedSquads);
+        }
     }
 
     const std::size_t initialWritten = written;
@@ -668,6 +680,7 @@ bool append_roster_notification(
         session.activityRosterStaged.retirementPriorEpoch = retirementPriorEpoch;
         session.activityRosterStaged.retirementBaseEpoch = retirementBaseEpoch;
         session.activityRosterStaged.retirementEpoch = retirementEpoch;
+        session.activityRosterStaged.handedSquads = handedSquads;
         session.activityRosterStaged.decodeMap = decodeMap;
         session.activityRosterStaged.bindingGeneration = session.activity.bindingGeneration;
         session.activityRosterStaged.priorLeases = initialLeases;
@@ -852,6 +865,14 @@ void commit_staged_roster(Session& session) noexcept {
             request.pending = false;
             request.staged = false;
         }
+    }
+    if (const auto& handed = session.activityRosterStaged.handedSquads; handed.count != 0) {
+        // The recipient's next delta is relative to the state it was just handed.
+        static_cast<void>(server::activity::host::seed_handover_squad_sense(
+            session.activity.session,
+            session.activity.bindingGeneration,
+            handed.releaser,
+            std::span(handed.keys).first(handed.count)));
     }
     if (session.activityRosterStaged.hasGrant) {
         state::activity::bubble_authority::record_grant(session.activity.session.sessionId,
