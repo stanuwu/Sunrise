@@ -116,35 +116,13 @@ mission_seed_link_locked(const state::activity::SessionBinding& binding,
     return mission_seed_session_status(*output, scenarioRow, expectedGeneration);
 }
 
-/** @return True when two leases name the same complete generated plan. */
-[[nodiscard]] bool same_mission_seed_plan(const ActivityMissionSeedPlan& left,
-                                          const ActivityMissionSeedPlan& right) noexcept {
-    if (left.omissionCount != right.omissionCount) {
-        return false;
-    }
-    for (std::uint32_t index = 0; index < left.omissionCount; ++index) {
-        if (left.omissions[index].objectTag != right.omissions[index].objectTag
-            || left.omissions[index].registryKey != right.omissions[index].registryKey) {
-            return false;
-        }
-    }
-    return left.activityRow == right.activityRow && left.scenarioRow == right.scenarioRow
-           && left.stateRow == right.stateRow && left.bubbleRow == right.bubbleRow
-           && left.bubbleOrdinal == right.bubbleOrdinal && left.stateOrdinal == right.stateOrdinal
-           && left.entryIndex == right.entryIndex && left.sliceSetIndex == right.sliceSetIndex
-           && left.effectiveRegion == right.effectiveRegion
-           && left.occurrenceCount == right.occurrenceCount && left.groupCount == right.groupCount
-           && left.authMappingSlots == right.authMappingSlots
-           && left.authResetSlots == right.authResetSlots
-           && left.senseSuppressedSlots == right.senseSuppressedSlots;
-}
-
 /** Validates only identities required to mutate a connection-owned lease safely. */
 [[nodiscard]] bool valid_mission_seed_plan(const ActivityMissionSeedPlan& plan,
                                            std::uint32_t scenarioRow) noexcept {
     const std::uint64_t authoredRegion =
         static_cast<std::uint64_t>(plan.sliceSetIndex) + plan.stateOrdinal;
-    return plan.activityRow != (std::numeric_limits<std::uint32_t>::max)()
+    return plan.omissionCount <= plan.omissions.size()
+           && plan.activityRow != (std::numeric_limits<std::uint32_t>::max)()
            && plan.scenarioRow == scenarioRow
            && plan.stateRow != (std::numeric_limits<std::uint32_t>::max)()
            && plan.bubbleRow != (std::numeric_limits<std::uint32_t>::max)()
@@ -619,61 +597,93 @@ select_activity_mission_seed(const state::activity::SessionBinding& binding,
         status = ActivityMissionSeedLeaseStatus::refused;
     }
     if (status == ActivityMissionSeedLeaseStatus::ready) {
-        MissionSeedLease& lease = session->activityMissionSeed;
-        // Ordinary traversal can reach a plan's region before the script selects it, so an open
-        // arrival window closes here when the client already holds that region.
-        const auto placement = state::activity::membership::reported_placement(binding.sessionId);
-        const auto heldRegion = state::activity::membership::instantiated_region(placement);
-        const bool targetHeld = encrypted::push::activity::mission_seed_arrival_window_closed(
-            heldRegion, plan.effectiveRegion);
-        if (lease.configured && same_mission_seed_plan(lease.plan, plan)) {
-            if (targetHeld) {
-                lease.regionArrivalPending = false;
-            }
-            // The script may select the plan the roster adopted by default. That is a selection.
-            lease.scriptSelected = true;
-            return ActivityMissionSeedLeaseStatus::ready;
-        }
-        if (lease.configured && lease.revision == (std::numeric_limits<std::uint64_t>::max)()) {
-            status = ActivityMissionSeedLeaseStatus::refused;
-        } else {
-            // A staged older revision may finish. Its commit cannot publish this newer revision.
-            const std::uint64_t revision = lease.configured ? lease.revision + 1U : 1U;
-            // Every region this lease has selected stays registered on the peer, so record the
-            // new one and keep the earlier ones. Publication carries the union; dropping a group
-            // does not unregister it, it only stops seeding records the peer still holds.
-            if (!lease.configured) {
-                lease.registeredRegionCount = 0;
-            }
-            bool regionKnown = false;
-            for (std::size_t index = 0; index < lease.registeredRegionCount; ++index) {
-                regionKnown = regionKnown || lease.registeredRegions[index] == plan.effectiveRegion;
-            }
-            if (!regionKnown) {
-                if (lease.registeredRegionCount >= lease.registeredRegions.size()) {
-                    return ActivityMissionSeedLeaseStatus::refused;
+        // No peer can observe a new selection unless every current recipient can retain it. The
+        // first pass only checks each recipient; the second commits. Each keeps its own
+        // generation, receipt, registered groups and arrival window.
+        const auto prepare_recipients = [&](bool commit) noexcept {
+            for (Session& peer : g_sessions) {
+                if (!mission_seed_recipient(peer, binding)) {
+                    continue;
                 }
-                lease.registeredRegions[lease.registeredRegionCount++] = plan.effectiveRegion;
+                const state::ScopedAccount accountScope(peer.accountHandle);
+                const state::activity::ScopedMemberContext memberScope(binding.sessionId,
+                                                                       peer.activityMemberKey);
+                const auto placement =
+                    state::activity::membership::reported_placement(binding.sessionId);
+                MissionSeedLease lease{};
+                if (!prepare_mission_seed_lease(
+                        peer.activityMissionSeed,
+                        plan,
+                        peer.activity.bindingGeneration,
+                        state::activity::membership::instantiated_region(placement),
+                        lease)) {
+                    return false;
+                }
+                if (commit) {
+                    peer.activityMissionSeed = lease;
+                }
             }
-            // A selection that replaces the world waits for the client's arrival there. One that
-            // does not must close any window an earlier selection left open, because an open
-            // window blocks publication and nothing else clears it.
-            if (lease.configured
-                && encrypted::push::activity::mission_seed_selection_needs_arrival(
-                    lease.plan.effectiveRegion, plan.effectiveRegion, heldRegion)) {
-                lease.previousPlan = lease.plan;
-                lease.regionArrivalPending = true;
-            } else {
-                lease.regionArrivalPending = false;
-            }
-            lease.plan = plan;
-            lease.bindingGeneration = session->activity.bindingGeneration;
-            lease.revision = revision;
-            lease.configured = true;
-            lease.scriptSelected = true;
+            return true;
+        };
+        if (!prepare_recipients(false) || !prepare_recipients(true)) {
+            return ActivityMissionSeedLeaseStatus::refused;
         }
     }
     return status;
+}
+
+bool mission_seed_publication_ready(const state::activity::SessionBinding& binding,
+                                    std::uint64_t generation) noexcept {
+    const std::shared_lock lock(g_lock);
+    std::size_t count{};
+    const Session* owner = activity_link_for_generation_locked(binding, generation, count);
+    if (owner == nullptr) {
+        return false;
+    }
+    const auto& selected = owner->activityMissionSeed;
+    if (!selected.configured || !selected.scriptSelected) {
+        return true;
+    }
+    for (const Session& peer : g_sessions) {
+        if (mission_seed_recipient(peer, binding) && !mission_seed_published(peer, selected.plan)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool arm_shared_mission_region(const state::activity::SessionBinding& binding,
+                               std::uint64_t generation,
+                               std::int32_t region,
+                               std::uint32_t nameHash) noexcept {
+    namespace membership = state::activity::membership;
+    if (region < 0 || region > membership::kMaximumSliceSetIndex || nameHash == 0) {
+        return false;
+    }
+    const std::lock_guard lock(g_lock);
+    std::size_t count{};
+    if (activity_link_for_generation_locked(binding, generation, count) == nullptr) {
+        return false;
+    }
+    bool armed = false;
+    for (const Session& peer : g_sessions) {
+        if (!mission_seed_recipient(peer, binding)
+            || peer.activity.role != ActivityClientRole::privateCurrent
+            || !peer.activityMemberKey) {
+            continue;
+        }
+        const state::ScopedAccount accountScope(peer.accountHandle);
+        const state::activity::ScopedMemberContext memberScope(binding.sessionId,
+                                                               peer.activityMemberKey);
+        // A matching pending leg means the client accepted the move, not that its teleport
+        // machine finished. Leave the host's spawn phase in place until the client's native
+        // completion report retires it; clearing here would restore its still-waiting block.
+        if (membership::player_region(binding.sessionId) == region) {
+            continue;
+        }
+        armed = membership::arm_host_teleport(binding.sessionId, region, nameHash) || armed;
+    }
+    return armed;
 }
 
 /** Queues one generation-bound replication epoch request. */

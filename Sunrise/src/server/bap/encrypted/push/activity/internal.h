@@ -425,6 +425,14 @@ canonical_group_status(const state::build_data::scenarios::Definition& layout,
 make_auth_override(const server::activity::host::PendingScriptableOverride& retained,
                    message::AuthOverride& output) noexcept;
 
+/** Projects a binding's full retained Auth into this recipient; null means success. */
+[[nodiscard]] const char* append_retained_auth_estate(
+    const state::build_data::scenarios::Definition& layout,
+    const EffectiveRegion& region,
+    Scratch& scratch,
+    message::Snapshot& snapshot,
+    std::span<const server::activity::host::PendingScriptableOverride> estate) noexcept;
+
 /** Tracks the bubble the client holds; a change moves no group and only logs the crossing. */
 void advance_region_epoch(Session& session, const RefreshReport* refresh) noexcept;
 

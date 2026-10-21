@@ -16,6 +16,7 @@
 #include "../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../state/activity_sdk/runtime.h"
 #include "../host_runtime.h"
+#include "mission_member_life.h"
 #include "mission_script_actor_path_sense.h"
 #include "mission_script_combatant_damage_sense.h"
 #include "mission_script_device_sense.h"
@@ -150,6 +151,15 @@ struct CombatantDamageObservation final {
     bool used{};
 };
 
+/** Last published pools of one entity the selected owner's admitted source reports. */
+struct EntityDamageObservation final {
+    state::gameplay::entity_identity::Token token{};
+    state::gameplay::entity_identity::ActorSourceReference actorSource{};
+    state::gameplay::entity_identity::DamagePools damage{};
+    std::uint64_t allocationDomain{};
+    std::uint8_t allocationSequence{}, allocationEpoch{};
+    bool used{};
+};
 /** Last reported current values for one exact Type-23 source. */
 struct DeviceObservation final {
     DeviceLevel level{};
@@ -223,7 +233,18 @@ struct SessionRosterWatch final {
     std::uint64_t createdRevision{};
     std::uint64_t memberKey{};
     std::uint64_t joinIdentity{};
+    std::uint64_t joinedRevision{};
     bool used{};
+};
+
+/** Per-member levels never merge a guest's local sensor deltas with another client's. */
+struct MemberInputState final {
+    MissionMemberLife life{};
+    std::array<TriggerOccupancy, kTriggerOccupancyCapacity> triggerOccupancy{};
+    std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
+    std::array<ObjectInteractionObservation, kObjectInteractionObservationCapacity>
+        objectInteractionObservations{};
+    bool present{};
 };
 
 /** Everything one bound mission program owns: its VM, views, delivery state and counters. */
@@ -233,7 +254,13 @@ struct RuntimeInstance final {
     std::uint64_t dispatchInputSequence{};
     lua_vm::Vm vm{};
     sdk::BoundView view{};
-    generated_world::GeneratedWorldView worldView{};
+    generated::GeneratedWorldView worldView{};
+    state::gameplay::entity_identity::Source damageEntitySource{};
+    /** Entities of damageEntitySource whose pools were published; they reset with it. */
+    std::array<EntityDamageObservation, kSquadObservationCapacity> entityDamageObservations{};
+    /** Set once the retained rows ran out for this source, so the warning is logged once. */
+    bool entityDamageAtCapacity{};
+    std::uint64_t nextEntityDamageTick{};
     lua_vm::ProgramIdentity identity{};
     mission_state::ProgramKey programKey{};
     std::array<char, 16> lastVmStage{};
@@ -267,9 +294,8 @@ struct RuntimeInstance final {
     std::array<ObjectiveObservation, kObjectiveObservationCapacity> objectiveObservations{};
     // The table is exactly as large as the session table, so it can never overflow.
     std::array<SessionRosterWatch, state::activity::kSessionCapacity> sessionRoster{};
-    /** Participation levels of the sixteen player slots, for the client generation below. */
-    std::array<PlayerLifeObservation, kParticipationSlotCount> playerLife{};
-    std::uint64_t playerLifeGeneration{};
+    std::vector<MemberInputState> memberInputs{};
+    bool partySnapshotValid{};
     /** Last published party life counts. Published once, then only on a change. */
     FireteamLife lastFireteamLife{};
     bool fireteamLifePublished{};
@@ -302,6 +328,36 @@ struct RuntimeInstance final {
     bool occupied{};
 };
 
+/** Native Sense levels cannot cross an attempt or ActivityClient generation boundary. */
+void clear_sense_levels(RuntimeInstance& instance) noexcept;
+
+/**
+ * Re-baselines the levels a new attempt must not inherit but the fallback arrays do not hold:
+ * each member's live trigger, Ghost and interaction levels, and the channel-2 entity levels.
+ * Player life is kept, because the client never resends an unchanged region or life field.
+ */
+inline void reset_member_observations(RuntimeInstance& instance) noexcept {
+    for (MemberInputState& member : instance.memberInputs) {
+        member.triggerOccupancy.fill({});
+        member.ghostObservations.fill({});
+        member.objectInteractionObservations.fill({});
+    }
+    instance.entityDamageObservations.fill({});
+    instance.entityDamageAtCapacity = false;
+    instance.damageEntitySource = {};
+    instance.nextEntityDamageTick = 0;
+}
+
+/** Withdraws a retired source's observation history without changing mission or member state. */
+inline void reset_shared_observations(RuntimeInstance& instance) noexcept {
+    clear_sense_levels(instance);
+    instance.entityDamageObservations.fill({});
+    instance.entityDamageAtCapacity = false;
+    instance.damageEntitySource = {};
+    instance.nextEntityDamageTick = 0;
+    instance.activeRegion = -1;
+}
+
 /** Writes one bounded mission-script diagnostic line. Fields are key=value, error is free text. */
 void log_line(core::log::Level level,
               const RuntimeInstance* instance,
@@ -313,6 +369,11 @@ void log_line(core::log::Level level,
 void push_script_event(RuntimeInstance& instance, const host::Event& event) noexcept;
 /** Raises a fireteam event on each private instance whose party life counts changed. */
 void publish_fireteam_life(std::uint64_t now) noexcept;
+/** Re-reads the exact party so every current member owns an input state before it is used. */
+void refresh_mission_members(RuntimeInstance& instance) noexcept;
+/** @return The input state of the member this client generation belongs to, or null. */
+[[nodiscard]] MemberInputState* member_input(RuntimeInstance& instance,
+                                             std::uint64_t generation) noexcept;
 /** Merges the type-13 participation records of one Sense snapshot into the instance. */
 void observe_player_life(RuntimeInstance& instance,
                          const host::SenseObservationSnapshot& sense) noexcept;
@@ -330,6 +391,12 @@ void push_actor_path_edges(RuntimeInstance& instance,
 /** Raises one event per damage monitor whose health, shield or revision changed. */
 void push_damage_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;
+/** Raises the entity pools of the selected owner's admitted source that changed since the last
+ * poll. */
+void push_entity_damage_edges(RuntimeInstance& instance, std::uint64_t now) noexcept;
+/** @return True while a queued entity damage event still names its admitted source and allocation.
+ */
+[[nodiscard]] bool current_entity_damage(const host::Event& event) noexcept;
 /** Raises observed Type-2 damage pools and lifecycle resets without inferring damage. */
 void push_combatant_damage_edges(RuntimeInstance& instance,
                                  const host::SenseObservationSnapshot& sense) noexcept;
@@ -395,7 +462,7 @@ void push_objective_edges(RuntimeInstance& instance,
                           const host::SenseObservationSnapshot& sense) noexcept;
 /** Reports one committed phase change to the script. */
 void queue_phase_entered(RuntimeInstance& instance, std::uint32_t previousPhase) noexcept;
-/** Moves the client to the region a freshly selected mission state belongs to. */
+/** Moves every private member to the region a freshly selected mission state belongs to. */
 void arm_state_region_teleport(RuntimeInstance& instance,
                                const server::bap::ActivityMissionSeedPlan& plan) noexcept;
 /** @return The identity every host-state edge that is not a Sense edge carries. */
@@ -404,8 +471,7 @@ void arm_state_region_teleport(RuntimeInstance& instance,
 [[nodiscard]] host::Event sense_edge_event(const RuntimeInstance& instance,
                                            const host::SenseObservation& observation) noexcept;
 /** Raises one event per peer session that appeared or left this instance's destination. */
-void push_session_roster_edges(RuntimeInstance& instance,
-                               std::span<const state::activity::SessionRosterRow> roster) noexcept;
+void push_session_roster_edges(RuntimeInstance& instance) noexcept;
 
 // The runtime unit owns these. The delivery state machine calls into them.
 
@@ -495,8 +561,6 @@ void clear_instance(RuntimeInstance& instance, bool clearPending = true) noexcep
 void note_vm_status(RuntimeInstance& instance,
                     std::string_view stage,
                     std::string_view status) noexcept;
-/** Native Sense levels cannot cross an attempt or ActivityClient generation boundary. */
-void clear_sense_levels(RuntimeInstance& instance) noexcept;
 /** Commits the VM's phase/revision/start transaction into exact server-owned State. */
 [[nodiscard]] bool commit_mission_state(RuntimeInstance& instance,
                                         bool started,

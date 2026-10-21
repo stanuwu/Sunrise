@@ -13,6 +13,11 @@ inline constexpr std::size_t kSlotCapacity = 8192;
 inline constexpr std::size_t kSourceCapacity = 16;
 /** The native external scheduler admits at most 256 records per packet. */
 inline constexpr std::size_t kObservationBatchCapacity = 256;
+/**
+ * One packet's records plus the anchor detaches and descendant retirements they imply.
+ * Derived changes have their own headroom, so a full packet cannot refuse on one detach.
+ */
+inline constexpr std::size_t kBatchChangeCapacity = 2 * kObservationBatchCapacity;
 inline constexpr std::uint16_t kPacketModulus = 1024;
 inline constexpr std::uint16_t kNoCell = 0xFFFF;
 
@@ -58,6 +63,24 @@ struct ActorSourceReference final {
     bool operator==(const ActorSourceReference&) const = default;
 };
 
+/** The first two pool positions of the compiled damage component are health then shield. */
+inline constexpr std::size_t kDamagePoolCount = 2;
+/** Health is the first pool position of the compiled damage component. */
+inline constexpr std::size_t kHealthPoolIndex = 0;
+/** Shield is the second pool position of the compiled damage component. */
+inline constexpr std::size_t kShieldPoolIndex = 1;
+/** The compiled damage component stores each pool as a ten-bit level. */
+inline constexpr unsigned kDamagePoolLevelBits = 10;
+/** Largest raw level a ten-bit damage pool can carry. */
+inline constexpr std::uint16_t kDamagePoolLevelMaximum = (1U << kDamagePoolLevelBits) - 1U;
+
+/** Raw ten-bit pools from a completely decoded damage component. Missing pools stay unknown. */
+struct DamagePools final {
+    std::array<std::uint16_t, kDamagePoolCount> levels{};
+    std::array<bool, kDamagePoolCount> present{};
+    bool operator==(const DamagePools&) const = default;
+};
+
 /** Unknown semantic fields remain absent rather than becoming player or NPC classifications. */
 struct Metadata final {
     std::uint32_t rsatTag{};
@@ -76,6 +99,7 @@ struct Observation final {
     Token token{}, anchor{};
     Metadata metadata{};
     ActorSourceReference actorSource{};
+    DamagePools damage{};
     std::uint64_t tick{}, packetOrdinal{};
     std::uint16_t packetRecordIndex{};
     std::uint16_t packetSequence{}, cell{kNoCell}, recordFlags{};
@@ -91,6 +115,7 @@ struct Identity final {
     Token token{}, anchor{};
     Metadata metadata{};
     ActorSourceReference actorSource{};
+    DamagePools damage{};
     std::uint64_t revision{}, tick{}, packetOrdinal{};
     std::uint16_t packetRecordIndex{};
     std::uint16_t packetSequence{}, cell{kNoCell}, recordFlags{};
@@ -127,6 +152,10 @@ public:
                                       std::span<Source> output) const noexcept;
     [[nodiscard]] Result snapshot_source(const Source& source,
                                          std::vector<Identity>& output) const noexcept;
+    /** Receives one slot of a source in slot order; returning false ends the walk early. */
+    using SlotVisitor = bool (*)(void* context, const Identity& slot) noexcept;
+    [[nodiscard]] Result
+    visit_source(const Source& source, SlotVisitor visitor, void* context) const noexcept;
     /** A committed purge advances allocation serials without deleting retained identities. */
     [[nodiscard]] bool advance_epoch(const Source&,
                                      std::uint8_t expected,

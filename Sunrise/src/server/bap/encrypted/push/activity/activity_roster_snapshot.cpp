@@ -15,6 +15,7 @@
 #include "../../../../../state/runtime/runtime.h"
 #include "../../../../gameplay/gameplay_advertisement.h"
 #include "../../../../gameplay/group/group_host_sessions.h"
+#include "../../../activity_mission_seed_lease.h"
 #include "activity_arrival.h"
 #include "activity_member_roster.h"
 #include "activity_mission_seed_roster.h"
@@ -234,14 +235,20 @@ build_roster_snapshot(Session& session,
 
     // One resolution serves this body and the citizen advertisement in message 12. Two would let
     // the join descriptor land in a region record the client is not pending on.
-    const EffectiveRegion committedRegion = selected_effective_region(
-        session,
-        arrival_slice_set(defaults.defaultDestination,
-                          selection,
-                          name,
-                          layout,
-                          state::activity::membership::declared_initial_region(
-                              session.activity.session.sessionId)));
+    std::uint16_t arrival{};
+    if (!session_arrival_slice_set(
+            session.activity.session,
+            layout,
+            arrival_slice_set(defaults.defaultDestination,
+                              selection,
+                              name,
+                              layout,
+                              state::activity::membership::declared_initial_region(
+                                  session.activity.session.sessionId)),
+            arrival)) {
+        return RosterOutcome::noLayout;
+    }
+    const EffectiveRegion committedRegion = selected_effective_region(session, arrival);
     const EffectiveRegion region = exactRegion == nullptr ? committedRegion : *exactRegion;
     if (exactRegion != nullptr
         && (session.activity.role != ActivityClientRole::privateCurrent || !region.reported
@@ -379,64 +386,9 @@ build_roster_snapshot(Session& session,
             return refuse_override("retained_auth_install");
         }
     }
-    // Each included Auth slot is replaced, so snapshots must carry its complete retained value.
-    // Squads stay in their lease, which also owns group admission and per-group revisions.
-    for (const server::activity::host::PendingScriptableOverride& retained : authEstate) {
-        if (retained.kind == server::activity::host::ScriptableOverrideKind::squad
-            || retained.kind == server::activity::host::ScriptableOverrideKind::lifetime) {
-            continue;
-        }
-        // A dialogue body is a pulse: the client plays one line of the cue each time it applies
-        // the body, and it applies every body of every msg 5. So it goes out once, in the push
-        // that delivers it, and the slot then carries no body.
-        if (retained.kind == server::activity::host::ScriptableOverrideKind::dialogue) {
-            continue;
-        }
-        const server::activity::host::ScriptableTarget& target = retained.target;
-        if (!target.stateLocalRoster) {
-            const CanonicalGroupStatus status =
-                canonical_group_status(layout, region, target.rosterGroupIndex);
-            if (status == CanonicalGroupStatus::inactive) {
-                continue;
-            }
-            if (status == CanonicalGroupStatus::unknown) {
-                return refuse_override("canonical_group_unknown");
-            }
-        }
-        if (target.stateLocalRoster) {
-            if (!layouts::valid_roster_group(retained.stateLocalRosterGroup)
-                || target.stateLocalRegion < 0
-                || target.rosterGroupIndex != server::activity::host::kGeneratedRosterGroupIndex
-                || target.sdkObjectIndex == server::activity::host::kNoSdkObjectIndex) {
-                return refuse_override("retained_state_local_target");
-            }
-            const std::uint32_t bubble =
-                static_cast<std::uint32_t>(target.stateLocalRegion)
-                / middleware::content::packages::tables::kSliceSetIndexFactor;
-            std::size_t position = snapshot.roster.groups.size();
-            const ExistingGroup existing = find_existing_group(
-                retained.stateLocalRosterGroup, scratch, snapshot.roster, position);
-            if (existing == ExistingGroup::conflict
-                || (existing == ExistingGroup::exact
-                    && !activate_existing_group(position, bubble, scratch, snapshot.roster))
-                || (existing == ExistingGroup::missing
-                    && !append_state_local_group(
-                        retained.stateLocalRosterGroup, bubble, scratch, snapshot.roster))) {
-                return refuse_override("retained_group_install");
-            }
-        }
-        message::AuthOverride value{};
-        if (!make_auth_override(retained, value)
-            || !install_auth_override(layout,
-                                      region,
-                                      scratch,
-                                      snapshot,
-                                      value,
-                                      target.rosterGroupIndex,
-                                      target.rosterSlotOffset,
-                                      target.stateLocalRoster)) {
-            return refuse_override("retained_auth_apply");
-        }
+    if (const char* refusal =
+            append_retained_auth_estate(layout, region, scratch, snapshot, authEstate)) {
+        return refuse_override(refusal);
     }
     // The pending override's group goes after the retained estate, where the next push will place
     // it once retained, so two pushes carry the same group order. An exact match here may be a
@@ -563,6 +515,25 @@ build_roster_snapshot(Session& session,
     }
     if (pendingStateLocal && pendingGroupPosition >= snapshot.roster.groupCount) {
         return refuse_override("pending_group_position");
+    }
+    // Only this recipient's own native recovery reports are replayed. Retire departed
+    // connections without letting a newer guest evict another live member's reports.
+    std::array<std::uint64_t, core::network_capacity::kConnections> liveSources{};
+    std::size_t liveCount{};
+    bool completeSources = true;
+    for (const auto& peer : sessions()) {
+        if (!mission_seed_recipient(peer, session.activity.session)) {
+            continue;
+        }
+        if (liveCount == liveSources.size()) {
+            completeSources = false;
+            break;
+        }
+        liveSources[liveCount++] = peer.activity.bindingGeneration;
+    }
+    if (completeSources) {
+        server::activity::host::retain_squad_sense_generations(
+            session.activity.session, std::span(liveSources).first(liveCount));
     }
     std::size_t senseCount = 0;
     for (const message::AuthOverride& auth : snapshot.authOverrides) {

@@ -55,6 +55,7 @@ dispatch_actor_command(const RuntimeInstance& instance, const lua_vm::Intent& in
         const ActorCommandPolicyRequest request{
             .binding = instance.view.binding,
             .sdkBuildSha256 = intent.sdkBuildSha256,
+            .activityClientGeneration = instance.view.activityClientGeneration,
             .squadRow = intent.firstRow,
             .commandRow = static_cast<std::uint32_t>(index),
             .commandSelector = command.selector,

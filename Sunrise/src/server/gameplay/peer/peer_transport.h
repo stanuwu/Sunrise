@@ -151,6 +151,10 @@ remote_address(std::uint64_t sessionId,
 remote_address(const state::gameplay::Endpoint& endpoint,
                std::uint64_t sessionId,
                std::array<std::byte, state::gameplay::kNetAddrBlobSize>& output) noexcept;
+/** Reads an established endpoint's own connect address before its private view has a group. */
+[[nodiscard]] bool
+remote_address(const state::gameplay::Endpoint& endpoint,
+               std::array<std::byte, state::gameplay::kNetAddrBlobSize>& output) noexcept;
 
 /** Host-reestablish is the widest out-of-band body currently emitted. */
 inline constexpr std::size_t kOutOfBandBodyCapacity = 136;

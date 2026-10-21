@@ -15,6 +15,7 @@
 #include "../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../state/activity/bubble_authority/definition.h"
 #include "../../state/activity/definition.h"
+#include "../../state/activity/entity_slots/runtime.h"
 #include "../../state/activity/mission/definition.h"
 #include "../../state/activity_sdk/runtime.h"
 #include "../../state/build_data/scenarios/definition.h"
@@ -147,6 +148,8 @@ inline constexpr std::size_t kRosterGroupLeaseCapacity =
  */
 struct RosterPublication {
     state::activity::bubble_authority::Grant grant{};
+    /** Unheld native indices supplied before a roster that can instantiate mission objects. */
+    state::activity::entity_slots::PendingMutation entitySlotAllocation{};
     state::gameplay::squad_entity_retirement::RetirementPlan entityRetirement{};
     /** Epochs remain staged until both retirement and roster frames reach the caller. */
     std::uint64_t retirementSequence{};
@@ -180,6 +183,8 @@ struct RosterPublication {
     std::uint64_t hostStateRevision{};
     /** SDK selected-state roster lease revision carried by this body. */
     std::uint64_t missionSeedRevision{};
+    /** This staged frame contains the complete selected-state definition set. */
+    bool missionSeedFullSet{};
     /** Type-17 lifetime state carried for that revision. */
     std::uint8_t hostLifetimeState{};
     /** Exact authored region that owns the staged state-local group. */
@@ -252,8 +257,8 @@ struct MissionSeedLease {
     std::uint64_t bindingGeneration{};
     std::uint64_t revision{};
     std::uint64_t publishedRevision{};
-    /** Revision whose roster body was refused. The next selection is owed again. */
-    std::uint64_t refusedRevision{};
+    /** Last selection whose complete definition set reached this recipient's transport. */
+    std::uint64_t fullSetTransportRevision{};
     /**
      * Every authored region this lease has selected, in selection order. The peer's registered set
      * only grows: a group is torn down by a changed state byte, never by being left out, and every

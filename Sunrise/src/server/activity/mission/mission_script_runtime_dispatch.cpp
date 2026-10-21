@@ -10,6 +10,7 @@
 
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../../state/activity/membership/activity_membership_query.h"
+#include "../../../state/activity/membership/mission_party.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/build_data/spawn_sets/spawn_set_catalog.h"
 #include "../../gameplay/squad_entity_retirement.h"
@@ -230,6 +231,16 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         static_cast<void>(service_delivery_timeout(instance, now));
         return;
     }
+    // The native authority may replicate an enemy immediately after receiving its squad Auth.
+    // Retain output until every recipient can decode that state's entity definitions.
+    if (intent.kind != lua_vm::IntentKind::selectMissionState
+        && intent.kind != lua_vm::IntentKind::restartCheckpoint
+        && !server::bap::mission_seed_publication_ready(instance.view.binding,
+                                                        instance.view.activityClientGeneration)) {
+        report_intent_status(
+            instance, kIntentStatusStateTransitionPending, "peer_state_publication_pending");
+        return;
+    }
     begin_intent_attempt(instance, now);
     if (intent.attemptGeneration != instance.attempt.generation) {
         refuse_delivery(instance, "attempt_refused", "stale_attempt", host::EffectOutcome::refused);
@@ -293,6 +304,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         // The selected effective region is an authored-state key, not a region the client reports.
         // Publishing this lease revision is the completion edge, except when publication waits for
         // arrival: there the teleport is armed first, because arrival closes that window.
+        arm_state_region_teleport(instance, selected.plan);
         if (!selected.regionArrivalPending
             && (selected.publicationPending || selected.revision == 0
                 || selected.publishedRevision != selected.revision)) {
@@ -303,7 +315,6 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         // A selected state names its own slice-set region. Until the client transitions there its
         // object registry comes from the loaded slice-set entry, so the new state's objects stay
         // unfindable. Arming the host teleport is the only mid-activity move.
-        arm_state_region_teleport(instance, selected.plan);
         static_cast<void>(complete_local_effect(instance, "state_selected"));
         return;
     }
@@ -325,7 +336,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             return;
         }
         if (intent.checkpointReleaseRequest != 0) {
-            if (::sunrise::state::activity::membership::release_hard_wipe(
+            if (::sunrise::state::activity::membership::release_party_hard_wipe(
                     instance.view.binding, intent.checkpointReleaseRequest)) {
                 static_cast<void>(complete_local_effect(instance, "checkpoint_reset_ready"));
             } else {
@@ -343,8 +354,19 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             destination.packageNameLength);
         data::scenarios::Definition layout{};
         data::spawn_sets::NameHash spawn{};
+        // Revalidate native member lifetimes: a reconnect withdraws its old life evidence.
+        refresh_mission_members(instance);
+        FireteamLife currentLife{};
+        if (!instance.partySnapshotValid) {
+            currentLife.add(PlayerLife::unknown);
+        }
+        for (const auto& member : instance.memberInputs) {
+            if (member.present) {
+                currentLife.add(member.life.life());
+            }
+        }
         // A wipe restarts the whole party at an authored spawn set of the region they are in.
-        if (instance.publicTarget || !instance.lastFireteamLife.all_dead()
+        if (instance.publicTarget || !currentLife.all_dead()
             || instance.activeRegion != intent.effectiveRegion
             || !data::find_scenario_layout(package, layout)
             || !data::spawn_sets::find_hash({layout.spawnStem.data(), layout.spawnStemLength},
@@ -357,10 +379,19 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                             host::EffectOutcome::refused);
             return;
         }
-        if (::sunrise::state::activity::membership::arm_hard_wipe(instance.view.binding,
-                                                                  intent.requestKey,
-                                                                  intent.effectiveRegion,
-                                                                  intent.checkpointSpawnHash)) {
+        ::sunrise::state::activity::membership::MissionParty party{};
+        std::size_t partyCount{};
+        for (const auto& member : instance.memberInputs) {
+            if (member.present) {
+                party[partyCount++] = member.life.member;
+            }
+        }
+        if (::sunrise::state::activity::membership::arm_party_hard_wipe(
+                instance.view.binding,
+                intent.requestKey,
+                intent.effectiveRegion,
+                intent.checkpointSpawnHash,
+                std::span(party).first(partyCount))) {
             static_cast<void>(complete_local_effect(instance, "checkpoint_wipe_armed"));
         } else {
             refuse_delivery(

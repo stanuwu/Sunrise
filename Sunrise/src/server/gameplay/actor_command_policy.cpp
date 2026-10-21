@@ -76,12 +76,13 @@ std::array<DeferredPolicyRow, kDeferredPolicyCapacity> g_deferredPolicies{};
  * @return True when the matching ActivityClient has an elected gameplay host.
  */
 [[nodiscard]] bool resolve_policy_host(const activity::SessionBinding& binding,
+                                       std::uint64_t expectedGeneration,
                                        group::HostSessionBinding& output,
                                        std::uint64_t& sourceGeneration) noexcept {
     output = {};
     sourceGeneration = 0;
     server::bap::ActivityLinkView activityLink{};
-    if (!server::bap::activity_link_view(binding, activityLink)
+    if (!server::bap::activity_link_view(binding, expectedGeneration, activityLink)
         || activityLink.activityClientGeneration == 0) {
         return false;
     }
@@ -111,6 +112,7 @@ std::array<DeferredPolicyRow, kDeferredPolicyCapacity> g_deferredPolicies{};
 [[nodiscard]] bool same_request(const mission::ActorCommandPolicyRequest& left,
                                 const mission::ActorCommandPolicyRequest& right) noexcept {
     return same_binding(left.binding, right.binding) && left.sdkBuildSha256 == right.sdkBuildSha256
+           && left.activityClientGeneration == right.activityClientGeneration
            && left.squadRow == right.squadRow && left.commandRow == right.commandRow
            && left.commandSelector == right.commandSelector && left.value == right.value;
 }
@@ -221,7 +223,18 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
     if (!activity::binding_matches(request.binding)) {
         return mission::ActorCommandPolicyStatus::refused;
     }
-    if (!resolve_policy_host(request.binding, output.host, output.activityClientGeneration)) {
+    server::bap::ActivityLinkView activityLink{};
+    if (!server::bap::activity_link_view(
+            request.binding, request.activityClientGeneration, activityLink)) {
+        // A replacement connection must issue its own command. Stale deferred requests must
+        // not occupy the bounded policy queue for the rest of the shared activity.
+        return mission::ActorCommandPolicyStatus::refused;
+    }
+
+    if (!resolve_policy_host(request.binding,
+                             request.activityClientGeneration,
+                             output.host,
+                             output.activityClientGeneration)) {
         return mission::ActorCommandPolicyStatus::unavailable;
     }
     if (!same_binding(output.host.source, request.binding)) {
@@ -243,8 +256,8 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
     }
     const format::Squad& squad = squads[request.squadRow];
     state::activity_sdk::BoundView activityView{};
-    server::bap::ActivityLinkView activityLink{};
-    if (server::bap::activity_link_view(request.binding, activityLink)
+    if (server::bap::activity_link_view(
+            request.binding, output.activityClientGeneration, activityLink)
         && state::activity_sdk::resolve(
                snapshot,
                {request.binding, activityLink.matchingLinks, activityLink.activityClientGeneration},

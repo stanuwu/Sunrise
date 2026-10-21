@@ -1,6 +1,7 @@
 #include "entity_identity.h"
 
 #include <algorithm>
+#include <bitset>
 #include <new>
 
 namespace sunrise::state::gameplay::entity_identity {
@@ -43,6 +44,13 @@ bool valid_actor_source(const Observation& value) noexcept {
 }
 
 bool valid_observation(const Observation& value) noexcept {
+    for (std::size_t pool = 0; pool < value.damage.levels.size(); ++pool) {
+        if (value.damage.present[pool]
+            && (value.damage.levels[pool] > kDamagePoolLevelMaximum || value.type != 0
+                || value.action == Action::remove)) {
+            return false;
+        }
+    }
     return valid_token(value.token) && value.type < kTypeLimit && valid_actor_source(value)
            && (!value.hasPacketSequence || value.packetSequence < kPacketModulus)
            && (!value.anchorChanged || !value.anchorPresent || valid_token(value.anchor))
@@ -54,7 +62,8 @@ bool valid_observation(const Observation& value) noexcept {
 bool same_state(const Identity& left, const Identity& right) noexcept {
     return left.token == right.token && left.anchor == right.anchor
            && left.metadata == right.metadata && left.actorSource == right.actorSource
-           && left.cell == right.cell && left.recordFlags == right.recordFlags
+           && left.damage == right.damage && left.cell == right.cell
+           && left.recordFlags == right.recordFlags
            && left.allocationSequence == right.allocationSequence
            && left.serialDomain == right.serialDomain
            && left.allocationDomain == right.allocationDomain
@@ -155,6 +164,12 @@ Result stage(const Identity& current,
         }
         if (value.action == Action::remove) {
             next.present = false;
+        }
+    }
+    for (std::size_t pool = 0; pool < value.damage.levels.size(); ++pool) {
+        if (value.damage.present[pool]) {
+            next.damage.levels[pool] = value.damage.levels[pool];
+            next.damage.present[pool] = true;
         }
     }
     if (value.actorSource.known) {
@@ -357,7 +372,7 @@ Result Store::observe_batch(const Source& source,
         std::uint16_t slot{};
         Identity value{};
     };
-    std::array<Change, kObservationBatchCapacity> changes{};
+    std::array<Change, kBatchChangeCapacity> changes{};
     std::array<Result, kObservationBatchCapacity> stagedResults{};
     std::size_t changeCount = 0;
     const Identity empty{};
@@ -421,7 +436,56 @@ Result Store::observe_batch(const Source& source,
         }
         stagedResults[index] = result;
     }
-    std::array<Token, kObservationBatchCapacity> terminals{};
+    // Match the receiver baseline's anchor pass before recursive removal.
+    const auto recorded = [&](Token token) {
+        return std::any_of(observations.begin(), observations.end(), [&](const auto& row) {
+            return row.token == token;
+        });
+    };
+    // Only an anchored identity can detach. An unstaged slot still reads as the partition holds
+    // it, so most of the table is rejected before any staged-change or record search.
+    std::bitset<kSlotCapacity> stagedSlots{};
+    for (std::size_t index = 0; index < changeCount; ++index) {
+        stagedSlots.set(changes[index].slot);
+    }
+    for (std::size_t slot = 0; slot < kSlotCapacity; ++slot) {
+        if (!stagedSlots.test(slot)) {
+            if (partition == partitions_.end()) {
+                continue;
+            }
+            const Identity& retained = partition->slots[slot];
+            if (!retained.known || !retained.present || !retained.anchorPresent) {
+                continue;
+            }
+        }
+        auto child = current(static_cast<std::uint16_t>(slot));
+        if (!child.known || !child.present || !child.anchorPresent || recorded(child.token)
+            || !recorded(child.anchor)) {
+            continue;
+        }
+        child.anchor = {};
+        child.anchorKnown = true;
+        child.anchorPresent = false;
+        const auto& order = observations.back();
+        if (child.hasPacketOrdinal && order.hasPacketOrdinal
+            && child.packetOrdinal > order.packetOrdinal) {
+            return Result::stale;
+        }
+        child.tick = order.tick;
+        if (order.hasPacketOrdinal) {
+            child.hasPacketOrdinal = true;
+            child.packetOrdinal = order.packetOrdinal;
+            child.packetRecordIndex = order.packetRecordIndex;
+        }
+        if (order.hasPacketSequence) {
+            child.hasPacketSequence = true;
+            child.packetSequence = order.packetSequence;
+        }
+        if (!assign(static_cast<std::uint16_t>(slot), child)) {
+            return Result::capacity;
+        }
+    }
+    std::array<Token, kBatchChangeCapacity> terminals{};
     std::size_t terminalCount = 0;
     const auto add_terminal = [&](Token token) {
         for (std::size_t index = 0; index < terminalCount; ++index) {
@@ -568,6 +632,33 @@ Result Store::snapshot_source(const Source& source, std::vector<Identity>& outpu
     } catch (const std::bad_alloc&) {
         output.clear();
         return Result::capacity;
+    }
+    return Result::unchanged;
+}
+
+/**
+ * Visits every slot from one source in slot order, including tombstones and conflicts.
+ * @param source Exact admitted source generation.
+ * @param visitor Receives each slot; returning false ends the walk early.
+ * @param context Caller state passed unchanged to the visitor.
+ * @return Unchanged for a visited source, missing, or invalid for a bad source or visitor.
+ */
+Result
+Store::visit_source(const Source& source, SlotVisitor visitor, void* context) const noexcept {
+    if (!valid_source(source) || visitor == nullptr) {
+        return Result::invalid;
+    }
+    const auto partition =
+        std::find_if(partitions_.begin(), partitions_.end(), [&](const auto& row) {
+            return row.occupied && row.source == source;
+        });
+    if (partition == partitions_.end()) {
+        return Result::missing;
+    }
+    for (const Identity& slot : partition->slots) {
+        if (!visitor(context, slot)) {
+            break;
+        }
     }
     return Result::unchanged;
 }

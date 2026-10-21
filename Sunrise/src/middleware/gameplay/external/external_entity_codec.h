@@ -70,10 +70,7 @@ struct TypePayload {
     std::array<std::byte, kTypePayloadStateCapacity> state{};
     std::uint16_t byteCount{};
     state::gameplay::entity_identity::ActorSourceReference actorSource{};
-    /** Damage component pools 0 and 1, ten-bit levels; valid when damageKnown. */
-    std::uint16_t damageHealth{};
-    std::uint16_t damageShield{};
-    bool damageKnown{};
+    state::gameplay::entity_identity::DamagePools damage{};
 };
 
 /** One generic channel-2 record and its callback-owned type state. */

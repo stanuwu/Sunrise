@@ -65,13 +65,20 @@ sense_value(std::span<const sense_values::DecodedValue> body,
     return value != nullptr && value->present ? static_cast<std::int32_t>(value->signedValue) : 0;
 }
 
-/** @return A squad edge carrying the squad's retained spawn generation. */
-[[nodiscard]] host::Event squad_edge_event(const RuntimeInstance& instance,
-                                           const host::SenseObservation& observation,
-                                           const SquadObservation& squad) noexcept {
-    host::Event event = sense_edge_event(instance, observation);
-    event.squadSpawnGeneration = squad.spawnGeneration;
-    event.squadHasSpawnGeneration = squad.hasSpawnGeneration;
+/** @return The identity every derived Sense edge carries. */
+[[nodiscard]] host::Event sense_edge_event(const RuntimeInstance& instance,
+                                           const host::SenseObservation& observation) noexcept {
+    host::Event event{};
+    event.binding = instance.view.binding;
+    event.sequence = observation.sequence;
+    event.tick = observation.tick;
+    event.sourceGeneration = observation.sourceGeneration;
+    event.missionSequence = instance.lastMissionSequence;
+    event.firstRegistryKey = observation.key.registryKey;
+    event.firstSlotIndex = observation.key.slotIndex;
+    event.firstSlotType = observation.key.slotType;
+    event.slotObjectTag = observation.key.objectTag;
+    event.slotSenseSchema = observation.key.senseSchema;
     return event;
 }
 
@@ -184,7 +191,9 @@ void push_trigger_edges(RuntimeInstance& instance,
         const bool occupied = sense_flag(body, root, trigger::kOccupiedOrdinal);
         TriggerOccupancy* slot = nullptr;
         TriggerOccupancy* spare = nullptr;
-        for (TriggerOccupancy& retained : instance.triggerOccupancy) {
+        auto* member = member_input(instance, sense.sourceGeneration);
+        auto& levels = member ? member->triggerOccupancy : instance.triggerOccupancy;
+        for (TriggerOccupancy& retained : levels) {
             if (retained.used && retained.registryKey == observation.key.registryKey
                 && retained.objectTag == observation.key.objectTag
                 && retained.slotIndex == observation.key.slotIndex) {
@@ -366,8 +375,10 @@ void push_object_interaction_edges(RuntimeInstance& instance,
                 observation, sense, format::kObjectSlotType, format::kObjectSenseSchema)) {
             continue;
         }
-        ObjectInteractionObservation* const slot =
-            find_slot_row(instance.objectInteractionObservations, observation.key);
+        auto* member = member_input(instance, sense.sourceGeneration);
+        ObjectInteractionObservation* const slot = find_slot_row(
+            member ? member->objectInteractionObservations : instance.objectInteractionObservations,
+            observation.key);
         if (slot == nullptr) {
             continue;
         }
@@ -432,7 +443,9 @@ void push_ghost_edges(RuntimeInstance& instance,
         if (!observation_of(observation, sense, ghost::kSlotType, ghost::kSenseSchema)) {
             continue;
         }
-        GhostObservation* const slot = find_slot_row(instance.ghostObservations, observation.key);
+        auto* member = member_input(instance, sense.sourceGeneration);
+        GhostObservation* const slot = find_slot_row(
+            member ? member->ghostObservations : instance.ghostObservations, observation.key);
         if (slot == nullptr
             || !update_ghost_level(
                 slot->level, observation_values(observation, sense), observation.key.schemaRow)) {
@@ -448,11 +461,13 @@ void push_ghost_edges(RuntimeInstance& instance,
     publish_ghost_levels(instance);
 }
 
-/** Hands the VM the retained Ghost-link levels, so a callback can read one it did not receive. */
+/** Publishes the selected member's Ghost levels without mixing another member's history. */
 void publish_ghost_levels(RuntimeInstance& instance) noexcept {
     std::array<GhostLinkRow, kGhostObservationCapacity> rows{};
     std::size_t count = 0;
-    for (const GhostObservation& observation : instance.ghostObservations) {
+    const auto* member = member_input(instance, instance.view.activityClientGeneration);
+    const auto& observations = member ? member->ghostObservations : instance.ghostObservations;
+    for (const GhostObservation& observation : observations) {
         if (observation.used) {
             rows[count++] = {observation.level,
                              observation.registryKey,
@@ -465,8 +480,9 @@ void publish_ghost_levels(RuntimeInstance& instance) noexcept {
 
 /**
  * Raises the squad events derived from one msg 6 body.
- * The client publishes levels, so a first sighting only records them. A slot count that rose is the
- * only spawn signal, and the alive count falling is the only death signal.
+ * The client publishes levels, so a first sighting of a source only records them. After that a
+ * slot count that rose is the only spawn signal, and the alive count falling is the only death
+ * signal.
  */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept {
@@ -539,9 +555,11 @@ void push_squad_edges(RuntimeInstance& instance,
             push_script_event(instance, state);
         }
 
-        for (std::uint8_t slot = 0; slot < countLength; ++slot) {
+        // A replacement source starts from its own levels, so only a rise after the first sighting
+        // is a spawn.
+        for (std::uint8_t slot = 0; !first && slot < countLength; ++slot) {
             const std::int32_t previous =
-                !first && slot < squad->slotCountLength ? squad->slotCounts[slot] : 0;
+                slot < squad->slotCountLength ? squad->slotCounts[slot] : 0;
             if (counts[slot] <= previous) {
                 continue;
             }

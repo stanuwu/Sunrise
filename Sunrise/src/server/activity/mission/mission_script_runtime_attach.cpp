@@ -55,7 +55,11 @@ namespace {
  */
 [[nodiscard]] bool rebind_instance(RuntimeInstance& instance) noexcept {
     server::bap::ActivityLinkView link{};
-    if (!server::bap::activity_link_view(instance.view.binding, link) || !link.joined) {
+    if ((!server::bap::activity_link_view(
+             instance.view.binding, instance.view.activityClientGeneration, link)
+         || !link.joined)
+        && (!server::bap::mission_activity_link_view(instance.view.binding, link)
+            || !link.joined)) {
         return false;
     }
     const sdk::Snapshot catalog = sdk::snapshot();
@@ -92,7 +96,9 @@ namespace {
         return false;
     }
     if (sourceChanged) {
-        clear_sense_levels(instance);
+        // The next native report establishes its own baseline, not a delta from another client.
+        reset_shared_observations(instance);
+        instance.activeRegion = link.sliceSetIndex;
     }
     mission_state::Snapshot snapshot{};
     if (!mission_state::state_snapshot(instance.view.binding, snapshot)) {
@@ -273,10 +279,13 @@ enum class InitialStateGate : std::uint8_t {
         return InitialStateGate::failed;
     }
     instance.initialStateSelected = true;
+    arm_state_region_teleport(instance, seed.plan);
     // `plan.effectiveRegion` is the authored-state key; several authored states share one client
     // slice-set region, so the client link cannot report it. The lease revision reaching the
     // transport is the publication acknowledgement.
     return seed.publicationPending || seed.revision == 0 || seed.publishedRevision != seed.revision
+                   || !server::bap::mission_seed_publication_ready(
+                       instance.view.binding, instance.view.activityClientGeneration)
                ? InitialStateGate::pending
                : InitialStateGate::ready;
 }
@@ -368,16 +377,8 @@ enum class InitialStateGate : std::uint8_t {
         return AttachResult::programError;
     }
     instance.programStatus = ProgramStatus::loaded;
-    std::array<state::activity::SessionRosterRow, state::activity::kSessionCapacity> roster{};
-    std::size_t rosterCount = 0;
-    if (!state::activity::snapshot_session_roster(roster, rosterCount)
-        || rosterCount > roster.size()) {
-        lua_vm::fault(instance.vm, "initial peer snapshot could not be read");
-        instance.programStatus = ProgramStatus::programError;
-        note_vm_status(instance, "open", "peer_snapshot_refused");
-        return AttachResult::programError;
-    }
-    push_session_roster_edges(instance, std::span(roster).first(rosterCount));
+    // The first read records the current peers, so a reattach never replays them.
+    push_session_roster_edges(instance);
     instance.initialStateDeclared =
         lua_vm::initial_state_region(instance.vm, instance.initialStateRegion);
     if (instance.initialStateDeclared) {
@@ -567,14 +568,14 @@ void synchronize_instances(std::uint64_t now) noexcept {
             clear_instance(instance, !bindingRetained);
         }
     }
+    for (RuntimeInstance& instance : g_instances) {
+        if (instance.occupied) {
+            push_session_roster_edges(instance);
+        }
+    }
     std::array<state::activity::SessionRosterRow, state::activity::kSessionCapacity> roster{};
     std::size_t rosterCount = 0;
     static_cast<void>(state::activity::snapshot_session_roster(roster, rosterCount));
-    for (RuntimeInstance& instance : g_instances) {
-        if (instance.occupied) {
-            push_session_roster_edges(instance, {roster.data(), rosterCount});
-        }
-    }
     const sdk::Snapshot catalog = sdk::snapshot();
     publish_fireteam_life(now);
     for (std::size_t index = 0; index < diagnostics.instanceCount; ++index) {

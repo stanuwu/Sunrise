@@ -1,7 +1,10 @@
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <span>
 
+#include "../../gameplay/entity_identities.h"
+#include "mission_script_entity_damage.h"
 #include "mission_script_runtime_internal.h"
 
 namespace sunrise::server::activity::mission {
@@ -56,6 +59,225 @@ void push_damage_state(RuntimeInstance& instance,
 }
 
 } // namespace
+
+/** Revalidate queued health against the same admitted source and allocation. */
+bool current_entity_damage(const host::Event& event) noexcept {
+    namespace identities = state::gameplay::entity_identity;
+    std::array<identities::Source, identities::kSourceCapacity> sources{};
+    const auto count = gameplay::entity_identities::sources(
+        event.binding.sessionId, event.binding.createdRevision, sources);
+    std::size_t matches = 0;
+    for (std::size_t index = 0; index < count && index < sources.size(); ++index) {
+        if (sources[index].activityClientGeneration == event.sourceGeneration) {
+            if (sources[index] != event.damageEntitySource) {
+                return false;
+            }
+            ++matches;
+        }
+    }
+    if (count > sources.size() || matches != 1) {
+        return false;
+    }
+    state::gameplay::entity_identity::Identity current{};
+    return state::activity::binding_matches(event.binding)
+           && event.damageEntitySource.activitySessionId == event.binding.sessionId
+           && event.damageEntitySource.activityRevision == event.binding.createdRevision
+           && event.damageEntitySource.activityClientGeneration == event.sourceGeneration
+           && gameplay::entity_identities::lookup(
+                  event.damageEntitySource, event.damageEntityLifetime.token, current)
+                  == state::gameplay::entity_identity::Result::unchanged
+           && matches_entity_damage(event, current);
+}
+
+namespace {
+
+/** What one poll of the entity registry carries through the walk and out of the lock. */
+struct EntityDamageScan final {
+    RuntimeInstance* instance{};
+    std::array<state::gameplay::entity_identity::Identity, kSquadObservationCapacity> changed{};
+    std::size_t changedCount{};
+    std::size_t overflow{};
+};
+
+/**
+ * Retains each entity under its network slot; a reused slot replaces the earlier incarnation.
+ * @return The matching or free row, or null at capacity.
+ */
+[[nodiscard]] EntityDamageObservation*
+find_entity_damage(RuntimeInstance& instance,
+                   state::gameplay::entity_identity::Token token) noexcept {
+    EntityDamageObservation* spare = nullptr;
+    for (auto& row : instance.entityDamageObservations) {
+        if (row.used && row.token.slot == token.slot) {
+            return &row;
+        }
+        if (!row.used && spare == nullptr) {
+            spare = &row;
+        }
+    }
+    return spare;
+}
+
+/**
+ * Collects one entity whose pools differ from the last published ones. It runs under the
+ * registry lock, so it only compares and copies; events are raised after the walk.
+ */
+[[nodiscard]] bool
+observe_entity_damage(void* context,
+                      const state::gameplay::entity_identity::Identity& row) noexcept {
+    namespace identities = state::gameplay::entity_identity;
+    auto& scan = *static_cast<EntityDamageScan*>(context);
+    // Type zero is the entity record, the same record the retirement scan reads.
+    if (!row.known || !row.present || row.conflicted || row.type != 0 || !row.actorSource.known
+        || !row.actorSource.present || row.actorSource.type != kCombatantDamageSlotType
+        || (!row.damage.present[identities::kHealthPoolIndex]
+            && !row.damage.present[identities::kShieldPoolIndex])) {
+        return true;
+    }
+    EntityDamageObservation* const retained = find_entity_damage(*scan.instance, row.token);
+    if (retained == nullptr) {
+        ++scan.overflow;
+        return true;
+    }
+    if (retained->used && retained->token == row.token
+        && retained->allocationSequence == row.allocationSequence
+        && retained->allocationDomain == row.allocationDomain
+        && retained->actorSource == row.actorSource && retained->damage == row.damage) {
+        return true;
+    }
+    retained->token = row.token;
+    retained->actorSource = row.actorSource;
+    retained->damage = row.damage;
+    retained->allocationDomain = row.allocationDomain;
+    retained->allocationSequence = row.allocationSequence;
+    retained->allocationEpoch = row.allocationEpoch;
+    retained->used = true;
+    // Every changed row owns a retained row, so the retained capacity bounds this array too.
+    if (scan.changedCount < scan.changed.size()) {
+        scan.changed[scan.changedCount++] = row;
+    }
+    return true;
+}
+
+/** @return The one authored combatant this actor source names in the world, or null. */
+[[nodiscard]] const state::build_data::scriptables::Object* unique_combatant(
+    const state::build_data::scriptables::Snapshot& world,
+    const state::gameplay::entity_identity::ActorSourceReference& actorSource) noexcept {
+    const state::build_data::scriptables::Object* object = nullptr;
+    std::size_t matches = 0;
+    for (const auto& candidate : world.objects) {
+        if (!candidate.complete || candidate.registryKey != actorSource.key
+            || candidate.firstSlot > world.slots.size()
+            || candidate.slotCount > world.slots.size() - candidate.firstSlot) {
+            continue;
+        }
+        for (const auto& slot :
+             std::span(world.slots).subspan(candidate.firstSlot, candidate.slotCount)) {
+            if (slot.slotIndex == actorSource.index && slot.slotType == actorSource.type) {
+                object = &candidate;
+                ++matches;
+            }
+        }
+    }
+    return matches == 1 ? object : nullptr;
+}
+
+/** @return The pool as a fraction of full, or the unknown level when the client has not sent it. */
+[[nodiscard]] float normalised_level(const state::gameplay::entity_identity::DamagePools& pools,
+                                     std::size_t pool) noexcept {
+    namespace identities = state::gameplay::entity_identity;
+    return pools.present[pool] ? static_cast<float>(pools.levels[pool])
+                                     / static_cast<float>(identities::kDamagePoolLevelMaximum)
+                               : kUnknownDamageLevel;
+}
+
+/** Forgets the source's published pools; a replacement source reports levels of its own. */
+void reset_entity_damage(RuntimeInstance& instance) noexcept {
+    instance.entityDamageObservations.fill({});
+    instance.entityDamageAtCapacity = false;
+    instance.damageEntitySource = {};
+}
+
+} // namespace
+
+/** Publishes changed pools only from the selected mission owner's unique admitted view. */
+static void push_entity_damage_edges(RuntimeInstance& instance,
+                                     const state::build_data::scriptables::Snapshot& world,
+                                     std::uint64_t now) noexcept {
+    namespace identities = state::gameplay::entity_identity;
+    if (now < instance.nextEntityDamageTick) {
+        return;
+    }
+    instance.nextEntityDamageTick = now + kEntityDamagePollIntervalMs;
+    if (!state::activity::binding_matches(instance.view.binding)) {
+        return;
+    }
+    std::array<identities::Source, identities::kSourceCapacity> sources{};
+    const auto count = gameplay::entity_identities::sources(
+        instance.view.binding.sessionId, instance.view.binding.createdRevision, sources);
+    if (count > sources.size()) {
+        return;
+    }
+    identities::Source source{};
+    std::size_t matches = 0;
+    for (std::size_t index = 0; index < count; ++index) {
+        if (sources[index].activityClientGeneration == instance.view.activityClientGeneration) {
+            source = sources[index];
+            ++matches;
+        }
+    }
+    if (matches != 1) {
+        if (instance.damageEntitySource != identities::Source{}) {
+            reset_entity_damage(instance);
+        }
+        return;
+    }
+    if (source != instance.damageEntitySource) {
+        reset_entity_damage(instance);
+        instance.damageEntitySource = source;
+    }
+    EntityDamageScan scan{};
+    scan.instance = &instance;
+    if (gameplay::entity_identities::visit_source(source, observe_entity_damage, &scan)
+        != identities::Result::unchanged) {
+        return;
+    }
+    if (scan.overflow != 0 && !instance.entityDamageAtCapacity) {
+        instance.entityDamageAtCapacity = true;
+        log_line(core::log::Level::warn, &instance, "entity_damage", "watch_capacity");
+    }
+    for (const identities::Identity& row : std::span(scan.changed).first(scan.changedCount)) {
+        const auto* const object = unique_combatant(world, row.actorSource);
+        if (object == nullptr) {
+            continue;
+        }
+        auto event = state_edge_event(instance);
+        event.kind = host::EventKind::damageState;
+        event.tick = now;
+        event.sequence = row.revision;
+        event.firstRegistryKey = row.actorSource.key;
+        event.firstSlotIndex = row.actorSource.index;
+        event.firstSlotType = row.actorSource.type;
+        event.slotObjectTag = object->objectTag;
+        event.slotSenseSchema = kCombatantDamageSenseSchema;
+        event.damageFromEntity = true;
+        event.damageEntitySource = source;
+        event.damageEntityLifetime = {
+            row.token, row.allocationSequence, row.allocationEpoch, row.allocationDomain};
+        event.damageEntityPools = row.damage;
+        event.damageHealth = normalised_level(row.damage, identities::kHealthPoolIndex);
+        event.damageShield = normalised_level(row.damage, identities::kShieldPoolIndex);
+        // The entity channel carries no Sense spawn revision. Scripts use the explicit entity
+        // allocation fields instead of correlating unrelated revision counters.
+        push_script_event(instance, event);
+    }
+}
+
+void push_entity_damage_edges(RuntimeInstance& instance, std::uint64_t now) noexcept {
+    if (const auto* world = instance.worldView.snapshot()) {
+        push_entity_damage_edges(instance, *world, now);
+    }
+}
 
 /**
  * Raises damage-state observations without inferring actor attachment or provocation.

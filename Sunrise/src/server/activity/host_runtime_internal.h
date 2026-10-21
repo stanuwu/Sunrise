@@ -182,6 +182,7 @@ struct SceneSenseTrace final {
 struct SquadSenseRecord final {
     SenseObservationKey key{};
     middleware::bap::activity_message::squad_sense::State state{};
+    std::uint64_t sourceGeneration{};
 };
 
 /** Mutable per-instance storage kept behind the runtime lock. */
@@ -189,7 +190,6 @@ struct Instance final {
     InstanceSnapshot view{};
     SenseObservationSnapshot senseObservations{};
     std::vector<SquadSenseRecord> squadSense{};
-    std::uint64_t squadSenseSourceGeneration{};
     SceneSenseTrace sceneSenseTrace{};
     std::array<ScriptableGuard, kScriptableGuardCapacity> scriptableGuards{};
     /** Latest delivered body for every full ClientRef, re-emitted by every later msg-5 body. */
@@ -211,7 +211,6 @@ inline void clear_instance(Instance& instance) noexcept {
     std::destroy_at(&instance.senseObservations);
     std::construct_at(&instance.senseObservations);
     instance.squadSense.clear();
-    instance.squadSenseSourceGeneration = 0;
     std::destroy_at(&instance.sceneSenseTrace);
     std::construct_at(&instance.sceneSenseTrace);
     instance.scriptableGuards.fill({});
@@ -401,5 +400,11 @@ valid_state_local_group(const ScriptableTarget& target,
 void cancel_pending(Instance& instance,
                     const state::activity::SessionBinding& binding,
                     std::uint64_t expectedRevision) noexcept;
+
+/**
+ * Merges one link's complete squad Sense deltas into that link's recovery records, without
+ * discarding fields a later report omits.
+ */
+void retain_squad_sense(Instance& instance, const SenseInput& input) noexcept;
 
 } // namespace sunrise::server::activity::host::detail

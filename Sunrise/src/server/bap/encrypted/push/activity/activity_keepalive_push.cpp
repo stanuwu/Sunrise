@@ -30,6 +30,7 @@
 #include "activity_notification_frame.h"
 #include "activity_roster_push.h"
 #include "internal.h"
+#include "mission_entity_allocation.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
 namespace {
@@ -103,10 +104,7 @@ constexpr std::uint32_t kCurrentRevision = 0;
     server::gameplay::entity_identities::PublicationLease entityLease;
     if (!published || framedSize == 0 || framedSize > response.size()
         || !begin_staged_roster_publication(session, entityLease)
-        || (session.activityRosterStaged.staged
-            && session.activityRosterStaged.entityRetirement.pending
-            && !state::activity::advance_replication_sequence(
-                session.activity.session, session.activityRosterStaged.retirementSequence))) {
+        || !commit_mission_entity_allocation(session)) {
         // Nothing left, so a roster staged into the discarded body is offered again next push.
         discard_staged_roster(session);
         discard_staged_advertisement(session);
@@ -338,13 +336,34 @@ bool consume_activity_keepalive(Session& session,
         active && session.activityPatchEpoch.seen
         && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
         && activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
-               == 1
-        && server::gameplay::squad_entity_retirement::placed_transition_pending(
-            session.activity.session, session.activity.bindingGeneration);
+               == 1;
+    bool retirementDue = retirementReady
+                         && server::gameplay::squad_entity_retirement::placed_transition_pending(
+                             session.activity.session, session.activity.bindingGeneration);
+    if (retirementReady && !retirementDue) {
+        const auto region = effective_region(session.activity.session);
+        const auto bubble =
+            region.index >= 0
+                ? region.index >> state::activity::bubble_authority::kSliceSetToBubbleShift
+                : -1;
+        if (bubble >= 0 && bubble != session.activityRosterRegionBubble) {
+            server::gameplay::squad_entity_retirement::RetirementPlan retirement{};
+            retirementDue = server::gameplay::squad_entity_retirement::prepare_retirement(
+                                session.activity.session,
+                                session.activity.bindingGeneration,
+                                static_cast<std::uint8_t>(bubble),
+                                retirement)
+                            && retirement.pending;
+        }
+    }
+    const bool missionAllocationDue =
+        active && session.activityPatchEpoch.seen
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
+        && mission_entity_allocation_owed(session, false);
     if (!active
-        || (!burstDue && !keepaliveDue && !regionChanged && !hostStateDue && !scriptableDue
-            && !incidentDue && !authorityResetDue && !authorityQueryDue && !hostTeleportDue
-            && !placedRetirementDue && !membershipDue)) {
+        || (!keepaliveDue && !regionChanged && !hostStateDue && !scriptableDue && !incidentDue
+            && !authorityResetDue && !authorityQueryDue && !hostTeleportDue && !retirementDue
+            && !arrivalDue && !membershipDue && !missionAllocationDue)) {
         return false;
     }
     touchesScratch = true;
@@ -361,7 +380,7 @@ bool consume_activity_keepalive(Session& session,
     // republish.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue && !membershipDue) {
         bool appendedRoster = false;
-        if (burstDue || hostStateDue || scriptableDue || placedRetirementDue) {
+        if (hostStateDue || scriptableDue || retirementDue || arrivalDue || missionAllocationDue) {
             appendedRoster = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
         }
@@ -645,7 +664,8 @@ bool consume_activity_keepalive(Session& session,
     const bool deferredMembership = commitsMembership && !appendedMembership;
     if (framedSize > response.size()
         || (commitsMembership && appendedMembership
-            && !state::activity::membership::commit(stagedMembership))) {
+            && (!state::activity::membership::commit(stagedMembership)
+                || !refresh_mission_entity_allocation(session)))) {
         SecureZeroMemory(&stagedMembership, sizeof stagedMembership);
         discard_staged_roster(session);
         discard_staged_advertisement(session);

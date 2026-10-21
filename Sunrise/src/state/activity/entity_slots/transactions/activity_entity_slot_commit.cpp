@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include <cstddef>
+#include <limits>
 
 #include "../../../account/account_context.h"
 #include "../../../account/public_profiles.h"
@@ -230,7 +231,12 @@ bool commit(PendingMutation& mutation) noexcept {
     if (state.stateRevision == kMaximumRevision
         || state.stateRevision != prepared.expectedStateRevision || !record.occupied
         || record.sessionId != prepared.sessionId
-        || record.recordRevision != prepared.expectedRecordRevision) {
+        || record.recordRevision != prepared.expectedRecordRevision
+        || (prepared.advanceReplicationSequence
+            && (prepared.kind != MutationKind::grant
+                || record.memberLeases.replicationSequence != prepared.expectedReplicationSequence
+                || prepared.expectedReplicationSequence
+                       == (std::numeric_limits<std::uint64_t>::max)()))) {
         ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
         return false;
     }
@@ -239,7 +245,11 @@ bool commit(PendingMutation& mutation) noexcept {
     if (prepared.shared) {
         const bool applied = apply_shared(state, record, prepared);
         if (applied
-            && (prepared.kind == MutationKind::join || !transactions::empty(prepared.mask))) {
+            && (prepared.kind == MutationKind::join || !transactions::empty(prepared.mask)
+                || prepared.advanceReplicationSequence)) {
+            if (prepared.advanceReplicationSequence) {
+                ++record.memberLeases.replicationSequence;
+            }
             record.recordRevision = ++state.stateRevision;
             if (prepared.kind == MutationKind::join) {
                 if (prepared.memberRow == 0) {
@@ -301,13 +311,17 @@ bool commit(PendingMutation& mutation) noexcept {
     }
 
     const bool wasJoined = record.joined;
-    const bool changesState =
-        (prepared.kind == MutationKind::join && !wasJoined) || !transactions::empty(prepared.mask);
+    const bool changesState = (prepared.kind == MutationKind::join && !wasJoined)
+                              || !transactions::empty(prepared.mask)
+                              || prepared.advanceReplicationSequence;
     if (!apply(record, prepared)) {
         ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
         return false;
     }
     if (changesState) {
+        if (prepared.advanceReplicationSequence) {
+            ++record.memberLeases.replicationSequence;
+        }
         ++state.stateRevision;
         record.recordRevision = state.stateRevision;
         if (prepared.kind == MutationKind::join) {

@@ -12,4 +12,12 @@ struct Session;
 activity_link_for_generation_locked(const state::activity::SessionBinding& binding,
                                     std::uint64_t generation,
                                     std::size_t& count) noexcept;
+
+/**
+ * Selects a joined transport for the one shared mission program, without changing gameplay
+ * authority.
+ */
+[[nodiscard]] const Session*
+mission_activity_link_locked(const state::activity::SessionBinding& binding,
+                             std::size_t& count) noexcept;
 } // namespace sunrise::server::bap

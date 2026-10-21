@@ -33,6 +33,9 @@ struct PendingMutation final {
     std::uint64_t expectedMemberKey{};
     std::uint64_t expectedStateRevision{};
     std::uint64_t expectedRecordRevision{};
+    /** A retirement-bearing grant advances this epoch atomically with its slot mask. */
+    bool advanceReplicationSequence{};
+    std::uint64_t expectedReplicationSequence{};
     /** Shared epoch captured with the join snapshot, before any later departure. */
     std::uint64_t replicationSequence{};
     std::size_t requestedCount{};

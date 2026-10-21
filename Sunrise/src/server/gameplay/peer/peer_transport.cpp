@@ -330,6 +330,19 @@ bool remote_address(const gp::Endpoint& endpoint,
     return present;
 }
 
+bool remote_address(const gp::Endpoint& endpoint,
+                    std::array<std::byte, gp::kNetAddrBlobSize>& output) noexcept {
+    output = {};
+    AcquireSRWLockShared(&g_lock);
+    const auto* peer = find_locked(endpoint);
+    const bool present = peer != nullptr && peer->establishQueued && peer->remoteAddressPresent;
+    if (present) {
+        output = peer->remoteAddress;
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return present;
+}
+
 /** Binds one peer's view signature. */
 void bind_view(const gp::Endpoint& from, const gp::ViewSignature& signature) noexcept {
     AcquireSRWLockExclusive(&g_lock);

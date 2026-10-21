@@ -12,6 +12,8 @@
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/activity_host_control.h"
+#include "../../../../../middleware/bap/activity_message/entity_slots.h"
+#include "../../../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
 #include "../../../../../state/activity/bubble_authority/runtime.h"
@@ -20,11 +22,13 @@
 #include "../../../../activity/host_runtime.h"
 #include "../../../../gameplay/peer/peer_transport.h"
 #include "../../../../gameplay/squad_entity_retirement.h"
+#include "../../../activity_mission_seed_lease.h"
 #include "activity_member_departure_push.h"
 #include "activity_member_roster.h"
 #include "activity_notification_frame.h"
 #include "activity_roster_device_publication.h"
 #include "internal.h"
+#include "mission_entity_allocation.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
 namespace {
@@ -484,13 +488,24 @@ bool append_roster_notification(
     // During the region-arrival window the pending revision's content is deliberately not in
     // this body, so the pending revision neither forces a send nor commits as published.
     const bool missionSeedPending =
-        stagedMissionSeed.configured
-        && stagedMissionSeed.bindingGeneration == session.activity.bindingGeneration
-        && stagedMissionSeed.revision != stagedMissionSeed.publishedRevision
-        && !stagedMissionSeed.regionArrivalPending;
+        mission_seed_publication_pending(stagedMissionSeed, session.activity.bindingGeneration);
+    state::activity::entity_slots::PendingMutation entitySlotAllocation{};
+    const bool allocationOwed = mission_entity_allocation_owed(session, squadPending);
+    // Client reports commit their own State revision after this builder. Publish the dependent
+    // allocation and roster together on the next host push, against committed client state.
+    if (allocationOwed && solicited) {
+        session.activityRosterGroupLeases = initialLeases;
+        session.activityRosterSends = initialRosterSends;
+        session.activityRosterState = initialRosterState;
+        session.activityRosterRegionEpoch = initialRegionEpoch;
+        session.activityRosterRegionBubble = initialRegionBubble;
+        SecureZeroMemory(&initialNonce, sizeof initialNonce);
+        return false;
+    }
     bool encoded = message::encode_sensor_auth_update(snapshot, scratch.responseBody, messageSize);
-    // Only a body that cannot be built is refused. A full frame or a held purge is tried again.
-    bool bodyRefused = !encoded;
+    encoded =
+        encoded
+        && (!allocationOwed || prepare_mission_entity_allocation(session, entitySlotAllocation));
     const bool hasRetirement =
         encoded && (placedRetirementPending || (snapshot.hasGrant && enteringBubble))
         && server::gameplay::squad_entity_retirement::prepare_retirement(
@@ -560,6 +575,25 @@ bool append_roster_notification(
             middleware::secure_channel::advance_nonce(nonce);
         }
     }
+    if (encoded && entitySlotAllocation.prepared) {
+        namespace slotWire = middleware::bap::activity_message::entity_slots;
+        // Keep the encoded roster intact: both native notifications share the same ordered batch.
+        std::array<std::byte, slotWire::kEncodedSize> allocationBytes{};
+        std::size_t allocationSize{};
+        encoded = slotWire::encode_entity_slots(
+                      entitySlotAllocation.mask, allocationBytes, allocationSize)
+                  && append_notification_frame(scratch,
+                                               session.activity.session.sessionId,
+                                               slotWire::kNotificationMessageType,
+                                               std::span(allocationBytes).first(allocationSize),
+                                               key,
+                                               nonce,
+                                               response,
+                                               written);
+        if (encoded) {
+            middleware::secure_channel::advance_nonce(nonce);
+        }
+    }
     encoded = encoded
               && append_notification_frame(scratch,
                                            session.activity.session.sessionId,
@@ -586,6 +620,7 @@ bool append_roster_notification(
         // discarded, so they are held here and settled by `commit_staged_roster` or
         // `discard_staged_roster`.
         session.activityRosterStaged.grant = grant;
+        session.activityRosterStaged.entitySlotAllocation = entitySlotAllocation;
         session.activityRosterStaged.entityRetirement = entityRetirement;
         session.activityRosterStaged.retirementSequence = retirementSequence;
         session.activityRosterStaged.retirementPriorEpoch = retirementPriorEpoch;
@@ -612,10 +647,10 @@ bool append_roster_notification(
         session.activityRosterStaged.peerLeave = peerLeave;
         // A retired body publishes no seed content, so its revision stays owed.
         session.activityRosterStaged.hasMissionSeedRevision =
-            !peerLeave && missionSeed.configured
-            && missionSeed.bindingGeneration == session.activity.bindingGeneration
-            && missionSeed.revision != missionSeed.publishedRevision
-            && !missionSeed.regionArrivalPending;
+            !peerLeave
+            && mission_seed_publication_pending(missionSeed, session.activity.bindingGeneration);
+        session.activityRosterStaged.missionSeedFullSet =
+            !peerLeave && missionSeed.fullSetPublished;
         session.activityRosterStaged.hasScriptableOverride = ownsPending;
         session.activityRosterStaged.stateLocalRegion = scriptablePending.target.stateLocalRegion;
         session.activityRosterStaged.activatesSquadOverride = squadPending;
@@ -784,14 +819,7 @@ void commit_staged_roster(Session& session) noexcept {
             session.activityRosterStaged.hostStateRevision,
             session.activityRosterStaged.hostLifetimeState);
     }
-    if (session.activityRosterStaged.hasMissionSeedRevision) {
-        MissionSeedLease& missionSeed = session.activityMissionSeed;
-        if (missionSeed.configured
-            && missionSeed.bindingGeneration == session.activity.bindingGeneration
-            && missionSeed.revision == session.activityRosterStaged.missionSeedRevision) {
-            missionSeed.publishedRevision = missionSeed.revision;
-        }
-    }
+    commit_mission_seed_publication(session, session.activityRosterStaged);
     bool scriptableCommitReady = session.activityRosterStaged.hasScriptableOverride;
     if (scriptableCommitReady && session.activityRosterStaged.activatesSquadOverride) {
         scriptableCommitReady = activate_staged_squad_override(session);

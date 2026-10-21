@@ -9,6 +9,7 @@
 #include "../../client/network/consumer.h"
 #include "../../middleware/bap/activity_message/activity_patch_epoch_parser.h"
 #include "../../middleware/bap/activity_message/scriptable_auth_body.h"
+#include "../../middleware/gameplay/descriptor/join_descriptor.h"
 #include "../../state/activity/definition.h"
 #include "../../state/activity_sdk/runtime.h"
 #include "../../state/runtime/state.h"
@@ -137,6 +138,16 @@ struct ActivityMissionSeedLeaseView final {
     bool regionArrivalPending{};
 };
 
+/** True once every current recipient has the script-selected state's native decode groups. */
+[[nodiscard]] bool mission_seed_publication_ready(const state::activity::SessionBinding& binding,
+                                                  std::uint64_t generation) noexcept;
+
+/** Arms the authored region transition in each private member's own membership scope. */
+[[nodiscard]] bool arm_shared_mission_region(const state::activity::SessionBinding& binding,
+                                             std::uint64_t generation,
+                                             std::int32_t region,
+                                             std::uint32_t nameHash) noexcept;
+
 /** Applies one connection-scoped BAP lifecycle event. */
 [[nodiscard]] bool consume(const client::network::BapRequest& request,
                            client::network::BapResponse& response) noexcept;
@@ -153,6 +164,15 @@ activity_link_count(const state::activity::SessionBinding& binding) noexcept;
  */
 [[nodiscard]] bool activity_link_view(const state::activity::SessionBinding& binding,
                                       ActivityLinkView& output) noexcept;
+
+/** Selects a joined delivery route for the activity's single mission program. */
+[[nodiscard]] bool mission_activity_link_view(const state::activity::SessionBinding& binding,
+                                              ActivityLinkView& output) noexcept;
+
+/** Exact committed player identity; duplicate or loading links do not supply life evidence. */
+[[nodiscard]] bool mission_member_link_view(const state::activity::SessionBinding& binding,
+                                            const state::activity::membership::Identity& identity,
+                                            ActivityLinkView& output) noexcept;
 
 /** Resolves one native client generation without requiring other players to leave the activity. */
 [[nodiscard]] bool activity_link_view(const state::activity::SessionBinding& binding,
@@ -200,6 +220,11 @@ activity_type23_override_available(const state::activity::SessionBinding& bindin
 /** Reads the unique ActivityClient bound to one gameplay group session. */
 [[nodiscard]] bool activity_replication_view_for_group(std::uint64_t groupSessionId,
                                                        ActivityReplicationView& output) noexcept;
+/** Resolves a private view by the complete native address published by its own current link. */
+[[nodiscard]] bool activity_replication_view_for_address(
+    std::uint64_t activitySessionId,
+    const std::array<std::byte, middleware::gameplay::descriptor::kNetAddrSize>& address,
+    ActivityReplicationView& output) noexcept;
 /** Exact native player ownership resolves a view when several accounts share its session. */
 [[nodiscard]] bool activity_replication_view_for_session(std::uint64_t activitySessionId,
                                                          std::uint64_t accountSoid,

@@ -115,26 +115,11 @@ struct PendingMutation final {
                                      std::int32_t sliceSetIndex,
                                      std::uint32_t spawnSetHash) noexcept;
 
-/**
- * Arms one native hard wipe on an exact session generation. Arming the same request key again
- * is accepted; another key is refused while a wipe or a host teleport is active.
- * @param requestKey Script request that owns the wipe. @param region Region the party is in.
- * @param spawnSetHash Authored spawn set the party respawns at.
- */
-[[nodiscard]] bool arm_hard_wipe(const SessionBinding& binding,
-                                 std::uint64_t requestKey,
-                                 std::int32_t region,
-                                 std::uint32_t spawnSetHash) noexcept;
-
 /** @return True while an armed wipe's spawn block still has to reach the client. */
 [[nodiscard]] bool hard_wipe_needs_publish(std::uint64_t sessionId) noexcept;
 
 /** @return True while the client has not yet mirrored an armed wipe's start block. */
 [[nodiscard]] bool hard_wipe_start_unseen(std::uint64_t sessionId) noexcept;
-
-/** Releases the wipe the request key armed, so the client's wait is answered. */
-[[nodiscard]] bool release_hard_wipe(const SessionBinding& binding,
-                                     std::uint64_t requestKey) noexcept;
 
 /** @return The spawn set the armed wipe named for this region, or zero. */
 [[nodiscard]] std::uint32_t checkpoint_spawn_hash(std::uint64_t sessionId,

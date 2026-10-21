@@ -18,6 +18,11 @@ namespace bits = middleware::encoding::bits;
 /** Marks a retained mirror body so another callback's layout cannot be read as one. */
 inline constexpr std::uint32_t kMirrorIdentity = 0x4345324DU;
 
+/** Compiled damage-component decode plan, from the generated SDK decode plans for this build. */
+inline constexpr std::uint32_t kCombatantDamageComponentPlan = 0x80804BEEU;
+/** Pool-walk schema inside the damage-component plan; each walk carries one pool level. */
+inline constexpr std::uint32_t kCombatantDamagePoolSchema = 0x80804C5CU;
+
 /** Private header distinguishes retained mirror bodies from other payload layouts. */
 struct MirrorHeader final {
     std::uint32_t identity{kMirrorIdentity};
@@ -39,17 +44,14 @@ struct ResolverContext final {
     std::span<std::uint8_t> presence{};
     std::uint32_t firstFieldBit{};
     std::uint32_t componentTag{};
+    std::uint32_t damagePool{format::kAbsentIndex};
 };
 
 /** Builds one bounded canonical body while the input is decoded. */
 class MirrorBuilder final {
 public:
     state::gameplay::entity_identity::ActorSourceReference actorSource{};
-    std::uint16_t damageHealth{};
-    std::uint16_t damageShield{};
-    bool damageKnown{};
-    /** Damage pools seen so far; each pool is its own nested walk. */
-    std::uint8_t damagePools{};
+    state::gameplay::entity_identity::DamagePools damage{};
     /** Opens an empty fixed-capacity bit writer. */
     MirrorBuilder() noexcept : writer_(bytes_) {}
 
@@ -79,9 +81,7 @@ public:
         std::memcpy(candidate.state.data() + sizeof(header), bytes_.data(), byteCount);
         candidate.byteCount = static_cast<std::uint16_t>(sizeof(header) + byteCount);
         candidate.actorSource = actorSource;
-        candidate.damageHealth = damageHealth;
-        candidate.damageShield = damageShield;
-        candidate.damageKnown = damageKnown;
+        candidate.damage = damage;
         output = candidate;
         return true;
     }

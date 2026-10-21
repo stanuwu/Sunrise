@@ -1010,6 +1010,7 @@
     <ClCompile Include="src\server\activity\host_runtime_scriptable_requests.cpp" />
     <ClCompile Include="src\server\activity\host_runtime_scriptable_staging.cpp" />
     <ClCompile Include="src\server\activity\host_runtime_sense.cpp" />
+    <ClCompile Include="src\server\activity\host_runtime_squad_sense.cpp" />
     <ClCompile Include="src\server\activity\host_runtime_incidents.cpp" />
     <ClCompile Include="src\server\activity\host_runtime_client_messages.cpp" />
     <ClCompile Include="src\server\activity\host_runtime_mission_inputs.cpp" />
@@ -1084,6 +1085,7 @@
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_push.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_push_records.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_device_publication.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_auth_estate.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_snapshot.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_roster_regions.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_mission_seed_roster.cpp" />
@@ -2378,11 +2380,16 @@
     <ClInclude Include="src\server\activity\mission\mission_script_ghost_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_object_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_player_sense.h" />
+    <ClInclude Include="src\server\activity\mission\mission_member_life.h" />
+    <ClInclude Include="src\server\activity\mission\mission_input_policy.h" />
+    <ClInclude Include="src\server\activity\mission\mission_script_entity_damage.h" />
+    <ClInclude Include="src\state\activity\membership\mission_party.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_squad_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_combatant_damage_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_device_sense.h" />
     <ClInclude Include="src\server\activity\activity_sdk_behavior_scope.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\mission_seed_world_change.h" />
+    <ClInclude Include="src\server\bap\encrypted\push\activity\mission_entity_allocation.h" />
     <ClInclude Include="src\server\bap\encrypted\queuez\queuez_reward_staging.h" />
     <ClInclude Include="src\server\gameplay\entity_identities.h" />
     <ClInclude Include="src\server\gameplay\squad_entity_retirement.h" />

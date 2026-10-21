@@ -9,6 +9,7 @@
 #include "../member_context.h"
 #include "../member_selection.h"
 #include "../transactions/internal.h"
+#include "mission_party.h"
 
 namespace sunrise::state::activity::membership {
 namespace {
@@ -29,6 +30,58 @@ auto selected_member(Record& record) noexcept -> decltype(member_state(record, 0
                                    account_primary_soid(account)));
 }
 } // namespace
+
+bool snapshot_mission_party(const SessionBinding& binding,
+                            MissionParty& output,
+                            std::size_t& count) noexcept {
+    output = {};
+    count = 0;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    bool found = false;
+    for (const auto& record : runtime::storage::g_state.activity.sessions) {
+        if (!transactions::record_matches(record, binding)) {
+            continue;
+        }
+        count = read_mission_party(record, output);
+        found = true;
+        break;
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return found;
+}
+
+bool arm_party_hard_wipe(const SessionBinding& binding,
+                         std::uint64_t request,
+                         std::int32_t region,
+                         std::uint32_t spawn,
+                         std::span<const MissionMember> expected) noexcept {
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    bool accepted = false;
+    for (auto& record : runtime::storage::g_state.activity.sessions) {
+        if (!transactions::record_matches(record, binding)) {
+            continue;
+        }
+        accepted = same_mission_party(record, expected)
+                   && arm_mission_party(record, request, region, spawn);
+        break;
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    return accepted;
+}
+
+bool release_party_hard_wipe(const SessionBinding& binding, std::uint64_t request) noexcept {
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    bool accepted = false;
+    for (auto& record : runtime::storage::g_state.activity.sessions) {
+        if (!transactions::record_matches(record, binding)) {
+            continue;
+        }
+        accepted = release_mission_party(record, request);
+        break;
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    return accepted;
+}
 
 std::uint32_t current_revision(const SessionBinding& binding) noexcept {
     if (binding.sessionId == kAbsentSessionId || binding.createdRevision == 0) {
@@ -98,8 +151,8 @@ bool arm_host_teleport(std::uint64_t sessionId,
             membership.hostTeleport.state = kHostTeleportArmedState;
             membership.hasHostTeleport = true;
             // The client refuses a region record whose per-member token does not equal its own
-            // transition count. The initial slice-set load is count 1 and each host teleport adds
-            // one, so the published token must advance or the target region never precaches.
+            // transition count. Anticipate the next transition until its native report arrives;
+            // that report replaces the prediction, including a request consumed by initial load.
             const std::uint8_t current = membership.hasTransitionToken ? membership.transitionToken
                                                                        : kInitialTransitionToken;
             auto advanced = static_cast<std::uint8_t>(current + 1U);
@@ -113,46 +166,6 @@ bool arm_host_teleport(std::uint64_t sessionId,
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
     return changed;
-}
-
-/** All-one bits is not a spawn set hash. */
-constexpr std::uint32_t kInvalidSpawnSetHash = (std::numeric_limits<std::uint32_t>::max)();
-
-/** Arms one hard wipe; the same request key is accepted again while it is armed. */
-bool arm_hard_wipe(const SessionBinding& binding,
-                   std::uint64_t requestKey,
-                   std::int32_t region,
-                   std::uint32_t spawnSetHash) noexcept {
-    if (requestKey == 0 || region < 0 || spawnSetHash == 0
-        || spawnSetHash == kInvalidSpawnSetHash) {
-        return false;
-    }
-    bool accepted = false;
-    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    ActivityState& state = runtime::storage::g_state.activity;
-    const auto target = activity::transactions::find_session(state, binding.sessionId);
-    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr
-        && state.sessions[target].createdRevision == binding.createdRevision) {
-        MembershipState& membership = *selected_member(state.sessions[target]);
-        HardWipeState& wipe = membership.hardWipe;
-        if (wipe.requestKey == requestKey) {
-            accepted = true;
-        } else if (!wipe.active && !membership.hasHostTeleport) {
-            wipe.requestKey = requestKey;
-            wipe.region = region;
-            wipe.spawnSetHash = spawnSetHash;
-            wipe.host = {};
-            wipe.host.state = kHardWipeStartState;
-            // The token must differ from the client's current block, or the client ignores it.
-            wipe.host.opaqueByte = static_cast<std::uint8_t>(membership.spawn.opaqueByte + 1U);
-            wipe.active = true;
-            wipe.resetReady = false;
-            wipe.clientWaiting = false;
-            accepted = true;
-        }
-    }
-    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
-    return accepted;
 }
 
 /** @return True while the client has not yet mirrored the armed wipe's spawn block. */
@@ -188,24 +201,6 @@ bool hard_wipe_start_unseen(std::uint64_t sessionId) noexcept {
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return unseen;
-}
-
-/** Releases the armed wipe named by its request key. */
-bool release_hard_wipe(const SessionBinding& binding, std::uint64_t requestKey) noexcept {
-    bool accepted = false;
-    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
-    ActivityState& state = runtime::storage::g_state.activity;
-    const auto target = activity::transactions::find_session(state, binding.sessionId);
-    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr
-        && state.sessions[target].createdRevision == binding.createdRevision) {
-        HardWipeState& wipe = selected_member(state.sessions[target])->hardWipe;
-        if (wipe.active && wipe.requestKey == requestKey) {
-            wipe.release();
-            accepted = true;
-        }
-    }
-    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
-    return accepted;
 }
 
 /** @return The checkpoint spawn set a wipe named for this region, or zero. */

@@ -214,22 +214,36 @@ void bind_view(const state::gameplay::Endpoint& from,
     const bool ready = resolvedOwner && owner.present
                        && server::bap::activity_replication_view_for_session(
                            view.sessionToken, owner.accountSoid, owner.characterSoid, activity);
+    // A private ActivityClient opens its service view without joining the service's group.
+    // Its own connect address and authenticated BAP transport report supply the missing owner.
+    // Compare the full native carrier; the UDP source port may differ from its NAT mapping.
+    std::array<std::byte, state::gameplay::kNetAddrBlobSize> nativeAddress{};
+    HostSessionBinding privateViewHost{};
+    const bool privateReady =
+        resolvedOwner && !owner.present && from.localPort != 0
+        && peer::remote_address(from, nativeAddress)
+        && server::bap::activity_replication_view_for_address(
+            view.sessionToken, nativeAddress, activity)
+        && server::gameplay::private_host_session(activity.binding, privateViewHost)
+        && privateViewHost.port == from.localPort;
     const bool embeddedReady =
-        resolvedOwner && !owner.present && core::settings::role() == core::settings::Role::embedded
+        !privateReady && resolvedOwner && !owner.present
+        && core::settings::role() == core::settings::Role::embedded
         && server::bap::activity_replication_view_for_session(view.sessionToken, activity);
-    if (ready || embeddedReady) {
+    bool commonOpened = false;
+    if (ready || privateReady || embeddedReady) {
         std::uint64_t groupSessionId = activity.groupSessionId;
         HostSessionBinding privateHost{};
         if (groupSessionId == 0
             && server::gameplay::private_host_session(activity.binding, privateHost)) {
             groupSessionId = privateHost.groupSessionId;
         }
-        static_cast<void>(peer::open_external_common(from,
-                                                     groupSessionId,
-                                                     activity.binding,
-                                                     activity.patchEpoch,
-                                                     activity.activityClientGeneration,
-                                                     activity.replicationEpoch));
+        commonOpened = peer::open_external_common(from,
+                                                  groupSessionId,
+                                                  activity.binding,
+                                                  activity.patchEpoch,
+                                                  activity.activityClientGeneration,
+                                                  activity.replicationEpoch);
     }
     wire::ViewEstablishment response{};
     std::uint64_t generation = 0;
@@ -243,14 +257,22 @@ void bind_view(const state::gameplay::Endpoint& from,
                                        });
     const bool committed = sent && peer::commit_view_response(from, generation);
     report(sent ? core::log::Level::info : core::log::Level::warn,
-           "ev=gameplay stage=view result=%s remote=%u local=%u token=0x%llX list=%u",
+           "ev=gameplay stage=view result=%s remote=%u local=%u token=0x%llX list=%u "
+           "owner=%s member=0x%llX generation=%llu common=%u",
            committed                                   ? "queued"
            : result == peer::ViewStageResult::accepted ? "queue_fail"
                                                        : "refused",
            static_cast<unsigned>(view.kind),
            static_cast<unsigned>(response.kind),
            static_cast<unsigned long long>(view.sessionToken),
-           static_cast<unsigned>(view.listCount));
+           static_cast<unsigned>(view.listCount),
+           ready           ? "player"
+           : privateReady  ? "native_address"
+           : embeddedReady ? "single_link"
+                           : "unresolved",
+           static_cast<unsigned long long>(activity.memberId),
+           static_cast<unsigned long long>(activity.activityClientGeneration),
+           commonOpened ? 1U : 0U);
 }
 
 /**

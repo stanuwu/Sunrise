@@ -40,6 +40,9 @@ EffectiveRegion effective_region(const state::activity::SessionBinding& binding)
                           name,
                           layout,
                           state::activity::membership::declared_initial_region(binding.sessionId));
+    if (!session_arrival_slice_set(binding, layout, region.arrival, region.arrival)) {
+        return region;
+    }
     const std::int32_t reported = state::activity::membership::player_region(binding.sessionId);
     region.reported = reported >= 0;
     region.index = region.reported ? reported : static_cast<std::int32_t>(region.arrival);

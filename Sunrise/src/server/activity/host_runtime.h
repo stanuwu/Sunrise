@@ -350,6 +350,10 @@ struct SenseObservationKey final {
     std::uint8_t slotType{};
 };
 
+/** Retires recovery reports only after their native connections have left the binding. */
+void retain_squad_sense_generations(const state::activity::SessionBinding& binding,
+                                    std::span<const std::uint64_t> generations) noexcept;
+
 /** Copies the squad's merged recovery state for this exact ActivityClient generation. */
 [[nodiscard]] bool
 snapshot_squad_sense(const state::activity::SessionBinding& binding,
@@ -536,6 +540,11 @@ struct Event final {
     std::uint8_t triggerContinuity{};
     /** Health and shield fractions, for damageState events. Negative until published. */
     float damageHealth{-1.0F};
+    /** Channel-2 observations retain raw levels and the exact admitted lifetime. */
+    bool damageFromEntity{};
+    state::gameplay::entity_identity::Source damageEntitySource{};
+    state::gameplay::entity_identity::RetiredLifetime damageEntityLifetime{};
+    state::gameplay::entity_identity::DamagePools damageEntityPools{};
     float damageShield{-1.0F};
     std::int32_t damageRevision{};
     /** Current position, power and lock levels; masks distinguish unknown fields. */

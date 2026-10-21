@@ -81,18 +81,15 @@ inline bool equal(const Snapshot& first, const Snapshot& second) noexcept {
 inline MembershipState merge(const MembershipState& state,
                              const AuthoritativeUpdate& update) noexcept {
     MembershipState merged = state;
-    // While the host is teleporting the client, the host owns the transition token. A stale
-    // client report would revert the arm's advance, and the client would then reject the target
-    // region record. The client owns the token again once the teleport is spent.
-    const bool hostDrivesToken =
-        state.hasHostTeleport && state.hostTeleport.state != kHostTeleportSpawnState;
+    // The client owns its transition count, independently of the host's teleport request token.
+    // An initial load can consume that request without a second transition. Always reflect its
+    // report: retaining the host's predicted advance leaves the region acknowledgment ahead of
+    // the native transition and prevents the client from switching into the loaded region.
     if (update.hasTransitionToken) {
         merged.nativeTransitionToken = update.transitionToken;
         merged.transitionReported = true;
-        if (!hostDrivesToken) {
-            merged.transitionToken = update.transitionToken;
-            merged.hasTransitionToken = true;
-        }
+        merged.transitionToken = update.transitionToken;
+        merged.hasTransitionToken = true;
     }
     if (update.hasSpawn) {
         merged.spawn = update.spawn;

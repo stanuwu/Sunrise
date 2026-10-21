@@ -176,6 +176,37 @@ void report_release_refusal(const service::Request& request,
 }
 
 /**
+ * Readies the logical host the membership body advertises.
+ * Private activities use one stable Bubble Host. Public regions use their citizen host. This
+ * runs before the plan is prepared: the allocation advances the state revision the plan reads.
+ * @param binding Exact ActivityClient generation owned by this link.
+ * @return False when the private Bubble Host could not be completed.
+ */
+[[nodiscard]] bool complete_arrival_host_session(const ActivityClientBinding& binding) noexcept {
+    const std::int32_t arrival = push::activity::effective_region(binding.session).index;
+    if (push::activity::private_region(binding.session, binding.bindingGeneration, arrival)) {
+        return server::gameplay::complete_private_host_session(binding.session, arrival);
+    }
+    server::gameplay::complete_host_session(
+        binding.session,
+        arrival,
+        push::activity::public_region(binding.session, binding.bindingGeneration, arrival));
+    return true;
+}
+
+/**
+ * Readies the host a private link's snapshot answer advertises.
+ * The answer carries the membership body like the join burst, and a row the pump service has
+ * not filled yet fails it instead of holding it.
+ * @param binding Exact ActivityClient generation owned by this link.
+ */
+void complete_snapshot_host_session(const ActivityClientBinding& binding) noexcept {
+    if (binding.role == ActivityClientRole::privateCurrent) {
+        static_cast<void>(complete_arrival_host_session(binding));
+    }
+}
+
+/**
  * Prepares the joined State and the whole initial lease mask as one mutation.
  * @param binding Exact ActivityClient generation already owned by this link.
  * @param request Validated owned svc8 envelope.
@@ -201,16 +232,9 @@ void report_release_refusal(const service::Request& request,
         plan.targetBinding = binding.session;
         // The join burst carries the membership body, so its logical host must already be ready.
         // Private activities use one stable Bubble Host. Public regions use their citizen host.
-        const std::int32_t arrival = push::activity::effective_region(binding.session).index;
-        if (push::activity::private_region(binding.session, binding.bindingGeneration, arrival)) {
-            if (!server::gameplay::complete_private_host_session(binding.session, arrival)) {
-                return refuse("ev=activity stage=join result=refused reason=private_host");
-            }
-        } else {
-            server::gameplay::complete_host_session(
-                binding.session,
-                arrival,
-                push::activity::public_region(binding.session, binding.bindingGeneration, arrival));
+        if (binding.role == ActivityClientRole::privateCurrent
+            && !complete_arrival_host_session(binding)) {
+            return refuse("ev=activity stage=join result=refused reason=private_host");
         }
     } else if (server::gameplay::group::host_session_for_activity(parsed.sessionId, plan.publicHost)
                && state::activity::binding_matches(plan.publicHost.target)) {
@@ -516,6 +540,7 @@ bool process(const ActivityClientBinding& binding,
         prepared = prepare_release(request, plan);
         break;
     case IngressAdapter::stateRefreshMembership:
+        complete_snapshot_host_session(binding);
         prepared = membership::prepare_refresh(request, plan);
         break;
     case IngressAdapter::clientIdentityMembership:
@@ -531,9 +556,21 @@ bool process(const ActivityClientBinding& binding,
         prepared = membership::prepare_acknowledgement(request, plan);
         break;
     case IngressAdapter::startActivityOptionalStateRefresh:
-        // The transition policy is compiled in. The release owns no runtime switch that answers a
-        // start-activity request with nothing; deployment settings cover accounts, endpoints,
-        // personas and profiles only.
+        // Off, the request is framed and recorded but no transition policy runs on it.
+        if (!core::settings::get().server.activation.defaultClientActivation) {
+            const receipts::Framed framed = receipts::frame_start_activity(request);
+            DiagnosticBody diagnostic{};
+            diagnostic.consumedBits = framed.consumedBits;
+            diagnostic.status = diagnostic_status(framed, false);
+            static_cast<void>(record(request,
+                                     framed.verdict,
+                                     framed.consumedBits,
+                                     &binding.session,
+                                     binding.bindingGeneration,
+                                     diagnostic));
+            return true;
+        }
+        complete_snapshot_host_session(binding);
         prepared = membership::prepare_start_activity(request, plan);
         break;
     case IngressAdapter::authorityResetAcknowledgement:

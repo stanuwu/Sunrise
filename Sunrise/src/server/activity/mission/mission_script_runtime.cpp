@@ -22,6 +22,7 @@
 #include "../../../middleware/gameplay/external/external_entity_codec.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
+#include "../../bap/runtime.h"
 #include "../../gameplay/squad_entity_retirement.h"
 #include "../host_runtime.h"
 #include "mission_script_event_batch.h"
@@ -44,21 +45,83 @@ bool g_pathReady{};
            || (left.deadlineTick == right.deadlineTick && left.sequence < right.sequence);
 }
 
-/** @return The life of the instance's own player, from its retained participation levels. */
-[[nodiscard]] PlayerLife own_player_life(const RuntimeInstance& instance) noexcept {
-    if (!instance.occupied
-        || instance.playerLifeGeneration != instance.view.activityClientGeneration) {
-        return PlayerLife::unknown;
+} // namespace
+
+MemberInputState* member_input(RuntimeInstance& instance, std::uint64_t generation) noexcept {
+    if (!generation) {
+        return nullptr;
     }
-    for (const PlayerLifeObservation& life : instance.playerLife) {
-        if (instance.playerKey != 0 && life.playerKey == instance.playerKey) {
-            return life.life();
+    for (auto& member : instance.memberInputs) {
+        if (member.present && member.life.sourceGeneration == generation) {
+            return &member;
         }
     }
-    return PlayerLife::unknown;
+    return nullptr;
 }
 
-} // namespace
+void refresh_mission_members(RuntimeInstance& instance) noexcept {
+    namespace membership = state::activity::membership;
+    membership::MissionParty party{};
+    std::size_t count{};
+    instance.partySnapshotValid =
+        membership::snapshot_mission_party(instance.view.binding, party, count);
+    try {
+        if (instance.memberInputs.size() < count) {
+            instance.memberInputs.resize(count);
+        }
+    } catch (const std::bad_alloc&) {
+        instance.partySnapshotValid = false;
+        for (auto& member : instance.memberInputs) {
+            member.present = false;
+        }
+        return;
+    }
+    for (auto& member : instance.memberInputs) {
+        member.present = false;
+    }
+    for (const auto& identity : std::span(party).first(count)) {
+        MemberInputState* selected = nullptr;
+        for (auto& member : instance.memberInputs) {
+            if (member.life.member.identity == identity.identity
+                && member.life.member.joinedRevision == identity.joinedRevision) {
+                selected = &member;
+                break;
+            }
+        }
+        if (!selected) {
+            for (auto& member : instance.memberInputs) {
+                const bool retained =
+                    std::ranges::any_of(std::span(party).first(count), [&](const auto& row) {
+                        return row.identity == member.life.member.identity
+                               && row.joinedRevision == member.life.member.joinedRevision;
+                    });
+                if (!member.present && !retained) {
+                    selected = &member;
+                    break;
+                }
+            }
+        }
+        if (!selected) {
+            instance.partySnapshotValid = false;
+            break;
+        }
+        bap::ActivityLinkView link{};
+        const bool live =
+            bap::mission_member_link_view(instance.view.binding, identity.identity, link);
+        if (selected->life.bind(
+                identity, live ? link.activityClientGeneration : 0, live ? link.playerKey : 0)) {
+            selected->triggerOccupancy.fill({});
+            selected->ghostObservations.fill({});
+            selected->objectInteractionObservations.fill({});
+        }
+        selected->present = true;
+    }
+    for (auto& member : instance.memberInputs) {
+        if (!member.present) {
+            member = {};
+        }
+    }
+}
 
 /**
  * Writes one bounded mission-script diagnostic line.
@@ -122,22 +185,15 @@ void publish_fireteam_life(std::uint64_t now) noexcept {
             || instance.programStatus != ProgramStatus::loaded) {
             continue;
         }
+        refresh_mission_members(instance);
         FireteamLife counts{};
-        counts.add(own_player_life(instance));
-        for (const SessionRosterWatch& peer : instance.sessionRoster) {
-            if (!peer.used) {
-                continue;
+        if (!instance.partySnapshotValid) {
+            counts.add(PlayerLife::unknown);
+        }
+        for (const auto& member : instance.memberInputs) {
+            if (member.present) {
+                counts.add(member.life.life());
             }
-            PlayerLife life = PlayerLife::unknown;
-            for (const RuntimeInstance& candidate : g_instances) {
-                if (candidate.occupied && !candidate.publicTarget
-                    && candidate.view.binding.sessionId == peer.sessionId
-                    && candidate.view.binding.createdRevision == peer.createdRevision) {
-                    life = own_player_life(candidate);
-                    break;
-                }
-            }
-            counts.add(life);
         }
         if (instance.fireteamLifePublished && counts == instance.lastFireteamLife) {
             continue;
@@ -171,9 +227,10 @@ void publish_fireteam_life(std::uint64_t now) noexcept {
 /** Merges the type-13 participation records of one Sense snapshot into the instance. */
 void observe_player_life(RuntimeInstance& instance,
                          const host::SenseObservationSnapshot& sense) noexcept {
-    if (instance.playerLifeGeneration != sense.sourceGeneration) {
-        instance.playerLife = {};
-        instance.playerLifeGeneration = sense.sourceGeneration;
+    refresh_mission_members(instance);
+    auto* member = member_input(instance, sense.sourceGeneration);
+    if (!member) {
+        return;
     }
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
@@ -187,14 +244,14 @@ void observe_player_life(RuntimeInstance& instance,
             continue;
         }
         PlayerLifeObservation& level =
-            instance.playerLife[observation.key.slotIndex - kFirstParticipationSlot];
+            member->life.slots[observation.key.slotIndex - kFirstParticipationSlot];
         update_player_life(
             level, std::span(sense.values).subspan(observation.firstValue, observation.valueCount));
         // The host writes its own player key on every participation record of this link, so a
         // record that reports state is that player's.
         if ((level.seen & kLifeSeenKey) == 0 && (level.seen & kLifeSeenState) != 0
-            && instance.playerKey != 0) {
-            level.playerKey = instance.playerKey;
+            && member->life.playerKey != 0) {
+            level.playerKey = member->life.playerKey;
             level.seen |= kLifeSeenKey;
         }
     }
@@ -333,6 +390,10 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     }
     lua_vm::close(instance.vm);
     instance.worldView = {};
+    instance.entityDamageObservations.fill({});
+    instance.entityDamageAtCapacity = false;
+    instance.damageEntitySource = {};
+    instance.nextEntityDamageTick = 0;
     instance.view = {};
     instance.identity = {};
     instance.programKey = {};
@@ -373,11 +434,11 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.missionReattached = false;
     instance.startPending = false;
     instance.timerPending = false;
-    clear_sense_levels(instance);
+    reset_shared_observations(instance);
     instance.sessionRoster = {};
     instance.sessionRosterObserved = false;
-    instance.playerLife = {};
-    instance.playerLifeGeneration = 0;
+    instance.memberInputs.clear();
+    instance.partySnapshotValid = false;
     instance.lastFireteamLife = {};
     instance.fireteamLifePublished = false;
     std::vector<host::Event>{}.swap(instance.scriptEvents);
@@ -410,6 +471,7 @@ void accept_mission_state(RuntimeInstance& instance,
                           const mission_state::Snapshot& snapshot) noexcept {
     if (instance.attempt.generation != snapshot.state.attempt.generation) {
         clear_sense_levels(instance);
+        reset_member_observations(instance);
         // Player life is kept: the client sends only changed fields and never resends the region.
         instance.fireteamLifePublished = false;
         instance.timerPending = false;
@@ -721,6 +783,13 @@ void service(std::uint64_t now) noexcept {
     timed_step("inputs", [now] { consume_mission_inputs(now); });
     timed_step("scriptless", [] { retire_scriptless_inputs(); });
     timed_step("timers", [now] { service_timers(now); });
+    timed_step("entity_damage", [now] {
+        for (auto& instance : g_instances) {
+            if (instance.occupied && instance.programStatus == ProgramStatus::loaded) {
+                push_entity_damage_edges(instance, now);
+            }
+        }
+    });
     timed_step("script_events", [now] { service_script_events(now); });
     timed_step("dispatch", [now] {
         for (RuntimeInstance& instance : g_instances) {
