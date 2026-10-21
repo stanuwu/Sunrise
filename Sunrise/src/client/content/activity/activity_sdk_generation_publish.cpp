@@ -14,6 +14,7 @@
 #include "../../../state/activity_sdk/runtime.h"
 #include "../../../state/gameplay/external/rsat_decode_plans.h"
 #include "activity_sdk_decode_plans.h"
+#include "activity_sdk_decode_plans_image.h"
 #include "activity_sdk_generation_worker_internal.h"
 #include "activity_sdk_live_publication.h"
 #include "activity_sdk_native_pack_pipeline.h"
@@ -266,7 +267,7 @@ void log_decoder_cache(decode_plans::Status status,
 }
 
 /** Keeps the decoder pair beside the pack whose identity it uses. */
-[[nodiscard]] bool build_decoder_cache(const Work& work,
+[[nodiscard]] bool build_decoder_cache(const decode_plans::Image& image,
                                        std::wstring_view packPath,
                                        const package_reader::Source& source,
                                        const state::activity_sdk::Catalog& catalog,
@@ -281,8 +282,7 @@ void log_decoder_cache(decode_plans::Status status,
                                                   : std::wstring(packPath.substr(0, separator)))
             + std::wstring(state::gameplay::rsat_decode_plans::kCacheSuffix);
         decode_plans::Request request{};
-        request.executablePath = work.executablePath;
-        request.executableModule = work.executableModule;
+        request.image = &image;
         request.source = &source;
         request.descriptors = catalog.sobject_rsat_descriptors();
         request.sdkBuildSha256 = catalog.sdk_build_sha256();
@@ -320,6 +320,21 @@ bool publish_estate(Work& work,
         return false;
     }
 
+    // One reflection image serves the actor runtime schemas and the decoder cache.
+    const auto imageStarted = GetTickCount64();
+    decode_plans::Image image;
+    const auto imageStatus = image.open(work.executablePath.c_str(), work.executableModule);
+    if (imageStatus != decode_plans::Status::ready) {
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::error,
+                          "ev=activity_sdk_image result=failed reason=%s",
+                          decode_plans::status_name(imageStatus));
+        failureDetail = "executable_image_failed";
+        return false;
+    }
+    core::log::write_elapsed(
+        core::log::Channel::client, "ev=activity_sdk_image", imageStarted, "ok");
+
     live::Stage stage{};
     PackProgressContext progress{
         !work.offline,
@@ -345,6 +360,7 @@ bool publish_estate(Work& work,
     const native_pack::Status packStatus = native_pack::stage(sdkDirectory,
                                                               packPath,
                                                               source,
+                                                              image,
                                                               work.sourceFingerprint,
                                                               work.activityInventory,
                                                               work.canonicalTopology,
@@ -379,7 +395,7 @@ bool publish_estate(Work& work,
     }
     if (complete) {
         report_publication_progress(progress, "building decoder cache");
-        complete = build_decoder_cache(work, packPath, source, *stagedCatalog, failureDetail);
+        complete = build_decoder_cache(image, packPath, source, *stagedCatalog, failureDetail);
     }
     stagedCatalog.reset();
     if (complete) {
