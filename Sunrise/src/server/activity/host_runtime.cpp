@@ -608,6 +608,8 @@ bool auth_state(const state::activity::SessionBinding& binding,
     const bool found = instance != nullptr;
     if (found) {
         output.revision = instance->view.stateRevision;
+        output.estateRevision = instance->view.scriptableEstateRevision;
+        output.dialogueRevision = instance->view.dialogueRevision;
         output.lifetimeState = instance->view.lifetimeState;
         output.refused = link_refused(instance->view, sourceGeneration);
     }

@@ -206,16 +206,26 @@ namespace detail {
     if (owned.expectedActivityClientGeneration == 0) {
         owned.expectedActivityClientGeneration = sourceGeneration;
     }
-    for (PendingScriptableOverride& retained : instance.scriptableAuthEstate) {
-        if (same_client_ref(retained.target, pending.target)) {
-            retained = owned;
-            return true;
+    bool retained = false;
+    for (PendingScriptableOverride& existing : instance.scriptableAuthEstate) {
+        if (same_client_ref(existing.target, pending.target)) {
+            existing = owned;
+            retained = true;
+            break;
         }
     }
-    try {
-        instance.scriptableAuthEstate.push_back(owned);
-    } catch (const std::bad_alloc&) {
-        return false;
+    if (!retained) {
+        try {
+            instance.scriptableAuthEstate.push_back(owned);
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+    // A dialogue body is a pulse the client plays once per apply, so the projection carries it to
+    // each link once: the links whose cursor is behind this revision still owe the line.
+    if (pending.kind == ScriptableOverrideKind::dialogue) {
+        instance.view.dialogueRevision =
+            (std::max)(instance.view.dialogueRevision, pending.revision);
     }
     return true;
 }

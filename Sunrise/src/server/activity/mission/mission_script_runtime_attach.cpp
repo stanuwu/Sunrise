@@ -279,13 +279,14 @@ enum class InitialStateGate : std::uint8_t {
         return InitialStateGate::failed;
     }
     instance.initialStateSelected = true;
-    arm_state_region_teleport(instance, seed.plan);
+    // The launch lands in the declared initial region, so the selection owes no move, and a
+    // player who walks out of that region afterwards is not moved back.
     // `plan.effectiveRegion` is the authored-state key; several authored states share one client
     // slice-set region, so the client link cannot report it. The lease revision reaching the
     // transport is the publication acknowledgement.
     return seed.publicationPending || seed.revision == 0 || seed.publishedRevision != seed.revision
                    || !server::bap::mission_seed_publication_ready(
-                       instance.view.binding, instance.view.activityClientGeneration)
+                       instance.view.binding, instance.view.activityClientGeneration, true)
                ? InitialStateGate::pending
                : InitialStateGate::ready;
 }

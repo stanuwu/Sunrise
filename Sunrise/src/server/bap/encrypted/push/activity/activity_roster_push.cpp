@@ -300,8 +300,13 @@ bool append_roster_notification(
         server::gameplay::squad_entity_retirement::placed_transition_pending(
             session.activity.session, session.activity.bindingGeneration);
     server::activity::host::AuthState hostState{};
-    const bool hasHostState = server::activity::host::auth_state(
-        session.activity.session, session.activity.bindingGeneration, hostState);
+    const bool hasHostState =
+        server::activity::host::auth_state(session.activity.session, hostState);
+    // A link's first roster since it joined carries no line said before it: the cursor starts at
+    // the newest pulse, so only the pulses retained after this body are owed to the link.
+    if (hasHostState && session.activityRosterSends == 0) {
+        session.activityDialogueRevision = hostState.dialogueRevision;
+    }
     const bool hostStatePending = hasHostState && hostState.revision != 0
                                   && hostState.revision != session.activityHostStateRevision;
     server::activity::host::PendingScriptableOverride scriptablePending{};
@@ -312,6 +317,18 @@ bool append_roster_notification(
         !hasScriptablePending
         || activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
                == 1;
+    // A leave delta retires every group, so it carries no host state and no typed body. Both stay
+    // owed and neither is spent on it.
+    const bool ownsPending = hasScriptablePending && singleScriptableLink && !peerLeave;
+    const bool ownsHostState = hostStatePending && !peerLeave;
+    // The estate this body carries holds a body another link's push staged, and the client
+    // behind this link applies it itself; only a push lets that client see it. The push that
+    // staged it carried it as the pending body, so that link's cursor moves with its commit. The
+    // term owes the push, not a resend: a body identical to the last delivered one is still
+    // skipped, and the cursors move with the skip.
+    const bool estatePending = hasHostState && !peerLeave
+                               && session.activity.role == ActivityClientRole::privateCurrent
+                               && hostState.estateRevision != session.activityEstateRevision;
     const bool squadPending =
         ownsPending
         && scriptablePending.kind == server::activity::host::ScriptableOverrideKind::squad;
@@ -552,6 +569,11 @@ bool append_roster_notification(
         session.activityRosterState = initialRosterState;
         session.activityRosterRegionEpoch = initialRegionEpoch;
         session.activityRosterRegionBubble = initialRegionBubble;
+        if (estatePending) {
+            // The client holds this exact body already, so it has what the estate owed it.
+            session.activityEstateRevision = hostState.estateRevision;
+            session.activityDialogueRevision = hostState.dialogueRevision;
+        }
         report_roster_push(
             session, snapshot, name, 0, kNoGrant, RosterOutcome::unchanged, bodyHash, forced);
         return false;
@@ -644,6 +666,10 @@ bool append_roster_notification(
         session.activityRosterStaged.scriptableOverride = scriptablePending;
         session.activityRosterStaged.hasGrant = snapshot.hasGrant;
         session.activityRosterStaged.hasHostState = ownsHostState;
+        session.activityRosterStaged.estateRevision = hasHostState ? hostState.estateRevision : 0;
+        session.activityRosterStaged.dialogueRevision =
+            hasHostState ? hostState.dialogueRevision : 0;
+        session.activityRosterStaged.hasEstateRevision = hasHostState && !peerLeave;
         session.activityRosterStaged.peerLeave = peerLeave;
         // A retired body publishes no seed content, so its revision stays owed.
         session.activityRosterStaged.hasMissionSeedRevision =
@@ -835,6 +861,18 @@ void commit_staged_roster(Session& session) noexcept {
             session.activity.bindingGeneration,
             session.activityRosterStaged.scriptableOverride,
             server::activity::host::OutputStatus::noOverrideTarget);
+    }
+    if (session.activityRosterStaged.hasEstateRevision) {
+        // The body carried the estate as read when it was built. A pending body it also carried
+        // joined the estate just above, delivered by this same body, so the cursors take that.
+        server::activity::host::AuthState hostState{};
+        const bool staged =
+            scriptableCommitReady
+            && server::activity::host::auth_state(session.activity.session, hostState);
+        session.activityEstateRevision =
+            staged ? hostState.estateRevision : session.activityRosterStaged.estateRevision;
+        session.activityDialogueRevision =
+            staged ? hostState.dialogueRevision : session.activityRosterStaged.dialogueRevision;
     }
     commit_roster_device_publications(session);
     if (session.activityRosterStaged.peerLeave) {

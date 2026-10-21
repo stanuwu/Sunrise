@@ -386,8 +386,8 @@ build_roster_snapshot(Session& session,
             return refuse_override("retained_auth_install");
         }
     }
-    if (const char* refusal =
-            append_retained_auth_estate(layout, region, scratch, snapshot, authEstate)) {
+    if (const char* refusal = append_retained_auth_estate(
+            layout, region, scratch, snapshot, authEstate, session.activityDialogueRevision)) {
         return refuse_override(refusal);
     }
     // The pending override's group goes after the retained estate, where the next push will place

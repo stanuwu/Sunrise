@@ -278,6 +278,46 @@ enum class ScriptableOverrideKind : std::uint8_t {
  */
 inline constexpr float kGhostLinkFinishFraction = 0.99F;
 
+/**
+ * Decides whether a body's arrival in the retained estate owes every other link a push. It does
+ * not change what a body carries: every msg 5 carries the whole estate either way.
+ * @return True for a body every client applies itself. The game replicates no device, trigger,
+ * directive, dialogue, scene or lifetime between peers, so only a push lets a client see one.
+ * A squad, combatant or damage-watch body is the authority's alone: native replication carries
+ * its effect, so its arrival owes nothing.
+ */
+[[nodiscard]] constexpr bool client_applied_override(ScriptableOverrideKind kind) noexcept {
+    switch (kind) {
+    case ScriptableOverrideKind::squad:
+    case ScriptableOverrideKind::combatantChannel:
+    case ScriptableOverrideKind::combatantBinding:
+    case ScriptableOverrideKind::combatantSequence:
+    case ScriptableOverrideKind::squadObjective:
+    case ScriptableOverrideKind::combatantProgram:
+    case ScriptableOverrideKind::combatantRetirement:
+    case ScriptableOverrideKind::damageWatch:
+        return false;
+    case ScriptableOverrideKind::object:
+    case ScriptableOverrideKind::sequence:
+    case ScriptableOverrideKind::cinematic:
+    case ScriptableOverrideKind::type23:
+    case ScriptableOverrideKind::type31:
+    case ScriptableOverrideKind::objectiveReset:
+    case ScriptableOverrideKind::task:
+    case ScriptableOverrideKind::authoredScene:
+    case ScriptableOverrideKind::dialogue:
+    case ScriptableOverrideKind::sdkAuth:
+    case ScriptableOverrideKind::lifetime:
+    case ScriptableOverrideKind::performance:
+    case ScriptableOverrideKind::authoredSceneEvent:
+    case ScriptableOverrideKind::authoredSceneStop:
+    case ScriptableOverrideKind::interactableObject:
+    case ScriptableOverrideKind::ghostLink:
+        return true;
+    }
+    return true;
+}
+
 /** Current diagnostic state of one retained incident. */
 enum class IncidentStatus : std::uint8_t {
     received,
@@ -785,6 +825,12 @@ struct InstanceSnapshot final {
     std::uint64_t scriptableRevision{};
     std::uint64_t scriptableTransportRevision{};
     std::uint64_t scriptableReservedRevision{};
+    /** Advances when a body every client applies joins the retained estate or the lifetime latches.
+     */
+    std::uint64_t scriptableEstateRevision{};
+    /** Output revision of the newest retained dialogue pulse; a link behind it still owes the line.
+     */
+    std::uint64_t dialogueRevision{};
     std::uint32_t senseCount{};
     std::uint32_t outputAttempts{};
     std::uint32_t incidentsPending{};
@@ -877,6 +923,10 @@ struct DiagnosticsSnapshot final {
 /** Activity-state value consumed by the msg-5 output adapter. */
 struct AuthState final {
     std::uint64_t revision{};
+    /** Retained-estate revision; a link behind it owes its client a roster. */
+    std::uint64_t estateRevision{};
+    /** Newest retained dialogue pulse; a link's roster carries the pulses past its own cursor. */
+    std::uint64_t dialogueRevision{};
     std::uint8_t lifetimeState{kDefaultLifetimeState};
     /** The adapter refused this revision's body. The next revision clears it. */
     bool refused{};

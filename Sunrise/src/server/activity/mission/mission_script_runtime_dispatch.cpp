@@ -232,11 +232,13 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         return;
     }
     // The native authority may replicate an enemy immediately after receiving its squad Auth.
-    // Retain output until every recipient can decode that state's entity definitions.
+    // Retain output until every recipient in that state's bubble can decode its entity
+    // definitions. A client with no link in the bubble is not waited for: nothing can carry the
+    // output there, and a held intent never starts its lifetime.
     if (intent.kind != lua_vm::IntentKind::selectMissionState
         && intent.kind != lua_vm::IntentKind::restartCheckpoint
-        && !server::bap::mission_seed_publication_ready(instance.view.binding,
-                                                        instance.view.activityClientGeneration)) {
+        && !server::bap::mission_seed_publication_ready(
+            instance.view.binding, instance.view.activityClientGeneration, false)) {
         report_intent_status(
             instance, kIntentStatusStateTransitionPending, "peer_state_publication_pending");
         return;
@@ -303,8 +305,13 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         }
         // The selected effective region is an authored-state key, not a region the client reports.
         // Publishing this lease revision is the completion edge, except when publication waits for
-        // arrival: there the teleport is armed first, because arrival closes that window.
-        arm_state_region_teleport(instance, selected.plan);
+        // arrival: there the teleport is armed first, because arrival closes that window. The
+        // move is one host event per selection: a re-dispatch while publication is pending does
+        // not move back a player who has since left the region.
+        if (instance.armedStateRevision != selected.revision) {
+            arm_state_region_teleport(instance, selected.plan);
+            instance.armedStateRevision = selected.revision;
+        }
         if (!selected.regionArrivalPending
             && (selected.publicationPending || selected.revision == 0
                 || selected.publishedRevision != selected.revision)) {

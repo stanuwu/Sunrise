@@ -62,6 +62,8 @@ void reset_join_state(Session& session) noexcept {
     session.activityRosterSends = 0;
     session.activityRosterRegionBubble = -1;
     session.activityHostStateRevision = 0;
+    session.activityEstateRevision = 0;
+    session.activityDialogueRevision = 0;
     session.activityRosterAwaitClientSync = false;
     authority_query::reset(session.activityAuthorityQuery, session.activity.bindingGeneration);
     authority_reset::reset(session.activityAuthorityReset, session.activity.bindingGeneration);

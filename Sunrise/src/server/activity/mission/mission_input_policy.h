@@ -10,6 +10,7 @@ inline bool member_mission_event(host::EventKind kind) noexcept {
     case host::EventKind::senseUpdate:
     case host::EventKind::incidentReceived:
     case host::EventKind::clientStateChanged:
+    case host::EventKind::regionChanged:
     case host::EventKind::clientMessageReceived:
     case host::EventKind::entitySlotsRequested:
     case host::EventKind::playerTrigger:

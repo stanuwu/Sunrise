@@ -138,9 +138,14 @@ struct ActivityMissionSeedLeaseView final {
     bool regionArrivalPending{};
 };
 
-/** True once every current recipient has the script-selected state's native decode groups. */
+/**
+ * True once every link hosting the script-selected state's bubble has its native decode groups.
+ * @param everyClient True also waits for a client with no link in that bubble to arrive; false
+ * does not, for output that nothing can carry into a bubble no client hosts.
+ */
 [[nodiscard]] bool mission_seed_publication_ready(const state::activity::SessionBinding& binding,
-                                                  std::uint64_t generation) noexcept;
+                                                  std::uint64_t generation,
+                                                  bool everyClient) noexcept;
 
 /** Arms the authored region transition in each private member's own membership scope. */
 [[nodiscard]] bool arm_shared_mission_region(const state::activity::SessionBinding& binding,

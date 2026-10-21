@@ -537,14 +537,17 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
     instance.dispatchAttemptGeneration = event.attemptGeneration;
     instance.dispatchInputSequence = event.missionSequence;
     const lua_vm::CallStatus status = lua_vm::dispatch(instance.vm, event, clientMessage, now);
-    if (event.kind == host::EventKind::clientStateChanged
-        && event.sourceGeneration == instance.view.activityClientGeneration) {
-        // A pending-region report can name the next slice while the player still holds the old
-        // one, so the held region wins.
-        if (event.heldRegionIndex >= 0) {
-            instance.activeRegion = event.heldRegionIndex;
-        } else if (event.currentRegionIndex >= 0) {
-            instance.activeRegion = event.currentRegionIndex;
+    if (event.kind == host::EventKind::clientStateChanged) {
+        // The selected route's reports place the program; every member's arrival is a region
+        // fact, as the script keys its watchers on any member reaching a state's region.
+        if (event.sourceGeneration == instance.view.activityClientGeneration) {
+            // A pending-region report can name the next slice while the player still holds the
+            // old one, so the held region wins.
+            if (event.heldRegionIndex >= 0) {
+                instance.activeRegion = event.heldRegionIndex;
+            } else if (event.currentRegionIndex >= 0) {
+                instance.activeRegion = event.currentRegionIndex;
+            }
         }
         host::Event changed{};
         if (make_region_changed(event, changed)) {

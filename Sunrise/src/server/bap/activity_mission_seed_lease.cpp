@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <limits>
 
+#include "../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../state/activity/transactions/internal.h"
+#include "../../state/build_data/scenarios/definition.h"
+#include "encrypted/push/activity/internal.h"
 #include "encrypted/push/activity/mission_seed_world_change.h"
 
 namespace sunrise::server::bap {
@@ -125,6 +128,73 @@ bool mission_seed_recipient(const Session& session,
                                                               binding.destination);
 }
 
+bool mission_seed_public_link(const Session& link, const Session& recipient) noexcept {
+    // A pooled public host keeps the first fireteam's binding as every link's source, so the
+    // account is what ties a public link to the private link beside it.
+    return link.id != 0 && link.authenticated && link.activity.bindingGeneration != 0
+           && link.activity.role == ActivityClientRole::publicTarget
+           && link.accountHandle != state::kInvalidAccount
+           && link.accountHandle == recipient.accountHandle;
+}
+
+bool mission_seed_region_published(const Session& link, std::uint32_t effectiveRegion) noexcept {
+    const auto& lease = link.activityMissionSeed;
+    return lease.configured && lease.revision != 0
+           && lease.bindingGeneration == link.activity.bindingGeneration
+           && lease.revision == lease.publishedRevision
+           && lease.revision == lease.fullSetTransportRevision && !lease.regionArrivalPending
+           && lease.plan.effectiveRegion == effectiveRegion;
+}
+
+bool mission_seed_plan_hosted(const Session& session,
+                              const ActivityMissionSeedPlan& plan) noexcept {
+    const std::uint32_t bubble =
+        plan.effectiveRegion / middleware::content::packages::tables::kSliceSetIndexFactor;
+    return bubble < state::build_data::scenarios::kBubbleCapacity
+           && ((encrypted::push::activity::hosted_bubble_mask(session) >> bubble) & 1U) != 0;
+}
+
+bool mission_seed_hosted_publication_locked(const state::activity::SessionBinding& binding,
+                                            const ActivityMissionSeedPlan& plan,
+                                            bool everyClient) noexcept {
+    bool hosting = false;
+    for (const Session& recipient : sessions()) {
+        if (!mission_seed_recipient(recipient, binding)) {
+            continue;
+        }
+        if (mission_seed_plan_hosted(recipient, plan)) {
+            if (!mission_seed_published(recipient, plan)) {
+                return false;
+            }
+            hosting = true;
+            continue;
+        }
+        // This link publishes nothing of a bubble it does not host. The client's public link
+        // hosts it and runs the free-roam activity, so it cannot carry this plan: it publishes
+        // the bubble's own state, and that receipt is the client's acknowledgement of the
+        // bubble's content.
+        bool clientHosting = false;
+        for (const Session& link : sessions()) {
+            if (!mission_seed_public_link(link, recipient)
+                || !mission_seed_plan_hosted(link, plan)) {
+                continue;
+            }
+            if (!mission_seed_region_published(link, plan.effectiveRegion)) {
+                return false;
+            }
+            clientHosting = true;
+        }
+        if (!clientHosting) {
+            if (everyClient) {
+                return false;
+            }
+            continue;
+        }
+        hosting = true;
+    }
+    return hosting || !everyClient;
+}
+
 bool inherit_mission_seed_locked(Session& session, std::int32_t heldRegion) noexcept {
     if (!mission_seed_recipient(session, session.activity.session)) {
         return false;
@@ -202,11 +272,14 @@ void read_mission_seed_lease(const Session& session,
     output.matchingLinks = matchingLinks;
     output.activityClientGeneration = session.activity.bindingGeneration;
     output.revision = lease.revision;
+    // The view is this link's own receipt: a roster of its own committed since the selection,
+    // whether or not it hosts the plan's bubble. A state-local output needs no more than that; the
+    // output's pending body installs the state-local group it targets. Whether the bubble's own
+    // entity definitions reached the clients is mission_seed_hosted_publication_locked's question,
+    // asked by the output gates.
     output.publishedRevision = lease.publishedRevision;
     output.configured = lease.configured;
-    output.publicationPending = lease.configured && lease.revision != lease.publishedRevision;
-    output.publicationRefused =
-        output.publicationPending && lease.refusedRevision == lease.revision;
+    output.publicationPending = lease.configured && lease.revision != output.publishedRevision;
     output.regionArrivalPending = lease.configured && lease.regionArrivalPending;
 }
 

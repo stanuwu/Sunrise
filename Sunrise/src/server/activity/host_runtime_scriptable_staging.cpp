@@ -336,6 +336,7 @@ void note_scriptable_transport_staged(const state::activity::SessionBinding& bin
         server::gameplay::squad_entity_retirement::record_delivered_target(
             binding, sourceGeneration, pending);
         advance_staged_guard(guard, pending);
+        bool clientApplied = client_applied_override(pending.kind);
         if (pending.kind == ScriptableOverrideKind::lifetime) {
             // Latch the state so every later msg 5 keeps reporting it.
             instance->view.lifetimeState = pending.lifetimeState;
@@ -358,11 +359,17 @@ void note_scriptable_transport_staged(const state::activity::SessionBinding& bin
             server::gameplay::squad_entity_retirement::record_delivered_target(
                 binding, sourceGeneration, queued);
             advance_staged_guard(queuedGuard, queued);
+            clientApplied = clientApplied || client_applied_override(queued.kind);
             event.scriptableRevision = queued.revision;
             append_event(event);
         }
         instance->pendingScriptableTail.fill({});
         instance->pendingScriptableTailCount = 0;
+        if (clientApplied) {
+            // Every other link now owes its client a roster: the estate it carries has a body
+            // that client applies itself, and only a push lets the client see it.
+            ++instance->view.scriptableEstateRevision;
+        }
         instance->view.scriptableTransportRevision = instance->view.scriptableRevision;
         instance->view.lastOutputSourceGeneration = sourceGeneration;
         ++instance->view.outputAttempts;

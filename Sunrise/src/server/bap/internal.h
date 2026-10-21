@@ -181,6 +181,12 @@ struct RosterPublication {
     std::uint8_t squadStateSequence{};
     /** Activity Host state revision carried by this body. */
     std::uint64_t hostStateRevision{};
+    /** Retained-estate revision this body carried; the link's cursor moves to it on commit. */
+    std::uint64_t estateRevision{};
+    /** Set when this body was built against a live Activity Host estate revision. */
+    bool hasEstateRevision{};
+    /** Newest retained dialogue pulse this body could carry; the cursor moves to it on commit. */
+    std::uint64_t dialogueRevision{};
     /** SDK selected-state roster lease revision carried by this body. */
     std::uint64_t missionSeedRevision{};
     /** This staged frame contains the complete selected-state definition set. */
@@ -478,6 +484,10 @@ struct Session {
     std::uint8_t activityRosterState{};
     /** Latest Activity Host revision staged into this connection's transport output. */
     std::uint64_t activityHostStateRevision{};
+    /** Retained-estate revision this connection last carried; a newer one owes it a roster. */
+    std::uint64_t activityEstateRevision{};
+    /** Newest retained dialogue pulse this connection carried; its rosters skip older ones. */
+    std::uint64_t activityDialogueRevision{};
     /** The delivered roster carries the team wait bit; the arrival report is answered while set. */
     bool activityRosterAwaitClientSync{};
     /** One bounded authority-mask readback owned by this exact ActivityClient generation. */

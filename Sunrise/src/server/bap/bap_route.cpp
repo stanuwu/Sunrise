@@ -633,7 +633,8 @@ select_activity_mission_seed(const state::activity::SessionBinding& binding,
 }
 
 bool mission_seed_publication_ready(const state::activity::SessionBinding& binding,
-                                    std::uint64_t generation) noexcept {
+                                    std::uint64_t generation,
+                                    bool everyClient) noexcept {
     const std::shared_lock lock(g_lock);
     std::size_t count{};
     const Session* owner = activity_link_for_generation_locked(binding, generation, count);
@@ -644,12 +645,7 @@ bool mission_seed_publication_ready(const state::activity::SessionBinding& bindi
     if (!selected.configured || !selected.scriptSelected) {
         return true;
     }
-    for (const Session& peer : g_sessions) {
-        if (mission_seed_recipient(peer, binding) && !mission_seed_published(peer, selected.plan)) {
-            return false;
-        }
-    }
-    return true;
+    return mission_seed_hosted_publication_locked(binding, selected.plan, everyClient);
 }
 
 bool arm_shared_mission_region(const state::activity::SessionBinding& binding,

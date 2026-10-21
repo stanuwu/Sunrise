@@ -210,32 +210,18 @@ bool consume_activity_keepalive(Session& session,
     const bool authorityQueryDue = active
                                    && authority_query::pending(session.activityAuthorityQuery,
                                                                session.activity.bindingGeneration);
-    // No roster can be built before the client's patch epoch for this binding arrives.
-    const bool epochSeen =
-        active && session.activityPatchEpoch.seen
-        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration;
-    const bool isPrivate = session.activity.role == ActivityClientRole::privateCurrent;
-    const bool regionReady = active && client_region_ready(session, nullptr);
-    // The roster defers an unsolicited body while the private client loads. Its region report is
-    // answered instead, so no standalone roster is due until then.
-    const bool rosterReady = epochSeen && (!isPrivate || regionReady);
-    // While a placed reset is pending, an unsolicited roster leaves only with its purge.
-    const bool placedPending =
-        epochSeen
-        && server::gameplay::squad_entity_retirement::placed_transition_pending(
-            session.activity.session, session.activity.bindingGeneration);
-    const bool placedPurgeReady = rosterReady && placedPending && placed_purge_ready(session);
-    const bool rosterOpen = rosterReady && (!placedPending || placedPurgeReady);
     server::activity::host::AuthState hostState{};
-    const bool hostKnown = rosterOpen
-                           && server::activity::host::auth_state(session.activity.session,
-                                                                 session.activity.bindingGeneration,
-                                                                 hostState);
-    // This link could not build a body for the current Host revision. Only a new one retries it.
-    const bool hostRefused = hostKnown && hostState.refused;
-    // A committed Activity Host revision the delivered roster lacks.
-    const bool hostStateDue = hostKnown && !hostRefused && hostState.revision != 0
+    const bool hostStateRead =
+        active && session.activityPatchEpoch.seen
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
+        && server::activity::host::auth_state(session.activity.session, hostState);
+    const bool hostStateDue = hostStateRead && hostState.revision != 0
                               && hostState.revision != session.activityHostStateRevision;
+    // A newer retained estate owes this private link a roster: a body its client applies joined
+    // it. The push skips the body when the client already holds it and moves the cursor anyway.
+    const bool estateDue = hostStateRead
+                           && session.activity.role == ActivityClientRole::privateCurrent
+                           && hostState.estateRevision != session.activityEstateRevision;
     server::activity::host::PendingScriptableOverride pendingScriptable{};
     const bool scriptableDue =
         active && session.activityPatchEpoch.seen
@@ -361,9 +347,9 @@ bool consume_activity_keepalive(Session& session,
         && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
         && mission_entity_allocation_owed(session, false);
     if (!active
-        || (!keepaliveDue && !regionChanged && !hostStateDue && !scriptableDue && !incidentDue
-            && !authorityResetDue && !authorityQueryDue && !hostTeleportDue && !retirementDue
-            && !arrivalDue && !membershipDue && !missionAllocationDue)) {
+        || (!keepaliveDue && !regionChanged && !hostStateDue && !estateDue && !scriptableDue
+            && !incidentDue && !authorityResetDue && !authorityQueryDue && !hostTeleportDue
+            && !retirementDue && !arrivalDue && !membershipDue && !missionAllocationDue)) {
         return false;
     }
     touchesScratch = true;
@@ -380,7 +366,8 @@ bool consume_activity_keepalive(Session& session,
     // republish.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue && !membershipDue) {
         bool appendedRoster = false;
-        if (hostStateDue || scriptableDue || retirementDue || arrivalDue || missionAllocationDue) {
+        if (hostStateDue || estateDue || scriptableDue || retirementDue || arrivalDue
+            || missionAllocationDue) {
             appendedRoster = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
         }
@@ -627,8 +614,8 @@ bool consume_activity_keepalive(Session& session,
     // push could have been read at all. Without it a correct body and a deduped one look the same.
     const std::uint32_t reportedRevision = refresh.snapshot.revision;
     SecureZeroMemory(&refresh, sizeof refresh);
-    if (appendedMembership || hostStateDue || scriptableDue || retirementDue || arrivalDue
-        || missionSeedDue) {
+    if (appendedMembership || hostStateDue || estateDue || scriptableDue || retirementDue
+        || arrivalDue) {
         published = append_roster_notification(
                         session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                     || published;

@@ -276,6 +276,8 @@ struct RuntimeInstance final {
     std::uint64_t durableIntentSequence{};
     std::uint64_t durableHostOutputRevision{};
     std::uint64_t expectedScriptableRevision{};
+    /** Lease revision whose region move was armed, so a pending selection moves players once. */
+    std::uint64_t armedStateRevision{};
     std::uint64_t deliveryDeadline{};
     std::uint64_t firstIntentAttempt{};
     host::Event pendingTimerEvent{};

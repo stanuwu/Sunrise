@@ -9,7 +9,8 @@ const char* append_retained_auth_estate(
     const EffectiveRegion& region,
     Scratch& scratch,
     message::Snapshot& snapshot,
-    std::span<const server::activity::host::PendingScriptableOverride> estate) noexcept {
+    std::span<const server::activity::host::PendingScriptableOverride> estate,
+    std::uint64_t deliveredDialogueRevision) noexcept {
     // Each included Auth slot is replaced, so snapshots must carry its complete retained value.
     // A connection's squad lease records its own deliveries, not the population's lifetime.
     // New observers and rejoined links need the shared spawn body even before combat Auth
@@ -19,9 +20,10 @@ const char* append_retained_auth_estate(
             continue;
         }
         // A dialogue body is a pulse: the client plays one line of the cue each time it applies
-        // the body, and it applies every body of every msg 5. So it goes out once, in the push
-        // that delivers it, and the slot then carries no body.
-        if (retained.kind == server::activity::host::ScriptableOverrideKind::dialogue) {
+        // the body, and it applies every body of every msg 5. So each link carries it once, in
+        // its first body after the pulse was retained, and its later bodies leave the slot out.
+        if (retained.kind == server::activity::host::ScriptableOverrideKind::dialogue
+            && retained.revision <= deliveredDialogueRevision) {
             continue;
         }
         const server::activity::host::ScriptableTarget& target = retained.target;
