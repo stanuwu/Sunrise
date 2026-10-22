@@ -122,29 +122,30 @@ Status actor_program_source_squad(const state::activity_sdk::BoundView& view,
     return parent_definition(view, actorSlot, squadRow);
 }
 
-/** Population bookkeeping uses the exact SDK parent that the transported body prepared. */
+/**
+ * Population bookkeeping uses the exact SDK parent that the transported body names. The parent and
+ * its wire ClientRef come from the package and the generated world alone, so the check holds on
+ * every link, including after the carrier has left or moved.
+ */
 Status actor_program_parent_squad(const state::activity_sdk::BoundView& view,
                                   std::uint32_t actorSlot,
                                   const host::ScriptableTarget& expectedParent,
                                   std::uint32_t& squadRow) noexcept {
     squadRow = state::activity_sdk::format::kAbsentIndex;
-    detail::PreparedDevice actor{}, source{};
-    const auto prepared = detail::prepare_combatant(view, actorSlot, actor);
-    if (prepared != Status::ready) {
-        return prepared;
-    }
-    const auto resolved = parent(view, actorSlot, source, squadRow);
+    std::uint32_t row = state::activity_sdk::format::kAbsentIndex;
+    const auto resolved = parent_definition(view, actorSlot, row);
     if (resolved != Status::ready) {
         return resolved;
     }
-    const auto& target = source.target;
-    return target.objectTag == expectedParent.objectTag
-                   && target.registryKey == expectedParent.registryKey
-                   && target.slotIndex == expectedParent.slotIndex
-                   && target.slotType == expectedParent.slotType
-                   && target.authSchema == expectedParent.authSchema
-               ? Status::ready
-               : Status::targetUnavailable;
+    const auto& squad = view.catalog->squads()[row];
+    const auto& slot = view.catalog->slots()[squad.slotIndex];
+    if (view.catalog->objects()[squad.objectIndex].objectKey != expectedParent.registryKey
+        || slot.slotIndex != expectedParent.slotIndex || slot.slotType != expectedParent.slotType
+        || slot.authSchema != expectedParent.authSchema) {
+        return Status::targetUnavailable;
+    }
+    squadRow = row;
+    return Status::ready;
 }
 
 /** Revalidates the pinned actor and its authored parent before reserving a native program. */

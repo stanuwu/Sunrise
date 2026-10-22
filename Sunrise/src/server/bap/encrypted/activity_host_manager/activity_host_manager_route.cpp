@@ -6,14 +6,19 @@
 #include <string_view>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../core/settings/role.h"
 #include "../../../../middleware/bap/activity_host_manager/request/activity_manager_request.h"
 #include "../../../../middleware/bap/activity_host_manager/request/selection/\
 activity_manager_selection_parser.h"
 #include "../../../../middleware/bap/activity_host_manager/response/activity_manager_response.h"
+#include "../../../../state/account/account_context.h"
+#include "../../../../state/account/public_profiles.h"
 #include "../../../../state/activity/defaults/activity_defaults_snapshot.h"
 #include "../../../../state/activity/forced/activity_forced_destination.h"
 #include "../../../../state/activity/runtime.h"
+#include "../../../../state/activity/shared_allocation.h"
 #include "../../../../state/build_data/runtime.h"
+#include "activity_establish_response.h"
 
 namespace sunrise::server::bap::encrypted::activity_host_manager {
 namespace {
@@ -86,7 +91,8 @@ void report_forced(const state::activity::destination::DestinationSelection& for
 [[nodiscard]] bool
 prepare_allocation(const request_selection::ActivityManagerSelectionResult& parsed,
                    std::uint64_t& sessionId,
-                   state::activity::PendingAllocation& allocation) noexcept {
+                   state::activity::PendingAllocation& allocation,
+                   const state::activity::LaunchParty* party) noexcept {
     const bool hasCopy = parsed.hasSelection || parsed.hasSecondary;
     const request_selection::ActivityManagerSelection& source =
         hasCopy ? choose_copy(parsed) : parsed.selection;
@@ -104,9 +110,12 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
         state::activity::destination::DestinationSelection forced{};
         if (state::activity::forced::apply(forced)) {
             report_forced(forced);
-            return state::activity::prepare_session(forced, sessionId, allocation);
+            return party ? state::activity::prepare_shared_session(
+                               forced, *party, sessionId, allocation)
+                         : state::activity::prepare_session(forced, sessionId, allocation);
         }
-        return state::activity::prepare_session(sessionId, allocation);
+        return party ? state::activity::prepare_shared_session(*party, sessionId, allocation)
+                     : state::activity::prepare_session(sessionId, allocation);
     }
     state::activity::destination::DestinationSelection destination{};
     destination.packageName = source.packageName;
@@ -138,7 +147,9 @@ prepare_allocation(const request_selection::ActivityManagerSelectionResult& pars
     if (state::activity::forced::apply(destination)) {
         report_forced(destination);
     }
-    return state::activity::prepare_session(destination, sessionId, allocation);
+    return party
+               ? state::activity::prepare_shared_session(destination, *party, sessionId, allocation)
+               : state::activity::prepare_session(destination, sessionId, allocation);
 }
 
 } // namespace
@@ -148,8 +159,10 @@ bool encode_response(std::span<const std::byte> requestBody,
                      std::span<std::byte> output,
                      std::size_t& written,
                      state::activity::PendingAllocation& allocation,
-                     bool& hasAllocation) noexcept {
+                     bool& hasAllocation,
+                     PendingStartupReservations& startupReservations) noexcept {
     written = 0;
+    startupReservations = {};
     allocation = {};
     hasAllocation = false;
     middleware::bap::activity_host_manager::Request request;
@@ -169,14 +182,29 @@ bool encode_response(std::span<const std::byte> requestBody,
     }
     std::uint64_t sessionId = state::activity::kAbsentSessionId;
     state::activity::PendingAllocation prepared{};
-    if (!prepare_allocation(selection, sessionId, prepared)) {
+    const auto owner = state::bound_account();
+    const auto startup = prepare_startup_reservations(selection.startupReservations,
+                                                      state::account_primary_soid(owner));
+    state::activity::LaunchParty party{};
+    const bool shared = core::settings::hosts_session();
+    if (shared) {
+        party.publisherAccount = state::account_primary_soid(owner);
+        party.publisherCharacter = state::account::profiles::selected_character(owner);
+        if (startup.valid) {
+            party.identities = startup.identities;
+            party.count = startup.count;
+        }
+    }
+    if (!prepare_allocation(selection, sessionId, prepared, shared ? &party : nullptr)) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=bap svc=6 stage=allocation result=fail");
         return false;
     }
-    if (!middleware::bap::activity_host_manager::response::encode_response(
-            sessionId, output, written)) {
+    middleware::bap::activity_host_manager::response::Response response{};
+    if (!make_establish_response(sessionId, response)
+        || !middleware::bap::activity_host_manager::response::encode_response(
+            response, output, written)) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=bap svc=6 stage=encode result=fail");
@@ -185,6 +213,7 @@ bool encode_response(std::span<const std::byte> requestBody,
     }
     // Publish only scalar transaction data. Borrowed protobuf bytes never enter State.
     allocation = prepared;
+    startupReservations = startup;
     hasAllocation = true;
     return true;
 }

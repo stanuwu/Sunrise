@@ -305,6 +305,13 @@ inline constexpr MemberSpec kDamageFields[]{
     field("health", kNumber),
     field("shield", kNumber),
     field("revision", kInteger),
+    field("from_entity", kBoolean, "true when a replicated entity dealt the damage"),
+    field("health_level", kOptionalInteger, "the entity's health pool level, when known"),
+    field("shield_level", kOptionalInteger, "the entity's shield pool level, when known"),
+    field("entity_slot", kOptionalInteger, "nil unless from_entity"),
+    field("entity_incarnation", kOptionalInteger, "nil unless from_entity"),
+    field("allocation_sequence", kOptionalInteger, "nil unless from_entity"),
+    field("allocation_domain", kOptionalDecimal, "nil unless from_entity"),
 };
 inline constexpr MemberSpec kObjectFields[]{
     field("generation", kInteger),

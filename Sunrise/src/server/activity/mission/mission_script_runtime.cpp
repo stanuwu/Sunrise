@@ -12,15 +12,19 @@
 #include <cstddef>
 #include <cstdio>
 #include <limits>
+#include <memory>
 #include <new>
+#include <span>
 #include <string_view>
 #include <vector>
 
 #include "../../../core/logging/log.h"
 #include "../../../core/settings/settings.h"
 #include "../../../middleware/gameplay/external/external_entity_codec.h"
+#include "../../../state/activity/entity_slots/member_leases.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
+#include "../../bap/runtime.h"
 #include "../../gameplay/squad_entity_retirement.h"
 #include "../host_runtime.h"
 #include "mission_script_event_batch.h"
@@ -43,21 +47,83 @@ bool g_pathReady{};
            || (left.deadlineTick == right.deadlineTick && left.sequence < right.sequence);
 }
 
-/** @return The life of the instance's own player, from its retained participation levels. */
-[[nodiscard]] PlayerLife own_player_life(const RuntimeInstance& instance) noexcept {
-    if (!instance.occupied
-        || instance.playerLifeGeneration != instance.view.activityClientGeneration) {
-        return PlayerLife::unknown;
+} // namespace
+
+MemberInputState* member_input(RuntimeInstance& instance, std::uint64_t generation) noexcept {
+    if (!generation) {
+        return nullptr;
     }
-    for (const PlayerLifeObservation& life : instance.playerLife) {
-        if (instance.playerKey != 0 && life.playerKey == instance.playerKey) {
-            return life.life();
+    for (auto& member : instance.memberInputs) {
+        if (member.present && member.life.sourceGeneration == generation) {
+            return &member;
         }
     }
-    return PlayerLife::unknown;
+    return nullptr;
 }
 
-} // namespace
+void refresh_mission_members(RuntimeInstance& instance) noexcept {
+    namespace membership = state::activity::membership;
+    membership::MissionParty party{};
+    std::size_t count{};
+    instance.partySnapshotValid =
+        membership::snapshot_mission_party(instance.view.binding, party, count);
+    try {
+        if (instance.memberInputs.size() < count) {
+            instance.memberInputs.resize(count);
+        }
+    } catch (const std::bad_alloc&) {
+        instance.partySnapshotValid = false;
+        for (auto& member : instance.memberInputs) {
+            member.present = false;
+        }
+        return;
+    }
+    for (auto& member : instance.memberInputs) {
+        member.present = false;
+    }
+    for (const auto& identity : std::span(party).first(count)) {
+        MemberInputState* selected = nullptr;
+        for (auto& member : instance.memberInputs) {
+            if (member.life.member.identity == identity.identity
+                && member.life.member.joinedRevision == identity.joinedRevision) {
+                selected = &member;
+                break;
+            }
+        }
+        if (!selected) {
+            for (auto& member : instance.memberInputs) {
+                const bool retained =
+                    std::ranges::any_of(std::span(party).first(count), [&](const auto& row) {
+                        return row.identity == member.life.member.identity
+                               && row.joinedRevision == member.life.member.joinedRevision;
+                    });
+                if (!member.present && !retained) {
+                    selected = &member;
+                    break;
+                }
+            }
+        }
+        if (!selected) {
+            instance.partySnapshotValid = false;
+            break;
+        }
+        bap::ActivityLinkView link{};
+        const bool live =
+            bap::mission_member_link_view(instance.view.binding, identity.identity, link);
+        if (selected->life.bind(
+                identity, live ? link.activityClientGeneration : 0, live ? link.playerKey : 0)) {
+            selected->triggerOccupancy.fill({});
+            selected->ghostObservations.fill({});
+            selected->objectInteractionObservations.fill({});
+        }
+        selected->present = true;
+    }
+    for (auto& member : instance.memberInputs) {
+        if (!member.present) {
+            member = {};
+        }
+    }
+}
 
 /**
  * Writes one bounded mission-script diagnostic line.
@@ -121,22 +187,15 @@ void publish_fireteam_life(std::uint64_t now) noexcept {
             || instance.programStatus != ProgramStatus::loaded) {
             continue;
         }
+        refresh_mission_members(instance);
         FireteamLife counts{};
-        counts.add(own_player_life(instance));
-        for (const SessionRosterWatch& peer : instance.sessionRoster) {
-            if (!peer.used) {
-                continue;
+        if (!instance.partySnapshotValid) {
+            counts.add(PlayerLife::unknown);
+        }
+        for (const auto& member : instance.memberInputs) {
+            if (member.present) {
+                counts.add(member.life.life());
             }
-            PlayerLife life = PlayerLife::unknown;
-            for (const RuntimeInstance& candidate : g_instances) {
-                if (candidate.occupied && !candidate.publicTarget
-                    && candidate.view.binding.sessionId == peer.sessionId
-                    && candidate.view.binding.createdRevision == peer.createdRevision) {
-                    life = own_player_life(candidate);
-                    break;
-                }
-            }
-            counts.add(life);
         }
         if (instance.fireteamLifePublished && counts == instance.lastFireteamLife) {
             continue;
@@ -170,9 +229,10 @@ void publish_fireteam_life(std::uint64_t now) noexcept {
 /** Merges the type-13 participation records of one Sense snapshot into the instance. */
 void observe_player_life(RuntimeInstance& instance,
                          const host::SenseObservationSnapshot& sense) noexcept {
-    if (instance.playerLifeGeneration != sense.sourceGeneration) {
-        instance.playerLife = {};
-        instance.playerLifeGeneration = sense.sourceGeneration;
+    refresh_mission_members(instance);
+    auto* member = member_input(instance, sense.sourceGeneration);
+    if (!member) {
+        return;
     }
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
@@ -186,14 +246,14 @@ void observe_player_life(RuntimeInstance& instance,
             continue;
         }
         PlayerLifeObservation& level =
-            instance.playerLife[observation.key.slotIndex - kFirstParticipationSlot];
+            member->life.slots[observation.key.slotIndex - kFirstParticipationSlot];
         update_player_life(
             level, std::span(sense.values).subspan(observation.firstValue, observation.valueCount));
         // The host writes its own player key on every participation record of this link, so a
         // record that reports state is that player's.
         if ((level.seen & kLifeSeenKey) == 0 && (level.seen & kLifeSeenState) != 0
-            && instance.playerKey != 0) {
-            level.playerKey = instance.playerKey;
+            && member->life.playerKey != 0) {
+            level.playerKey = member->life.playerKey;
             level.seen |= kLifeSeenKey;
         }
     }
@@ -224,6 +284,11 @@ void push_script_event(RuntimeInstance& instance, const host::Event& event) noex
 
 /**
  * Queues an exact host-policy transition without consuming a client mission-input sequence.
+ * The policy may sit on any link that carries the program's output, so `admitted_provocation`
+ * decides which links' provocations are the squad's own.
+ * Lock order: the lane-0 receive path calls this under the peer lock, and `service` takes the
+ * peer lock under this one through the actor-command policy. Both run only on the server
+ * service thread, so the two orders cannot deadlock; moving either path to another thread would.
  * @param binding Activity generation that accepted the damage.
  * @param sourceGeneration ActivityClient generation that owns the policy.
  * @param registryKey Authored squad registry key.
@@ -239,13 +304,14 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
     }
     AcquireSRWLockExclusive(&g_lock);
     auto* instance = find_instance(binding);
-    if (instance != nullptr && instance->view.activityClientGeneration == sourceGeneration) {
+    if (instance != nullptr && admitted_provocation(*instance, sourceGeneration)) {
         host::Event event{};
         event.kind = host::EventKind::squadProvoked;
         event.binding = binding;
         event.sequence = instance->missionStateRevision;
         event.missionSequence = instance->lastMissionSequence;
-        event.sourceGeneration = sourceGeneration;
+        // Lua and `eligible_event` read shared simulation as the route's input.
+        event.sourceGeneration = instance->view.activityClientGeneration;
         event.tick = GetTickCount64();
         event.firstRegistryKey = registryKey;
         event.firstSlotType = sdk::format::kSquadSlotType;
@@ -258,7 +324,7 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
 /**
  * Queues one replicated damage level for a squad slot, once per change.
  * @param binding Activity generation that accepted the entity update.
- * @param sourceGeneration ActivityClient generation that owns the policy.
+ * @param sourceGeneration ActivityClient generation of the link that sent the entity update.
  * @param registryKey Authored registry key.
  * @param slotType Authored slot type: the squad's, or the combatant's own.
  * @param slotIndex Authored slot index.
@@ -279,20 +345,17 @@ void report_squad_damage(const state::activity::SessionBinding& binding,
     }
     AcquireSRWLockExclusive(&g_lock);
     auto* instance = find_instance(binding);
-    if (instance != nullptr && instance->view.activityClientGeneration == sourceGeneration) {
+    // A level that finds no mission, or comes from a link that does not simulate its target, is
+    // dropped without a log line: every update of every link reaches this call.
+    if (instance != nullptr) {
         push_entity_damage(*instance,
+                           sourceGeneration,
                            registryKey,
                            slotType,
                            slotIndex,
                            static_cast<float>(health) / static_cast<float>(full),
                            static_cast<float>(shield) / static_cast<float>(full),
                            GetTickCount64());
-    } else {
-        // Nothing else records a level that finds no mission.
-        log_line(core::log::Level::debug,
-                 instance,
-                 "combatant_damage",
-                 instance == nullptr ? "no_instance" : "stale_generation");
     }
     ReleaseSRWLockExclusive(&g_lock);
 }
@@ -309,12 +372,15 @@ void note_vm_status(RuntimeInstance& instance,
 void clear_sense_levels(RuntimeInstance& instance) noexcept {
     instance.triggerOccupancy = {};
     instance.squadObservations = {};
+    instance.squadShadows = {};
+    instance.squadShadowAtCapacity = false;
     instance.ghostObservations = {};
     instance.damageObservations = {};
     instance.combatantDamageObservations = {};
     instance.entityDamageObservations = {};
     instance.deviceObservations = {};
     instance.objectInteractionObservations = {};
+    instance.objectStateObservations = {};
     instance.actorPathObservations = {};
     instance.sceneObservations = {};
     instance.objectiveObservations = {};
@@ -331,6 +397,14 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     }
     lua_vm::close(instance.vm);
     instance.worldView = {};
+    instance.pinCount = 0;
+    std::vector<PinBubbleRow>{}.swap(instance.pinBubbles);
+    std::vector<host::PendingScriptableOverride>{}.swap(instance.estate);
+    instance.estateCopied = false;
+    instance.liveLinkCount = 0;
+    instance.entitySourceDamageObservations.fill({});
+    instance.damageEntitySources.fill({});
+    instance.nextEntityDamageTick = 0;
     instance.view = {};
     instance.identity = {};
     instance.programKey = {};
@@ -371,11 +445,11 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.missionReattached = false;
     instance.startPending = false;
     instance.timerPending = false;
-    clear_sense_levels(instance);
+    reset_shared_observations(instance);
     instance.sessionRoster = {};
     instance.sessionRosterObserved = false;
-    instance.playerLife = {};
-    instance.playerLifeGeneration = 0;
+    instance.memberInputs.clear();
+    instance.partySnapshotValid = false;
     instance.lastFireteamLife = {};
     instance.fireteamLifePublished = false;
     std::vector<host::Event>{}.swap(instance.scriptEvents);
@@ -408,14 +482,14 @@ void accept_mission_state(RuntimeInstance& instance,
                           const mission_state::Snapshot& snapshot) noexcept {
     if (instance.attempt.generation != snapshot.state.attempt.generation) {
         clear_sense_levels(instance);
+        reset_member_observations(instance);
         // Player life is kept: the client sends only changed fields and never resends the region.
         instance.fireteamLifePublished = false;
         instance.timerPending = false;
         instance.pendingTimerEvent = {};
     }
     lua_vm::publish_attempt(instance.vm, snapshot.state.attempt);
-    if (!lua_vm::publish_device_requests(
-            instance.vm, snapshot.state.deviceRequests, instance.view.activityClientGeneration)) {
+    if (!lua_vm::publish_device_requests(instance.vm, snapshot.state.deviceRequests)) {
         lua_vm::fault(instance.vm, "device request snapshot allocation failed");
         instance.programStatus = ProgramStatus::programError;
     }
@@ -425,6 +499,38 @@ void accept_mission_state(RuntimeInstance& instance,
         instance.programStatus = ProgramStatus::programError;
     }
     accept_compare_fields(instance, snapshot);
+}
+
+/**
+ * The links a target's pin still counts on: the route, which stands even for a public target, and
+ * every joined private link. They change only when a link joins, leaves or rejoins, so one read
+ * per service pass serves every admission and device read in it.
+ */
+bool read_live_links(RuntimeInstance& instance) noexcept {
+    std::array<bap::ActivityLinkView, state::activity::entity_slots::kMemberLeaseRowCount> links{};
+    const std::size_t linkCount = bap::mission_route_candidates(
+        instance.view.binding, {}, instance.view.activityClientGeneration, links);
+    std::array<std::uint64_t, kLiveLinkCapacity> live{};
+    std::size_t count = 0;
+    live[count++] = instance.view.activityClientGeneration;
+    for (const bap::ActivityLinkView& link : std::span(links).first(linkCount)) {
+        if (link.activityClientGeneration != instance.view.activityClientGeneration) {
+            live[count++] = link.activityClientGeneration;
+        }
+    }
+    const auto next = std::span(live).first(count);
+    const bool changed = !std::ranges::equal(next, live_links(instance));
+    instance.liveLinks = live;
+    instance.liveLinkCount = count;
+    return changed;
+}
+
+/**
+ * A device request is pinned to the link that carried it, and only that link's report applies it.
+ * The script reads it as applied while that link is still live.
+ */
+bool publish_device_sources(const RuntimeInstance& instance, lua_vm::Vm& vm) noexcept {
+    return lua_vm::publish_device_sources(vm, live_links(instance));
 }
 
 /** Copies the committed attempt, revision, cursors, phase and intent head into the instance. */
@@ -714,11 +820,27 @@ void service(std::uint64_t now) noexcept {
         return;
     }
     timed_step("synchronize", [now] { synchronize_instances(now); });
+    timed_step("links", [] {
+        for (RuntimeInstance& instance : g_instances) {
+            if (instance.occupied && read_live_links(instance)
+                && instance.programStatus == ProgramStatus::loaded
+                && !publish_device_sources(instance, instance.vm)) {
+                fault_instance(instance, "device request source allocation failed");
+            }
+        }
+    });
     timed_step("starts", [now] { service_pending_starts(now); });
     timed_step("delivery_events", [now] { consume_delivery_events(now); });
     timed_step("inputs", [now] { consume_mission_inputs(now); });
     timed_step("scriptless", [] { retire_scriptless_inputs(); });
     timed_step("timers", [now] { service_timers(now); });
+    timed_step("entity_damage", [now] {
+        for (auto& instance : g_instances) {
+            if (instance.occupied && instance.programStatus == ProgramStatus::loaded) {
+                push_entity_damage_edges(instance, now);
+            }
+        }
+    });
     timed_step("script_events", [now] { service_script_events(now); });
     timed_step("dispatch", [now] {
         for (RuntimeInstance& instance : g_instances) {
@@ -737,7 +859,8 @@ void service(std::uint64_t now) noexcept {
 
 /** Copies every open instance row and every retained attach row for the panel. */
 void snapshot(DiagnosticsSnapshot& output) noexcept {
-    output = {};
+    std::destroy_at(&output);
+    std::construct_at(&output);
     AcquireSRWLockShared(&g_lock);
     output.enabled = g_enabled;
     output.pathReady = g_pathReady;

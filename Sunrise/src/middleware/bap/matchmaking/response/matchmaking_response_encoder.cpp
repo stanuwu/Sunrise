@@ -20,8 +20,11 @@ constexpr std::uint32_t kLiveStatsField = 8;
 constexpr std::uint32_t kActivityConfigurationField = 1;
 /** Field 8 of the activity configuration: a party this size or larger counts as a big fireteam. */
 constexpr std::uint32_t kBigFireteamThresholdField = 8;
-/** 2 is the smallest threshold a solo fireteam does not reach. The retail value is unread. */
-constexpr std::uint64_t kBigFireteamThreshold = 2;
+/**
+ * 7 is above the largest fireteam, so no party counts as big and a full fireteam passes the
+ * composition check. A big party with no team to hold it is refused. The retail value is unread.
+ */
+constexpr std::uint64_t kBigFireteamThreshold = 7;
 /** Two nested varint fields fit inside this. */
 constexpr std::size_t kConfigurationScratchSize = 32;
 

@@ -44,7 +44,7 @@ void clear_targets() noexcept;
  */
 [[nodiscard]] bool install() noexcept;
 
-/** Stops Studio observers and detaches both teleport hooks; false requires a retry. */
+/** Stops Studio observers, then detaches both hooks once callers finish; false needs a retry. */
 [[nodiscard]] bool uninstall() noexcept;
 
 /** Publishes the camera pose for the frame and the forward vector for the next physics tick. */

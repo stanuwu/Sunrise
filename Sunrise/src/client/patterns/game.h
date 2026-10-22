@@ -10,6 +10,7 @@ namespace sunrise::client::patterns::game {
 /** Stable indices for game-executable signatures. */
 enum class Id : std::size_t {
     transportKind,
+    transportKindSession,
     httpExecuteRequest,
     signOnReadinessFailure,
     signOnReadinessReady,

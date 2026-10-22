@@ -40,6 +40,9 @@ EffectiveRegion effective_region(const state::activity::SessionBinding& binding)
                           name,
                           layout,
                           state::activity::membership::declared_initial_region(binding.sessionId));
+    if (!session_arrival_slice_set(binding, layout, region.arrival, region.arrival)) {
+        return region;
+    }
     const std::int32_t reported = state::activity::membership::player_region(binding.sessionId);
     region.reported = reported >= 0;
     region.index = region.reported ? reported : static_cast<std::int32_t>(region.arrival);
@@ -96,15 +99,6 @@ bool client_region_ready(const Session& session, const RefreshReport* refresh) n
                              && lease.regionArrivalPending
                              && static_cast<std::int64_t>(lease.plan.effectiveRegion) != held;
     return !movePending && held >= 0;
-}
-
-/** Tests whether the client has reported arrival in its instantiated region. */
-bool client_in_world(const Session& session, const RefreshReport* refresh) noexcept {
-    // ws-702 world state 8 is the arrival report. It does not depend on the player spawn.
-    // Both reports are tested here, so either one arriving last opens the gate.
-    const state::activity::membership::ClientPlacement placement =
-        client_placement(session, refresh);
-    return placement.clientInWorld && client_region_ready(session, refresh);
 }
 
 /** Resolves the region one prepared membership body publishes. */

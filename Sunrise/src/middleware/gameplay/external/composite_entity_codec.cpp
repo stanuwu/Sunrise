@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -27,13 +26,6 @@ constexpr std::uint8_t kNullableU32AliasType = 21;
 constexpr std::uint8_t kNestedCustomType = 37;
 /** The type-37 schema: a 19-bit real and a 5-bit int8, 24 bits in all. */
 constexpr std::uint32_t kNestedCustomSchema = 0x808092FFU;
-/** The damage component replicates each level pool as its own walk of kDamagePoolSchema. */
-constexpr std::uint32_t kDamageComponent = 0x80804BEEU;
-/** One pool level; its single field is the only value it decodes. */
-constexpr std::uint32_t kDamagePoolSchema = 0x80804C5CU;
-/** Pool 0 is health and pool 1 the shield. */
-constexpr std::uint8_t kHealthPool = 0;
-constexpr std::uint8_t kShieldPool = 1;
 
 /** Resolves one schema only when it supports the selected codec family. */
 [[nodiscard]] bool
@@ -562,29 +554,24 @@ runtime_schema(const CompositeEntityCodecContext& context, std::uint32_t handle)
         }
         *semanticTag = tag;
     }
-    if (resolverContext.componentTag == kDamageComponent) {
+    if (resolverContext.componentTag == kCombatantDamageComponentPlan
+        && schemaHandle == kCombatantDamagePoolSchema
+        && resolverContext.damagePool < mirror.damage.levels.size()) {
+        // Use the compiled plan's pool position, never the count of present values.
+        // An omitted health pool must not turn a shield update into health.
         for (const auto& value : std::span(values).first(result.valueCount)) {
-            if (value.schemaHandle != kDamagePoolSchema || !value.present) {
+            if (value.schemaHandle != schemaHandle || !value.present
+                || value.role != wire::ValueRole::opaqueScalarCode) {
                 continue;
             }
-            const double level = value.kind == wire::ValueKind::real32
-                                     ? static_cast<double>(value.realValue)
-                                 : value.kind == wire::ValueKind::signedInteger
-                                     ? static_cast<double>(value.signedValue)
-                                     : static_cast<double>(value.unsignedValue);
-            if (!(level >= 0.0 && level <= static_cast<double>(kDamageLevelFull))) {
-                continue;
+            const auto pool = resolverContext.damagePool;
+            if (value.occurrence != 0
+                || value.width != state::gameplay::entity_identity::kDamagePoolLevelBits
+                || value.unsignedValue > kDamageLevelFull || mirror.damage.present[pool]) {
+                return false;
             }
-            const auto rounded = static_cast<std::uint16_t>(std::lround(level));
-            if (mirror.damagePools == kHealthPool) {
-                mirror.damageHealth = rounded;
-                mirror.damageKnown = true;
-            } else if (mirror.damagePools == kShieldPool) {
-                mirror.damageShield = rounded;
-            }
-            if (mirror.damagePools != (std::numeric_limits<std::uint8_t>::max)()) {
-                ++mirror.damagePools;
-            }
+            mirror.damage.levels[pool] = static_cast<std::uint16_t>(value.unsignedValue);
+            mirror.damage.present[pool] = true;
         }
     }
     if (resolverContext.componentTag == 0x80C70EDCU && schemaHandle == 0x80C70EDCU) {

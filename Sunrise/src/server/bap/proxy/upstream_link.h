@@ -1,0 +1,150 @@
+#pragma once
+
+#include <WinSock2.h>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+#include "../../../client/network/consumer.h"
+#include "../../../middleware/bap/frame.h"
+#include "../../../middleware/secure_channel/runtime.h"
+#include "../../../state/runtime/state.h"
+
+namespace sunrise::server::bap::proxy::upstream_link {
+
+/** Upstream connection lifecycle, advanced by service_link. */
+enum class LinkStage : std::uint8_t {
+    idle,
+    connecting,
+    helloSent,
+
+    ready,
+    failed,
+};
+
+/** One request forwarded upstream, awaiting its correlated response. */
+struct PendingForward {
+    std::uint32_t downstreamConnectionId{};
+    std::uint32_t taskId{};
+    /** The full response tuple must match before it can complete this request. */
+    std::uint16_t expectedResponseService{};
+    bool inUse{};
+
+    bool plaintextForward{};
+    std::uint64_t queuedTick{};
+};
+
+/**
+ * Concurrent correlations; additional requests stay in the bounded held-input queue. A slot is
+ * one of four, which is why `kResponseTimeoutMs` bounds a correlation: an answer that never
+ * arrives would otherwise hold its slot for the life of the link. Four is a chosen depth, and
+ * exceeding it defers a request rather than losing one.
+ */
+inline constexpr std::size_t kPendingCapacity = 4;
+
+/** Matches the downstream frame capacity, so a downstream frame always forwards in one piece. */
+inline constexpr std::size_t kLinkFrameCapacity = client::network::kBapFrameCapacity;
+
+// Link scheduling. Each value bounds one local event of this link and is a chosen bound, not a
+// retail-observed interval: nothing on the wire declares any of them.
+/** Backoff between initial dial attempts; no redial after the first completed hello. */
+inline constexpr std::uint64_t kRetryIntervalMs = 2000;
+/** Bounds one nonblocking connect; the hello has its own deadline. */
+inline constexpr std::uint64_t kConnectTimeoutMs = 5000;
+/** Bounds the hello reply once the connect above completes; a slower server is retried. */
+inline constexpr std::uint64_t kHelloTimeoutMs = 5000;
+
+/** Idle period after which the link sends the protocol's own keepalive service, `echo`. */
+inline constexpr std::uint64_t kKeepaliveIntervalMs = 5000;
+/** Response deadline, paused under local backpressure; failure never redials an established link.
+ */
+inline constexpr std::uint64_t kResponseTimeoutMs = 30'000;
+/** Initial id for link-originated requests; admission separately rejects live collisions. */
+inline constexpr std::uint32_t kOriginatedTaskIdBase = 0x80000000U;
+
+/**
+ * One connection's upstream socket and its wire state, owned by the BAP service thread under
+ * the session lock.
+ */
+struct UpstreamLink {
+    std::uint32_t downstreamConnectionId{};
+    SOCKET socket{INVALID_SOCKET};
+    LinkStage stage{LinkStage::idle};
+    bool established{};
+    std::uint64_t nextAttemptTick{};
+    std::uint64_t attemptStartedTick{};
+    std::uint64_t helloSentTick{};
+    std::uint64_t lastActivityTick{};
+    std::uint32_t helloTaskId{};
+    /**
+     * Correlation counter for requests this link originates itself (pass-through forwards reuse
+     * the downstream client's own taskId instead and never touch this counter). Starts at
+     * `kOriginatedTaskIdBase`; queue admission still refuses any live correlation collision.
+     */
+    std::uint32_t nextOriginatedTaskId{kOriginatedTaskIdBase};
+    std::array<std::byte, state::kAesKeySize> sessionKey{};
+    std::array<std::byte, state::kBapNonceSize> sendNonce{};
+    std::array<std::byte, state::kBapNonceSize> receiveNonce{};
+    std::array<std::byte, kLinkFrameCapacity> stream{};
+    std::size_t streamSize{};
+    /** A refused callback leaves the frame, receive nonce and correlation unchanged. */
+    bool receiveBlocked{};
+    std::uint64_t blockedSince{};
+    std::array<std::byte, kLinkFrameCapacity * kPendingCapacity> output{};
+    std::size_t outputOffset{};
+    std::size_t outputSize{};
+    std::array<PendingForward, kPendingCapacity> pending{};
+};
+
+/** Closes the socket and returns the link to idle, clearing keys, nonces and pending forwards. */
+void reset(UpstreamLink& link) noexcept;
+/** Retry only before the first completed hello; established native requests cannot be replayed. */
+[[nodiscard]] bool retry_initial(UpstreamLink& link, std::uint64_t now) noexcept;
+
+/**
+ * Services one nonblocking connection. Callbacks return false for temporary output pressure;
+ * they must then leave application state unchanged. The same frame is offered again when
+ * serviced. Response deadlines exclude time spent waiting for this local consumer.
+ * @param onInternal Receives services the shim originates for itself. They are classified before
+ *        notifications and responses alike, so they can never reach the game client.
+ */
+void service_link(UpstreamLink& link,
+                  std::uint64_t now,
+                  bool (*onNotification)(UpstreamLink& link,
+                                         std::span<const std::byte> plaintextPayload,
+                                         bool plaintextFrame),
+                  bool (*onResponse)(UpstreamLink& link,
+                                     const PendingForward& forward,
+                                     std::span<const std::byte> plaintextPayload),
+                  bool (*onInternal)(UpstreamLink& link,
+                                     std::span<const std::byte> plaintextPayload)) noexcept;
+
+/** Sends a request expecting a correlated response, occupying one of the link's pending slots. */
+[[nodiscard]] bool queue_forward(UpstreamLink& link,
+                                 std::uint32_t downstreamConnectionId,
+                                 std::uint16_t service,
+                                 std::uint32_t taskId,
+                                 std::uint16_t expectedResponseService,
+                                 std::span<const std::byte> body) noexcept;
+
+/** As queue_forward, but framed and sent unencrypted rather than through the secure channel. */
+[[nodiscard]] bool queue_forward_plaintext(UpstreamLink& link,
+                                           std::uint32_t downstreamConnectionId,
+                                           std::uint16_t service,
+                                           std::uint32_t taskId,
+                                           std::uint16_t expectedResponseService,
+                                           std::span<const std::byte> body) noexcept;
+
+/** Sends a request that expects no response and occupies no pending slot. */
+[[nodiscard]] bool send_fire_and_forget(UpstreamLink& link,
+                                        std::uint16_t service,
+                                        std::uint32_t taskId,
+                                        std::span<const std::byte> body) noexcept;
+
+/** Fails every pending forward through `onAbandoned`, then reports and resets the link. */
+void close_link(UpstreamLink& link,
+                const char* reason,
+                void (*onAbandoned)(UpstreamLink& link, const PendingForward& forward)) noexcept;
+
+} // namespace sunrise::server::bap::proxy::upstream_link

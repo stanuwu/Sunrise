@@ -3,17 +3,44 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <span>
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../../../state/activity/mission/runtime.h"
+#include "../../../activity_link_selection.h"
 #include "../../../internal.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
 
 namespace message = middleware::bap::activity_message::sensor_auth_update;
 namespace scriptable = middleware::bap::activity_message::scriptable_auth;
+
+namespace {
+
+/**
+ * Lists each generation exactly one joined link of the activity owns. The caller holds the BAP
+ * session lock, as the roster builder does.
+ * @return The number of generations written.
+ */
+[[nodiscard]] std::uint8_t live_generations_locked(const state::activity::SessionBinding& binding,
+                                                   std::span<std::uint64_t> output) noexcept {
+    std::size_t count = 0;
+    for (const Session& link : sessions()) {
+        const std::uint64_t generation = link.activity.bindingGeneration;
+        std::size_t owners = 0;
+        if (count == output.size() || !joined_mission_link_locked(link, binding)
+            || activity_link_for_generation_locked(binding, generation, owners) != &link) {
+            continue;
+        }
+        output[count++] = generation;
+    }
+    return static_cast<std::uint8_t>(count);
+}
+
+} // namespace
 
 /** Requires an encoded snapshot; retired slots and unknown channels yield no proof. */
 bool collect_roster_device_publications(
@@ -93,6 +120,8 @@ bool stage_roster_device_publications(Session& session,
                                                               boundary.inputSequence,
                                                               boundary.clientMessageSequence)) {
         boundary.sourceGeneration = session.activity.bindingGeneration;
+        boundary.liveGenerationCount =
+            live_generations_locked(session.activity.session, boundary.liveGenerations);
     }
     auto& staged = session.activityRosterStaged;
     std::copy_n(scratch.rosterDevicePublications.begin(), count, staged.devicePublications.begin());

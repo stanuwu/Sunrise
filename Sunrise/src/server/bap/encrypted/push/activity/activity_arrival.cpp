@@ -1,6 +1,7 @@
 #include "activity_arrival.h"
 
 #include "../../../../../middleware/content/packages/tables/region_reader.h"
+#include "../../../activity_mission_seed_lease.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
 namespace {
@@ -108,6 +109,29 @@ resolve_arrival_bubble(const state::activity::defaults::DefaultDestination& defa
 }
 
 } // namespace
+
+bool session_arrival_slice_set(const state::activity::SessionBinding& binding,
+                               const scenarios::Definition& layout,
+                               std::uint16_t authoredArrival,
+                               std::uint16_t& output) noexcept {
+    output = 0;
+    ActivityMissionSeedPlan plan{};
+    bool selected{};
+    if (!selected_mission_seed_locked(binding, plan, selected)) {
+        return false;
+    }
+    if (selected) {
+        if (plan.effectiveRegion > state::activity::membership::kMaximumSliceSetIndex
+            || plan.effectiveRegion / tables::kSliceSetIndexFactor != plan.bubbleOrdinal
+            || !bubble_is_live(layout, plan.bubbleOrdinal)) {
+            return false;
+        }
+        output = static_cast<std::uint16_t>(plan.effectiveRegion);
+        return true;
+    }
+    output = authoredArrival;
+    return output <= state::activity::membership::kMaximumSliceSetIndex;
+}
 
 /** Finds the slice-set index a destination arrives in. */
 std::uint16_t arrival_slice_set(const state::activity::defaults::DefaultDestination& defaults,

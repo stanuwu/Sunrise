@@ -7,8 +7,6 @@
 namespace sunrise::steam::interfaces::methods {
 namespace {
 
-/** Account id for the single local user. The authored `primary_soid` must match it. */
-constexpr std::uint64_t kLocalSteamId = 0x0110000130AA9EC5ULL;
 /** Steam universe value for the public network. */
 constexpr int kConnectedUniverse = 1;
 /** An empty country token turns region filtering off. */
@@ -59,7 +57,7 @@ UserHandle get_user_handle([[maybe_unused]] void* self) noexcept {
  */
 SteamId* get_steam_id([[maybe_unused]] void* self, SteamId* result) noexcept {
     if (result != nullptr) {
-        result->value = kLocalSteamId;
+        result->value = core::settings::get().steam.user.steamId;
     }
     return result;
 }

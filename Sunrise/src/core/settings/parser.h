@@ -26,24 +26,33 @@ public:
     [[nodiscard]] bool parse_root(Settings& output) noexcept;
 
     /** Reads only the root version; a missing version is zero. */
-    [[nodiscard]] bool parse_version(std::uint32_t& output) noexcept;
+    [[nodiscard]] bool parse_version(std::uint32_t& output, bool* compact = nullptr) noexcept;
 
     /** @return The settings name of a supported menu toggle key, or empty when it is not one. */
     [[nodiscard]] static std::string_view ui_toggle_key_name(UINT virtualKey) noexcept;
 
 private:
+    /** @return True when the next unread byte opens a string, for the compact forms. */
+    [[nodiscard]] bool quoted_value() const noexcept;
+    /** Host text, its dotted-quad octets and a port, at the widths both endpoints declare. */
+    [[nodiscard]] bool
+    bap_endpoint(std::array<char, client::server_endpoint::kHostCapacity>& host,
+                 std::array<unsigned char, client::server_endpoint::kAddressOctets>& address,
+                 std::uint16_t& port) noexcept;
+    [[nodiscard]] bool compact_endpoint(client::server_endpoint::Settings& output) noexcept;
+    [[nodiscard]] bool compact_persona(steam::User& output) noexcept;
     /** Parses the Core settings object. */
     [[nodiscard]] bool core(Settings& output) noexcept;
     /** Parses the activity SDK generation block. `lua_declarations` must be unique and boolean. */
     [[nodiscard]] bool
     activity_sdk_generation_settings(ActivitySdkGenerationSettings& output) noexcept;
     /** Parses Client settings. Each supported object may appear at most once. */
-    [[nodiscard]] bool client_settings(client::Settings& output) noexcept;
+    [[nodiscard]] bool client_settings(client::Settings& output, bool& endpointConfigured) noexcept;
     /** Parses the in-game UI boot and input policy. Keys must name a Windows key. */
     [[nodiscard]] bool client_ui_settings(ui::runtime::Settings& output) noexcept;
     /** Parses the external-server block. Each supported key may appear at most once. */
     [[nodiscard]] bool client_external_settings(client::external::Settings& output) noexcept;
-    /** Parses the standalone Server settings object. */
+    /** Parses the shared service settings object. */
     [[nodiscard]] bool server_settings(server::Settings& output) noexcept;
     /** Parses the activation gate block. Every supported key carries a boolean. */
     [[nodiscard]] bool activation_settings(server::activation::Settings& output) noexcept;
@@ -72,6 +81,9 @@ private:
     [[nodiscard]] static std::size_t channel_index(std::string_view name) noexcept;
     /** Maps one settings key name to a Windows SDK virtual key from the supported menu set. */
     [[nodiscard]] static bool ui_toggle_key_value(std::string_view name, UINT& output) noexcept;
+
+    /** The reader's input, kept because the reader offers no look-ahead. */
+    std::string_view text_;
 };
 
 } // namespace sunrise::core::settings::parser

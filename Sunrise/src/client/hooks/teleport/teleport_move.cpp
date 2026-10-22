@@ -154,7 +154,7 @@ void report_skip(const char* reason) noexcept;
  * player's own forward action, instead of writing what that action would have produced.
  */
 void begin_press() noexcept {
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const auto& binding = account.settings.keyBindings.values[kForwardAction];
     if (!binding.primary.has_value()) {
         return;

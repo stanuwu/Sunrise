@@ -23,6 +23,7 @@ namespace {
 /** Slot names let an attach log be searched without a second lookup table. */
 constexpr std::array<const char*, kHandleCount> kSlotNames{
     "transport_kind",
+    "transport_kind_session",
     "authentication_status",
     "set_certificate",
     "http_execute_request",

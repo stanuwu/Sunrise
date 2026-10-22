@@ -1,8 +1,10 @@
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <bcrypt.h>
 
+#include "../crypto/aes_cbc.h"
 #include "../encoding/byte_order.h"
 #include "runtime.h"
 
@@ -171,6 +173,49 @@ bool encode_server_hello(const state::SignOnState& signOn,
     }
     written = kServerHelloEnvelopeSize;
     return true;
+}
+
+bool decode_server_hello(const state::SignOnState& signOn,
+                         std::span<const std::byte> envelope,
+                         state::BapState& output) noexcept {
+    if (envelope.size() != kServerHelloEnvelopeSize
+        || encoding::read_u32_be(envelope.first<encoding::kU32Size>()) != kEnvelopePayloadSize) {
+        return false;
+    }
+    std::array<std::byte, kMacSize> mac{};
+    if (!hmac_sha256(signOn.authenticationKey, envelope.first<kAuthenticatedSize>(), mac)) {
+        return false;
+    }
+    std::byte difference{};
+    for (std::size_t i = 0; i < mac.size(); ++i) {
+        difference |= mac[i] ^ envelope[kAuthenticatedSize + i];
+    }
+    if (difference != std::byte{}) {
+        return false;
+    }
+    std::array<std::byte, kPlaintextSize> plaintext{};
+    if (!crypto::aes::decrypt(signOn.encryptionKey,
+                              envelope.subspan<kEnvelopeIvOffset, kIvSize>(),
+                              envelope.subspan<kEnvelopeCiphertextOffset, kCiphertextSize>(),
+                              plaintext)) {
+        SecureZeroMemory(plaintext.data(), plaintext.size());
+        return false;
+    }
+    const bool validPadding =
+        std::all_of(plaintext.begin() + state::kBapNonceSize + state::kAesKeySize,
+                    plaintext.end(),
+                    [](std::byte b) { return b == kPaddingByte; });
+    if (validPadding) {
+        std::copy_n(plaintext.begin(), output.nonce.size(), output.nonce.begin());
+        std::copy_n(plaintext.begin() + static_cast<std::ptrdiff_t>(output.nonce.size()),
+                    output.sessionKey.size(),
+                    output.sessionKey.begin());
+        std::copy_n(envelope.begin() + kEnvelopeIvOffset,
+                    output.envelopeIv.size(),
+                    output.envelopeIv.begin());
+    }
+    SecureZeroMemory(plaintext.data(), plaintext.size());
+    return validPadding;
 }
 
 } // namespace sunrise::middleware::secure_channel

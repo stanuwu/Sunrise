@@ -12,6 +12,7 @@
 #include "../../../../../state/activity/runtime.h"
 #include "../../../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../../../state/activity_sdk/runtime.h"
+#include "../../../activity_mission_seed_lease.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
 namespace {
@@ -370,6 +371,12 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
         lease = {};
     }
 
+    const state::activity::membership::ClientPlacement placement =
+        client_placement(session, refresh);
+    const std::int32_t heldRegion = state::activity::membership::instantiated_region(placement);
+    if (!inherit_mission_seed_locked(session, heldRegion)) {
+        return refuse_seed("shared_selection");
+    }
     const bool adopting = !lease.configured;
     if (adopting && session.activityRosterSends != 0) {
         return MissionSeedRosterResult::inactive;
@@ -391,9 +398,6 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
     // A region-changing selection publishes nothing of its new region until the client's current
     // leg names it, or the registration races the old world's teardown. The roster epoch is not
     // advanced here; it follows the bubble the client holds.
-    const state::activity::membership::ClientPlacement placement =
-        client_placement(session, refresh);
-    const std::int32_t heldRegion = state::activity::membership::instantiated_region(placement);
     // The public link keeps its own bubble loaded and never instantiates the selected region,
     // so the window also closes on the link that reports one.
     const std::int32_t liveRegion = state::activity::membership::instantiated_region(

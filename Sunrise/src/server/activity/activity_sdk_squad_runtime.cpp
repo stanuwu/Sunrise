@@ -41,7 +41,7 @@ struct PreparedSquad final {
     if (!state::activity::binding_matches(view.binding)) {
         return Status::staleBinding;
     }
-    (void)server::bap::activity_link_view(view.binding, link);
+    (void)server::bap::activity_link_view(view.binding, view.activityClientGeneration, link);
     switch (
         sdk::revalidate(view, view.binding, link.matchingLinks, link.activityClientGeneration)) {
     case sdk::Status::ready:
@@ -156,6 +156,30 @@ struct PreparedSquad final {
         ++matches;
     }
     return matches == 1;
+}
+
+/** Reads the bubble ordinal of a squad's authored occurrence, checked against its scenario. */
+[[nodiscard]] bool authored_bubble_ordinal(const sdk::Catalog& catalog,
+                                           const format::Squad& squad,
+                                           std::uint8_t& output) noexcept {
+    output = 0;
+    const auto occurrences = catalog.occurrences();
+    const auto bubbles = catalog.bubbles();
+    if (squad.occurrenceIndex >= occurrences.size()) {
+        return false;
+    }
+    const format::Occurrence& occurrence = occurrences[squad.occurrenceIndex];
+    if (occurrence.scenarioIndex != squad.scenarioIndex
+        || occurrence.bubbleIndex >= bubbles.size()) {
+        return false;
+    }
+    const format::Bubble& bubble = bubbles[occurrence.bubbleIndex];
+    if (bubble.scenarioIndex != squad.scenarioIndex
+        || bubble.bubbleOrdinal >= layouts::kBubbleCapacity) {
+        return false;
+    }
+    output = static_cast<std::uint8_t>(bubble.bubbleOrdinal);
+    return true;
 }
 
 /** Resolves one validated SDK row to a canonical group or an inline generated group. */
@@ -389,18 +413,12 @@ retirement_eligibility(const sdk::BoundView& view,
                          }) != 1) {
         return result;
     }
-    const auto occurrences = catalog.occurrences();
-    const auto bubbles = catalog.bubbles();
-    if (squads[squadRow].occurrenceIndex >= occurrences.size()) {
-        return result;
-    }
-    const auto& occurrence = occurrences[squads[squadRow].occurrenceIndex];
-    if (occurrence.bubbleIndex >= bubbles.size()
-        || bubbles[occurrence.bubbleIndex].bubbleOrdinal >= layouts::kBubbleCapacity) {
+    std::uint8_t bubble = 0;
+    if (!authored_bubble_ordinal(catalog, squads[squadRow], bubble)) {
         return result;
     }
     result.rsatTag = selected;
-    result.bubble = static_cast<std::uint8_t>(bubbles[occurrence.bubbleIndex].bubbleOrdinal);
+    result.bubble = bubble;
     result.enabled = true;
     return result;
 }
@@ -584,6 +602,25 @@ Status place_reserved(const sdk::BoundView& view,
                  retireOnReturn,
                  destinationSquadRow,
                  spawnRuleSlotRow);
+}
+
+/** Reads the squad's authored bubble without resolving a link or a roster target. */
+Status
+authored_bubble(const sdk::BoundView& view, std::uint32_t squadRow, std::uint8_t& bubble) noexcept {
+    bubble = 0;
+    if (view.catalog == nullptr) {
+        return Status::invalidView;
+    }
+    const auto squads = view.catalog->squads();
+    if (squadRow >= squads.size()) {
+        return Status::invalidSquad;
+    }
+    const format::Squad& squad = squads[squadRow];
+    if (squad.scenarioIndex != view.scenarioRow) {
+        return Status::wrongScenario;
+    }
+    return authored_bubble_ordinal(*view.catalog, squad, bubble) ? Status::ready
+                                                                 : Status::invalidSquad;
 }
 
 /** Returns the concise operator and VM diagnostic name for one result. */

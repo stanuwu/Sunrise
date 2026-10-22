@@ -7,6 +7,7 @@
 #include <detours.h>
 #include <span>
 
+#include "../../../process/freeze/client_process_freeze.h"
 #include "../../detour.h"
 #include "detour_transaction_limits.h"
 
@@ -60,6 +61,7 @@ struct Threads {
     std::array<HANDLE, kThreadLimit> handles{};
     std::array<DWORD, kThreadLimit> ids{};
     std::size_t count{};
+    process::freeze::ProcessLocks processLocks{};
 };
 
 /** Result of checking suspended instruction pointers. */

@@ -63,6 +63,27 @@ Status retain_population(MissionState& candidate,
     return Status::ready;
 }
 
+/** @return True when one report names the placement one population counts. */
+[[nodiscard]] bool reports_population(const SquadPopulation& population,
+                                      const SquadPopulationReport& report) noexcept {
+    return population.attemptGeneration == report.attemptGeneration
+           && population.spawnGeneration != 0 && population.objectTag == report.objectTag
+           && population.registryKey == report.registryKey
+           && population.slotIndex == report.slotIndex;
+}
+
+/** @return True when one admitted report would move a population another link holds. */
+[[nodiscard]] bool moves_population(const MissionState& mission,
+                                    const SquadPopulationReport& report) noexcept {
+    return report.admitted && report.sourceGeneration != 0
+           && std::any_of(mission.squadPopulations.begin(),
+                          mission.squadPopulations.end(),
+                          [&report](const SquadPopulation& population) noexcept {
+                              return reports_population(population, report)
+                                     && population.sourceGeneration != report.sourceGeneration;
+                          });
+}
+
 } // namespace
 
 /** Queueing scene creation invalidates every captured parent before any output is staged. */
@@ -102,6 +123,7 @@ Status retain_scene_populations(MissionState& candidate,
     for (std::size_t index = 0; index < populations.size(); ++index) {
         const auto& population = populations[index];
         if (population.squadRow != intent.burstRows[index] || population.spawnGeneration == 0
+            || population.sourceGeneration == 0
             || population.attemptGeneration != intent.attemptGeneration
             || population.attemptGeneration != candidate.attempt.generation) {
             return Status::intentMismatch;
@@ -120,6 +142,7 @@ Status retain_squad_population(MissionState& candidate,
                                const SquadPopulation& population) noexcept {
     if (intent.kind != IntentKind::placeSquad || intent.squadCount > intent.squadCounts.size()
         || population.squadRow != intent.firstRow || population.spawnGeneration == 0
+        || population.sourceGeneration == 0
         || population.attemptGeneration != intent.attemptGeneration
         || population.attemptGeneration != candidate.attempt.generation) {
         return Status::intentMismatch;
@@ -137,7 +160,12 @@ Status retain_squad_population(MissionState& candidate,
     return retain_population(candidate, intent, population, static_cast<std::int32_t>(expected));
 }
 
-/** Count evidence cannot cross an attempt, placement generation or accepted-input boundary. */
+/**
+ * Count evidence cannot cross an attempt, placement generation, source link or accepted-input
+ * boundary. Another link's report of the same squad is a replica's, not the placement's, unless
+ * it is admitted as the squad's simulation: the evidence gathered so far then follows that link.
+ * Any admitted report moves it, so a move a report could not carry is made by the next one.
+ */
 Status observe_squad_population(const SessionBinding& binding,
                                 const ProgramKey& program,
                                 const SquadPopulationReport& report,
@@ -160,19 +188,27 @@ Status observe_squad_population(const SessionBinding& binding,
             || report.inputSequence > record->mission.issuedInputSequence)) {
         status = Status::invalidTransition;
     }
-    if (status == Status::ready && report.initialized
-        && report.attemptGeneration == record->mission.attempt.generation) {
+    // Only an initialized report or a move can change a population, so no other report copies the
+    // state under the exclusive lock.
+    if (status == Status::ready && report.attemptGeneration == record->mission.attempt.generation
+        && (report.initialized || moves_population(record->mission, report))) {
         MissionState candidate{};
         if (!copy_mission_state(record->mission, candidate)) {
             status = Status::outOfMemory;
         } else {
             bool changed = false;
             for (auto& population : candidate.squadPopulations) {
-                if (population.attemptGeneration != report.attemptGeneration
-                    || population.spawnGeneration == 0 || population.objectTag != report.objectTag
-                    || population.registryKey != report.registryKey
-                    || population.slotIndex != report.slotIndex
-                    || report.inputSequence <= population.inputSequenceAtStage
+                if (!reports_population(population, report)) {
+                    continue;
+                }
+                if (population.sourceGeneration != report.sourceGeneration) {
+                    if (!report.admitted || report.sourceGeneration == 0) {
+                        continue;
+                    }
+                    population.sourceGeneration = report.sourceGeneration;
+                    changed = true;
+                }
+                if (!report.initialized || report.inputSequence <= population.inputSequenceAtStage
                     || report.clientMessageSequence <= population.clientMessageSequenceAtStage
                     || report.inputSequence <= population.lastInputSequence) {
                     continue;

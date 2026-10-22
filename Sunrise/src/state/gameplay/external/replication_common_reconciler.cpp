@@ -71,8 +71,9 @@ Reconciler::observe(const middleware::gameplay::external::CommonState& common) n
     if (phase_ == Phase::ready && observed == requestedGeneration_) {
         return ObserveResult::ready;
     }
-    if (phase_ == Phase::ready && hasPreviousHostGeneration_
-        && observed == previousHostGeneration_) {
+    if (phase_ == Phase::ready
+        && static_cast<std::uint8_t>(requestedGeneration_ - observed)
+               <= priorHostGenerationCount_) {
         return ObserveResult::awaitingRequestedGeneration;
     }
     return fail(ObserveResult::unexpectedGeneration);
@@ -109,8 +110,9 @@ bool Reconciler::advance_host_epoch(std::uint8_t expected, std::uint8_t next) no
         || allocationDomain_ == (std::numeric_limits<std::uint64_t>::max)()) {
         return false;
     }
-    previousHostGeneration_ = expected;
-    hasPreviousHostGeneration_ = true;
+    if (priorHostGenerationCount_ != (std::numeric_limits<std::uint8_t>::max)()) {
+        ++priorHostGenerationCount_;
+    }
     requestedGeneration_ = next;
     ++allocationDomain_;
     entityEpochConfirmed_ = false;

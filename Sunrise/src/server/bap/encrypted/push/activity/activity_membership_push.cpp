@@ -20,6 +20,7 @@
 #include "../../bap_connection_publication.h"
 #include "activity_arrival.h"
 #include "activity_notification_frame.h"
+#include "activity_peer_snapshot.h"
 #include "internal.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
@@ -28,8 +29,6 @@ namespace {
 namespace membership_message = middleware::bap::activity_message::replicate_membership;
 namespace sdk = state::activity_sdk;
 
-/** The one published member always occupies slot zero of both top-level masks. */
-constexpr std::uint8_t kLocalMemberSlot = 0;
 /** Descriptor fields reused by the matching remote activity-member row. */
 constexpr std::size_t kDescriptorMachineOffset = 0;
 constexpr std::size_t kDescriptorNetAddrOffset = 8;
@@ -143,7 +142,8 @@ resolve_generated_world(const state::activity::SessionBinding& source,
                         sdk::generated_world::GeneratedWorldView& output) noexcept {
     const sdk::Snapshot catalog = sdk::snapshot();
     sdk::BoundView activityView{};
-    const sdk::Selection selection{source, activity_link_count_locked(source), bindingGeneration};
+    const sdk::Selection selection{
+        source, activity_link_count_locked(source, bindingGeneration), bindingGeneration};
     return catalog != nullptr
            && sdk::resolve(catalog, selection, activityView) == sdk::Status::ready
            && sdk::generated_world::resolve(activityView, output)
@@ -198,6 +198,11 @@ make_base_snapshot(const Session& session,
     const state::activity::membership::Snapshot& snapshot = mutation.snapshot;
     membership_message::MembershipSnapshot wire{};
     wire.activityHostId = activityHostId;
+    if (mutation.memberDirectory.valid) {
+        project_activity_peers(mutation.memberDirectory, wire);
+    } else {
+        project_activity_peers(mutation.peerSnapshot, wire);
+    }
     wire.identity.memberKey = snapshot.identity.memberKey;
     wire.identity.field1 = snapshot.identity.smallOpaque;
     wire.identity.field2 = snapshot.identity.signedOpaque;
@@ -205,6 +210,7 @@ make_base_snapshot(const Session& session,
     wire.identity.accountSoid = snapshot.identity.accountSoid;
     wire.identity.field5 = snapshot.identity.opaqueSoid;
     wire.identity.field6 = snapshot.identity.secondaryOpaque;
+    project_activity_local_name(wire);
     wire.spawn.state = snapshot.spawn.state;
     wire.spawn.opaqueByte = snapshot.spawn.opaqueByte;
     wire.spawn.opaqueValue = snapshot.spawn.opaqueValue;
@@ -266,7 +272,7 @@ make_wire_snapshot(const Session& session,
         membership_message::CitizenAdvertisement host{};
         std::uint64_t hostGeneration = 0;
         server::gameplay::build_private_host_advertisement(
-            session.activity.source, region.index, kLocalMemberSlot, host, hostGeneration);
+            session.activity.source, region.index, wire.localSlot, host, hostGeneration);
         if (hostGeneration != 0 && build_remote_member(host, wire.remoteViewMember)) {
             retains.hostGenerations[retains.count++] = hostGeneration;
         } else if (hostGeneration != 0) {
@@ -283,20 +289,25 @@ make_wire_snapshot(const Session& session,
         // The published region is entry zero and is the one worth a log line. Reporting each of
         // the others would put one line per region on every push.
         if (entry == 0) {
-            server::gameplay::build_advertisement(session.activity.source,
-                                                  regions[entry],
-                                                  region.reported
-                                                      ? server::gameplay::RegionSource::reported
-                                                      : server::gameplay::RegionSource::arrival,
-                                                  kLocalMemberSlot,
-                                                  candidate,
-                                                  hostGeneration);
+            server::gameplay::build_advertisement(
+                session.activity.source,
+                regions[entry],
+                region.reported ? server::gameplay::RegionSource::reported
+                                : server::gameplay::RegionSource::arrival,
+                wire.localSlot,
+                candidate,
+                hostGeneration,
+                public_region(
+                    session.activity.source, session.activity.bindingGeneration, regions[entry]));
         } else {
-            server::gameplay::build_directory_entry(session.activity.source,
-                                                    regions[entry],
-                                                    kLocalMemberSlot,
-                                                    candidate,
-                                                    hostGeneration);
+            server::gameplay::build_directory_entry(
+                session.activity.source,
+                regions[entry],
+                wire.localSlot,
+                candidate,
+                hostGeneration,
+                public_region(
+                    session.activity.source, session.activity.bindingGeneration, regions[entry]));
         }
         if (!candidate.present) {
             continue;
@@ -354,6 +365,15 @@ bool private_region(const Session& session, std::int32_t region) noexcept {
     return private_region(session.activity.session, session.activity.bindingGeneration, region);
 }
 
+bool public_region(const state::activity::SessionBinding& source,
+                   std::uint64_t bindingGeneration,
+                   std::int32_t region) noexcept {
+    sdk::generated_world::GeneratedWorldView worldView{};
+    bool isPublic = false;
+    return region >= 0 && resolve_generated_world(source, bindingGeneration, worldView)
+           && sdk::generated_world::region_is_public(worldView, region, isPublic) && isPublic;
+}
+
 /** Publicity is authored per bubble, so a bubble's state zero answers for all 8 of its states. */
 bool region_publicity_mask(const Session& session, std::uint64_t& mask) noexcept {
     mask = 0;
@@ -387,7 +407,10 @@ server::gameplay::AdvertisementState region_advertisement(const Session& session
                    ? server::gameplay::AdvertisementState::ready
                    : server::gameplay::AdvertisementState::pending;
     }
-    return server::gameplay::advertisement_state(session.activity.source, region);
+    return server::gameplay::advertisement_state(
+        session.activity.source,
+        region,
+        public_region(session.activity.source, session.activity.bindingGeneration, region));
 }
 
 /** Appends one current membership svc9 notification and advances its local nonce. */
@@ -448,7 +471,10 @@ bool append_membership_notification(Scratch& scratch,
                                            response,
                                            written);
     if (encoded) {
-        stage_membership_body_record(session, std::span(scratch.responseBody).first(messageSize));
+        stage_membership_body_record(session,
+                                     std::span(scratch.responseBody).first(messageSize),
+                                     activity.membershipMutation.sessionId,
+                                     snapshot.revision);
     }
     SecureZeroMemory(scratch.responseBody.data(), membership_message::encoded_size(snapshot));
     if (encoded) {
@@ -469,7 +495,7 @@ bool append_membership_notification(Scratch& scratch,
     return encoded;
 }
 
-/** Appends the membership body a public-target join answers. */
+/** Appends the initial membership body for a newly selected activity binding. */
 bool append_join_membership_notification(Scratch& scratch,
                                          const Session& session,
                                          const activity_message::ActivityPlan& activity,
@@ -504,6 +530,12 @@ bool append_join_membership_notification(Scratch& scratch,
                                      nonce,
                                      response,
                                      written);
+    if (encoded) {
+        stage_membership_body_record(session,
+                                     std::span(scratch.responseBody).first(messageSize),
+                                     activity.membershipMutation.sessionId,
+                                     snapshot.revision);
+    }
     SecureZeroMemory(scratch.responseBody.data(), membership_message::encoded_size(snapshot));
     if (encoded) {
         middleware::secure_channel::advance_nonce(nonce);

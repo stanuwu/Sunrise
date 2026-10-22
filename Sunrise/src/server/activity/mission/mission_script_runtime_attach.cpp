@@ -35,7 +35,8 @@ namespace {
 [[nodiscard]] bool still_exact(const RuntimeInstance& instance) noexcept {
     server::bap::ActivityLinkView link{};
     lua_vm::WorldGenerationIdentity worldGeneration{};
-    return server::bap::activity_link_view(instance.view.binding, link)
+    return server::bap::activity_link_view(
+               instance.view.binding, instance.view.activityClientGeneration, link)
            && link.publicTarget == instance.publicTarget
            && sdk::revalidate(instance.view,
                               instance.view.binding,
@@ -50,12 +51,16 @@ namespace {
 }
 
 /**
- * Re-points one open program at the current ActivityClient generation.
+ * Rebuilds one open program view for its exact owning ActivityClient generation.
  * @return True when the instance holds an exact view of the same program.
  */
 [[nodiscard]] bool rebind_instance(RuntimeInstance& instance) noexcept {
     server::bap::ActivityLinkView link{};
-    if (!server::bap::activity_link_view(instance.view.binding, link) || !link.joined) {
+    if ((!server::bap::activity_link_view(
+             instance.view.binding, instance.view.activityClientGeneration, link)
+         || !link.joined)
+        && (!server::bap::mission_activity_link_view(instance.view.binding, link)
+            || !link.joined)) {
         return false;
     }
     const sdk::Snapshot catalog = sdk::snapshot();
@@ -77,6 +82,14 @@ namespace {
     if (generated::resolve(view, worldView) != generated::BindStatus::ready) {
         return false;
     }
+    // The pin bubbles depend only on the catalog and scenario, and the catalog is the same here.
+    if (view.scenarioRow != instance.view.scenarioRow) {
+        std::vector<PinBubbleRow> pinBubbles{};
+        if (!bind_pin_bubbles(view, pinBubbles)) {
+            return false;
+        }
+        instance.pinBubbles = std::move(pinBubbles);
+    }
     const bool sourceChanged =
         view.activityClientGeneration != instance.view.activityClientGeneration;
     instance.view = std::move(view);
@@ -92,7 +105,9 @@ namespace {
         return false;
     }
     if (sourceChanged) {
-        clear_sense_levels(instance);
+        // The next native report establishes its own baseline, not a delta from another client.
+        reset_shared_observations(instance);
+        instance.activeRegion = link.sliceSetIndex;
     }
     mission_state::Snapshot snapshot{};
     if (!mission_state::state_snapshot(instance.view.binding, snapshot)) {
@@ -271,10 +286,14 @@ enum class InitialStateGate : std::uint8_t {
         return InitialStateGate::failed;
     }
     instance.initialStateSelected = true;
+    // The launch lands in the declared initial region, so the selection owes no move, and a
+    // player who walks out of that region afterwards is not moved back.
     // `plan.effectiveRegion` is the authored-state key; several authored states share one client
     // slice-set region, so the client link cannot report it. The lease revision reaching the
     // transport is the publication acknowledgement.
     return seed.publicationPending || seed.revision == 0 || seed.publishedRevision != seed.revision
+                   || !server::bap::mission_seed_publication_ready(
+                       instance.view.binding, instance.view.activityClientGeneration, true)
                ? InitialStateGate::pending
                : InitialStateGate::ready;
 }
@@ -366,16 +385,15 @@ enum class InitialStateGate : std::uint8_t {
         return AttachResult::programError;
     }
     instance.programStatus = ProgramStatus::loaded;
-    std::array<state::activity::SessionRosterRow, state::activity::kSessionCapacity> roster{};
-    std::size_t rosterCount = 0;
-    if (!state::activity::snapshot_session_roster(roster, rosterCount)
-        || rosterCount > roster.size()) {
-        lua_vm::fault(instance.vm, "initial peer snapshot could not be read");
+    // on_load and on_start may read a device request as applied, which needs the live links now.
+    static_cast<void>(read_live_links(instance));
+    if (!publish_device_sources(instance, instance.vm)) {
+        lua_vm::fault(instance.vm, "device request source allocation failed");
         instance.programStatus = ProgramStatus::programError;
-        note_vm_status(instance, "open", "peer_snapshot_refused");
         return AttachResult::programError;
     }
-    push_session_roster_edges(instance, std::span(roster).first(rosterCount));
+    // The first read records the current peers, so a reattach never replays them.
+    push_session_roster_edges(instance);
     instance.initialStateDeclared =
         lua_vm::initial_state_region(instance.vm, instance.initialStateRegion);
     if (instance.initialStateDeclared) {
@@ -418,6 +436,7 @@ enum class InitialStateGate : std::uint8_t {
 
 /** Binds one host instance to a free slot once its link, SDK view and world view all resolve. */
 void attach_instance(const host::InstanceSnapshot& hostInstance,
+                     std::span<const state::activity::SessionRosterRow> roster,
                      const sdk::Snapshot& catalog,
                      std::uint64_t now) noexcept {
     if (find_instance(hostInstance.binding) != nullptr) {
@@ -429,7 +448,17 @@ void attach_instance(const host::InstanceSnapshot& hostInstance,
         return;
     }
     server::bap::ActivityLinkView link{};
-    if (!server::bap::activity_link_view(hostInstance.binding, link)) {
+    // Host snapshots are session-scoped and have no client owner yet. The lowest joined native
+    // member owns the session-wide program: the primary while present, so a guest sharing its
+    // binding cannot replace it, and the first remaining peer once the primary has left.
+    std::uint64_t memberKey{};
+    for (const auto& row : roster) {
+        if (row.joined && state::activity::same_binding(row.binding, hostInstance.binding)) {
+            memberKey = row.presentMemberKey;
+            break;
+        }
+    }
+    if (!server::bap::activity_link_view_for_member(hostInstance.binding, memberKey, link)) {
         report_attach_result(
             hostInstance.binding, AttachResult::noActivityLink, "no_activity_link");
         return;
@@ -471,7 +500,14 @@ void attach_instance(const host::InstanceSnapshot& hostInstance,
             hostInstance.binding, AttachResult::capacity, "capacity", view.activityRow);
         return;
     }
+    std::vector<PinBubbleRow> pinBubbles{};
+    if (!bind_pin_bubbles(view, pinBubbles)) {
+        report_attach_result(
+            hostInstance.binding, AttachResult::capacity, "pin_bubble_capacity", view.activityRow);
+        return;
+    }
     instance->view = std::move(view);
+    instance->pinBubbles = std::move(pinBubbles);
     instance->worldView = std::move(worldView);
     instance->publicTarget = link.publicTarget;
     instance->playerKey = link.playerKey;
@@ -543,7 +579,7 @@ void synchronize_instances(std::uint64_t now) noexcept {
             instance.occupied && is_active(diagnostics, instance.view.binding);
         const bool bindingRetained =
             instance.occupied && state::activity::binding_matches(instance.view.binding);
-        // A generation change only stales the view, so rebind and keep the program.
+        // Rebuild a stale SDK/world view only while the exact client owner remains live.
         if (instance.occupied && bindingActive && bindingRetained && !still_exact(instance)
             && rebind_instance(instance)) {
             log_line(core::log::Level::debug, &instance, "rebind", "generation");
@@ -557,19 +593,20 @@ void synchronize_instances(std::uint64_t now) noexcept {
             clear_instance(instance, !bindingRetained);
         }
     }
+    for (RuntimeInstance& instance : g_instances) {
+        if (instance.occupied) {
+            push_session_roster_edges(instance);
+        }
+    }
     std::array<state::activity::SessionRosterRow, state::activity::kSessionCapacity> roster{};
     std::size_t rosterCount = 0;
     static_cast<void>(state::activity::snapshot_session_roster(roster, rosterCount));
-    for (RuntimeInstance& instance : g_instances) {
-        if (instance.occupied) {
-            push_session_roster_edges(instance, {roster.data(), rosterCount});
-        }
-    }
     const sdk::Snapshot catalog = sdk::snapshot();
     publish_fireteam_life(now);
     for (std::size_t index = 0; index < diagnostics.instanceCount; ++index) {
         if (diagnostics.instances[index].active) {
-            attach_instance(diagnostics.instances[index], catalog, now);
+            attach_instance(
+                diagnostics.instances[index], {roster.data(), rosterCount}, catalog, now);
         }
     }
 }

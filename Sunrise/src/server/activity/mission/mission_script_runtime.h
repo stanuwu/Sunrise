@@ -69,6 +69,7 @@ struct DiagnosticsSnapshot final {
 struct ActorCommandPolicyRequest final {
     state::activity::SessionBinding binding{};
     std::array<std::byte, 32> sdkBuildSha256{};
+    std::uint64_t activityClientGeneration{};
     std::uint32_t squadRow{};
     std::uint32_t commandRow{};
     std::uint32_t commandSelector{};

@@ -13,7 +13,12 @@
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/datagen/definitions.h"
+#include "../../../../../middleware/datagen/presence/presence_record_encoder.h"
+#include "../../../../../state/account/account_context.h"
 #include "../../../../../state/account/inventory/inventory_state.h"
+#include "../../../../../state/activity/destination/activity_destination_snapshot.h"
+#include "../../../../../state/activity/fireteam.h"
+#include "../../../../../state/activity/member_presence.h"
 #include "../../../../../state/build_data/items/item_catalog.h"
 #include "../../../../../state/equipment/light/resolution/configured_equipment_light_resolver.h"
 #include "../../../../../state/runtime/runtime.h"
@@ -24,16 +29,8 @@
 namespace sunrise::server::bap::encrypted::push::snapshot {
 namespace {
 
-/** Capacity for one social-roster status line. */
-constexpr std::size_t kReportCapacity = 160;
-
-/** Family-two member byte offset for the signed Power field. */
-constexpr std::size_t kPowerOffset = 20;
-/** Where the member record carries the emblem the panel row reads. */
-constexpr std::size_t kEmblemDefinitionOffset = 36;
-constexpr std::size_t kEmblemVariantOffset = 38;
-/** Family-two member byte offset for the account Triumph score field. */
-constexpr std::size_t kTriumphScoreOffset = 44;
+/** One line carries the soid, the object count, the encoded size and the resolved member row. */
+constexpr std::size_t kReportCapacity = 224;
 
 /**
  * Absent definition index. The variant field always takes it, because a real value there indexes
@@ -73,21 +70,70 @@ constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFFU;
     return false;
 }
 
-/**
- * Computes the selected character's Power, the same value the banner and character card show.
- * @param account Account snapshot, already read under the lock by the caller.
- * @param power Receives the equipment light plus the artifact bonus, or 0 on failure.
- * @return False when nothing is selected or an equipped item cannot be resolved.
- */
-[[nodiscard]] bool selected_character_power(const state::AccountState& account,
-                                            std::int32_t& power) noexcept {
-    power = 0;
-    for (std::size_t index = 0; index < account.characterCount; ++index) {
-        if (account.characters[index].selected) {
-            return state::equipment::light::resolution::character_light(account, index, power);
-        }
+/** Zero is the record's own fill, so an unresolved fireteam writes nothing. */
+constexpr std::uint32_t kNoGroupKey = 0;
+/** All-one bits are the native no-group value and must not be minted from a fold. */
+constexpr std::uint32_t kGroupKeySentinelNone = 0xFFFFFFFFU;
+
+/** FNV-1a over one 64-bit value, seeded so several values can be folded in sequence. */
+[[nodiscard]] std::uint32_t fold(std::uint32_t seed, std::uint64_t value) noexcept {
+    std::uint32_t key = seed;
+    for (std::size_t index = 0; index < sizeof value; ++index) {
+        key ^= static_cast<std::uint32_t>((value >> (index * 8)) & 0xFFU);
+        key *= 16777619U;
     }
-    return false;
+    return key;
+}
+
+/**
+ * Folds one fireteam's representative account into the shared roster group key.
+ * Every member of an established fireteam folds the same representative, so the panel groups
+ * them under one key even when no client publishes a native one.
+ */
+[[nodiscard]] std::uint32_t folded_group_key(std::uint64_t representative) noexcept {
+    const auto key = fold(2166136261U, representative);
+    // Both members land here together, so the substitute is still one shared key.
+    return key == kNoGroupKey || key == kGroupKeySentinelNone ? 1U : key;
+}
+
+/** The member record's fireteam and activity fields, resolved from server State. */
+struct MemberFacts final {
+    std::int16_t activityIndex{-1};
+    std::int16_t previousActivityIndex{-1};
+    std::uint32_t groupKey{};
+    std::int8_t memberCount{};
+};
+
+/**
+ * Resolves the fireteam and activity fields one account root publishes.
+ * The account's own native publication owns the key when it has one; otherwise the established
+ * fireteam supplies it, which is what gives two players who publish none a shared key. The seat
+ * names the live activity: a follower who never sent a launch request has nothing else.
+ * @param account Account snapshot already read under the profile lock.
+ * @param characterSoid Selected character the member record is about.
+ * @param facts Cleared, then filled with whatever resolves.
+ */
+void resolve_member_facts(const state::AccountState& account,
+                          std::uint64_t characterSoid,
+                          MemberFacts& facts) noexcept {
+    facts = {};
+    if (account.presence.native.hasGroup
+        && account.presence.native.characterSoid == characterSoid) {
+        facts.groupKey = account.presence.native.groupKey;
+        facts.memberCount = account.presence.native.memberCount;
+    } else if (const auto representative =
+                   state::activity::fireteam::representative(account.primarySoid);
+               representative != 0) {
+        facts.groupKey = folded_group_key(representative);
+    }
+    state::activity::destination::DestinationSelection seat{};
+    const auto seatSession =
+        state::activity::presence::seat_session(account.primarySoid, characterSoid);
+    if (seatSession != 0 && state::activity::destination::snapshot(seatSession, seat)
+        && seat.activityIndex >= 0) {
+        facts.activityIndex = seat.activityIndex;
+        facts.previousActivityIndex = seat.sourceActivityIndex;
+    }
 }
 
 } // namespace
@@ -100,14 +146,22 @@ bool prepare_social_roster(Scratch& scratch,
                            Prepared& prepared) noexcept {
     // Both slot ids are resolved here, so the caller's single id is not used.
     (void)objectId;
-    const state::AccountState account = state::account_snapshot();
-    if (account.primarySoid == 0 || reservation.rawWriteOffset > scratch.plaintext.size()) {
+    auto& account = scratch.accountImage;
+    const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
+    const state::ScopedAccountView bind(handle);
+    if (!state::bound_account_snapshot(account)) {
+        return report_failure("social_roster_state");
+    }
+    if (account.primarySoid == 0 || account.primarySoid != subscription.familyRootSoid
+        || reservation.rawWriteOffset > scratch.plaintext.size()) {
         return report_failure("social_roster_state");
     }
     const auto destination = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     // The body is the directory record followed by the member record.
-    constexpr std::size_t kTotal = middleware::datagen::kSocialRosterDirectorySize
-                                   + middleware::datagen::kSocialRosterMemberSize;
+    const auto characterSoid = state::account::selected_character_soid(account);
+    const std::size_t kTotal =
+        middleware::datagen::kSocialRosterDirectorySize
+        + (characterSoid != 0 ? middleware::datagen::kSocialRosterMemberSize : 0);
     if (destination.size() < kTotal) {
         return report_failure("social_roster_storage");
     }
@@ -117,14 +171,40 @@ bool prepare_social_roster(Scratch& scratch,
     if (!selected_emblem_definition_index(account, emblem, emblemHash)) {
         emblem = kEmptyDefinitionIndex;
     }
-    // Preserve the zero wire fallback when Power resolution fails.
-    std::int32_t power = 0;
-    if (!selected_character_power(account, power)) {
-        power = 0;
+    MemberFacts facts{};
+    resolve_member_facts(account, characterSoid, facts);
+    middleware::datagen::presence::Member member{};
+    member.characterSoid = characterSoid;
+    member.emblem = emblem;
+    for (std::size_t i = 0; i < account.characterCount; ++i) {
+        const auto& character = account.characters[i];
+        if (character.soid != characterSoid) {
+            continue;
+        }
+        member.level = character.level;
+        member.title = character.equippedTitleRecordIndex;
+        member.titleKind = static_cast<std::int8_t>(character.gender);
+        // The seat is where this account really is. Its own character row only carries what a
+        // launch request wrote, so a follower who sent none read In Orbit for everyone.
+        if (facts.activityIndex >= 0) {
+            member.activityIndex = facts.activityIndex;
+            member.previousActivityIndex = facts.previousActivityIndex;
+        } else if (character.currentActivityIndex <= (std::numeric_limits<std::int16_t>::max)()) {
+            member.activityIndex = static_cast<std::int16_t>(character.currentActivityIndex);
+        }
+        // Preserve the zero wire fallback when Power resolution fails.
+        if (!state::equipment::light::resolution::character_light(account, i, member.light)) {
+            member.light = 0;
+        }
     }
+    member.groupKey = facts.groupKey;
+    member.memberCount = facts.memberCount;
     // The client reads the score as a signed 32-bit value; the store never publishes it negative.
-    const std::uint32_t storedScore = state::unlocks::records::score();
-    const std::int32_t triumphScore = static_cast<std::int32_t>(
+    // A remote account's scope cannot read private SQLite, so its score is zero without a store
+    // read that would fail and count as a store failure.
+    const std::uint32_t storedScore =
+        state::local_account_access() ? state::unlocks::records::score() : 0U;
+    member.triumphScore = static_cast<std::int32_t>(
         (std::min)(storedScore,
                    static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())));
 
@@ -136,35 +216,26 @@ bool prepare_social_roster(Scratch& scratch,
     /**
      * Writes one object and stages it.
      * Both lookups match on the first qword, so the directory leads with the account soid and
-     * repeats it at +8 as the link the member record leads with. Only the member has the Power,
-     * the emblem and the Triumph score.
+     * links its selected character at +8. That character owns the member record and its Power,
+     * emblem and Triumph score.
      */
     const auto emit = [&](std::size_t size, std::uint32_t id, bool directory) noexcept {
-        if (objectCount >= staged.objects.size()
-            || size < kTriumphScoreOffset + sizeof triumphScore) {
+        if (objectCount >= staged.objects.size()) {
             return false;
         }
         const auto body = destination.subspan(rawUsed, size);
-        std::fill(body.begin(), body.end(), std::byte{});
-        if (directory) {
-            std::memcpy(body.data(), &account.primarySoid, sizeof account.primarySoid);
-            std::memcpy(body.data() + sizeof account.primarySoid,
-                        &account.primarySoid,
-                        sizeof account.primarySoid);
-        } else {
-            std::memcpy(body.data(), &account.primarySoid, sizeof account.primarySoid);
-            std::memcpy(body.data() + kPowerOffset, &power, sizeof power);
-            std::memcpy(body.data() + kEmblemDefinitionOffset, &emblem, sizeof emblem);
-            std::memcpy(body.data() + kEmblemVariantOffset,
-                        &kEmptyDefinitionIndex,
-                        sizeof kEmptyDefinitionIndex);
-            std::memcpy(body.data() + kTriumphScoreOffset, &triumphScore, sizeof triumphScore);
+        const bool encoded = directory
+                                 ? middleware::datagen::presence::encode_directory(
+                                       account.primarySoid, characterSoid, account.presence, body)
+                                 : middleware::datagen::presence::encode_member(member, body);
+        if (!encoded) {
+            return false;
         }
         std::size_t compressedSize = 0;
         if (!compress_object(scratch,
                              body,
                              id,
-                             account.primarySoid,
+                             directory ? account.primarySoid : characterSoid,
                              compressedExtent,
                              staged.objects[objectCount],
                              compressedSize)) {
@@ -183,9 +254,10 @@ bool prepare_social_roster(Scratch& scratch,
               true)) {
         return report_failure("social_roster_directory");
     }
-    if (!emit(middleware::datagen::kSocialRosterMemberSize,
-              middleware::datagen::kSocialRosterMemberObjectId,
-              false)) {
+    if (characterSoid != 0
+        && !emit(middleware::datagen::kSocialRosterMemberSize,
+                 middleware::datagen::kSocialRosterMemberObjectId,
+                 false)) {
         return report_failure("social_roster_member");
     }
 
@@ -207,21 +279,41 @@ bool prepare_social_roster(Scratch& scratch,
     const int written = std::snprintf(line.data(),
                                       line.size(),
                                       "ev=queuez stage=social_roster result=ok soid=0x%016llX"
-                                      " objects=%zu bytes=%zu emblem=%u hash=0x%08X power=%d"
-                                      " score=%d",
+                                      " objects=%zu bytes=%zu emblem=%u hash=0x%08X"
+                                      " activity=%d prev=%d group=0x%08X power=%d score=%d",
                                       static_cast<unsigned long long>(account.primarySoid),
                                       objectCount,
                                       rawUsed,
                                       static_cast<unsigned>(emblem),
                                       static_cast<unsigned>(emblemHash),
-                                      static_cast<int>(power),
-                                      static_cast<int>(triumphScore));
+                                      static_cast<int>(member.activityIndex),
+                                      static_cast<int>(member.previousActivityIndex),
+                                      member.groupKey,
+                                      static_cast<int>(member.light),
+                                      static_cast<int>(member.triumphScore));
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,
                          {line.data(), static_cast<std::size_t>(written)});
     }
     return true;
+}
+
+std::uint32_t social_roster_revision(Scratch& scratch, std::uint64_t familyRootSoid) noexcept {
+    auto& account = scratch.accountImage;
+    const auto handle = state::account_for_subscription_root(familyRootSoid);
+    const state::ScopedAccountView bind(handle);
+    if (!state::bound_account_snapshot(account)) {
+        return 0;
+    }
+    MemberFacts facts{};
+    resolve_member_facts(account, state::account::selected_character_soid(account), facts);
+    // A pure function of the served values, so it settles by itself and never repushes a body
+    // the subscriber already holds.
+    std::uint32_t key = fold(2166136261U, facts.groupKey);
+    key = fold(key, static_cast<std::uint16_t>(facts.activityIndex));
+    key = fold(key, static_cast<std::uint16_t>(facts.previousActivityIndex));
+    return fold(key, static_cast<std::uint8_t>(facts.memberCount));
 }
 
 } // namespace sunrise::server::bap::encrypted::push::snapshot

@@ -15,10 +15,31 @@ namespace {
     if (reserve < kMinimumServerReserve || static_cast<std::size_t>(reserve) >= kSlotCount) {
         return false;
     }
-    return kSlotCount - static_cast<std::size_t>(reserve) >= kClientLeaseMinimum;
+    const auto available = kSlotCount - static_cast<std::size_t>(reserve);
+    // Member leases split this pool into disjoint blocks even when only one player has joined.
+    return available >= kClientLeaseMinimum
+           && available / network_capacity::kActivityPlayers >= kMinimumClientJoinGrant;
 }
 
 } // namespace
+
+std::uint16_t effective_relay_port(const Settings& settings) noexcept {
+    if (settings.topology == Topology::disabled || !settings.relayPort
+        || settings.relayPort % kPortAlignment != 0) {
+        return 0;
+    }
+    const std::uint32_t lastHost =
+        static_cast<std::uint32_t>(settings.port)
+        + static_cast<std::uint32_t>(kHostPortCount - 1) * kPortAlignment;
+    std::uint32_t port = settings.relayPort;
+    while (port <= (std::numeric_limits<std::uint16_t>::max)()) {
+        if (port != kDiscoveryPort && !(settings.port <= port && port <= lastHost)) {
+            return static_cast<std::uint16_t>(port);
+        }
+        port += kPortAlignment;
+    }
+    return 0;
+}
 
 /** Checks one gameplay block for internal consistency. */
 bool valid(const Settings& settings) noexcept {
@@ -39,7 +60,7 @@ bool valid(const Settings& settings) noexcept {
     if (settings.port <= kDiscoveryPort && kDiscoveryPort <= lastPort) {
         return false;
     }
-    if (!reserve_fits(settings.serverReserveCount)) {
+    if (!effective_relay_port(settings) || !reserve_fits(settings.serverReserveCount)) {
         return false;
     }
     // The grant only has to name a real slot count. The join caps it at whatever the reserve

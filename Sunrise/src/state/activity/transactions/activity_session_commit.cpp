@@ -3,6 +3,7 @@
 #include "../../runtime/storage/internal.h"
 #include "../destination/activity_destination_validation.h"
 #include "../runtime.h"
+#include "../shared_allocation.h"
 #include "internal.h"
 
 namespace sunrise::state::activity {
@@ -23,6 +24,13 @@ bool commit(PendingAllocation& allocation) noexcept {
     // Take the plan first so no transaction can replay, pass or fail.
     const PendingAllocation prepared = allocation;
     allocation = {};
+    if (prepared.shared) {
+        return transactions::commit_shared_allocation(prepared);
+    }
+    if (prepared.reused || prepared.launchParty.publisherAccount
+        || prepared.launchPartyGuard.publisherAccount) {
+        return false;
+    }
     // A fresh plan must name the id the allocator is about to publish. A re-created plan names one
     // it published before, and its prepare has already proved the counter is behind the allocator.
     const bool namesNextId =

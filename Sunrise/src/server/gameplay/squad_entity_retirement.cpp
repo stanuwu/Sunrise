@@ -25,6 +25,8 @@ policy::Store g_store;
 policy::Store g_propStore;
 struct Target final {
     std::uint64_t session{}, revision{}, generation{};
+    /** Link the squad's body was delivered on; only a delivery changes it. */
+    std::uint64_t deliveredGeneration{};
     policy::Eligibility eligibility{};
 };
 std::vector<Target> g_targets;
@@ -448,9 +450,12 @@ void record_delivered_target(const state::activity::SessionBinding& binding,
                 binding.sessionId,
                 generation,
                 {pending.target.registryKey, pending.target.slotIndex, pending.target.slotType});
+            // A squad's body lives on the one link it was staged on, so this delivery re-pins the
+            // squad: its rows on any link go. Other squads keep their links' rows. A release a
+            // former link already captured stays, because it covers only that link's own trees.
             std::erase_if(g_targets, [&](const Target& row) {
                 return row.session == binding.sessionId
-                       && (row.revision != binding.createdRevision || row.generation != generation
+                       && (row.revision != binding.createdRevision
                            || (row.eligibility.squad.key == pending.target.registryKey
                                && row.eligibility.squad.index == pending.target.slotIndex));
             });
@@ -459,7 +464,7 @@ void record_delivered_target(const state::activity::SessionBinding& binding,
                 identities::kSourceCapacity * identities::kSlotCapacity;
             if (enabled && g_targets.size() < kMaximumTargets) {
                 g_targets.push_back(
-                    {binding.sessionId, binding.createdRevision, generation, selected});
+                    {binding.sessionId, binding.createdRevision, generation, generation, selected});
             }
         }
     } catch (...) {
@@ -467,6 +472,41 @@ void record_delivered_target(const state::activity::SessionBinding& binding,
             binding.sessionId,
             generation,
             {pending.target.registryKey, pending.target.slotIndex, pending.target.slotType});
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+}
+/**
+ * A link that is not live re-pins nothing, so its squad's target moves as the squad's population
+ * does, and returns to the delivering link once that link is live again.
+ */
+void follow_squad(const state::activity::SessionBinding& binding,
+                  std::uint64_t generation,
+                  identities::SquadReference squad,
+                  std::span<const std::uint64_t> live) noexcept {
+    // The delivering link changes only at a delivery, so a pass whose pin copy predates one cannot
+    // move the target off a live delivering link.
+    const auto followed = [&](const Target& row) noexcept {
+        return std::find(live.begin(), live.end(), row.deliveredGeneration) != live.end()
+                   ? row.deliveredGeneration
+                   : generation;
+    };
+    const auto due = [&](const Target& row) noexcept {
+        return row.session == binding.sessionId && row.revision == binding.createdRevision
+               && row.eligibility.squad.key == squad.key
+               && row.eligibility.squad.index == squad.index && row.generation != followed(row);
+    };
+    // Every admitted squad report asks, so the common answer is read without blocking capture.
+    AcquireSRWLockShared(&g_lock);
+    const bool moves = std::any_of(g_targets.begin(), g_targets.end(), due);
+    ReleaseSRWLockShared(&g_lock);
+    if (!moves) {
+        return;
+    }
+    AcquireSRWLockExclusive(&g_lock);
+    for (Target& row : g_targets) {
+        if (due(row)) {
+            row.generation = followed(row);
+        }
     }
     ReleaseSRWLockExclusive(&g_lock);
 }

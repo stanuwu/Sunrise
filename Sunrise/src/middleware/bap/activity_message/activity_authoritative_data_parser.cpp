@@ -101,7 +101,8 @@ bool parse_client_authoritative_data(std::span<const std::byte> input,
 
     bool present = false;
     const bool walked =
-        read_presence(reader, present) && (!present || skip_opaque_root_branch(reader))
+        read_presence(reader, present)
+        && (!present || read_transport_branch(reader, parsed.transport))
         && read_presence(reader, present) && (!present || read_transition_branch(reader, parsed))
         && read_presence(reader, present) && (!present || read_spawn(reader, parsed))
         && read_presence(reader, present) && (!present || read_teleport(reader, parsed))

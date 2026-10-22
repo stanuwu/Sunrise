@@ -8,6 +8,7 @@
 #include "../../encoding/bit_reader.h"
 #include "../../encoding/bit_writer.h"
 #include "../descriptor/join_descriptor.h"
+#include "native_player_profile.h"
 
 namespace sunrise::middleware::gameplay::group {
 
@@ -27,6 +28,8 @@ enum class SessionMessageId : std::uint8_t {
 
 /** Declared decoded sizes the registry holds for the ids this host sends. */
 inline constexpr std::uint32_t kLeaveAcknowledgeSize = 8;
+/** See kLeaveAcknowledgeSize. */
+inline constexpr std::uint32_t kPeerEstablishSize = 8;
 /** See kLeaveAcknowledgeSize. */
 inline constexpr std::uint32_t kTimeSynchronizeSize = 48;
 /** See kLeaveAcknowledgeSize. */
@@ -155,6 +158,8 @@ struct MembershipPlayer {
     std::uint64_t accountSoid{};
     /** Character soid the same field carries second. */
     std::uint64_t characterSoid{};
+    /** Profile retained from this player's native add and sparse publications. */
+    NativePlayerProfile nativeProfile{};
 };
 
 /** Complete membership snapshot one host publishes. */
@@ -183,5 +188,9 @@ struct MembershipUpdate {
  */
 [[nodiscard]] bool write_membership_update(encoding::bits::Writer& writer,
                                            const MembershipUpdate& body) noexcept;
+
+/** Native unassigned sub-block-A scalar encoding (record bytes are all -1).
+ * The native add initializes these bytes to -1; the name comes from the owning player. */
+inline constexpr std::uint64_t kProfileSubAWire = 0;
 
 } // namespace sunrise::middleware::gameplay::group

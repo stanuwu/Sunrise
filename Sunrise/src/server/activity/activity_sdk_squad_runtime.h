@@ -72,6 +72,17 @@ place_reserved(const state::activity_sdk::BoundView& view,
                std::optional<std::uint32_t> destinationSquadRow = std::nullopt,
                std::optional<std::uint32_t> spawnRuleSlotRow = std::nullopt) noexcept;
 
+/**
+ * Reads the bubble a squad's authored occurrence belongs to, which names the client that can
+ * instantiate its members. It reads the package alone, so it holds on every link.
+ * @param bubble Receives the authored bubble ordinal; zero on refusal.
+ * @return ready; invalidView without a catalog; wrongScenario for another scenario's squad;
+ * invalidSquad for a row, occurrence or bubble outside the catalog.
+ */
+[[nodiscard]] Status authored_bubble(const state::activity_sdk::BoundView& view,
+                                     std::uint32_t squadRow,
+                                     std::uint8_t& bubble) noexcept;
+
 /** @return Stable concise text for one squad runtime result. */
 [[nodiscard]] const char* status_name(Status status) noexcept;
 

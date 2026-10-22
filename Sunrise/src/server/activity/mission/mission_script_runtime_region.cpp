@@ -25,14 +25,6 @@ void arm_state_region_teleport(RuntimeInstance& instance,
         || plan.effectiveRegion > static_cast<std::uint32_t>(membership::kMaximumSliceSetIndex)) {
         return;
     }
-    const std::int32_t reported = membership::player_region(instance.view.binding.sessionId);
-    // A sibling-state transition still needs the host teleport to order the spawn.
-    if (reported == static_cast<std::int32_t>(plan.effectiveRegion)) {
-        // Already there. Clear any earlier arm so the mirror owns the block again.
-        static_cast<void>(membership::arm_host_teleport(
-            instance.view.binding.sessionId, membership::kAbsentSliceSetIndex, 0));
-        return;
-    }
     namespace dest = ::sunrise::state::activity::destination;
     // The move carries the spawn set the client filters its spawn points by, not a slice-set name.
     // A set answers only the slice sets of the bubble that declares it; the empty-name hash
@@ -41,10 +33,11 @@ void arm_state_region_teleport(RuntimeInstance& instance,
     const std::uint32_t declared = membership::declared_spawn_set(instance.view.binding.sessionId);
     const bool declaredAnswers =
         declared != 0 && dest::spawn_set_slice_set(destination, declared, target) == target;
-    const bool armed =
-        membership::arm_host_teleport(instance.view.binding.sessionId,
-                                      static_cast<std::int32_t>(plan.effectiveRegion),
-                                      declaredAnswers ? declared : dest::kAbsentSpawnSetHash);
+    const bool armed = server::bap::arm_shared_mission_region(
+        instance.view.binding,
+        instance.view.activityClientGeneration,
+        static_cast<std::int32_t>(plan.effectiveRegion),
+        declaredAnswers ? declared : dest::kAbsentSpawnSetHash);
     log_line(core::log::Level::info,
              &instance,
              "state_region",

@@ -2,11 +2,14 @@
 
 #include "../../ui/runtime/settings.h"
 #include "external/definition.h"
+#include "server_endpoint/definition.h"
 
 namespace sunrise::core::settings::client {
 
 /** Read-only Client settings parsed by Core. */
 struct Settings {
+    server_endpoint::Settings serverEndpoint;
+    std::uint64_t machineId{};
     /** In-game UI visibility and input policy. */
     ui::runtime::Settings userInterface;
     /** Points the Client at a server outside this process. Off answers everything in process. */

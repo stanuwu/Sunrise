@@ -56,6 +56,13 @@ void observe(const identities::Source& source,
 [[nodiscard]] identities::Result
 snapshot_source(const identities::Source& source,
                 std::vector<identities::Identity>& output) noexcept;
+/**
+ * Walks all exact-source slots in slot order, including tombstones and conflicts.
+ * The visitor runs under the registry lock and must not re-enter this registry.
+ */
+[[nodiscard]] identities::Result visit_source(const identities::Source& source,
+                                              identities::Store::SlotVisitor visitor,
+                                              void* context) noexcept;
 /** Advances only the exact source allocation domain after a committed host purge. */
 [[nodiscard]] bool advance_epoch(const identities::Source&,
                                  std::uint8_t expected,

@@ -374,6 +374,8 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
     // The client's anchor pass runs before its remove pass: an entity that receives a record
     // detaches to root every descendant that received none in the same batch. A parent sent as a
     // direct element therefore loses its children, and they outlive its removal as roots.
+    // This registry is already partitioned by admitted source, so another peer's records cannot
+    // stamp or prune this tree.
     std::bitset<kMaximumEntitySlot + 1U> recorded{};
     for (std::size_t index = 0; index < count; ++index) {
         if (!candidate.ignoredRecordMask.test(index)) {
@@ -396,7 +398,7 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
         if (!detach) {
             continue;
         }
-        if (changes == kEntityBatchCapacity) {
+        if (changes == kEntityBaselineChangeCapacity) {
             return false;
         }
         auto& change = change_at(changes++);
@@ -408,7 +410,7 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
         change.replacement.anchorOrder = 0;
         ++candidate.detachedCount;
     }
-    std::array<EntityToken, kEntityBatchCapacity> terminals{};
+    std::array<EntityToken, kEntityBaselineChangeCapacity> terminals{};
     std::size_t terminalCount = 0;
     const auto append_terminal = [&](EntityToken token) {
         for (std::size_t index = 0; index < terminalCount; ++index) {
@@ -447,7 +449,7 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
         std::size_t selected = 0;
         for (; selected < changes && change_at(selected).slot != token.slot; ++selected) {}
         if (selected == changes) {
-            if (changes == kEntityBatchCapacity) {
+            if (changes == kEntityBaselineChangeCapacity) {
                 return false;
             }
             auto& change = change_at(changes++);
@@ -468,7 +470,7 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
 /** Applies a staged mutation only when its source slot has not changed. */
 bool commit_accepted_entity_batch(EntityBaselineRegistry& registry,
                                   const EntityBaselineMutation& mutation) noexcept {
-    if (!mutation.valid || mutation.additionalChangeCount >= kEntityBatchCapacity
+    if (!mutation.valid || mutation.additionalChangeCount >= kEntityBaselineChangeCapacity
         || registry.anchorOrder != mutation.expectedAnchorOrder
         || registry.allocationEpoch != mutation.expectedAllocationEpoch
         || registry.hasAllocationEpoch != mutation.expectedHasAllocationEpoch

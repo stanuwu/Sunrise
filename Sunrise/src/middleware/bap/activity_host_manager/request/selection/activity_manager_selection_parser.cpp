@@ -30,7 +30,7 @@ struct SelectedField final {
  * @param request Receives a borrowed field-one view when one was found.
  * @param snapshot Receives a borrowed field-two view when one was found.
  */
-void select_fields(std::span<const std::byte> input,
+bool select_fields(std::span<const std::byte> input,
                    SelectedField& request,
                    SelectedField& snapshot) noexcept {
     request = {};
@@ -39,7 +39,7 @@ void select_fields(std::span<const std::byte> input,
     while (reader.remaining() != 0) {
         Field field{};
         if (!reader.next(field)) {
-            return;
+            return false;
         }
         if (field.wireType != WireType::lengthDelimited) {
             continue;
@@ -53,6 +53,7 @@ void select_fields(std::span<const std::byte> input,
         target->seen = true;
         target->bytes = field.bytes;
     }
+    return true;
 }
 
 } // namespace
@@ -63,14 +64,18 @@ bool parse_selection(std::span<const std::byte> input,
     result = {};
     SelectedField request{};
     SelectedField snapshot{};
-    select_fields(input, request, snapshot);
+    const bool complete = select_fields(input, request, snapshot);
 
     ActivityManagerSelectionResult committed{};
     if (request.seen && !request.bytes.empty()) {
         committed.hasSelection = parse_field_one(request.bytes, committed.selection);
     }
     if (snapshot.seen && !snapshot.bytes.empty()) {
-        committed.hasSecondary = parse_field_two(snapshot.bytes, committed.secondary);
+        committed.hasSecondary =
+            parse_field_two(snapshot.bytes, committed.secondary, committed.startupReservations);
+    }
+    if (!complete) {
+        committed.startupReservations = {};
     }
     result = committed;
     // A missing or empty carrier means no selection, which is fine. Only a carrier that is there

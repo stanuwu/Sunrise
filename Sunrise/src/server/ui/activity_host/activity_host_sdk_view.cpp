@@ -43,7 +43,8 @@ std::uint64_t g_scriptReloadTicket{};
 
 /** Draws the selected activity's Lua attach, VM, delivery, and Host-lane health. */
 void draw_script_runtime(const host::InstanceSnapshot& hostInstance) noexcept {
-    mission::DiagnosticsSnapshot runtime{};
+    // Reused by the UI thread; the complete server roster exceeds a safe local stack budget.
+    static mission::DiagnosticsSnapshot runtime{};
     mission::snapshot(runtime);
     ImGui::Text("Runtime %s", runtime.enabled ? "on" : "off");
     ImGui::SameLine();

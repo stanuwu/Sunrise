@@ -75,7 +75,9 @@ bool prepare_roster(Scratch& scratch,
                     std::uint32_t objectId,
                     const Reservation& reservation,
                     Prepared& prepared) noexcept {
-    const state::AccountState account = state::account_snapshot();
+    const state::ScopedAccountView accountScope(
+        state::account_for_subscription_root(subscription.familyRootSoid));
+    const state::AccountState account = state::bound_account_snapshot();
     if (reservation.rawWriteOffset > scratch.plaintext.size()) {
         return false;
     }
@@ -129,7 +131,7 @@ bool prepare_roster_appearance_refresh(Scratch& scratch,
         return false;
     }
 
-    state::AccountState account = state::account_snapshot();
+    state::AccountState account = state::bound_account_snapshot();
     if (!refresh.after.family3Active || refresh.after.family3RootSoid == 0
         || refresh.after.family3Version <= kInitialFamilyVersion || refresh.characterSoid == 0
         || afterCharacter.soid != refresh.characterSoid || characterIndex >= account.characterCount

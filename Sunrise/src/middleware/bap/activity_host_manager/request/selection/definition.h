@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "startup_reservations.h"
+
 namespace sunrise::middleware::bap::activity_host_manager::request::selection {
 
 /** The descriptor schema holds 16 skull selection entries. */
@@ -81,6 +83,7 @@ struct ActivityManagerSelection final {
  * missing or unreadable while the other is fine.
  */
 struct ActivityManagerSelectionResult final {
+    StartupReservations startupReservations{};
     /** False when protobuf field one is missing, empty or unreadable. */
     bool hasSelection{};
     /** Field-one output. Valid only when hasSelection is true. */

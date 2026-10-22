@@ -89,7 +89,7 @@ constexpr std::size_t kCharacterStatRowOffsets[]{593, 594, 595, 622, 623, 624};
 /** Collects the authored equipment and plug hashes every configured character names. */
 bool collect_authored_hashes(AuthoredHashes& output) noexcept {
     output = {};
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     if (!state::account::valid(account)) {
         return false;
     }

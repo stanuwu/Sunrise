@@ -84,6 +84,10 @@ struct EntityBaselineRegistry final {
     std::uint64_t anchorOrder{};
 };
 
+/** Records plus the derived anchor detaches and descendant removals of one accepted batch. */
+inline constexpr std::size_t kEntityBaselineChangeCapacity =
+    state::gameplay::entity_identity::kBatchChangeCapacity;
+
 /** One compare-and-commit registry change staged from an accepted batch. */
 struct EntityBaselineChange {
     EntityBaselineSlot expected{};
@@ -99,7 +103,7 @@ struct EntityBaselineMutation final : EntityBaselineChange {
     std::uint64_t expectedAllocationDomain{}, replacementAllocationDomain{};
     state::gameplay::entity_identity::Source source{};
     bool scoped{};
-    std::array<EntityBaselineChange, kEntityBatchCapacity - 1> additionalChanges{};
+    std::array<EntityBaselineChange, kEntityBaselineChangeCapacity - 1> additionalChanges{};
     std::uint16_t additionalChangeCount{};
     /** Descendants this batch detached because an ancestor received a record and they did not. */
     std::uint16_t detachedCount{};

@@ -91,6 +91,7 @@ scene_population_sources(RuntimeInstance& instance,
         }
         auto& population = output[index];
         population.attemptGeneration = intent.attemptGeneration;
+        population.sourceGeneration = source.expectedActivityClientGeneration;
         population.inputSequenceAtStage = staged.missionInputSequenceAtStage;
         population.clientMessageSequenceAtStage = staged.clientMessageSequenceAtStage;
         population.squadRow = intent.burstRows[index];
@@ -130,6 +131,7 @@ scene_population_sources(RuntimeInstance& instance,
             return false;
         }
         population.attemptGeneration = intent.attemptGeneration;
+        population.sourceGeneration = staged.expectedActivityClientGeneration;
         population.inputSequenceAtStage = staged.missionInputSequenceAtStage;
         population.clientMessageSequenceAtStage = staged.clientMessageSequenceAtStage;
         population.squadRow = intent.firstRow;

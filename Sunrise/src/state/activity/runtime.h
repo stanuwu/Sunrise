@@ -104,6 +104,11 @@ bool release_session(std::uint64_t sessionId) noexcept;
 struct SessionRosterRow final {
     SessionBinding binding{};
     std::uint64_t memberKey{};
+    /**
+     * Key of the lowest joined member row, or zero when nobody is joined.
+     * `memberKey` keeps naming the primary after it leaves a record its peers still hold.
+     */
+    std::uint64_t presentMemberKey{};
     /** The identity message 12 publishes at member record `+16`, or zero before one. */
     std::uint64_t joinIdentity{};
     std::uint64_t joinedRevision{};

@@ -59,9 +59,11 @@ bool read_player_add(bits::Reader& reader, PlayerAddRequest& output) noexcept {
     }
     candidate.sequence = static_cast<std::uint32_t>(sequence);
     candidate.kind = static_cast<std::uint8_t>(kind);
-    // The identity fields above are the whole request. A block this reader cannot walk leaves the
-    // soids absent rather than refusing the add.
-    (void)read_player_block_soids(reader, candidate.soids);
+    if (!read_native_player_profile(reader, candidate.profile)
+        || !read_native_player_tail(reader, candidate.profile)) {
+        return false;
+    }
+    candidate.soids = candidate.profile.soids;
     output = candidate;
     return true;
 }
@@ -97,6 +99,29 @@ bool read_player_properties_header(bits::Reader& reader, PlayerPropertiesRequest
     }
     candidate.sequence = static_cast<std::uint32_t>(sequence);
     candidate.kind = static_cast<std::uint8_t>(kind);
+    output = candidate;
+    return true;
+}
+
+bool read_player_properties(bits::Reader& reader, PlayerPropertiesRequest& output) noexcept {
+    PlayerPropertiesRequest candidate{};
+    std::uint64_t present{}, byte{};
+    if (!read_player_properties_header(reader, candidate)
+        || !read_native_player_profile(reader, candidate.profile) || !reader.read(1, present)) {
+        return false;
+    }
+    candidate.hasBaselineChecksum = present != 0;
+    if (present) {
+        for (unsigned i = 0; i < 4; ++i) {
+            if (!reader.read(8, byte)) {
+                return false;
+            }
+            candidate.baselineChecksum |= static_cast<std::uint32_t>(byte) << (8 * i);
+        }
+    }
+    if (!read_native_player_tail(reader, candidate.profile)) {
+        return false;
+    }
     output = candidate;
     return true;
 }

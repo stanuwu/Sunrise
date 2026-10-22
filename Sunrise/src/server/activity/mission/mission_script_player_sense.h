@@ -70,6 +70,16 @@ inline void
 update_player_life(PlayerLifeObservation& level,
                    std::span<const middleware::bap::activity_message::sense_update::DecodedValue>
                        values) noexcept {
+    // A slot can be reused within one connection. Never carry the former player's death
+    // evidence across a native identity replacement or withdrawal.
+    for (const auto& value : values) {
+        if (value.schemaRow == kParticipationIdentitySchema
+            && value.fieldOrdinal == kParticipationKeyOrdinal
+            && (!value.present || value.unsignedValue != level.playerKey)) {
+            level = {};
+            break;
+        }
+    }
     for (const auto& value : values) {
         const bool identity = value.schemaRow == kParticipationIdentitySchema
                               && value.fieldOrdinal == kParticipationKeyOrdinal;

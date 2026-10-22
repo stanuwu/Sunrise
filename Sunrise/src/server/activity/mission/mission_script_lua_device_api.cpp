@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -625,11 +626,13 @@ int slot_applied(lua_State* state) {
         }
     }
     bool applied = false;
+    const auto& sources = impl->deviceRequestSources;
     for (const auto& request : impl->deviceRequests) {
         if (request.slotRow == slot.nativeRow && request.channel == channel.channel
             && request.attemptGeneration == impl->attempt.generation
-            && impl->deviceRequestGeneration != 0
-            && request.sourceGeneration == impl->deviceRequestGeneration) {
+            && request.sourceGeneration != 0
+            && std::find(sources.begin(), sources.end(), request.sourceGeneration)
+                   != sources.end()) {
             applied = request.applied;
             break;
         }

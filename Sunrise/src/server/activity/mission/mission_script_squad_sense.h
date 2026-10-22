@@ -31,8 +31,10 @@ inline constexpr std::int64_t kMaximumCounter = 0x7FFFFFFF;
 
 /**
  * Reads the per-slot created counts. They never decrement and are zeroed on a generation change,
- * so a rise is a spawn.
- * @param output Receives one count per slot; slots past the list length read zero.
+ *
+ * so a rise after the first sighting is a spawn.
+ * @param output Receives one count per slot;
+ * slots past the list length read zero.
  * @return The list length, or zero when the list is absent or incomplete.
  */
 [[nodiscard]] inline std::uint8_t read_squad_created_counts(

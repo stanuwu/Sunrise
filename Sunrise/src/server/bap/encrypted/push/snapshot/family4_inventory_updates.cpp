@@ -243,7 +243,7 @@ bool prepare_seasonal_experience_presentation(
         return report_failure("season_xp_session");
     }
 
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const std::optional<std::size_t> selectedIndex = find_character_index(account);
     Resolved selected{};
     state::build_data::items::Definition item{};

@@ -4,14 +4,17 @@
 #include <array>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <new>
 
+#include "../../../core/threading/srw_lock.h"
 #include "../../../middleware/encoding/bit_reader.h"
 #include "../../../middleware/encoding/bit_writer.h"
 #include "../../../middleware/gameplay/external/common_state.h"
 #include "../../../middleware/gameplay/external/control_state_codec.h"
 #include "../../../middleware/gameplay/peer/connect_messages.h"
 #include "../../../middleware/gameplay/peer/established_packet.h"
+#include "../../../middleware/gameplay/peer/outbound_window.h"
 #include "../../../middleware/gameplay/peer/packet_fragments.h"
 #include "../../../middleware/gameplay/peer/reliable_assembly.h"
 #include "../../bap/runtime.h"
@@ -28,6 +31,11 @@ namespace gp = state::gameplay;
 namespace wire = middleware::gameplay::peer;
 namespace bits = middleware::encoding::bits;
 namespace fragments = wire::packet_fragments;
+
+/** Serializes send staging without waiting on another slice or reentrant producer callback. */
+core::threading::SrwLock g_sendLock;
+/** One peer at a time is encoded outside g_lock; g_sendLock owns this reusable snapshot. */
+gp::PeerLink g_sendSnapshot{};
 
 /** Delay sentinel used until a round trip has been measured. */
 constexpr std::uint16_t kDelaySentinel = 1023;
@@ -229,24 +237,14 @@ void apply_message(gp::PeerLink& peer, const wire::AssembledMessage& message) no
 }
 
 /**
- * Clears the send queue once the peer acknowledges the packet that carried it.
- * @param peer Peer whose acknowledgement arrived, held under the lock.
+ * Removes the carried fragment run once the peer acknowledges its packet.
+ * @param peer Peer whose
+ * acknowledgement arrived, held under the lock.
  * @param ack Acknowledgement state the packet published.
- * @return True when this acknowledgement emptied the queue.
+ * @return True when this acknowledgement released the outstanding run.
  */
 bool apply_acknowledgement(gp::PeerLink& peer, const wire::AckState& ack) noexcept {
-    if (!peer.outbound.awaitingAcknowledgement
-        || !wire::acknowledgement_covers(ack, peer.outbound.sentInPacket)) {
-        return false;
-    }
-    // The peer has the packet, so every fragment in it is delivered. The next sequence is kept
-    // because message sequences continue across messages.
-    for (gp::OutboundFragment& fragment : peer.outbound.fragments) {
-        fragment = {};
-    }
-    peer.outbound.count = 0;
-    peer.outbound.awaitingAcknowledgement = false;
-    return true;
+    return wire::outbound_window::acknowledge(peer.outbound, ack);
 }
 
 /** Common state retained from one complete external frame. */
@@ -291,11 +289,17 @@ read_external(std::span<const std::byte> payload,
               ParsedExternal& output) noexcept {
     output.commonPresent = false;
     bits::Reader reader(payload);
-    const std::unique_ptr<ParsedExternal> candidateStorage(new (std::nothrow) ParsedExternal{});
+    thread_local std::unique_ptr<ParsedExternal> candidateStorage;
+    if (!candidateStorage) {
+        candidateStorage.reset(new (std::nothrow) ParsedExternal{});
+    }
     if (!candidateStorage) {
         return ExternalReadResult::lane2;
     }
+    // Receive decoding does not re-enter on this thread. Reset its retained image per packet.
     ParsedExternal& candidate = *candidateStorage;
+    std::destroy_at(&candidate);
+    std::construct_at(&candidate);
     bool lanePresent = false;
     bool externalPresent = false;
     if (!reader.skip(bitOffset) || !read_flag(reader, externalPresent) || !externalPresent) {
@@ -400,8 +404,8 @@ void queue_common_request(const state::gameplay::Endpoint& from,
     return true;
 }
 
-/** Builds and sends one ACK packet from a peer copy taken under the lock. */
-[[nodiscard]] bool send_acknowledgement(const gp::PeerLink& peer) noexcept {
+/** Exact acknowledgement carried by the measured and transmitted packet. */
+[[nodiscard]] wire::AckState acknowledgement(const gp::PeerLink& peer) noexcept {
     wire::AckState ack{};
     ack.outboundHead = peer.outboundHead;
     ack.outboundHeadPresent = peer.outboundHeadPresent;
@@ -413,7 +417,12 @@ void queue_common_request(const state::gameplay::Endpoint& from,
     ack.received = peer.received;
     // No round trip is timed, so the delay field carries its sentinel.
     ack.delay = kDelaySentinel;
+    return ack;
+}
 
+/** Builds and sends one ACK packet from a peer copy taken under the lock. */
+[[nodiscard]] bool send_acknowledgement(const gp::PeerLink& peer) noexcept {
+    const auto ack = acknowledgement(peer);
     std::array<std::byte, kReplyCapacity> buffer{};
     bits::Writer writer(buffer);
     const std::uint8_t guard = wire::connection_sequence_low2(peer.localConnectionSequence);
@@ -439,7 +448,23 @@ void queue_common_request(const state::gameplay::Endpoint& from,
     if (!writer.finish(size)) {
         return false;
     }
-    return send_transport(peer.endpoint, {buffer.data(), size});
+    // Keep the selected native channel alive through the transport send.
+    // Transport sealing does not call the peer layer; association receive releases its lock first.
+    AcquireSRWLockExclusive(&g_lock);
+    auto* current = find_locked(peer.endpoint);
+    const bool owned =
+        current && current->peerGeneration == peer.peerGeneration
+        && current->channelGeneration == peer.channelGeneration
+        && current->viewGeneration == peer.viewGeneration
+        && current->localConnectionSequence == peer.localConnectionSequence
+        && current->remoteConnectionSequence == peer.remoteConnectionSequence
+        && current->externalGroupSessionId == peer.externalGroupSessionId
+        && current->activityBinding.sessionId == peer.activityBinding.sessionId
+        && current->activityBinding.createdRevision == peer.activityBinding.createdRevision
+        && current->commonReconciler.owner_generation() == peer.commonReconciler.owner_generation();
+    const bool sent = owned && send_transport(peer.endpoint, {buffer.data(), size});
+    ReleaseSRWLockExclusive(&g_lock);
+    return sent;
 }
 
 } // namespace
@@ -474,11 +499,16 @@ void consume_established(const gp::Endpoint& from,
     bool externalExpected = false;
     bool externalValid = true;
     const char* externalFailure = "none";
-    const std::unique_ptr<ParsedExternal> externalStorage(new (std::nothrow) ParsedExternal{});
+    thread_local std::unique_ptr<ParsedExternal> externalStorage;
+    if (!externalStorage) {
+        externalStorage.reset(new (std::nothrow) ParsedExternal{});
+    }
     if (!externalStorage) {
         return;
     }
     ParsedExternal& external = *externalStorage;
+    std::destroy_at(&external);
+    std::construct_at(&external);
     state::activity::SessionBinding commonBinding{};
     std::uint64_t commonOwnerGeneration = 0;
     std::uint8_t commonRequestedGeneration = 0;
@@ -532,6 +562,9 @@ void consume_established(const gp::Endpoint& from,
     }
     ReleaseSRWLockExclusive(&g_lock);
     // Reliable controls establish the view used by this packet's external payload.
+    if (guardAccepted) {
+        bind_participant(from, ingress);
+    }
     for (std::size_t index = 0; index < deliveredCount; ++index) {
         report(core::log::Level::info,
                "ev=gameplay stage=message result=ok id=%u peerstage=%u",
@@ -762,17 +795,21 @@ void consume_established(const gp::Endpoint& from,
            largeDropped);
 }
 
-/** Sends any owed acknowledgement. */
 void service(std::uint64_t now) noexcept {
-    std::array<gp::PeerLink, gp::kAssociationCapacity> owed{};
-    std::size_t count = 0;
-    AcquireSRWLockExclusive(&g_lock);
-    for (gp::PeerLink& peer : g_peers) {
+    std::unique_lock sendGuard(g_sendLock, std::try_to_lock);
+    if (!sendGuard.owns_lock()) {
+        return;
+    }
+    const auto& owed = g_sendSnapshot;
+    for (std::size_t index = 0; index < g_peers.size(); ++index) {
+        AcquireSRWLockExclusive(&g_lock);
+        auto& peer = g_peers[index];
         // An unacknowledged send queue keeps the packet going out until the peer confirms it.
         // Every packet burns one sequence, so the resend is paced.
         const bool resendDue = peer.outbound.count != 0 && now - peer.lastSend >= kResendInterval;
         const bool due = peer.acknowledgementOwed || resendDue;
         if (peer.stage == gp::PeerStage::absent || !due) {
+            ReleaseSRWLockExclusive(&g_lock);
             continue;
         }
         middleware::gameplay::external::CommonState externalCommon{};
@@ -786,17 +823,13 @@ void service(std::uint64_t now) noexcept {
         if (external
             && peer.externalContributions[nextPacket % peer.externalContributions.size()]
                    .occupied) {
+            ReleaseSRWLockExclusive(&g_lock);
             continue;
         }
         peer.acknowledgementOwed = false;
         peer.lastSend = now;
-        // Only the first send of the current contents is stamped. A resend carries the same
-        // fragments, so re-stamping would move the target past what the peer can acknowledge.
-        if (peer.outbound.count != 0 && !peer.outbound.awaitingAcknowledgement) {
-            peer.outbound.sentInPacket =
-                static_cast<std::uint16_t>((peer.outboundHead + 1) % gp::kPacketSequenceModulus);
-            peer.outbound.awaitingAcknowledgement = true;
-        }
+        // Later enqueues wait behind this run, preserving the current acknowledgement target.
+        wire::outbound_window::begin(peer.outbound, nextPacket);
         // The packet sequence advances here so the copy carries the value it will publish.
         peer.outboundHead = nextPacket;
         peer.outboundHeadPresent = true;
@@ -816,30 +849,27 @@ void service(std::uint64_t now) noexcept {
             contribution.occupied = true;
         }
         peer.lastTick = now;
-        owed[count] = peer;
-        ++count;
-    }
-    ReleaseSRWLockExclusive(&g_lock);
-    for (std::size_t index = 0; index < count; ++index) {
-        if (send_acknowledgement(owed[index])) {
+        g_sendSnapshot = peer;
+        ReleaseSRWLockExclusive(&g_lock);
+        if (send_acknowledgement(owed)) {
             continue;
         }
         report(core::log::Level::debug, "ev=gameplay stage=ack result=fail");
         DisplacedExternals displaced{};
         std::size_t displacedCount = 0;
         AcquireSRWLockExclusive(&g_lock);
-        gp::PeerLink* const peer = find_locked(owed[index].endpoint);
-        if (peer != nullptr && peer->peerGeneration == owed[index].peerGeneration) {
-            peer->acknowledgementOwed = true;
-            if (peer->outbound.awaitingAcknowledgement
-                && peer->outbound.sentInPacket == owed[index].outboundHead) {
-                peer->outbound.awaitingAcknowledgement = false;
-            }
-            auto& reserved = peer->externalContributions[owed[index].outboundHead
-                                                         % peer->externalContributions.size()];
+        gp::PeerLink* const current = find_locked(owed.endpoint);
+        if (current != nullptr && current->peerGeneration == owed.peerGeneration
+            && current->channelGeneration == owed.channelGeneration
+            && current->localConnectionSequence == owed.localConnectionSequence
+            && current->remoteConnectionSequence == owed.remoteConnectionSequence) {
+            current->acknowledgementOwed = true;
+            wire::outbound_window::send_failed(current->outbound, owed.outboundHead);
+            auto& reserved =
+                current->externalContributions[owed.outboundHead
+                                               % current->externalContributions.size()];
             // The packet never left, so the stake is displaced like any other lost contribution.
-            if (reserved.occupied
-                && reserved.transmissionId == owed[index].nextExternalTransmission) {
+            if (reserved.occupied && reserved.transmissionId == owed.nextExternalTransmission) {
                 displaced[displacedCount++] = {
                     reserved.groupSessionId, reserved.transmissionId, wire::AckOutcome::unresolved};
                 reserved = {};

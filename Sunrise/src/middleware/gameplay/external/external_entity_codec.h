@@ -70,6 +70,7 @@ struct TypePayload {
     std::array<std::byte, kTypePayloadStateCapacity> state{};
     std::uint16_t byteCount{};
     state::gameplay::entity_identity::ActorSourceReference actorSource{};
+    state::gameplay::entity_identity::DamagePools damage{};
     /** Damage component 0x80804BEE pools 0 and 1, ten-bit levels; valid when damageKnown. */
     std::uint16_t damageHealth{};
     std::uint16_t damageShield{};

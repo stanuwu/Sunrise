@@ -18,7 +18,9 @@
 #include "../../../core/logging/log.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
+#include "../../bap/runtime.h"
 #include "../host_runtime.h"
+#include "mission_input_policy.h"
 #include "mission_script_region.h"
 #include "mission_script_runtime_internal.h"
 #include "mission_script_vm.h"
@@ -44,26 +46,6 @@ host::MissionInputCursor g_missionInputCursor{};
 
 void clear_pending_event(PendingMissionEvent& pending) noexcept {
     SecureZeroMemory(&pending, sizeof(pending));
-}
-
-/** @return True for the host events that report an output's progress, not an input. */
-[[nodiscard]] bool delivery_lifecycle_event(host::EventKind kind) noexcept {
-    switch (kind) {
-    case host::EventKind::authStateCommitted:
-    case host::EventKind::authStateTransportStaged:
-    case host::EventKind::authStateCanceled:
-    case host::EventKind::incidentQueued:
-    case host::EventKind::incidentTransportStaged:
-    case host::EventKind::incidentCanceled:
-    case host::EventKind::incidentRefused:
-    case host::EventKind::scriptableOverrideCommitted:
-    case host::EventKind::scriptableOverrideTransportStaged:
-    case host::EventKind::scriptableOverrideCanceled:
-    case host::EventKind::operatorRefused:
-        return true;
-    default:
-        return false;
-    }
 }
 
 /**
@@ -104,51 +86,6 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     default:
         return true;
     }
-}
-
-/** True when the event may reach a callback for this instance's ActivityClient generation. */
-[[nodiscard]] bool eligible_event(const RuntimeInstance& instance,
-                                  const host::Event& event) noexcept {
-    if (event.attemptGeneration != 0 && event.attemptGeneration != instance.attempt.generation) {
-        return false;
-    }
-    if (event.kind == host::EventKind::timerElapsed) {
-        return true;
-    }
-    if (event.sourceGeneration != instance.view.activityClientGeneration) {
-        return false;
-    }
-    return event.kind == host::EventKind::clientStateChanged
-           || event.kind == host::EventKind::incidentReceived
-           || event.kind == host::EventKind::clientMessageReceived
-           || event.kind == host::EventKind::effectResult
-           || event.kind == host::EventKind::phaseEntered
-           || event.kind == host::EventKind::triggerEntered
-           || event.kind == host::EventKind::triggerState
-           || event.kind == host::EventKind::triggerExited
-           || event.kind == host::EventKind::squadState
-           || event.kind == host::EventKind::squadProvoked
-           || event.kind == host::EventKind::entitySpawned
-           || event.kind == host::EventKind::entityDied
-           || event.kind == host::EventKind::sceneFinished
-           || event.kind == host::EventKind::sceneOutput
-           || event.kind == host::EventKind::objectiveProgress
-           || event.kind == host::EventKind::entitySlotsRequested
-           || event.kind == host::EventKind::sessionJoined
-           || event.kind == host::EventKind::sessionLeft
-           || event.kind == host::EventKind::playerTrigger
-           || event.kind == host::EventKind::cinematicStarted
-           || event.kind == host::EventKind::actorPathState
-           || event.kind == host::EventKind::damageState
-           || event.kind == host::EventKind::deviceState
-           || event.kind == host::EventKind::regionChanged
-           || event.kind == host::EventKind::objectState
-           || event.kind == host::EventKind::fireteamState
-           || event.kind == host::EventKind::objectInteracted
-           || event.kind == host::EventKind::ghostLinkState
-           || event.kind == host::EventKind::cinematicSkipRequested
-           || event.kind == host::EventKind::cinematicTerminated
-           || delivery_lifecycle_event(event.kind) || event.has_sense_observations();
 }
 
 /** Faults the instance unless the ordered mission input arrives with no gap, starting at one. */
@@ -304,6 +241,8 @@ void drain_pending_mission_events(std::uint64_t now) noexcept {
                 }
                 pending.missionSequenceObserved = true;
             }
+            // A queued member may disconnect or replace its connection before this dispatch.
+            refresh_mission_members(*instance);
             if (!eligible_event(*instance, pending.event)) {
                 if (!commit_mission_state(
                         *instance, instance->missionStarted, pending.event.missionSequence)) {
@@ -566,11 +505,20 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
                                   std::uint64_t now) noexcept {
     if (instance.programStatus == ProgramStatus::missing
         && event.kind == host::EventKind::senseUpdate && sense != nullptr) {
-        push_squad_edges(instance, *sense);
+        // Without a program only squad baselines are seeded, and each from its simulating link.
+        if (reads_pins(*sense) && copy_pins(instance)) {
+            push_squad_edges(instance, *sense);
+        }
         return lua_vm::CallStatus::inactive;
     }
-    if (instance.programStatus != ProgramStatus::loaded || !eligible_event(instance, event)) {
+    if (instance.programStatus != ProgramStatus::loaded || !eligible_event(instance, event)
+        || (event.damageFromEntity && !current_entity_damage(instance, event))) {
         return lua_vm::CallStatus::inactive;
+    }
+    // Every shared report and Ghost level this dispatch raises reads the same copy.
+    if (event.kind == host::EventKind::senseUpdate && sense != nullptr && reads_pins(*sense)
+        && !copy_pins(instance)) {
+        return lua_vm::CallStatus::scriptError;
     }
     ++instance.eventsSeen;
     // The three region numbers the script is about to read. A report restates only the leg it
@@ -597,12 +545,16 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
     instance.dispatchInputSequence = event.missionSequence;
     const lua_vm::CallStatus status = lua_vm::dispatch(instance.vm, event, clientMessage, now);
     if (event.kind == host::EventKind::clientStateChanged) {
-        // A pending-region report can name the next slice while the player still holds the old
-        // one, so the held region wins.
-        if (event.heldRegionIndex >= 0) {
-            instance.activeRegion = event.heldRegionIndex;
-        } else if (event.currentRegionIndex >= 0) {
-            instance.activeRegion = event.currentRegionIndex;
+        // The selected route's reports place the program; every member's arrival is a region
+        // fact, as the script keys its watchers on any member reaching a state's region.
+        if (event.sourceGeneration == instance.view.activityClientGeneration) {
+            // A pending-region report can name the next slice while the player still holds the
+            // old one, so the held region wins.
+            if (event.heldRegionIndex >= 0) {
+                instance.activeRegion = event.heldRegionIndex;
+            } else if (event.currentRegionIndex >= 0) {
+                instance.activeRegion = event.currentRegionIndex;
+            }
         }
         host::Event changed{};
         if (make_region_changed(event, changed)) {
@@ -619,6 +571,9 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         push_trigger_edges(instance, *sense);
         push_ghost_edges(instance, *sense);
         push_object_interaction_edges(instance, *sense);
+        // Shared counters and actor feedback keep one observation stream per target: the link
+        // that simulates it. Member-local levels above use separate source histories and cannot
+        // impersonate shared simulation output.
         push_damage_edges(instance, *sense);
         push_actor_path_edges(instance, *sense);
         push_squad_edges(instance, *sense);

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../account/account_handle.h"
 #include "../account/account_state.h"
 #include "../activity/definition.h"
 #include "../investment/investment.h"

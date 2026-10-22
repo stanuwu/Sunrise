@@ -10,19 +10,29 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/settings/settings.h"
+#include "../../state/account/public_profiles.h"
+#include "../../state/activity/fireteam.h"
+#include "../../state/activity/member_context.h"
+#include "../../state/activity/member_departure.h"
 #include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/activity/runtime.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/matchmaking/matchmaking_state.h"
 #include "../../state/runtime/runtime.h"
+#include "../../state/social/steam_roster.h"
 #include "../activity/host_runtime.h"
+#include "../gameplay/group/group_host.h"
 #include "activity_authority_query_owner.h"
 #include "activity_authority_reset_owner.h"
 #include "activity_mission_seed_lease.h"
+#include "bap_session_nonce.h"
 #include "core/threading/srw_lock.h"
 #include "encrypted/bap_connection_publication.h"
 #include "encrypted/push/activity/mission_seed_world_change.h"
+#include "encrypted/social_feed_route.h"
 #include "internal.h"
+#include "proxy/proxy_runtime.h"
 #include "runtime.h"
 
 namespace sunrise::server::bap {
@@ -87,8 +97,9 @@ same_destination(const state::activity::destination::DestinationSelection& left,
 /** Returns the mutable unique-link result while the caller owns the exclusive BAP lock. */
 [[nodiscard]] Session*
 unique_mutable_activity_link_locked(const state::activity::SessionBinding& binding,
+                                    std::uint64_t generation,
                                     std::size_t& count) noexcept {
-    return const_cast<Session*>(unique_activity_link_locked(binding, count));
+    return const_cast<Session*>(activity_link_for_generation_locked(binding, generation, count));
 }
 
 /** Validates and, when stale, clears one connection-owned SDK selected-state roster lease. */
@@ -98,34 +109,11 @@ mission_seed_link_locked(const state::activity::SessionBinding& binding,
                          std::uint64_t expectedGeneration,
                          Session*& output,
                          std::size_t& matchingLinks) noexcept {
-    output = unique_mutable_activity_link_locked(binding, matchingLinks);
+    output = unique_mutable_activity_link_locked(binding, expectedGeneration, matchingLinks);
     if (output == nullptr) {
         return ActivityMissionSeedLeaseStatus::noActivityLink;
     }
     return mission_seed_session_status(*output, scenarioRow, expectedGeneration);
-}
-
-/** @return True when two leases name the same complete generated plan. */
-[[nodiscard]] bool same_mission_seed_plan(const ActivityMissionSeedPlan& left,
-                                          const ActivityMissionSeedPlan& right) noexcept {
-    if (left.omissionCount != right.omissionCount) {
-        return false;
-    }
-    for (std::uint32_t index = 0; index < left.omissionCount; ++index) {
-        if (left.omissions[index].objectTag != right.omissions[index].objectTag
-            || left.omissions[index].registryKey != right.omissions[index].registryKey) {
-            return false;
-        }
-    }
-    return left.activityRow == right.activityRow && left.scenarioRow == right.scenarioRow
-           && left.stateRow == right.stateRow && left.bubbleRow == right.bubbleRow
-           && left.bubbleOrdinal == right.bubbleOrdinal && left.stateOrdinal == right.stateOrdinal
-           && left.entryIndex == right.entryIndex && left.sliceSetIndex == right.sliceSetIndex
-           && left.effectiveRegion == right.effectiveRegion
-           && left.occurrenceCount == right.occurrenceCount && left.groupCount == right.groupCount
-           && left.authMappingSlots == right.authMappingSlots
-           && left.authResetSlots == right.authResetSlots
-           && left.senseSuppressedSlots == right.senseSuppressedSlots;
 }
 
 /** Validates only identities required to mutate a connection-owned lease safely. */
@@ -133,7 +121,8 @@ mission_seed_link_locked(const state::activity::SessionBinding& binding,
                                            std::uint32_t scenarioRow) noexcept {
     const std::uint64_t authoredRegion =
         static_cast<std::uint64_t>(plan.sliceSetIndex) + plan.stateOrdinal;
-    return plan.activityRow != (std::numeric_limits<std::uint32_t>::max)()
+    return plan.omissionCount <= plan.omissions.size()
+           && plan.activityRow != (std::numeric_limits<std::uint32_t>::max)()
            && plan.scenarioRow == scenarioRow
            && plan.stateRow != (std::numeric_limits<std::uint32_t>::max)()
            && plan.bubbleRow != (std::numeric_limits<std::uint32_t>::max)()
@@ -146,9 +135,27 @@ mission_seed_link_locked(const state::activity::SessionBinding& binding,
 
 /** @param session Its secrets and identity are wiped. */
 void clear_session(Session& session) noexcept {
+    nat_relay::release(session);
+    if (session.authenticated && core::settings::hosts_session()) {
+        const state::ScopedAccount accountScope(session.accountHandle);
+        state::social::session_directory().closed(session.accountHandle);
+        if (state::social::session_directory().link_count(session.accountHandle) == 0) {
+            server::gameplay::group::release_account(
+                state::account_primary_soid(session.accountHandle));
+            if (session.accountHandle == state::kLocalAccount) {
+                static_cast<void>(
+                    state::account::profiles::publish_local_presence(state::kLocalAccount, {}));
+            } else {
+                state::account::profiles::clear_remote_presence(session.accountHandle);
+            }
+            static_cast<void>(state::activity::fireteam::depart(
+                state::account_primary_soid(session.accountHandle)));
+        }
+    }
     SecureZeroMemory(&session, sizeof session);
     // Zeroing is not the cleared state: `advertisedRegion` is -1 and zero is a real region.
     session.activity = {};
+    session.accountHandle = state::kInvalidAccount;
 }
 
 /**
@@ -161,15 +168,14 @@ void clear_session(Session& session) noexcept {
         session.matchmakingContext = {};
         return true;
     }
-    if (!state::matchmaking::release_context(session.matchmakingContext)) {
-        return false;
-    }
+    // A refusal means this generation is already absent; it cannot prevent socket teardown.
+    (void)state::matchmaking::release_context(session.matchmakingContext);
     session.matchmakingContext = {};
     return true;
 }
 
 /** @param id Session-slot id. @return True when the slot is opened. */
-[[nodiscard]] bool open_session(std::uint32_t id) noexcept {
+[[nodiscard]] bool open_session(std::uint32_t id, std::uint32_t remoteAddress) noexcept {
     if (id == 0 || id > g_sessions.size()) {
         return false;
     }
@@ -178,10 +184,17 @@ void clear_session(Session& session) noexcept {
         return false;
     }
     if (session.id != 0) {
+        const state::ScopedAccount accountScope(session.accountHandle);
+        const state::activity::ScopedMemberContext memberScope(session.activity.session.sessionId,
+                                                               session.activityMemberKey);
         encrypted::release_activity_connection(session);
     }
     clear_session(session);
     session.id = id;
+    session.remoteAddress = remoteAddress;
+    session.accountHandle =
+        core::settings::hosts_session() ? state::kInvalidAccount : state::kLocalAccount;
+    proxy::open_link(id);
     return true;
 }
 
@@ -191,9 +204,13 @@ void clear_session(Session& session) noexcept {
         return false;
     }
     auto& session = g_sessions[id - 1];
+    const state::ScopedAccount accountScope(session.accountHandle);
+    const state::activity::ScopedMemberContext memberScope(session.activity.session.sessionId,
+                                                           session.activityMemberKey);
     if (session.id != 0 && !release_matchmaking_context(session)) {
         return false;
     }
+    proxy::close_link(id);
     if (session.id != 0) {
         encrypted::release_activity_connection(session);
     }
@@ -211,24 +228,57 @@ void clear_session(Session& session) noexcept {
                                  client::network::BapResponse& response) noexcept {
     middleware::bap::OuterFrame frame;
     if (!middleware::bap::parse_frame(request.frame, frame)) {
+        response.closeConnection =
+            core::settings::get().server.upstream.enabled || core::settings::hosts_session();
         return false;
     }
     auto* session = session_for(request.connectionId);
     if (session == nullptr) {
         return false;
     }
+    const bool ordered = core::settings::get().server.upstream.enabled;
+    if (ordered && !proxy::can_accept_request(session->id)) {
+        response.size =
+            proxy::drain_ordered_replies(session->id, session->sessionKey, request.response);
+        response.closeConnection = proxy::failed(session->id);
+        response.deferFrame = !response.closeConnection;
+        return !response.closeConnection;
+    }
     bool handled = false;
-    if (frame.frameType == middleware::bap::FrameType::encrypted) {
-        handled = encrypted::consume(*session, g_scratch, frame, request.response, response.size);
-    } else {
-        handled = plaintext::consume(*session, g_scratch, frame, request.response, response.size);
+    {
+        const state::ScopedAccount accountScope(session->accountHandle);
+        const state::activity::ScopedMemberContext memberScope(session->activity.session.sessionId,
+                                                               session->activityMemberKey);
+        if (frame.frameType == middleware::bap::FrameType::encrypted) {
+            handled =
+                encrypted::consume(*session, g_scratch, frame, request.response, response.size);
+        } else {
+            handled =
+                plaintext::consume(*session, g_scratch, frame, request.response, response.size);
+        }
     }
     if (!handled) {
+        response.closeConnection = ordered || core::settings::hosts_session();
         return false;
     }
+    const state::ScopedAccount accountScope(session->accountHandle);
+    const state::activity::ScopedMemberContext memberScope(session->activity.session.sessionId,
+                                                           session->activityMemberKey);
     if (frame.frameType == middleware::bap::FrameType::encrypted
         && session->accountMutationPublished) {
         publish_account_mutation(*session);
+    }
+    if (ordered && proxy::has_outstanding(session->id)) {
+        if (response.size != 0
+            && !proxy::enqueue_local_reply(session->id,
+                                           std::span(request.response).first(response.size))) {
+            response.closeConnection = true;
+            return false;
+        }
+        response.size =
+            proxy::drain_ordered_replies(session->id, session->sessionKey, request.response);
+        response.closeConnection = proxy::failed(session->id);
+        return !response.closeConnection;
     }
     // A frame response can carry one already-due push in the same bounded socket write.
     bool touchesScratch = true;
@@ -258,8 +308,39 @@ void clear_session(Session& session) noexcept {
     if (session == nullptr) {
         return false;
     }
-    return encrypted::consume_deferred(
+    const state::ScopedAccount accountScope(session->accountHandle);
+    const state::activity::ScopedMemberContext memberScope(session->activity.session.sessionId,
+                                                           session->activityMemberKey);
+    const bool ordered = core::settings::get().server.upstream.enabled;
+    if (ordered) {
+        response.closeConnection = proxy::failed(session->id);
+        if (response.closeConnection) {
+            return false;
+        }
+        response.size =
+            proxy::drain_ordered_replies(session->id, session->sessionKey, request.response);
+        if (response.size != 0) {
+            return true;
+        }
+        response.closeConnection = proxy::failed(session->id);
+        if (response.closeConnection) {
+            return false;
+        }
+        if (!proxy::can_enqueue_local_reply(session->id)) {
+            return false;
+        }
+    }
+    const bool produced = encrypted::consume_deferred(
         *session, g_scratch, request.response, response.size, touchesScratch);
+    if (produced && ordered && proxy::has_outstanding(session->id)) {
+        if (!proxy::enqueue_local_reply(session->id,
+                                        std::span(request.response).first(response.size))) {
+            response.closeConnection = true;
+            return false;
+        }
+        response.size = 0;
+    }
+    return produced;
 }
 
 } // namespace
@@ -272,6 +353,16 @@ core::threading::SrwLock& session_lock() noexcept {
 /** @return Every session slot, open or not. */
 std::span<Session> sessions() noexcept {
     return g_sessions;
+}
+
+std::array<std::byte, state::kBapNonceSize>* downstream_send_nonce(std::uint32_t id) noexcept {
+    auto* session = session_for(id);
+    return session && session->authenticated ? &session->sendNonce : nullptr;
+}
+
+void service(std::uint64_t now) noexcept {
+    const std::lock_guard lock(g_lock);
+    proxy::service(now);
 }
 
 /** Takes the slice consumer slot, or refuses a second registration. */
@@ -337,7 +428,8 @@ bool session_scenario_layout(const Session& session, layouts::Definition& output
 
 void arm_account_resync_elsewhere(Session& origin) noexcept {
     for (auto& peer : g_sessions) {
-        if (&peer != &origin && peer.id != 0 && peer.authenticated && peer.queuez.family4Active) {
+        if (&peer != &origin && peer.id != 0 && peer.authenticated && peer.queuez.family4Active
+            && peer.accountHandle == origin.accountHandle) {
             peer.accountResyncArmed = true;
         }
     }
@@ -346,7 +438,8 @@ void arm_account_resync_elsewhere(Session& origin) noexcept {
 /** Arms every active peer to re-read the account, including the origin. */
 void arm_account_resync_everywhere() noexcept {
     for (auto& peer : g_sessions) {
-        if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active) {
+        if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active
+            || peer.accountHandle != state::bound_account()) {
             continue;
         }
         peer.accountResyncArmed = true;
@@ -421,7 +514,7 @@ bool consume(const client::network::BapRequest& request,
     // Hold the session lock across cryptographic counter reads and updates.
     switch (request.event) {
     case client::network::BapEvent::open:
-        success = open_session(request.connectionId);
+        success = open_session(request.connectionId, request.remoteAddress);
         break;
     case client::network::BapEvent::frame:
         success = consume_frame(request, response);
@@ -432,6 +525,9 @@ bool consume(const client::network::BapRequest& request,
     case client::network::BapEvent::close:
         success = close_session(request.connectionId);
         break;
+    }
+    if (const auto* session = session_for(request.connectionId)) {
+        response.authenticated = session->authenticated;
     }
     // Decrypted frames can contain runtime-only keys or tokens, so scratch never outlives the call.
     if (touchesScratch) {
@@ -475,61 +571,89 @@ select_activity_mission_seed(const state::activity::SessionBinding& binding,
         status = ActivityMissionSeedLeaseStatus::refused;
     }
     if (status == ActivityMissionSeedLeaseStatus::ready) {
-        MissionSeedLease& lease = session->activityMissionSeed;
-        // Ordinary traversal can reach a plan's region before the script selects it, so an open
-        // arrival window closes here when the client already holds that region.
-        const auto placement = state::activity::membership::reported_placement(binding.sessionId);
-        const auto heldRegion = state::activity::membership::instantiated_region(placement);
-        const bool targetHeld = encrypted::push::activity::mission_seed_arrival_window_closed(
-            heldRegion, plan.effectiveRegion);
-        if (lease.configured && same_mission_seed_plan(lease.plan, plan)) {
-            if (targetHeld) {
-                lease.regionArrivalPending = false;
-            }
-            // The script may select the plan the roster adopted by default. That is a selection.
-            lease.scriptSelected = true;
-            return ActivityMissionSeedLeaseStatus::ready;
-        }
-        if (lease.configured && lease.revision == (std::numeric_limits<std::uint64_t>::max)()) {
-            status = ActivityMissionSeedLeaseStatus::refused;
-        } else {
-            // A staged older revision may finish. Its commit cannot publish this newer revision.
-            const std::uint64_t revision = lease.configured ? lease.revision + 1U : 1U;
-            // Every region this lease has selected stays registered on the peer, so record the
-            // new one and keep the earlier ones. Publication carries the union; dropping a group
-            // does not unregister it, it only stops seeding records the peer still holds.
-            if (!lease.configured) {
-                lease.registeredRegionCount = 0;
-            }
-            bool regionKnown = false;
-            for (std::size_t index = 0; index < lease.registeredRegionCount; ++index) {
-                regionKnown = regionKnown || lease.registeredRegions[index] == plan.effectiveRegion;
-            }
-            if (!regionKnown) {
-                if (lease.registeredRegionCount >= lease.registeredRegions.size()) {
-                    return ActivityMissionSeedLeaseStatus::refused;
+        // No peer can observe a new selection unless every current recipient can retain it. The
+        // first pass only checks each recipient; the second commits. Each keeps its own
+        // generation, receipt, registered groups and arrival window.
+        const auto prepare_recipients = [&](bool commit) noexcept {
+            for (Session& peer : g_sessions) {
+                if (!mission_seed_recipient(peer, binding)) {
+                    continue;
                 }
-                lease.registeredRegions[lease.registeredRegionCount++] = plan.effectiveRegion;
+                const state::ScopedAccount accountScope(peer.accountHandle);
+                const state::activity::ScopedMemberContext memberScope(binding.sessionId,
+                                                                       peer.activityMemberKey);
+                const auto placement =
+                    state::activity::membership::reported_placement(binding.sessionId);
+                MissionSeedLease lease{};
+                if (!prepare_mission_seed_lease(
+                        peer.activityMissionSeed,
+                        plan,
+                        peer.activity.bindingGeneration,
+                        state::activity::membership::instantiated_region(placement),
+                        lease)) {
+                    return false;
+                }
+                if (commit) {
+                    peer.activityMissionSeed = lease;
+                }
             }
-            // A selection that replaces the world waits for the client's arrival there. One that
-            // does not must close any window an earlier selection left open, because an open
-            // window blocks publication and nothing else clears it.
-            if (lease.configured
-                && encrypted::push::activity::mission_seed_selection_needs_arrival(
-                    lease.plan.effectiveRegion, plan.effectiveRegion, heldRegion)) {
-                lease.previousPlan = lease.plan;
-                lease.regionArrivalPending = true;
-            } else {
-                lease.regionArrivalPending = false;
-            }
-            lease.plan = plan;
-            lease.bindingGeneration = session->activity.bindingGeneration;
-            lease.revision = revision;
-            lease.configured = true;
-            lease.scriptSelected = true;
+            return true;
+        };
+        if (!prepare_recipients(false) || !prepare_recipients(true)) {
+            return ActivityMissionSeedLeaseStatus::refused;
         }
     }
     return status;
+}
+
+bool mission_seed_publication_ready(const state::activity::SessionBinding& binding,
+                                    std::uint64_t generation,
+                                    bool everyClient) noexcept {
+    const std::shared_lock lock(g_lock);
+    std::size_t count{};
+    const Session* owner = activity_link_for_generation_locked(binding, generation, count);
+    if (owner == nullptr) {
+        return false;
+    }
+    const auto& selected = owner->activityMissionSeed;
+    if (!selected.configured || !selected.scriptSelected) {
+        return true;
+    }
+    return mission_seed_hosted_publication_locked(binding, selected.plan, everyClient);
+}
+
+bool arm_shared_mission_region(const state::activity::SessionBinding& binding,
+                               std::uint64_t generation,
+                               std::int32_t region,
+                               std::uint32_t nameHash) noexcept {
+    namespace membership = state::activity::membership;
+    if (region < 0 || region > membership::kMaximumSliceSetIndex || nameHash == 0) {
+        return false;
+    }
+    const std::lock_guard lock(g_lock);
+    std::size_t count{};
+    if (activity_link_for_generation_locked(binding, generation, count) == nullptr) {
+        return false;
+    }
+    bool armed = false;
+    for (const Session& peer : g_sessions) {
+        if (!mission_seed_recipient(peer, binding)
+            || peer.activity.role != ActivityClientRole::privateCurrent
+            || !peer.activityMemberKey) {
+            continue;
+        }
+        const state::ScopedAccount accountScope(peer.accountHandle);
+        const state::activity::ScopedMemberContext memberScope(binding.sessionId,
+                                                               peer.activityMemberKey);
+        // A matching pending leg means the client accepted the move, not that its teleport
+        // machine finished. Leave the host's spawn phase in place until the client's native
+        // completion report retires it; clearing here would restore its still-waiting block.
+        if (membership::player_region(binding.sessionId) == region) {
+            continue;
+        }
+        armed = membership::arm_host_teleport(binding.sessionId, region, nameHash) || armed;
+    }
+    return armed;
 }
 
 /** Queues one generation-bound replication epoch request. */
@@ -538,11 +662,19 @@ bool request_replication_epoch(const state::activity::SessionBinding& binding,
                                std::uint8_t requestedEpoch) noexcept {
     const std::lock_guard lock(g_lock);
     std::size_t count = 0;
-    Session* const session = unique_mutable_activity_link_locked(binding, count);
+    Session* const session =
+        unique_mutable_activity_link_locked(binding, expectedGeneration, count);
     bool queued =
         session != nullptr && expectedGeneration != 0
         && session->activity.bindingGeneration == expectedGeneration
         && requestedEpoch == static_cast<std::uint8_t>(session->activity.replicationEpoch + 1U);
+    if (queued) {
+        std::uint64_t current{};
+        queued = state::activity::replication_sequence(binding, current)
+                 && (current == session->activity.replicationSequence
+                         ? state::activity::advance_replication_sequence(binding, current)
+                         : current > session->activity.replicationSequence);
+    }
     if (queued) {
         ReplicationEpochPublication& request = session->activityReplicationEpoch;
         queued = !request.pending
@@ -567,7 +699,8 @@ request_activity_authority_query(const state::activity::SessionBinding& binding,
     correlation = -1;
     const std::lock_guard lock(g_lock);
     std::size_t linkCount = 0;
-    Session* const session = unique_mutable_activity_link_locked(binding, linkCount);
+    Session* const session =
+        unique_mutable_activity_link_locked(binding, expectedGeneration, linkCount);
     ActivityAuthorityQueryStatus status = ActivityAuthorityQueryStatus::noActivityLink;
     if (session != nullptr) {
         status = session->activity.bindingGeneration == expectedGeneration
@@ -586,7 +719,8 @@ activity_authority_query_snapshot(const state::activity::SessionBinding& binding
     output = {};
     const std::shared_lock lock(g_lock);
     std::size_t linkCount = 0;
-    const Session* const session = unique_activity_link_locked(binding, linkCount);
+    const Session* const session =
+        activity_link_for_generation_locked(binding, expectedGeneration, linkCount);
     ActivityAuthorityQueryStatus status = ActivityAuthorityQueryStatus::noActivityLink;
     if (session != nullptr) {
         status = session->activity.bindingGeneration == expectedGeneration
@@ -605,7 +739,8 @@ request_activity_authority_reset(const state::activity::SessionBinding& binding,
     correlation = -1;
     const std::lock_guard lock(g_lock);
     std::size_t linkCount = 0;
-    Session* const session = unique_mutable_activity_link_locked(binding, linkCount);
+    Session* const session =
+        unique_mutable_activity_link_locked(binding, expectedGeneration, linkCount);
     ActivityAuthorityResetStatus status = ActivityAuthorityResetStatus::noActivityLink;
     if (session != nullptr) {
         status = session->activity.bindingGeneration == expectedGeneration
@@ -624,7 +759,8 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     output = {};
     const std::shared_lock lock(g_lock);
     std::size_t linkCount = 0;
-    const Session* const session = unique_activity_link_locked(binding, linkCount);
+    const Session* const session =
+        activity_link_for_generation_locked(binding, expectedGeneration, linkCount);
     ActivityAuthorityResetStatus status = ActivityAuthorityResetStatus::noActivityLink;
     if (session != nullptr) {
         status = session->activity.bindingGeneration == expectedGeneration
@@ -656,6 +792,10 @@ void shutdown() noexcept {
     const std::lock_guard lock(g_lock);
     drain_world_rewards();
     for (auto& session : g_sessions) {
+        const state::ScopedAccount accountScope(session.accountHandle);
+        const state::activity::ScopedMemberContext memberScope(session.activity.session.sessionId,
+                                                               session.activityMemberKey);
+        proxy::close_link(session.id);
         if (session.id != 0
             && session.matchmakingContext.generation != state::matchmaking::kInvalidGeneration) {
             // State erases runtime descriptors before the opaque association is cleared.
@@ -666,6 +806,8 @@ void shutdown() noexcept {
         }
     }
     SecureZeroMemory(g_sessions.data(), sizeof g_sessions);
+    state::social::reset_directory();
+    encrypted::reset_host_social();
     SecureZeroMemory(&g_scratch, sizeof g_scratch);
 }
 

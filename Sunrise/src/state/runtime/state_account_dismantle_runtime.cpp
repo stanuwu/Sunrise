@@ -16,7 +16,7 @@ using namespace runtime::detail;
 /** Prepares one selected-character unequipped item removal without changing account State. */
 bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mutation) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     if (instanceSoid == 0 || !account::valid(account)) {
         report_dismantle("prepare", "fail", "input", 0, 0, instanceSoid, 0, 0, 0, 0, 0);
         return false;
@@ -52,7 +52,7 @@ bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mu
 
 /** Produces the exact character-and-profile after-image while the captured views remain current. */
 bool preview_item_dismantle(const PendingItemDismantle& mutation, AccountState& after) noexcept {
-    const AccountState current = account_snapshot();
+    const AccountState current = bound_account_snapshot();
     const bool ready = materialize_item_dismantle(current, mutation, after);
     report_dismantle("preview",
                      ready ? "ok" : "fail",

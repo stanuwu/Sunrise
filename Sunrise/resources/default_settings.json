@@ -1,5 +1,6 @@
 {
-  "version": 18,
+  "version": 19,
+  "multiplayer_enabled": false,
   "core": {
     "logging": {
       "debugger_sink": true,
@@ -41,7 +42,9 @@
     "dump_package_keys": false
   },
   "server": {
+    "max_players": 32,
     "bap_port": 30974,
+    "bap_bind": "127.0.0.1",
     "gameplay": {
       "topology": "embedded",
       "bind_address": "127.0.0.1",
