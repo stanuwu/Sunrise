@@ -103,19 +103,44 @@ find_entity_damage(RuntimeInstance& instance,
  * @return The link whose entity source speaks for one combatant, by the same chain its Sense
  * reports are admitted by. Another link's copy of it is not its simulation.
  */
-[[nodiscard]] std::uint64_t
-entity_damage_generation(const RuntimeInstance& instance,
-                         const state::gameplay::entity_identity::Identity& row) noexcept {
+[[nodiscard]] std::uint64_t entity_damage_generation(
+    const RuntimeInstance& instance,
+    const state::gameplay::entity_identity::ActorSourceReference& actorSource) noexcept {
     return simulating_link(instance,
-                           {.registryKey = row.actorSource.key,
-                            .slotIndex = row.actorSource.index,
-                            .slotType = row.actorSource.type});
+                           {.registryKey = actorSource.key,
+                            .slotIndex = actorSource.index,
+                            .slotType = actorSource.type});
+}
+
+/** @return True when the route is the only live link, so every pin falls back to it. */
+[[nodiscard]] bool route_only(const RuntimeInstance& instance) noexcept {
+    const auto live = live_links(instance);
+    return std::all_of(live.begin(), live.end(), [&instance](std::uint64_t link) noexcept {
+        return link == instance.view.activityClientGeneration;
+    });
 }
 
 /**
- * Collects one entity whose pools differ from the last published ones, or whose withheld pools its
- * link now simulates. It runs under the registry lock, so it only compares and copies; events are
- * raised after the walk.
+ * @return True when one link's copy of a combatant is its simulation. The walk runs under the
+ * registry lock for every visited row, so with the route the only live link, where every pin falls
+ * back to the route, the pin walk is skipped.
+ */
+[[nodiscard]] bool
+simulated_copy(const RuntimeInstance& instance,
+               bool routeOnly,
+               std::uint64_t sourceGeneration,
+               const state::gameplay::entity_identity::ActorSourceReference& actorSource) noexcept {
+    return routeOnly ? sourceGeneration == instance.view.activityClientGeneration
+                     : entity_damage_generation(instance, actorSource) == sourceGeneration;
+}
+
+/**
+ * Collects one entity whose pools differ from the last published ones, or whose publication was
+ * refused at dispatch. Only the copy of the link that simulates a combatant holds a row: every
+ * link's source also lists replica copies, and rows held for them would take the table from the
+ * copies that are published. A copy that is not the simulation frees its row; once its link
+ * simulates the combatant, its first visit finds no row and publishes it. It runs under the
+ * registry lock, so it only compares and copies; events are raised after the walk.
  */
 [[nodiscard]] bool
 observe_entity_damage(void* context,
@@ -141,29 +166,23 @@ observe_entity_damage(void* context,
     }
     EntityDamageObservation* const retained =
         find_entity_damage(*scan.instance, scan.sourceGeneration, row.token);
+    if (!simulated_copy(*scan.instance, scan.routeOnly, scan.sourceGeneration, row.actorSource)) {
+        if (retained != nullptr && retained->used) {
+            *retained = {};
+        }
+        return true;
+    }
     if (retained == nullptr) {
         ++scan.overflow;
         return true;
     }
     retained->listed = true;
-    // The pin walk runs under the registry lock for every visited row, so one link skips it.
-    const bool admitted =
-        scan.routeOnly ? scan.sourceGeneration == scan.instance->view.activityClientGeneration
-                       : entity_damage_generation(*scan.instance, row) == scan.sourceGeneration;
-    // A copy that stops being the simulation is held back even when it does not change, so the
-    // script reads it again once its link simulates the combatant again.
-    if (!admitted) {
-        retained->withheld = retained->withheld || retained->used;
-    }
     const bool unchanged = retained->used && retained->token == row.token
                            && retained->allocationSequence == row.allocationSequence
                            && retained->allocationDomain == row.allocationDomain
                            && retained->actorSource == row.actorSource
                            && retained->damage == row.damage;
     if (unchanged && !retained->withheld) {
-        return true;
-    }
-    if (unchanged && !admitted) {
         return true;
     }
     retained->token = row.token;
@@ -173,11 +192,10 @@ observe_entity_damage(void* context,
     retained->allocationSequence = row.allocationSequence;
     retained->allocationEpoch = row.allocationEpoch;
     retained->sourceGeneration = scan.sourceGeneration;
-    // Another link's copy stays retained, so this link's later changes still compare against it.
-    retained->withheld = !admitted;
+    retained->withheld = false;
     retained->used = true;
     // Every changed row owns a retained row, so the retained capacity bounds this array too.
-    if (admitted && scan.changedCount < scan.changed.size()) {
+    if (scan.changedCount < scan.changed.size()) {
         scan.changed[scan.changedCount++] = row;
     }
     return true;
@@ -272,8 +290,8 @@ void reset_entity_damage(RuntimeInstance& instance, std::uint64_t sourceGenerati
 
 /**
  * Revalidates queued health against the same source and allocation. A pin can move between the poll
- * and this dispatch, which makes the copy another link's: it is withheld again, so its link
- * publishes it once that link simulates the combatant.
+ * and this dispatch, which makes the copy another link's: its row is withheld, so the next poll
+ * frees it, or publishes it again while its link still simulates the combatant.
  */
 bool current_entity_damage(RuntimeInstance& instance, const host::Event& event) noexcept {
     namespace identities = state::gameplay::entity_identity;
@@ -303,7 +321,7 @@ bool current_entity_damage(RuntimeInstance& instance, const host::Event& event) 
         || !matches_entity_damage(event, current) || !copy_pins(instance)) {
         return false;
     }
-    if (entity_damage_generation(instance, current) == event.sourceGeneration) {
+    if (entity_damage_generation(instance, current.actorSource) == event.sourceGeneration) {
         return true;
     }
     for (auto& row : instance.entityDamageObservations) {
@@ -349,12 +367,8 @@ push_source_damage_edges(RuntimeInstance& instance,
     EntityDamageScan scan{};
     scan.instance = &instance;
     scan.sourceGeneration = generation;
-    const auto live = live_links(instance);
-    scan.routeOnly =
-        std::all_of(live.begin(), live.end(), [&instance](std::uint64_t link) noexcept {
-            return link == instance.view.activityClientGeneration;
-        });
-    for (auto& row : instance.entityDamageObservations) {
+    scan.routeOnly = route_only(instance);
+    for (auto& row : instance.entitySourceDamageObservations) {
         if (row.used && row.sourceGeneration == generation) {
             row.listed = false;
             if (row.token.slot < scan.retainedSlots.size()) {
@@ -431,6 +445,15 @@ static void push_entity_damage_edges(RuntimeInstance& instance,
         if (generation != 0
             && std::find(polled.begin(), polled.end(), generation) == polled.end()) {
             reset_entity_damage(instance, generation);
+        }
+    }
+    // A re-pin turns rows into replica copies. They free before any source is walked, so the copies
+    // that are the simulation now find the rows whichever source is walked first.
+    const bool routeOnly = route_only(instance);
+    for (auto& row : instance.entitySourceDamageObservations) {
+        if (row.used
+            && !simulated_copy(instance, routeOnly, row.sourceGeneration, row.actorSource)) {
+            row = {};
         }
     }
     for (const std::uint64_t generation : polled) {

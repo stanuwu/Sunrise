@@ -170,7 +170,7 @@ struct EntityDamageObservation final {
     /** Link whose entity source reported it. Network slots are unique only within one source. */
     std::uint64_t sourceGeneration{};
     std::uint8_t allocationSequence{}, allocationEpoch{};
-    /** Set while these pools are not their combatant's simulation, so a re-pin publishes them. */
+    /** Set when a queued publication was refused, so the next poll publishes these pools. */
     bool withheld{};
     /** Set when the last poll of the source found the entity still listed. */
     bool listed{};
