@@ -378,7 +378,15 @@ struct SenseInput final {
     middleware::bap::activity_message::sense_update::DecodedPacket decoded{};
     bool hasFirstObject{};
     std::uint64_t attemptGeneration{};
+    /**
+     * Bubbles whose grant the source link held when the message was framed, one bit per bubble
+     * ordinal. The holder of a bubble simulates its squads; another link's squad Sense is a
+     * replica's view.
+     */
+    std::uint64_t heldBubbles{};
 };
+static_assert(state::build_data::scenarios::kBubbleCapacity
+              <= sizeof(SenseInput::heldBubbles) * 8U);
 
 /** Exact package and schema identity for one observed Sense ClientRef. */
 struct SenseObservationKey final {
@@ -421,31 +429,38 @@ snapshot_squad_sense(const state::activity::SessionBinding& binding,
                                                     std::span<SenseObservationKey> output) noexcept;
 
 /**
- * Copies the bubble's state for one squad, for the link granted the released bubble: the newest
- * valid state its releaser or the recipient itself reported, withdrawn or not. The client that
- * takes the bubble over resumes every squad. A client walking back into a bubble it unloaded gets
- * its cleared encounters, which stay dead; its other squads start natively. A recipient whose own
- * live report is the newest is owed nothing; every body replays it.
+ * Copies the bubble's state for one squad, for the link granted the released bubble: its
+ * releaser's last valid state, withdrawn or not, or the recipient's own when that is newer and was
+ * reported while the recipient held the bubble. A report from the recipient's replica never
+ * replaces the releaser's. The client that takes the bubble over resumes every squad. A client
+ * walking back into a bubble it unloaded gets its cleared encounters, which stay dead; its other
+ * squads start natively. A recipient whose own live record is the truth is owed nothing; every
+ * body replays it.
  * @param recipientGeneration The link being granted the bubble.
  * @param releaserGeneration The link that held the bubble before it; it may be the recipient.
+ * @param bubble The bubble being granted.
  * @return True when the recipient is owed the state.
  */
 [[nodiscard]] bool snapshot_handover_squad_sense(
     const state::activity::SessionBinding& binding,
     std::uint64_t recipientGeneration,
     std::uint64_t releaserGeneration,
+    std::uint8_t bubble,
     const SenseObservationKey& key,
     middleware::bap::activity_message::squad_sense::State& output) noexcept;
 
 /**
  * Makes the state a delivered grant body handed over the recipient's own record, so its later
- * deltas merge onto the state it resumed from and every later body replays it.
+ * deltas merge onto the state it resumed from and every later body replays it. The record counts
+ * as reported while the recipient held the bubble.
+ * @param bubble The bubble the body granted.
  * @param keys The squads the body handed over.
  * @return The number of records seeded.
  */
 std::size_t seed_handover_squad_sense(const state::activity::SessionBinding& binding,
                                       std::uint64_t recipientGeneration,
                                       std::uint64_t releaserGeneration,
+                                      std::uint8_t bubble,
                                       std::span<const SenseObservationKey> keys) noexcept;
 
 /** What the msg-5 builder needs to publish one type-65 Sense root. */

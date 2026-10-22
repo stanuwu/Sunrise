@@ -693,6 +693,7 @@ void append_handover_squad_sense(const Session& session,
     namespace squadSense = middleware::bap::activity_message::squad_sense;
     output = {};
     output.releaser = releaser;
+    output.bubble = bubble;
     const sdk::Snapshot catalog = sdk::snapshot();
     sdk::BoundView view{};
     const sdk::Selection selection{session.activity.session, 1, session.activity.bindingGeneration};
@@ -716,6 +717,7 @@ void append_handover_squad_sense(const Session& session,
                 session.activity.session,
                 session.activity.bindingGeneration,
                 releaser,
+                bubble,
                 key,
                 recovered)) {
             continue;

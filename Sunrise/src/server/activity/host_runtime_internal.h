@@ -188,6 +188,11 @@ struct SquadSenseRecord final {
     /** Instance-wide merge order, so a holder change replays the newest simulating report. */
     std::uint64_t mergeSequence{};
     /**
+     * Bubbles the source held when it last merged a valid state. Only while it held the squad's
+     * bubble did it simulate the squad; otherwise the state is its replica's view.
+     */
+    std::uint64_t heldBubbles{};
+    /**
      * The source withdrew its state. Its last valid state stays only as the baseline the link that
      * takes over the squad's bubble is reconciled to; it is never replayed to its own source.
      */

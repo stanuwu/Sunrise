@@ -52,6 +52,7 @@ void retain_squad_sense(Instance& instance, const SenseInput& input) noexcept {
             found->withdrawn = false;
             found->attemptGeneration = input.attemptGeneration;
             found->mergeSequence = ++instance.squadSenseSequence;
+            found->heldBubbles = input.heldBubbles;
         } else if (instance.squadSense.size()
                    < kScriptableGuardCapacity
                          * state::activity::entity_slots::kMemberLeaseRowCount) {
@@ -67,6 +68,7 @@ void retain_squad_sense(Instance& instance, const SenseInput& input) noexcept {
                                                input.sourceGeneration,
                                                input.attemptGeneration,
                                                ++instance.squadSenseSequence,
+                                               input.heldBubbles,
                                                false});
             } catch (const std::bad_alloc&) {
                 return;
@@ -159,20 +161,33 @@ cleared(const middleware::bap::activity_message::squad_sense::State& state) noex
                        [](std::int32_t created) { return created > 0; });
 }
 
+/** @return True when the record's state was reported while its source held this bubble. */
+[[nodiscard]] bool simulated(const SquadSenseRecord& record, std::uint8_t bubble) noexcept {
+    return bubble < state::build_data::scenarios::kBubbleCapacity
+           && (record.heldBubbles & (std::uint64_t{1} << bubble)) != 0;
+}
+
 /**
- * The bubble's truth for one squad is the newest valid state its releaser or the recipient
- * reported, withdrawn or not. The recipient is owed that state unless it is its own live record,
+ * The bubble's truth for one squad is its releaser's last valid state, withdrawn or not: the
+ * releaser held the bubble, so it simulated the squad. The recipient's own record replaces it only
+ * when it is newer and was reported while the recipient held the bubble, as when a client walks
+ * back into an encounter it cleared. A newer report from the recipient's replica does not: arrival
+ * order says nothing about who simulated the squad. With no valid releaser state, the recipient's
+ * own record is the only one. The recipient is owed the truth unless it is its own live record,
  * which every body replays. A recipient that unloaded the squad, by withdrawing it or by releasing
  * the bubble itself, reloads it: a cleared encounter stays cleared for it, and any other squad
  * starts natively, since its members went with the unload.
+ * @param bubble The bubble being granted, which the squad is authored in.
  * @return The record whose state the recipient is owed, or null.
  */
 [[nodiscard]] const SquadSenseRecord* handover_owed(const SquadSenseRecord* released,
-                                                    const SquadSenseRecord* own) noexcept {
+                                                    const SquadSenseRecord* own,
+                                                    std::uint8_t bubble) noexcept {
     const SquadSenseRecord* truth =
         released != nullptr && released->state.valid ? released : nullptr;
     if (own != nullptr && own->state.valid
-        && (truth == nullptr || own->mergeSequence > truth->mergeSequence)) {
+        && (truth == nullptr
+            || (simulated(*own, bubble) && own->mergeSequence > truth->mergeSequence))) {
         truth = own;
     }
     if (truth == nullptr || (truth == own && !own->withdrawn)) {
@@ -214,12 +229,14 @@ std::size_t handover_squad_sense_keys(const state::activity::SessionBinding& bin
 /**
  * The releaser's last valid state is the bubble's truth even though it withdrew it at the
  * crossing that released the bubble, and so is the recipient's own withdrawn state when it is the
- * newer one: the recipient walks back into an encounter it cleared.
+ * newer one and the recipient held the bubble then: the recipient walks back into an encounter it
+ * cleared.
  */
 bool snapshot_handover_squad_sense(
     const state::activity::SessionBinding& binding,
     std::uint64_t recipientGeneration,
     std::uint64_t releaserGeneration,
+    std::uint8_t bubble,
     const SenseObservationKey& key,
     middleware::bap::activity_message::squad_sense::State& output) noexcept {
     output = {};
@@ -231,7 +248,7 @@ bool snapshot_handover_squad_sense(
             find_record(instance->squadSense, releaserGeneration, key);
         const SquadSenseRecord* const own =
             find_record(instance->squadSense, recipientGeneration, key);
-        owed = handover_owed(released, own);
+        owed = handover_owed(released, own, bubble);
         if (owed != nullptr) {
             output = owed->state;
         }
@@ -243,6 +260,7 @@ bool snapshot_handover_squad_sense(
 std::size_t seed_handover_squad_sense(const state::activity::SessionBinding& binding,
                                       std::uint64_t recipientGeneration,
                                       std::uint64_t releaserGeneration,
+                                      std::uint8_t bubble,
                                       std::span<const SenseObservationKey> keys) noexcept {
     std::size_t seeded = 0;
     if (recipientGeneration == 0 || releaserGeneration == 0) {
@@ -255,7 +273,7 @@ std::size_t seed_handover_squad_sense(const state::activity::SessionBinding& bin
                 find_record(instance->squadSense, releaserGeneration, key);
             SquadSenseRecord* const own =
                 find_record(instance->squadSense, recipientGeneration, key);
-            const SquadSenseRecord* const owed = handover_owed(released, own);
+            const SquadSenseRecord* const owed = handover_owed(released, own, bubble);
             if (owed == nullptr) {
                 continue;
             }
@@ -263,6 +281,11 @@ std::size_t seed_handover_squad_sense(const state::activity::SessionBinding& bin
             seed.sourceGeneration = recipientGeneration;
             seed.withdrawn = false;
             seed.mergeSequence = ++instance->squadSenseSequence;
+            // The body that delivered it grants the recipient the bubble, so it simulates the
+            // squad from this state on.
+            seed.heldBubbles = bubble < state::build_data::scenarios::kBubbleCapacity
+                                   ? std::uint64_t{1} << bubble
+                                   : 0;
             if (own != nullptr) {
                 *own = seed;
             } else if (instance->squadSense.size()

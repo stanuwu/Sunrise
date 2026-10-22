@@ -932,6 +932,7 @@ void commit_staged_roster(Session& session) noexcept {
             session.activity.session,
             session.activity.bindingGeneration,
             handed.releaser,
+            handed.bubble,
             std::span(handed.keys).first(handed.count)));
     }
     if (session.activityRosterStaged.hasGrant) {

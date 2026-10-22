@@ -150,6 +150,8 @@ struct HandoverSquadSense final {
     std::array<activity::host::SenseObservationKey, kHandoverSquadCapacity> keys{};
     std::size_t count{};
     std::uint64_t releaser{};
+    /** The bubble the body grants. */
+    std::uint8_t bubble{};
 };
 
 /**
