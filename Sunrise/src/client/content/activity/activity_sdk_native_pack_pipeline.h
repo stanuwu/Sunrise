@@ -7,6 +7,7 @@
 #include "../../../state/activity_sdk/generation/pack_writer.h"
 #include "../../../state/activity_sdk/identity.h"
 #include "activity_sdk_activity_inventory.h"
+#include "activity_sdk_decode_plans_image.h"
 #include "activity_sdk_external_placements.h"
 #include "activity_sdk_lua_artifacts.h"
 #include "activity_sdk_topology_inventory.h"
@@ -82,6 +83,7 @@ struct Result final {
 [[nodiscard]] Status stage(const wchar_t* sdkDirectory,
                            const wchar_t* packPath,
                            const middleware::content::packages::reader::Source& source,
+                           const decode_plans::Image& reflectionImage,
                            const pack::Digest& sourceFingerprint,
                            const activity_inventory::Snapshot& activities,
                            topology_inventory::Snapshot& topology,

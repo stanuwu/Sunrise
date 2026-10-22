@@ -1,5 +1,6 @@
 #include "actor_command_runtime_codec.h"
 
+#include <algorithm>
 #include <array>
 #include <limits>
 
@@ -55,30 +56,31 @@ sdk_find_schema(const void* raw, std::uint32_t handle, wire::runtime::SchemaView
     if (catalog == nullptr) {
         return false;
     }
-    for (std::size_t index = 0; index < catalog->schemas.size(); ++index) {
-        const format::RuntimeSchema& row = catalog->schemas[index];
-        if (row.handle != handle) {
-            continue;
-        }
-        /** Only these two flags are understood; any other flag refuses the row. */
-        constexpr std::uint32_t kAllowedFlags =
-            format::kRuntimeSchemaExact | format::kRuntimeSchemaArrayRegion;
-        const bool arrayRegion = (row.flags & format::kRuntimeSchemaArrayRegion) != 0;
-        if ((row.flags & format::kRuntimeSchemaExact) == 0 || (row.flags & ~kAllowedFlags) != 0
-            || arrayRegion != (row.arrayElementCount != 0)
-            || row.fields.first > catalog->fields.size()
-            || row.fields.count > catalog->fields.size() - row.fields.first) {
-            return false;
-        }
-        output = {static_cast<std::uint32_t>(index),
-                  row.handle,
-                  row.arrayElementCount,
-                  row.fields.first,
-                  row.fields.count,
-                  row.decodedSize};
-        return true;
+    // Runtime schemas are sorted by handle.
+    const auto found = std::lower_bound(
+        catalog->schemas.begin(), catalog->schemas.end(), handle, [](const auto& row, auto value) {
+            return row.handle < value;
+        });
+    if (found == catalog->schemas.end() || found->handle != handle) {
+        return false;
     }
-    return false;
+    const format::RuntimeSchema& row = *found;
+    /** Only these two flags are understood; any other flag refuses the row. */
+    constexpr std::uint32_t kAllowedFlags =
+        format::kRuntimeSchemaExact | format::kRuntimeSchemaArrayRegion;
+    const bool arrayRegion = (row.flags & format::kRuntimeSchemaArrayRegion) != 0;
+    if ((row.flags & format::kRuntimeSchemaExact) == 0 || (row.flags & ~kAllowedFlags) != 0
+        || arrayRegion != (row.arrayElementCount != 0) || row.fields.first > catalog->fields.size()
+        || row.fields.count > catalog->fields.size() - row.fields.first) {
+        return false;
+    }
+    output = {static_cast<std::uint32_t>(found - catalog->schemas.begin()),
+              row.handle,
+              row.arrayElementCount,
+              row.fields.first,
+              row.fields.count,
+              row.decodedSize};
+    return true;
 }
 
 /** Reads one schema row without exposing SDK storage to the walker. */

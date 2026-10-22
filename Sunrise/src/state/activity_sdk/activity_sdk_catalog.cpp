@@ -703,12 +703,13 @@ const format::SimulationEventDefinition* simulation_event_by_name(const Catalog&
 
 const format::RuntimeSchema* runtime_schema_by_handle(const Catalog& catalog,
                                                       std::uint32_t handle) noexcept {
-    for (const format::RuntimeSchema& row : catalog.runtime_schemas()) {
-        if (row.handle == handle) {
-            return &row;
-        }
-    }
-    return nullptr;
+    // Runtime schemas are sorted by handle; validation refuses a catalog that is not.
+    const auto schemas = catalog.runtime_schemas();
+    const auto found =
+        std::lower_bound(schemas.begin(), schemas.end(), handle, [](const auto& row, auto value) {
+            return row.handle < value;
+        });
+    return found != schemas.end() && found->handle == handle ? &*found : nullptr;
 }
 
 std::span<const format::RuntimeField>

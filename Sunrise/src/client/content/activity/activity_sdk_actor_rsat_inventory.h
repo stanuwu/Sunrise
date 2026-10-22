@@ -9,6 +9,7 @@
 
 #include "../../../middleware/content/packages/reader/reader.h"
 #include "../../../state/activity_sdk/format.h"
+#include "activity_sdk_decode_plans_image.h"
 
 namespace sunrise::client::content::activity::sdk_generation::actor_rsat_inventory {
 
@@ -251,7 +252,8 @@ using ReadTag = bool (*)(void* context,
 [[nodiscard]] bool validate(const Snapshot& snapshot) noexcept;
 
 /** Builds an inventory from an already complete, sorted actor-definition tag set. */
-[[nodiscard]] bool build_from_tags(std::span<const std::uint32_t> actorTags,
+[[nodiscard]] bool build_from_tags(const decode_plans::Image& image,
+                                   std::span<const std::uint32_t> actorTags,
                                    ReadTag readTag,
                                    void* readContext,
                                    CancelProbe cancel,
@@ -260,7 +262,8 @@ using ReadTag = bool (*)(void* context,
 
 /** Builds actor joins plus a complete caller-supplied installed RSAT tag set. */
 [[nodiscard]] bool
-build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
+build_from_tags_and_rsats(const decode_plans::Image& image,
+                          std::span<const std::uint32_t> actorTags,
                           std::span<const std::uint32_t> rsatTags,
                           ReadTag readTag,
                           void* readContext,
@@ -271,6 +274,7 @@ build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
 
 /** Builds actor joins against one complete sorted installed RSAT tag set. */
 [[nodiscard]] bool build_with_rsats(const middleware::content::packages::reader::Source& source,
+                                    const decode_plans::Image& image,
                                     std::span<const std::uint32_t> actorTags,
                                     std::span<const std::uint32_t> rsatTags,
                                     CancelProbe cancel,

@@ -416,15 +416,15 @@ bool decode_composite_entity_payload_impl(const state::activity_sdk::Snapshot& c
 
 namespace detail {
 
-/** Finds one unique runtime schema handle in the pinned view. */
+/** Finds one unique runtime schema handle in the pinned view, which is sorted by handle. */
 [[nodiscard]] const format::RuntimeSchema*
 runtime_schema(const CompositeEntityCodecContext& context, std::uint32_t handle) noexcept {
-    for (const format::RuntimeSchema& row : context.runtimeSchemas) {
-        if (row.handle == handle) {
-            return &row;
-        }
-    }
-    return nullptr;
+    const auto found =
+        std::lower_bound(context.runtimeSchemas.begin(),
+                         context.runtimeSchemas.end(),
+                         handle,
+                         [](const auto& row, auto value) { return row.handle < value; });
+    return found != context.runtimeSchemas.end() && found->handle == handle ? &*found : nullptr;
 }
 
 /** Finds one installed RSAT in its generated tag order. */

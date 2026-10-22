@@ -8,8 +8,10 @@
 #include "../../patterns/signature_text.h"
 #include "activity_sdk_decode_plans_internal.h"
 
-namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal {
+namespace sunrise::client::content::activity::sdk_generation::decode_plans {
 namespace {
+
+using internal::read_at;
 
 // Matches the codec walk's primitive size lookup: movsx rcx, r9b; lea rdx, [table];
 // mov edx, [rdx+rcx*4]. The table address comes from the wildcarded lea operand.
@@ -308,4 +310,4 @@ bool Image::f32(std::uint64_t address, float& value) const noexcept {
     return offset(address, sizeof value, at) && read_at(bytes(), at, value);
 }
 
-} // namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal
+} // namespace sunrise::client::content::activity::sdk_generation::decode_plans

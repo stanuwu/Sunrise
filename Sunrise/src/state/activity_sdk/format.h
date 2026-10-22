@@ -222,6 +222,7 @@ enum class RuntimeFieldType : std::uint32_t {
     quantizedFloat = 11,
     vector3 = 13,
     compressedVector = 14,
+    noopSeventeen = 17,
     entityToken = 18,
     nullableTag = 22,
     dynamicSchema = 23,
@@ -1467,7 +1468,7 @@ struct SimulationEventDefinition final {
     std::uint32_t reserved{};
 };
 
-/** One reflected runtime schema required by a generated simulation event. */
+/** One reflected runtime schema, one per class in the executable's registry. */
 struct RuntimeSchema final {
     std::uint32_t handle{};
     std::uint32_t decodedSize{};

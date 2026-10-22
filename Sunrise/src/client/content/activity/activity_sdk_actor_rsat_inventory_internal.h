@@ -211,4 +211,8 @@ format_descriptor_id(std::uint32_t tag, std::uint32_t ordinal, Text& output) noe
 /** Adds the pinned actor command semantics shared by every installed actor. */
 [[nodiscard]] bool add_engine_semantics(Snapshot& snapshot);
 
+/** Reads runtime schemas and codec fields from the selected reflection image. */
+[[nodiscard]] bool add_runtime_schemas(const decode_plans::Image& image,
+                                       Snapshot& snapshot) noexcept;
+
 } // namespace sunrise::client::content::activity::sdk_generation::actor_rsat_inventory

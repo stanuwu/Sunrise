@@ -109,7 +109,9 @@ bool parse_native(const Image& image,
         Metadata record{};
         std::uint32_t length = 0;
         std::uint8_t genericFlag = 0;
-        if (!image.u32(address, length) || !image.u32(address + kSizeAt, record.size)
+        if (!image.u32(address, length)
+            || !image.u32(address + kDefinitionHashAt, record.definitionHash)
+            || !image.u32(address + kSizeAt, record.size)
             || !image.u8(address + kAlignmentAt, record.alignment)
             || !image.u8(address + kKindAt, record.kind)
             || !image.u8(address + kGenericFlagAt, genericFlag)) {
@@ -158,6 +160,10 @@ bool parse_native(const Image& image,
                 error = "metadata_block_extent";
                 return false;
             }
+            // The first block names the record's class; a codec block overrides it.
+            if (cursor == marker || kind == kCodecBlock) {
+                record.definitionClass = kind;
+            }
             if (kind == kCodecBlock) {
                 if (record.codec.present) {
                     error = "metadata_codec_repeated";
@@ -165,7 +171,8 @@ bool parse_native(const Image& image,
                 }
                 Codec& codec = record.codec;
                 codec.present = true;
-                if (!image.u32(address + cursor + 20, codec.original)
+                if (!image.u32(address + cursor + kCodecHandleAt, codec.handle)
+                    || !image.u32(address + cursor + 20, codec.original)
                     || !image.u32(address + cursor + 24, codec.serialized)
                     || !image.u32(address + cursor + 28, codec.flags)
                     || !image.u32(address + cursor + 0x20, codec.array)) {

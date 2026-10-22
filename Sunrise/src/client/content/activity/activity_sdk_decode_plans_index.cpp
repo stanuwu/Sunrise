@@ -3,8 +3,7 @@
 namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal {
 namespace {
 
-/** Codec block: bound handle at +0x10, serialized size at +0x18, field rows from +0x28. */
-constexpr std::uint64_t kCodecHandleAt = 0x10;
+/** Codec block: serialized size at +0x18, field rows from +0x28. */
 constexpr std::uint64_t kCodecSerializedAt = 0x18;
 constexpr std::uint64_t kCodecFieldsAt = 0x28;
 /** Bit offset of one field inside its 40-byte row. */

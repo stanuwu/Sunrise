@@ -135,33 +135,6 @@ bool add_engine_semantics(Snapshot& snapshot) {
         }
         snapshot.simulationEvents.push_back(event);
     }
-    for (const ExtractedRuntimeSchema& input : extracted.runtimeSchemas) {
-        RuntimeSchema schema{};
-        schema.handle = input.handle;
-        schema.decodedSize = input.decodedSize;
-        schema.definitionHash = input.definitionHash;
-        schema.definitionClass = input.definitionClass;
-        schema.codecFamilies = input.codecFamilies;
-        schema.fields = {input.firstField, input.fieldCount};
-        schema.evidenceAddress = input.evidenceAddress;
-        schema.flags = input.flags;
-        schema.arrayElementCount = input.arrayElementCount;
-        snapshot.runtimeSchemas.push_back(schema);
-    }
-    for (const ExtractedRuntimeField& input : extracted.runtimeFields) {
-        RuntimeField field{};
-        field.schemaIndex = input.schemaIndex;
-        field.ordinal = input.ordinal;
-        field.structOffset = input.structOffset;
-        field.alternateOffset = input.alternateOffset;
-        field.typeCode = input.typeCode;
-        field.nestedHandle = input.nestedHandle;
-        field.bias = input.bias;
-        field.bits = input.bits;
-        field.codecParameters = input.codecParameters;
-        field.flags = input.flags;
-        snapshot.runtimeFields.push_back(field);
-    }
     for (const ExtractedRuntimeTypeDefinition& input : extracted.runtimeTypes) {
         RuntimeTypeDefinition type{};
         if (!text_literal(input.name, type.name)) {
@@ -254,8 +227,6 @@ bool validate(const Snapshot& snapshot) noexcept {
         }
     }
     if (snapshot.simulationEvents.size() != extracted.simulationEvents.size()
-        || snapshot.runtimeSchemas.size() != extracted.runtimeSchemas.size()
-        || snapshot.runtimeFields.size() != extracted.runtimeFields.size()
         || snapshot.runtimeTypes.size() != extracted.runtimeTypes.size()
         || snapshot.entityTypes.size() != extracted.entityTypes.size()) {
         return false;
@@ -278,33 +249,6 @@ bool validate(const Snapshot& snapshot) noexcept {
             || row.primaryEvidenceAddress != expected.primaryEvidenceAddress
             || row.secondaryEvidenceAddress != expected.secondaryEvidenceAddress
             || row.flags != (format::kSimulationEventDefinitionExact | absentFlags)) {
-            return false;
-        }
-    }
-    for (std::size_t index = 0; index < snapshot.runtimeSchemas.size(); ++index) {
-        const RuntimeSchema& row = snapshot.runtimeSchemas[index];
-        const ExtractedRuntimeSchema& expected = extracted.runtimeSchemas[index];
-        if (row.handle != expected.handle || row.decodedSize != expected.decodedSize
-            || row.definitionHash != expected.definitionHash
-            || row.definitionClass != expected.definitionClass
-            || row.codecFamilies != expected.codecFamilies
-            || row.provenance != format::ActorSemanticProvenance::executableStatic
-            || row.fields.first != expected.firstField || row.fields.count != expected.fieldCount
-            || !range_inside(row.fields, snapshot.runtimeFields.size())
-            || row.evidenceAddress != expected.evidenceAddress || row.flags != expected.flags
-            || row.arrayElementCount != expected.arrayElementCount) {
-            return false;
-        }
-    }
-    for (std::size_t index = 0; index < snapshot.runtimeFields.size(); ++index) {
-        const RuntimeField& row = snapshot.runtimeFields[index];
-        const ExtractedRuntimeField& expected = extracted.runtimeFields[index];
-        if (row.schemaIndex != expected.schemaIndex || row.ordinal != expected.ordinal
-            || row.structOffset != expected.structOffset
-            || row.alternateOffset != expected.alternateOffset || row.typeCode != expected.typeCode
-            || row.nestedHandle != expected.nestedHandle || row.bias != expected.bias
-            || row.bits != expected.bits || row.codecParameters != expected.codecParameters
-            || row.flags != expected.flags || row.schemaIndex >= snapshot.runtimeSchemas.size()) {
             return false;
         }
     }

@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/reader/parallel.h"
 #include "activity_sdk_actor_rsat_inventory_internal.h"
 #include "activity_sdk_actor_sequences.h"
@@ -112,7 +113,8 @@ private:
 } // namespace
 
 /** Builds an inventory from an already complete, sorted actor-definition tag set. */
-bool build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
+bool build_from_tags_and_rsats(const decode_plans::Image& image,
+                               std::span<const std::uint32_t> actorTags,
                                std::span<const std::uint32_t> rsatTags,
                                ReadTag readTag,
                                void* readContext,
@@ -147,7 +149,7 @@ bool build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
         state.schemaSources.reserve(actorTags.size() + rsatTags.size());
         state.schemaIndexes.reserve(actorTags.size() + rsatTags.size());
         state.rsatTags.reserve(actorTags.size());
-        if (!add_engine_semantics(state.snapshot)) {
+        if (!add_engine_semantics(state.snapshot) || !add_runtime_schemas(image, state.snapshot)) {
             return false;
         }
 
@@ -345,13 +347,19 @@ bool build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
                 &binding.decodedOffset, field.rawRow.data() + 0x20U, sizeof binding.decodedOffset);
             binding.flags = format::kSobjectRsatFieldBindingExact;
             if (binding.runtimeSchemaHandle != format::kAbsentIndex) {
-                const auto runtime =
-                    std::find_if(state.snapshot.runtimeSchemas.begin(),
-                                 state.snapshot.runtimeSchemas.end(),
-                                 [&binding](const RuntimeSchema& row) {
-                                     return row.handle == binding.runtimeSchemaHandle;
-                                 });
-                if (runtime == state.snapshot.runtimeSchemas.end()) {
+                // Runtime schemas are sorted by handle.
+                const auto runtime = std::lower_bound(
+                    state.snapshot.runtimeSchemas.begin(),
+                    state.snapshot.runtimeSchemas.end(),
+                    binding.runtimeSchemaHandle,
+                    [](const auto& row, auto value) { return row.handle < value; });
+                if (runtime == state.snapshot.runtimeSchemas.end()
+                    || runtime->handle != binding.runtimeSchemaHandle) {
+                    core::log::writef(core::log::Channel::client,
+                                      core::log::Level::error,
+                                      "ev=actor_rsat stage=field_binding result=failed "
+                                      "reason=unknown_runtime_schema handle=0x%08X",
+                                      binding.runtimeSchemaHandle);
                     return false;
                 }
                 binding.definitionClass = runtime->definitionClass;
@@ -392,18 +400,20 @@ bool build_from_tags_and_rsats(std::span<const std::uint32_t> actorTags,
     }
 }
 
-bool build_from_tags(std::span<const std::uint32_t> actorTags,
+bool build_from_tags(const decode_plans::Image& image,
+                     std::span<const std::uint32_t> actorTags,
                      ReadTag readTag,
                      void* readContext,
                      CancelProbe cancel,
                      void* cancelContext,
                      Snapshot& output) noexcept {
     return build_from_tags_and_rsats(
-        actorTags, {}, readTag, readContext, cancel, cancelContext, output);
+        image, actorTags, {}, readTag, readContext, cancel, cancelContext, output);
 }
 
 /** Prefetches the sorted installed RSAT rows, then builds the actor inventory from tags. */
 bool build_with_rsats(const reader::Source& source,
+                      const decode_plans::Image& image,
                       std::span<const std::uint32_t> actorTags,
                       std::span<const std::uint32_t> rsatTags,
                       CancelProbe cancel,
@@ -427,7 +437,8 @@ bool build_with_rsats(const reader::Source& source,
         if (!sequence_inventory::scan_tables(source, sequenceTables)) {
             return false;
         }
-        return build_from_tags_and_rsats(actorTags,
+        return build_from_tags_and_rsats(image,
+                                         actorTags,
                                          rsatTags,
                                          &package_read,
                                          &context,

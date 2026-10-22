@@ -2068,6 +2068,7 @@
     <ClInclude Include="src\client\content\activity\activity_sdk_shard_cleanup.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_generation_worker.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_decode_plans.h" />
+    <ClInclude Include="src\client\content\activity\activity_sdk_decode_plans_image.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_decode_plans_internal.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_generation_worker_internal.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_estate_validation.h" />
@@ -2295,6 +2296,7 @@
     <ClCompile Include="src\client\content\activity\entity_object_type_build.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_squad_config_parse.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_actor_rsat_read.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_actor_rsat_runtime_schemas.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_actor_rsat_validation.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_generation_world_source.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_generation_scenario_shards.cpp" />

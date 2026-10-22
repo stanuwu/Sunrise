@@ -315,12 +315,7 @@ struct ScratchOwner final {
  * @return Status::ready when both files are on disk.
  */
 [[nodiscard]] Status run(const Request& request, Result& output) {
-    Image image;
-    const Status opened =
-        image.open(std::wstring(request.executablePath).c_str(), request.executableModule);
-    if (opened != Status::ready) {
-        return opened;
-    }
+    const Image& image = *request.image;
     output.slots = static_cast<std::uint32_t>(image.slots().size());
     ScratchOwner scratch;
     if (scratch.value == nullptr) {
@@ -448,7 +443,7 @@ struct ScratchOwner final {
  */
 Status build(const Request& request, Result& output) noexcept {
     output = {};
-    if (request.source == nullptr || request.executablePath.empty() || request.cachePath.empty()
+    if (request.image == nullptr || request.source == nullptr || request.cachePath.empty()
         || request.sdkBuildSha256.size() != Digest{}.size()) {
         return Status::invalidInput;
     }
