@@ -270,6 +270,7 @@
     <ClCompile Include="src\core\ui\hud\ui_hud_overlay_stack.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_logo_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_mission_script_overlay.cpp" />
+    <ClCompile Include="src\core\ui\hud\overlays\ui_hud_mission_variables_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_sensor_events_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_session_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_startup_hint_overlay.cpp" />
@@ -1055,6 +1056,7 @@
     <ClCompile Include="src\server\activity\mission\mission_script_sources.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_source_owner.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_diagnostics.cpp" />
+    <ClCompile Include="src\server\activity\mission\mission_script_variable_log.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_feed.cpp" />
     <ClCompile Include="src\server\activity\host_runtime.cpp" />
     <ClCompile Include="src\server\activity\host_runtime_names.cpp" />
@@ -2243,6 +2245,7 @@
     <ClInclude Include="src\core\ui\hud\overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_logo_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_mission_script_overlay.h" />
+    <ClInclude Include="src\core\ui\hud\overlays\ui_hud_mission_variables_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_sensor_events_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_session_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_startup_hint_overlay.h" />
@@ -2568,6 +2571,7 @@
     <ClInclude Include="src\server\activity\activity_sdk_mission_runtime.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_message_catalog.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_runtime.h" />
+    <ClInclude Include="src\server\activity\mission\mission_script_variable_log.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_runtime_internal.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_sdk_bridge.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_slot_index.h" />

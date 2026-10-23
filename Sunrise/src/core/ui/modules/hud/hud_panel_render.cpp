@@ -12,8 +12,8 @@ namespace sunrise::core::ui::modules::hud::internal {
 
 /** Draws the HUD page inside the active Core UI frame. */
 void draw() noexcept {
-    ImGui::TextWrapped("Overlays draw in the top-left corner while the game runs, with or "
-                       "without this menu open.");
+    ImGui::TextWrapped("Overlays draw in the top corners while the game runs, with or without "
+                       "this menu open. Mission Variables takes the top-right corner.");
     ImGui::Spacing();
 
     for (std::size_t index = 0; index < static_cast<std::size_t>(ui::hud::Overlay::count);
