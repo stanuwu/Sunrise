@@ -58,6 +58,11 @@ inline constexpr auto kChangeRecordIsZero = [](const auto& record) noexcept {
  * Local to one incremental upsert; an ordinary snapshot encodes it empty.
  */
 inline constexpr std::uint8_t kChangeKind = 1;
+/**
+ * The client checks vendor-transfer room under this kind, and its observer presents a row moved
+ * under it without counting a new acquisition.
+ */
+inline constexpr std::uint8_t kVendorTransferChangeKind = 0xD;
 /** Clear policy bits leave the record enabled; the observer skips any other pair. */
 inline constexpr std::uint16_t kChangeFlags = 0;
 
