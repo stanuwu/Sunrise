@@ -6,7 +6,6 @@
 #include "opcode405.h"
 
 namespace sunrise::middleware::web_service::messages::opcode405 {
-namespace {
 
 /** The vendor transfer request occupies exactly 144 bits. */
 constexpr std::size_t kPayloadSize = 18;
@@ -21,8 +20,6 @@ constexpr std::int64_t kQuantityBias =
     -static_cast<std::int64_t>((std::numeric_limits<std::int32_t>::min)());
 /** Two absent envelope fields and six alignment bits close the payload. */
 constexpr std::uint8_t kFinalPaddingWidth = 8;
-
-} // namespace
 
 /** Reads the biased signed fields and rejects a nonzero closing pad run. */
 bool parse_request(const Message& message, Request& request) noexcept {

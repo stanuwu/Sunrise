@@ -154,7 +154,8 @@ namespace sunrise::server::bap::encrypted::queuez {
  * @param updatesAccount True when the account object rides the same increment.
  * @param evictedInstanceSoid FIFO resident to release, or zero.
  * @param acquisition Gets the exact +1 version and resident after-image.
- * @return True when both schemas resolve and the manifest has one free resident slot.
+ * @return True when both schemas resolve and the manifest has a free resident slot or releases
+ *         the FIFO eviction.
  */
 [[nodiscard]] bool stage_item_acquisition(const SessionState& before,
                                           std::uint64_t accountSoid,

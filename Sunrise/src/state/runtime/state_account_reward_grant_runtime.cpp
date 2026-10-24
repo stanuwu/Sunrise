@@ -144,7 +144,10 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept;
 
-/** Each native change list must fit independently; unlock flags consume neither list. */
+/**
+ * Each native change list must fit independently. Unlock flags and rewards a later FIFO arrival
+ * discarded publish no change record, so they consume neither list.
+ */
 [[nodiscard]] const char*
 reward_change_refusal(std::span<const PreparedRecordReward> rewards) noexcept {
     std::size_t characterChanges = 0;
@@ -153,14 +156,16 @@ reward_change_refusal(std::span<const PreparedRecordReward> rewards) noexcept {
         switch (reward.kind) {
         case RecordRewardKind::characterInstance:
         case RecordRewardKind::characterStack:
-            if (++characterChanges
-                > middleware::datagen::family4::character::layout::kInventoryChangeRecordCapacity) {
+            if (reward.retained
+                && ++characterChanges > middleware::datagen::family4::character::layout::
+                           kInventoryChangeRecordCapacity) {
                 return "character_change_capacity";
             }
             break;
         case RecordRewardKind::profileStack:
-            if (++profileChanges > middleware::datagen::family4::account::layout::
-                    kProfileInventoryChangeRecordCapacity) {
+            if (reward.retained
+                && ++profileChanges > middleware::datagen::family4::account::layout::
+                           kProfileInventoryChangeRecordCapacity) {
                 return "profile_change_capacity";
             }
             break;
@@ -981,11 +986,6 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         mutation.rewards[index] = prepared;
     }
 
-    reason = reward_change_refusal(std::span(mutation.rewards).first(rewards.size()));
-    if (reason != nullptr) {
-        // Only a wrapper draw can exceed a list, and its next draw may fit.
-        return RewardPreparation::deferred;
-    }
     reason = "loadout";
     // A full native bucket rejects the whole loadout; retry later.
     family4_loadout::ResolvedLoadout loadout{};
@@ -1012,6 +1012,11 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
             reward,
             mutation.afterCharacter,
             std::span(mutation.afterProfileItems).first(mutation.afterProfileItemCount));
+    }
+    reason = reward_change_refusal(std::span(mutation.rewards).first(rewards.size()));
+    if (reason != nullptr) {
+        // Only a wrapper draw can exceed a list, and its next draw may fit.
+        return RewardPreparation::deferred;
     }
     mutation.rewardCount = rewards.size();
     reason = nullptr;
