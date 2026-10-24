@@ -9,6 +9,7 @@
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -89,19 +90,18 @@ using Quest = build_data::items::QuestInitialization;
     }
 
     const CharacterState& before = account.characters[characterIndex];
-    if (before.inventory.count >= before.inventory.values.size()
+    if (before.inventory.count > before.inventory.values.size()
         || before.nextInventorySerial
                >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
         return false;
     }
 
     std::uint64_t instanceSoid = 0;
-    if (!next_item_instance_soid(account, instanceSoid)) {
+    if (!next_item_instance_soid(account, instanceSoid, source.minimumInstanceSoid)) {
         return false;
     }
 
     CharacterState after = before;
-    const std::size_t inventoryIndex = after.inventory.count;
     authored_inventory::Item acquired{};
     acquired.instanceSoid = instanceSoid;
     acquired.definitionHash = definitionHash;
@@ -109,8 +109,16 @@ using Quest = build_data::items::QuestInitialization;
     acquired.quantity = 1;
     acquired.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
     acquired.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
+    std::uint64_t evictedInstanceSoid = 0;
+    if (source.direct
+        && !place_instanced_reward(account, characterIndex, acquired, after, evictedInstanceSoid)) {
+        return false;
+    }
+    if (after.inventory.count >= after.inventory.values.size()) {
+        return false;
+    }
+    const std::size_t inventoryIndex = after.inventory.count++;
     after.inventory.values[inventoryIndex] = acquired;
-    ++after.inventory.count;
 
     AccountState candidate = chargedAccount;
     candidate.characters[characterIndex] = after;
@@ -137,6 +145,7 @@ using Quest = build_data::items::QuestInitialization;
     mutation.expectedProfileItemCount = account.profileItemCount;
     mutation.afterProfileItemCount = chargedAccount.profileItemCount;
     mutation.inventoryIndex = inventoryIndex;
+    mutation.evictedInstanceSoid = evictedInstanceSoid;
     mutation.collectibleIndex = source.collectibleIndex;
     mutation.inventoryRow = inventoryRow;
     mutation.equipmentSlot = equipmentSlot;
@@ -290,6 +299,22 @@ bool reserve_selected_character_inventory_serial(std::int32_t& mutationSerial) n
 
 namespace runtime::detail {
 
+/** An acquisition appends a row or replaces exactly the resident selected for FIFO eviction. */
+[[nodiscard]] static bool
+valid_acquisition_placement(const PendingItemAcquisition& mutation) noexcept {
+    const auto& before = mutation.beforeCharacter.inventory;
+    const auto& after = mutation.afterCharacter.inventory;
+    if (before.count != mutation.expectedInventoryCount || before.count > before.values.size()
+        || mutation.inventoryIndex >= after.count || after.count > after.values.size()) {
+        return false;
+    }
+    if (mutation.inventoryIndex + 1 != after.count) {
+        return false;
+    }
+    return mutation.evictedInstanceSoid == 0 ? after.count == before.count + 1
+                                             : mutation.directGrant && after.count == before.count;
+}
+
 /**
  * Checks that a prepared insertion still agrees with its Collections row or direct grant.
  * @return False when the mutation's shape, its cost fields, or its item no longer hold.
@@ -299,11 +324,7 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
     if (!mutation.prepared || mutation.characterSoid == 0 || mutation.acquiredInstanceSoid == 0
         || mutation.accountSoid == 0
         || mutation.acquiredDefinitionHash == authored_inventory::kNoDefinitionHash
-        || mutation.characterIndex >= kCharacterCapacity
-        || mutation.expectedInventoryCount >= authored_inventory::kCharacterItemCapacity
-        || mutation.inventoryIndex != mutation.expectedInventoryCount
-        || mutation.afterCharacter.inventory.count != mutation.expectedInventoryCount + 1U
-        || mutation.inventoryIndex >= mutation.afterCharacter.inventory.count
+        || mutation.characterIndex >= kCharacterCapacity || !valid_acquisition_placement(mutation)
         || mutation.afterCharacter.inventory.values[mutation.inventoryIndex].instanceSoid
                != mutation.acquiredInstanceSoid
         || mutation.afterCharacter.inventory.values[mutation.inventoryIndex].definitionHash
@@ -365,6 +386,23 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
             current, mutation.beforeProfileItems, mutation.expectedProfileItemCount)
         || !next_item_instance_soid(current, nextSoid)
         || nextSoid != mutation.acquiredInstanceSoid) {
+        return false;
+    }
+
+    auto placed = mutation.afterCharacter.inventory.values[mutation.inventoryIndex];
+    placed.placement = authored_inventory::ItemPlacement::inventory;
+    CharacterState canonical = current.characters[mutation.characterIndex];
+    std::uint64_t evicted = 0;
+    if ((mutation.directGrant
+         && !place_instanced_reward(current, mutation.characterIndex, placed, canonical, evicted))
+        || evicted != mutation.evictedInstanceSoid
+        || canonical.inventory.count != mutation.inventoryIndex
+        || canonical.nextInventorySerial != static_cast<std::uint32_t>(placed.mutationSerial)) {
+        return false;
+    }
+    canonical.inventory.values[canonical.inventory.count++] = placed;
+    ++canonical.nextInventorySerial;
+    if (!same_character(canonical, mutation.afterCharacter)) {
         return false;
     }
 
@@ -497,9 +535,33 @@ finalize_profile_item_acquisition(const AccountState& account,
         }
     }
     if (greatestMutationSerial == (std::numeric_limits<std::int32_t>::max)()
-        || (appended && chargedAccount.profileItemCount >= chargedAccount.profileItems.size())
         || quantity > detail.maxStackSize - previousQuantity) {
         return false;
+    }
+
+    bool replaced = false;
+    if (appended) {
+        inventory_buckets::Descriptor bucket{};
+        BucketAdmission occupancy;
+        if (!build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
+            return false;
+        }
+        if (!profile_bucket_admission(
+                std::span(chargedAccount.profileItems).first(chargedAccount.profileItemCount),
+                bucket.bucketId,
+                occupancy)) {
+            return false;
+        }
+        if (!occupancy.select(bucket, chargedAccount.profileItemCount, profileIndex)
+            || profileIndex >= chargedAccount.profileItems.size()) {
+            return false;
+        }
+        replaced = profileIndex < chargedAccount.profileItemCount;
+        if (replaced
+            && (!source.direct || actionSource
+                || chargedAccount.profileItems[profileIndex].instanceSoid != 0)) {
+            return false;
+        }
     }
 
     std::uint64_t acquiredInstanceSoid =
@@ -517,7 +579,7 @@ finalize_profile_item_acquisition(const AccountState& account,
     if (appended) {
         after.profileItems[profileIndex] = {
             acquiredInstanceSoid, definitionHash, quantity, acquiredMutationSerial};
-        ++after.profileItemCount;
+        after.profileItemCount += !replaced;
     } else {
         after.profileItems[profileIndex].quantity += quantity;
         after.profileItems[profileIndex].mutationSerial = acquiredMutationSerial;
@@ -546,7 +608,8 @@ finalize_profile_item_acquisition(const AccountState& account,
     mutation.bucketId = detail.bucketId;
     mutation.materialRequirementCount = source.materialRequirementCount;
     mutation.actionSource = actionSource;
-    mutation.appended = appended;
+    mutation.appended = appended && !replaced;
+    mutation.replaced = replaced;
     mutation.directGrant = source.direct;
     mutation.prepared = true;
     if (valid_profile_mutation_shape(mutation)) {

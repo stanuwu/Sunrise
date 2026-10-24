@@ -160,6 +160,11 @@ namespace sunrise::state::build_data::cache::records {
 [[nodiscard]] bool decode(const VendorInstalledRowRecord& record,
                           vendors::InstalledRow& value) noexcept;
 
+[[nodiscard]] bool encode(const vendors::TransferRule& value,
+                          VendorTransferRuleRecord& record) noexcept;
+[[nodiscard]] bool decode(const VendorTransferRuleRecord& record,
+                          vendors::TransferRule& value) noexcept;
+
 [[nodiscard]] bool encode(const rewards::Pool& value, RewardPoolRecord& record) noexcept;
 [[nodiscard]] bool decode(const RewardPoolRecord& record, rewards::Pool& value) noexcept;
 [[nodiscard]] bool encode(const rewards::Entry& value, RewardEntryRecord& record) noexcept;

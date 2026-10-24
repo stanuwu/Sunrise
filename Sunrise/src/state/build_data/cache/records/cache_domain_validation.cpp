@@ -163,6 +163,7 @@ template <typename Value, typename Less>
            && counts.vendorDefinitions <= domains.vendorDefinitions.size()
            && counts.vendorSaleRows <= domains.vendorSaleRows.size()
            && counts.vendorInstalledRows <= domains.vendorInstalledRows.size()
+           && counts.vendorTransferRules <= domains.vendorTransferRules.size()
            && counts.positionProfiles <= domains.positionProfiles.size()
            && counts.objectTypes <= domains.objectTypes.size()
            && counts.recordObjectives <= domains.recordObjectives.size()
@@ -276,14 +277,15 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
                 : !spawn_sets::valid(domains.spawnStems, domains.spawnNameHashes))
         || !spawn_sets::valid_points(domains.spawnPoints, domains.spawnStems)
         // An empty catalog is complete. With no index there is no vendor domain, so the
-        // definitions and both row banks must be empty too.
+        // definitions and every row bank must be empty too.
         || (domains.vendorIndex.empty()
                 ? !(domains.vendorDefinitions.empty() && domains.vendorSaleRows.empty()
-                    && domains.vendorInstalledRows.empty())
+                    && domains.vendorInstalledRows.empty() && domains.vendorTransferRules.empty())
                 : !vendors::valid(domains.vendorIndex,
                                   domains.vendorDefinitions,
                                   domains.vendorSaleRows,
-                                  domains.vendorInstalledRows))
+                                  domains.vendorInstalledRows,
+                                  domains.vendorTransferRules))
         || !hash_names::valid(domains.hashNames)) {
         return false;
     }

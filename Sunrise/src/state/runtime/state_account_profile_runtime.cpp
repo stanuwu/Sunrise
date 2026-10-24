@@ -11,6 +11,7 @@
 
 #include "../../core/logging/log.h"
 #include "../build_data/runtime.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -60,6 +61,23 @@ same_profile_inventory(const AccountState& account,
     for (std::size_t index = 0; index < left.size(); ++index) {
         if (!same_profile_item(left[index], right[index])) {
             return false;
+        }
+    }
+    return true;
+}
+
+/** Counts this bucket's saved profile rows and selects its oldest mutation identity. */
+[[nodiscard]] bool profile_bucket_admission(std::span<const authored_inventory::ProfileItem> items,
+                                            std::uint8_t bucketId,
+                                            BucketAdmission& occupancy) noexcept {
+    occupancy = {};
+    for (std::size_t index = 0; index < items.size(); ++index) {
+        build_data::items::Definition definition{};
+        if (!build_data::find_item_definition_hash(items[index].definitionHash, definition)) {
+            return false;
+        }
+        if (definition.bucketId == bucketId) {
+            occupancy.include(index, items[index].mutationSerial);
         }
     }
     return true;
@@ -424,6 +442,25 @@ apply_action_materials(const AccountState& before,
         changed);
 }
 
+/** Distinguishes a merge, an appended stack, and a FIFO replacement without changing other rows. */
+[[nodiscard]] static bool
+valid_profile_row_change(const PendingProfileItemAcquisition& mutation) noexcept {
+    if (mutation.replaced) {
+        return mutation.directGrant && !mutation.appended && !mutation.actionSource
+               && mutation.previousQuantity == 0
+               && mutation.profileIndex < mutation.expectedItemCount
+               && mutation.afterItemCount == mutation.expectedItemCount;
+    }
+    if (mutation.appended) {
+        return mutation.previousQuantity == 0
+               && (!mutation.directGrant
+                   || (mutation.afterItemCount == mutation.expectedItemCount + 1
+                       && mutation.profileIndex == mutation.expectedItemCount));
+    }
+    return mutation.previousQuantity > 0
+           && (!mutation.directGrant || mutation.afterItemCount == mutation.expectedItemCount);
+}
+
 /** @return True when a pending profile acquisition carries canonical dense before/after images. */
 [[nodiscard]] bool
 valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noexcept {
@@ -431,7 +468,7 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
     // more than one, so it has its own shape.
     if (mutation.changeCount != 0) {
         if (!mutation.prepared || mutation.accountSoid == 0 || mutation.actionSource
-            || mutation.appended || mutation.acquiredInstanceSoid != 0
+            || mutation.appended || mutation.replaced || mutation.acquiredInstanceSoid != 0
             || mutation.acquiredDefinitionHash == authored_inventory::kNoDefinitionHash
             || mutation.changeCount > mutation.changes.size()
             || mutation.expectedItemCount > authored_inventory::kProfileItemCapacity
@@ -489,25 +526,14 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
         || mutation.expectedItemCount > authored_inventory::kProfileItemCapacity
         || mutation.afterItemCount > authored_inventory::kProfileItemCapacity
         || mutation.profileIndex >= mutation.afterItemCount || mutation.previousQuantity < 0
+        || !valid_profile_row_change(mutation)
         || mutation.acquiredQuantity <= mutation.previousQuantity
         || (!mutation.directGrant && mutation.acquiredQuantity - mutation.previousQuantity != 1)
         || mutation.previousMutationSerial < 0
         || mutation.acquiredMutationSerial <= mutation.previousMutationSerial) {
         return false;
     }
-    if (mutation.appended) {
-        if (mutation.afterItemCount == 0 || mutation.previousQuantity != 0
-            || (mutation.directGrant
-                && (mutation.afterItemCount != mutation.expectedItemCount + 1U
-                    || mutation.profileIndex != mutation.expectedItemCount))) {
-            return false;
-        }
-    } else if (mutation.previousQuantity == 0
-               || (mutation.directGrant && mutation.afterItemCount != mutation.expectedItemCount)) {
-        return false;
-    }
-
-    bool foundBeforeTarget = mutation.appended;
+    bool foundBeforeTarget = mutation.appended || mutation.replaced;
     for (std::size_t index = 0; index < mutation.beforeItems.size(); ++index) {
         const authored_inventory::ProfileItem& before = mutation.beforeItems[index];
         const authored_inventory::ProfileItem& after = mutation.afterItems[index];
@@ -529,7 +555,7 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
                 || after.mutationSerial != 0)) {
             return false;
         }
-        if (!mutation.appended && index < mutation.expectedItemCount
+        if (!mutation.appended && !mutation.replaced && index < mutation.expectedItemCount
             && before.instanceSoid == mutation.acquiredInstanceSoid
             && before.definitionHash == mutation.acquiredDefinitionHash
             && before.quantity == mutation.previousQuantity
@@ -603,6 +629,21 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
         || build_data::is_profile_action_source(item.definitionIndex, item.bucketId)
                != mutation.actionSource) {
         return false;
+    }
+    if (mutation.replaced) {
+        BucketAdmission occupancy;
+        if (!profile_bucket_admission(
+                std::span(current.profileItems).first(current.profileItemCount),
+                bucket.bucketId,
+                occupancy)) {
+            return false;
+        }
+        std::size_t replacement = current.profileItemCount;
+        if (!occupancy.select(bucket, current.profileItemCount, replacement)
+            || replacement != mutation.profileIndex
+            || current.profileItems[replacement].instanceSoid != 0) {
+            return false;
+        }
     }
     after = current;
     after.profileItems = mutation.afterItems;

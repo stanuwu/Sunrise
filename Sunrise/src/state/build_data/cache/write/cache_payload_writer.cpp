@@ -94,6 +94,8 @@ bool payload_checksum(records::Domains domains, std::uint64_t& checksum) noexcep
            && checksum_domain<records::VendorSaleRowRecord>(domains.vendorSaleRows, checksum)
            && checksum_domain<records::VendorInstalledRowRecord>(domains.vendorInstalledRows,
                                                                  checksum)
+           && checksum_domain<records::VendorTransferRuleRecord>(domains.vendorTransferRules,
+                                                                 checksum)
            && checksum_domain<records::PositionProfileRecord>(domains.positionProfiles, checksum)
            && checksum_domain<records::ObjectTypeRecord>(domains.objectTypes, checksum)
            && checksum_domain<records::RecordObjectiveRecord>(domains.recordObjectives, checksum)
@@ -141,6 +143,7 @@ bool write_payload(HANDLE file, records::Domains domains) noexcept {
            && write_domain<records::VendorDefinitionRecord>(file, domains.vendorDefinitions)
            && write_domain<records::VendorSaleRowRecord>(file, domains.vendorSaleRows)
            && write_domain<records::VendorInstalledRowRecord>(file, domains.vendorInstalledRows)
+           && write_domain<records::VendorTransferRuleRecord>(file, domains.vendorTransferRules)
            && write_domain<records::PositionProfileRecord>(file, domains.positionProfiles)
            && write_domain<records::ObjectTypeRecord>(file, domains.objectTypes)
            && write_domain<records::RecordObjectiveRecord>(file, domains.recordObjectives)

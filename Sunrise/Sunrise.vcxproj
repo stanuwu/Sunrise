@@ -99,6 +99,10 @@
     <None Include="vendor\lua\UPSTREAM_README" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\middleware\web_service\messages\opcode405_codec.cpp" />
+    <ClCompile Include="src\server\web_service\web_service_postmaster.cpp" />
+    <ClCompile Include="src\state\runtime\bucket_admission.cpp" />
+    <ClCompile Include="src\state\runtime\postmaster_runtime.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_reward_records.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_reward_build.cpp" />
     <ClCompile Include="src\state\rewards\reward_resolver.cpp" />
@@ -1353,6 +1357,9 @@
     <ClCompile Remove="vendor\lua\lzio.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\state\runtime\bucket_admission.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode405.h" />
+    <ClInclude Include="src\state\account\inventory\postmaster_policy.h" />
     <ClInclude Include="src\middleware\content\packages\tables\field_reader.h" />
     <ClInclude Include="src\client\content\items\packages\package_reward_build.h" />
     <ClInclude Include="src\state\rewards\reward_resolver.h" />

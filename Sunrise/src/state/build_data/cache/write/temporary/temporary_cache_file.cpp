@@ -134,6 +134,7 @@ enum class WriteStatus {
         static_cast<std::uint32_t>(domains.vendorDefinitions.size()),
         static_cast<std::uint32_t>(domains.vendorSaleRows.size()),
         static_cast<std::uint32_t>(domains.vendorInstalledRows.size()),
+        static_cast<std::uint32_t>(domains.vendorTransferRules.size()),
         static_cast<std::uint32_t>(domains.positionProfiles.size()),
         static_cast<std::uint32_t>(domains.objectTypes.size()),
         static_cast<std::uint32_t>(domains.recordObjectives.size()),

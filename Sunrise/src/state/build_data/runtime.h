@@ -793,13 +793,27 @@ find_nearest_spawn_point(std::string_view stem,
  * @param definitions Extracted definitions in ascending index order, which may be empty.
  * @param saleRows Complete flat sale bank in definition then row order.
  * @param installedRows Complete flat installed bank in definition then row order.
+ * @param transferRules Complete flat transfer bank in definition then row order.
  * @return True when the rows pass the checks and any needed cache write succeeds.
  */
 [[nodiscard]] bool
 publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
                        std::span<const vendors::Definition> definitions,
                        std::span<const vendors::SaleRow> saleRows,
-                       std::span<const vendors::InstalledRow> installedRows) noexcept;
+                       std::span<const vendors::InstalledRow> installedRows,
+                       std::span<const vendors::TransferRule> transferRules) noexcept;
+
+/**
+ * Finds where one vendor transfers an item held in one source bucket.
+ * The first installed rule naming this source bucket decides.
+ * @param vendorIndex Vendor index row the request carries.
+ * @param sourceBucket Native bucket id the item is held in.
+ * @param destination Receives the rule's destination bucket, or `vendors::kAuthoredDestination`.
+ * @return True when the vendor is held and one of its rules names the source bucket.
+ */
+[[nodiscard]] bool find_vendor_transfer_destination(std::uint16_t vendorIndex,
+                                                    std::uint8_t sourceBucket,
+                                                    std::uint8_t& destination) noexcept;
 
 /**
  * An unsupported catalyst build finishes without writing an incomplete cache.

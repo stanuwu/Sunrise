@@ -6,6 +6,7 @@
 
 #include "../../../../middleware/datagen/family4/loadout/definition.h"
 #include "../../../../state/account/account_state.h"
+#include "../../../../state/runtime/runtime.h"
 
 namespace sunrise::server::bap::encrypted::queuez {
 
@@ -140,6 +141,7 @@ struct ItemAcquisition {
     std::uint64_t acquiredInstanceSoid{};
     /** True when the same revision also publishes the charged profile-material balances. */
     bool updatesAccount{};
+    std::uint64_t evictedInstanceSoid{};
 };
 
 /** Validated socket-action after-image for one item upsert and optional material balances. */
@@ -186,6 +188,8 @@ struct RecordRewardGrant {
     std::uint64_t accountSoid{};
     std::uint64_t characterSoid{};
     std::size_t appendedResidentCount{};
+    std::array<std::uint64_t, state::kRecordRewardGrantCapacity> releasedResidents{};
+    std::size_t releasedResidentCount{};
 };
 
 /** Validated item-dismantle after-image for one character upsert and one instance release. */

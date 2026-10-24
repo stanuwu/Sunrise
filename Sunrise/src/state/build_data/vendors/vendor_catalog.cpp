@@ -9,13 +9,14 @@
 namespace sunrise::state::build_data::vendors {
 namespace {
 
-// One lock covers all four tables. A definition names its rows by range, so a reader must
+// One lock covers all five tables. A definition names its rows by range, so a reader must
 // never see one table replaced and another not.
 core::threading::SrwLock g_lock;
 Table<IndexEntry, kIndexCapacity> g_index;
 Table<Definition, kDefinitionCapacity> g_definitions;
 Table<SaleRow, kSaleRowCapacity> g_saleRows;
 Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
+Table<TransferRule, kTransferRuleCapacity> g_transferRules;
 
 /**
  * Checks one array a definition declares against the definition blob it sits in.
@@ -135,22 +136,25 @@ template <typename Row>
 
 } // namespace
 
-/** Clears the index, every held definition, and both row banks under the catalog lock. */
+/** Clears the index, every held definition, and every row bank under the catalog lock. */
 void clear() noexcept {
     const std::lock_guard guard(g_lock);
     g_index.clear();
     g_definitions.clear();
     g_saleRows.clear();
     g_installedRows.clear();
+    g_transferRules.clear();
 }
 
 /** Checks one complete vendor catalog in canonical order. */
 bool valid(std::span<const IndexEntry> index,
            std::span<const Definition> definitions,
            std::span<const SaleRow> saleRows,
-           std::span<const InstalledRow> installedRows) noexcept {
+           std::span<const InstalledRow> installedRows,
+           std::span<const TransferRule> transferRules) noexcept {
     if (index.empty() || index.size() > kIndexCapacity || definitions.size() > kDefinitionCapacity
-        || saleRows.size() > kSaleRowCapacity || installedRows.size() > kInstalledRowCapacity) {
+        || saleRows.size() > kSaleRowCapacity || installedRows.size() > kInstalledRowCapacity
+        || transferRules.size() > kTransferRuleCapacity) {
         return false;
     }
     for (std::size_t row = 0; row < index.size(); ++row) {
@@ -160,38 +164,46 @@ bool valid(std::span<const IndexEntry> index,
     }
     std::size_t saleOffset = 0;
     std::size_t installedOffset = 0;
+    std::size_t transferOffset = 0;
     for (std::size_t row = 0; row < definitions.size(); ++row) {
         const Definition& definition = definitions[row];
         if (!canonical(definition, index) || definition.saleRowOffset != saleOffset
             || definition.installedRowOffset != installedOffset
+            || definition.transferRuleOffset != transferOffset
             || definition.saleCount > saleRows.size() - saleOffset
             || definition.installedCount > installedRows.size() - installedOffset
+            || definition.transferRuleCount > transferRules.size() - transferOffset
             || (row != 0 && definitions[row - 1].index >= definition.index)
             || !canonical_sale_rows(definition, saleRows)) {
             return false;
         }
         saleOffset += definition.saleCount;
         installedOffset += definition.installedCount;
+        transferOffset += definition.transferRuleCount;
     }
-    return saleOffset == saleRows.size() && installedOffset == installedRows.size();
+    return saleOffset == saleRows.size() && installedOffset == installedRows.size()
+           && transferOffset == transferRules.size();
 }
 
 /** Replaces the complete vendor catalog in one step. */
 bool replace(std::span<const IndexEntry> index,
              std::span<const Definition> definitions,
              std::span<const SaleRow> saleRows,
-             std::span<const InstalledRow> installedRows) noexcept {
-    if (!valid(index, definitions, saleRows, installedRows)) {
+             std::span<const InstalledRow> installedRows,
+             std::span<const TransferRule> transferRules) noexcept {
+    if (!valid(index, definitions, saleRows, installedRows, transferRules)) {
         return false;
     }
     const std::lock_guard guard(g_lock);
-    // All four run with no short-circuit, so the set cannot be left half replaced. Capacity is
+    // All five run with no short-circuit, so the set cannot be left half replaced. Capacity is
     // the only reason one can refuse, and valid() already checked it.
     const bool storedIndex = g_index.replace(index);
     const bool storedDefinitions = g_definitions.replace(definitions);
     const bool storedSaleRows = g_saleRows.replace(saleRows);
     const bool storedInstalledRows = g_installedRows.replace(installedRows);
-    return storedIndex && storedDefinitions && storedSaleRows && storedInstalledRows;
+    const bool storedTransferRules = g_transferRules.replace(transferRules);
+    return storedIndex && storedDefinitions && storedSaleRows && storedInstalledRows
+           && storedTransferRules;
 }
 
 /** Finds one index row by the vendor definition hash. */
@@ -296,6 +308,22 @@ bool installed_row(const Definition& definition, std::size_t row, InstalledRow& 
     return true;
 }
 
+/** Reads one transfer rule of one definition. */
+bool transfer_rule(const Definition& definition, std::size_t row, TransferRule& output) noexcept {
+    output = {};
+    if (row >= definition.transferRuleCount) {
+        return false;
+    }
+    const std::shared_lock guard(g_lock);
+    const auto bank = g_transferRules.rows();
+    const std::size_t at = static_cast<std::size_t>(definition.transferRuleOffset) + row;
+    if (at >= bank.size()) {
+        return false;
+    }
+    output = bank[at];
+    return true;
+}
+
 /** Copies every index row in ascending index order. */
 bool snapshot_index(std::span<IndexEntry> output, std::size_t& count) noexcept {
     const std::shared_lock guard(g_lock);
@@ -320,6 +348,12 @@ bool snapshot_installed_rows(std::span<InstalledRow> output, std::size_t& count)
     return g_installedRows.snapshot(output, count);
 }
 
+/** Copies the whole flat transfer bank. */
+bool snapshot_transfer_rules(std::span<TransferRule> output, std::size_t& count) noexcept {
+    const std::shared_lock guard(g_lock);
+    return g_transferRules.snapshot(output, count);
+}
+
 /** @return The index row count, read under the lock. */
 std::size_t count() noexcept {
     const std::shared_lock guard(g_lock);
@@ -342,6 +376,12 @@ std::size_t sale_row_count() noexcept {
 std::size_t installed_row_count() noexcept {
     const std::shared_lock guard(g_lock);
     return g_installedRows.count();
+}
+
+/** @return The flat transfer bank row count, read under the lock. */
+std::size_t transfer_rule_count() noexcept {
+    const std::shared_lock guard(g_lock);
+    return g_transferRules.count();
 }
 
 } // namespace sunrise::state::build_data::vendors

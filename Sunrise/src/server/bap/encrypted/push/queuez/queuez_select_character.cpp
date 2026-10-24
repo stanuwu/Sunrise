@@ -9,6 +9,18 @@
 
 namespace sunrise::server::bap::encrypted::push {
 
+bool append_postmaster_claim_notification(Scratch& scratch,
+                                          const queuez::EquipmentSwap& update,
+                                          const state::PendingPostmasterClaim& mutation,
+                                          std::span<const std::byte, state::kAesKeySize> key,
+                                          std::span<const std::byte, state::kBapNonceSize> nonce,
+                                          std::span<std::byte> response,
+                                          std::size_t& written) noexcept {
+    snapshot::Prepared prepared{};
+    return snapshot::prepare_postmaster_claim(scratch, update, mutation, prepared)
+           && queuez_frame::append_prepared(scratch, prepared, key, nonce, response, written);
+}
+
 /** Appends the opcode-504 Family-4 character-selection update. */
 bool append_select_character_notification(Scratch& scratch,
                                           const queuez::SelectCharacter& select,

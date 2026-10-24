@@ -400,6 +400,7 @@ bool consume(Session& session,
     const bool mutatesAccount =
         outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasArtifactReset
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
+        || transaction_if<PostmasterClaimTransaction>(outcome) != nullptr
         || transaction_if<SubclassSelectionTransaction>(outcome) != nullptr
         || transaction_if<SocketPlugTransaction>(outcome) != nullptr
         || transaction_if<ItemStateTransaction>(outcome) != nullptr || artifactPurchase

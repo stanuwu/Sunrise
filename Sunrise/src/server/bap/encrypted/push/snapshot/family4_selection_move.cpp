@@ -591,4 +591,81 @@ bool prepare_artifact_item_refresh(Scratch& scratch,
     return true;
 }
 
+/**
+ * Names the claimed row in the character's change ring so the observer presents the transfer.
+ * @param characterBytes Freshly encoded character object whose ring is still empty.
+ * @param claimed The claimed item as State placed it, carrying its new mutation serial.
+ * @return False for a partial object, a ring already written, or no single claimed row.
+ */
+[[nodiscard]] static bool
+record_vendor_transfer(std::span<std::byte> characterBytes,
+                       const state::account::inventory::Item& claimed) noexcept {
+    namespace character_layout = family4_datagen::character::layout;
+    if (characterBytes.size() < character_layout::kObjectSize) {
+        return false;
+    }
+    auto& object = *reinterpret_cast<character_layout::Object*>(characterBytes.data());
+    auto& changes = object.inventoryChanges;
+    if (changes.writeSlot != 0 || changes.nextSequence != 0
+        || !std::all_of(changes.records.cbegin(), changes.records.cend(), kChangeRecordIsZero)
+        || std::count_if(object.inventoryItems.cbegin(),
+                         object.inventoryItems.cend(),
+                         [&](const auto& row) noexcept {
+                             return row.instanceSoid == claimed.instanceSoid
+                                    && row.mutationSerial == claimed.mutationSerial;
+                         })
+               != 1) {
+        return false;
+    }
+    auto& change = changes.records.front();
+    change.mutationSerial = claimed.mutationSerial;
+    change.kind = kVendorTransferChangeKind;
+    change.flags = kChangeFlags;
+    changes.writeSlot = 1;
+    changes.nextSequence = 1;
+    return true;
+}
+
+bool prepare_postmaster_claim(Scratch& scratch,
+                              const queuez::EquipmentSwap& update,
+                              const state::PendingPostmasterClaim& mutation,
+                              Prepared& prepared) noexcept {
+    const Reservation reservation = reserve_prior(scratch, prepared);
+    if (reservation.rawWriteOffset > scratch.plaintext.size()
+        || reservation.compressedWriteOffset > scratch.sealed.size()) {
+        return report_failure("postmaster_reservation");
+    }
+    auto account = std::unique_ptr<state::AccountState>{new (std::nothrow) state::AccountState};
+    if (!account || !state::preview_postmaster_claim(mutation, *account)
+        || mutation.characterSoid != update.characterSoid
+        || account->primarySoid != update.after.family4RootSoid) {
+        return report_failure("postmaster_mutation");
+    }
+    Resolved selected{};
+    const auto selectedIndex = find_character_index(*account);
+    if (!selectedIndex || *selectedIndex != mutation.characterIndex
+        || !resolve(*account, mutation.characterIndex, selected)
+        || selected.characterObjectId != update.characterDefinitionId) {
+        return report_failure("postmaster_selection");
+    }
+    const auto raw = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
+    if (raw.size() < family4_datagen::character::layout::kObjectSize) {
+        return report_failure("postmaster_storage");
+    }
+    const auto bytes = raw.first(family4_datagen::character::layout::kObjectSize);
+    const auto& character = account->characters[mutation.characterIndex];
+    if (!family4_datagen::character::encode(
+            character, selected.loadout, selected.lightEvaluation, bytes)) {
+        return report_failure("postmaster_character");
+    }
+    if (mutation.inventoryIndex >= character.inventory.count
+        || character.inventory.values[mutation.inventoryIndex].instanceSoid != mutation.instanceSoid
+        || !record_vendor_transfer(bytes, character.inventory.values[mutation.inventoryIndex])) {
+        return report_failure("postmaster_change");
+    }
+    // No acquisition overlay: the source's old Lost Items row must become empty in this revision.
+    return finish_character_upsert(
+        scratch, reservation, bytes, update, "postmaster_object", "postmaster_snapshot", prepared);
+}
+
 } // namespace sunrise::server::bap::encrypted::push::snapshot

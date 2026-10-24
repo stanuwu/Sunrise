@@ -7,6 +7,10 @@
 
 namespace sunrise::server::web_service {
 
+/** Prepares an installed vendor's identity-preserving Lost Items claim. */
+void claim_postmaster_item(const middleware::web_service::Message& message,
+                           Outcome& outcome) noexcept;
+
 void select_character(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 /** Saves the character an opcode-501 request describes, with its starter set. */
 void create_character(const middleware::web_service::Message& message, Outcome& outcome) noexcept;

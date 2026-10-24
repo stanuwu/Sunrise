@@ -36,12 +36,14 @@ bool encode(const vendors::Definition& value, VendorDefinitionRecord& record) no
     record.thirdRowClass = value.thirdRowClass;
     record.saleRowOffset = value.saleRowOffset;
     record.installedRowOffset = value.installedRowOffset;
+    record.transferRuleOffset = value.transferRuleOffset;
     record.resetIntervalRaw = value.resetIntervalRaw;
     record.resetPhaseRaw = value.resetPhaseRaw;
     record.index = value.index;
     record.installedCount = value.installedCount;
     record.saleCount = value.saleCount;
     record.thirdCount = value.thirdCount;
+    record.transferRuleCount = value.transferRuleCount;
     return true;
 }
 
@@ -65,12 +67,14 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
     value.thirdRowClass = record.thirdRowClass;
     value.saleRowOffset = record.saleRowOffset;
     value.installedRowOffset = record.installedRowOffset;
+    value.transferRuleOffset = record.transferRuleOffset;
     value.resetIntervalRaw = record.resetIntervalRaw;
     value.resetPhaseRaw = record.resetPhaseRaw;
     value.index = record.index;
     value.installedCount = record.installedCount;
     value.saleCount = record.saleCount;
     value.thirdCount = record.thirdCount;
+    value.transferRuleCount = record.transferRuleCount;
     return true;
 }
 
@@ -129,6 +133,18 @@ bool encode(const vendors::InstalledRow& value, VendorInstalledRowRecord& record
 /** Decodes one vendor category row. */
 bool decode(const VendorInstalledRowRecord& record, vendors::InstalledRow& value) noexcept {
     value = {record.definitionHash};
+    return true;
+}
+
+/** Encodes one vendor transfer rule. */
+bool encode(const vendors::TransferRule& value, VendorTransferRuleRecord& record) noexcept {
+    record = {value.sourceBucket, value.destinationBucket};
+    return true;
+}
+
+/** Decodes one vendor transfer rule. */
+bool decode(const VendorTransferRuleRecord& record, vendors::TransferRule& value) noexcept {
+    value = {record.sourceBucket, record.destinationBucket};
     return true;
 }
 

@@ -164,6 +164,7 @@ selected_character(const state::AccountState& account) noexcept {
                                                        pending.characterSoid,
                                                        pending.acquiredInstanceSoid,
                                                        pending.updates_account(),
+                                                       pending.evictedInstanceSoid,
                                                        acquisition);
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;

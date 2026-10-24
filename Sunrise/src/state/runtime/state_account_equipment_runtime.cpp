@@ -278,7 +278,7 @@ finalize_equipment_transition(const AccountState& account,
     return left.instanceSoid == right.instanceSoid && left.definitionHash == right.definitionHash
            && left.level == right.level && left.quantity == right.quantity
            && left.flags == right.flags && left.seen == right.seen
-           && left.sockets.policy == right.sockets.policy
+           && left.placement == right.placement && left.sockets.policy == right.sockets.policy
            && left.sockets.plugCount == right.sockets.plugCount
            && left.sockets.plugs == right.sockets.plugs
            && left.movementAbilityEntry == right.movementAbilityEntry
@@ -407,7 +407,9 @@ void report_item_state(std::string_view stage,
         if (character.inventory.values[index].instanceSoid != instanceSoid) {
             continue;
         }
-        if (found) {
+        if (found
+            || character.inventory.values[index].placement
+                   != authored_inventory::ItemPlacement::inventory) {
             return false;
         }
         found = true;
@@ -426,7 +428,9 @@ character_item_at(const CharacterState& character, const CharacterItemLocation& 
         }
         return &*character.equipment.slots[location.index];
     }
-    if (location.index >= character.inventory.count) {
+    if (location.index >= character.inventory.count
+        || character.inventory.values[location.index].placement
+               != authored_inventory::ItemPlacement::inventory) {
         return nullptr;
     }
     return &character.inventory.values[location.index];
@@ -442,7 +446,9 @@ character_item_at(CharacterState& character, const CharacterItemLocation& locati
         }
         return &*character.equipment.slots[location.index];
     }
-    if (location.index >= character.inventory.count) {
+    if (location.index >= character.inventory.count
+        || character.inventory.values[location.index].placement
+               != authored_inventory::ItemPlacement::inventory) {
         return nullptr;
     }
     return &character.inventory.values[location.index];

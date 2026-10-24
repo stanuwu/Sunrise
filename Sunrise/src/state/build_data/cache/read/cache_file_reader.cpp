@@ -46,6 +46,7 @@ namespace {
            && counts.vendorDefinitions <= output.vendorDefinitions.size()
            && counts.vendorSaleRows <= output.vendorSaleRows.size()
            && counts.vendorInstalledRows <= output.vendorInstalledRows.size()
+           && counts.vendorTransferRules <= output.vendorTransferRules.size()
            && counts.positionProfiles <= output.positionProfiles.size()
            && counts.objectTypes <= output.objectTypes.size()
            && counts.recordObjectives <= output.recordObjectives.size()
@@ -92,6 +93,7 @@ namespace {
         header.vendorDefinitionCount,
         header.vendorSaleRowCount,
         header.vendorInstalledRowCount,
+        header.vendorTransferRuleCount,
         header.positionProfileCount,
         header.objectTypeCount,
         header.recordObjectiveCount,

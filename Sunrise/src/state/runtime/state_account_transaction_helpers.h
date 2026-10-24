@@ -121,6 +121,8 @@ struct GrantSource {
     std::uint16_t collectibleIndex{};
     std::uint8_t materialRequirementCount{};
     bool direct{};
+    /** A batch keeps identities above its pre-eviction inventory and earlier grants. */
+    std::uint64_t minimumInstanceSoid{};
 };
 
 /** @return The selected character's index, or the character count when none is selected. */
@@ -141,6 +143,12 @@ struct GrantSource {
                                              bool profileChanged,
                                              const GrantSource& source,
                                              PendingItemAcquisition& mutation) noexcept;
+struct BucketAdmission;
+/** Counts a profile bucket using installed item definitions for prepare and commit. */
+[[nodiscard]] bool profile_bucket_admission(std::span<const account::inventory::ProfileItem> items,
+                                            std::uint8_t bucketId,
+                                            BucketAdmission& occupancy) noexcept;
+
 /**
  * Stages the common profile-stack insertion path.
  * @param chargedAccount Account after any material cost, or account itself when nothing is charged.
@@ -207,7 +215,8 @@ find_resolved_position(const middleware::datagen::family4::loadout::ResolvedLoad
                                             std::uint8_t requestedEntry,
                                             PendingSubclassSelection& mutation) noexcept;
 [[nodiscard]] bool next_item_instance_soid(const AccountState& account,
-                                           std::uint64_t& output) noexcept;
+                                           std::uint64_t& output,
+                                           std::uint64_t minimum = 0) noexcept;
 [[nodiscard]] bool next_profile_item_instance_soid(const AccountState& account,
                                                    std::uint64_t& output) noexcept;
 [[nodiscard]] bool account_owns_soid(const AccountState& account, std::uint64_t soid) noexcept;

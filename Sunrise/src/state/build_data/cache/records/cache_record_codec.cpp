@@ -284,7 +284,7 @@ bool encode(const inventory::buckets::Descriptor& value, InventoryBucketRecord& 
         value.firstSlot,
         value.slotCount,
         value.equipmentSlot,
-        value.reserved,
+        value.policyFlags,
     };
     return true;
 }
@@ -297,7 +297,7 @@ bool decode(const InventoryBucketRecord& record, inventory::buckets::Descriptor&
         record.firstSlot,
         record.slotCount,
         record.equipmentSlot,
-        record.reserved,
+        record.policyFlags,
     };
     return true;
 }

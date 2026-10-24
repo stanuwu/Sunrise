@@ -120,6 +120,25 @@ struct PendingEquipmentSwap {
     bool prepared{};
 };
 
+/** A whole-instance Lost Items claim, kept private until its response and Family-4 update fit. */
+struct PendingPostmasterClaim {
+    CharacterState beforeCharacter{};
+    CharacterState afterCharacter{};
+    std::uint64_t accountSoid{};
+    std::uint64_t characterSoid{};
+    std::uint64_t instanceSoid{};
+    std::size_t characterIndex{};
+    std::size_t inventoryIndex{};
+    std::uint32_t expectedNextInventorySerial{};
+    std::int32_t quantity{};
+    std::uint16_t vendorIndex{};
+    std::uint16_t definitionIndex{};
+    std::uint16_t beforeInventoryRow{};
+    std::uint16_t afterInventoryRow{};
+    std::uint8_t sourceBucket{};
+    bool prepared{};
+};
+
 /** Prepared selected-character inventory insertion kept private until its reply and push fit. */
 struct PendingItemAcquisition {
     CharacterState beforeCharacter{};
@@ -139,6 +158,8 @@ struct PendingItemAcquisition {
     std::size_t expectedProfileItemCount{};
     std::size_t afterProfileItemCount{};
     std::size_t inventoryIndex{};
+    /** Resident replaced by FIFO eviction, or zero. */
+    std::uint64_t evictedInstanceSoid{};
     std::uint16_t collectibleIndex{};
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};
@@ -207,6 +228,8 @@ struct PendingProfileItemAcquisition {
     /** Skips Collections revalidation for direct rewards. */
     bool directGrant{};
     bool prepared{};
+    /** A new non-resident FIFO stack replaces an older row; appended remains false. */
+    bool replaced{};
 };
 
 /** Shared batch capacity bounds one reward transaction. */
@@ -241,6 +264,8 @@ struct PreparedRecordReward {
     bool appendedProfileResident{};
     std::uint16_t acquiredFlag{build_data::rewards::kAbsent};
     std::uint8_t previousFlag{};
+    /** Later arrivals in this batch can evict an earlier FIFO reward. */
+    bool retained{true};
 };
 
 /** One consumed wrapper's acquisition flag and the value its preparation observed. */
@@ -544,6 +569,28 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
  * @return True when the equip or unequip commits atomically and leaves the account valid.
  */
 [[nodiscard]] bool commit_equipment_swap(PendingEquipmentSwap& mutation) noexcept;
+
+/**
+ * Prepares moving one selected-character Lost Items instance back to its authored bucket.
+ * @param vendorIndex Vendor whose installed transfer rule must return this source bucket.
+ * @param sourceBucket Bucket the Client named; only Lost Items is claimable.
+ * @param instanceSoid Instance to move; the claim always moves the whole instance.
+ * @param definitionIndex Definition row the Client named, checked against the instance.
+ * @param quantity Requested quantity; must be 1.
+ * @param mutation Gets the checked after-image without changing account State.
+ * @return True when the rule accepts the bucket and the authored bucket has room.
+ */
+[[nodiscard]] bool prepare_postmaster_claim(std::uint16_t vendorIndex,
+                                            std::uint8_t sourceBucket,
+                                            std::uint64_t instanceSoid,
+                                            std::uint16_t definitionIndex,
+                                            std::int32_t quantity,
+                                            PendingPostmasterClaim& mutation) noexcept;
+/** Rebuilds the claim's after-image against current State without writing it. */
+[[nodiscard]] bool preview_postmaster_claim(const PendingPostmasterClaim& mutation,
+                                            AccountState& after) noexcept;
+/** Rechecks the claim under the transaction lock and commits it; always consumes the mutation. */
+[[nodiscard]] bool commit_postmaster_claim(PendingPostmasterClaim& mutation) noexcept;
 
 /**
  * Prepares one installed equippable definition as a new selected-character inventory instance.
