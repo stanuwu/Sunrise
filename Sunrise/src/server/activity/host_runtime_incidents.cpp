@@ -7,8 +7,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
+#include <string_view>
 
+#include "../../core/logging/log.h"
 #include "../../state/activity/runtime.h"
 #include "host_runtime_internal.h"
 
@@ -63,6 +66,84 @@ namespace detail {
     return nullptr;
 }
 
+/** Appends up to `limit` bytes as lowercase hex, marking a truncated tail with `+`. */
+void append_hex(std::array<char, core::log::kLineCapacity>& line,
+                int& used,
+                const std::byte* bytes,
+                std::uint32_t count,
+                std::uint32_t limit) noexcept {
+    const std::uint32_t shown = count < limit ? count : limit;
+    for (std::uint32_t index = 0; index < shown && used > 0; ++index) {
+        const int written = std::snprintf(line.data() + used,
+                                          line.size() - static_cast<std::size_t>(used),
+                                          "%02x",
+                                          std::to_integer<unsigned>(bytes[index]));
+        if (written <= 0 || static_cast<std::size_t>(used + written) >= line.size()) {
+            used = -1;
+            return;
+        }
+        used += written;
+    }
+    if (shown < count && used > 0 && static_cast<std::size_t>(used + 1) < line.size()) {
+        line[static_cast<std::size_t>(used++)] = '+';
+    }
+}
+
+/**
+ * Logs one incident in either direction with its complete outer fields, so a live run shows what
+ * the client raised and whether an operator incident reached transport. Diagnostic only.
+ */
+void log_incident(const char* direction,
+                  const char* result,
+                  const middleware::bap::activity_message::incident::Incident& incident,
+                  std::uint64_t revision,
+                  const char* reason) noexcept {
+    std::array<char, core::log::kLineCapacity> line{};
+    int used = std::snprintf(line.data(),
+                             line.size(),
+                             "ev=activity_incident dir=%s result=%s target=%u revision=%llu "
+                             "reason=%s extra=%u optional=%u words=%08x:%08x selector=%u:",
+                             direction,
+                             result,
+                             incident.primaryTarget,
+                             static_cast<unsigned long long>(revision),
+                             reason,
+                             incident.extraTargetCount,
+                             incident.hasOptionalBlock ? 1U : 0U,
+                             incident.optionalWordA,
+                             incident.optionalWordB,
+                             incident.selectorLength);
+    if (used <= 0 || static_cast<std::size_t>(used) >= line.size()) {
+        return;
+    }
+    append_hex(line, used, incident.selector.data(), incident.selectorLength, 64);
+    if (used > 0) {
+        const int written = std::snprintf(line.data() + used,
+                                          line.size() - static_cast<std::size_t>(used),
+                                          " payload=%u:",
+                                          incident.payloadLength);
+        used = written > 0 && static_cast<std::size_t>(used + written) < line.size()
+                   ? used + written
+                   : -1;
+    }
+    append_hex(line, used, incident.payload.data(), incident.payloadLength, 160);
+    for (std::uint32_t index = 0; index < incident.extraTargetCount && used > 0; ++index) {
+        const int written = std::snprintf(line.data() + used,
+                                          line.size() - static_cast<std::size_t>(used),
+                                          index == 0 ? " extra_targets=%u" : ",%u",
+                                          incident.extraTargets[index]);
+        used = written > 0 && static_cast<std::size_t>(used + written) < line.size()
+                   ? used + written
+                   : -1;
+    }
+    if (used <= 0) {
+        return;
+    }
+    core::log::write(core::log::Channel::server,
+                     core::log::Level::info,
+                     std::string_view(line.data(), static_cast<std::size_t>(used)));
+}
+
 /** Copies one incident summary into the chronological event history. */
 void fill_incident_event(Event& event,
                          const middleware::bap::activity_message::incident::Incident& incident,
@@ -80,8 +161,10 @@ void apply_incident(const IncidentInput& input, std::uint64_t now) noexcept {
     if (instance == nullptr || !instance->view.active) {
         ++g_droppedIngress;
         ++g_droppedIncidents;
+        log_incident("in", "dropped", input.incident, 0, "no_active_instance");
         return;
     }
+    log_incident("in", "received", input.incident, 0, "-");
     touch(*instance);
     Event event{};
     event.attemptGeneration = input.attemptGeneration;
@@ -143,6 +226,17 @@ void apply_incident_control(const IncidentRequest& request, std::uint64_t now) n
         || (record = reserve_incident_record()) == nullptr) {
         ++g_refusedControls;
         ++g_refusedIncidents;
+        log_incident("out",
+                     "refused",
+                     request.incident,
+                     0,
+                     instance == nullptr            ? "no_instance"
+                     : !instance->view.active       ? "inactive"
+                     : instance->view.outputPending ? "output_pending"
+                     : instance->view.incidentRevision
+                             == (std::numeric_limits<std::uint64_t>::max)()
+                         ? "revision_exhausted"
+                         : "history_full");
     } else {
         touch(*instance);
         ++instance->view.incidentRevision;
@@ -162,6 +256,7 @@ void apply_incident_control(const IncidentRequest& request, std::uint64_t now) n
         record->outbound = true;
         event.kind = EventKind::incidentQueued;
         fill_incident_event(event, request.incident, record->revision);
+        log_incident("out", "queued", request.incident, record->revision, "-");
     }
     append_event(event);
     if (record != nullptr && event.kind == EventKind::incidentQueued) {
@@ -325,6 +420,11 @@ void note_incident_attempt(const state::activity::SessionBinding& binding,
         record->lastSourceGeneration = sourceGeneration;
         ++record->attempts;
         record->status = status;
+        log_incident("out",
+                     status == IncidentStatus::encodeFailed ? "encode_failed" : "frame_refused",
+                     record->incident,
+                     revision,
+                     "-");
         instance->view.lastOutputAttemptTick = record->lastAttemptTick;
         instance->view.lastOutputSourceGeneration = sourceGeneration;
         ++instance->view.outputAttempts;
@@ -351,6 +451,7 @@ void note_incident_transport_staged(const state::activity::SessionBinding& bindi
         ++record->attempts;
         ++record->transportStages;
         record->status = IncidentStatus::transportStaged;
+        log_incident("out", "transport_staged", record->incident, revision, "-");
         instance->view.incidentTransportRevision = revision;
         instance->view.lastOutputAttemptTick = record->lastAttemptTick;
         instance->view.lastOutputSourceGeneration = sourceGeneration;
