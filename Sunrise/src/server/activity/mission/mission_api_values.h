@@ -200,9 +200,43 @@ inline constexpr ValueSpec kAbilityTargetArgument{.name = "target",
                                                   .kind = ValueKind::handle,
                                                   .ref = "slot",
                                                   .optional = true,
-                                                  .note = "must have authored point parameter 0"};
-inline constexpr ValueSpec kAtomAbilityFields[]{
-    kAtomKindField, kAbilityArgument, kAbilityTargetArgument, kAtomQuantizedField};
+                                                  .note =
+                                                      "a type-58 point or type-48 point set the "
+                                                      "SDK proved; an ability atom's value picks "
+                                                      "its point"};
+// Which authored point of `target` to aim at. It is only sent with a target, so it is never
+// negative here; an atom without a target sends -1 in the lane's signed byte, as shipped atoms do.
+// The client indexes the target's selector array
+inline constexpr ValueSpec kAbilityPointArgument{.name = "value",
+                                                 .kind = ValueKind::integer,
+                                                 .optional = true,
+                                                 .fallback = default_integer(0),
+                                                 .bound = between(0, 127),
+                                                 .scope = Scope::argument,
+                                                 .note = "authored point parameter of target"};
+// Which entity the ability is aimed at. The client copies the lane into the actor's ability
+// request and resolves it the same way for every actor:
+//   -1  no entity; the ability uses the position of target/value alone (a teleport)
+//    0  the actor's primary combat target, which its own target selection keeps up to date (player)
+//    1  target slot 1, set from outside the AI (a type-40 target sensor or a scripted target)
+//    2  the highest-scoring perceived target of the secondary target class
+//    3  the actor linked to this one in its AI record
+//    4  the actor itself
+inline constexpr ValueSpec kAbilityModeArgument{.name = "mode",
+                                                .kind = ValueKind::integer,
+                                                .optional = true,
+                                                .fallback = default_integer(-1),
+                                                .bound = between(-1, 4),
+                                                .scope = Scope::argument,
+                                                .note = "what the ability is aimed at: -1 the "
+                                                        "point only, 0..2 a target slot, 3 the "
+                                                        "linked actor, 4 itself"};
+inline constexpr ValueSpec kAtomAbilityFields[]{kAtomKindField,
+                                                kAbilityArgument,
+                                                kAbilityTargetArgument,
+                                                kAbilityPointArgument,
+                                                kAbilityModeArgument,
+                                                kAtomQuantizedField};
 
 /** The ten primary lane schemas the client-atom runner selects between, in native order. */
 inline constexpr std::array<AtomKindSpec, 10> kAtomKinds{{
@@ -215,7 +249,10 @@ inline constexpr std::array<AtomKindSpec, 10> kAtomKinds{{
     {.name = "set_temperament", .fields = kAtomTemperamentFields, .note = "set a temperament"},
     {.name = "set_channel", .fields = kAtomChannelFields, .note = "set an actor channel"},
     {.name = "snap_to", .fields = kAtomPointFields, .note = "jump to a point of target"},
-    {.name = "ability", .fields = kAtomAbilityFields, .closed = true, .note = "use an ability"},
+    {.name = "ability",
+     .fields = kAtomAbilityFields,
+     .closed = true,
+     .note = "use an ability, aimed by target/value and mode"},
 }};
 
 /** @return The field set of one atom kind. Fails compilation for an unknown kind. */

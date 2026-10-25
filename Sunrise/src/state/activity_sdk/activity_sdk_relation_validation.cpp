@@ -37,6 +37,8 @@ constexpr std::uint32_t kAbilitySenseSchema = 0x80807DA2U;
 constexpr std::uint32_t kAbilityAuthSchema = 0x80807DA1U;
 constexpr std::uint32_t kAbilityTargetSlotType = 58U;
 constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
+// Type 48 AI point sets have no per-slot descriptor, so their slots carry no schema at all.
+constexpr std::uint32_t kAbilityPointSetSlotType = 48U;
 
 /**
  * @return True when every scene event key belongs to a resourced type-43 slot, names that
@@ -172,12 +174,18 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
     }
     const format::ActorAbilityTarget* priorTarget = nullptr;
     for (const format::ActorAbilityTarget& row : catalog.actor_ability_targets()) {
-        if (row.slotIndex >= slots.size() || slots[row.slotIndex].slotType != kAbilityTargetSlotType
-            || slots[row.slotIndex].componentClass != kAbilityTargetComponentClass
-            || slots[row.slotIndex].senseSchema != format::kAbsentIndex
-            || slots[row.slotIndex].authSchema != format::kAbsentIndex
-            || (slots[row.slotIndex].flags & format::kSlotSchemaJoinExact) == 0
-            || row.resourceTag == 0 || row.resourceTag == format::kAbsentIndex
+        if (row.slotIndex >= slots.size()) {
+            return false;
+        }
+        const format::Slot& slot = slots[row.slotIndex];
+        const bool point = slot.slotType == kAbilityTargetSlotType
+                           && slot.componentClass == kAbilityTargetComponentClass
+                           && (slot.flags & format::kSlotSchemaJoinExact) != 0;
+        const bool pointSet = slot.slotType == kAbilityPointSetSlotType
+                              && slot.componentClass == format::kAbsentIndex;
+        if ((!point && !pointSet) || slot.senseSchema != format::kAbsentIndex
+            || slot.authSchema != format::kAbsentIndex || row.resourceTag == 0
+            || row.resourceTag == format::kAbsentIndex
             || (priorTarget != nullptr && row.slotIndex <= priorTarget->slotIndex)) {
             return false;
         }

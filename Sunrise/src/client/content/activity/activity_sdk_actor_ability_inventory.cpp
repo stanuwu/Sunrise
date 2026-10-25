@@ -32,6 +32,18 @@ constexpr std::uint32_t kPointResourceClass = 0x8080834CU;
 constexpr std::uint32_t kPointSelectorClass = 0x8080000FU;
 constexpr std::size_t kPointResourceOffset = 88U;
 constexpr std::size_t kPointSelectorsField = 64U;
+// Type 48 AI point sets are one multi-slot table per object (component class 0x80808344). Its
+// descriptor names no single slot, so the descriptor walk never reports them. The table pairs a
+// ClientRef row (name pointer, ClientRef, flags) with a resource handle whose payload has the
+// Type 58 point resource class, selectors at +64 included.
+constexpr std::uint32_t kPointSetSlotType = 48U;
+constexpr std::uint32_t kPointSetComponentClass = 0x80808344U;
+constexpr std::uint32_t kPointSetRowClass = 0x80809A6DU;
+constexpr std::uint32_t kPointSetResourceHandleClass = 0x8080834BU;
+constexpr std::size_t kPointSetRowsField = 0x28U;
+constexpr std::size_t kPointSetRowStride = 0x18U;
+constexpr std::size_t kPointSetRowReference = 8U;
+constexpr std::size_t kPointSetResourcesField = 0x38U;
 // Runtime ability keys use the empty-name hash as the absent value.
 constexpr std::uint32_t kAbsentName = 0x811C9DC5U;
 // Logical Type 2 owns the actor controller.
@@ -131,6 +143,98 @@ struct Actor final {
 
 using Source = std::tuple<std::uint32_t, std::uint16_t, std::uint16_t>;
 using ScopedSource = std::tuple<std::uint32_t, Source>;
+
+/**
+ * Reads the selector count of one point resource.
+ * @return False when the tag is not an exact point resource.
+ */
+bool point_selectors(Packages& packages, std::uint32_t resource, std::uint32_t& count) {
+    const Package* point = packages.get(resource);
+    std::size_t data = 0;
+    return point != nullptr && point->classId == kPointResourceClass
+           && array(
+               point->bytes, kPointSelectorsField, sizeof(float), kPointSelectorClass, data, count);
+}
+
+/**
+ * Adds every Type 48 point set one config authors to `targets`.
+ * @param packages Cached installed package reader.
+ * @param configTag Placed config to scan.
+ * @param slots Type 48 slot rows by their exact ClientRef.
+ * @param targets Receives one target per proved slot.
+ * @param invalid Receives slots whose rows disagree or whose resource is malformed.
+ * @return False only when the config cannot be read.
+ */
+bool point_sets(Packages& packages,
+                std::uint32_t configTag,
+                const std::map<Source, std::uint32_t>& slots,
+                std::map<std::uint32_t, format::ActorAbilityTarget>& targets,
+                std::set<std::uint32_t>& invalid) {
+    const Package* config = packages.get(configTag);
+    if (config == nullptr) {
+        return false;
+    }
+    const std::span<const std::byte> bytes = config->bytes;
+    for (std::size_t offset = 0; offset + 3 * sizeof(std::uint32_t) <= bytes.size();
+         offset += tables::kDescriptorStep) {
+        std::uint32_t own = 0;
+        std::uint32_t component = 0;
+        std::uint32_t mark = 0;
+        if (!read(bytes, offset, own) || own != configTag
+            || !read(bytes, offset + sizeof own, component) || component != kPointSetComponentClass
+            || !read(bytes, offset + 2 * sizeof own, mark) || mark != tables::kDescriptorMark) {
+            continue;
+        }
+        std::size_t rows = 0;
+        std::uint32_t rowCount = 0;
+        std::size_t resources = 0;
+        std::uint32_t resourceCount = 0;
+        if (!array(bytes,
+                   offset + kPointSetRowsField,
+                   kPointSetRowStride,
+                   kPointSetRowClass,
+                   rows,
+                   rowCount)
+            || !array(bytes,
+                      offset + kPointSetResourcesField,
+                      sizeof(std::uint32_t),
+                      kPointSetResourceHandleClass,
+                      resources,
+                      resourceCount)
+            || rowCount != resourceCount) {
+            continue;
+        }
+        for (std::uint32_t index = 0; index < rowCount; ++index) {
+            const std::size_t row = rows + index * kPointSetRowStride + kPointSetRowReference;
+            std::uint32_t key = 0;
+            std::uint16_t type = 0;
+            std::uint16_t slotIndex = 0;
+            std::uint32_t resource = 0;
+            if (!read(bytes, row, key) || !read(bytes, row + sizeof key, type)
+                || !read(bytes, row + sizeof key + sizeof type, slotIndex)
+                || !read(bytes, resources + index * sizeof resource, resource)) {
+                continue;
+            }
+            // The ClientRef's slot type is a byte; the byte after it is padding.
+            const auto found =
+                slots.find({key, static_cast<std::uint16_t>(type & 0xFFU), slotIndex});
+            if (found == slots.end()) {
+                continue;
+            }
+            std::uint32_t count = 0;
+            if (!point_selectors(packages, resource, count)) {
+                invalid.insert(found->second);
+                continue;
+            }
+            const format::ActorAbilityTarget target{found->second, resource, count};
+            const auto [existing, inserted] = targets.emplace(found->second, target);
+            if (!inserted && existing->second != target) {
+                invalid.insert(found->second);
+            }
+        }
+    }
+    return true;
+}
 
 /**
  * Reads only keys from an exact local actor definition.
@@ -291,6 +395,28 @@ bool build(const topology_inventory::Snapshot& topology,
             }
             parents[descriptor.slotIndex].emplace(
                 parent.targetKey, parent.targetType, parent.targetIndex);
+        }
+        // Type 48 point sets: no descriptor names them, so read every placed config once.
+        std::map<Source, std::uint32_t> pointSetSlots{};
+        for (std::uint32_t row = 0; row < topology.slots.size(); ++row) {
+            const auto& slot = topology.slots[row];
+            if (slot.slotType == kPointSetSlotType && slot.objectIndex < topology.objects.size()) {
+                pointSetSlots.emplace(Source{topology.objects[slot.objectIndex].objectKey,
+                                             static_cast<std::uint16_t>(slot.slotType),
+                                             static_cast<std::uint16_t>(slot.slotIndex)},
+                                      row);
+            }
+        }
+        if (!pointSetSlots.empty()) {
+            std::set<std::uint32_t> configs{};
+            for (const auto& occurrence : facts.configOccurrences) {
+                configs.insert(occurrence.configTag);
+            }
+            for (const auto configTag : configs) {
+                if (!point_sets(packages, configTag, pointSetSlots, targets, invalidTargets)) {
+                    return false;
+                }
+            }
         }
         std::map<std::uint32_t, std::set<std::uint32_t>> definitions{};
         for (const auto& binding : output.sequenceBindings) {

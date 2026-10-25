@@ -199,7 +199,15 @@ atom_ability(lua_State* state, int table, const SlotDefinition& actor) {
     ability.values = {
         group, request, middleware::bap::activity_message::auth_fields::kClientRefAbsentKey};
     ability.reference.slotType = -1;
-    ability.mode = -1;
+    constexpr const api::ValueSpec& kMode = api::find_field(kAbility.fields, "mode");
+    lua_getfield(state, table, kMode.name.data());
+    const lua_Integer mode =
+        lua_isnil(state, -1) ? kMode.fallback.integer : luaL_checkinteger(state, -1);
+    lua_pop(state, 1);
+    if (mode < kMode.bound.minimum || mode > kMode.bound.maximum) {
+        static_cast<void>(luaL_error(state, "ability mode is outside its native width"));
+    }
+    ability.mode = static_cast<std::int8_t>(mode);
     ability.value = -1;
     const char* const targetKey = api::find_field(kAbility.fields, "target").name.data();
     lua_getfield(state, table, targetKey);
@@ -212,15 +220,19 @@ atom_ability(lua_State* state, int table, const SlotDefinition& actor) {
         SlotDefinition target{};
         const bool current = current_slot(state, *handle, target);
         lua_pop(state, 1);
-        // Selector zero is the first authored point parameter, not an actor-target mode.
-        constexpr std::uint32_t kFirstPointParameter = 0;
+        // The point parameter selects one authored point of the target, not an actor-target
+        // mode. The client reads it unchecked, so it must be one the SDK proved for this target.
+        constexpr const api::ValueSpec& kPoint = api::find_field(kAbility.fields, "value");
+        const std::uint8_t parameter = atom_u8(
+            state, table, kPoint.name.data(), static_cast<std::uint8_t>(kPoint.bound.maximum));
         if (!current || impl->definitions.resolveActorAbilityTarget == nullptr
             || !impl->definitions.resolveActorAbilityTarget(
-                impl->definitions.context, target.nativeRow, kFirstPointParameter)) {
-            static_cast<void>(luaL_error(state, "ability target has no authored point parameter"));
+                impl->definitions.context, target.nativeRow, parameter)) {
+            static_cast<void>(
+                luaL_error(state, "ability target has no such authored point parameter"));
         }
         ability.reference = atom_target(state, table);
-        ability.value = static_cast<std::int8_t>(kFirstPointParameter);
+        ability.value = static_cast<std::int8_t>(parameter);
     }
     return ability;
 }
