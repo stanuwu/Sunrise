@@ -12,7 +12,6 @@
 #include <span>
 #include <string_view>
 
-#include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../middleware/encoding/bit_writer.h"
 #include "../../../state/activity/mission/runtime.h"
@@ -650,115 +649,11 @@ void draw_states(const sdk::BoundView& view) noexcept {
     draw_result();
 }
 
-/** One incident target worth a one-click send: the Last Wish HUD callouts traced by string scan. */
-struct IncidentPreset final {
-    std::uint16_t target{};
-    const char* label{};
-};
-
-/** Type-0 sobject rows whose name hash keys the Last Wish HUD message bank 0x80B9E417. */
-constexpr std::array<IncidentPreset, 6> kIncidentPresets{{
-    {5124, "Kalli prepares to wield her weapon"},
-    {5330, "Kalli conceives an ontological weapon"},
-    {3827, "Shuro's tempo quickens"},
-    {2707, "Shuro's tempo resumes"},
-    {1858, "Riven prepares her gaze"},
-    {4674, "The Taken advance!"},
-}};
-
-/** Parses whitespace-separated hex bytes into an incident payload. */
-[[nodiscard]] bool parse_hex_payload(std::string_view text,
-                                     std::span<std::byte> output,
-                                     std::uint32_t& length) noexcept {
-    length = 0;
-    int high = -1;
-    for (const char c : text) {
-        int nibble = -1;
-        if (c >= '0' && c <= '9') {
-            nibble = c - '0';
-        } else if (c >= 'a' && c <= 'f') {
-            nibble = c - 'a' + 10;
-        } else if (c >= 'A' && c <= 'F') {
-            nibble = c - 'A' + 10;
-        } else if (c == ' ' || c == '\t' || c == ',') {
-            continue;
-        } else {
-            return false;
-        }
-        if (high < 0) {
-            high = nibble;
-            continue;
-        }
-        if (length >= output.size()) {
-            return false;
-        }
-        output[length++] = static_cast<std::byte>((high << 4) | nibble);
-        high = -1;
-    }
-    return high < 0;
-}
-
-/**
- * Sends one operator incident (message 19) to the bound client, as the activity host would.
- * The target is an sobject row; the host refuses while its incident slot or output lane is busy.
- */
-void draw_send_incident(const sdk::BoundView& view) noexcept {
-    namespace incident = middleware::bap::activity_message::incident;
-    static int target = 5330;
-    // The all-zero 42-byte metadata header: what a type-0 notification row needs to display.
-    static std::array<char, 1024> payloadText = [] {
-        std::array<char, 1024> text{};
-        for (std::size_t index = 0; index < incident::kHeaderOnlyPayloadBytes * 2; ++index) {
-            text[index] = '0';
-        }
-        return text;
-    }();
-    static const char* last = nullptr;
-    ImGui::SeparatorText("Send incident");
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0F);
-    ImGui::InputInt("Target##send_incident", &target, 0, 0);
-    target = (std::clamp)(target, 0, static_cast<int>(incident::kTargetMaximum));
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 18.0F);
-    ImGui::InputText("Payload hex##send_incident", payloadText.data(), payloadText.size());
-    ImGui::SameLine();
-    if (ImGui::Button("Send##send_incident")) {
-        incident::Incident body{};
-        body.primaryTarget = static_cast<std::uint32_t>(target);
-        if (!parse_hex_payload(payloadText.data(), body.payload, body.payloadLength)) {
-            last = "payload is not whole hex bytes (500 at most)";
-        } else if (!incident::outer_valid(body)) {
-            last = "target refused (poisoned or out of range)";
-        } else {
-            last = host::request_incident(view.binding, body)
-                       ? "queued"
-                       : "host refused (no active instance, or an output is pending)";
-        }
-    }
-    for (std::size_t index = 0; index < kIncidentPresets.size(); ++index) {
-        const IncidentPreset& preset = kIncidentPresets[index];
-        if (index % 3 != 0) {
-            ImGui::SameLine();
-        }
-        ImGui::PushID(static_cast<int>(preset.target));
-        if (ImGui::SmallButton(preset.label)) {
-            target = preset.target;
-        }
-        ImGui::PopID();
-    }
-    ImGui::TextDisabled("Target is an sobject row. Default payload = zero 42-byte header (type-0 "
-                        "notifications need it); clear it to send none.");
-    if (last != nullptr) {
-        ImGui::Text("last send: %s", last);
-    }
-}
-
 /** Draws the durable mission state of the bound view. */
 void draw_mission_state(const sdk::BoundView& view) noexcept {
     mission_state::Snapshot snapshot{};
     if (!mission_state::state_snapshot(view.binding, snapshot)) {
         ImGui::TextDisabled("This session holds no mission record.");
-        draw_send_incident(view);
         return;
     }
     ImGui::Text("Revision %llu  phase %u",
@@ -817,7 +712,6 @@ void draw_mission_state(const sdk::BoundView& view) noexcept {
         }
         ImGui::EndTable();
     }
-    draw_send_incident(view);
 }
 
 /** Draws the lifetime slot of the bound view and its state control. */
