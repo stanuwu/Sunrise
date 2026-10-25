@@ -255,6 +255,23 @@ bool request_incident(
     return true;
 }
 
+bool incident_in_flight(const state::activity::SessionBinding& binding) noexcept {
+    AcquireSRWLockShared(&g_lock);
+    bool inFlight = false;
+    for (std::size_t index = g_pendingRead; index < g_pending.size() && !inFlight; ++index) {
+        const PendingInput& pending = g_pending[index];
+        inFlight = pending.kind == PendingKind::incidentControl
+                   && same_binding(pending.incidentControl.binding, binding);
+    }
+    if (!inFlight) {
+        const Instance* const instance = find_instance(binding);
+        inFlight = instance != nullptr && instance->view.outputPending
+                   && instance->view.outputKind == OutputKind::incident;
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return inFlight;
+}
+
 /** Reads the one pending incident occupying the exact instance's serialized output slot. */
 bool pending_incident(const state::activity::SessionBinding& binding,
                       PendingIncident& output) noexcept {

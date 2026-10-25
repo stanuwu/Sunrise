@@ -45,6 +45,14 @@ inline constexpr std::size_t kMaximumBodyBits =
 /** Fixed byte capacity needed by the largest padded incident body. */
 inline constexpr std::size_t kMaximumBodyBytes = (kMaximumBodyBits + 7) / 8;
 
+/**
+ * Bytes of the common incident metadata header (schemas 0x80809512 + 0x8080880D, 335 bits plus
+ * one padding bit). Every payload schema in the incident family starts with it; the header-only
+ * schemas 0x808087A5 / 0x808087AA are exactly this. An all-zero header (every biased field at its
+ * absent value) is what makes a type-0 notification row such as 5330 display: verified in game.
+ */
+inline constexpr std::size_t kHeaderOnlyPayloadBytes = 42;
+
 /** Why one incident did not pass validation. */
 enum class Verdict : std::uint8_t {
     accepted,

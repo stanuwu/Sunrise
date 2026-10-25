@@ -763,6 +763,8 @@ inline constexpr std::uint16_t kIntentStatusCancelPending = 0x2FF;
 inline constexpr std::uint16_t kIntentStatusSceneOutputBusy = 0x301;
 inline constexpr std::uint16_t kIntentStatusStateTransitionPending = 0x302;
 inline constexpr std::uint16_t kIntentStatusSceneLeasePending = 0x303;
+/** The host's incident slot or output lane is busy with an outbound incident. */
+inline constexpr std::uint16_t kIntentStatusIncidentBusy = 0x304;
 /** Logs one adapter status, and only when it differs from the last one logged. */
 void report_intent_status(RuntimeInstance& instance,
                           std::uint16_t status,

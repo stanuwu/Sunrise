@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../state/activity/membership/definition.h"
 #include "../../../state/activity/mission/definition.h"
 #include "mission_api_types.h"
@@ -58,6 +59,17 @@ inline constexpr ValueSpec kSlotLookupArguments[]{
     {.name = "selector", .kind = ValueKind::selector, .ref = "mission.Slot"}};
 inline constexpr ValueSpec kHoldSpawnArguments[]{
     {.name = "active", .kind = ValueKind::boolean, .note = "true holds the spawn, false releases"},
+};
+inline constexpr ValueSpec kSendIncidentArguments[]{
+    {.name = "target",
+     .kind = ValueKind::integer,
+     .bound = between(0, middleware::bap::activity_message::incident::kTargetMaximum),
+     .note = "sobject row the client resolves to an incident handler; poisoned rows are refused"},
+    {.name = "payload",
+     .kind = ValueKind::string,
+     .optional = true,
+     .bound = at_most(middleware::bap::activity_message::incident::kPayloadMaximum),
+     .note = "raw bytes; absent sends the all-zero 42-byte header, \"\" sends none"},
 };
 inline constexpr ValueSpec kStateRowFields[]{
     {.name = "region_index", .kind = ValueKind::integer, .bound = between(0, kInt32Maximum)},
@@ -175,6 +187,13 @@ inline constexpr MemberSpec kContextMembers[]{
      .arguments = kHoldSpawnArguments,
      .returns = kRequestKey,
      .effect = "mission.hold_spawn"},
+    {.name = "send_incident",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .arguments = kSendIncidentArguments,
+     .returns = kRequestKey,
+     .effect = "mission.send_incident",
+     .note = "sends one msg-19 activity incident to the client, as the activity host would"},
     {.name = "select_state",
      .kind = MemberKind::request,
      .call = CallForm::positional,

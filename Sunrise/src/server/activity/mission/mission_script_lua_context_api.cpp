@@ -7,6 +7,7 @@
 #include <string_view>
 #include <tuple>
 
+#include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../state/activity/membership/definition.h"
 #include "../../../state/mods/definition.h"
 #include "mission_script_lua_dispatch.h"
@@ -28,6 +29,8 @@ constexpr const api::MemberSpec& kCompleteMission =
 constexpr const api::MemberSpec& kRestartCheckpoint =
     api::member(api::Receiver::context, "restart_checkpoint");
 constexpr const api::MemberSpec& kHoldSpawn = api::member(api::Receiver::context, "hold_spawn");
+constexpr const api::MemberSpec& kSendIncident =
+    api::member(api::Receiver::context, "send_incident");
 constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::context, "select_state");
 
 /**
@@ -193,6 +196,61 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
     intent.kind = IntentKind::holdSpawn;
     intent.active = lua_toboolean(state, -1) != 0;
     lua_pop(state, 1);
+    return queue_intent(state, active_frame(state), intent);
+}
+
+/**
+ * Sends one activity incident (message 19) to the client, as the activity host would.
+ * The target is an sobject row, the 13-bit incident target the client resolves to a handler. The
+ * Last Wish HUD callouts are type-0 rows: 5124 "Kalli prepares to wield her weapon", 5330 "Kalli
+ * conceives an ontological weapon". Out-of-range and poisoned targets are refused here, because
+ * the client indexes its handler tables with them unchecked.
+ * @param state Lua call holding the context and `{target, payload?}`; `payload` is a raw byte
+ * string of at most 500 bytes. Absent sends the all-zero 42-byte metadata header, which is what a
+ * type-0 notification row needs; pass `""` to send no payload at all.
+ * @return One RequestKey. Its effect result reports that the host queued the incident.
+ */
+[[nodiscard]] int context_send_incident(lua_State* state) {
+    namespace incident = ::sunrise::middleware::bap::activity_message::incident;
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    refuse_unknown_arguments(state, kSendIncident);
+    lua_getfield(state, 2, required_key(kSendIncident, "target", api::ValueKind::integer));
+    const lua_Integer target = lua_isinteger(state, -1) ? lua_tointeger(state, -1) : -1;
+    lua_pop(state, 1);
+    if (target < 0 || target > static_cast<lua_Integer>(incident::kTargetMaximum)) {
+        return luaL_error(state,
+                          "send_incident requires a target from 0 to %d",
+                          static_cast<int>(incident::kTargetMaximum));
+    }
+    Intent intent{};
+    intent.kind = IntentKind::sendIncident;
+    intent.firstRow = static_cast<std::uint32_t>(target);
+    lua_getfield(state, 2, optional_key(kSendIncident, "payload", api::ValueKind::string));
+    if (lua_isnil(state, -1)) {
+        intent.authBody.assign(incident::kHeaderOnlyPayloadBytes, std::byte{0});
+        intent.authByteCount = static_cast<std::uint16_t>(incident::kHeaderOnlyPayloadBytes);
+    } else {
+        if (lua_type(state, -1) != LUA_TSTRING) {
+            return luaL_argerror(state, 2, "send_incident payload must be a byte string");
+        }
+        std::size_t length = 0;
+        const char* const bytes = lua_tolstring(state, -1, &length);
+        if (length > incident::kPayloadMaximum) {
+            return luaL_error(state,
+                              "send_incident payload exceeds %d bytes",
+                              static_cast<int>(incident::kPayloadMaximum));
+        }
+        const auto* const first = reinterpret_cast<const std::byte*>(bytes);
+        intent.authBody.assign(first, first + length);
+        intent.authByteCount = static_cast<std::uint16_t>(length);
+    }
+    lua_pop(state, 1);
+    incident::Incident probe{};
+    probe.primaryTarget = intent.firstRow;
+    probe.payloadLength = intent.authByteCount;
+    if (!incident::outer_valid(probe)) {
+        return luaL_error(state, "send_incident target %d is poisoned", static_cast<int>(target));
+    }
     return queue_intent(state, active_frame(state), intent);
 }
 
@@ -436,6 +494,7 @@ constexpr std::array<ContextBinding, std::size(api::kContextMembers)> kContextBi
     {"scene", &context_scene},
     {"slot", &context_slot},
     {"hold_spawn", &context_hold_spawn},
+    {"send_incident", &context_send_incident},
     {"select_state", &context_select_state},
     {"restart_checkpoint", &context_restart_checkpoint},
     {"set_phase", &context_set_phase},

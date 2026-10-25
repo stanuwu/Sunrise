@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
 #include "../../../state/activity/entity_slots/member_leases.h"
@@ -533,6 +534,13 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         refuse_delivery(instance, "attempt_refused", "stale_attempt", host::EffectOutcome::refused);
         return;
     }
+    // send_incident completes once its control is queued, but the host refuses every scriptable
+    // reservation until that incident is transport-staged. Hold the next intent, in order, instead
+    // of letting it fail its reservation and be dropped.
+    if (host::incident_in_flight(instance.view.binding)) {
+        report_intent_status(instance, kIntentStatusIncidentBusy, "incident_in_flight");
+        return;
+    }
     switch (intent.kind) {
     case lua_vm::IntentKind::selectMissionState: {
         if (intent.retirePlacedProps) {
@@ -616,6 +624,33 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             instance.view.binding.sessionId, intent.active);
         static_cast<void>(
             complete_local_effect(instance, intent.active ? "spawn_held" : "spawn_released"));
+        return;
+    }
+    case lua_vm::IntentKind::sendIncident: {
+        namespace incident = middleware::bap::activity_message::incident;
+        incident::Incident body{};
+        body.primaryTarget = intent.firstRow;
+        if (intent.authByteCount != intent.authBody.size()
+            || intent.authBody.size() > body.payload.size()) {
+            refuse_delivery(
+                instance, "incident_refused", "payload_mismatch", host::EffectOutcome::refused);
+            return;
+        }
+        std::copy(intent.authBody.begin(), intent.authBody.end(), body.payload.begin());
+        body.payloadLength = intent.authByteCount;
+        if (!incident::outer_valid(body)) {
+            refuse_delivery(
+                instance, "incident_refused", "target_not_allowed", host::EffectOutcome::refused);
+            return;
+        }
+        // The host refuses while its one incident slot or its output lane is occupied; the intent
+        // stays queued and retries each tick until its delivery lifetime runs out.
+        if (!host::request_incident(instance.view.binding, body)) {
+            report_intent_status(instance, kIntentStatusIncidentBusy, "incident_host_busy");
+            return;
+        }
+        // Queued for the host's next push; transport staging shows on the Host incident history.
+        static_cast<void>(complete_local_effect(instance, "incident_queued"));
         return;
     }
     case lua_vm::IntentKind::restartCheckpoint: {
