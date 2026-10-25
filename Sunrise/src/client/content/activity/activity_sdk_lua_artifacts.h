@@ -96,7 +96,6 @@ struct Bundle final {
     std::string missionIndex{};
     std::string activitySdkModule{};
     std::string behaviorModule{};
-    /** sunrise/incidents.lua: every incident notification, named from its English text. */
     std::string incidentModule{};
     std::string manifestJson{};
     /** The mission Lua API schema, rendered from the table the VM dispatches from. */

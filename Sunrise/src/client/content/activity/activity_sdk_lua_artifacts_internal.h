@@ -68,9 +68,9 @@ void append_world_spatial_views(Value::Object& output);
 void append_mission_api_luals(std::string& output);
 [[nodiscard]] bool render_activity_files(const Source& source, Bundle& output) noexcept;
 [[nodiscard]] bool render_contract_files(const Source& source, Bundle& output) noexcept;
+void append_actor_sequence_contract(const Source& source, std::string& output);
 /** Renders sunrise/incidents.lua from the published incident definitions. */
 [[nodiscard]] bool render_incident_module(const Source& source, std::string& output) noexcept;
-void append_actor_sequence_contract(const Source& source, std::string& output);
 
 [[nodiscard]] std::string_view text(const Source& source, format::StringRef reference) noexcept;
 [[nodiscard]] std::string digest_hex(const std::array<std::byte, 32>& digest, bool prefix);
