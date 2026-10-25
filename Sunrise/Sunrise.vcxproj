@@ -900,6 +900,7 @@
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_activities.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_artifacts.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_contract.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_lua_incidents.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_mission_api.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_mission_luals.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_actor_sequences.cpp" />
@@ -2946,6 +2947,7 @@
     <ClInclude Include="src\client\content\activity\activity_sdk_activity_enrichment_inventory.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_actor_rsat_inventory.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_authored_scene_inventory.h" />
+    <ClInclude Include="src\client\content\activity\activity_sdk_incident_inventory.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_behavior_inventory.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_behavior_node_shapes.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_lua_artifacts.h" />
@@ -3229,6 +3231,7 @@
     <ClCompile Include="src\state\activity_sdk\scene_triggers.cpp" />
     <ClCompile Include="src\client\content\activity\scriptable_catalog_container_placement_cache.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_native_pack_text.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_native_pack_incidents.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_policy_inventory_capabilities.cpp" />
     <ClCompile Include="src\server\gameplay\entity_position_profile_provider.cpp" />
     <ClInclude Include="src\state\gameplay\external\entity_position_profiles.h" />

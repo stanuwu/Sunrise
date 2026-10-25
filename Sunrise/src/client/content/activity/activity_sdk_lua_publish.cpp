@@ -27,8 +27,8 @@ constexpr std::wstring_view kSunriseSuffix = L"\\sunrise";
 // The mission API schema sits beside activity_sdk.lua.
 constexpr std::wstring_view kMissionApiName = L"\\mission_api.json";
 // Files every estate publishes beside its modules: two indexes, the manifest, the SDK module,
-// the behavior module and the mission API schema.
-constexpr std::size_t kFixedFileCount = 6;
+// the behavior module, the incident module and the mission API schema.
+constexpr std::size_t kFixedFileCount = 7;
 // Distinct temporary names tried before publication fails.
 constexpr std::size_t kTemporaryAttempts = 16;
 
@@ -310,9 +310,9 @@ Status publish_bundle(const wchar_t* sdkDirectory, const Bundle& bundle, Result&
     output = {};
     if (sdkDirectory == nullptr || sdkDirectory[0] == L'\0' || bundle.activityIndex.empty()
         || bundle.missionIndex.empty() || bundle.activitySdkModule.empty()
-        || bundle.behaviorModule.empty() || bundle.manifestJson.empty()
-        || bundle.missionApiJson.empty() || bundle.activityModules.empty()
-        || bundle.missionModules.empty()) {
+        || bundle.behaviorModule.empty() || bundle.incidentModule.empty()
+        || bundle.manifestJson.empty() || bundle.missionApiJson.empty()
+        || bundle.activityModules.empty() || bundle.missionModules.empty()) {
         return Status::invalidInput;
     }
     try {
@@ -336,7 +336,9 @@ Status publish_bundle(const wchar_t* sdkDirectory, const Bundle& bundle, Result&
                 sunrise.chars.data(), L"\\activity_sdk.lua", bundle.activitySdkModule, bytes)
             || !publish_named(sunrise.chars.data(), kMissionApiName, bundle.missionApiJson, bytes)
             || !publish_named(
-                sunrise.chars.data(), L"\\behaviors.lua", bundle.behaviorModule, bytes)) {
+                sunrise.chars.data(), L"\\behaviors.lua", bundle.behaviorModule, bytes)
+            || !publish_named(
+                sunrise.chars.data(), L"\\incidents.lua", bundle.incidentModule, bytes)) {
             return Status::writeFailure;
         }
 
@@ -408,6 +410,7 @@ bool is_current(const wchar_t* sdkDirectory, const state::activity_sdk::Catalog&
         source.actorSequenceBindings = catalog.actor_sequence_bindings();
         source.authoredSceneEventKeys = catalog.authored_scene_event_keys();
         source.dialogueCues = catalog.dialogue_cues();
+        source.incidentDefinitions = catalog.incident_definitions();
         Bundle expected{};
         if (!internal::render_contract_files(source, expected)) {
             return false;

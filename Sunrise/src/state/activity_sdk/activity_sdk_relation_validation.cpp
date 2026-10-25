@@ -79,6 +79,24 @@ constexpr std::uint32_t kTaskReferenceOffset =
     return true;
 }
 
+/**
+ * @return True when every incident definition is a notification row of the SObject domain with a
+ *         bank and a name, in strictly ascending target order.
+ */
+[[nodiscard]] bool incident_definitions(const Catalog& catalog) noexcept {
+    const auto rows = catalog.incident_definitions();
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        const format::IncidentDefinition& row = rows[index];
+        if (row.target >= format::kIncidentTargetCapacity
+            || row.typeCode != format::kIncidentNotificationTypeCode || row.nameHash == 0
+            || row.containerTag == 0 || row.containerTag == format::kAbsentIndex || row.flags != 0
+            || row.reserved != 0 || (index != 0 && rows[index - 1].target >= row.target)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /** @return True when every task target names slots and objectives the catalog holds. */
 [[nodiscard]] bool task_targets(const Catalog& catalog) noexcept {
     const auto targets = catalog.task_targets();
@@ -697,8 +715,9 @@ bool relations(const Catalog& catalog) {
         bool (*run)(const Catalog&) noexcept;
     };
     // Every relation check a catalog must pass, named so a refusal reports which one failed.
-    static constexpr std::array<Check, 10> kChecks{
+    static constexpr std::array<Check, 11> kChecks{
         {{"authored_scene_event_keys", &authored_scene_event_keys},
+         {"incident_definitions", &incident_definitions},
          {"squad_profiles", &squad_profiles},
          {"task_targets", &task_targets},
          {"dialogue_cues", &dialogue_cues},

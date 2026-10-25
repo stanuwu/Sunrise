@@ -347,6 +347,11 @@ std::span<const format::AuthoredSceneEventKey> Catalog::authored_scene_event_key
         header_, view_, format::SectionIndex::authoredSceneEventKeys);
 }
 
+std::span<const format::IncidentDefinition> Catalog::incident_definitions() const noexcept {
+    return rows<format::IncidentDefinition>(
+        header_, view_, format::SectionIndex::incidentDefinitions);
+}
+
 std::span<const format::ActorStateName> Catalog::actor_state_names() const noexcept {
     return rows<format::ActorStateName>(header_, view_, format::SectionIndex::actorStateNames);
 }

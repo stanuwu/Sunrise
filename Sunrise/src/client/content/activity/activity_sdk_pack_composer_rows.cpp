@@ -8,6 +8,7 @@
 #include "activity_sdk_actor_rsat_inventory.h"
 #include "activity_sdk_authored_scene_inventory.h"
 #include "activity_sdk_behavior_inventory.h"
+#include "activity_sdk_incident_inventory.h"
 #include "activity_sdk_pack_composer_internal.h"
 #include "activity_sdk_policy_inventory.h"
 #include "activity_sdk_squad_inventory.h"
@@ -612,6 +613,22 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         target.reserved = input.reserved;
         if (!link_text(linker, input.id, target.id)) {
             return false;
+        }
+    }
+
+    if (inputs.incidents != nullptr) {
+        const auto& incidents = inputs.incidents->definitions;
+        output.incidentDefinitions.resize(incidents.size());
+        for (std::size_t index = 0; index < incidents.size(); ++index) {
+            const incident_inventory::Definition& input = incidents[index];
+            format::IncidentDefinition& target = output.incidentDefinitions[index];
+            target.target = input.target;
+            target.nameHash = input.nameHash;
+            target.containerTag = input.containerTag;
+            target.typeCode = input.typeCode;
+            if (!link_text(linker, input.text, target.text)) {
+                return false;
+            }
         }
     }
 

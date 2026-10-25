@@ -64,7 +64,8 @@ inline constexpr ValueSpec kSendIncidentArguments[]{
     {.name = "target",
      .kind = ValueKind::integer,
      .bound = between(0, middleware::bap::activity_message::incident::kTargetMaximum),
-     .note = "sobject row the client resolves to an incident handler; poisoned rows are refused"},
+     .note = "sobject row the client resolves to an incident handler; poisoned rows are refused. "
+             "require(\"sunrise.incidents\").Notification names every notification"},
     {.name = "payload",
      .kind = ValueKind::string,
      .optional = true,

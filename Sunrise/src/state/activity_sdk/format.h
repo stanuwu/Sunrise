@@ -25,10 +25,10 @@ namespace generated = middleware::content::packages::schema::generated;
 
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
-/** Runtime-pack schema version accepted by this reader. 47 keeps scenes of up to 128 roles. */
-inline constexpr std::uint32_t kVersion = 47;
+/** Runtime-pack schema version accepted by this reader. 48 adds incident definition rows. */
+inline constexpr std::uint32_t kVersion = 48;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
-inline constexpr std::uint32_t kSectionCount = 51;
+inline constexpr std::uint32_t kSectionCount = 52;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
 /** The runtime accepts only the checked generated SDK build. Each pin is a SHA-256 digest. */
 inline constexpr std::array<std::byte, 32> kExpectedSdkBuildDigest{
@@ -434,7 +434,7 @@ inline constexpr std::int64_t kAbsentSignedValue = (-0x7FFFFFFFFFFFFFFFLL - 1);
 
 /** Fixed packed byte sizes make producer and consumer ABI drift fail at compile time. */
 inline constexpr std::size_t kSectionSize = 16;
-inline constexpr std::size_t kHeaderSize = 976;
+inline constexpr std::size_t kHeaderSize = 992;
 inline constexpr std::size_t kStringRefSize = 8;
 inline constexpr std::size_t kRangeSize = 8;
 inline constexpr std::size_t kActivitySize = 124;
@@ -459,6 +459,7 @@ inline constexpr std::size_t kSquadMemberSize = 48;
 inline constexpr std::size_t kSquadAnchorSize = 48;
 inline constexpr std::size_t kAuthoredSceneResourceSize = 40;
 inline constexpr std::size_t kAuthoredSceneEventKeySize = 40;
+inline constexpr std::size_t kIncidentDefinitionSize = 32;
 inline constexpr std::size_t kAuthoredSceneSquadEdgeSize = 40;
 inline constexpr std::size_t kTaskTargetSize = 44;
 inline constexpr std::size_t kDialogueCueSize = 40;
@@ -779,10 +780,10 @@ enum class SectionIndex : std::uint32_t {
     actorAbilities,
     actorAbilityTargets,
     authoredSceneEventKeys,
+    incidentDefinitions,
 };
 
-static_assert(static_cast<std::uint32_t>(SectionIndex::authoredSceneEventKeys) + 1
-              == kSectionCount);
+static_assert(static_cast<std::uint32_t>(SectionIndex::incidentDefinitions) + 1 == kSectionCount);
 
 /** Exact activity-name/root join result retained for every activity row. */
 enum class ActivityJoinStatus : std::uint32_t {
@@ -1215,6 +1216,29 @@ struct AuthoredSceneEventKey final {
     std::uint32_t reserved{};
 };
 
+/** Rows of the SObject table, the 13-bit incident target domain. */
+inline constexpr std::uint32_t kIncidentTargetCapacity = 8192U;
+/** SObject type code of a notification: the empty incident header displays its text. */
+inline constexpr std::int32_t kIncidentNotificationTypeCode = 0;
+
+/**
+ * One SObject row an activity incident can target, in target order. Only notification rows with
+ * an English text are published; the text is how the client shows the incident.
+ */
+struct IncidentDefinition final {
+    /** English text of the row's name hash, from the first installed bank that holds it. */
+    StringRef text{};
+    /** SObject row, the incident's primary target. */
+    std::uint32_t target{};
+    /** FNV-1 name hash of the SObject definition, also the text's string hash. */
+    std::uint32_t nameHash{};
+    /** String container the text was read from. */
+    std::uint32_t containerTag{};
+    std::int32_t typeCode{};
+    std::uint32_t flags{};
+    std::uint32_t reserved{};
+};
+
 /** One type-43 slot retains an exact same-object reference to one type-1 squad slot. */
 struct AuthoredSceneSquadEdge final {
     StringRef id{};
@@ -1615,6 +1639,7 @@ static_assert(sizeof(SquadMember) == kSquadMemberSize);
 static_assert(sizeof(SquadAnchor) == kSquadAnchorSize);
 static_assert(sizeof(AuthoredSceneResource) == kAuthoredSceneResourceSize);
 static_assert(sizeof(AuthoredSceneEventKey) == kAuthoredSceneEventKeySize);
+static_assert(sizeof(IncidentDefinition) == kIncidentDefinitionSize);
 static_assert(sizeof(AuthoredSceneSquadEdge) == kAuthoredSceneSquadEdgeSize);
 static_assert(sizeof(TaskTarget) == kTaskTargetSize);
 static_assert(sizeof(DialogueCue) == kDialogueCueSize);

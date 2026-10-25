@@ -63,6 +63,8 @@ struct PackProgressContext final {
         return "reading authored dialogue cues";
     case native_pack::Phase::authoredText:
         return "reading authored dialogue and HUD text";
+    case native_pack::Phase::incidents:
+        return "naming incident notifications";
     case native_pack::Phase::behaviors:
         return "reading compiled behavior roots";
     case native_pack::Phase::actionPolicies:
@@ -98,6 +100,8 @@ struct PackProgressContext final {
         return "dialogue_cues";
     case native_pack::Phase::authoredText:
         return "authored_text";
+    case native_pack::Phase::incidents:
+        return "incidents";
     case native_pack::Phase::behaviors:
         return "behaviors";
     case native_pack::Phase::actionPolicies:

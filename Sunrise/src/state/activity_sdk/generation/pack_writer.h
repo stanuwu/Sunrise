@@ -73,6 +73,7 @@ struct Tables final {
     std::span<const format::ActorAbility> actorAbilities{};
     std::span<const format::ActorAbilityTarget> actorAbilityTargets{};
     std::span<const format::AuthoredSceneEventKey> authoredSceneEventKeys{};
+    std::span<const format::IncidentDefinition> incidentDefinitions{};
 };
 
 /** Canonical pack build and publication outcomes. */

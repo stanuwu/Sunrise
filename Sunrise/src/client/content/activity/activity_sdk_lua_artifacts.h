@@ -81,6 +81,7 @@ struct Source final {
     std::span<const format::ActorAbility> actorAbilities{};
     std::span<const format::AuthoredSceneEventKey> authoredSceneEventKeys{};
     std::span<const format::DialogueCue> dialogueCues{};
+    std::span<const format::IncidentDefinition> incidentDefinitions{};
 };
 
 /** One readable generated Lua module with a filesystem-safe canonical name. */
@@ -95,6 +96,8 @@ struct Bundle final {
     std::string missionIndex{};
     std::string activitySdkModule{};
     std::string behaviorModule{};
+    /** sunrise/incidents.lua: every incident notification, named from its English text. */
+    std::string incidentModule{};
     std::string manifestJson{};
     /** The mission Lua API schema, rendered from the table the VM dispatches from. */
     std::string missionApiJson{};

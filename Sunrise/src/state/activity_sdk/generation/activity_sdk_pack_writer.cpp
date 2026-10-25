@@ -71,6 +71,7 @@ constexpr std::array<std::uint32_t, format::kSectionCount> kSectionStrides{
     sizeof(format::ActorAbility),
     sizeof(format::ActorAbilityTarget),
     sizeof(format::AuthoredSceneEventKey),
+    sizeof(format::IncidentDefinition),
 };
 /** Bounded retries handle a stale sibling with the same process-local sequence. */
 constexpr std::size_t kTemporaryAttempts = 16;
@@ -179,6 +180,7 @@ raw_sections(const Tables& tables) noexcept {
         rows(tables.actorAbilities),
         rows(tables.actorAbilityTargets),
         rows(tables.authoredSceneEventKeys),
+        rows(tables.incidentDefinitions),
     };
 }
 
