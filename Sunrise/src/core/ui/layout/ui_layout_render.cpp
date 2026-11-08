@@ -41,8 +41,6 @@ constexpr ImGuiWindowFlags kMainWindowFlags =
     | ImGuiWindowFlags_NoTitleBar;
 /** One trailing null byte turns a descriptor name into a component label. */
 constexpr std::size_t kLabelTerminatorBytes = 1;
-/** Fixed animation key. Every visibility-lane user needs its own, so keep these distinct. */
-constexpr ImGuiID kSurfaceAnimationId = 1;
 /** Response rates for opening and closing, in the same range as the other components. */
 constexpr animation::transition::Rates kVisibilityRates{16.0F, 14.0F};
 /** A closed surface has finished its transition and draws nothing. */
@@ -164,9 +162,9 @@ void draw_companion_windows() noexcept {
     ImGui::SameLine();
     const float buttonExtent = ImGui::GetFontSize();
     const float rowHeight = logoDrawn ? extent : titleHeight;
-    const ImVec2 buttonPosition{
-        rowRight - buttonExtent,
-        rowOrigin.y + ((std::max)(rowHeight - buttonExtent, 0.0F) / kHalfExtent)};
+    const ImVec2 buttonPosition{rowRight - buttonExtent,
+                                rowOrigin.y
+                                    + ((std::max)(rowHeight - buttonExtent, 0.0F) / kHalfExtent)};
     ImGui::SetCursorScreenPos(buttonPosition);
     const bool pressed = ImGui::InvisibleButton(kCloseWidgetId, {buttonExtent, buttonExtent});
 
@@ -201,11 +199,12 @@ bool render(bool visible) noexcept {
         return false;
     }
     // A new lane starts closed, so the surface animates open the first time it is asked for.
-    const float progress = animation::transition::update(kSurfaceAnimationId,
-                                                         animation::transition::Lane::visibility,
-                                                         visible,
-                                                         kVisibilityRates,
-                                                         kClosedProgress);
+    const float progress = animation::transition::update(
+        animation::transition::fixed_id(animation::transition::FixedKey::surface),
+        animation::transition::Lane::visibility,
+        visible,
+        kVisibilityRates,
+        kClosedProgress);
     if (progress <= kClosedProgress) {
         return false;
     }

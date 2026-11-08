@@ -131,41 +131,32 @@ build_remote_member(const membership_message::CitizenAdvertisement& advertisemen
 }
 
 /**
- * Binds the generated world one activity session's selected activity names.
+ * Binds the activity one activity session selected.
  * @param source Exact activity session.
  * @param bindingGeneration Connection generation that binds it.
- * @param output Receives the bound generated-world view.
- * @return True when the selection resolves to authenticated live content.
+ * @param output Receives the bound activity SDK view.
+ * @return True when the selection resolves to authenticated content.
  */
-[[nodiscard]] bool
-resolve_generated_world(const state::activity::SessionBinding& source,
-                        std::uint64_t bindingGeneration,
-                        sdk::generated_world::GeneratedWorldView& output) noexcept {
+[[nodiscard]] bool resolve_activity(const state::activity::SessionBinding& source,
+                                    std::uint64_t bindingGeneration,
+                                    sdk::BoundView& output) noexcept {
     const sdk::Snapshot catalog = sdk::snapshot();
-    sdk::BoundView activityView{};
     const sdk::Selection selection{source, activity_link_count_locked(source), bindingGeneration};
-    return catalog != nullptr
-           && sdk::resolve(catalog, selection, activityView) == sdk::Status::ready
-           && sdk::generated_world::resolve(activityView, output)
-                  == sdk::generated_world::BindStatus::ready;
+    return catalog != nullptr && sdk::resolve(catalog, selection, output) == sdk::Status::ready;
 }
 
-/** Binds the generated world of the connection's own activity session. */
-[[nodiscard]] bool
-resolve_generated_world(const Session& session,
-                        sdk::generated_world::GeneratedWorldView& output) noexcept {
-    return resolve_generated_world(
-        session.activity.session, session.activity.bindingGeneration, output);
+/** Binds the activity of the connection's own activity session. */
+[[nodiscard]] bool resolve_activity(const Session& session, sdk::BoundView& output) noexcept {
+    return resolve_activity(session.activity.session, session.activity.bindingGeneration, output);
 }
 
 /** @return True only when extracted package data selects a private Bubble Host lane. */
 [[nodiscard]] bool remote_member_allowed(const Session& session,
                                          std::int32_t effectiveRegion) noexcept {
-    sdk::generated_world::GeneratedWorldView worldView{};
+    sdk::BoundView view{};
     bool isPublic = false;
-    return resolve_generated_world(session, worldView)
-           && sdk::generated_world::region_is_public(worldView, effectiveRegion, isPublic)
-           && !isPublic;
+    return resolve_activity(session, view)
+           && sdk::generated_world::region_is_public(view, effectiveRegion, isPublic) && !isPublic;
 }
 
 /** @return One wire leg copied from a reported State leg, or an absent one. */
@@ -343,10 +334,10 @@ void report_directory(const membership_message::MembershipSnapshot& wire) noexce
 bool private_region(const state::activity::SessionBinding& source,
                     std::uint64_t bindingGeneration,
                     std::int32_t region) noexcept {
-    sdk::generated_world::GeneratedWorldView worldView{};
+    sdk::BoundView view{};
     bool isPublic = false;
-    return region >= 0 && resolve_generated_world(source, bindingGeneration, worldView)
-           && sdk::generated_world::region_is_public(worldView, region, isPublic) && !isPublic;
+    return region >= 0 && resolve_activity(source, bindingGeneration, view)
+           && sdk::generated_world::region_is_public(view, region, isPublic) && !isPublic;
 }
 
 /** Same test for the connection's own activity session. */
@@ -357,19 +348,12 @@ bool private_region(const Session& session, std::int32_t region) noexcept {
 /** Publicity is authored per bubble, so a bubble's state zero answers for all 8 of its states. */
 bool region_publicity_mask(const Session& session, std::uint64_t& mask) noexcept {
     mask = 0;
-    sdk::generated_world::GeneratedWorldView worldView{};
-    if (!resolve_generated_world(session, worldView)) {
-        return false;
-    }
-    for (std::size_t record = 0; record < membership_message::kRegionRecordCount; ++record) {
-        const auto region =
-            static_cast<std::int32_t>(record) * membership_message::kRegionStateCount;
-        bool isPublic = false;
-        if (sdk::generated_world::region_is_public(worldView, region, isPublic) && isPublic) {
-            mask |= std::uint64_t{1} << record;
-        }
-    }
-    return true;
+    sdk::BoundView view{};
+    return resolve_activity(session, view)
+           && sdk::generated_world::public_bubble_mask(view,
+                                                       membership_message::kRegionRecordCount,
+                                                       membership_message::kRegionStateCount,
+                                                       mask);
 }
 
 /** Reports whether the citizen advertisement for one region can be built now. */

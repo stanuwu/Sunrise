@@ -9,30 +9,38 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <span>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../core/settings/settings.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808075.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../content/handles/handle_resolver.h"
 #include "../../../memory/current_process_memory.h"
 #include "../../../targets/game/content.h"
 #include "internal.h"
 #include "lore_visibility_patch.h"
+#include "socket_menu_native_array.h"
 
 namespace sunrise::client::hooks::network::investment {
 namespace {
 
 namespace tables = middleware::content::packages::tables;
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Installed tags of the record table and the presentation node table, in that order. */
 constexpr std::array<std::uint32_t, 2> kTableTags{0x81319339U, 0x8131933FU};
+/** Row array field of each of those tables, in the same order. */
+constexpr std::array<std::size_t, 2> kTableArrayFields{offsetof(generated::C80807567, table),
+                                                       offsetof(generated::C80803041, table)};
 /** Rows each of those tables holds in this build. A different count is a different build. */
 constexpr std::array<std::size_t, 2> kTableRowCounts{2242, 924};
 /** Row size of each of those tables, in the same order. */
 constexpr std::array<std::size_t, 2> kTableRowStrides{tables::kRecordRowStride,
                                                       tables::kNodeRowStride};
+/** Row class of each of those tables, in the same order. */
+constexpr std::array<std::uint32_t, 2> kTableRowClasses{generated::RecordRow::kClass,
+                                                        generated::PresentationNodeRow::kClass};
 /** Expression fields swept on a record row. */
 constexpr std::array<std::size_t, 2> kRecordExpressionFields{
     tables::kRecordCategoryExpressionField, tables::kRecordAlternateExpressionField};
@@ -43,18 +51,13 @@ constexpr std::array<std::size_t, 2> kNodeExpressionFields{tables::kNodeExpressi
 constexpr std::size_t kRecordTable = 0;
 /** Both tables carry the row's authored definition hash at this offset. */
 constexpr std::size_t kRowHashOffset = tables::kRecordHashOffset;
-/** Bytes between an array header and the marker that precedes it. */
-constexpr std::size_t kArrayMarkerBack = 4;
-/** An array header is a count then its element class. */
-constexpr std::size_t kArrayClassOffset = 8;
-/** An expression field is a count then a self-relative offset. */
-constexpr std::size_t kFieldPointerOffset = tables::kUnlockExpressionPointerOffset;
+/** One array field: how many rows it holds and where they sit. */
+using Descriptor = native_array::ArrayDescriptor;
 
-/** One expression field: how many instructions it holds and where they sit. */
-struct Descriptor {
-    std::uint64_t count;
-    std::int64_t relative;
-};
+/** @return The field's row count, read as the unsigned word the native reader uses. */
+[[nodiscard]] std::uint64_t count_of(const Descriptor& desc) noexcept {
+    return static_cast<std::uint64_t>(desc.count);
+}
 
 /** One replaced instruction and both values it takes. */
 struct Patch {
@@ -73,45 +76,25 @@ template <class T> bool read(std::uintptr_t address, T& value) noexcept {
 }
 
 /**
- * Follows one expression field to its instruction bytes.
+ * Follows one array field to its first row.
  * @param address Address of the field itself.
- * @param desc Field contents already read from that address.
- * @param data Receives the address of the first instruction.
- * @return False when the header does not repeat the count or is not an installed array.
+ * @param maximumCount Largest row count accepted.
+ * @param stride Row size; the last row must be readable.
+ * @param elementClass Class the array header must name.
+ * @param data Receives the address of the first row.
+ * @return False when the header does not repeat the count or names another class.
  */
-bool data_at(std::uintptr_t address, const Descriptor& desc, std::uintptr_t& data) noexcept {
-    // Highest field address whose header arithmetic below still fits a signed 64-bit value.
-    constexpr std::uintptr_t kAddressCeiling =
-        static_cast<std::uintptr_t>(INT64_MAX) - tables::kHeaderSkip - kArrayClassOffset;
-    if (address > kAddressCeiling) {
+bool data_at(std::uintptr_t address,
+             std::size_t maximumCount,
+             std::size_t stride,
+             std::uint32_t elementClass,
+             std::uintptr_t& data) noexcept {
+    native_array::ArrayView view{};
+    if (!native_array::resolve_array(address, maximumCount, stride, elementClass, view)) {
         return false;
     }
-    const auto base =
-        static_cast<std::int64_t>(address) + static_cast<std::int64_t>(kFieldPointerOffset);
-    if (desc.relative < -base
-        || desc.relative > INT64_MAX - base - static_cast<std::int64_t>(tables::kHeaderSkip)) {
-        return false;
-    }
-    const auto header = static_cast<std::uintptr_t>(base + desc.relative);
-    std::uint64_t count{};
-    std::uint32_t marker{};
-    std::uint32_t type{};
-    if (header < kArrayMarkerBack || !read(header, count) || count != desc.count
-        || !read(header - kArrayMarkerBack, marker) || !read(header + kArrayClassOffset, type)
-        || marker >> tables::kDefinitionClassShift != tables::kDefinitionClassHigh
-        || type >> tables::kDefinitionClassShift != tables::kDefinitionClassHigh) {
-        return false;
-    }
-    data = header + tables::kHeaderSkip;
+    data = view.data;
     return true;
-}
-
-/** Rebuilds an image pointer without an implementation-defined integer conversion. */
-[[nodiscard]] void* image_pointer(std::uintptr_t address) noexcept {
-    void* pointer = nullptr;
-    static_assert(sizeof pointer == sizeof address);
-    std::memcpy(&pointer, &address, sizeof pointer);
-    return pointer;
 }
 
 /**
@@ -127,7 +110,7 @@ bool write(const Patch& patch, bool restore) noexcept {
     if (!read(patch.address, current) || current != expected) {
         return false;
     }
-    void* destination = image_pointer(patch.address);
+    void* destination = native_array::image_pointer(patch.address);
     DWORD previous{};
     if (!VirtualProtect(destination, sizeof desired, PAGE_READWRITE, &previous)) {
         return false;
@@ -179,9 +162,12 @@ bool prepare(std::array<Patch, lore::kTargets.size()>& staged) noexcept {
         std::uintptr_t table{};
         Descriptor desc{};
         if (!content::handles::resolve(source, kTableTags[i], table)
-            || !read(table + tables::kTableArrayDescriptor, desc)
-            || desc.count != kTableRowCounts[i]
-            || !data_at(table + tables::kTableArrayDescriptor, desc, rows[i])) {
+            || !read(table + kTableArrayFields[i], desc) || count_of(desc) != kTableRowCounts[i]
+            || !data_at(table + kTableArrayFields[i],
+                        kTableRowCounts[i],
+                        kTableRowStrides[i],
+                        kTableRowClasses[i],
+                        rows[i])) {
             return false;
         }
     }
@@ -193,13 +179,18 @@ bool prepare(std::array<Patch, lore::kTargets.size()>& staged) noexcept {
         std::uintptr_t data{};
         std::array<lore::Instruction, lore::kMaximumInstructions> code{};
         if (!read(row + kRowHashOffset, hash) || hash != target.hash
-            || !read(row + target.field, desc) || desc.count == 0 || desc.count > code.size()
-            || !data_at(row + target.field, desc, data)
-            || !memory::read_current_process(
-                nullptr,
-                data,
-                std::as_writable_bytes(std::span(code).first(static_cast<std::size_t>(desc.count))))
-            || !lore::replacement(std::span(code).first(static_cast<std::size_t>(desc.count)),
+            || !read(row + target.field, desc) || count_of(desc) == 0
+            || count_of(desc) > code.size()
+            || !data_at(row + target.field,
+                        code.size(),
+                        tables::kUnlockInstructionStride,
+                        tables::kInvestmentExpressionRowClass,
+                        data)
+            || !memory::read_current_process(nullptr,
+                                             data,
+                                             std::as_writable_bytes(std::span(code).first(
+                                                 static_cast<std::size_t>(count_of(desc)))))
+            || !lore::replacement(std::span(code).first(static_cast<std::size_t>(count_of(desc))),
                                   staged[i].after)) {
             return false;
         }
@@ -220,14 +211,18 @@ bool prepare(std::array<Patch, lore::kTargets.size()>& staged) noexcept {
                 if (!read(at, desc)) {
                     return false;
                 }
-                if (desc.count == 0) {
+                if (count_of(desc) == 0) {
                     continue;
                 }
-                if (desc.count > static_cast<std::uint64_t>(tables::kNodeExpressionCapacity)
-                    || !data_at(at, desc, data)) {
+                if (count_of(desc) > static_cast<std::uint64_t>(tables::kNodeExpressionCapacity)
+                    || !data_at(at,
+                                tables::kNodeExpressionCapacity,
+                                tables::kUnlockInstructionStride,
+                                tables::kInvestmentExpressionRowClass,
+                                data)) {
                     return false;
                 }
-                const auto span = desc.count * tables::kUnlockInstructionStride;
+                const auto span = count_of(desc) * tables::kUnlockInstructionStride;
                 for (std::size_t i = 0; i < staged.size(); ++i) {
                     if (staged[i].address >= data && staged[i].address - data < span) {
                         ++references[i];

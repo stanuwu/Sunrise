@@ -24,6 +24,11 @@ namespace {
 /** The byte a bubble carries when its first slice-set state is enabled. */
 constexpr std::uint8_t kBubbleEnabledByte = 0x80;
 
+// Message 1 carries exactly 64 bubble bytes, so no bubble table may be wider.
+static_assert(::sunrise::state::build_data::scenarios::kBubbleCapacity
+              == message::kBubbleStateCount);
+static_assert(::sunrise::state::activity::defaults::kBubbleCapacity == message::kBubbleStateCount);
+
 /**
  * Copies one destination name into the fixed message field.
  * @param selection Destination carrying the package name.

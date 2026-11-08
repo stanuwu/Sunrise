@@ -1,57 +1,55 @@
 #include "scenario_reader.h"
 
+#include <cstddef>
 #include <limits>
+#include <type_traits>
 
+#include "../reader/layout.h"
+#include "../reader/typed_array.h"
+#include "../schema/generated/tag_classes_808092.h"
+#include "../schema/generated/tag_classes_808094.h"
+#include "../schema/generated/tag_classes_808099.h"
+#include "../schema/generated/tag_classes_80809b.h"
+#include "../schema/generated/tag_classes_80809f.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::tables {
 namespace {
 
+namespace generated = schema::generated;
+
 /** A state records whether it is enabled in its first byte. */
-constexpr std::size_t kStateEnabledOffset = 0;
-/** A state holds its own name hash at this offset. */
-constexpr std::size_t kStateHashOffset = 4;
-/** A state repeats its owning bubble's name hash at this offset. */
-constexpr std::size_t kStateBubbleHashOffset = 64;
-/** A state names its slice-set entry at this offset. */
-constexpr std::size_t kStateEntryTagOffset = 68;
-/**
- * A state carries the PUB/PRV public flag here.
- * The client getter returns the state array header plus 28, and data starts 16 bytes after that
- * header. So the byte sits 12 into the record, where only 0 and 1 ever appear.
- */
-constexpr std::size_t kStatePublicOffset = 12;
-/** Exact marker before a Tiger array header. */
-constexpr std::uint32_t kArrayMarker = 0x80809FBDU;
-/** Array headers hold count, element class, and zero padding. */
-constexpr std::size_t kArrayHeaderSize = 16;
+constexpr std::size_t kStateEnabledOffset = offsetof(generated::SliceSetState, enabled);
+/** A state holds its own name hash here. */
+constexpr std::size_t kStateHashOffset = offsetof(generated::SliceSetState, stateHash);
+/** A state repeats its owning bubble's name hash here. */
+constexpr std::size_t kStateBubbleHashOffset = offsetof(generated::SliceSetState, bubbleNameHash);
+/** A state names its slice-set entry here. */
+constexpr std::size_t kStateEntryTagOffset = offsetof(generated::SliceSetState, entry);
+/** Leading fields of a bubble row and a per-bubble sub-block. */
+constexpr std::size_t kBubbleNameHashOffset = offsetof(generated::ScenarioBubble, nameHash);
+constexpr std::size_t kObjectBubbleIndexOffset =
+    offsetof(generated::ObjectBubbleBlock, bubbleIndex);
+/** A slot is a type, then a name hash. */
+constexpr std::size_t kSlotTypeOffset = offsetof(generated::ObjectSlot, slotType);
+constexpr std::size_t kSlotNameHashOffset = offsetof(generated::ObjectSlot, nameHash);
+/** A state carries the PUB/PRV public flag here; only 0 and 1 ever appear. */
+constexpr std::size_t kStatePublicOffset = offsetof(generated::SliceSetState, publicFlag);
+
+/** True when `Field` is an array field whose rows are `Row`. */
+template <typename Field, typename Row>
+concept ArrayOf = std::is_same_v<Field, generated::TagArray<Row>>;
+
+// Every array field this reader walks must hold the rows its stride assumes.
+static_assert(ArrayOf<decltype(generated::SScenario::bubbles), generated::ScenarioBubble>);
+static_assert(ArrayOf<decltype(generated::ScenarioBubble::states), generated::SliceSetState>);
+static_assert(ArrayOf<decltype(generated::SScenarioTagSet::tagSetA), generated::RegistryObjectRef>);
+static_assert(ArrayOf<decltype(generated::C80809b38::slots), generated::ObjectSlot>);
+static_assert(
+    ArrayOf<decltype(generated::SAuthoredObject::entryFilters), generated::ObjectBubbleBlock>);
+static_assert(ArrayOf<decltype(generated::ObjectBubbleBlock::handles), generated::PlacedHandle>);
 /** Canonical SDK extraction refuses Tiger arrays above this authored-row bound. */
 constexpr std::int64_t kObjectArrayMaximumCount = 1'000'000;
-
-/** Validates one array header reached from a known object field. */
-[[nodiscard]] bool valid_object_array_header(std::span<const std::byte> blob,
-                                             std::size_t header,
-                                             std::uint64_t count,
-                                             std::uint32_t expectedClass,
-                                             Array& output) noexcept {
-    output = {};
-    if (header < sizeof(std::uint32_t) || header > blob.size()
-        || kArrayHeaderSize > blob.size() - header) {
-        return false;
-    }
-    std::uint32_t marker = 0;
-    std::uint64_t repeated = 0;
-    std::uint32_t elementClass = 0;
-    std::uint32_t padding = 0;
-    if (!read(blob, header - sizeof marker, marker) || marker != kArrayMarker
-        || !read(blob, header, repeated) || repeated != count
-        || !read(blob, header + sizeof repeated, elementClass) || elementClass != expectedClass
-        || !read(blob, header + sizeof repeated + sizeof elementClass, padding) || padding != 0) {
-        return false;
-    }
-    output = Array{count, header + kArrayHeaderSize, elementClass};
-    return true;
-}
 
 /** Reads an exact object array while accepting both authored empty forms. */
 [[nodiscard]] bool object_array_at(std::span<const std::byte> blob,
@@ -63,18 +61,19 @@ constexpr std::int64_t kObjectArrayMaximumCount = 1'000'000;
     std::int64_t signedCount = 0;
     std::int64_t relative = 0;
     if (!read(blob, descriptor, signedCount)
-        || !read(blob, descriptor + sizeof signedCount, relative) || signedCount < 0
-        || signedCount > kObjectArrayMaximumCount) {
+        || !read(blob, descriptor + reader::layout::kArrayFieldRelative, relative)
+        || signedCount < 0 || signedCount > kObjectArrayMaximumCount) {
         return false;
     }
     if (signedCount == 0 && relative == 0) {
         return true;
     }
     if (descriptor > static_cast<std::size_t>((std::numeric_limits<std::int64_t>::max)())
-                         - sizeof signedCount) {
+                         - reader::layout::kArrayFieldRelative) {
         return false;
     }
-    const std::int64_t base = static_cast<std::int64_t>(descriptor + sizeof signedCount);
+    const std::int64_t base =
+        static_cast<std::int64_t>(descriptor + reader::layout::kArrayFieldRelative);
     if ((relative > 0 && base > (std::numeric_limits<std::int64_t>::max)() - relative)
         || (relative < 0 && base < (std::numeric_limits<std::int64_t>::min)() - relative)) {
         return false;
@@ -84,12 +83,16 @@ constexpr std::int64_t kObjectArrayMaximumCount = 1'000'000;
         return false;
     }
     const auto count = static_cast<std::uint64_t>(signedCount);
-    if (!valid_object_array_header(
-            blob, static_cast<std::size_t>(signedHeader), count, expectedClass, output)
-        || output.dataOffset > blob.size() || count > (blob.size() - output.dataOffset) / stride) {
-        output = {};
+    const auto header = static_cast<std::size_t>(signedHeader);
+    reader::TypedArrayRows rows{};
+    std::uint32_t padding = 0;
+    // An object array also needs zero header padding.
+    if (!reader::read_typed_array(blob, header, count, expectedClass, stride, rows)
+        || !read(blob, header + reader::layout::TypedArrayHeader::kPadding, padding)
+        || padding != 0) {
         return false;
     }
+    output = Array{count, rows.data, rows.elementClass};
     return true;
 }
 
@@ -121,7 +124,7 @@ bool bubble_at(std::span<const std::byte> blob,
     output = {};
     std::size_t offset = 0;
     if (!element_offset(bubbles.dataOffset, bubbles.count, kBubbleStride, index, offset)
-        || !read(blob, offset, output.nameHash)) {
+        || !read(blob, offset + kBubbleNameHashOffset, output.nameHash)) {
         return false;
     }
     // A bubble with no states is ordinary, so a descriptor that does not read is not a failure.
@@ -251,8 +254,8 @@ bool object_slot_at(std::span<const std::byte> blob,
     output = {};
     std::size_t offset = 0;
     if (!element_offset(slots.dataOffset, slots.count, kSlotStride, index, offset)
-        || !read(blob, offset, output.type)
-        || !read(blob, offset + sizeof output.type, output.nameHash)) {
+        || !read(blob, offset + kSlotTypeOffset, output.type)
+        || !read(blob, offset + kSlotNameHashOffset, output.nameHash)) {
         output = {};
         return false;
     }
@@ -285,7 +288,7 @@ bool object_bubble_at(std::span<const std::byte> blob,
     output = {};
     std::size_t offset = 0;
     if (!element_offset(bubbles.dataOffset, bubbles.count, kObjectBubbleStride, index, offset)
-        || !read(blob, offset, output.bubbleIndex)) {
+        || !read(blob, offset + kObjectBubbleIndexOffset, output.bubbleIndex)) {
         output = {};
         return false;
     }

@@ -33,6 +33,8 @@ struct PropTransition final {
     std::uint64_t transition{};
     std::int32_t fromRegion{}, toRegion{};
     std::uint8_t bubble{};
+    /** A captured tree changed, so its purge can never be prepared. */
+    bool refused{};
 };
 std::vector<PropTransition> g_propTransitions;
 /** Eight authored states share one bubble's wire authority selector. */
@@ -136,6 +138,38 @@ void report_released(const policy::Mask& mask,
     }
 }
 
+/** @return Why one row leaves the anchor hierarchy incomplete, or null when it does not. */
+[[nodiscard]] const char* hierarchy_gap(std::span<const identities::Identity> rows,
+                                        std::size_t slot) noexcept {
+    const auto& row = rows[slot];
+    if (!row.present) {
+        return nullptr;
+    }
+    if (!row.known || row.conflicted || !row.anchorKnown || row.token.slot != slot) {
+        return "identity";
+    }
+    if (row.anchorPresent && (row.anchor.slot >= rows.size() || !rows[row.anchor.slot].present)) {
+        return "missing_parent";
+    }
+    if (row.anchorPresent && rows[row.anchor.slot].token != row.anchor) {
+        return "parent_lifetime";
+    }
+    return nullptr;
+}
+
+/** A gap waits on a client identity report, so a prepare it blocks may still succeed later. */
+[[nodiscard]] bool has_hierarchy_gap(std::span<const identities::Identity> rows) noexcept {
+    if (rows.size() != identities::kSlotCapacity) {
+        return true;
+    }
+    for (std::size_t slot = 0; slot < rows.size(); ++slot) {
+        if (hierarchy_gap(rows, slot) != nullptr) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Missing parents must remain visible when they block a complete retire tree. */
 void report_hierarchy_gaps(std::span<const identities::Identity> rows) noexcept {
     if (!core::log::accepts(core::log::Channel::server, core::log::Level::debug)) {
@@ -146,18 +180,7 @@ void report_hierarchy_gaps(std::span<const identities::Identity> rows) noexcept 
     std::size_t shown = 0;
     for (std::size_t slot = 0; slot < rows.size() && shown < kMaximumReportedGaps; ++slot) {
         const auto& row = rows[slot];
-        if (!row.present) {
-            continue;
-        }
-        const char* reason = nullptr;
-        if (!row.known || row.conflicted || !row.anchorKnown || row.token.slot != slot) {
-            reason = "identity";
-        } else if (row.anchorPresent
-                   && (row.anchor.slot >= rows.size() || !rows[row.anchor.slot].present)) {
-            reason = "missing_parent";
-        } else if (row.anchorPresent && rows[row.anchor.slot].token != row.anchor) {
-            reason = "parent_lifetime";
-        }
+        const char* const reason = hierarchy_gap(rows, slot);
         if (reason == nullptr) {
             continue;
         }
@@ -184,7 +207,11 @@ void report_hierarchy_gaps(std::span<const identities::Identity> rows) noexcept 
 void report(const char* stage,
             bool result,
             std::uint8_t bubble,
-            const policy::Mask* mask = nullptr) {
+            const policy::Mask* mask = nullptr,
+            core::log::Level level = core::log::Level::info) {
+    if (!core::log::accepts(core::log::Channel::server, level)) {
+        return;
+    }
     std::array<char, core::log::kLineCapacity> line{};
     std::size_t selected = 0;
     if (mask) {
@@ -223,7 +250,35 @@ void report(const char* stage,
     if (shown == 0) {
         line[length++] = '-';
     }
-    core::log::write(core::log::Channel::server, core::log::Level::info, {line.data(), length});
+    core::log::write(core::log::Channel::server, level, {line.data(), length});
+}
+
+/**
+ * Refuses the pending placed transition for one source and bubble, and withdraws its capture.
+ * Its script then sees the refusal instead of waiting out its intent.
+ * @param source Exact identity source the capture was taken from.
+ * @param bubble Bubble the capture covers.
+ */
+void refuse_placed_transition(const identities::Source& source, std::uint8_t bubble) noexcept {
+    AcquireSRWLockExclusive(&g_lock);
+    std::uint64_t refused = 0;
+    for (PropTransition& transition : g_propTransitions) {
+        if (!transition.refused && transition.source == source && transition.bubble == bubble
+            && g_propStore.pending(source, bubble)) {
+            transition.refused = true;
+            refused = transition.transition;
+            g_propStore.invalidate_source(source, bubble);
+        }
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+    if (refused != 0) {
+        core::log::writef(
+            core::log::Channel::server,
+            core::log::Level::warn,
+            "squad_entity_retirement stage=placed_refused bubble=%u transition=0x%llX",
+            static_cast<unsigned>(bubble),
+            static_cast<unsigned long long>(refused));
+    }
 }
 } // namespace
 /**
@@ -258,7 +313,7 @@ TransitionStatus begin_placed_transition(const state::activity_sdk::BoundView& v
             && prior.source.activityClientGeneration == view.activityClientGeneration
             && prior.transition == transition) {
             const bool pending = g_propStore.pending(prior.source, prior.bubble);
-            const bool same = prior.toRegion == toRegion;
+            const bool same = prior.toRegion == toRegion && !prior.refused;
             ReleaseSRWLockShared(&g_lock);
             return !same ? TransitionStatus::refused
                          : (pending ? TransitionStatus::pending : TransitionStatus::ready);
@@ -375,10 +430,15 @@ TransitionStatus begin_placed_transition(const state::activity_sdk::BoundView& v
             ReleaseSRWLockExclusive(&g_lock);
             return TransitionStatus::refused;
         }
+        RetirementPlan plan{};
+        // A capture that cannot prepare from its own rows, with no gap left to fill, never will.
         const bool captured =
-            g_propStore.capture(source, bubble, mask, rows, eligible, cells, true);
+            g_propStore.capture(source, bubble, mask, rows, eligible, cells, true)
+            && (g_propStore.prepare(source, bubble, rows, plan) || has_hierarchy_gap(rows));
         if (captured) {
             g_propTransitions.push_back({source, transition, fromRegion, toRegion, bubble});
+        } else {
+            g_propStore.invalidate_source(source, bubble);
         }
         ReleaseSRWLockExclusive(&g_lock);
         report("placed_transition", captured, bubble);
@@ -534,11 +594,15 @@ bool prepare_retirement(const state::activity::SessionBinding& binding,
         return false;
     }
     AcquireSRWLockShared(&g_lock);
-    const bool ready = g_propStore.pending(source, bubble)
-                           ? g_propStore.prepare(source, bubble, rows, output)
-                           : g_store.prepare(source, bubble, rows, output);
+    const bool placed = g_propStore.pending(source, bubble);
+    const bool ready = placed ? g_propStore.prepare(source, bubble, rows, output)
+                              : g_store.prepare(source, bubble, rows, output);
     ReleaseSRWLockShared(&g_lock);
-    report("prepare", ready, bubble, &output.entities);
+    // A captured prop tree that changed with no gap left to fill cannot be retired whole.
+    if (placed && !ready && !has_hierarchy_gap(rows)) {
+        refuse_placed_transition(source, bubble);
+    }
+    report("prepare", ready, bubble, &output.entities, core::log::Level::debug);
     return ready;
 }
 /** The exact identity view remains pinned until its transport response has been copied. */

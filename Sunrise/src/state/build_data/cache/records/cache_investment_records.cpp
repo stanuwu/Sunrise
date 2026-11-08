@@ -185,6 +185,27 @@ bool decode(const BountyRecord& record, bounties::Definition& value) noexcept {
     return true;
 }
 
+/** Encodes one new-character class row; unused item slots are zero in the runtime row too. */
+bool encode(const starter_sets::Definition& value, StarterSetRecord& record) noexcept {
+    record = {value.characterClass, value.itemCount, value.itemIndices};
+    return value.itemCount <= starter_sets::kItemCapacity;
+}
+
+/** Decodes one new-character class row after checking its unused item slots. */
+bool decode(const StarterSetRecord& record, starter_sets::Definition& value) noexcept {
+    value = {};
+    if (record.itemCount > starter_sets::kItemCapacity) {
+        return false;
+    }
+    const auto unused = std::span(record.itemIndices).subspan(record.itemCount);
+    if (!std::all_of(
+            unused.begin(), unused.end(), [](std::uint16_t index) { return index == 0; })) {
+        return false;
+    }
+    value = {record.characterClass, record.itemCount, record.itemIndices};
+    return true;
+}
+
 /** Encodes one record objective row with its padding zeroed. */
 bool encode(const build_data::records::Objective& value, RecordObjectiveRecord& record) noexcept {
     record = {value.completionValue,

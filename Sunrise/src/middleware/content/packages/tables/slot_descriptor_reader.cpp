@@ -9,19 +9,15 @@
 namespace sunrise::middleware::content::packages::tables {
 namespace {
 
-/** Tests the repeated tag, mark, owner key, and class-shaped fields together. */
+/** Tests the owner key and the class-shaped fields of the config's descriptor. */
 [[nodiscard]] bool descriptor_at(std::span<const std::byte> blob,
                                  std::size_t base,
                                  std::uint32_t ownTag,
                                  std::uint32_t registryKey,
                                  SlotDescriptor& output) noexcept {
     output = {};
-    std::uint32_t tag = 0;
-    std::uint32_t mark = 0;
     std::uint32_t key = 0;
-    if (!read(blob, base + kDescriptorOwnTagOffset, tag) || tag != ownTag
-        || !read(blob, base + kDescriptorMarkOffset, mark) || mark != kDescriptorMark
-        || !read(blob, base + kDescriptorRegistryKeyOffset, key) || key != registryKey) {
+    if (!read(blob, base + kDescriptorRegistryKeyOffset, key) || key != registryKey) {
         return false;
     }
     SlotDescriptor candidate{};
@@ -151,7 +147,28 @@ push_observed_child(std::array<ObservedPendingTag, kPlacedChainCapacity>& pendin
 
 } // namespace
 
-/** Reports exact slot descriptors until the blob ends or the visitor refuses one. */
+/** Finds the config's definition object and checks that its handle names the config. */
+bool config_descriptor_offset(std::span<const std::byte> blob,
+                              std::uint32_t ownTag,
+                              std::size_t& offset) noexcept {
+    offset = 0;
+    std::size_t descriptor = 0;
+    std::size_t defaultInstance = 0;
+    std::uint32_t tag = 0;
+    std::int64_t handleOffset = 0;
+    if (!relative(blob, kConfigDescriptorField, descriptor)
+        || !relative(blob, kConfigDefaultInstanceField, defaultInstance)
+        || sizeof(SlotDescriptorHeader) > blob.size() - descriptor
+        || !read(blob, descriptor + kDescriptorOwnTagOffset, tag) || tag != ownTag
+        || !read(blob, descriptor + kDescriptorHandleOffsetOffset, handleOffset)
+        || handleOffset != static_cast<std::int64_t>(defaultInstance)) {
+        return false;
+    }
+    offset = descriptor;
+    return true;
+}
+
+/** Reports the config's descriptor unless it is absent or names another owner. */
 bool visit_slot_descriptors(std::span<const std::byte> blob,
                             std::uint32_t ownTag,
                             std::uint32_t registryKey,
@@ -160,20 +177,13 @@ bool visit_slot_descriptors(std::span<const std::byte> blob,
     if (visitor == nullptr) {
         return false;
     }
-    if (blob.size() < kDescriptorSize) {
+    std::size_t base = 0;
+    SlotDescriptor descriptor{};
+    if (!config_descriptor_offset(blob, ownTag, base)
+        || !descriptor_at(blob, base, ownTag, registryKey, descriptor)) {
         return true;
     }
-    const std::size_t last = blob.size() - kDescriptorSize;
-    for (std::size_t base = 0; base <= last; base += kDescriptorStep) {
-        SlotDescriptor descriptor{};
-        if (!descriptor_at(blob, base, ownTag, registryKey, descriptor)) {
-            continue;
-        }
-        if (!visitor(context, descriptor)) {
-            return false;
-        }
-    }
-    return true;
+    return visitor(context, descriptor);
 }
 
 /** Walks every known descriptor-chain branch with fixed work storage. */
@@ -227,7 +237,7 @@ bool walk_slot_descriptor_chain(std::uint32_t rootTag,
             || targets.elementClass != kSlotRedirectElementClass
             || targets.count > kDescriptorChainCapacity - scheduledCount
             || targets.dataOffset > blob.size()
-            || targets.count > (blob.size() - targets.dataOffset) / sizeof(std::uint32_t)
+            || targets.count > (blob.size() - targets.dataOffset) / kSlotRedirectElementStride
             || current.depth + 1 >= kDescriptorChainDepthLimit) {
             return false;
         }
@@ -235,7 +245,8 @@ bool walk_slot_descriptor_chain(std::uint32_t rootTag,
         for (std::uint64_t ordinal = targets.count; ordinal != 0; --ordinal) {
             std::uint32_t next = 0;
             const std::size_t offset =
-                targets.dataOffset + static_cast<std::size_t>(ordinal - 1) * sizeof next;
+                targets.dataOffset
+                + static_cast<std::size_t>(ordinal - 1) * kSlotRedirectElementStride;
             if (!read(blob, offset, next)
                 || !push_child(pending, pendingCount, scheduledCount, next, current.depth + 1)) {
                 return false;
@@ -322,7 +333,7 @@ bool observe_placed_chain(std::uint32_t rootTag,
         Array targets{};
         if (!find_array_at(blob, kSlotIndirectDescriptor, targets) || targets.count == 0
             || targets.elementClass != kSlotRedirectElementClass || targets.dataOffset > blob.size()
-            || targets.count > (blob.size() - targets.dataOffset) / sizeof(std::uint32_t)
+            || targets.count > (blob.size() - targets.dataOffset) / kSlotRedirectElementStride
             || static_cast<std::size_t>(current.depth) + 1U >= kPlacedChainDepthLimit) {
             output.complete = false;
             continue;
@@ -335,7 +346,8 @@ bool observe_placed_chain(std::uint32_t rootTag,
         for (std::uint64_t ordinal = accepted; ordinal != 0; --ordinal) {
             std::uint32_t next = 0;
             const std::size_t offset =
-                targets.dataOffset + static_cast<std::size_t>(ordinal - 1U) * sizeof next;
+                targets.dataOffset
+                + static_cast<std::size_t>(ordinal - 1U) * kSlotRedirectElementStride;
             if (!read(blob, offset, next)
                 || !push_observed_child(pending, pendingCount, scheduledCount, current, next)) {
                 output.complete = false;
@@ -424,7 +436,7 @@ bool visit_placed_chain_records(std::uint32_t rootTag,
         Array targets{};
         if (!find_array_at(blob, kSlotIndirectDescriptor, targets) || targets.count == 0
             || targets.elementClass != kSlotRedirectElementClass || targets.dataOffset > blob.size()
-            || targets.count > (blob.size() - targets.dataOffset) / sizeof(std::uint32_t)
+            || targets.count > (blob.size() - targets.dataOffset) / kSlotRedirectElementStride
             || targets.count > kPlacedChainCapacity - scheduledCount
             || targets.count > (std::numeric_limits<std::uint8_t>::max)()
             || static_cast<std::size_t>(current.depth) + 1U >= kPlacedChainDepthLimit) {
@@ -442,7 +454,8 @@ bool visit_placed_chain_records(std::uint32_t rootTag,
             std::uint32_t next = 0;
             const std::uint64_t childOrdinal = ordinal - 1U;
             const std::size_t offset =
-                targets.dataOffset + static_cast<std::size_t>(childOrdinal) * sizeof next;
+                targets.dataOffset
+                + static_cast<std::size_t>(childOrdinal) * kSlotRedirectElementStride;
             if (!read(blob, offset, next)
                 || !push_record_child(
                     pending, pendingCount, scheduledCount, current, next, childOrdinal)) {

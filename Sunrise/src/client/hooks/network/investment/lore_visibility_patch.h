@@ -21,6 +21,10 @@ struct Instruction {
 
     friend bool operator==(const Instruction&, const Instruction&) = default;
 };
+// The patch reads and writes whole expression rows through this struct.
+static_assert(sizeof(Instruction) == tables::kUnlockInstructionStride);
+static_assert(offsetof(Instruction, opcode) == tables::kUnlockInstructionOpcodeOffset);
+static_assert(offsetof(Instruction, operand) == tables::kUnlockInstructionOperandOffset);
 
 /** One presentation gate: which record row holds it, which field, and the row's authored hash. */
 struct Target {

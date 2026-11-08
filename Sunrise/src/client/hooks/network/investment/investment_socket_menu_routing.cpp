@@ -11,16 +11,24 @@
 
 #include "../../../../core/logging/log.h"
 #include "../../../../core/settings/settings.h"
+#include "../../../../middleware/content/packages/reader/layout.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80802c.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80802d.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80805b.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808077.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80807b.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/build_data/items/socket_plugs/definition.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/content/content_catalog.h"
 #include "../../../content/handles/handle_resolver.h"
 #include "../../../content/investment/internal.h"
-#include "../../../content/investment/layout.h"
-#include "../../../content/items/layout.h"
 #include "../../../memory/current_process_memory.h"
 #include "../../../targets/game/content.h"
 #include "internal.h"
+#include "socket_menu_low_arena.h"
+#include "socket_menu_native_array.h"
 #include "socket_row_relocation.h"
 
 namespace sunrise::client::hooks::network::investment {
@@ -28,7 +36,6 @@ namespace {
 
 namespace content_handles = client::content::handles;
 namespace content_investment = client::content::investment;
-namespace item_layout = client::content::items::layout;
 
 /** FNV-1 name hash shared by the installed investment-globals candidates. */
 constexpr std::uint32_t kInvestmentGlobalsNameHash = 0x6F7125CBU;
@@ -40,45 +47,53 @@ namespace socket_plugs = state::build_data::items::socket_plugs;
 using socket_plugs::kArrivalsLegModHashes;
 using socket_plugs::kArrivalsLegReferenceHash;
 
+namespace generated = middleware::content::packages::schema::generated;
+
+/** Root tag the globals name, and the two root slots this patch reads. */
+constexpr std::size_t kGlobalsRootTagOffset =
+    offsetof(generated::InvestmentGlobals, investmentRoot);
+constexpr std::size_t kItemTableTagOffset = offsetof(generated::InvestmentRoot, slot48ItemIndex);
+constexpr std::size_t kPlugSetTableTagOffset = offsetof(generated::InvestmentRoot, slot51PlugSets);
+/** Loaded item table: one index row per item definition. */
+using ItemRow = generated::ItemIndexRow;
+// Tag layout: the item table's array descriptor.
+constexpr std::size_t kItemArrayDescriptorOffset = offsetof(generated::ItemIndexTable, table);
+
 /** Installed reusable-set layout and the two rows proved by package extraction. */
-constexpr std::size_t kTableArrayDescriptorOffset = 8;
-constexpr std::size_t kPlugSetRowStride = 24;
-constexpr std::size_t kPlugSetMemberDescriptorOffset = 8;
-constexpr std::size_t kPlugMemberStride = 32;
-constexpr std::size_t kArrayMarkerSize = 4;
-constexpr std::size_t kArrayHeaderSize = 16;
+constexpr std::size_t kTableArrayDescriptorOffset = offsetof(generated::C80802cb6, table);
+constexpr std::size_t kPlugSetRowStride = sizeof(generated::SPlugSetRow);
+constexpr std::size_t kPlugSetMemberDescriptorOffset = offsetof(generated::SPlugSetRow, entries);
+constexpr std::size_t kPlugMemberStride = sizeof(generated::PlugSetMember);
 constexpr std::size_t kGeneralSetIndex = 8;
 constexpr std::size_t kLegSetIndex = 14;
 constexpr std::uint64_t kGeneralMemberCount = 19;
 constexpr std::uint64_t kLegMemberCount = 52;
 constexpr std::size_t kMaximumSetCount = 4096;
 constexpr std::size_t kMaximumMemberCount = 4096;
-constexpr std::uintptr_t kMaximumLowAddress = UINT32_MAX;
-constexpr std::size_t kLowArenaSize = 64U * 1024U;
-constexpr std::size_t kArenaAlignment = 16U;
-constexpr std::size_t kPlugBlockOffset = 0x184;
-constexpr std::size_t kPlugCategoryOffset = 4;
-constexpr std::size_t kPlugBlockSize = 64;
-/** Class every plug block declares in its first field. */
-constexpr std::uint32_t kPlugBlockClass = 0x808077E3U;
+/** A definition reaches its plug block through this self-relative pointer. */
+constexpr std::size_t kPlugBlockPointer = offsetof(generated::ItemDefinition, plugItemBlock);
+/** The pointer names the block's fields; its class word sits just before them. */
+constexpr std::size_t kPlugBlockClassSize =
+    middleware::content::packages::reader::layout::kClassWordSize;
+constexpr std::size_t kPlugCategoryOffset =
+    kPlugBlockClassSize + offsetof(generated::PlugBlock, plugCategory);
+/** Bytes compared: the class word up to the low word of the enabled rules' relative field. */
+constexpr std::size_t kPlugBlockSize =
+    kPlugBlockClassSize + offsetof(generated::PlugBlock, enabledRequirements.enabledRules.relative)
+    + sizeof(std::uint32_t);
 /** Plug-block bytes after the class and category, which must match the reference item exactly. */
-constexpr std::size_t kPlugBlockMetadataOffset = 8;
+constexpr std::size_t kPlugBlockMetadataOffset =
+    kPlugCategoryOffset + sizeof(generated::PlugBlock::plugCategory);
 constexpr std::size_t kPlugBlockMetadataSize = kPlugBlockSize - kPlugBlockMetadataOffset;
 
-struct ArrayDescriptor {
-    std::uint64_t count{};
-    std::int64_t relative{};
-
-    friend bool operator==(const ArrayDescriptor&, const ArrayDescriptor&) = default;
-};
-
-struct ArrayView {
-    std::uintptr_t descriptor{};
-    std::uintptr_t header{};
-    std::uintptr_t data{};
-    std::uint64_t count{};
-    std::uint32_t elementClass{};
-};
+using native_array::add_relative;
+using native_array::ArrayDescriptor;
+using native_array::ArrayView;
+using native_array::read;
+using native_array::read_bytes;
+using native_array::resolve_array;
+using native_array::same;
+using native_array::write;
 
 struct LocatedSets {
     content_investment::Source source{};
@@ -86,14 +101,7 @@ struct LocatedSets {
     ArrayView legs{};
 };
 
-struct Allocation {
-    std::byte* base{};
-    std::size_t size{};
-
-    [[nodiscard]] explicit operator bool() const noexcept {
-        return base != nullptr && size != 0;
-    }
-};
+using Allocation = low_arena::Allocation;
 
 struct AppliedSet {
     std::uintptr_t descriptor{};
@@ -127,8 +135,6 @@ std::array<Allocation, 2> g_allocations{};
 std::array<AppliedSet, 2> g_applied{};
 std::size_t g_appliedCount{};
 Failure g_lastFailure{Failure::none};
-std::byte* g_lowArena{};
-std::size_t g_lowArenaUsed{};
 std::array<std::array<relocation::Row, relocation::kMaximumMembers>, 2> g_expected{};
 std::array<std::size_t, 2> g_expectedCounts{};
 content_investment::Source g_categorySource{};
@@ -186,109 +192,12 @@ void report_failure(Failure failure, std::uint64_t detail = 0) noexcept {
     }
 }
 
-/** Rebuilds an image pointer without an implementation-defined integer conversion. */
-[[nodiscard]] void* image_pointer(std::uintptr_t address) noexcept {
-    void* pointer = nullptr;
-    static_assert(sizeof pointer == sizeof address);
-    std::memcpy(&pointer, &address, sizeof pointer);
-    return pointer;
-}
-
-[[nodiscard]] bool read_bytes(std::uintptr_t address, std::span<std::byte> output) noexcept {
-    return !output.empty() && memory::read_current_process(nullptr, address, output);
-}
-
-template <typename Value> [[nodiscard]] bool read(std::uintptr_t address, Value& value) noexcept {
-    return read_bytes(address, std::span(reinterpret_cast<std::byte*>(&value), sizeof value));
-}
-
-/**
- * Writes bytes over read-only image data, then puts the page protection back.
- * @return False when the address is null, the span is empty, or the page cannot be opened.
- */
-[[nodiscard]] bool write_bytes(std::uintptr_t address, std::span<const std::byte> bytes) noexcept {
-    if (address == 0 || bytes.empty()) {
-        return false;
-    }
-    void* destination = image_pointer(address);
-    DWORD previous = 0;
-    if (VirtualProtect(destination, bytes.size(), PAGE_READWRITE, &previous) == FALSE) {
-        return false;
-    }
-    std::memcpy(destination, bytes.data(), bytes.size());
-    DWORD ignored = 0;
-    const bool restored = VirtualProtect(destination, bytes.size(), previous, &ignored) != FALSE;
-    return restored;
-}
-
-template <typename Value>
-[[nodiscard]] bool write(std::uintptr_t address, const Value& value) noexcept {
-    return write_bytes(address,
-                       std::span(reinterpret_cast<const std::byte*>(&value), sizeof value));
-}
-
-/**
- * Applies one signed self-relative displacement to a base address.
- * @param output Receives the result; unchanged on overflow.
- * @return False when the sum leaves the address space.
- */
-[[nodiscard]] bool
-add_relative(std::uintptr_t base, std::int64_t relative, std::uintptr_t& output) noexcept {
-    if (relative >= 0) {
-        const auto distance = static_cast<std::uint64_t>(relative);
-        if (distance > (std::numeric_limits<std::uintptr_t>::max)() - base) {
-            return false;
-        }
-        output = base + static_cast<std::uintptr_t>(distance);
-        return true;
-    }
-    const auto distance = static_cast<std::uint64_t>(-(relative + 1)) + 1U;
-    if (distance > base) {
-        return false;
-    }
-    output = base - static_cast<std::uintptr_t>(distance);
-    return true;
-}
-
-/** Resolves one native count/self-relative array and validates its repeated header. */
-[[nodiscard]] bool resolve_array(std::uintptr_t descriptor,
-                                 std::size_t maximumCount,
-                                 std::size_t stride,
-                                 ArrayView& output) noexcept {
-    output = {};
-    ArrayDescriptor encoded{};
-    if (!read(descriptor, encoded) || encoded.count == 0 || encoded.count > maximumCount) {
-        return false;
-    }
-    std::uintptr_t header = 0;
-    if (!add_relative(descriptor + sizeof(std::uint64_t), encoded.relative, header)
-        || header < kArrayMarkerSize) {
-        return false;
-    }
-    std::uint32_t marker = 0;
-    std::uint64_t repeatedCount = 0;
-    std::uint32_t elementClass = 0;
-    if (!read(header - kArrayMarkerSize, marker) || !read(header, repeatedCount)
-        || !read(header + sizeof(std::uint64_t), elementClass) || repeatedCount != encoded.count
-        || (marker >> 16U) != 0x8080U || (elementClass >> 16U) != 0x8080U
-        || encoded.count
-               > ((std::numeric_limits<std::uintptr_t>::max)() - header - kArrayHeaderSize)
-                     / stride) {
-        return false;
-    }
-    const std::uintptr_t data = header + kArrayHeaderSize;
-    std::byte tail{};
-    if (!read(data + static_cast<std::uintptr_t>(encoded.count * stride) - 1U, tail)) {
-        return false;
-    }
-    output = {descriptor, header, data, encoded.count, elementClass};
-    return true;
-}
-
 [[nodiscard]] bool
 member_index(const ArrayView& array, std::size_t position, std::uint32_t& index) noexcept {
     return position < array.count
-           && read(array.data + static_cast<std::uintptr_t>(position) * kPlugMemberStride, index);
+           && read(array.data + static_cast<std::uintptr_t>(position) * kPlugMemberStride
+                       + relocation::kMemberPlugItemOffset,
+                   index);
 }
 
 /**
@@ -343,27 +252,31 @@ member_index(const ArrayView& array, std::size_t position, std::uint32_t& index)
     std::uint32_t rootTag = 0;
     std::uint32_t itemTableTag = 0;
     std::uint32_t plugSetTableTag = 0;
-    std::uint64_t itemCount = 0;
+    ArrayView items{};
     if (!content_handles::resolve(source.handles, source.investmentGlobalsTag, globals)
-        || !read(globals + content_investment::layout::kGlobalsRootTagOffset, rootTag)
+        || !read(globals + kGlobalsRootTagOffset, rootTag)
         || !content_handles::resolve(source.handles, rootTag, root)
-        || !read(root + content_investment::layout::kItemTableTagOffset, itemTableTag)
+        || !read(root + kItemTableTagOffset, itemTableTag)
         || !content_handles::resolve(source.handles, itemTableTag, itemTable)
-        || !read(itemTable + item_layout::kTableRowCountOffset, itemCount) || itemCount == 0
-        || itemCount > state::build_data::items::kDefinitionCapacity
-        || !read(root + content_investment::layout::kPlugSetTableTagOffset, plugSetTableTag)
+        || !resolve_array(itemTable + kItemArrayDescriptorOffset,
+                          state::build_data::items::kDefinitionCapacity,
+                          sizeof(ItemRow),
+                          ItemRow::kClass,
+                          items)
+        || !read(root + kPlugSetTableTagOffset, plugSetTableTag)
         || !content_handles::resolve(source.handles, plugSetTableTag, plugSetTable)) {
         return false;
     }
 
-    const std::uintptr_t itemRows = itemTable + item_layout::kTableFirstRowOffset;
     const auto matches_item = [&](std::uint16_t index, std::uint32_t hash) noexcept {
-        if (index >= itemCount) {
+        if (index >= items.count) {
             return false;
         }
-        item_layout::ItemIndexRow row{};
-        return read(itemRows + static_cast<std::uintptr_t>(index) * sizeof row, row)
-               && row.definitionHash == hash;
+        std::uint32_t itemHash = 0;
+        return read(items.data + static_cast<std::uintptr_t>(index) * sizeof(ItemRow)
+                        + offsetof(ItemRow, itemHash),
+                    itemHash)
+               && itemHash == hash;
     };
     if (!matches_item(reference, kArrivalsLegReferenceHash)) {
         return false;
@@ -375,8 +288,11 @@ member_index(const ArrayView& array, std::size_t position, std::uint32_t& index)
     }
 
     ArrayView sets{};
-    if (!resolve_array(
-            plugSetTable + kTableArrayDescriptorOffset, kMaximumSetCount, kPlugSetRowStride, sets)
+    if (!resolve_array(plugSetTable + kTableArrayDescriptorOffset,
+                       kMaximumSetCount,
+                       kPlugSetRowStride,
+                       generated::SPlugSetRow::kClass,
+                       sets)
         || sets.count <= kLegSetIndex) {
         return false;
     }
@@ -386,8 +302,13 @@ member_index(const ArrayView& array, std::size_t position, std::uint32_t& index)
         sets.data + kLegSetIndex * kPlugSetRowStride + kPlugSetMemberDescriptorOffset;
     ArrayView general{};
     ArrayView legs{};
-    if (!resolve_array(generalDescriptor, kMaximumMemberCount, kPlugMemberStride, general)
-        || !resolve_array(legDescriptor, kMaximumMemberCount, kPlugMemberStride, legs)
+    if (!resolve_array(generalDescriptor,
+                       kMaximumMemberCount,
+                       kPlugMemberStride,
+                       relocation::kMemberClass,
+                       general)
+        || !resolve_array(
+            legDescriptor, kMaximumMemberCount, kPlugMemberStride, relocation::kMemberClass, legs)
         || !native_membership(general, legs, routes, reference)) {
         return false;
     }
@@ -435,66 +356,6 @@ member_index(const ArrayView& array, std::size_t position, std::uint32_t& index)
     return matches != 0;
 }
 
-[[nodiscard]] std::uintptr_t align_up(std::uintptr_t value, std::uintptr_t alignment) noexcept {
-    const std::uintptr_t mask = alignment - 1U;
-    if (value > (std::numeric_limits<std::uintptr_t>::max)() - mask) {
-        return 0;
-    }
-    return (value + mask) & ~mask;
-}
-
-/** Reserves one process-lifetime arena while the low content address domain is still available. */
-[[nodiscard]] std::byte* reserve_low_arena() noexcept {
-    SYSTEM_INFO system{};
-    GetSystemInfo(&system);
-    const std::uintptr_t granularity = system.dwAllocationGranularity;
-    std::uintptr_t cursor =
-        align_up(reinterpret_cast<std::uintptr_t>(system.lpMinimumApplicationAddress), granularity);
-    while (cursor != 0 && cursor <= kMaximumLowAddress
-           && kLowArenaSize <= kMaximumLowAddress - cursor + 1U) {
-        MEMORY_BASIC_INFORMATION information{};
-        if (VirtualQuery(image_pointer(cursor), &information, sizeof information) == 0) {
-            break;
-        }
-        const std::uintptr_t base = reinterpret_cast<std::uintptr_t>(information.BaseAddress);
-        const std::uintptr_t next =
-            information.RegionSize <= (std::numeric_limits<std::uintptr_t>::max)() - base
-                ? base + information.RegionSize
-                : 0;
-        if (information.State == MEM_FREE) {
-            const std::uintptr_t candidate = align_up((std::max)(cursor, base), granularity);
-            const std::uintptr_t offset = candidate >= base ? candidate - base : 0;
-            if (candidate != 0 && candidate <= kMaximumLowAddress
-                && kLowArenaSize <= kMaximumLowAddress - candidate + 1U && candidate >= base
-                && offset <= information.RegionSize
-                && kLowArenaSize <= information.RegionSize - offset) {
-                void* const allocated = VirtualAlloc(image_pointer(candidate),
-                                                     kLowArenaSize,
-                                                     MEM_RESERVE | MEM_COMMIT,
-                                                     PAGE_READWRITE);
-                if (allocated != nullptr) {
-                    return static_cast<std::byte*>(allocated);
-                }
-            }
-        }
-        if (next == 0 || next <= cursor) {
-            break;
-        }
-        cursor = align_up(next, granularity);
-    }
-    return nullptr;
-}
-
-/** Carves one immutable array payload from the arena reserved at DLL process attach. */
-[[nodiscard]] Allocation allocate_array(std::size_t size) noexcept {
-    const std::size_t aligned = static_cast<std::size_t>(align_up(g_lowArenaUsed, kArenaAlignment));
-    if (g_lowArena == nullptr || aligned > kLowArenaSize || size > kLowArenaSize - aligned) {
-        return {};
-    }
-    g_lowArenaUsed = aligned + size;
-    return {g_lowArena + aligned, size};
-}
-
 void release(Allocation& allocation) noexcept {
     // Storage belongs to the process-lifetime low arena, not to an individual array.
     allocation = {};
@@ -536,29 +397,47 @@ bool stage_categories(const content_investment::Source& source,
     std::uintptr_t globals = 0, root = 0, table = 0;
     g_categoryFailure = "table";
     std::uint32_t tag = 0;
+    ArrayView items{};
     if (!content_handles::resolve(source.handles, source.investmentGlobalsTag, globals)
-        || !read(globals + content_investment::layout::kGlobalsRootTagOffset, tag)
+        || !read(globals + kGlobalsRootTagOffset, tag)
         || !content_handles::resolve(source.handles, tag, root)
-        || !read(root + content_investment::layout::kItemTableTagOffset, tag)
-        || !content_handles::resolve(source.handles, tag, table)) {
+        || !read(root + kItemTableTagOffset, tag)
+        || !content_handles::resolve(source.handles, tag, table)
+        || !resolve_array(table + kItemArrayDescriptorOffset,
+                          state::build_data::items::kDefinitionCapacity,
+                          sizeof(ItemRow),
+                          ItemRow::kClass,
+                          items)) {
         return false;
     }
     const auto block = [&](std::uint16_t index,
                            std::uint32_t hash,
                            std::uintptr_t& address,
                            std::array<std::byte, kPlugBlockSize>& bytes) noexcept {
-        item_layout::ItemIndexRow row{};
+        const std::uintptr_t row =
+            items.data + static_cast<std::uintptr_t>(index) * sizeof(ItemRow);
+        std::uint32_t itemHash = 0;
+        std::uint32_t target = 0;
         g_categoryFailure = "definition";
         std::uintptr_t definition = 0;
-        if (!read(table + item_layout::kTableFirstRowOffset + index * sizeof row, row)
-            || row.definitionHash != hash
-            || !content_handles::resolve(source.handles, row.targetHandle, definition)) {
+        if (!read(row + offsetof(ItemRow, itemHash), itemHash) || itemHash != hash
+            || !read(row + offsetof(ItemRow, itemDefinition), target)
+            || !content_handles::resolve(source.handles, target, definition)) {
             return false;
         }
-        address = definition + kPlugBlockOffset + kPlugCategoryOffset;
         g_categoryFailure = "block";
-        return read_bytes(definition + kPlugBlockOffset, bytes)
-               && relocation::get<std::uint32_t>(bytes.data()) == kPlugBlockClass;
+        const std::uintptr_t pointer = definition + kPlugBlockPointer;
+        std::int64_t relative = 0;
+        std::uintptr_t fields = 0;
+        if (!read(pointer, relative) || relative == 0 || !add_relative(pointer, relative, fields)
+            || fields < kPlugBlockClassSize) {
+            return false;
+        }
+        const std::uintptr_t start = fields - kPlugBlockClassSize;
+        address = start + kPlugCategoryOffset;
+        return read_bytes(start, bytes)
+               && relocation::get<std::uint32_t>(bytes.data())
+                      == middleware::content::packages::tables::kPlugBlockClass;
     };
     std::array<std::byte, kPlugBlockSize> referenceBlock{};
     std::uintptr_t referenceAddress = 0;
@@ -676,21 +555,23 @@ void apply_categories() noexcept {
                                      const Allocation& allocation,
                                      std::uint64_t count,
                                      ArrayDescriptor& output) noexcept {
-    const std::uintptr_t header = reinterpret_cast<std::uintptr_t>(allocation.base) + 8;
-    const std::uintptr_t relativeBase = descriptor + sizeof(std::uint64_t);
+    const std::uintptr_t header =
+        reinterpret_cast<std::uintptr_t>(allocation.base) + relocation::kArrayHeaderOffset;
+    const std::uintptr_t relativeBase =
+        descriptor + middleware::content::packages::reader::layout::kArrayFieldRelative;
     if (header >= relativeBase) {
         const std::uintptr_t distance = header - relativeBase;
         if (distance > static_cast<std::uintptr_t>((std::numeric_limits<std::int64_t>::max)())) {
             return false;
         }
-        output = {count, static_cast<std::int64_t>(distance)};
+        output = {static_cast<std::int64_t>(count), static_cast<std::int64_t>(distance)};
         return true;
     }
     const std::uintptr_t distance = relativeBase - header;
     if (distance > static_cast<std::uintptr_t>((std::numeric_limits<std::int64_t>::max)())) {
         return false;
     }
-    output = {count, -static_cast<std::int64_t>(distance)};
+    output = {static_cast<std::int64_t>(count), -static_cast<std::int64_t>(distance)};
     return true;
 }
 
@@ -723,7 +604,7 @@ void apply_categories() noexcept {
         return false;
     }
     g_expectedCounts[0] = written;
-    allocation = allocate_array(relocation::capacity(written));
+    allocation = low_arena::allocate(relocation::capacity(written));
     return allocation
            && relocation::build(std::span(g_expected[0].data(), written),
                                 std::span(allocation.base, allocation.size))
@@ -784,7 +665,7 @@ void apply_categories() noexcept {
     std::rotate(g_expected[1].begin() + 1,
                 g_expected[1].begin() + static_cast<std::ptrdiff_t>(source.count),
                 g_expected[1].begin() + static_cast<std::ptrdiff_t>(newCount));
-    allocation = allocate_array(relocation::capacity(g_expectedCounts[1]));
+    allocation = low_arena::allocate(relocation::capacity(g_expectedCounts[1]));
     return allocation
            && relocation::build(std::span(g_expected[1].data(), g_expectedCounts[1]),
                                 std::span(allocation.base, allocation.size))
@@ -822,8 +703,8 @@ void apply_categories() noexcept {
     ArrayDescriptor legDescriptor{};
     if (!read(g_applied[0].descriptor, generalDescriptor)
         || !read(g_applied[1].descriptor, legDescriptor)
-        || generalDescriptor != g_applied[0].replacement
-        || legDescriptor != g_applied[1].replacement) {
+        || !same(generalDescriptor, g_applied[0].replacement)
+        || !same(legDescriptor, g_applied[1].replacement)) {
         return false;
     }
     return true;
@@ -837,8 +718,16 @@ void apply_categories() noexcept {
     }
     ArrayView general{};
     ArrayView legs{};
-    return resolve_array(g_applied[0].descriptor, kMaximumMemberCount, kPlugMemberStride, general)
-           && resolve_array(g_applied[1].descriptor, kMaximumMemberCount, kPlugMemberStride, legs)
+    return resolve_array(g_applied[0].descriptor,
+                         kMaximumMemberCount,
+                         kPlugMemberStride,
+                         relocation::kMemberClass,
+                         general)
+           && resolve_array(g_applied[1].descriptor,
+                            kMaximumMemberCount,
+                            kPlugMemberStride,
+                            relocation::kMemberClass,
+                            legs)
            && patched_membership(general, legs, routes, reference);
 }
 
@@ -849,11 +738,11 @@ bool restore_applied() noexcept {
         const AppliedSet& applied = g_applied[index - 1];
         ArrayDescriptor current{};
         const bool loaded = read(applied.descriptor, current);
-        if (loaded && current == applied.original) {
+        if (loaded && same(current, applied.original)) {
             continue;
         }
         // Write only over this module's own replacement, so a foreign descriptor is left alone.
-        if (!loaded || current != applied.replacement
+        if (!loaded || !same(current, applied.replacement)
             || !write(applied.descriptor, applied.original)) {
             restoredAll = false;
         }
@@ -872,9 +761,7 @@ bool restore_applied() noexcept {
 } // namespace
 
 void reserve_socket_menu_routing_storage() noexcept {
-    if (g_lowArena == nullptr) {
-        g_lowArena = reserve_low_arena();
-    }
+    low_arena::reserve();
 }
 
 /** Moves exactly four members between two validated native reusable plug sets. */

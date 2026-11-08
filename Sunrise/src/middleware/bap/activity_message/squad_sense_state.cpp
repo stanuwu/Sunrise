@@ -2,15 +2,21 @@
 
 #include <limits>
 
+#include "../../content/packages/schema/generated/tag_classes_80807e.h"
+#include "../../content/packages/schema/generated/tag_classes_808094.h"
 #include "../../encoding/bit_writer.h"
 
 namespace sunrise::middleware::bap::activity_message::squad_sense {
 namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
+
 using sense_update::DecodedValue;
 using sense_update::ValueKind;
 /** Nested native schemas for the list, its signed counts, and quantized real array. */
-constexpr std::uint32_t kListSchema = 0x80807ECFU, kCountSchema = 0x80809491U;
-constexpr std::uint32_t kRealSchema = 0x80807ECDU;
+constexpr std::uint32_t kListSchema = generated::C80807ecf::kClass,
+                        kCountSchema = generated::C80809491::kClass;
+constexpr std::uint32_t kRealSchema = generated::C80807ecd::kClass;
 /** Root fields 0 through 5 carry these wire widths; field 4 is a quantized real. */
 constexpr std::array<std::uint8_t, kScalarCount> kScalarWidths{31, 31, 31, 6, 7, 31};
 constexpr std::size_t kRealField = 4;

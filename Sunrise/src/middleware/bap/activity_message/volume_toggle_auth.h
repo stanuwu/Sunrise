@@ -4,12 +4,16 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808095.h"
+
 namespace sunrise::middleware::bap::activity_message::scriptable_auth {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Type-32 toggle Auth: a volume reference followed by a signed state in {-1, 0, 1}. */
 inline constexpr std::uint8_t kType32SlotType = 32;
-inline constexpr std::uint32_t kType32ComponentClass = 0x80809556;
-inline constexpr std::uint32_t kType32Schema = 0x8080955A;
+inline constexpr std::uint32_t kType32ComponentClass = generated::C80809556::kClass;
+inline constexpr std::uint32_t kType32Schema = generated::C8080955a::kClass;
 inline constexpr std::uint8_t kVolumeSlotType = 60;
 inline constexpr std::size_t kType32BitCount = 57;
 inline constexpr std::size_t kType32ByteCount = 8;

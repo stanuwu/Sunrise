@@ -7,6 +7,10 @@
 #include <utility>
 #include <vector>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808062.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808063.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808095.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../../middleware/content/packages/tables/slot_descriptor_reader.h"
 #include "activity_sdk_authored_scene_inventory.h"
@@ -15,6 +19,7 @@ namespace sunrise::client::content::activity::sdk_generation::authored_scene_inv
 namespace {
 
 namespace tables = middleware::content::packages::tables;
+namespace generated = middleware::content::packages::schema::generated;
 
 /** One object-local descriptor walk and its replaceable package-read storage. */
 struct DescriptorWalk final {
@@ -79,23 +84,23 @@ struct DescriptorWalk final {
                 return false;
             }
             if (slot.slotType == format::kAuthoredSceneSlotType && schema.exact
-                && schema.componentClass == format::kAuthoredSceneComponentClass
-                && schema.senseSchema == format::kAuthoredSceneSenseSchema
-                && schema.authSchema == format::kAuthoredSceneAuthSchema) {
+                && schema.componentClass == generated::AuthoredSceneComponentType43::kClass
+                && schema.senseSchema == generated::C8080626a::kClass
+                && schema.authSchema == generated::C8080626b::kClass) {
                 projectedOwners[slot.objectIndex] = true;
             }
             if (slot.slotType == format::kTaskSlotType && schema.exact
-                && schema.componentClass == format::kTaskComponentClass
+                && schema.componentClass == generated::TaskComponent::kClass
                 && schema.senseSchema == format::kAbsentIndex
-                && schema.authSchema == format::kTaskAuthSchema) {
+                && schema.authSchema == generated::C80807d89::kClass) {
                 projectedOwners[slot.objectIndex] = true;
             }
             // A performance sensor names a squad in its own object, so that object must be
             // walked even when it holds no scene and no task.
             if (slot.slotType == format::kPerformanceSlotType && schema.exact
-                && schema.componentClass == format::kPerformanceComponentClass
+                && schema.componentClass == generated::PerformanceSensorComponent::kClass
                 && schema.senseSchema == format::kAbsentIndex
-                && schema.authSchema == format::kPerformanceAuthSchema) {
+                && schema.authSchema == generated::C80809586::kClass) {
                 projectedOwners[slot.objectIndex] = true;
             }
         }

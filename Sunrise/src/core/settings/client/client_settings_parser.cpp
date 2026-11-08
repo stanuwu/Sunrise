@@ -14,7 +14,7 @@ bool Parser::client_settings(client::Settings& output) noexcept {
     bool hasSocketMenuRouting = false;
     bool hasRevealLoreBooks = false;
     bool hasCheats = false;
-    bool hasDumpPackageKeys = false;
+    bool hasExports = false;
     if (consume('}')) {
         return true;
     }
@@ -53,11 +53,51 @@ bool Parser::client_settings(client::Settings& output) noexcept {
                 return false;
             }
             hasCheats = true;
-        } else if (key == "dump_package_keys") {
-            if (hasDumpPackageKeys || !boolean(candidate.dumpPackageKeys)) {
+        } else if (key == "exports") {
+            if (hasExports || !client_exports_settings(candidate.exports)) {
                 return false;
             }
-            hasDumpPackageKeys = true;
+            hasExports = true;
+        } else if (!skip_value(0)) {
+            return false;
+        }
+        if (consume('}')) {
+            output = candidate;
+            return true;
+        }
+        if (!consume(',')) {
+            return false;
+        }
+    }
+}
+
+/** Parses the startup export switches. Each key may appear once and must be boolean. */
+bool Parser::client_exports_settings(client::Exports& output) noexcept {
+    if (!consume('{')) {
+        return false;
+    }
+    client::Exports candidate{};
+    if (consume('}')) {
+        output = candidate;
+        return true;
+    }
+    bool hasPackageKeys = false;
+    bool hasTagDefinitions = false;
+    for (;;) {
+        std::string_view key;
+        if (!string(key) || !consume(':')) {
+            return false;
+        }
+        if (key == "package_keys") {
+            if (hasPackageKeys || !boolean(candidate.packageKeys)) {
+                return false;
+            }
+            hasPackageKeys = true;
+        } else if (key == "tag_definitions") {
+            if (hasTagDefinitions || !boolean(candidate.tagDefinitions)) {
+                return false;
+            }
+            hasTagDefinitions = true;
         } else if (!skip_value(0)) {
             return false;
         }

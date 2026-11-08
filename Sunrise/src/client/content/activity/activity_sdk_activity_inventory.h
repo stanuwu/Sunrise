@@ -8,22 +8,32 @@
 
 #include "../../../middleware/content/packages/named_tags.h"
 #include "../../../middleware/content/packages/reader/reader.h"
+#include "../../../middleware/content/packages/schema/generated/tag_layout_80808a_0.h"
+#include "../../../middleware/content/packages/schema/generated/tag_layout_80809b_2.h"
 #include "../../../middleware/content/packages/tables/activity_definition_reader.h"
+#include "../../../state/activity_sdk/generated_world/catalog_manifest.h"
 
 namespace sunrise::client::content::activity::sdk_generation::activity_inventory {
 
 /** Tag class of one activity root that binds an investment activity name to a scenario. */
-inline constexpr std::uint32_t kActivityRootClass = 0x80808AAEU;
+inline constexpr std::uint32_t kActivityRootClass =
+    middleware::content::packages::schema::generated::ActivityRoot::kClass;
 /** Tag class of the transition descriptor named by an activity root. */
-inline constexpr std::uint32_t kActivityTransitionDescriptorClass = 0x80809BA3U;
-/** Activity roots are exact 72-byte records. */
-inline constexpr std::size_t kActivityRootSize = 0x48U;
-/** Activity roots name their scenario at this byte offset. */
-inline constexpr std::size_t kActivityRootScenarioOffset = 0x40U;
-/** Activity roots name their transition descriptor at this byte offset. */
-inline constexpr std::size_t kActivityRootTransitionOffset = 0x44U;
-/** Transition descriptors are exact 48-byte records. */
-inline constexpr std::size_t kActivityTransitionDescriptorSize = 0x30U;
+inline constexpr std::uint32_t kActivityTransitionDescriptorClass =
+    middleware::content::packages::schema::generated::ActivityTransitionDescriptor::kClass;
+/** An activity root binds exactly two tags: row 0 the scenario, row 1 the transition. */
+inline constexpr std::uint64_t kActivityRootBoundTagCount = 2U;
+using state::activity_sdk::generated_world::manifest::kActivityRootRowsOffset;
+using state::activity_sdk::generated_world::manifest::kActivityRootScenarioOffset;
+using state::activity_sdk::generated_world::manifest::kActivityRootTransitionOffset;
+/** An activity root ends with its last bound-tag row. */
+inline constexpr std::size_t kActivityRootSize =
+    kActivityRootRowsOffset
+    + kActivityRootBoundTagCount
+          * sizeof(middleware::content::packages::schema::generated::ActivityRootTagRow);
+/** Transition descriptors are exact records of their class size. */
+inline constexpr std::size_t kActivityTransitionDescriptorSize =
+    middleware::content::packages::schema::generated::ActivityTransitionDescriptor::kSize;
 /** A live root name is selected only when its effective named rows agree exactly. */
 enum class NameStatus : std::uint8_t {
     exact,

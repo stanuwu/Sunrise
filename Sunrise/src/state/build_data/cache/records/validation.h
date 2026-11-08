@@ -69,4 +69,7 @@ valid_collectible_links(std::span<const collectibles::Definition> collectibleDef
  */
 [[nodiscard]] bool valid_domains(const BuildIdentity& build, Domains domains) noexcept;
 
+/** @return True when every count fits the caller's fixed storage. */
+[[nodiscard]] bool counts_fit(const DomainCounts& counts, MutableDomains domains) noexcept;
+
 } // namespace sunrise::state::build_data::cache::records

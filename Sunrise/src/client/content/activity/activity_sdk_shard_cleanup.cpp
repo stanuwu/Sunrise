@@ -10,7 +10,7 @@
 namespace sunrise::client::content::activity::sdk_generation {
 namespace {
 
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 namespace manifest = state::activity_sdk::generated_world::manifest;
 
 /** Resolves one directory. */
@@ -75,10 +75,10 @@ namespace manifest = state::activity_sdk::generated_world::manifest;
 /** Recognizes only immutable shard names owned by this generator. */
 [[nodiscard]] bool parse_shard_leaf(std::wstring_view leaf,
                                     std::uint32_t& scenarioTag,
-                                    generated::Digest& digest) noexcept {
+                                    generated_world::Digest& digest) noexcept {
     // A shard leaf is an 8-hex tag, a dash, the hex digest, then the pack suffix.
     constexpr std::size_t kTagLength = 8;
-    constexpr std::size_t kDigestLength = generated::Digest{}.size() * 2;
+    constexpr std::size_t kDigestLength = generated_world::Digest{}.size() * 2;
     constexpr std::wstring_view kSuffix = L".pack";
     if (leaf.size() != kTagLength + 1 + kDigestLength + kSuffix.size() || leaf[kTagLength] != L'-'
         || leaf.substr(leaf.size() - kSuffix.size()) != kSuffix) {
@@ -145,7 +145,7 @@ bool clean_stale_shards(const std::wstring& directory,
         const std::wstring_view leaf(found.cFileName);
         bool remove = false;
         std::uint32_t scenarioTag = 0;
-        generated::Digest digest{};
+        generated_world::Digest digest{};
         if (parse_shard_leaf(leaf, scenarioTag, digest)) {
             const auto record =
                 std::lower_bound(active.begin(),

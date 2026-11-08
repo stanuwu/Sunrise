@@ -149,13 +149,28 @@ constexpr std::array<std::uint32_t, format::kSectionCount> kExpectedStrides{
     return core::path::assign(output, std::wstring_view(absolute.chars.data(), length));
 }
 
+/** Checks a mod pack's header: the shape, no installed identity, and its own payload digest. */
+[[nodiscard]] bool valid_mod_header(const format::Header& header,
+                                    std::span<const std::byte> file) noexcept {
+    // A mod pack leaves every installed-build digest zero.
+    constexpr format::Header kUnset{};
+    if (header.magic != format::kMagic || header.version != format::kVersion
+        || header.headerSize != sizeof(format::Header) || header.fileSize != file.size()
+        || header.sectionCount != format::kSectionCount || header.reserved != 0
+        || header.sdkBuildSha256 != kUnset.sdkBuildSha256
+        || header.contentKeySha256 != kUnset.contentKeySha256
+        || header.logicalIrSha256 != kUnset.logicalIrSha256 || !valid_sections(header)) {
+        return false;
+    }
+    middleware::crypto::sha256::Digest digest{};
+    return middleware::crypto::sha256::hash(file.subspan(header.headerSize), digest)
+           && digest == header.payloadSha256;
+}
+
 } // namespace
 
-/** Maps one explicit pack only after an independent expected identity is supplied. */
-bool load_path_expected(const wchar_t* path,
-                        const ExpectedIdentity& expected,
-                        std::shared_ptr<Catalog>& output,
-                        Status& result) noexcept {
+/** Opens and maps one pack read-only. A missing file reports missing; nothing is validated. */
+bool open_pack(const wchar_t* path, std::shared_ptr<Catalog>& output, Status& result) noexcept {
     output.reset();
     result = Status::catalogInvalid;
     if (path == nullptr || path[0] == L'\0') {
@@ -201,10 +216,41 @@ bool load_path_expected(const wchar_t* path,
     }
     pending->view_ = static_cast<const std::byte*>(view);
     pending->header_ = reinterpret_cast<const format::Header*>(pending->view_);
+    output = std::move(pending);
+    return true;
+}
+
+/** Maps one explicit pack only after an independent expected identity is supplied. */
+bool load_path_expected(const wchar_t* path,
+                        const ExpectedIdentity& expected,
+                        std::shared_ptr<Catalog>& output,
+                        Status& result) noexcept {
+    std::shared_ptr<Catalog> pending;
+    if (!open_pack(path, pending, result)) {
+        return false;
+    }
     const std::span<const std::byte> bytes(pending->view_, pending->size_);
     if (!identity::valid(expected.sdkBuildSha256) || !identity::valid(expected.payloadSha256)
         || !identity::valid(expected.contentKeySha256) || !identity::valid(expected.logicalIrSha256)
         || !valid_header(*pending->header_, bytes, expected, result) || !valid_catalog(*pending)) {
+        return false;
+    }
+    output = std::move(pending);
+    result = Status::ready;
+    return true;
+}
+
+/** Maps one mod pack; see runtime.h for what is checked. */
+bool load_mod_path(const wchar_t* path, std::shared_ptr<Catalog>& output, Status& result) noexcept {
+    output.reset();
+    std::shared_ptr<Catalog> pending;
+    if (!open_pack(path, pending, result)) {
+        return false;
+    }
+    pending->mod_ = true;
+    if (!valid_mod_header(*pending->header_, std::span(pending->view_, pending->size_))
+        || !valid_mod_catalog(*pending)) {
+        result = Status::catalogInvalid;
         return false;
     }
     output = std::move(pending);

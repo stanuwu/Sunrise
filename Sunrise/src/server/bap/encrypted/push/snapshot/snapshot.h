@@ -50,12 +50,17 @@ prepare_initial(Scratch& scratch,
                 std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
                 Prepared& prepared) noexcept;
 
-/** Rebuilds the active account family at the peer's next version. */
+/**
+ * Rebuilds the active account family at the peer's next version.
+ * @param accountSelectionCleared The peer's account object names no character since its
+ *        opcode 505; the character object stays resident.
+ */
 [[nodiscard]] bool prepare_family4_refresh(
     Scratch& scratch,
     std::uint64_t familyRootSoid,
     std::int32_t version,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    bool accountSelectionCleared,
     Prepared& prepared) noexcept;
 
 /**

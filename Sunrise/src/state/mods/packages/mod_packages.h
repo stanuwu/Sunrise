@@ -10,9 +10,6 @@
 
 namespace sunrise::state::mods::packages {
 
-/** New package ids must pass the client header check, which is narrower than the registrar. */
-inline constexpr std::uint16_t kNewPackageIdMaximum = 0x0CFF;
-
 /** Directories the package stage reads and writes. Each has no trailing separator. */
 struct Paths final {
     /** Holds `packages`; client paths are relative to it. */
@@ -21,6 +18,8 @@ struct Paths final {
     std::wstring_view modsDirectory;
     /** Receives merged generations. Stale files in it are removed. */
     std::wstring_view mergeDirectory;
+    /** Package moves kept across sessions, so a remapped mod keeps its ids. */
+    std::wstring_view remapsFile;
 };
 
 /** What the package stage produced. */

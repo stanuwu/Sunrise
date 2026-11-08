@@ -6,11 +6,29 @@
 #include <limits>
 #include <utility>
 
+#include "../reader/layout.h"
+#include "../schema/generated/tag_classes_80807d.h"
+#include "../schema/generated/tag_classes_808091.h"
+#include "../schema/generated/tag_classes_808092.h"
+#include "../schema/generated/tag_classes_808096.h"
+#include "../schema/generated/tag_classes_808098.h"
+#include "../schema/generated/tag_classes_808099.h"
+#include "../schema/generated/tag_classes_80809f.h"
+
 namespace sunrise::middleware::content::packages::position_profiles {
 namespace {
-/** These class ids and strides belong to the installed package layouts. */
-constexpr std::uint32_t kMapRoot = 0x808091DE, kMap = 0x80809962, kBubble = 0x80807DAE;
-constexpr std::uint32_t kBounds = 0x8080964E, kScenario = 0x80809994, kAbsent = 0xFFFFFFFF;
+namespace generated = schema::generated;
+// Classes of the map tree the walk follows, then the all-ones absent marker.
+constexpr std::uint32_t kMapRoot = generated::SMapRoot::kClass;
+constexpr std::uint32_t kMap = generated::SMapLocationNames::kClass;
+constexpr std::uint32_t kBubble = generated::SBubbleParent::kClass;
+constexpr std::uint32_t kBounds = generated::BubbleBounds::kClass;
+constexpr std::uint32_t kScenario = generated::SScenario::kClass;
+constexpr std::uint32_t kAbsent = 0xFFFFFFFF;
+using ArrayHeader = reader::layout::TypedArrayHeader;
+/** A reference holds its wide key at the same offset in every referencing row. */
+constexpr std::size_t kWideKey = offsetof(generated::MapBubbleRef, wideTag);
+static_assert(kWideKey == offsetof(generated::BubbleBoundsRef, wideTag));
 using Blob = std::vector<std::byte>;
 using Rows = state::gameplay::entity_position_profiles::Rows;
 template <class T> T value(std::span<const std::byte> bytes, std::size_t offset) {
@@ -49,7 +67,7 @@ struct Extractor final {
     reference(std::span<const std::byte> bytes, std::size_t offset, std::uint32_t cls) {
         auto handle = value<std::uint32_t>(bytes, offset);
         if (handle == kAbsent) {
-            const auto key = value<std::uint64_t>(bytes, offset + 8);
+            const auto key = value<std::uint64_t>(bytes, offset + kWideKey);
             const auto found =
                 std::lower_bound(keys.begin(), keys.end(), key, [](const KeyTag& row, auto target) {
                     return row.key < target;
@@ -71,6 +89,11 @@ struct Extractor final {
         }
         return offsets;
     }
+    /** Row offsets of one typed array field; its stride and element class come from `Row`. */
+    template <class Row>
+    std::vector<std::size_t> members(std::span<const std::byte> bytes, std::size_t field) {
+        return members(bytes, field, sizeof(Row), Row::kClass);
+    }
     /** Every referenced bound must resolve before its union can be used. */
     std::array<std::uint8_t, 3> bubble(std::span<const std::byte> root, std::size_t offset) {
         auto [handle, bytes] = reference(root, offset, kBubble);
@@ -85,16 +108,19 @@ struct Extractor final {
         constexpr float maximum = (std::numeric_limits<float>::max)();
         std::array<float, 3> low{maximum, maximum, maximum}, high{-maximum, -maximum, -maximum};
         bool any = false;
-        for (auto member : members(bytes, 64, 16, 0x80809644)) {
+        for (auto member : members<generated::BubbleBoundsRef>(
+                 bytes, offsetof(generated::SBubbleParent, metadata.boundsRefs))) {
             const auto [boundTag, bound] = reference(bytes, member, kBounds);
             (void)boundTag;
-            if (bound.size() != 96) {
+            if (bound.size() != sizeof(generated::BubbleBounds)) {
                 throw 0;
             }
             std::array<float, 3> a{}, b{};
             for (std::size_t axis = 0; axis < 3; ++axis) {
-                a[axis] = value<float>(bound, axis * 4);
-                b[axis] = value<float>(bound, 16 + axis * 4);
+                a[axis] = value<float>(
+                    bound, offsetof(generated::BubbleBounds, min) + axis * sizeof(float));
+                b[axis] = value<float>(
+                    bound, offsetof(generated::BubbleBounds, max) + axis * sizeof(float));
             }
             if (a == std::array<float, 3>{maximum, maximum, maximum}
                 && b == std::array<float, 3>{-maximum, -maximum, -maximum}) {
@@ -133,26 +159,37 @@ struct Extractor final {
     /** Cell ownership must agree with the map's ordered bubble table. */
     Map map(const NamedTag& name) {
         const auto root = tag(name.tag, kMapRoot);
-        const auto definition = tag(value<std::uint32_t>(root, 8), kMap);
-        const auto refs = members(root, 16, 16, 0x80807D53);
-        const auto cells = members(definition, 16, 24, 0x808098C4);
-        const auto bubbles = members(definition, 32, 80, 0x808098C2);
+        const auto definition =
+            tag(value<std::uint32_t>(root, offsetof(generated::SMapRoot, mapDefinition)), kMap);
+        const auto refs =
+            members<generated::MapBubbleRef>(root, offsetof(generated::SMapRoot, mapEntries));
+        const auto cells =
+            members<generated::MapCell>(definition, offsetof(generated::SMapLocationNames, slices));
+        const auto bubbles = members<generated::MapBubble>(
+            definition, offsetof(generated::SMapLocationNames, sliceSets));
         if (refs.empty() || refs.size() != bubbles.size()) {
             throw 0;
         }
         Map result;
         result.base = name.basePackage;
         for (std::size_t index = 0; index < bubbles.size(); ++index) {
-            if (value<std::uint32_t>(definition, bubbles[index] + 72) != index) {
+            if (value<std::uint32_t>(definition,
+                                     bubbles[index] + offsetof(generated::MapBubble, bubbleOrdinal))
+                != index) {
                 throw 0;
             }
-            result.hashes.push_back(value<std::uint32_t>(definition, bubbles[index]));
+            result.hashes.push_back(value<std::uint32_t>(
+                definition, bubbles[index] + offsetof(generated::MapBubble, bubbleNameHash)));
         }
         for (std::size_t index = 0; index < cells.size(); ++index) {
-            auto owner = value<std::uint32_t>(definition, cells[index] + 16);
+            auto owner = value<std::uint32_t>(
+                definition, cells[index] + offsetof(generated::MapCell, ownerBubble));
             if (owner == kAbsent && index < 256) {
                 for (std::size_t bubbleIndex = 0; bubbleIndex < bubbles.size(); ++bubbleIndex) {
-                    if ((value<std::uint8_t>(definition, bubbles[bubbleIndex] + 40 + index / 8)
+                    if ((value<std::uint8_t>(definition,
+                                             bubbles[bubbleIndex]
+                                                 + offsetof(generated::MapBubble, cellMask)
+                                                 + index / 8)
                          & (1U << (index % 8)))
                         != 0) {
                         owner = static_cast<std::uint32_t>(bubbleIndex);
@@ -177,14 +214,19 @@ struct Extractor final {
     /** Ambiguous map signatures leave the entire scenario without guessed profiles. */
     bool scenario(const NamedTag& name, const std::vector<Map>& maps, Rows& rows) {
         const auto bytes = tag(name.tag, kScenario);
-        const auto bubbles = members(bytes, 80, 24, 0x8080924D);
+        const auto bubbles =
+            members<generated::ScenarioBubble>(bytes, offsetof(generated::SScenario, bubbles));
         std::vector<std::uint32_t> hashes;
         std::vector<std::pair<std::uint32_t, std::uint32_t>> owners;
         for (std::size_t index = 0; index < bubbles.size(); ++index) {
-            hashes.push_back(value<std::uint32_t>(bytes, bubbles[index]));
-            for (auto state : members(bytes, bubbles[index] + 8, 76, 0x8080924F)) {
-                owners.emplace_back(value<std::uint32_t>(bytes, state + 28),
-                                    static_cast<std::uint32_t>(index));
+            hashes.push_back(value<std::uint32_t>(
+                bytes, bubbles[index] + offsetof(generated::ScenarioBubble, nameHash)));
+            for (auto state : members<generated::SliceSetState>(
+                     bytes, bubbles[index] + offsetof(generated::ScenarioBubble, states))) {
+                owners.emplace_back(
+                    value<std::uint32_t>(
+                        bytes, state + offsetof(generated::SliceSetState, mapBubbleIndex)),
+                    static_cast<std::uint32_t>(index));
             }
         }
         if (owners.empty()) {
@@ -255,20 +297,25 @@ bool array(std::span<const std::byte> bytes,
         if (count == 0) {
             return true;
         }
-        const auto relative = value<std::int64_t>(bytes, field + 8);
+        const auto relative =
+            value<std::int64_t>(bytes, field + reader::layout::kArrayFieldRelative);
         if (relative < 0 || static_cast<std::uint64_t>(relative) > bytes.size()
             || count > 1048576) {
             return false;
         }
-        const auto header = field + 8 + static_cast<std::size_t>(relative);
-        if (header < 4 || header > bytes.size() || bytes.size() - header < 16
-            || value<std::uint32_t>(bytes, header - 4) != 0x80809FBD
-            || value<std::uint32_t>(bytes, header + 8) != elementClass || stride == 0
-            || count > (bytes.size() - header - 16) / stride) {
+        const auto header =
+            field + reader::layout::kArrayFieldRelative + static_cast<std::size_t>(relative);
+        // Unlike read_typed_array, the header's count is not checked and a zero stride fails.
+        if (header < ArrayHeader::kMarkerBack || header > bytes.size()
+            || bytes.size() - header < ArrayHeader::kSize
+            || value<std::uint32_t>(bytes, header - ArrayHeader::kMarkerBack)
+                   != reader::layout::kTableArrayMarker
+            || value<std::uint32_t>(bytes, header + ArrayHeader::kClass) != elementClass
+            || stride == 0 || count > (bytes.size() - header - ArrayHeader::kSize) / stride) {
             return false;
         }
         for (std::size_t index = 0; index < count; ++index) {
-            offsets.push_back(header + 16 + index * stride);
+            offsets.push_back(header + ArrayHeader::kSize + index * stride);
         }
         return true;
     } catch (...) {

@@ -8,6 +8,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../../state/build_data/runtime.h"
+#include "../../../state/build_data/runtime/build_data_invalidation.h"
 #include "internal.h"
 
 namespace sunrise::client::content::scenarios {
@@ -122,6 +123,16 @@ bool build(const packages::reader::Source& source, packages::reader::Scratch& sc
         return true;
     }
     static Storage storage{};
+    // A live reload dropped the layouts; the pass starts over. In place, as the storage is too big
+    // for the stack.
+    static std::uint64_t builtRevision{};
+    if (const auto revision = state::build_data::invalidation::revision(
+            state::build_data::invalidation::kScenarioLayouts);
+        revision != builtRevision) {
+        builtRevision = revision;
+        std::destroy_at(&storage);
+        std::construct_at(&storage);
+    }
     return collect_layouts(source, scratch, storage) && walk_rosters(source, scratch, storage);
 }
 

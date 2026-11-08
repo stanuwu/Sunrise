@@ -65,6 +65,55 @@ host_output_status(RosterOutcome outcome) noexcept {
     return false;
 }
 
+/**
+ * Records a refused body against each output it carried, so no due flag rebuilds it.
+ * A typed body may be the cause, so the other outputs are tried again without it. Every body
+ * carries the Host revision, so the Host records the link's refusal of that revision, which
+ * also stops an arrival answer or a retirement that rode on it.
+ * @param session Connection whose seed lease is marked.
+ * @param hostState Host revision the body carried.
+ * @param hasHostState True when the activity has a Host instance.
+ * @param scriptable Typed body the body carried.
+ * @param ownsPending True when the body carried the typed body.
+ * @param status Refusal; only a missing epoch leaves the outputs owed.
+ */
+void refuse_roster_outputs(Session& session,
+                           const server::activity::host::AuthState& hostState,
+                           bool hasHostState,
+                           const server::activity::host::PendingScriptableOverride& scriptable,
+                           bool ownsPending,
+                           server::activity::host::OutputStatus status) noexcept {
+    const std::uint64_t generation = session.activity.bindingGeneration;
+    if (ownsPending) {
+        server::activity::host::note_scriptable_attempt(
+            session.activity.session, generation, scriptable, status);
+        return;
+    }
+    if (hasHostState) {
+        server::activity::host::note_auth_attempt(
+            session.activity.session,
+            generation,
+            hostState.revision,
+            hostState.lifetimeState,
+            status,
+            activity_link_count_locked(session.activity.session) == 1);
+    }
+    if (status == server::activity::host::OutputStatus::waitingForEpoch) {
+        return;
+    }
+    MissionSeedLease& seed = session.activityMissionSeed;
+    const bool seedOwed = seed.configured && seed.bindingGeneration == generation
+                          && seed.revision != seed.publishedRevision && !seed.regionArrivalPending;
+    if (seedOwed) {
+        seed.refusedRevision = seed.revision;
+    }
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::warn,
+                      "ev=activity stage=roster_push result=refused host_rev=%llu seed_rev=%llu",
+                      static_cast<unsigned long long>(hostState.revision),
+                      static_cast<unsigned long long>(seedOwed ? seed.revision : 0));
+}
+
 } // namespace
 
 /** Copies the decode identities from one complete, already-encoded msg-5 roster snapshot. */
@@ -123,8 +172,8 @@ bool append_roster_notification(
         server::gameplay::squad_entity_retirement::placed_transition_pending(
             session.activity.session, session.activity.bindingGeneration);
     server::activity::host::AuthState hostState{};
-    const bool hasHostState =
-        server::activity::host::auth_state(session.activity.session, hostState);
+    const bool hasHostState = server::activity::host::auth_state(
+        session.activity.session, session.activity.bindingGeneration, hostState);
     const bool hostStatePending = hasHostState && hostState.revision != 0
                                   && hostState.revision != session.activityHostStateRevision;
     server::activity::host::PendingScriptableOverride scriptablePending{};
@@ -253,18 +302,13 @@ bool append_roster_notification(
     const std::string_view name(destination.data(), destinationLength);
     if (outcome != RosterOutcome::published) {
         report_roster_push(session, snapshot, name, 0, kNoGrant, outcome, 0, 0);
-        if (ownsHostState) {
-            server::activity::host::note_auth_attempt(session.activity.session,
-                                                      session.activity.bindingGeneration,
-                                                      hostState.revision,
-                                                      hostState.lifetimeState,
-                                                      host_output_status(outcome));
-        }
-        if (ownsPending) {
-            server::activity::host::note_scriptable_attempt(session.activity.session,
-                                                            session.activity.bindingGeneration,
-                                                            scriptablePending,
-                                                            host_output_status(outcome));
+        if (!peerLeave) {
+            refuse_roster_outputs(session,
+                                  hostState,
+                                  hasHostState,
+                                  scriptablePending,
+                                  ownsPending,
+                                  host_output_status(outcome));
         }
         return false;
     }
@@ -326,6 +370,8 @@ bool append_roster_notification(
         && stagedMissionSeed.revision != stagedMissionSeed.publishedRevision
         && !stagedMissionSeed.regionArrivalPending;
     bool encoded = message::encode_sensor_auth_update(snapshot, scratch.responseBody, messageSize);
+    // Only a body that cannot be built is refused. A full frame or a held purge is tried again.
+    bool bodyRefused = !encoded;
     const bool hasRetirement =
         encoded && allowEntityRetirement
         && (placedRetirementPending || (snapshot.hasGrant && enteringBubble))
@@ -402,10 +448,12 @@ bool append_roster_notification(
     // The frame contains a complete roster, not a delta against this host map. Capture the exact
     // group order only after both encoders accept it. A malformed identity map refuses the whole
     // attempt, and the rollback below removes the staged bytes and counters.
+    const bool framed = encoded;
     encoded =
         encoded
         && build_roster_decode_map(snapshot.roster, session.activity.bindingGeneration, decodeMap);
     encoded = encoded && stage_roster_device_publications(session, scratch, snapshot);
+    bodyRefused = bodyRefused || (framed && !encoded);
     if (encoded) {
         middleware::secure_channel::advance_nonce(nonce);
         // The deferred answer is discharged by the body that carries it.
@@ -484,20 +532,13 @@ bool append_roster_notification(
                        forced);
     SecureZeroMemory(scratch.responseBody.data(), messageSize);
     if (!encoded) {
-        if (ownsHostState) {
-            server::activity::host::note_auth_attempt(
-                session.activity.session,
-                session.activity.bindingGeneration,
-                hostState.revision,
-                hostState.lifetimeState,
-                server::activity::host::OutputStatus::frameRefused);
-        }
-        if (ownsPending) {
-            server::activity::host::note_scriptable_attempt(
-                session.activity.session,
-                session.activity.bindingGeneration,
-                scriptablePending,
-                server::activity::host::OutputStatus::frameRefused);
+        if (bodyRefused && !peerLeave) {
+            refuse_roster_outputs(session,
+                                  hostState,
+                                  hasHostState,
+                                  scriptablePending,
+                                  ownsPending,
+                                  server::activity::host::OutputStatus::frameRefused);
         }
         if (written > initialWritten) {
             SecureZeroMemory(response.data() + initialWritten, written - initialWritten);
@@ -666,23 +707,8 @@ void discard_staged_roster(Session& session) noexcept {
     if (!session.activityRosterStaged.staged) {
         return;
     }
-    if (session.activityRosterStaged.hasHostState) {
-        server::activity::host::note_auth_attempt(
-            session.activity.session,
-            session.activity.bindingGeneration,
-            session.activityRosterStaged.hostStateRevision,
-            session.activityRosterStaged.hostLifetimeState,
-            server::activity::host::OutputStatus::frameRefused);
-    }
-    if (session.activityRosterStaged.hasScriptableOverride) {
-        server::activity::host::note_scriptable_attempt(
-            session.activity.session,
-            session.activity.bindingGeneration,
-            session.activityRosterStaged.scriptableOverride,
-            server::activity::host::OutputStatus::frameRefused);
-    }
-    // The client never saw this body, so its state byte must not be spent. The next push has to
-    // move the byte again or the client does not rebuild its roster objects.
+    // An unsent body refused nothing, so its outputs stay pending. The client never saw it, so its
+    // state byte must not be spent either, or the client does not rebuild its roster objects.
     discard_roster_body_record(session);
     rollback_staged_roster_state(session);
 }

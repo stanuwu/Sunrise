@@ -70,8 +70,6 @@ void drive_cinematic_hold(Session& session, std::uint64_t now) noexcept {
     }
 }
 
-/** Failed incident attempts wait before rebuilding the same frame. */
-constexpr std::uint64_t kIncidentRetryIntervalMs = 250;
 /**
  * Retry cadence for a membership body held while its advertisement is still being allocated.
  * The allocation lands in the next service slice, so this is short. Leaving the keepalive due
@@ -174,14 +172,27 @@ void commit_staged_replication_epoch(Session& session) noexcept {
     return true;
 }
 
-/** Preserves a pending incident's backoff until it succeeds or disappears. */
-void update_incident_retry(
-    Session& session, std::uint64_t now, bool hasPending, bool due, bool transportStaged) noexcept {
-    if (!hasPending || (due && transportStaged)) {
-        session.activityIncidentRetryDueTick = 0;
-    } else if (due) {
-        session.activityIncidentRetryDueTick = now + kIncidentRetryIntervalMs;
+/**
+ * Tests whether a pending placed reset can carry its purge on a roster built now.
+ * The roster refuses an unsolicited body without that purge.
+ * @param session Connection whose roster region and identities are read.
+ * @return True when the purge prepares for the bubble the roster names.
+ */
+[[nodiscard]] bool placed_purge_ready(const Session& session) noexcept {
+    // The region the roster builder resolves, so the purge is prepared for the same bubble.
+    const EffectiveRegion region =
+        selected_effective_region(session, effective_region(session.activity.session).arrival);
+    if (region.index < 0) {
+        return false;
     }
+    server::gameplay::squad_entity_retirement::RetirementPlan plan{};
+    return server::gameplay::squad_entity_retirement::prepare_retirement(
+               session.activity.session,
+               session.activity.bindingGeneration,
+               static_cast<std::uint8_t>(
+                   region.index >> state::activity::bubble_authority::kSliceSetToBubbleShift),
+               plan)
+           && plan.pending;
 }
 
 } // namespace
@@ -215,38 +226,59 @@ bool consume_activity_keepalive(Session& session,
     const bool authorityQueryDue = active
                                    && authority_query::pending(session.activityAuthorityQuery,
                                                                session.activity.bindingGeneration);
-    server::activity::host::AuthState hostState{};
-    const bool hostStateDue =
+    // No roster can be built before the client's patch epoch for this binding arrives.
+    const bool epochSeen =
         active && session.activityPatchEpoch.seen
-        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
-        && server::activity::host::auth_state(session.activity.session, hostState)
-        && hostState.revision != 0 && hostState.revision != session.activityHostStateRevision;
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration;
+    const bool isPrivate = session.activity.role == ActivityClientRole::privateCurrent;
+    const bool regionReady = active && client_region_ready(session, nullptr);
+    // The roster defers an unsolicited body while the private client loads. Its region report is
+    // answered instead, so no standalone roster is due until then.
+    const bool rosterReady = epochSeen && (!isPrivate || regionReady);
+    // While a placed reset is pending, an unsolicited roster leaves only with its purge.
+    const bool placedPending =
+        epochSeen
+        && server::gameplay::squad_entity_retirement::placed_transition_pending(
+            session.activity.session, session.activity.bindingGeneration);
+    const bool placedPurgeReady = rosterReady && placedPending && placed_purge_ready(session);
+    const bool rosterOpen = rosterReady && (!placedPending || placedPurgeReady);
+    server::activity::host::AuthState hostState{};
+    const bool hostKnown = rosterOpen
+                           && server::activity::host::auth_state(session.activity.session,
+                                                                 session.activity.bindingGeneration,
+                                                                 hostState);
+    // This link could not build a body for the current Host revision. Only a new one retries it.
+    const bool hostRefused = hostKnown && hostState.refused;
+    // A committed Activity Host revision the delivered roster lacks.
+    const bool hostStateDue = hostKnown && !hostRefused && hostState.revision != 0
+                              && hostState.revision != session.activityHostStateRevision;
     server::activity::host::PendingScriptableOverride pendingScriptable{};
     const bool scriptableDue =
-        active && session.activityPatchEpoch.seen
-        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
-        && activity_link_count_locked(session.activity.session) == 1
+        rosterOpen && activity_link_count_locked(session.activity.session) == 1
         && server::activity::host::pending_scriptable_override(session.activity.session,
                                                                pendingScriptable);
-    server::activity::host::PendingIncident pendingIncident{};
-    const bool hasPendingIncident =
-        active
-        && server::activity::host::pending_incident(session.activity.session, pendingIncident);
+    // An operator incident waits for the arrival report. Its body always fits an empty frame, so a
+    // refused attempt only lost its slot and the next push carries it.
     const bool incidentClientReady = client_in_world(session, nullptr);
+    server::activity::host::PendingIncident pendingIncident{};
     const bool incidentDue =
-        hasPendingIncident && incidentClientReady && now >= session.activityIncidentRetryDueTick;
-    const bool isPrivate = session.activity.role == ActivityClientRole::privateCurrent;
+        active && incidentClientReady
+        && server::activity::host::pending_incident(session.activity.session, pendingIncident);
     // The arrival report (ws 702 world state 8) is answered by one roster built after it, on each
-    // link whose delivered body still holds the wait bit. That answer raises `entered`.
-    const bool arrivalDue = active && session.activityRosterAwaitClientSync && incidentClientReady;
+    // link whose delivered body still holds the wait bit. That answer raises `entered`. A program
+    // spawn hold keeps the bit set, so the answer is due when the program releases it.
+    const bool arrivalDue =
+        rosterOpen && !hostRefused && session.activityRosterAwaitClientSync && incidentClientReady
+        && !state::activity::membership::program_spawn_hold(session.activity.source.sessionId);
     // A script-selected state revision that has not reached the client's roster. Nothing else
     // makes a roster due for it, so it would otherwise wait for the next solicited report.
     const MissionSeedLease& missionSeed = session.activityMissionSeed;
     const bool missionSeedDue =
-        active && missionSeed.configured
+        rosterOpen && missionSeed.configured
         && missionSeed.bindingGeneration == session.activity.bindingGeneration
         && missionSeed.revision != missionSeed.publishedRevision
-        && !missionSeed.regionArrivalPending && client_region_ready(session, nullptr);
+        && missionSeed.revision != missionSeed.refusedRevision && !missionSeed.regionArrivalPending
+        && regionReady;
     // The region the client holds, which is the one its advertisement must describe. The pending
     // leg alone names the region behind the player after a z-leg switch, and advertising that
     // hands the client an ambassadorship for a region it has left.
@@ -277,18 +309,11 @@ bool consume_activity_keepalive(Session& session,
             if (!private_region(session, arrival.index)) {
                 server::gameplay::complete_host_session(session.activity.session, arrival.index);
             }
-            std::array<char, core::log::kLineCapacity> line{};
-            const int length = std::snprintf(line.data(),
-                                             line.size(),
-                                             "ev=gameplay stage=arrival result=changed region=%d "
-                                             "previous=%d",
-                                             arrival.index,
-                                             advertised);
-            if (length > 0) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::info,
-                                 {line.data(), static_cast<std::size_t>(length)});
-            }
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::info,
+                              "ev=gameplay stage=arrival result=changed region=%d previous=%d",
+                              arrival.index,
+                              advertised);
         }
     }
     const bool regionChanged = isPrivate
@@ -297,10 +322,9 @@ bool consume_activity_keepalive(Session& session,
                                         || reportedPrivate != session.activity.advertisedPrivate))
                                    || arrivalChanged);
     if (active && isPrivate) {
-        std::array<char, core::log::kLineCapacity> line{};
-        const int length = std::snprintf(
-            line.data(),
-            line.size(),
+        core::log::writef(
+            core::log::Channel::server,
+            core::log::Level::debug,
             "ev=activity stage=advertise_trigger held=%d pending=%d advertised=%d "
             "held_private=%u advertised_private=%u changed=%u",
             reportedRegion,
@@ -309,11 +333,6 @@ bool consume_activity_keepalive(Session& session,
             reportedPrivate ? 1U : 0U,
             session.activity.advertisedPrivate ? 1U : 0U,
             regionChanged ? 1U : 0U);
-        if (length > 0) {
-            core::log::write(core::log::Channel::server,
-                             core::log::Level::debug,
-                             {line.data(), static_cast<std::size_t>(length)});
-        }
     }
     // Arming a host teleport or a hard wipe is a host-owned event and cannot wait for the keepalive
     // cadence. It needs an acknowledged revision, so it fires once per ack and stops until the
@@ -325,13 +344,9 @@ bool consume_activity_keepalive(Session& session,
                 session.activity.session.sessionId))
         && state::activity::membership::acknowledged(session.activity.session.sessionId);
     const bool retirementReady =
-        active && session.activityPatchEpoch.seen
-        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
-        && activity_link_count_locked(session.activity.session) == 1;
-    bool retirementDue = retirementReady
-                         && server::gameplay::squad_entity_retirement::placed_transition_pending(
-                             session.activity.session, session.activity.bindingGeneration);
-    if (retirementReady && !retirementDue) {
+        rosterOpen && !hostRefused && activity_link_count_locked(session.activity.session) == 1;
+    bool retirementDue = retirementReady && placedPurgeReady;
+    if (retirementReady && !placedPending) {
         const auto region = effective_region(session.activity.session);
         const auto bubble =
             region.index >= 0
@@ -365,11 +380,9 @@ bool consume_activity_keepalive(Session& session,
     // Only a changed Host value or mission state, retirement or the arrival answer can publish a
     // standalone roster.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue) {
-        bool appendedRoster = false;
         if (hostStateDue || scriptableDue || retirementDue || arrivalDue || missionSeedDue) {
-            appendedRoster = append_roster_notification(
+            published = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
-            published = appendedRoster;
         }
         const bool appendedIncident =
             incidentDue
@@ -391,8 +404,6 @@ bool consume_activity_keepalive(Session& session,
         if (delivered && (appendedIncident || appendedAuthorityReset || appendedAuthorityQuery)) {
             session.activityKeepaliveDueTick = now + kActivityKeepaliveIntervalMs;
         }
-        update_incident_retry(
-            session, now, hasPendingIncident, incidentDue, delivered && appendedIncident);
         return delivered;
     }
     published = append_global_state_notification(
@@ -405,7 +416,6 @@ bool consume_activity_keepalive(Session& session,
     if (!published || framedSize > response.size()) {
         static_cast<void>(publish_frame(
             session, scratch, response, written, framedSize, nextSendNonce, published));
-        update_incident_retry(session, now, hasPendingIncident, incidentDue, false);
         return false;
     }
     const bool appendedAuthorityReset =
@@ -479,8 +489,6 @@ bool consume_activity_keepalive(Session& session,
             }
             session.activityKeepaliveDueTick = now + kActivityKeepaliveIntervalMs;
         }
-        update_incident_retry(
-            session, now, hasPendingIncident, incidentDue, delivered && appendedIncident);
         return delivered;
     }
 
@@ -655,7 +663,6 @@ bool consume_activity_keepalive(Session& session,
         discard_staged_incident(session);
         discard_staged_authority_reset(session);
         discard_staged_authority_query(session);
-        update_incident_retry(session, now, hasPendingIncident, incidentDue, false);
         return false;
     }
     SecureZeroMemory(&stagedMembership, sizeof stagedMembership);
@@ -683,8 +690,6 @@ bool consume_activity_keepalive(Session& session,
                                    "reason=host_teleport");
         }
     }
-    update_incident_retry(
-        session, now, hasPendingIncident, incidentDue, delivered && appendedIncident);
     return delivered;
 }
 

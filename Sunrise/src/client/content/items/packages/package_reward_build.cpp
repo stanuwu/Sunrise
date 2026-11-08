@@ -5,8 +5,10 @@
 #include <vector>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808075.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../middleware/content/packages/tables/field_reader.h"
+#include "../../../../middleware/content/packages/tables/reward_table.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_expression.h"
 #include "internal.h"
@@ -16,78 +18,9 @@ namespace {
 
 namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
+namespace layout = middleware::content::packages::tables::rewards;
 namespace domain = state::build_data::rewards;
 namespace unlocks = state::unlocks;
-
-/** Investment-root slots identify reward pools and unlock-slot bindings. */
-constexpr std::size_t kSupplementalRewardSlot = 84;
-constexpr std::size_t kPoolSlot = 88;
-constexpr std::size_t kExpressionSlot = 109;
-constexpr std::size_t kFlagSlot = 112;
-constexpr std::size_t kValueSlot = 114;
-/** Only the omitted-bank sentinel permits a no-op; other invalid tags leave effects unresolved. */
-constexpr std::uint32_t kAbsentTableTag = 0xFFFFFFFFU;
-/** Native reward schema classes and fixed row sizes. */
-constexpr std::uint32_t kPoolClass = 0x80807553U;
-constexpr std::uint32_t kPoolRowClass = 0x8080748CU;
-constexpr std::uint32_t kEntryClass = 0x8080748EU;
-constexpr std::uint32_t kExpressionClass = 0x80807D31U;
-constexpr std::uint32_t kModifierClass = 0x80807490U;
-constexpr std::uint32_t kSocketClass = 0x80803062U;
-constexpr std::uint32_t kWrapperClass = 0x808077CCU;
-constexpr std::uint32_t kSelectionClass = 0x808077CFU;
-constexpr std::uint32_t kFlagTableClass = 0x80807D49U;
-constexpr std::uint32_t kFlagRowClass = 0x80807D4FU;
-constexpr std::uint32_t kValueTableClass = 0x80807C92U;
-constexpr std::uint32_t kValueRowClass = 0x80807C96U;
-constexpr std::uint32_t kExpressionTableClass = 0x80807C49U;
-constexpr std::uint32_t kExpressionRowClass = 0x80807C4FU;
-constexpr std::uint32_t kConditionClass = 0x80807D2FU;
-constexpr std::size_t kPoolStride = 24;
-constexpr std::size_t kEntryStride = 80;
-constexpr std::size_t kModifierStride = 24;
-constexpr std::size_t kBindingStride = 8;
-constexpr std::size_t kExpressionRowStride = 24;
-constexpr std::size_t kSocketStride = 12;
-constexpr std::size_t kSelectionStride = 12;
-/** Item headers hold a relative wrapper pointer and an acquired-unlock slot. */
-constexpr std::size_t kWrapperField = 0x58;
-constexpr std::size_t kAcquiredFlagField = 0xDA;
-
-/** Byte offsets inside the serialized reward rows. */
-constexpr std::size_t kEntryQuantityOffset = 4;
-constexpr std::size_t kEntryPoolOffset = 8;
-constexpr std::size_t kEntrySupplementalOffset = 10;
-constexpr std::size_t kEntryCategoryOffset = 20;
-constexpr std::size_t kEntryWeightOffset = 24;
-constexpr std::size_t kEntryConditionOffset = 32;
-constexpr std::size_t kEntryModifiersOffset = 48;
-constexpr std::size_t kEntrySocketsOffset = 64;
-constexpr std::size_t kModifierValueIndexOffset = 16;
-constexpr std::size_t kModifierValueOffset = 20;
-constexpr std::size_t kPoolEntriesOffset = 8;
-constexpr std::size_t kExpressionBodyOffset = 8;
-constexpr std::size_t kWrapperSelectionsOffset = 8;
-constexpr std::size_t kWrapperFlagsOffset = 24;
-constexpr std::size_t kSelectionCountOffset = 4;
-constexpr std::size_t kSocketPlugOffset = 2;
-constexpr std::size_t kSocketPlugSetOffset = 4;
-constexpr std::size_t kSocketRollSetOffset = 6;
-constexpr std::size_t kSocketSelectionOffset = 8;
-/** Relative definition bodies are preceded by their four-byte schema class. */
-constexpr std::size_t kDefinitionClassPrefixSize = sizeof(std::uint32_t);
-
-/** Class rows name a default finisher whose use gate supplies the computed class flag. */
-constexpr std::size_t kClassSlot = 12;
-constexpr std::size_t kClassStride = 32;
-constexpr std::size_t kDefaultFinisherOffset = 24;
-constexpr std::uint32_t kClassTable = 0x808075BEU;
-constexpr std::uint32_t kClassRow = 0x808074FAU;
-constexpr std::size_t kUseConditionPointer = 24;
-constexpr std::uint32_t kUseConditionClass = 0x80802980U;
-
-/** Set when the installed data refuses the reward tables or graph; no retry can change that. */
-bool g_rewardsUnsupported = false;
 
 /** Logs one refused reward load, sizing or publication. */
 void report_refusal(const char* reason) noexcept {
@@ -97,11 +30,11 @@ void report_refusal(const char* reason) noexcept {
                       reason);
 }
 
-/** Logs a refusal the installed data decides and settles the domain once. */
+/** Logs a refusal the installed data decides and settles the domain in State once. */
 void settle_unsupported(const char* reason) noexcept {
     report_refusal(reason);
-    if (!g_rewardsUnsupported) {
-        g_rewardsUnsupported = true;
+    if (!state::build_data::reward_definitions_unsupported()) {
+        state::build_data::settle_reward_definitions_unsupported();
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=pkg stage=rewards result=unsupported");
@@ -129,7 +62,11 @@ template <typename T> bool append(std::vector<T>& bank, T value, std::size_t cap
 /** Package reads can fail temporarily. Only decoded schema failures settle a domain. */
 enum class TableRead { loaded, readFailed, unsupported };
 
-/** Reads the table an investment-root slot names, checking its class when one is expected. */
+/**
+ * Reads the table an investment-root slot names, checking its class when one is expected.
+ * @param expectedClass Required table class, or zero to accept any class.
+ * @return Unsupported for an absent slot or a wrong class; readFailed for a package read error.
+ */
 TableRead root_table(const reader::Source& source,
                      reader::Scratch& scratch,
                      std::span<const std::byte> root,
@@ -168,30 +105,38 @@ bool load_reward_table(const reader::Source& source,
 bool read_reward_entry(std::span<const std::byte> blob,
                        std::size_t at,
                        domain::Entry& entry) noexcept {
-    return tables::read(blob, at, entry.itemIndex)
-           && tables::read(blob, at + kEntryQuantityOffset, entry.quantity)
-           && tables::read(blob, at + kEntryPoolOffset, entry.poolIndex)
-           && tables::read(blob, at + kEntrySupplementalOffset, entry.supplementalIndex)
-           && tables::read(blob, at + kEntryCategoryOffset, entry.categoryHash)
-           && tables::read(blob, at + kEntryWeightOffset, entry.weight)
+    return tables::read(blob, at + layout::EntryRow::kItem, entry.itemIndex)
+           && tables::read(blob, at + layout::EntryRow::kQuantity, entry.quantity)
+           && tables::read(blob, at + layout::EntryRow::kPool, entry.poolIndex)
+           && tables::read(blob, at + layout::EntryRow::kSupplemental, entry.supplementalIndex)
+           && tables::read(blob, at + layout::EntryRow::kCategory, entry.categoryHash)
+           && tables::read(blob, at + layout::EntryRow::kWeight, entry.weight)
            && std::isfinite(entry.weight) && entry.weight >= 0;
 }
 
-/** Reads the single flag that gates use of the class's default finisher. */
+/**
+ * Reads the single flag that gates use of the class's default finisher.
+ * @param blob Finisher item definition bytes.
+ * @param output Receives the flag slot the gate reads.
+ * @return False unless the gate is exactly one flag read.
+ */
 bool read_class_flag(std::span<const std::byte> blob, std::uint16_t& output) noexcept {
     std::size_t at = 0;
     std::uint32_t cls = 0;
     tables::Array expression{};
-    if (!tables::relative(blob, kUseConditionPointer, at) || at < kDefinitionClassPrefixSize
-        || !tables::read(blob, at - kDefinitionClassPrefixSize, cls) || cls != kUseConditionClass
-        || !tables::read_array(
-            blob, at, kExpressionClass, tables::kUnlockInstructionStride, expression)
+    if (!tables::relative(blob, layout::ItemFields::kUseCondition, at)
+        || !reader::layout::class_word_before(blob, at, cls) || cls != layout::UseCondition::kClass
+        || !tables::read_array(blob,
+                               at,
+                               tables::kInvestmentExpressionRowClass,
+                               tables::kUnlockInstructionStride,
+                               expression)
         || expression.count != 1) {
         return false;
     }
     std::uint32_t opcode = 0;
     std::uint32_t flag = domain::kAbsent;
-    if (!tables::read(blob, expression.dataOffset, opcode)
+    if (!tables::read(blob, expression.dataOffset + tables::kUnlockInstructionOpcodeOffset, opcode)
         || opcode != tables::kUnlockReadFlagOpcode
         || !tables::read(
             blob, expression.dataOffset + tables::kUnlockInstructionOperandOffset, flag)
@@ -206,9 +151,18 @@ bool read_class_flag(std::span<const std::byte> blob, std::uint16_t& output) noe
 
 /** @return True when the reward graph is published or can never be. */
 bool reward_definitions_settled() noexcept {
-    return state::build_data::reward_definitions_ready() || g_rewardsUnsupported;
+    return state::build_data::reward_definitions_ready()
+           || state::build_data::reward_definitions_unsupported();
 }
 
+/**
+ * Appends one pool entry with its condition, modifiers and socket overrides.
+ * @param blob Pool table bytes.
+ * @param at Offset of the entry row.
+ * @param failure Receives which bank refused, or none for an unreadable entry.
+ * @param reason Receives the refusing bank's label when a bank refused.
+ * @return False when the entry is unreadable or a bank refused it.
+ */
 bool RewardBuild::entry(std::span<const std::byte> blob,
                         std::size_t at,
                         BankFailure& failure,
@@ -217,24 +171,31 @@ bool RewardBuild::entry(std::span<const std::byte> blob,
     failure = BankFailure::none;
     if (!read_reward_entry(blob, at, out)
         || !conditions.read(
-            blob, at + kEntryConditionOffset, instructions_, out.condition, failure)) {
+            blob, at + layout::EntryRow::kCondition, instructions_, out.condition, failure)) {
         reason = failure == BankFailure::full ? "instruction_capacity" : "instruction_storage";
         return false;
     }
     out.supplementalMissing = supplementalMissing_ && out.supplementalIndex != domain::kAbsent;
     tables::Array rows{};
-    if (!tables::read_array(
-            blob, at + kEntryModifiersOffset, kModifierClass, kModifierStride, rows)) {
+    if (!tables::read_array(blob,
+                            at + layout::EntryRow::kModifiers,
+                            layout::ModifierRow::kClass,
+                            layout::ModifierRow::kSize,
+                            rows)) {
         return false;
     }
     out.modifiers = {static_cast<std::uint32_t>(modifiers_.size()),
                      static_cast<std::uint32_t>(rows.count)};
     for (std::size_t i = 0; i < rows.count; ++i) {
-        const auto offset = rows.dataOffset + i * kModifierStride;
+        const auto offset = rows.dataOffset + i * layout::ModifierRow::kSize;
         domain::Modifier modifier{};
-        if (!conditions.read(blob, offset, instructions_, modifier.condition, failure)
-            || !tables::read(blob, offset + kModifierValueIndexOffset, modifier.valueIndex)
-            || !tables::read(blob, offset + kModifierValueOffset, modifier.value)
+        if (!conditions.read(blob,
+                             offset + layout::ModifierRow::kCondition,
+                             instructions_,
+                             modifier.condition,
+                             failure)
+            || !tables::read(blob, offset + layout::ModifierRow::kValueIndex, modifier.valueIndex)
+            || !tables::read(blob, offset + layout::ModifierRow::kValue, modifier.value)
             || !std::isfinite(modifier.value)) {
             reason = failure == BankFailure::full ? "instruction_capacity" : "instruction_storage";
             return false;
@@ -252,7 +213,7 @@ bool RewardBuild::entry(std::span<const std::byte> blob,
     }
     std::array<domain::SocketOverride, domain::kSocketsPerItem> overrides{};
     std::size_t count = 0;
-    if (!read_reward_sockets(blob, at + kEntrySocketsOffset, overrides, count)) {
+    if (!read_reward_sockets(blob, at + layout::EntryRow::kSockets, overrides, count)) {
         return false;
     }
     if (count > domain::kSocketOverrideCapacity - sockets_.size()) {
@@ -284,6 +245,10 @@ bool RewardBuild::entry(std::span<const std::byte> blob,
     return true;
 }
 
+/**
+ * Binds each class to the flag its default finisher's use gate reads.
+ * @return False when a table is unreadable or its schema refuses; a refusal settles the domain.
+ */
 bool RewardConditions::load_class_flags(const reader::Source& source,
                                         reader::Scratch& scratch,
                                         std::span<const std::byte> root) noexcept {
@@ -293,15 +258,24 @@ bool RewardConditions::load_class_flags(const reader::Source& source,
     std::vector<std::byte> blob;
     tables::Array classRows{};
     tables::Array itemRows{};
-    if (!load_reward_table(source, scratch, root, kClassSlot, classes, kClassTable, "class_table")
+    if (!load_reward_table(source,
+                           scratch,
+                           root,
+                           layout::RootSlots::kClasses,
+                           classes,
+                           layout::ClassRow::kTableClass,
+                           "class_table")
         || !load_reward_table(
             source, scratch, root, tables::kItemTableSlot, index, 0, "class_item_table")) {
         return false;
     }
-    if (!tables::read_array(
-            classes, tables::kTableArrayDescriptor, kClassRow, kClassStride, classRows)
+    if (!tables::read_array(classes,
+                            offsetof(generated::CharacterClassTable, table),
+                            layout::ClassRow::kClass,
+                            layout::ClassRow::kSize,
+                            classRows)
         || classRows.count != classFlags_.size()
-        || !tables::find_array_at(index, tables::kTableArrayDescriptor, itemRows)
+        || !tables::find_array_at(index, offsetof(generated::ItemIndexTable, table), itemRows)
         || itemRows.elementClass != tables::kItemIndexTableClass) {
         settle_unsupported("class_schema");
         return false;
@@ -311,7 +285,8 @@ bool RewardConditions::load_class_flags(const reader::Source& source,
         tables::IndexRow item{};
         std::uint32_t cls = 0;
         if (!tables::read(std::span<const std::byte>{classes},
-                          classRows.dataOffset + i * kClassStride + kDefaultFinisherOffset,
+                          classRows.dataOffset + i * layout::ClassRow::kSize
+                              + layout::ClassRow::kDefaultFinisher,
                           itemIndex)
             || !tables::index_row(index, itemRows, itemIndex, item)) {
             settle_unsupported("class_finisher_index");
@@ -332,6 +307,11 @@ bool RewardConditions::load_class_flags(const reader::Source& source,
     return true;
 }
 
+/**
+ * Reads the class bindings and the flag, value and shared expression tables.
+ * @param maps Unlock slot maps the binder reads; they must outlive this object's use.
+ * @return False when a table is unreadable or refused; a refusal settles the domain.
+ */
 bool RewardConditions::load(const reader::Source& source,
                             reader::Scratch& scratch,
                             std::span<const std::byte> root,
@@ -339,28 +319,44 @@ bool RewardConditions::load(const reader::Source& source,
     loaded_ = false;
     maps_ = &maps;
     if (!load_class_flags(source, scratch, root)
-        || !load_reward_table(
-            source, scratch, root, kFlagSlot, flags_, kFlagTableClass, "flag_table")
-        || !load_reward_table(
-            source, scratch, root, kValueSlot, values_, kValueTableClass, "value_table")
         || !load_reward_table(source,
                               scratch,
                               root,
-                              kExpressionSlot,
+                              layout::RootSlots::kFlagSlots,
+                              flags_,
+                              layout::SlotRow::kFlagTableClass,
+                              "flag_table")
+        || !load_reward_table(source,
+                              scratch,
+                              root,
+                              layout::RootSlots::kValueSlots,
+                              values_,
+                              layout::SlotRow::kValueTableClass,
+                              "value_table")
+        || !load_reward_table(source,
+                              scratch,
+                              root,
+                              layout::RootSlots::kExpressionPool,
                               expressions_,
-                              kExpressionTableClass,
+                              layout::ExpressionPoolRow::kTableClass,
                               "expression_table")) {
         return false;
     }
     // Shared expressions are expanded before the runtime evaluates reward conditions.
-    if (!tables::read_array(
-            flags_, tables::kTableArrayDescriptor, kFlagRowClass, kBindingStride, flagRows_)
-        || !tables::read_array(
-            values_, tables::kTableArrayDescriptor, kValueRowClass, kBindingStride, valueRows_)
+    if (!tables::read_array(flags_,
+                            offsetof(generated::UnlockFlagTable, table),
+                            layout::SlotRow::kFlagClass,
+                            layout::SlotRow::kSize,
+                            flagRows_)
+        || !tables::read_array(values_,
+                               offsetof(generated::UnlockValueTable, table),
+                               layout::SlotRow::kValueClass,
+                               layout::SlotRow::kSize,
+                               valueRows_)
         || !tables::read_array(expressions_,
-                               tables::kTableArrayDescriptor,
-                               kExpressionRowClass,
-                               kExpressionRowStride,
+                               offsetof(generated::RewardExpressionTable, table),
+                               layout::ExpressionPoolRow::kClass,
+                               layout::ExpressionPoolRow::kSize,
                                expressionRows_)) {
         settle_unsupported("condition_schema");
         return false;
@@ -373,6 +369,15 @@ bool RewardConditions::loaded() const noexcept {
     return loaded_;
 }
 
+/**
+ * Binds one native instruction to the bank the server evaluates it against.
+ * A flag or value slot maps to its saved bank, a class finisher flag to the class bank, and any
+ * other slot to an external identity hash.
+ * @param native Native opcode word.
+ * @param operand Native operand: a slot, a constant or nothing.
+ * @param instruction Receives the bound instruction.
+ * @return False for an opcode the evaluator refuses or a slot outside its table.
+ */
 bool RewardConditions::bind(std::uint32_t native,
                             std::uint32_t operand,
                             domain::Instruction& instruction) const noexcept {
@@ -385,7 +390,10 @@ bool RewardConditions::bind(std::uint32_t native,
     const std::span<const std::byte> blob = flag ? flags_ : values_;
     std::uint32_t hash = 0;
     if (operand >= rows.count
-        || !tables::read(blob, rows.dataOffset + operand * kBindingStride, hash)) {
+        || !tables::read(blob,
+                         rows.dataOffset + operand * layout::SlotRow::kSize
+                             + layout::SlotRow::kHash,
+                         hash)) {
         return false;
     }
     instruction.opcode = flag ? unlocks::Opcode::flag : unlocks::Opcode::loadValue;
@@ -421,6 +429,13 @@ bool RewardConditions::bind(std::uint32_t native,
     return true;
 }
 
+/**
+ * Appends one expression, expanding each shared-pool reference in place.
+ * @param at Offset of the expression field.
+ * @param depth Shared-pool nesting so far; it is bounded by the traversal depth.
+ * @param failure Receives full or storage when the bank refused.
+ * @return False for an unreadable or unbindable instruction or a refused bank.
+ */
 bool RewardConditions::append_expression(std::span<const std::byte> blob,
                                          std::size_t at,
                                          std::vector<domain::Instruction>& bank,
@@ -428,15 +443,18 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
                                          BankFailure& failure) const noexcept {
     tables::Array rows{};
     if (depth >= domain::kTraversalDepth
-        || !tables::read_array(
-            blob, at, kExpressionClass, tables::kUnlockInstructionStride, rows)) {
+        || !tables::read_array(blob,
+                               at,
+                               tables::kInvestmentExpressionRowClass,
+                               tables::kUnlockInstructionStride,
+                               rows)) {
         return false;
     }
     for (std::size_t i = 0; i < rows.count; ++i) {
         const std::size_t row = rows.dataOffset + i * tables::kUnlockInstructionStride;
         std::uint32_t native = 0;
         std::uint32_t operand = 0;
-        if (!tables::read(blob, row, native)
+        if (!tables::read(blob, row + tables::kUnlockInstructionOpcodeOffset, native)
             || !tables::read(blob, row + tables::kUnlockInstructionOperandOffset, operand)) {
             return false;
         }
@@ -444,8 +462,9 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
             const auto before = bank.size();
             if (operand >= expressionRows_.count
                 || !append_expression(expressions_,
-                                      expressionRows_.dataOffset + operand * kExpressionRowStride
-                                          + kExpressionBodyOffset,
+                                      expressionRows_.dataOffset
+                                          + operand * layout::ExpressionPoolRow::kSize
+                                          + layout::ExpressionPoolRow::kExpression,
                                       bank,
                                       depth + 1,
                                       failure)
@@ -470,6 +489,12 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
     return true;
 }
 
+/**
+ * Appends one expanded expression to a bank.
+ * @param range Receives the appended rows.
+ * @param failure Receives full or storage when the bank refused.
+ * @return False when the expression does not expand; the bank is unchanged then.
+ */
 bool RewardConditions::read(std::span<const std::byte> blob,
                             std::size_t at,
                             std::vector<domain::Instruction>& bank,
@@ -485,6 +510,13 @@ bool RewardConditions::read(std::span<const std::byte> blob,
     return true;
 }
 
+/**
+ * Expands a list of expressions into one program where every expression must hold.
+ * @param output Receives the program; it bounds the expanded length.
+ * @param count Receives the program length; zero for an empty list.
+ * @param failure Receives storage when a bank allocation failed.
+ * @return False for an unreadable, empty or oversized expression.
+ */
 bool RewardConditions::read_list(std::span<const std::byte> blob,
                                  std::size_t at,
                                  std::span<domain::Instruction> output,
@@ -494,13 +526,14 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
     failure = BankFailure::none;
     tables::Array rows{};
     std::vector<domain::Instruction> instructions;
-    if (!tables::read_array(blob, at, kConditionClass, tables::kUnlockExpressionFieldSize, rows)) {
+    if (!tables::read_array(
+            blob, at, layout::ConditionRow::kClass, layout::ConditionRow::kSize, rows)) {
         return false;
     }
     for (std::size_t i = 0; i < rows.count; ++i) {
         domain::Range expression{};
         if (!read(blob,
-                  rows.dataOffset + i * tables::kUnlockExpressionFieldSize,
+                  rows.dataOffset + i * layout::ConditionRow::kSize,
                   instructions,
                   expression,
                   failure)
@@ -528,24 +561,26 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
     return true;
 }
 
+/** Reads a socket override array; false when unreadable or wider than the output. */
 bool read_reward_sockets(std::span<const std::byte> blob,
                          std::size_t at,
                          std::span<domain::SocketOverride> output,
                          std::size_t& count) noexcept {
+    using Row = layout::SocketOverrideRow;
     count = 0;
     tables::Array rows{};
-    if (!tables::read_array(blob, at, kSocketClass, kSocketStride, rows)
+    if (!tables::read_array(blob, at, Row::kClass, Row::kSize, rows)
         || rows.count > output.size()) {
         return false;
     }
     for (std::size_t i = 0; i < rows.count; ++i) {
-        const std::size_t p = rows.dataOffset + i * kSocketStride;
+        const std::size_t p = rows.dataOffset + i * Row::kSize;
         auto& socket = output[i];
-        if (!tables::read(blob, p, socket.socketType)
-            || !tables::read(blob, p + kSocketPlugOffset, socket.plugItem)
-            || !tables::read(blob, p + kSocketPlugSetOffset, socket.plugSet)
-            || !tables::read(blob, p + kSocketRollSetOffset, socket.rollSet)
-            || !tables::read(blob, p + kSocketSelectionOffset, socket.selection)) {
+        if (!tables::read(blob, p + Row::kSocketType, socket.socketType)
+            || !tables::read(blob, p + Row::kPlugItem, socket.plugItem)
+            || !tables::read(blob, p + Row::kPlugSet, socket.plugSet)
+            || !tables::read(blob, p + Row::kRollSet, socket.rollSet)
+            || !tables::read(blob, p + Row::kSelection, socket.selection)) {
             return false;
         }
     }
@@ -553,6 +588,12 @@ bool read_reward_sockets(std::span<const std::byte> blob,
     return true;
 }
 
+/**
+ * Loads the condition tables, then every reward pool and its entries.
+ * An unreadable entry or pool is skipped; a full bank or a refused schema settles the domain.
+ * @param maps Unlock slot maps the conditions bind through.
+ * @return False when a table or bank refused; conditions that loaded still serve the season pass.
+ */
 bool RewardBuild::load(const reader::Source& source,
                        reader::Scratch& scratch,
                        std::span<const std::byte> root,
@@ -571,15 +612,24 @@ bool RewardBuild::load(const reader::Source& source,
     if (!conditions.load(source, scratch, root, maps)) {
         return false;
     }
-    if (!tables::slot_tag(root, kSupplementalRewardSlot, supplementalTag)) {
+    if (!tables::slot_tag(root, layout::RootSlots::kSupplementalRewards, supplementalTag)) {
         settle_unsupported("supplemental_slot");
         return false;
     }
-    if (!load_reward_table(source, scratch, root, kPoolSlot, blob, kPoolClass, "pool_table")) {
+    if (!load_reward_table(source,
+                           scratch,
+                           root,
+                           layout::RootSlots::kPools,
+                           blob,
+                           layout::PoolRow::kTableClass,
+                           "pool_table")) {
         return false;
     }
-    if (!tables::read_array(
-            blob, tables::kTableArrayDescriptor, kPoolRowClass, kPoolStride, rows)) {
+    if (!tables::read_array(blob,
+                            offsetof(generated::RewardPoolTable, table),
+                            layout::PoolRow::kClass,
+                            layout::PoolRow::kSize,
+                            rows)) {
         settle_unsupported("pool_schema");
         return false;
     }
@@ -587,15 +637,19 @@ bool RewardBuild::load(const reader::Source& source,
         settle_unsupported("pool_count");
         return false;
     }
-    supplementalMissing_ = supplementalTag == kAbsentTableTag;
+    supplementalMissing_ = supplementalTag == layout::kAbsentTableTag;
     std::size_t skipped = 0;
     for (std::size_t i = 0; i < rows.count; ++i) {
-        const auto at = rows.dataOffset + i * kPoolStride;
+        const auto at = rows.dataOffset + i * layout::PoolRow::kSize;
         domain::Pool pool{};
         tables::Array members{};
-        if (tables::read(blob, at, pool.definitionHash) && pool.definitionHash != 0
-            && tables::read_array(
-                blob, at + kPoolEntriesOffset, kEntryClass, kEntryStride, members)) {
+        if (tables::read(blob, at + layout::PoolRow::kHash, pool.definitionHash)
+            && pool.definitionHash != 0
+            && tables::read_array(blob,
+                                  at + layout::PoolRow::kEntries,
+                                  layout::EntryRow::kClass,
+                                  layout::EntryRow::kSize,
+                                  members)) {
             pool.entries.first = static_cast<std::uint32_t>(entries_.size());
             for (std::size_t j = 0; j < members.count; ++j) {
                 const auto beforeInstructions = instructions_.size();
@@ -603,7 +657,8 @@ bool RewardBuild::load(const reader::Source& source,
                 const auto beforeSockets = sockets_.size();
                 auto failure = BankFailure::none;
                 const char* reason = nullptr;
-                if (!entry(blob, members.dataOffset + j * kEntryStride, failure, reason)) {
+                if (!entry(
+                        blob, members.dataOffset + j * layout::EntryRow::kSize, failure, reason)) {
                     // Skipping a bank failure would publish a pool missing some of its entries.
                     if (failure == BankFailure::full) {
                         settle_unsupported(reason);
@@ -643,14 +698,22 @@ bool RewardBuild::load(const reader::Source& source,
     return true;
 }
 
+/**
+ * Reads one item's acquisition flag and, for a wrapper, its pool and category selections.
+ * An acquisition flag that binds outside the account bank is counted and dropped.
+ * @param hash Item definition hash the row keeps.
+ * @param blob Item definition bytes.
+ * @param item Receives the row.
+ * @return False when a field or the wrapper block is unreadable.
+ */
 bool RewardBuild::read_item(std::uint32_t hash,
                             std::span<const std::byte> blob,
                             domain::Item& item) noexcept {
     std::uint16_t acquired = domain::kAbsent;
     std::int64_t wrapper = 0;
     std::uint32_t cls = 0;
-    if (!tables::read(blob, kWrapperField, wrapper)
-        || !tables::read(blob, kAcquiredFlagField, acquired)) {
+    if (!tables::read(blob, layout::ItemFields::kWrapper, wrapper)
+        || !tables::read(blob, layout::ItemFields::kAcquiredFlag, acquired)) {
         return false;
     }
     item.definitionHash = hash;
@@ -670,21 +733,25 @@ bool RewardBuild::read_item(std::uint32_t hash,
     if (wrapper != 0) {
         std::size_t at = 0;
         tables::Array selections{};
-        if (!tables::relative(blob, kWrapperField, at) || at < kDefinitionClassPrefixSize
-            || !tables::read(blob, at - kDefinitionClassPrefixSize, cls) || cls != kWrapperClass
-            || !tables::read(blob, at, item.poolIndex)
-            || !tables::read(blob, at + kWrapperFlagsOffset, item.flags)
-            || !tables::read_array(
-                blob, at + kWrapperSelectionsOffset, kSelectionClass, kSelectionStride, selections)
+        if (!tables::relative(blob, layout::ItemFields::kWrapper, at)
+            || !reader::layout::class_word_before(blob, at, cls)
+            || cls != layout::WrapperBlock::kClass
+            || !tables::read(blob, at + layout::WrapperBlock::kPool, item.poolIndex)
+            || !tables::read(blob, at + layout::WrapperBlock::kFlags, item.flags)
+            || !tables::read_array(blob,
+                                   at + layout::WrapperBlock::kSelections,
+                                   layout::SelectionRow::kClass,
+                                   layout::SelectionRow::kSize,
+                                   selections)
             || selections.count > item.selections.size()) {
             return false;
         }
         item.selectionCount = static_cast<std::uint8_t>(selections.count);
         for (std::size_t j = 0; j < selections.count; ++j) {
             auto& selection = item.selections[j];
-            const auto p = selections.dataOffset + j * kSelectionStride;
-            if (!tables::read(blob, p, selection.categoryHash)
-                || !tables::read(blob, p + kSelectionCountOffset, selection.count)) {
+            const auto p = selections.dataOffset + j * layout::SelectionRow::kSize;
+            if (!tables::read(blob, p + layout::SelectionRow::kCategory, selection.categoryHash)
+                || !tables::read(blob, p + layout::SelectionRow::kCount, selection.count)) {
                 return false;
             }
         }
@@ -692,6 +759,11 @@ bool RewardBuild::read_item(std::uint32_t hash,
     return true;
 }
 
+/**
+ * Sizes the dense item rows before the item walk and resets the walk's counters.
+ * @param count Rows in the installed item table.
+ * @return False after a refused load or when the rows do not fit.
+ */
 bool RewardBuild::begin_items(std::size_t count) noexcept {
     unboundAcquiredFlags_ = 0;
     discardedAcquiredFlags_ = 0;
@@ -728,6 +800,11 @@ void RewardBuild::item_unread(std::uint16_t index) noexcept {
     }
 }
 
+/**
+ * Trims item rows to the catalog, drops entries naming unread items or pools, then publishes.
+ * @param catalogItemCount Rows the published item catalog holds.
+ * @return False after a refused load, an unclean item walk, a refused graph or a failed write.
+ */
 bool RewardBuild::publish(std::size_t catalogItemCount) noexcept {
     if (!loaded_) {
         return false;

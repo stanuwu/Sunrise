@@ -15,9 +15,15 @@
 #include <vector>
 
 #include "../../../core/logging/log.h"
+#include "../../../middleware/content/packages/reader/layout.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808083.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80808d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809f.h"
 #include "../../../middleware/content/packages/tables/activity_display_name_reader.h"
 #include "../../../state/activity_sdk/runtime.h"
-#include "activity_sdk_dialogue_group_index.h"
 #include "activity_sdk_dialogue_list.h"
 #include "activity_sdk_native_pack_internal.h"
 
@@ -25,19 +31,11 @@ namespace sunrise::client::content::activity::sdk_generation::native_pack_pipeli
 namespace {
 
 namespace format = state::activity_sdk::format;
-namespace dialogue_groups = dialogue_group_index;
 namespace display = middleware::content::packages::tables::activity_display_names;
-
-template <typename Value>
-[[nodiscard]] bool
-read_value(std::span<const std::byte> bytes, std::size_t offset, Value& output) noexcept {
-    output = {};
-    if (offset > bytes.size() || sizeof output > bytes.size() - offset) {
-        return false;
-    }
-    std::memcpy(&output, bytes.data() + offset, sizeof output);
-    return true;
-}
+namespace generated = middleware::content::packages::schema::generated;
+namespace layout = middleware::content::packages::reader::layout;
+using ArrayHeader = generated::STypedArrayMarker;
+using Element = generated::DirectiveElement;
 
 /** Applies one signed blob-relative offset. @return False when the result leaves the blob. */
 [[nodiscard]] bool
@@ -82,12 +80,13 @@ void log_directive_element(std::uint32_t slotIndex,
     }
 }
 
-/** Reads one packed localized string reference: container tag, then string hash. */
+/** Reads one localized string reference: its container tag and its string hash. */
 [[nodiscard]] bool read_reference(std::span<const std::byte> bytes,
-                                  std::size_t offset,
+                                  std::size_t containerTag,
+                                  std::size_t stringHash,
                                   display::Reference& output) noexcept {
-    return read_value(bytes, offset, output.containerTag)
-           && read_value(bytes, offset + 4U, output.stringHash);
+    return read_value(bytes, containerTag, output.containerTag)
+           && read_value(bytes, stringHash, output.stringHash);
 }
 
 /** Reads one array field's data offset and count, checking its declared class and stride. */
@@ -104,7 +103,7 @@ void log_directive_element(std::uint32_t slotIndex,
     std::uint32_t classId = 0;
     std::uint32_t padding = 0;
     if (!read_value(bytes, field, rawCount) || rawCount > format::kAbsentIndex
-        || !read_value(bytes, field + 8U, relative)) {
+        || !read_value(bytes, field + layout::kArrayFieldRelative, relative)) {
         return false;
     }
     if (rawCount == 0 && relative == 0) {
@@ -112,13 +111,15 @@ void log_directive_element(std::uint32_t slotIndex,
         count = 0;
         return true;
     }
-    if (!add_relative(field + 8U, relative, header) || !read_value(bytes, header, repeated)
-        || repeated != rawCount || !read_value(bytes, header + 8U, classId)
-        || classId != expectedClass || !read_value(bytes, header + 12U, padding) || padding != 0
+    if (!add_relative(field + layout::kArrayFieldRelative, relative, header)
+        || !read_value(bytes, header, repeated) || repeated != rawCount
+        || !read_value(bytes, header + offsetof(ArrayHeader, elementClass), classId)
+        || classId != expectedClass
+        || !read_value(bytes, header + offsetof(ArrayHeader, padding), padding) || padding != 0
         || rawCount > (std::numeric_limits<std::size_t>::max)() / stride) {
         return false;
     }
-    data = header + 16U;
+    data = header + sizeof(ArrayHeader);
     count = static_cast<std::size_t>(rawCount);
     return data <= bytes.size() && count * stride <= bytes.size() - data;
 }
@@ -216,21 +217,22 @@ bool attach_combat_objective_groups(const topology_inventory::Snapshot& topology
                                     const squads::Facts& facts,
                                     PackageContext& packageContext,
                                     authored_scene::Snapshot& output) {
-    // Objective descriptors contain 40-byte groups at +136 and 40-byte tasks at group +16.
-    constexpr std::size_t kGroupsField = 136U;
-    constexpr std::size_t kTasksField = 16U;
-    constexpr std::size_t kRowStride = 40U;
-    constexpr std::uint32_t kGroupClass = 0x80807D8FU;
-    constexpr std::uint32_t kTaskClass = 0x80807D95U;
+    // Objective descriptors hold an array of groups, and each group an array of tasks.
+    constexpr std::size_t kGroupsField = offsetof(generated::ObjectiveComponentResource, groups);
+    constexpr std::size_t kTasksField = offsetof(generated::ObjectiveGroup, tasks);
+    constexpr std::size_t kRowStride = sizeof(generated::ObjectiveGroup);
+    constexpr std::uint32_t kGroupClass = generated::ObjectiveGroup::kClass;
+    constexpr std::uint32_t kTaskClass = generated::ObjectiveTask::kClass;
+    static_assert(sizeof(generated::ObjectiveTask) == kRowStride);
     std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> configs{};
     std::map<std::uint32_t, std::vector<std::uint32_t>> slots{};
     try {
         for (const squads::DescriptorFact& descriptor : facts.descriptors) {
             if (descriptor.slotIndex >= topology.slots.size()
                 || topology.slots[descriptor.slotIndex].slotType != format::kObjectiveSlotType
-                || descriptor.componentClass != format::kObjectiveComponentClass
-                || descriptor.senseSchema != format::kObjectiveSenseSchema
-                || descriptor.authSchema != format::kObjectiveAuthSchema) {
+                || descriptor.componentClass != generated::ObjectiveComponentType3::kClass
+                || descriptor.senseSchema != generated::C80807f04::kClass
+                || descriptor.authSchema != generated::C80807f0c::kClass) {
                 continue;
             }
             const std::uint64_t descriptorKey =
@@ -292,10 +294,6 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                           const squads::Facts& facts,
                           PackageContext& packageContext,
                           authored_scene::Snapshot& output) {
-    struct CachedTag final {
-        std::vector<std::byte> bytes{};
-        std::uint32_t classId{};
-    };
     std::unordered_map<std::uint32_t, CachedTag> cache{};
     auto package = [&](std::uint32_t tag, const CachedTag*& result) -> bool {
         const auto found = cache.find(tag);
@@ -334,15 +332,18 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                 continue;
             }
             const std::uint32_t slotType = topology.slots[descriptor.slotIndex].slotType;
-            if (slotType != format::kDialogueSlotType && slotType != 68U) {
+            if (slotType != format::kDialogueSlotType && slotType != format::kDirectiveSlotType) {
                 continue;
             }
             const CachedTag* config = nullptr;
             if (!package(descriptor.configTag, config) || config == nullptr) {
                 continue;
             }
-            const std::size_t field = static_cast<std::size_t>(descriptor.descriptorOffset)
-                                      + (slotType == format::kDialogueSlotType ? 0x58U : 0x5CU);
+            const std::size_t field =
+                static_cast<std::size_t>(descriptor.descriptorOffset)
+                + (slotType == format::kDialogueSlotType
+                       ? offsetof(generated::DialogueSlotDefinitionType53, authoredList)
+                       : offsetof(generated::DirectiveResourceType68, directiveTable));
             std::uint32_t resourceTag = 0;
             const CachedTag* resource = nullptr;
             if (!read_value(std::span(config->bytes), field, resourceTag)
@@ -351,7 +352,7 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             }
             const auto bytes = std::span(resource->bytes);
             if (slotType == format::kDialogueSlotType) {
-                if (resource->classId != format::kDialogueAuthoredListClass) {
+                if (resource->classId != generated::DialogueAuthoredList::kClass) {
                     continue;
                 }
                 const auto [known, firstList] =
@@ -465,63 +466,66 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                     }
                 }
             } else {
-                if (resource->classId != format::kDirectiveTableClass) {
+                if (resource->classId != generated::DirectiveTable::kClass) {
                     continue;
                 }
                 std::size_t entries = 0;
                 std::size_t entryCount = 0;
                 if (!read_array(bytes,
-                                format::kDirectiveEntryArrayOffset,
-                                format::kDirectiveEntrySize,
-                                format::kDirectiveEntryClass,
+                                offsetof(generated::DirectiveTable, directives),
+                                sizeof(generated::DirectiveEntry),
+                                generated::DirectiveEntry::kClass,
                                 entries,
                                 entryCount)) {
                     continue;
                 }
                 for (std::size_t entry = 0; entry < entryCount; ++entry) {
-                    const std::size_t row = entries + entry * format::kDirectiveEntrySize;
-                    const std::size_t elementsField = row + format::kDirectiveEntryElementsOffset;
+                    const std::size_t row = entries + entry * sizeof(generated::DirectiveEntry);
+                    const std::size_t elementsField =
+                        row + offsetof(generated::DirectiveEntry, steps.relative);
                     std::uint32_t nameHash = 0;
                     std::int64_t relative = 0;
                     std::size_t elements = 0;
                     std::uint64_t elementCount = 0;
                     std::uint32_t elementClass = 0;
-                    if (!read_value(bytes, row, nameHash)
+                    if (!read_value(
+                            bytes, row + offsetof(generated::DirectiveEntry, nameHash), nameHash)
                         || !read_value(bytes, elementsField, relative)
                         || !add_relative(elementsField, relative, elements)
                         || !read_value(bytes, elements, elementCount) || elementCount == 0
                         || elementCount > format::kAbsentIndex
-                        || !read_value(bytes, elements + 8U, elementClass)
-                        || elementClass != format::kDirectiveElementClass) {
+                        || !read_value(
+                            bytes, elements + offsetof(ArrayHeader, elementClass), elementClass)
+                        || elementClass != generated::DirectiveElement::kClass) {
                         continue;
                     }
-                    const std::size_t data = elements + 16U;
+                    const std::size_t data = elements + sizeof(ArrayHeader);
                     if (data > bytes.size()
-                        || elementCount
-                               > (bytes.size() - data) / format::kDirectiveElementPackedSize) {
+                        || elementCount > (bytes.size() - data) / sizeof(Element)) {
                         continue;
                     }
                     for (std::size_t element = 0; element < elementCount; ++element) {
-                        const std::size_t elementRow =
-                            data + element * format::kDirectiveElementPackedSize;
+                        const std::size_t elementRow = data + element * sizeof(Element);
                         AuthoredDirectiveCandidate candidate{};
                         candidate.slotIndex = descriptor.slotIndex;
                         candidate.nameHash = nameHash;
                         candidate.elementIndex = static_cast<std::int32_t>(element);
                         candidate.elementCount = static_cast<std::uint32_t>(elementCount);
                         if (!read_reference(bytes,
-                                            elementRow + format::kDirectiveElementTitleOffset,
+                                            elementRow + offsetof(Element, title),
+                                            elementRow + offsetof(Element, titleStringHash),
                                             candidate.title)
                             || !read_reference(bytes,
+                                               elementRow + offsetof(Element, description),
                                                elementRow
-                                                   + format::kDirectiveElementDescriptionOffset,
+                                                   + offsetof(Element, descriptionStringHash),
                                                candidate.description)
                             || !read_reference(bytes,
-                                               elementRow + format::kDirectiveElementProgressOffset,
+                                               elementRow + offsetof(Element, progress),
+                                               elementRow + offsetof(Element, progressStringHash),
                                                candidate.progress)
-                            || !read_value(bytes,
-                                           elementRow + format::kDirectiveElementFlagsOffset,
-                                           candidate.flags)) {
+                            || !read_value(
+                                bytes, elementRow + offsetof(Element, flags), candidate.flags)) {
                             log_directive_element(
                                 descriptor.slotIndex, nameHash, element, candidate.flags, "read");
                             continue;
@@ -698,100 +702,6 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                                                               && !directiveLess(right, left);
                                                    }),
                                        output.directiveElements.end());
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-/** Resolves the native type-53 authored list and attaches its exact bound to the SDK slot row. */
-bool attach_dialogue_cue_counts(const topology_inventory::Snapshot& topology,
-                                const squads::Facts& facts,
-                                PackageContext& packageContext,
-                                topology_enrichment::Snapshot& enrichment) {
-    if (topology.slots.size() != enrichment.slots.size()) {
-        return false;
-    }
-    struct CachedTag final {
-        std::vector<std::byte> bytes{};
-        std::uint32_t classId{};
-    };
-    std::unordered_map<std::uint32_t, CachedTag> cache{};
-    auto package = [&](std::uint32_t tag, const CachedTag*& output) -> bool {
-        output = nullptr;
-        const auto found = cache.find(tag);
-        if (found != cache.end()) {
-            output = &found->second;
-            return true;
-        }
-        CachedTag row{};
-        if (tag == 0 || tag == format::kAbsentIndex
-            || !read_tag(&packageContext, tag, row.bytes, row.classId)) {
-            return false;
-        }
-        const auto [inserted, accepted] = cache.emplace(tag, std::move(row));
-        if (!accepted) {
-            return false;
-        }
-        output = &inserted->second;
-        return true;
-    };
-
-    try {
-        cache.reserve(facts.descriptors.size());
-        for (std::uint32_t slotRow = 0; slotRow < topology.slots.size(); ++slotRow) {
-            if (topology.slots[slotRow].slotType != format::kDialogueSlotType) {
-                continue;
-            }
-            topology_enrichment::Slot& enriched = enrichment.slots[slotRow];
-            if (enriched.componentClass != format::kDialogueComponentClass
-                || enriched.authSchema != format::kDialogueAuthSchema
-                || (enriched.flags & format::kSlotSchemaJoinExact) == 0) {
-                continue;
-            }
-            std::uint64_t agreedCount = 0;
-            std::vector<dialogue_groups::Definition> agreedDefinitions{};
-            bool sawDescriptor = false;
-            bool resolved = true;
-            for (const squads::DescriptorFact& descriptor : facts.descriptors) {
-                if (descriptor.slotIndex != slotRow) {
-                    continue;
-                }
-                sawDescriptor = true;
-                const CachedTag* config = nullptr;
-                if (!package(descriptor.configTag, config) || config == nullptr) {
-                    resolved = false;
-                    break;
-                }
-                const std::size_t listField = static_cast<std::size_t>(descriptor.descriptorOffset)
-                                              + format::kDialogueAuthoredListRelativeOffset;
-                std::uint32_t listTag = 0;
-                if (!read_value(std::span(config->bytes), listField, listTag) || listTag == 0
-                    || listTag == format::kAbsentIndex) {
-                    resolved = false;
-                    break;
-                }
-                const CachedTag* authored = nullptr;
-                std::vector<dialogue_groups::Definition> definitions{};
-                if (!package(listTag, authored) || authored == nullptr
-                    || authored->classId != format::kDialogueAuthoredListClass
-                    || !dialogue_groups::definitions(authored->bytes, definitions)
-                    || definitions.empty()
-                    || (agreedCount != 0 && agreedDefinitions != definitions)) {
-                    resolved = false;
-                    break;
-                }
-                agreedCount = definitions.size();
-                agreedDefinitions = std::move(definitions);
-            }
-            if (cancelled(packageContext.cancel, packageContext.cancelContext)) {
-                return false;
-            }
-            if (resolved && sawDescriptor && agreedCount != 0) {
-                enriched.dialogueCueCount = static_cast<std::uint32_t>(agreedCount);
-                enriched.flags |= format::kSlotDialogueCuesExact;
-            }
-        }
         return true;
     } catch (...) {
         return false;

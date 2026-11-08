@@ -4,6 +4,10 @@
 #include <limits>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80802c.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80805a.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808074.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808075.h"
 #include "../../../../middleware/content/packages/tables/unlock_expression.h"
 #include "../../../../state/build_data/runtime.h"
 #include "internal.h"
@@ -132,7 +136,7 @@ bool build_records(const reader::Source& source,
         || tables::package_of(objectiveTag) == tables::kAbsentPackageId
         || !reader::read_tag(source, storage.scratch, objectiveTag, storage.objectiveTable)
         || !tables::find_array_at(std::span<const std::byte>{storage.objectiveTable},
-                                  tables::kTableArrayDescriptor,
+                                  offsetof(generated::ObjectiveTable, table),
                                   objectiveRows)
         || objectiveRows.elementClass != tables::kObjectiveRowClass
         || objectiveRows.dataOffset
@@ -152,7 +156,7 @@ bool build_records(const reader::Source& source,
                           storage.displayTable,
                           displayClass)
         || !tables::find_array_at(std::span<const std::byte>{storage.displayTable},
-                                  tables::kTableArrayDescriptor,
+                                  offsetof(generated::C80805a95, table),
                                   displayRows)
         || displayRows.elementClass != tables::kRecordDisplayRowClass
         || displayRows.dataOffset
@@ -169,7 +173,7 @@ bool build_records(const reader::Source& source,
         || tables::package_of(tableTag) == tables::kAbsentPackageId
         || !reader::read_tag(source, storage.scratch, tableTag, storage.child)
         || !tables::find_array_at(
-            std::span<const std::byte>{storage.child}, tables::kTableArrayDescriptor, rows)
+            std::span<const std::byte>{storage.child}, offsetof(generated::C80807567, table), rows)
         || rows.count == 0 || rows.count > storage.recordRows.size()
         || rows.count > displayRows.count
         || rows.dataOffset + static_cast<std::size_t>(rows.count) * tables::kRecordRowStride
@@ -206,7 +210,7 @@ bool build_records(const reader::Source& source,
         std::memcpy(&score, table.data() + at + tables::kRecordScoreOffset, sizeof score);
         // The score is held as 16 bits, so a wider field is not a score and is dropped.
         definition.scoreValue = score <= kScoreCeiling ? static_cast<std::uint16_t>(score) : 0U;
-        std::uint32_t hasTitle = 0;
+        std::uint8_t hasTitle = 0;
         std::memcpy(&hasTitle, table.data() + at + tables::kRecordHasTitleOffset, sizeof hasTitle);
         definition.hasTitle = hasTitle != 0;
         std::int16_t flagSlot = 0;
@@ -259,7 +263,8 @@ bool build_records(const reader::Source& source,
             std::uint16_t objectiveRow = 0;
             std::memcpy(&objectiveRow,
                         table.data() + objectives.dataOffset
-                            + static_cast<std::size_t>(entry) * tables::kRecordObjectiveStride,
+                            + static_cast<std::size_t>(entry) * tables::kRecordObjectiveStride
+                            + offsetof(generated::RecordObjectiveRef, objectiveRow),
                         sizeof objectiveRow);
             domain::Objective& objective = storage.recordObjectives[storage.recordObjectiveCount];
             objective = {};
@@ -280,7 +285,7 @@ bool build_records(const reader::Source& source,
             const std::size_t stepAt =
                 intervals.dataOffset
                 + static_cast<std::size_t>(entry) * tables::kRecordIntervalStride;
-            std::uint32_t objectiveRow = 0;
+            std::uint16_t objectiveRow = 0;
             std::memcpy(&objectiveRow,
                         table.data() + stepAt + tables::kRecordIntervalObjectiveRowOffset,
                         sizeof objectiveRow);
@@ -307,18 +312,18 @@ bool build_records(const reader::Source& source,
             std::memcpy(&quantity,
                         displayTable.data() + rewardAt + tables::kRecordRewardQuantityOffset,
                         sizeof quantity);
-            std::uint32_t itemIndex = 0;
+            std::uint16_t itemIndex = 0;
             std::memcpy(&itemIndex,
                         displayTable.data() + rewardAt + tables::kRecordRewardItemIndexOffset,
                         sizeof itemIndex);
             // A row the grant path cannot honour is dropped, not published as a zero grant.
             if (quantity == 0
-                || quantity > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())
-                || itemIndex > domain::kUnavailableItemIndex) {
+                || quantity
+                       > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
                 continue;
             }
-            storage.recordRewards[storage.recordRewardCount] = {
-                static_cast<std::int32_t>(quantity), static_cast<std::uint16_t>(itemIndex)};
+            storage.recordRewards[storage.recordRewardCount] = {static_cast<std::int32_t>(quantity),
+                                                                itemIndex};
             ++storage.recordRewardCount;
             ++definition.rewardCount;
         }

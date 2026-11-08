@@ -10,10 +10,15 @@
 
 namespace sunrise::server::activity::mission {
 
+/** Holds `<stem>/<stem>.lua` up to MAX_PATH; a longer path is reported empty. */
+inline constexpr std::size_t kControllerFileCapacity = 260;
+
 /** One bounded, value-owned diagnostic row for an attached mission program. */
 struct InstanceDiagnostics final {
     state::activity::SessionBinding binding{};
     std::array<char, 64> activityId{};
+    /** Controller path the program's own catalog names; a mod's row is not in the installed one. */
+    std::array<char, kControllerFileCapacity> controllerFile{};
     std::array<char, 24> programStatus{};
     std::array<char, 32> deliveryStage{};
     std::array<char, 16> lastVmStage{};
@@ -52,6 +57,8 @@ struct AttachDiagnostics final {
     /** One-based SDK activity row when resolution reached an exact activity. */
     std::uint32_t activityRow{};
     bool hasActivityRow{};
+    /** Controller path of that activity, read from the catalog that resolved it. */
+    std::array<char, kControllerFileCapacity> controllerFile{};
 };
 
 /** One fixed-capacity copy of all attached mission-program diagnostics. */
@@ -107,9 +114,6 @@ void report_squad_damage(const state::activity::SessionBinding& binding,
 
 /** Starts the server mission-script manager when its setting is enabled. */
 void initialize() noexcept;
-/** Writes the authored controller path, `<name>/<name>.lua`, for one 1-based SDK activity row. */
-[[nodiscard]] bool controller_file_name(std::uint32_t oneBasedActivityRow,
-                                        std::span<char> output) noexcept;
 /** Runs one bounded event/reducer/output slice after Activity Host ingress. */
 void service(std::uint64_t now) noexcept;
 /** Copies mission-program state without invoking Lua or changing delivery state. */

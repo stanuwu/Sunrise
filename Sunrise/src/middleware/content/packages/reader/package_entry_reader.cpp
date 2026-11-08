@@ -85,7 +85,7 @@ package_nonce(std::span<const std::byte, crypto::aes_gcm::kNonceSize> base,
                 std::span<const std::byte, crypto::aes_gcm::kKeySize>(key),
                 nonce,
                 stored,
-                std::span<const std::byte, crypto::aes_gcm::kTagSize>(record.tag),
+                std::span<const std::byte, crypto::aes_gcm::kTagSize>(record.gcmTag),
                 opened)) {
             return false;
         }

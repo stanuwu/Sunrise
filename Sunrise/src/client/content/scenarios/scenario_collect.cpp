@@ -20,6 +20,9 @@ constexpr std::string_view kNameSuffix = ":scenario_client";
 // A destination's stem is the key its spawn sets are looked up by, so the two storages must
 // agree; a shorter one here would truncate the name and find nothing.
 static_assert(layouts::kSpawnStemCapacity == state::build_data::spawn_sets::kStemNameCapacity);
+// A row copies the reader's bubble arrays whole and keeps every package the reader found.
+static_assert(packages::tables::kBubbleStateCapacity == layouts::kBubbleCapacity);
+static_assert(packages::tables::kScenarioPackageCapacity == layouts::kDestinationPackageCapacity);
 
 /**
  * Records one live scenario tag and the map stem of the package it came from.

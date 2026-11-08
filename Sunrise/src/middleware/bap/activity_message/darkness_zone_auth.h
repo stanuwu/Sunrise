@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808099.h"
 #include "../../encoding/bit_reader.h"
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
@@ -15,11 +16,12 @@
 namespace sunrise::middleware::bap::activity_message::darkness_zone {
 
 namespace fields = auth_fields;
+namespace generated = middleware::content::packages::schema::generated;
 
 // Type 35 uses this schema and fixed body size.
 inline constexpr std::uint8_t kSlotType = 35;
-inline constexpr std::uint32_t kComponentClass = 0x808099BDU;
-inline constexpr std::uint32_t kSchema = 0x808099BFU;
+inline constexpr std::uint32_t kComponentClass = generated::C808099bd::kClass;
+inline constexpr std::uint32_t kSchema = generated::C808099bf::kClass;
 inline constexpr std::size_t kBits = 359;
 inline constexpr std::size_t kBytes = 45;
 /** Native durations count 673,200 ticks per second. */

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808095.h"
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
 
@@ -13,12 +14,13 @@
 namespace sunrise::middleware::bap::activity_message::damage_monitor {
 
 namespace fields = auth_fields;
+namespace generated = middleware::content::packages::schema::generated;
 
 // Type 20 uses these component and Auth/Sense schema identities.
 inline constexpr std::uint8_t kSlotType = 20;
-inline constexpr std::uint32_t kComponentClass = 0x80809560U;
-inline constexpr std::uint32_t kAuthSchema = 0x80809563U;
-inline constexpr std::uint32_t kSenseSchema = 0x80809562U;
+inline constexpr std::uint32_t kComponentClass = generated::C80809560::kClass;
+inline constexpr std::uint32_t kAuthSchema = generated::C80809563::kClass;
+inline constexpr std::uint32_t kSenseSchema = generated::C80809562::kClass;
 /** The watched object is a type-4 object slot. */
 inline constexpr std::uint32_t kTargetSlotType = 4;
 inline constexpr std::size_t kBits = fields::kClientRefBits + 32;

@@ -1,9 +1,12 @@
+#include "../../content/packages/schema/generated/tag_classes_808000.h"
 #include "auth_schema_catalog.h"
 #include "map_generator_auth.h"
 #include "sensor_auth_update.h"
 
 namespace sunrise::middleware::bap::activity_message::sensor_auth_update {
 namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 namespace bits = encoding::bits;
 
@@ -38,17 +41,17 @@ constexpr std::uint32_t kDefaultReviveDelayHalf = 0x4200U;
 /** A packed region is bubble times eight plus the state ordinal. */
 constexpr std::uint32_t kStatesPerBubble = 8;
 /**
- * Empty map-generator body, schema `0x80805007`.
+ * Empty map-generator body.
  * Two 475-bit records, a u32, then fixed arrays of 32 and 64 u8. The fixed array lengths apply
  * even with both dynamic arrays empty; counting one byte each truncates the body by 752 bits.
  */
 constexpr std::size_t kMapGeneratorBits = map_generator_auth::kBitCount;
 /**
- * Player-monitor body, schema `0x80809532`: a slot reference then a biased i32.
+ * Player-monitor body: a slot reference then a biased i32.
  * Fixed width: no presence bit and no array, so there is exactly one legal length.
  */
 constexpr std::size_t kPlayerMonitorBits = 32 + 7 + 16 + 32;
-/** Clock window, schema `0x808099C4`: a bool, five u64 and a raw u32, every field unbiased. */
+/** Clock window: a bool, five u64 and a raw u32, every field unbiased. */
 constexpr std::size_t kClockWindowBits = 1 + 5 * 64 + 32;
 /** Words in the clock window. */
 constexpr std::size_t kClockWindowWords = 5;
@@ -91,7 +94,7 @@ constexpr std::uint32_t kRegionBias = 0x80000000;
 constexpr std::uint32_t kAwaitingClientSync = 2;
 /** Neutral runtime-i32 override that forces the type-17 waiting selector to zero. */
 constexpr std::uint32_t kWaitingSwitchKey = 0xB3C1251B;
-constexpr std::uint32_t kWaitingSwitchClass = 0x80800007;
+constexpr std::uint32_t kWaitingSwitchClass = generated::SI32Element::kClass;
 /** Type 17 carries 3 spawn overrides. Wire zero stores index -1 and disables one. */
 constexpr std::size_t kSpawnOverrideCount = 3;
 constexpr std::uint8_t kSpawnOverrideIndexWidth = 10;
@@ -190,7 +193,7 @@ constexpr std::size_t kSpawnKeyCount = 32;
 }
 
 /**
- * Writes the hard-wipe globals body, schema `0x808099BF`.
+ * Writes the hard-wipe globals body.
  * Fixed width: no presence bit, no array and no variant field, so one legal length.
  * @param writer Body writer.
  * @return True when the body fits.
@@ -204,7 +207,7 @@ constexpr std::size_t kSpawnKeyCount = 32;
 }
 
 /**
- * Writes the activity-timer body, schema `0x80809919`.
+ * Writes the activity-timer body.
  * The trailing signed word carries the same `+2^31` bias as the other signed fields here.
  * @param writer Body writer.
  * @return True when the body fits.

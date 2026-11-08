@@ -19,6 +19,7 @@
 #include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/socket_entry_list_catalog.h"
 #include "../../spawn_sets/spawn_set_catalog.h"
+#include "../../starter_sets/starter_set_catalog.h"
 #include "../../vendors/vendor_catalog.h"
 #include "validation.h"
 
@@ -136,8 +137,10 @@ template <typename Value, typename Less>
            == values.end();
 }
 
-/** @return True when every count fits the fixed storage. */
-[[nodiscard]] bool counts_fit(MutableDomains domains, const DomainCounts& counts) noexcept {
+} // namespace
+
+/** Shared by the cache reader and the domain check, so both bound the same arrays. */
+bool counts_fit(const DomainCounts& counts, MutableDomains domains) noexcept {
     return counts.named <= domains.named.size() && counts.items <= domains.items.size()
            && counts.collectibles <= domains.collectibles.size()
            && counts.materialRequirementSets <= domains.materialRequirementSets.size()
@@ -176,14 +179,13 @@ template <typename Value, typename Less>
            && counts.rewardItems <= domains.rewardItems.size()
            && counts.rewardInstructions <= domains.rewardInstructions.size()
            && counts.rewardModifiers <= domains.rewardModifiers.size()
-           && counts.rewardSockets <= domains.rewardSockets.size();
+           && counts.rewardSockets <= domains.rewardSockets.size()
+           && counts.starterSets <= domains.starterSets.size();
 }
-
-} // namespace
 
 /** Sorts every filled domain before the checks, so the written file is always the same. */
 bool canonicalize(MutableDomains domains, const DomainCounts& counts) noexcept {
-    if (!counts_fit(domains, counts)) {
+    if (!counts_fit(counts, domains)) {
         return false;
     }
     const auto objectTypes = domains.objectTypes.first(counts.objectTypes);
@@ -242,12 +244,17 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         || !strictly_ordered(domains.named, named_less) || !items::valid(domains.items)
         || !collectibles::valid(domains.collectibles)
         || !strictly_ordered(domains.collectibles, collectible_less)
-        || !rewards::valid({domains.rewardPools,
-                            domains.rewardEntries,
-                            domains.rewardItems,
-                            domains.rewardInstructions,
-                            domains.rewardModifiers,
-                            domains.rewardSockets})
+        // No pools marks a build whose reward graph was refused, so every reward bank is empty.
+        || (domains.rewardPools.empty()
+                ? !(domains.rewardEntries.empty() && domains.rewardItems.empty()
+                    && domains.rewardInstructions.empty() && domains.rewardModifiers.empty()
+                    && domains.rewardSockets.empty())
+                : !rewards::valid({domains.rewardPools,
+                                   domains.rewardEntries,
+                                   domains.rewardItems,
+                                   domains.rewardInstructions,
+                                   domains.rewardModifiers,
+                                   domains.rewardSockets}))
         || !material_requirements::valid(domains.materialRequirementSets)
         || !strictly_ordered(domains.materialRequirementSets, material_requirement_less)
         || !inventory::buckets::valid(domains.inventoryBuckets)
@@ -263,6 +270,8 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         // An empty catalog is complete: a build with no installed pass declares no reward.
         || (!domains.seasonPassRewards.empty() && !season_pass::valid(domains.seasonPassRewards))
         || !bounties::valid(domains.bounties)
+        // An empty table is complete: an installed table with another layout publishes none.
+        || !starter_sets::valid(domains.starterSets)
         || !build_data::records::valid(domains.records,
                                        domains.recordObjectives,
                                        domains.recordIntervals,
@@ -288,12 +297,13 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         return false;
     }
     // Reward rows are dense by item index, so each must name its item or be unavailable.
-    if (domains.rewardItems.size() != domains.items.size()) {
+    const bool rewardsCached = !domains.rewardItems.empty();
+    if (rewardsCached && domains.rewardItems.size() != domains.items.size()) {
         return false;
     }
     for (std::size_t index = 0; index < domains.items.size(); ++index) {
         if (domains.items[index].definitionIndex != index
-            || (domains.rewardItems[index].definitionHash != 0
+            || (rewardsCached && domains.rewardItems[index].definitionHash != 0
                 && domains.rewardItems[index].definitionHash
                        != domains.items[index].definitionHash)) {
             return false;

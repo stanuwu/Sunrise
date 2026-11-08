@@ -4,11 +4,15 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808086.h"
+
 namespace sunrise::middleware::bap::activity_message::world_globals_state {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Message type and schema the client accepts, and the fixed size of its body. */
 inline constexpr std::uint32_t kMessageType = 2;
-inline constexpr std::uint32_t kSchema = 0x8080867EU;
+inline constexpr std::uint32_t kSchema = generated::C8080867e::kClass;
 inline constexpr std::size_t kBitCount = 33;
 inline constexpr std::size_t kByteCount = 5;
 

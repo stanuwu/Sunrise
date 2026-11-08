@@ -1,7 +1,5 @@
 #pragma once
 
-#include <Windows.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -28,9 +26,6 @@ public:
     /** Reads only the root version; a missing version is zero. */
     [[nodiscard]] bool parse_version(std::uint32_t& output) noexcept;
 
-    /** @return The settings name of a supported menu toggle key, or empty when it is not one. */
-    [[nodiscard]] static std::string_view ui_toggle_key_name(UINT virtualKey) noexcept;
-
 private:
     /** Parses the Core settings object. */
     [[nodiscard]] bool core(Settings& output) noexcept;
@@ -41,6 +36,8 @@ private:
     [[nodiscard]] bool client_settings(client::Settings& output) noexcept;
     /** Parses the in-game UI boot and input policy. Keys must name a Windows key. */
     [[nodiscard]] bool client_ui_settings(ui::runtime::Settings& output) noexcept;
+    /** Parses the startup export switches. Each key may appear once and must be boolean. */
+    [[nodiscard]] bool client_exports_settings(client::Exports& output) noexcept;
     /** Parses the external-server block. Each supported key may appear at most once. */
     [[nodiscard]] bool client_external_settings(client::external::Settings& output) noexcept;
     /** Parses the standalone Server settings object. */
@@ -70,8 +67,6 @@ private:
     [[nodiscard]] static bool level_value(std::string_view name, log::Level& output) noexcept;
     /** @return Channel index for the token, or Channel::count when it names none. */
     [[nodiscard]] static std::size_t channel_index(std::string_view name) noexcept;
-    /** Maps one settings key name to a Windows SDK virtual key from the supported menu set. */
-    [[nodiscard]] static bool ui_toggle_key_value(std::string_view name, UINT& output) noexcept;
 };
 
 } // namespace sunrise::core::settings::parser

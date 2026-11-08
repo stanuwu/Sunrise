@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 #include "../../core/filesystem/path.h"
 #include "../../middleware/bap/activity_message/wire_schema/activity_communication_route.h"
@@ -134,6 +135,8 @@ public:
     [[nodiscard]] std::span<const std::byte> logical_ir_sha256() const noexcept;
     /** @return The directory that owns this mapped pack and its generated SDK children. */
     [[nodiscard]] std::wstring_view artifact_directory() const noexcept;
+    /** @return True for a pack a mod ships; its activity rows are found by name, not index. */
+    [[nodiscard]] bool from_mod() const noexcept;
     /** @return Complete borrowed string-section bytes. */
     [[nodiscard]] std::span<const std::byte> string_bytes() const noexcept;
     /** @return One validated length-owned UTF-8 string. */
@@ -253,6 +256,10 @@ public:
     authored_scene_event_keys() const noexcept;
 
 private:
+    friend bool
+    open_pack(const wchar_t* path, std::shared_ptr<Catalog>& output, Status& result) noexcept;
+    friend bool
+    load_mod_path(const wchar_t* path, std::shared_ptr<Catalog>& output, Status& result) noexcept;
     friend bool load(void* module,
                      const ExpectedIdentity& expected,
                      std::shared_ptr<Catalog>& output,
@@ -277,6 +284,7 @@ private:
     std::size_t size_{};
     const format::Header* header_{};
     core::path::Buffer artifactDirectory_{};
+    bool mod_{};
 };
 
 using Snapshot = std::shared_ptr<const Catalog>;
@@ -327,6 +335,14 @@ void shutdown() noexcept;
     std::uint32_t messageId,
     middleware::bap::activity_message::wire_schema::communication::ActivityCommunicationRoute&
         output) noexcept;
+/**
+ * Checks one catalog activity row against a live destination.
+ * An installed row must match by index and name; a mod row has no index, so by name alone.
+ */
+[[nodiscard]] bool
+destination_matches(const Catalog& catalog,
+                    const format::Activity& activityRow,
+                    const state::activity::destination::DestinationSelection& destination) noexcept;
 /** Resolves one exact live activity and scenario without exposing an action surface. */
 [[nodiscard]] Status
 resolve(Snapshot catalog, const Selection& selection, BoundView& output) noexcept;
@@ -335,6 +351,25 @@ resolve(Snapshot catalog, const Selection& selection, BoundView& output) noexcep
                                 const state::activity::SessionBinding& currentBinding,
                                 std::size_t matchingLinks,
                                 std::uint64_t currentActivityClientGeneration) noexcept;
+
+/**
+ * Maps one mod's activity SDK pack. A mod pack has no installed-build identity, so its header
+ * names its own payload digest, and only the rows a roster reads are checked.
+ */
+[[nodiscard]] bool
+load_mod_path(const wchar_t* path, std::shared_ptr<Catalog>& output, Status& result) noexcept;
+/** Replaces the mod catalogs in one step; boot publishes the packs of the loaded mods. */
+void publish_mod_catalogs(std::vector<Snapshot>&& catalogs) noexcept;
+/** @return The mod catalogs in mod load order; resolve falls back to them by activity name. */
+[[nodiscard]] std::shared_ptr<const std::vector<Snapshot>> mod_catalogs() noexcept;
+/**
+ * Reads the authored public flag of the bubble that owns one effective region of a mod scenario.
+ * A mod has no generated-world shard; its state rows carry the same authored word.
+ * @param isPublic Cleared, then receives the flag of the bubble's first state.
+ * @return True when exactly one state owns the region.
+ */
+[[nodiscard]] bool
+mod_region_is_public(const BoundView& view, std::int32_t effectiveRegion, bool& isPublic) noexcept;
 
 /** @return The activity row retained by a valid bound view. */
 [[nodiscard]] const format::Activity* bound_activity(const BoundView& view) noexcept;

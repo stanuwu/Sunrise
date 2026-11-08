@@ -52,7 +52,7 @@ std::wstring mod_directory(const Work& work, const Record& record) {
 /** @return The file of one package id's newest generation. */
 std::wstring base_path(const Work& work, const Base& base) {
     std::wstring leaf = widen({base.newest.name.data(), base.newest.nameLength});
-    leaf += kPackageExtension;
+    leaf += kPackageFileExtension;
     if (base.owner == kInstalledOwner) {
         return join(work.paths.packagesDirectory, leaf);
     }
@@ -70,7 +70,7 @@ std::wstring cache_leaf_name(std::string_view stem,
         leaf.push_back(static_cast<wchar_t>(kHexDigits[value >> kNibbleBits]));
         leaf.push_back(static_cast<wchar_t>(kHexDigits[value & kNibbleMask]));
     }
-    leaf += kPackageExtension;
+    leaf += kPackageFileExtension;
     return leaf;
 }
 
@@ -200,6 +200,7 @@ void seed_installed(internal::Work& work, std::span<const content_manifest::Row>
     work.reserved = reserved;
     work.bases.resize(internal::kPackageIdCount);
     seed_installed(work, installed);
+    internal::load_remaps(work);
     for (const std::size_t record : order) {
         internal::stage_mod(work, record);
     }
@@ -213,6 +214,7 @@ void seed_installed(internal::Work& work, std::span<const content_manifest::Row>
             result.fileCount = work.files.size();
             result.cacheLeaves = std::move(work.cacheLeaves);
             result.complete = true;
+            internal::save_remaps(work);
         }
     }
     return work.failed;

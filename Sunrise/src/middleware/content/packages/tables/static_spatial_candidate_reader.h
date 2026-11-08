@@ -5,32 +5,49 @@
 #include <cstdint>
 #include <span>
 
+#include "../schema/generated/tag_classes_808071.h"
+#include "../schema/generated/tag_classes_808096.h"
 #include "definition_index_table.h"
 
 namespace sunrise::middleware::content::packages::tables {
 
 /** Tag class of the package table whose three arrays form one spatial candidate set. */
-inline constexpr std::uint32_t kStaticSpatialTableClass = 0x8080966DU;
+inline constexpr std::uint32_t kStaticSpatialTableClass =
+    schema::generated::SStaticMeshInstances::kClass;
 /** Tag class of the paired bounds-candidate table. */
-inline constexpr std::uint32_t kStaticSpatialBoundsTableClass = 0x80809671U;
+inline constexpr std::uint32_t kStaticSpatialBoundsTableClass =
+    schema::generated::SInstanceBoundsTable::kClass;
 /** Element classes carried by the four proved array headers. */
-inline constexpr std::uint32_t kStaticSpatialTransformClass = 0x808071A3U;
-inline constexpr std::uint32_t kStaticSpatialResourceClass = 0x8080967DU;
-inline constexpr std::uint32_t kStaticSpatialRangeClass = 0x80807190U;
-inline constexpr std::uint32_t kStaticSpatialBoundsClass = 0x80809673U;
+inline constexpr std::uint32_t kStaticSpatialTransformClass =
+    schema::generated::SStaticInstanceTransform::kClass;
+inline constexpr std::uint32_t kStaticSpatialResourceClass =
+    schema::generated::SStaticInstanceResource::kClass;
+inline constexpr std::uint32_t kStaticSpatialRangeClass =
+    schema::generated::SStaticMeshInstanceGroup::kClass;
+inline constexpr std::uint32_t kStaticSpatialBoundsClass =
+    schema::generated::SInstanceBoundsRow::kClass;
 /** Array and link offsets inside the two package records. */
-inline constexpr std::size_t kStaticSpatialBoundsTagOffset = 0x18;
-inline constexpr std::size_t kStaticSpatialTransformDescriptor = 0x40;
-inline constexpr std::size_t kStaticSpatialResourceDescriptor = 0x58;
-inline constexpr std::size_t kStaticSpatialRangeDescriptor = 0x68;
-inline constexpr std::size_t kStaticSpatialBoundsDescriptor = 0x08;
-/** Row strides. Their engine meanings are still candidates. */
-inline constexpr std::size_t kStaticSpatialTransformStride = 48;
-inline constexpr std::size_t kStaticSpatialResourceStride = 4;
-inline constexpr std::size_t kStaticSpatialRangeStride = 8;
-inline constexpr std::size_t kStaticSpatialBoundsStride = 48;
+inline constexpr std::size_t kStaticSpatialBoundsTagOffset =
+    offsetof(schema::generated::SStaticMeshInstances, boundsTable);
+inline constexpr std::size_t kStaticSpatialTransformDescriptor =
+    offsetof(schema::generated::SStaticMeshInstances, instances.transforms);
+inline constexpr std::size_t kStaticSpatialResourceDescriptor =
+    offsetof(schema::generated::SStaticMeshInstances, instances.resources);
+inline constexpr std::size_t kStaticSpatialRangeDescriptor =
+    offsetof(schema::generated::SStaticMeshInstances, instances.ranges);
+inline constexpr std::size_t kStaticSpatialBoundsDescriptor =
+    offsetof(schema::generated::SInstanceBoundsTable, boxes);
+/** Row strides. */
+inline constexpr std::size_t kStaticSpatialTransformStride =
+    sizeof(schema::generated::SStaticInstanceTransform);
+inline constexpr std::size_t kStaticSpatialResourceStride =
+    sizeof(schema::generated::SStaticInstanceResource);
+inline constexpr std::size_t kStaticSpatialRangeStride =
+    sizeof(schema::generated::SStaticMeshInstanceGroup);
+inline constexpr std::size_t kStaticSpatialBoundsStride =
+    sizeof(schema::generated::SInstanceBoundsRow);
 
-/** Validated arrays and paired tag from one class-0x8080966D record. */
+/** Validated arrays and paired tag from one spatial candidate table. */
 struct StaticSpatialTable final {
     std::uint32_t boundsTag{};
     Array transforms{};
@@ -82,7 +99,7 @@ struct StaticSpatialBoundsCandidate final {
                                            std::size_t index,
                                            StaticSpatialRange& output) noexcept;
 
-/** Finds the typed row array in one class-0x80809671 record. */
+/** Finds the typed row array in one paired bounds table. */
 [[nodiscard]] bool static_spatial_bounds(std::span<const std::byte> blob, Array& output) noexcept;
 
 /** Reads one two-vector row and opaque tail from a validated paired table. */

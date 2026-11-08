@@ -88,7 +88,7 @@ static_assert(sizeof(KeyExport) == kKeyExportSize);
 
 /** Exports once at Client activation only when the startup setting requests it. */
 void export_keys_if_requested() noexcept {
-    if (!core::settings::get().client.dumpPackageKeys) {
+    if (!core::settings::get().client.exports.packageKeys) {
         return;
     }
     KeyExport payload;

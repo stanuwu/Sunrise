@@ -35,6 +35,12 @@ void unregister_client_investment_slice_consumer() noexcept;
 /** Asks for one more investment refresh slice. Does nothing while no Client is registered. */
 void request_investment_slice() noexcept;
 
+/**
+ * Grants the perks the selected character earned once the rows the walk reads are published.
+ * Takes the session lock, so the caller must hold no lock the Server takes under it.
+ */
+void grant_published_season_perks() noexcept;
+
 /** Read-only eligibility state from one exact authenticated ActivityClient link. */
 struct ActivityLinkView final {
     std::size_t matchingLinks{};
@@ -119,6 +125,8 @@ struct ActivityMissionSeedLeaseView final {
     std::uint64_t publishedRevision{};
     bool configured{};
     bool publicationPending{};
+    /** True when the roster could not build this revision's body, so it never publishes. */
+    bool publicationRefused{};
     /** True while the selection's publication deliberately waits for the client's arrival. */
     bool regionArrivalPending{};
 };

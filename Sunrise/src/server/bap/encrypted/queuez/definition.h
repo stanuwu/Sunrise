@@ -214,7 +214,9 @@ struct StagedPublication {
      * A subscribe is the only moment that root arrives, so the connection keeps the last one.
      */
     std::uint64_t socialRosterRepushRoot{};
-    /** An emblem equip left the published family-two object stale and it owes a fresh copy. */
+    /** Family-two root an unsubscribe released; nothing is owed to it after that. */
+    std::uint64_t socialRosterReleaseRoot{};
+    /** An equip, a Triumph claim or a pick of another character made the family-two copy stale. */
     bool rearmsSocialRosterRepush{};
     /** A subclass selection just staged and owes a delayed ability-icon refresh. */
     bool armsAbilityRefresh{};

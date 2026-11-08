@@ -1,51 +1,65 @@
 #include <algorithm>
 #include <optional>
 
+#include "../reader/typed_array.h"
+#include "../schema/generated/tag_layout_808001_0.h"
+#include "../schema/generated/tag_layout_80809e_1.h"
 #include "../tables/definition_index_table.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::table_merge::internal {
 namespace {
 
+using schema::generated::ManifestGroup;
+using schema::generated::PackageManifest;
+
 /** Manifest fields; an offset field is relative to its own position. */
 struct ManifestField final {
-    // Offsets from the manifest start.
-    static constexpr std::size_t kSize = 0x00;
-    static constexpr std::size_t kOwnTag = 0x08;
-    static constexpr std::size_t kRootTag = 0x0C;
-    static constexpr std::size_t kGroupCount = 0x10;
-    static constexpr std::size_t kGroupArray = 0x18;
-    static constexpr std::size_t kKeyCount = 0x20;
-    static constexpr std::size_t kKeyArray = 0x28;
+    // Package manifest layout.
+    static constexpr std::size_t kSize = offsetof(PackageManifest, tagSize);
+    static constexpr std::size_t kOwnTag = offsetof(PackageManifest, selfTag);
+    static constexpr std::size_t kRootTag = offsetof(PackageManifest, rootTag);
+    static constexpr std::size_t kGroupCount =
+        offsetof(PackageManifest, fragment.manifestArray.count);
+    static constexpr std::size_t kGroupArray =
+        offsetof(PackageManifest, fragment.manifestArray.relative);
+    static constexpr std::size_t kKeyCount = offsetof(PackageManifest, fragment.keyCount.count);
+    static constexpr std::size_t kKeyArray = offsetof(PackageManifest, fragment.keyCount.relative);
     /** The reader needs the key offset field whole. */
-    static constexpr std::size_t kMinimumSize = kKeyArray + sizeof(std::int64_t);
+    static constexpr std::size_t kMinimumSize = sizeof(PackageManifest);
 };
 
-/** Fields of one 40-byte group row, sorted by package id. */
+/** Fields of one group row, sorted by package id. */
 struct GroupField final {
-    // Offsets from the group row start.
-    static constexpr std::size_t kPackageId = 0;
-    static constexpr std::size_t kBitmapCount = 8;
-    static constexpr std::size_t kBitmap = 16;
-    static constexpr std::size_t kListCount = 24;
-    static constexpr std::size_t kList = 32;
-    static constexpr std::size_t kSize = 40;
+    // Manifest group row layout.
+    static constexpr std::size_t kPackageId = offsetof(ManifestGroup, packageId);
+    static constexpr std::size_t kBitmapCount =
+        offsetof(ManifestGroup, bitArray.normalizeFlags.count);
+    static constexpr std::size_t kBitmap =
+        offsetof(ManifestGroup, bitArray.normalizeFlags.relative);
+    static constexpr std::size_t kListCount = offsetof(ManifestGroup, indexArray.count);
+    static constexpr std::size_t kList = offsetof(ManifestGroup, indexArray.relative);
+    static constexpr std::size_t kSize = sizeof(ManifestGroup);
 };
 
 /** Group rows, bitmaps and entry lists are typed arrays. */
 using ArrayField = reader::layout::TypedArrayHeader;
 
 /** Element class of the group rows. */
-constexpr std::uint32_t kGroupClass = 0x80809EFBU;
+constexpr std::uint32_t kGroupClass = ManifestGroup::kClass;
 /** Element classes of the bitmap words and the u16 entry lists. */
 constexpr std::uint32_t kBitmapClass = reader::layout::kU32ArrayClass;
+constexpr std::size_t kBitmapWordSize = sizeof(schema::generated::U32ArrayRow);
 constexpr std::uint32_t kEntryListClass = reader::layout::kU16ArrayClass;
+/** One entry-list row is a u16 entry index. */
+constexpr std::size_t kEntryListWordSize = sizeof(schema::generated::SU16Element);
+static_assert(kEntryListWordSize == sizeof(std::uint16_t));
 /** Entry indices keep 13 bits, the package entry limit. */
 constexpr std::uint32_t kEntryMask = reader::layout::kTagEntryMask;
 /** Bits in one bitmap word. */
 constexpr std::uint32_t kWordBits = 32;
 /** Bytes of one record key. */
-constexpr std::size_t kKeySize = 8;
+constexpr std::size_t kKeySize = sizeof(schema::generated::C8080013d);
 /** Manifest arrays start on 8-byte boundaries. */
 constexpr std::size_t kArrayAlignment = 8;
 
@@ -70,34 +84,27 @@ struct Group final {
     return array;
 }
 
-/**
- * The bitmap count is a u32, so its descriptor is not a typed array descriptor.
- * @return Where the bitmap words start, when the header matches and the words fit.
- */
+/** @return Where the bitmap words start, when the header matches and the words fit. */
 [[nodiscard]] std::optional<std::size_t>
-bitmap_words(std::span<const std::byte> data, std::size_t row, std::uint32_t words) noexcept {
+bitmap_words(std::span<const std::byte> data, std::size_t row, std::uint64_t words) noexcept {
     const std::size_t field = row + GroupField::kBitmap;
     const auto relative = load<std::int64_t>(data, field);
     if (relative < -static_cast<std::int64_t>(field)
         || relative > static_cast<std::int64_t>(data.size())) {
         return std::nullopt;
     }
-    const auto header = static_cast<std::uint64_t>(static_cast<std::int64_t>(field) + relative);
-    const std::uint64_t size = ArrayField::kSize + std::uint64_t{words} * sizeof(std::uint32_t);
-    if (header < ArrayField::kMarkerBack || header > data.size() || size > data.size() - header
-        || load<std::uint32_t>(data, header - ArrayField::kMarkerBack)
-               != reader::layout::kTableArrayMarker
-        || load<std::uint64_t>(data, header + ArrayField::kCount) != words
-        || load<std::uint32_t>(data, header + ArrayField::kClass) != kBitmapClass) {
+    const auto header = static_cast<std::size_t>(static_cast<std::int64_t>(field) + relative);
+    reader::TypedArrayRows rows{};
+    if (!reader::read_typed_array(data, header, words, kBitmapClass, kBitmapWordSize, rows)) {
         return std::nullopt;
     }
-    return static_cast<std::size_t>(header + ArrayField::kSize);
+    return rows.data;
 }
 
 /** @return True after adding every entry the group's bitmap marks. */
 [[nodiscard]] bool
 read_bitmap(std::span<const std::byte> data, std::size_t row, std::vector<std::uint16_t>& out) {
-    const auto words = load<std::uint32_t>(data, row + GroupField::kBitmapCount);
+    const auto words = load<std::uint64_t>(data, row + GroupField::kBitmapCount);
     if (load<std::int64_t>(data, row + GroupField::kBitmap) == 0) {
         return words == 0;
     }
@@ -105,9 +112,9 @@ read_bitmap(std::span<const std::byte> data, std::size_t row, std::vector<std::u
     if (!first) {
         return false;
     }
-    for (std::uint32_t word = 0; word < words; ++word) {
+    for (std::uint64_t word = 0; word < words; ++word) {
         const auto bits =
-            load<std::uint32_t>(data, *first + std::size_t{word} * sizeof(std::uint32_t));
+            load<std::uint32_t>(data, *first + static_cast<std::size_t>(word) * kBitmapWordSize);
         for (std::uint32_t bit = 0; bit < kWordBits; ++bit) {
             const std::uint64_t entry = std::uint64_t{word} * kWordBits + bit;
             if ((bits & (1U << bit)) == 0) {
@@ -127,13 +134,13 @@ read_bitmap(std::span<const std::byte> data, std::size_t row, std::vector<std::u
 [[nodiscard]] bool
 read_list(std::span<const std::byte> data, std::size_t row, std::vector<std::uint16_t>& out) {
     const auto list =
-        array_at(data, row + GroupField::kListCount, kEntryListClass, sizeof(std::uint16_t));
+        array_at(data, row + GroupField::kListCount, kEntryListClass, kEntryListWordSize);
     if (!list || list->count > std::uint64_t{kEntryMask} + 1) {
         return false;
     }
     for (std::uint64_t i = 0; i < list->count; ++i) {
         out.push_back(static_cast<std::uint16_t>(
-            load<std::uint16_t>(data, list->dataOffset + i * sizeof(std::uint16_t)) & kEntryMask));
+            load<std::uint16_t>(data, list->dataOffset + i * kEntryListWordSize) & kEntryMask));
     }
     return true;
 }
@@ -174,8 +181,7 @@ void write_list(std::span<std::byte> data,
     store<std::uint64_t>(data, header + ArrayField::kCount, entries.size());
     store<std::uint32_t>(data, header + ArrayField::kClass, kEntryListClass);
     for (std::size_t i = 0; i < entries.size(); ++i) {
-        store<std::uint16_t>(
-            data, header + ArrayField::kSize + i * sizeof(std::uint16_t), entries[i]);
+        store<std::uint16_t>(data, header + ArrayField::kSize + i * kEntryListWordSize, entries[i]);
     }
 }
 
@@ -229,7 +235,7 @@ struct Link final {
     const auto listHeader = static_cast<std::size_t>(
         align(data.size() + GroupField::kSize, kArrayAlignment) + ArrayField::kSize);
     std::vector<std::byte> result(listHeader + ArrayField::kSize
-                                  + entries.size() * sizeof(std::uint16_t));
+                                  + entries.size() * kEntryListWordSize);
     std::copy_n(data.begin(), insert, result.begin());
     std::copy(data.begin() + static_cast<std::ptrdiff_t>(insert),
               data.end(),
@@ -250,7 +256,8 @@ struct Link final {
     write_list(result, listHeader, entries);
     store<std::int64_t>(result, ManifestField::kGroupCount, count + 1);
     store<std::int64_t>(result, header + ArrayField::kCount, count + 1);
-    store<std::uint64_t>(result, ManifestField::kSize, result.size());
+    static_assert(ManifestField::kSize == 0);
+    reader::layout::write_size_word(result);
     data = std::move(result);
     return Status::ok;
 }
@@ -288,8 +295,8 @@ struct Link final {
         array->dataOffset + static_cast<std::size_t>(found - groups.begin()) * GroupField::kSize;
     const auto header =
         static_cast<std::size_t>(align(data.size() + ArrayField::kMarkerBack, kArrayAlignment));
-    data.resize(header + ArrayField::kSize + combined.size() * sizeof(std::uint16_t));
-    store<std::uint32_t>(data, row + GroupField::kBitmapCount, 0);
+    data.resize(header + ArrayField::kSize + combined.size() * kEntryListWordSize);
+    store<std::uint64_t>(data, row + GroupField::kBitmapCount, 0);
     store<std::int64_t>(data, row + GroupField::kBitmap, 0);
     store<std::int64_t>(
         data, row + GroupField::kListCount, static_cast<std::int64_t>(combined.size()));

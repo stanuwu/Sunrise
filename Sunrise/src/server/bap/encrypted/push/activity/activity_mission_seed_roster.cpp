@@ -394,8 +394,7 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
     const state::activity::membership::ClientPlacement placement =
         client_placement(session, refresh);
     const std::int32_t heldRegion = state::activity::membership::instantiated_region(placement);
-    // The public link keeps its own bubble loaded and never instantiates the selected region,
-    // so the window also closes on the link that reports one.
+    // The reporting link's region is logged only; it never closes this link's window.
     const std::int32_t liveRegion = state::activity::membership::instantiated_region(
         state::activity::membership::reported_placement(
             state::activity::membership::live_region_session(state::activity::kAbsentSessionId)));
@@ -563,12 +562,9 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
     // once the client reports holding it, and the published set never shrinks afterward.
     bool publicRegion = false;
     {
-        sdk::generated_world::GeneratedWorldView worldView{};
         bool isPublic = false;
-        if (sdk::generated_world::resolve(view, worldView)
-                == sdk::generated_world::BindStatus::ready
-            && sdk::generated_world::region_is_public(
-                worldView, static_cast<std::int32_t>(selectedRegion), isPublic)) {
+        if (sdk::generated_world::region_is_public(
+                view, static_cast<std::int32_t>(selectedRegion), isPublic)) {
             publicRegion = isPublic;
         }
     }
@@ -650,6 +646,8 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
     // Canonical assembly can inherit the previous state's active key. Replace every mission-owned
     // key in place before adding the selected set; retaining definitions must not retain
     // activation.
+    std::array<std::uint32_t, message::kBubbleKeyCapacity> retiredKeys{};
+    std::size_t retiredCount = 0;
     for (std::size_t blockIndex = 0; blockIndex < snapshot.roster.bubbleSubBlocks.size();
          ++blockIndex) {
         const message::BubbleSubBlock& sourceBlock = snapshot.roster.bubbleSubBlocks[blockIndex];
@@ -668,12 +666,10 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
                 }
             }
             if (managed && !active) {
-                // Removal is a cleared presence bit at the old key ordinal, not omission.
-                for (std::size_t group = 0; group < snapshot.roster.groupCount; ++group) {
-                    if (snapshot.roster.groups[group].key == key) {
-                        snapshot.roster.groups[group].retired = true;
-                    }
+                if (retiredCount >= retiredKeys.size()) {
+                    return refuse_seed("managed_key_capacity");
                 }
+                retiredKeys[retiredCount++] = key;
             }
             if (retainedCount >= scratch.rosterSubBlockKeys[blockIndex].size()) {
                 return refuse_seed("managed_key_capacity");
@@ -746,6 +742,15 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
             return refuse_seed("append_group");
         }
         snapshot.roster.groups[position].missionSeedOnly = true;
+    }
+    // Removal is a cleared presence bit at the old key ordinal, not omission. Mark after the
+    // append, so a retired key whose group was not canonical is cleared too.
+    for (std::size_t group = 0; group < snapshot.roster.groupCount; ++group) {
+        for (std::size_t index = 0; index < retiredCount; ++index) {
+            if (snapshot.roster.groups[group].key == retiredKeys[index]) {
+                snapshot.roster.groups[group].retired = true;
+            }
+        }
     }
     for (std::size_t index = 0; index < activationCount; ++index) {
         if (!append_bubble_key(

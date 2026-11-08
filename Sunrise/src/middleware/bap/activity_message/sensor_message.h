@@ -4,13 +4,16 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80809c.h"
 #include "definition.h"
 
 namespace sunrise::middleware::bap::activity_message::sensor_message {
 
+namespace generated = middleware::content::packages::schema::generated;
+
 /** Message type and the schemas the client accepts for the sensor envelope. */
 inline constexpr std::uint32_t kMessageType = 7;
-inline constexpr std::uint32_t kClientReferenceSchema = 0x80809C42U;
+inline constexpr std::uint32_t kClientReferenceSchema = generated::ClientRef::kClass;
 /** All-ones names no selected body; the client then reads only the short header. */
 inline constexpr std::uint32_t kAbsentSchema = 0xFFFFFFFFU;
 /** Header sizes with and without a selected body, in bits then bytes. */

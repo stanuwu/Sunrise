@@ -25,7 +25,7 @@
 
 namespace sunrise::client::content::activity::sdk_generation::worker_internal {
 
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 namespace manifest = state::activity_sdk::generated_world::manifest;
 namespace package_reader = middleware::content::packages::reader;
 namespace catalog = state::build_data::scriptables;
@@ -47,7 +47,7 @@ struct Scenario final {
 struct Work final {
     void* module{};
     package_reader::BlockKeys keys{};
-    generated::Digest sourceFingerprint{};
+    generated_world::Digest sourceFingerprint{};
     std::wstring packageDirectory{};
     std::wstring sdkDirectory{};
     std::wstring scenarioDirectory{};
@@ -75,7 +75,7 @@ struct Work final {
     std::vector<state::build_data::hash_names::Name> installedHashNames{};
     /** Tables the scenario builds read. Null members read the ones State publishes. */
     builder::BuildTables tables{};
-    generated::Digest payloadSha256{};
+    generated_world::Digest payloadSha256{};
     std::uint64_t packBytes{};
     std::uint32_t luaFiles{};
     OfflineBuildResult* offlineResult{};
@@ -144,19 +144,19 @@ void publish_progress(state::activity_sdk::generation::Status status,
 /** Formats the content-addressed path for one exact scenario payload. */
 [[nodiscard]] bool shard_path(const std::wstring& directory,
                               std::uint32_t scenarioTag,
-                              const generated::Digest& digest,
+                              const generated_world::Digest& digest,
                               std::wstring& output) noexcept;
 
 /** Reopens one full shard into caller-owned snapshot storage. */
 [[nodiscard]] bool load_record(const std::wstring& scenarioDirectory,
-                               const generated::Digest& sourceFingerprint,
+                               const generated_world::Digest& sourceFingerprint,
                                const Scenario& scenario,
                                const manifest::Record& record,
                                catalog::Snapshot& output) noexcept;
 
 /** Reopens one full shard under shared immutable ownership. */
 [[nodiscard]] bool load_full_record(const std::wstring& scenarioDirectory,
-                                    const generated::Digest& sourceFingerprint,
+                                    const generated_world::Digest& sourceFingerprint,
                                     const Scenario& scenario,
                                     const manifest::Record& record,
                                     std::shared_ptr<const catalog::Snapshot>& output) noexcept;

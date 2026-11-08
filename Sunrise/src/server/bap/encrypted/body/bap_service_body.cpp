@@ -255,6 +255,7 @@ bool process(const ServiceRoute& route,
         }
         outcome.hasSubscription = webOutcome.hasSubscription;
         outcome.hasRecordClaim = webOutcome.hasRecordClaim;
+        outcome.selectionMoved = webOutcome.selectionMoved;
         outcome.hasArtifactReset = webOutcome.hasArtifactReset;
         outcome.artifactReset = webOutcome.artifactReset;
         outcome.subscription = webOutcome.subscription;
@@ -316,6 +317,10 @@ bool process(const ServiceRoute& route,
             }
             transaction->pending =
                 web_service::take_mutation<state::PendingArtifactPurchase>(webOutcome);
+            // The purchase publishes the character only, so perks it earned need the image.
+            if (transaction->pending != nullptr && transaction->pending->perksEarned) {
+                sunrise::server::bap::arm_account_resync_everywhere();
+            }
         }
         const auto* settingsUpdate =
             web_service::mutation_if<state::PendingSettingsUpdate>(webOutcome);
@@ -636,6 +641,10 @@ bool process(const ServiceRoute& route,
                 && queuez::stage_select_character(
                     queuezState, webOutcome.selectedCharacterSoid, *selectCharacter)) {
                 outcome.hasSelectCharacter = true;
+                // A patched account carries no flags, so perks the pick earned need the image.
+                if (webOutcome.selectionEarnedPerks && selectCharacter->patchAccount) {
+                    sunrise::server::bap::arm_account_resync_everywhere();
+                }
             } else {
                 clear_transaction(outcome);
                 sunrise::server::bap::arm_account_resync_everywhere();

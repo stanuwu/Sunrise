@@ -239,6 +239,7 @@ bool draw(bool interfaceEnabled) noexcept {
         position.y += size.y + gap;
         drawn = true;
     }
+    // The hint's switch and layout row live at its own overlay index.
     constexpr auto hintIndex = static_cast<std::size_t>(Overlay::startupHint);
     if (g_enabled[hintIndex]) {
         const float progress = overlays::startup_hint::progress();

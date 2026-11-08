@@ -29,4 +29,10 @@ void remove_stale_siblings(const wchar_t* finalPath) noexcept;
  */
 [[nodiscard]] bool publish_sibling(const wchar_t* temporaryPath, const wchar_t* finalPath) noexcept;
 
+/**
+ * Writes `bytes` to a sibling, flushes it, then publishes it as `finalPath`.
+ * @return True when `bytes` is the complete file on disk.
+ */
+[[nodiscard]] bool replace_file(std::wstring_view finalPath, std::string_view bytes) noexcept;
+
 } // namespace sunrise::core::path

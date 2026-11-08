@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -46,4 +47,49 @@ relative(std::span<const std::byte> bytes, std::size_t field, std::size_t& targe
     return target < bytes.size();
 }
 
+/**
+ * Adds a signed self-relative offset to its field's position without overflow.
+ * @param base Offset of the field that holds the relative value.
+ * @param relative Signed distance from that field.
+ * @param output Receives the target offset; unchanged on failure.
+ * @return False when the sum overflows or is negative.
+ */
+[[nodiscard]] inline bool
+relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) noexcept {
+    // Signed range the addition must stay inside.
+    constexpr std::int64_t kMaximum = (std::numeric_limits<std::int64_t>::max)();
+    constexpr std::int64_t kMinimum = (std::numeric_limits<std::int64_t>::min)();
+    if (base > static_cast<std::size_t>(kMaximum)) {
+        return false;
+    }
+    const auto signedBase = static_cast<std::int64_t>(base);
+    if ((relative > 0 && signedBase > kMaximum - relative)
+        || (relative < 0 && signedBase < kMinimum - relative)) {
+        return false;
+    }
+    const std::int64_t target = signedBase + relative;
+    if (target < 0) {
+        return false;
+    }
+    output = static_cast<std::size_t>(target);
+    return true;
+}
+/**
+ * Reads float lanes without imposing alignment on package bytes.
+ * @param output Receives the lanes; zeroed on failure.
+ * @return False when a lane lies outside the blob.
+ */
+template <std::size_t Size>
+[[nodiscard]] bool read_vector(std::span<const std::byte> blob,
+                               std::size_t offset,
+                               std::array<float, Size>& output) noexcept {
+    output = {};
+    for (std::size_t lane = 0; lane < Size; ++lane) {
+        if (!read(blob, offset + lane * sizeof(float), output[lane])) {
+            output = {};
+            return false;
+        }
+    }
+    return true;
+}
 } // namespace sunrise::middleware::content::packages::tables

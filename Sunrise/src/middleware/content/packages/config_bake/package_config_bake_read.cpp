@@ -118,7 +118,7 @@ struct Range final {
         if (!tables::read_exact(input.file.get(), record.offset, bytes)) {
             return Status::unreadable;
         }
-        if (!digest(bytes, record.opaque)) {
+        if (!digest(bytes, record.sha1)) {
             return Status::source;
         }
     }

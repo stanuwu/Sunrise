@@ -13,6 +13,7 @@
 #include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/named_tags.h"
 #include "../../../middleware/content/packages/reader/parallel.h"
+#include "../../../middleware/content/packages/schema/generated/tag_layout_80809c_0.h"
 #include "../../../state/build_data/runtime.h"
 #include "hash_name_matcher.h"
 
@@ -28,7 +29,7 @@ namespace reader = middleware::content::packages::reader;
  * Its blobs end with the object's own id, and a bubble name is usually one token of it.
  * This class gives all but a handful of the names the packages can produce.
  */
-constexpr std::uint32_t kNamedObjectClass = 0x80809C36U;
+constexpr std::uint32_t kNamedObjectClass = packages::schema::generated::SEntityConfig::kClass;
 
 /** @param context Pass storage. @param tag Swept tag. @return True when the tag fits. */
 [[nodiscard]] bool collect_tag(void* context, std::uint32_t tag) noexcept {

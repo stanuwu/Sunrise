@@ -7,12 +7,20 @@
 #include <string_view>
 #include <vector>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808088.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809b.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809f.h"
 #include "../../../state/activity_sdk/squad_profiles.h"
 #include "activity_sdk_actor_rsat_inventory_internal.h"
 #include "activity_sdk_actor_sequences.h"
 
 namespace sunrise::client::content::activity::sdk_generation::actor_rsat_inventory {
 namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
+
+/** A typed array's rows follow its header. */
+constexpr std::size_t kHeaderSize = reader::layout::TypedArrayHeader::kSize;
 
 #include "activity_sdk_actor_engine_semantics.inc"
 
@@ -63,10 +71,13 @@ namespace {
                                       std::uint32_t data) noexcept {
     std::size_t expected = 0;
     return relative != 0
-           && relative_offset(static_cast<std::size_t>(field) + 8U, relative, expected)
+           && relative_offset(static_cast<std::size_t>(field) + reader::layout::kArrayFieldRelative,
+                              relative,
+                              expected)
            && expected <= (std::numeric_limits<std::uint32_t>::max)()
            && header == static_cast<std::uint32_t>(expected)
-           && header <= (std::numeric_limits<std::uint32_t>::max)() - 16U && data == header + 16U;
+           && header <= (std::numeric_limits<std::uint32_t>::max)() - kHeaderSize
+           && data == header + kHeaderSize;
 }
 
 } // namespace
@@ -363,12 +374,15 @@ bool validate(const Snapshot& snapshot) noexcept {
         const RsatField& field = snapshot.fields[index];
         std::uint32_t handle = 0;
         std::uint32_t parameter14 = 0;
-        std::uint32_t parameter18 = 0;
+        std::int64_t childCount = 0;
         std::uint64_t decodedOffset = 0;
-        std::memcpy(&handle, field.rawRow.data() + 0x10U, sizeof handle);
-        std::memcpy(&parameter14, field.rawRow.data() + 0x14U, sizeof parameter14);
-        std::memcpy(&parameter18, field.rawRow.data() + 0x18U, sizeof parameter18);
-        std::memcpy(&decodedOffset, field.rawRow.data() + 0x20U, sizeof decodedOffset);
+        std::memcpy(&handle, field.rawRow.data() + kFieldRawU32At10Offset, sizeof handle);
+        std::memcpy(&parameter14, field.rawRow.data() + kFieldRepeatOffset, sizeof parameter14);
+        std::memcpy(
+            &childCount, field.rawRow.data() + kFieldChildrenCountOffset, sizeof childCount);
+        std::memcpy(&decodedOffset,
+                    field.rawRow.data() + kFieldChildrenRelativeOffset,
+                    sizeof decodedOffset);
         const std::uint32_t expectedFlags =
             format::kSobjectRsatFieldBindingExact
             | (handle != format::kAbsentIndex ? format::kSobjectRsatFieldBindingHasRuntimeSchema
@@ -385,7 +399,8 @@ bool validate(const Snapshot& snapshot) noexcept {
             runtime = &*found;
         }
         if (binding.rsatFieldIndex != index || binding.runtimeSchemaHandle != handle
-            || binding.parameter14 != parameter14 || binding.parameter18 != parameter18
+            || binding.parameter14 != parameter14
+            || static_cast<std::int64_t>(binding.parameter18) != childCount
             || binding.decodedOffset != decodedOffset
             || (runtime != nullptr
                 && (binding.definitionClass != runtime->definitionClass
@@ -416,7 +431,7 @@ bool validate(const Snapshot& snapshot) noexcept {
                                   actor.descriptorArrayRelative,
                                   actor.descriptorArrayHeaderOffset,
                                   actor.descriptorArrayDataOffset)
-            && actor.descriptorElementClass == format::kActorRsatDescriptorClass;
+            && actor.descriptorElementClass == generated::RsatDescriptor::kClass;
         if (!format_actor_id(actor.definitionTag, expectedId) || !same_text(actor.id, expectedId)
             || is_absent_tag(actor.definitionTag)
             || (actorIndex != 0
@@ -427,9 +442,8 @@ bool validate(const Snapshot& snapshot) noexcept {
                 && (profile.behaviorConfigClass != format::kAbsentIndex
                     || profile.behaviorProvenance != format::ActorSemanticProvenance::notPresent))
             || (!is_absent_tag(profile.behaviorConfigTag)
-                && (profile.behaviorConfigClass != format::kActorBehaviorConfigClass
+                && (profile.behaviorConfigClass != generated::SEntityConfig::kClass
                     || profile.behaviorProvenance != format::ActorSemanticProvenance::packageField))
-            || profile.behaviorConfigOffset != kActorBehaviorConfigOffset
             || profile.defaultFaction != 0
             || profile.factionProvenance != format::ActorSemanticProvenance::engineZeroDefault
             || profile.flags != format::kActorBehaviorProfileExact
@@ -446,7 +460,7 @@ bool validate(const Snapshot& snapshot) noexcept {
                     || actor.descriptors.count != 0 || actor.dynamicPresenceTailCount != 0))
             || (!absentRsat
                 && (actor.rsatReverseDefinitionTag != actor.definitionTag
-                    || actor.descriptorArrayOffset != format::kActorRsatDescriptorArrayOffset
+                    || actor.descriptorArrayOffset != kRsatDescriptorArrayOffset
                     || (!nullArray && !typedArray)
                     || (nullArray
                         && (actor.descriptorArrayHeaderOffset != format::kAbsentIndex
@@ -470,20 +484,20 @@ bool validate(const Snapshot& snapshot) noexcept {
             Text expectedDescriptorId{};
             const bool eligible =
                 (descriptor.flags & format::kRsatDescriptorDynamicPresenceEligible) != 0;
-            const std::uint64_t offset =
-                static_cast<std::uint64_t>(actor.descriptorArrayDataOffset)
-                + static_cast<std::uint64_t>(ordinal) * format::kRsatDescriptorRawRowSize;
+            const std::uint64_t offset = static_cast<std::uint64_t>(actor.descriptorArrayDataOffset)
+                                         + static_cast<std::uint64_t>(ordinal) * kDescriptorStride;
             std::uint32_t rawComponent = 0;
             std::uint32_t rawSchema = 0;
             std::memcpy(&rawComponent, descriptor.rawRow.data(), sizeof rawComponent);
-            std::memcpy(&rawSchema, descriptor.rawRow.data() + 4U, sizeof rawSchema);
+            std::memcpy(
+                &rawSchema, descriptor.rawRow.data() + kDescriptorSchemaOffset, sizeof rawSchema);
             if (!format_descriptor_id(actor.rsatTag, ordinal, expectedDescriptorId)
                 || !same_text(descriptor.id, expectedDescriptorId)
                 || descriptor.actorClassIndex != actorIndex || descriptor.rsatTag != actor.rsatTag
                 || descriptor.descriptorOrdinal != ordinal
                 || offset > (std::numeric_limits<std::uint32_t>::max)()
                 || descriptor.descriptorOffset != static_cast<std::uint32_t>(offset)
-                || descriptor.descriptorElementClass != format::kActorRsatDescriptorClass
+                || descriptor.descriptorElementClass != generated::RsatDescriptor::kClass
                 || descriptor.schemaIndex >= snapshot.schemas.size()
                 || (descriptor.flags & ~format::kRsatDescriptorFlagMask) != 0
                 || descriptor.componentTag != rawComponent || descriptor.schemaTag != rawSchema
@@ -521,11 +535,11 @@ bool validate(const Snapshot& snapshot) noexcept {
                                                    rsat.descriptorArrayRelative,
                                                    rsat.descriptorArrayHeaderOffset,
                                                    rsat.descriptorArrayDataOffset)
-                                && rsat.descriptorElementClass == format::kActorRsatDescriptorClass;
+                                && rsat.descriptorElementClass == generated::RsatDescriptor::kClass;
         if (is_absent_tag(rsat.rsatTag)
             || (rsatIndex != 0 && snapshot.sobjectRsats[rsatIndex - 1U].rsatTag >= rsat.rsatTag)
             || is_absent_tag(rsat.reverseDefinitionTag)
-            || rsat.descriptorArrayOffset != format::kActorRsatDescriptorArrayOffset
+            || rsat.descriptorArrayOffset != kRsatDescriptorArrayOffset
             || (!nullArray && !typedArray)
             || (nullArray
                 && (rsat.descriptorArrayHeaderOffset != format::kAbsentIndex
@@ -545,11 +559,12 @@ bool validate(const Snapshot& snapshot) noexcept {
                 snapshot.sobjectRsatDescriptors[sobjectDescriptorCursor + ordinal];
             const std::uint64_t expectedOffset =
                 static_cast<std::uint64_t>(rsat.descriptorArrayDataOffset)
-                + static_cast<std::uint64_t>(ordinal) * format::kRsatDescriptorRawRowSize;
+                + static_cast<std::uint64_t>(ordinal) * kDescriptorStride;
             std::uint32_t rawComponent = 0;
             std::uint32_t rawSchema = 0;
             std::memcpy(&rawComponent, descriptor.rawRow.data(), sizeof rawComponent);
-            std::memcpy(&rawSchema, descriptor.rawRow.data() + 4U, sizeof rawSchema);
+            std::memcpy(
+                &rawSchema, descriptor.rawRow.data() + kDescriptorSchemaOffset, sizeof rawSchema);
             const bool eligible =
                 (descriptor.flags & format::kSobjectRsatDescriptorDynamicPresenceEligible) != 0;
             if (descriptor.rsatIndex != rsatIndex || descriptor.descriptorOrdinal != ordinal
@@ -591,15 +606,15 @@ bool validate(const Snapshot& snapshot) noexcept {
                                                    schema.fieldArrayRelative,
                                                    schema.fieldArrayHeaderOffset,
                                                    schema.fieldArrayDataOffset)
-                                && schema.fieldElementClass == format::kActorRsatSchemaFieldClass;
+                                && schema.fieldElementClass == generated::RsatSchemaField::kClass;
         if (!format_schema_id(schema.schemaTag, expectedId) || !same_text(schema.id, expectedId)
             || is_absent_tag(schema.schemaTag)
             || (schemaIndex != 0
                 && snapshot.schemas[schemaIndex - 1U].schemaTag >= schema.schemaTag)
-            || schema.schemaClass != format::kActorRsatSchemaClass
+            || schema.schemaClass != generated::SReplicationSchema::kClass
             || schema.fieldCount != schema.fields.count || schema.fields.first != fieldCursor
             || !range_inside(schema.fields, snapshot.fields.size())
-            || schema.fieldArrayOffset != format::kActorRsatSchemaFieldArrayOffset
+            || schema.fieldArrayOffset != kSchemaFieldArrayOffset
             || (schema.flags & ~format::kRsatSchemaFlagMask) != 0
             || eligible
                    != (schema.fieldCount != 0
@@ -620,7 +635,7 @@ bool validate(const Snapshot& snapshot) noexcept {
             std::uint32_t firstRaw = 0;
             const RsatField& first = snapshot.fields[fieldCursor];
             std::memcpy(&firstGate, first.rawRow.data(), sizeof firstGate);
-            std::memcpy(&firstRaw, first.rawRow.data() + 0x10U, sizeof firstRaw);
+            std::memcpy(&firstRaw, first.rawRow.data() + kFieldRawU32At10Offset, sizeof firstRaw);
             if (firstGate != schema.firstFieldRuntimeGate
                 || firstRaw != schema.firstFieldRawU32At10) {
                 return false;

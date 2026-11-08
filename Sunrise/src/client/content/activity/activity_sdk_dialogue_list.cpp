@@ -5,6 +5,10 @@
 #include <cstring>
 #include <limits>
 
+#include "../../../middleware/content/packages/reader/layout.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_7f0007.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80808d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809f.h"
 #include "../../../state/activity_sdk/format.h"
 #include "activity_sdk_dialogue_group_index.h"
 
@@ -12,28 +16,39 @@ namespace sunrise::client::content::activity::sdk_generation::dialogue_list {
 namespace {
 
 namespace format = state::activity_sdk::format;
+namespace generated = middleware::content::packages::schema::generated;
+namespace layout = middleware::content::packages::reader::layout;
+using ArrayHeader = generated::STypedArrayMarker;
+using Sequence = generated::DialogueSequence;
+using Selection = generated::DialogueSelection;
+using SelectionEntry = generated::DialogueSelectionEntry;
+using DialogueLine = generated::DialogueLine;
+using TakeRecord = generated::G80808d2318;
 
 // The cue definitions come in cue order; the content trees that follow are sorted by hash.
-constexpr std::size_t kTreeField = 0x18;
-constexpr std::size_t kTreeStride = 16;
+constexpr std::size_t kTreeField = offsetof(generated::DialogueAuthoredList, trees);
+constexpr std::size_t kTreeStride = sizeof(generated::DialogueTreeRow);
 // Every tree object repeats the definition hash it belongs to, after a per-object id.
-constexpr std::size_t kObjectHashOffset = 4;
+constexpr std::size_t kObjectHashOffset = offsetof(Sequence, unk4);
+static_assert(offsetof(Selection, unk4) == kObjectHashOffset
+              && offsetof(DialogueLine, unk4) == kObjectHashOffset);
 // A sequence plays its children in order through an array of relative object pointers.
-constexpr std::uint32_t kSequenceClass = 0x80808D1DU;
-constexpr std::size_t kSequenceChildField = 0x18;
-constexpr std::uint32_t kPointerArrayClass = 0x80808D20U;
-constexpr std::size_t kPointerStride = 8;
+constexpr std::uint32_t kSequenceClass = Sequence::kClass;
+constexpr std::size_t kSequenceChildField = offsetof(Sequence, children);
+constexpr std::uint32_t kPointerArrayClass = generated::DialoguePointer::kClass;
+constexpr std::size_t kPointerStride = sizeof(generated::DialoguePointer);
 // A selection plays one entry; each entry holds its conditions and a pointer to its child.
-constexpr std::uint32_t kSelectionClass = 0x80808D1AU;
-constexpr std::size_t kSelectionEntryField = 0x20;
-constexpr std::uint32_t kSelectionEntryClass = 0x80808D1FU;
-constexpr std::size_t kSelectionEntryStride = 0x38;
-constexpr std::size_t kSelectionChildOffset = 0x30;
+constexpr std::uint32_t kSelectionClass = Selection::kClass;
+constexpr std::size_t kSelectionEntryField = offsetof(Selection, entries);
+constexpr std::uint32_t kSelectionEntryClass = SelectionEntry::kClass;
+constexpr std::size_t kSelectionEntryStride = sizeof(SelectionEntry);
+constexpr std::size_t kSelectionChildOffset = offsetof(SelectionEntry, child);
 // A line carries two takes of the same text.
-constexpr std::uint32_t kLineClass = 0x80808D23U;
-constexpr std::size_t kFirstTakeOffset = 0x18;
-constexpr std::size_t kSecondTakeOffset = 0x28;
-constexpr std::size_t kLineByteCount = 0x38;
+constexpr std::uint32_t kLineClass = DialogueLine::kClass;
+constexpr std::size_t kFirstTakeOffset = offsetof(DialogueLine, unk18);
+constexpr std::size_t kSecondTakeOffset = kFirstTakeOffset + sizeof(TakeRecord);
+constexpr std::size_t kLineByteCount = kFirstTakeOffset + sizeof(DialogueLine::unk18);
+static_assert(sizeof(DialogueLine::unk18) == format::kDialogueTakeCount * sizeof(TakeRecord));
 // Ceilings that stop a corrupt or cyclic tree from driving an unbounded walk.
 constexpr std::size_t kMaximumDepth = 16;
 constexpr std::size_t kMaximumObjects = 1024;
@@ -95,12 +110,14 @@ follow(std::span<const std::byte> bytes, std::size_t member, std::size_t& target
     if (rawCount == 0) {
         return true;
     }
-    if (!follow(bytes, field + 8U, header) || !read_value(bytes, header, repeated)
-        || repeated != rawCount || !read_value(bytes, header + 8U, classId)
-        || classId != elementClass || !read_value(bytes, header + 12U, padding) || padding != 0) {
+    if (!follow(bytes, field + layout::kArrayFieldRelative, header)
+        || !read_value(bytes, header, repeated) || repeated != rawCount
+        || !read_value(bytes, header + offsetof(ArrayHeader, elementClass), classId)
+        || classId != elementClass
+        || !read_value(bytes, header + offsetof(ArrayHeader, padding), padding) || padding != 0) {
         return false;
     }
-    data = header + 16U;
+    data = header + sizeof(ArrayHeader);
     count = static_cast<std::size_t>(rawCount);
     return data <= bytes.size() && count * stride <= bytes.size() - data;
 }
@@ -108,11 +125,11 @@ follow(std::span<const std::byte> bytes, std::size_t member, std::size_t& target
 /** Reads one take stored at `offset`. */
 [[nodiscard]] bool
 read_take(std::span<const std::byte> bytes, std::size_t offset, Take& output) noexcept {
-    return read_value(bytes, offset, output.audioTag)
-           && read_value(bytes, offset + 4U, output.containerTag)
-           && read_value(bytes, offset + 8U, output.stringHash)
-           && read_value(bytes, offset + 12U, output.seconds) && std::isfinite(output.seconds)
-           && output.seconds >= 0.0F;
+    return read_value(bytes, offset + offsetof(TakeRecord, unk0), output.audioTag)
+           && read_value(bytes, offset + offsetof(TakeRecord, unk4), output.containerTag)
+           && read_value(bytes, offset + offsetof(TakeRecord, unk8), output.stringHash)
+           && read_value(bytes, offset + offsetof(TakeRecord, unkC), output.seconds)
+           && std::isfinite(output.seconds) && output.seconds >= 0.0F;
 }
 
 /** Walk state shared by one tree: its hash, its object budget, and the lines it collects. */
@@ -215,21 +232,26 @@ bool read(std::span<const std::byte> list, Snapshot& output) {
     std::size_t treeRows = 0;
     std::size_t treeCount = 0;
     if (!dialogue_group_index::definitions(list, definitions)
-        || !read_array(
-            list, kTreeField, kTreeStride, format::kDialogueGroupArrayClass, treeRows, treeCount)) {
+        || !read_array(list,
+                       kTreeField,
+                       kTreeStride,
+                       generated::DialogueTreeRow::kClass,
+                       treeRows,
+                       treeCount)) {
         return false;
     }
     std::vector<Tree> trees(treeCount);
     for (std::size_t index = 0; index < treeCount; ++index) {
         const std::size_t row = treeRows + index * kTreeStride;
         if (!read_value(list, row, trees[index].definitionHash)
-            || !follow(list, row + 8U, trees[index].root)) {
+            || !follow(list, row + offsetof(generated::DialogueTreeRow, root), trees[index].root)) {
             return false;
         }
     }
-    std::stable_sort(trees.begin(), trees.end(), [](const Tree& left, const Tree& right) {
-        return left.definitionHash < right.definitionHash;
-    });
+    const auto byHash = [](const Tree& row, const Tree& other) {
+        return row.definitionHash < other.definitionHash;
+    };
+    std::stable_sort(trees.begin(), trees.end(), byHash);
     for (auto first = trees.begin(); first != trees.end();) {
         const auto last = std::find_if(first, trees.end(), [&](const Tree& tree) {
             return tree.definitionHash != first->definitionHash;
@@ -246,12 +268,8 @@ bool read(std::span<const std::byte> list, Snapshot& output) {
         Cue& cue = output.cues[index];
         cue.definitionHash = definitions[index].hash;
         cue.windowSeconds = definitions[index].authoredWindowSeconds;
-        const auto range = std::equal_range(trees.begin(),
-                                            trees.end(),
-                                            Tree{cue.definitionHash, 0},
-                                            [](const Tree& left, const Tree& right) {
-                                                return left.definitionHash < right.definitionHash;
-                                            });
+        const auto range =
+            std::equal_range(trees.begin(), trees.end(), Tree{cue.definitionHash, 0}, byHash);
         std::size_t matches = 0;
         bool malformed = false;
         std::vector<Line> matched{};

@@ -131,6 +131,7 @@ void clear(records::MutableDomains output) noexcept {
         output.rewardInstructions.begin(), output.rewardInstructions.end(), rewards::Instruction{});
     std::fill(output.rewardModifiers.begin(), output.rewardModifiers.end(), rewards::Modifier{});
     std::fill(output.rewardSockets.begin(), output.rewardSockets.end(), rewards::SocketOverride{});
+    std::fill(output.starterSets.begin(), output.starterSets.end(), starter_sets::Definition{});
 }
 
 /** Computes the exact file size for every record array. */
@@ -178,7 +179,8 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.rewardItems, sizeof(records::RewardItemRecord), size)
            && add_records(counts.rewardInstructions, sizeof(records::RewardInstructionRecord), size)
            && add_records(counts.rewardModifiers, sizeof(records::RewardModifierRecord), size)
-           && add_records(counts.rewardSockets, sizeof(records::RewardSocketOverrideRecord), size);
+           && add_records(counts.rewardSockets, sizeof(records::RewardSocketOverrideRecord), size)
+           && add_records(counts.starterSets, sizeof(records::StarterSetRecord), size);
 }
 
 /** Reads every payload array and checks the decoded domains as one transaction. */
@@ -313,6 +315,9 @@ bool read_payload(HANDLE file,
     valid = valid
             && read_domain<records::RewardSocketOverrideRecord>(
                 file, output.rewardSockets.first(counts.rewardSockets), checksum);
+    valid = valid
+            && read_domain<records::StarterSetRecord>(
+                file, output.starterSets.first(counts.starterSets), checksum);
 
     if (!valid) {
         return false;
@@ -363,6 +368,7 @@ bool read_payload(HANDLE file,
             output.rewardInstructions.first(counts.rewardInstructions),
             output.rewardModifiers.first(counts.rewardModifiers),
             output.rewardSockets.first(counts.rewardSockets),
+            output.starterSets.first(counts.starterSets),
         });
 }
 

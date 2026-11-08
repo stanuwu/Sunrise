@@ -14,7 +14,7 @@ namespace sunrise::client::content::activity::sdk_generation::one_shot {
 namespace {
 
 namespace public_abi = abi;
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 
 struct ProgressAdapter final {
     public_abi::ProgressSink sink{};
@@ -58,7 +58,7 @@ void copy_result(Status status, const Result& source, public_abi::Result& output
 /** Copies one fingerprint. @return False when the size is wrong or every byte is zero. */
 [[nodiscard]] bool read_fingerprint(const std::uint8_t* bytes,
                                     std::uint32_t size,
-                                    generated::Digest& output) noexcept {
+                                    generated_world::Digest& output) noexcept {
     output = {};
     if (bytes == nullptr || size != output.size()) {
         return false;
@@ -251,7 +251,7 @@ extern "C" __declspec(dllexport) std::uint32_t SunriseVerifyActivitySdkEstate(
     if (output == nullptr || artifactDirectory == nullptr) {
         return static_cast<std::uint32_t>(one_shot::Status::invalidInput);
     }
-    one_shot::generated::Digest fingerprint{};
+    one_shot::generated_world::Digest fingerprint{};
     one_shot::Result result{};
     const one_shot::Status status =
         one_shot::read_fingerprint(sourceFingerprint, sourceFingerprintSize, fingerprint)
@@ -280,7 +280,7 @@ extern "C" __declspec(dllexport) std::uint32_t SunrisePublishActivitySdkEstate(
         || !one_shot::exported_output_allowed(outputArtifactDirectory)) {
         return static_cast<std::uint32_t>(one_shot::Status::invalidInput);
     }
-    one_shot::generated::Digest fingerprint{};
+    one_shot::generated_world::Digest fingerprint{};
     one_shot::Result result{};
     const one_shot::Status status =
         one_shot::read_fingerprint(sourceFingerprint, sourceFingerprintSize, fingerprint)

@@ -8,11 +8,12 @@
 
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../middleware/bap/activity_message/sense_update.h"
+#include "../../../state/activity_sdk/format.h"
 
 namespace sunrise::server::activity::mission {
 
 /** Type-23 Sense reports current position, power and lock, each followed by its sequence. */
-inline constexpr std::uint32_t kDeviceSenseSchema = 0x80804F47U;
+inline constexpr std::uint32_t kDeviceSenseSchema = state::activity_sdk::format::kDeviceSenseSchema;
 inline constexpr std::uint8_t kDeviceSenseSlotType = 23;
 inline constexpr std::size_t kDeviceSenseChannelCount =
     middleware::bap::activity_message::scriptable_auth::kType23ChannelCount;

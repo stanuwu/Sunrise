@@ -4,30 +4,36 @@
 #include <cstdint>
 #include <span>
 
+#include "../schema/generated/tag_classes_808092.h"
+#include "../schema/generated/tag_classes_808094.h"
+#include "../schema/generated/tag_classes_808099.h"
+#include "../schema/generated/tag_classes_80809b.h"
 #include "definition_index_table.h"
 
 namespace sunrise::middleware::content::packages::tables {
 
 /** Tag class of a destination's client scenario. */
-inline constexpr std::uint32_t kScenarioClass = 0x80809994U;
+inline constexpr std::uint32_t kScenarioClass = schema::generated::SScenario::kClass;
 /** A scenario holds its bubble array descriptor at this offset. */
-inline constexpr std::size_t kScenarioBubbleDescriptor = 80;
+inline constexpr std::size_t kScenarioBubbleDescriptor =
+    offsetof(schema::generated::SScenario, bubbles);
 /** Element class of a scenario's bubble array. */
-inline constexpr std::uint32_t kBubbleClass = 0x8080924DU;
-/** One bubble is 24 inline bytes. */
-inline constexpr std::size_t kBubbleStride = 24;
+inline constexpr std::uint32_t kBubbleClass = schema::generated::ScenarioBubble::kClass;
+inline constexpr std::size_t kBubbleStride = sizeof(schema::generated::ScenarioBubble);
 /** A bubble holds its slice-set state array descriptor at this offset. */
-inline constexpr std::size_t kBubbleStateDescriptor = 8;
+inline constexpr std::size_t kBubbleStateDescriptor =
+    offsetof(schema::generated::ScenarioBubble, states);
 /** Element class of a bubble's slice-set state array. */
-inline constexpr std::uint32_t kSliceStateClass = 0x8080924FU;
-/** One slice-set state is 76 inline bytes. */
-inline constexpr std::size_t kSliceStateStride = 76;
+inline constexpr std::uint32_t kSliceStateClass = schema::generated::SliceSetState::kClass;
+inline constexpr std::size_t kSliceStateStride = sizeof(schema::generated::SliceSetState);
 /** Tag class of the slice-set entry a state names. */
-inline constexpr std::uint32_t kSliceEntryClass = 0x8080925BU;
+inline constexpr std::uint32_t kSliceEntryClass = schema::generated::SScenarioStateEntry::kClass;
 /** A slice-set entry holds its index at this offset. */
-inline constexpr std::size_t kSliceEntryIndexOffset = 16;
+inline constexpr std::size_t kSliceEntryIndexOffset =
+    offsetof(schema::generated::SScenarioStateEntry, index);
 /** A slice-set entry names its object registry at this offset. */
-inline constexpr std::size_t kSliceEntryRegistryOffset = 20;
+inline constexpr std::size_t kSliceEntryRegistryOffset =
+    offsetof(schema::generated::SScenarioStateEntry, link);
 /** Slice-set indices are spaced by this factor across the region space. */
 inline constexpr std::uint32_t kSliceSetIndexFactor = 8;
 /**
@@ -35,41 +41,48 @@ inline constexpr std::uint32_t kSliceSetIndexFactor = 8;
  * The index is the bit a container's bubble mask sets, so it binds a spawn set to a bubble.
  * It is not the scenario ordinal: one map's bubbles are shared by every activity on it.
  */
-inline constexpr std::size_t kStateMapBubbleIndexOffset = 28;
+inline constexpr std::size_t kStateMapBubbleIndexOffset =
+    offsetof(schema::generated::SliceSetState, mapBubbleIndex);
 /** Reported for a bubble whose index is absent or wider than a container mask can name. */
 inline constexpr std::uint16_t kAbsentMapBubbleIndex = 0xFFFFU;
 /** Tag class of the object registry a slice-set entry names. */
-inline constexpr std::uint32_t kObjectRegistryClass = 0x8080925EU;
+inline constexpr std::uint32_t kObjectRegistryClass = schema::generated::SScenarioTagSet::kClass;
 /** A registry holds three independent object tag arrays at these descriptor offsets. */
-inline constexpr std::size_t kRegistryFirstDescriptor = 8;
-inline constexpr std::size_t kRegistrySecondDescriptor = 24;
-inline constexpr std::size_t kRegistryThirdDescriptor = 40;
+inline constexpr std::size_t kRegistryFirstDescriptor =
+    offsetof(schema::generated::SScenarioTagSet, tagSetA);
+inline constexpr std::size_t kRegistrySecondDescriptor =
+    offsetof(schema::generated::SScenarioTagSet, tagSetB);
+inline constexpr std::size_t kRegistryThirdDescriptor =
+    offsetof(schema::generated::SScenarioTagSet, tagSetC);
 /** Element class of a registry's object tag arrays. */
-inline constexpr std::uint32_t kRegistryElementClass = 0x80809260U;
+inline constexpr std::uint32_t kRegistryElementClass = schema::generated::RegistryObjectRef::kClass;
 /** One registry element is a bare tag handle. */
-inline constexpr std::size_t kRegistryElementStride = 4;
+inline constexpr std::size_t kRegistryElementStride = sizeof(schema::generated::RegistryObjectRef);
 /** Tag class of a placed object. */
-inline constexpr std::uint32_t kObjectClass = 0x80809462U;
+inline constexpr std::uint32_t kObjectClass = schema::generated::SAuthoredObject::kClass;
 /** An object holds its registry key at this offset. */
-inline constexpr std::size_t kObjectKeyOffset = 12;
+inline constexpr std::size_t kObjectKeyOffset =
+    offsetof(schema::generated::SAuthoredObject, registryKey);
 /** An object holds its slot array descriptor at this offset. */
-inline constexpr std::size_t kObjectSlotDescriptor = 32;
+inline constexpr std::size_t kObjectSlotDescriptor =
+    offsetof(schema::generated::SAuthoredObject, slotTable.slots);
 /** Element class of an object's slot array. */
-inline constexpr std::uint32_t kObjectSlotClass = 0x80809B3AU;
+inline constexpr std::uint32_t kObjectSlotClass = schema::generated::ObjectSlot::kClass;
 /** One slot is a type and a name hash. */
-inline constexpr std::size_t kSlotStride = 8;
+inline constexpr std::size_t kSlotStride = sizeof(schema::generated::ObjectSlot);
 /** An object holds its per-bubble sub-block array descriptor at this offset. */
-inline constexpr std::size_t kObjectBubbleDescriptor = 56;
+inline constexpr std::size_t kObjectBubbleDescriptor =
+    offsetof(schema::generated::SAuthoredObject, entryFilters);
 /** Element class of an object's per-bubble sub-block array. */
-inline constexpr std::uint32_t kObjectBubbleClass = 0x80809464U;
-/** One per-bubble sub-block is 24 bytes. */
-inline constexpr std::size_t kObjectBubbleStride = 24;
+inline constexpr std::uint32_t kObjectBubbleClass = schema::generated::ObjectBubbleBlock::kClass;
+inline constexpr std::size_t kObjectBubbleStride = sizeof(schema::generated::ObjectBubbleBlock);
 /** A sub-block holds its placed-handle array descriptor at this offset. */
-inline constexpr std::size_t kObjectBubbleHandleDescriptor = 8;
+inline constexpr std::size_t kObjectBubbleHandleDescriptor =
+    offsetof(schema::generated::ObjectBubbleBlock, handles);
 /** Element class of a sub-block's placed-handle array. */
-inline constexpr std::uint32_t kObjectPlacedHandleClass = 0x80809466U;
+inline constexpr std::uint32_t kObjectPlacedHandleClass = schema::generated::PlacedHandle::kClass;
 /** One placed handle is a bare tag handle. */
-inline constexpr std::size_t kObjectPlacedHandleStride = 4;
+inline constexpr std::size_t kObjectPlacedHandleStride = sizeof(schema::generated::PlacedHandle);
 /** A sub-block that applies to every bubble records this index. */
 inline constexpr std::int32_t kGlobalBubbleIndex = -1;
 

@@ -12,9 +12,12 @@
 #include "../../client/diagnostics/studio/studio_protocol.h"
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
+#include "../../state/build_data/runtime/build_data_invalidation.h"
 #include "../../state/mods/mods_runtime.h"
 #include "../activity/mission/mission_script_runtime.h"
+#include "../bap/runtime.h"
 #include "studio_command_protocol.h"
+#include "studio_tag_reload.h"
 
 namespace sunrise::server::studio {
 namespace {
@@ -32,6 +35,8 @@ std::uint32_t g_servingRequest{};
 std::uint64_t g_ticket{};
 std::uint32_t g_editorPid{};
 std::array<char, wire::kModIdBytes> g_requestedMod{};
+/** True while the request being served waits for the tag reload worker. */
+bool g_tagRequest{};
 
 /** The bridge lock keeps a requester check from reading an unmapped view. */
 std::uint64_t detach() noexcept {
@@ -41,7 +46,15 @@ std::uint64_t detach() noexcept {
     g_ticket = 0;
     g_editorPid = 0;
     g_requestedMod = {};
+    g_tagRequest = false;
     return ticket;
+}
+
+/** Version 2 keeps the version 1 layout, so an editor of either version is served. */
+[[nodiscard]] bool header_ok(const wire::SharedCommand& view) noexcept {
+    return editor::editor_header_ok(view, wire::kMagic, wire::kVersion, wire::kMappingBytes)
+           || editor::editor_header_ok(
+               view, wire::kMagic, wire::kOldestVersion, wire::kMappingBytes);
 }
 
 /** Service and commit guards run on the same server thread. */
@@ -55,7 +68,7 @@ void disconnect() noexcept {
     if (g_view == nullptr) {
         return false;
     }
-    if (!editor::editor_header_ok(*g_view, wire::kMagic, wire::kVersion, wire::kMappingBytes)) {
+    if (!header_ok(*g_view)) {
         disconnect();
         return false;
     }
@@ -124,9 +137,9 @@ bool requester_present(std::uint64_t ticket) noexcept {
         const auto request = static_cast<std::uint32_t>(
             InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&g_view->request), 0, 0));
         present =
-            editor::editor_header_ok(*g_view, wire::kMagic, wire::kVersion, wire::kMappingBytes)
-            && g_view->editorPid == g_editorPid && g_view->kind == wire::Kind::reloadMod
-            && g_view->modId == g_requestedMod && request == g_servingRequest
+            header_ok(*g_view) && g_view->editorPid == g_editorPid
+            && g_view->kind == wire::Kind::reloadMod && g_view->modId == g_requestedMod
+            && request == g_servingRequest
             && editor::editor_alive(g_view->heartbeat, GetTickCount64(), wire::kHeartbeatTimeoutMs)
             && static_cast<std::uint32_t>(InterlockedCompareExchange(
                    reinterpret_cast<volatile LONG*>(&g_view->response), 0, 0))
@@ -149,8 +162,38 @@ void start(std::uint32_t request) noexcept {
     g_editorPid = g_view->editorPid;
     modId.back() = '\0';
     const std::string_view id(modId.data());
-    if (g_view->kind != wire::Kind::reloadMod || id.empty()) {
-        answer(request, wire::Status::invalid, 0, "unknown command or empty mod id");
+    g_tagRequest = false;
+    const wire::Kind kind = g_view->kind;
+    if (id.empty()) {
+        answer(request, wire::Status::invalid, 0, "empty mod id");
+        return;
+    }
+    switch (kind) {
+    case wire::Kind::reloadMod:
+        break;
+    case wire::Kind::reloadBubble: {
+        std::array<char, wire::kMessageBytes> message = g_view->message;
+        message.back() = '\0';
+        const tag_reload::Reply reply = tag_reload::reload_bubble(std::string_view(message.data()));
+        answer(request, reply.status, 0, reply.message.data());
+        return;
+    }
+    case wire::Kind::reloadTags:
+    case wire::Kind::patchTags:
+    case wire::Kind::queryResident:
+        if (kind != wire::Kind::queryResident && !mod_loaded(id)) {
+            answer(request, wire::Status::notLoaded, 0, "the mod did not load this session");
+            return;
+        }
+        // The worker answers on a later slice; the manifest stays mapped by Studio until then.
+        if (!tag_reload::start(g_editorPid, request, kind)) {
+            answer(request, wire::Status::failed, 0, "a tag reload is still running");
+            return;
+        }
+        g_tagRequest = true;
+        return;
+    default:
+        answer(request, wire::Status::invalid, 0, "unknown command");
         return;
     }
     if (!mod_loaded(id)) {
@@ -207,9 +250,23 @@ void service_locked(std::uint64_t now) noexcept {
     }
     if (request != g_servingRequest) {
         start(request);
-        if (g_ticket == 0) {
+        if (g_ticket == 0 && !g_tagRequest) {
             return;
         }
+    }
+    if (g_tagRequest) {
+        tag_reload::Reply reply{};
+        if (!tag_reload::take(request, reply)) {
+            return;
+        }
+        g_tagRequest = false;
+        // The new tables are published; the dropped domains rebuild on the next investment slice.
+        if (reply.domains != 0) {
+            state::build_data::invalidation::invalidate(reply.domains);
+            bap::request_investment_slice();
+        }
+        answer(request, reply.status, reply.applied, reply.message.data());
+        return;
     }
     const mission::ReloadResult result = mission::reload_result(g_ticket);
     if (result.status == mission::ReloadStatus::pending) {
@@ -239,6 +296,7 @@ void shutdown() noexcept {
     g_nextConnect = 0;
     ReleaseSRWLockExclusive(&g_linkLock);
     static_cast<void>(mission::cancel_reload(ticket));
+    tag_reload::stop();
 }
 
 } // namespace sunrise::server::studio

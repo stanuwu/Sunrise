@@ -28,6 +28,8 @@ using AuthoredSceneDependencies =
 inline constexpr std::size_t kInstanceCapacity = state::activity::kSessionCapacity;
 /** Recent normalized events retained for the panel and HUD. */
 inline constexpr std::size_t kEventCapacity = 64;
+/** Links one activity can hold: one per BAP connection slot, of which there are eight. */
+inline constexpr std::size_t kRefusedLinkCapacity = 8;
 /**
  * Accepted client mission inputs copied in one paged feed read. The feed itself is unbounded:
  * the reader loops until it is empty, so this only sizes one copy.
@@ -120,11 +122,11 @@ enum class EventKind : std::uint8_t {
     sessionJoined = 26,
     /** A watched peer session left this destination; this is not a Host feed row. */
     sessionLeft = 27,
-    /** One schema-0x8080879F msg-19 target resolved to its authored type-31 source. */
+    /** One player-trigger msg-19 target resolved to its authored type-31 source. */
     playerTrigger = 28,
-    /** One schema-0x808087BF msg-19 reports that an exact authored Type-6 slot started. */
+    /** One cinematic msg-19 reports that an exact authored Type-6 slot started. */
     cinematicStarted = 29,
-    /** One schema-0x808087BF msg-19 reports Type-6 start failure or runtime termination. */
+    /** One cinematic msg-19 reports Type-6 start failure or runtime termination. */
     cinematicTerminated = 30,
     /** Accepted native Ghost interaction progress for one exact type-65 slot. */
     ghostLinkState = 31,
@@ -664,12 +666,12 @@ struct Event final {
     std::uint32_t incidentExtraTargets{};
     std::uint32_t incidentSelectorBytes{};
     std::uint32_t incidentPayloadBytes{};
-    /** Type-31 source ClientRef carried by a schema-0x8080879F player-trigger incident. */
+    /** Type-31 source ClientRef carried by a player-trigger incident. */
     std::uint32_t playerTriggerRegistryKey{};
     std::uint32_t playerTriggerResolvedObjectId{};
     std::int16_t playerTriggerSlotIndex{-1};
     std::int8_t playerTriggerSlotType{-1};
-    /** Type-6 source ClientRef carried by a schema-0x808087BF cinematic incident. */
+    /** Type-6 source ClientRef carried by a cinematic incident. */
     std::uint32_t cinematicRegistryKey{};
     std::uint64_t cinematicRuntimeObjectId{};
     float cinematicEventValue{};
@@ -762,6 +764,10 @@ struct InstanceSnapshot final {
     state::activity::SessionBinding binding{};
     std::uint64_t stateRevision{};
     std::uint64_t transportRevision{};
+    /** State revision the links in `refusedLinks` could not build a msg-5 body for. */
+    std::uint64_t refusedStateRevision{};
+    /** ActivityClient generations that refused `refusedStateRevision`; zero rows are free. */
+    std::array<std::uint64_t, kRefusedLinkCapacity> refusedLinks{};
     std::uint64_t lastEventSequence{};
     std::uint64_t lastOutputAttemptTick{};
     std::uint64_t lastOutputSourceGeneration{};
@@ -863,6 +869,8 @@ struct DiagnosticsSnapshot final {
 struct AuthState final {
     std::uint64_t revision{};
     std::uint8_t lifetimeState{kDefaultLifetimeState};
+    /** The adapter refused this revision's body. The next revision clears it. */
+    bool refused{};
 };
 
 /** Immutable outbound incident selected after one connection's staged revision. */
@@ -1286,8 +1294,15 @@ void read_mission_inputs_after(MissionInputCursor after, MissionInputRead& outpu
 /** @return Stable text for one exact scalar-selection result. */
 [[nodiscard]] const char* sense_scalar_status_name(SenseScalarStatus status) noexcept;
 
-/** Reads the committed Auth state for one exact activity generation. */
+/**
+ * Reads the committed Auth state for one exact activity generation.
+ * @param binding Exact activity owning the state.
+ * @param sourceGeneration ActivityClient asking; `refused` is true only for its own refusal.
+ * @param output Receives the revision, its lifetime state, and the asking link's refusal.
+ * @return True when the activity has a Host instance.
+ */
 [[nodiscard]] bool auth_state(const state::activity::SessionBinding& binding,
+                              std::uint64_t sourceGeneration,
                               AuthState& output) noexcept;
 
 /** Reads the one pending incident occupying the exact instance's serialized output slot. */
@@ -1315,12 +1330,17 @@ pending_scriptable_override_for_activity_client(const state::activity::SessionBi
 cancel_pending_scriptable_override(const state::activity::SessionBinding& binding,
                                    std::uint64_t expectedRevision) noexcept;
 
-/** Records one refused BAP attempt without clearing the committed output. */
+/**
+ * Records one link's refused msg-5 body against the state revision it carried.
+ * A refusal other than a missing epoch is final for that link and revision.
+ * @param soleLink True when no other link can still carry the revision, so its slot is freed.
+ */
 void note_auth_attempt(const state::activity::SessionBinding& binding,
                        std::uint64_t sourceGeneration,
                        std::uint64_t revision,
                        std::uint8_t lifetimeState,
-                       OutputStatus status) noexcept;
+                       OutputStatus status,
+                       bool soleLink) noexcept;
 
 /** Marks one committed Auth revision as staged into the transport output queue. */
 void note_auth_transport_staged(const state::activity::SessionBinding& binding,

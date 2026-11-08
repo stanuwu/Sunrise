@@ -1,8 +1,14 @@
 #include "activity_host_scriptable_labels.h"
 
+#include <array>
+#include <cstddef>
+
+#include "../../../middleware/content/packages/tables/scenario_reader.h"
+
 namespace sunrise::server::ui::activity_host::scriptable_labels {
 
 namespace catalog = state::build_data::scriptables;
+namespace tables = middleware::content::packages::tables;
 
 /** @return Stable UI text for one catalog build status. */
 const char* status(catalog::BuildStatus value) noexcept {
@@ -58,15 +64,26 @@ const char* provenance(catalog::NameProvenance value) noexcept {
 /** @return Stable UI text for one registry descriptor scope. */
 const char* scope(std::uint16_t descriptor) noexcept {
     switch (descriptor) {
-    case 8:
+    case tables::kRegistryFirstDescriptor:
         return "shared/8";
-    case 24:
+    case tables::kRegistrySecondDescriptor:
         return "registry/24";
-    case 40:
+    case tables::kRegistryThirdDescriptor:
         return "state-local/40";
     default:
         return "unknown";
     }
+}
+
+/** The combo lists the registry descriptors in this order after its "all" entry. */
+bool scope_matches(std::uint16_t descriptor, int scope) noexcept {
+    // Registry descriptor values the scope combo selects, in its entry order.
+    constexpr std::array<std::uint16_t, 4> descriptors{0,
+                                                       tables::kRegistryFirstDescriptor,
+                                                       tables::kRegistrySecondDescriptor,
+                                                       tables::kRegistryThirdDescriptor};
+    return scope <= 0 || scope >= static_cast<int>(descriptors.size())
+           || descriptor == descriptors[static_cast<std::size_t>(scope)];
 }
 
 } // namespace sunrise::server::ui::activity_host::scriptable_labels

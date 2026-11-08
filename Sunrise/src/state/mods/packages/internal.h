@@ -9,9 +9,12 @@
 #include <vector>
 
 #include "../../../middleware/content/packages/merge/merge.h"
+#include "../../../middleware/content/packages/merge/remap.h"
+#include "../../../middleware/content/packages/reader/package_file.h"
 #include "../../../middleware/content/packages/table_merge/sidecar.h"
 #include "../../content_manifest/definition.h"
 #include "../../content_manifest/fingerprint/content_manifest_fingerprint.h"
+#include "../../content_manifest/scanner/package/content_manifest_package_name.h"
 #include "../definition.h"
 #include "mod_packages.h"
 
@@ -30,8 +33,7 @@ inline constexpr std::size_t kNoRecord = static_cast<std::size_t>(-1);
 inline constexpr std::size_t kNoSidecar = static_cast<std::size_t>(-1);
 /** Separates a directory from its leaf. */
 inline constexpr std::wstring_view kSeparator = L"\\";
-/** Package files carry this extension. */
-inline constexpr std::wstring_view kPackageExtension = L".pkg";
+using middleware::content::packages::reader::layout::kPackageFileExtension;
 
 /** The newest generation of one package id, installed or added by an earlier mod. */
 struct Base final {
@@ -51,6 +53,10 @@ struct Claim final {
     std::bitset<merge::kEntryLimit> changed{};
     /** Index into Work::sidecars, or kNoSidecar. */
     std::size_t sidecar{kNoSidecar};
+    /** Patch index of the claimed file. */
+    std::uint32_t generation{};
+    /** The mod ships consecutive patches; the older ones are served as parents. */
+    bool chained{};
 };
 
 /** One staged new package file, kept for its merge data. */
@@ -84,6 +90,34 @@ private:
     std::vector<void*> handles_;
 };
 
+/** How reading one whole file ended. */
+enum class FileRead : std::uint8_t { ok, missing, tooLarge, failed };
+
+/**
+ * Reads one whole file in a single read.
+ * @param limit Largest size accepted; it keeps the file inside one ReadFile call.
+ * @param bytes Receives the file; its content is unusable unless the result is ok.
+ * @return ok, missing when no such file exists, tooLarge past `limit`, or failed.
+ */
+[[nodiscard]] FileRead
+read_whole_file(const std::wstring& path, std::size_t limit, std::vector<std::byte>& bytes);
+
+/** One `.pkg` file listed in a mod subfolder. */
+struct Listed final {
+    std::wstring path;
+    /** ASCII form of the leaf for messages; other characters become '?'. */
+    std::string leaf;
+    content_manifest::scanner::package::ParsedName parsed{};
+    content_manifest::scanner::package::NameStatus status{};
+};
+
+/** One mod's package moves, kept across sessions while its manifest names the same packages. */
+struct SavedRemap final {
+    std::string modId;
+    std::vector<std::uint16_t> packages;
+    std::vector<merge::remap::Move> moves;
+};
+
 /** One loaded mod's exact typed recipe, applied once to the final served package. */
 struct Bound final {
     std::size_t record{};
@@ -111,6 +145,9 @@ struct Work final {
     /** Records with an input to any replacement, sorted and unique. */
     std::vector<std::size_t> replacementMods;
     std::vector<MergedEntries> merged;
+    /** Moves read from the remap file before the stage, and the moves this stage made. */
+    std::vector<SavedRemap> savedRemaps;
+    std::vector<SavedRemap> remaps;
     /** Package ids of the installed startup `_unp1_` packages; no mod may add them. */
     std::bitset<kPackageIdCount> reserved{};
     std::size_t fileCapacity{};
@@ -150,6 +187,24 @@ void warn_ignored(Record& record, std::uint16_t packageId, const char* reason);
 
 /** Checks one loaded mod's packages and patches, and commits them if the mod stays loaded. */
 void stage_mod(Work& work, std::size_t record);
+
+/**
+ * Moves a mod's own packages off ids another source holds, using its reference map: rewritten
+ * copies replace the listed files. A mod with no usable map is left to the usual refusal.
+ * @param added The mod's `packages` listing; @param patches its `patches` listing.
+ * @return False when the mod was refused.
+ */
+[[nodiscard]] bool relocate(Work& work,
+                            std::size_t record,
+                            const std::wstring& directory,
+                            std::vector<Listed>& added,
+                            std::vector<Listed>& patches);
+
+/** Reads the remap file; a missing or unreadable one reads as no saved moves. */
+void load_remaps(Work& work);
+
+/** Writes the remap file when its content changed: this stage's moves plus those of absent mods. */
+void save_remaps(const Work& work);
 
 /**
  * Merges the tables mods share, then serves each patched package id: one patch directly,

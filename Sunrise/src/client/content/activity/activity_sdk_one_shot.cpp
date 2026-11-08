@@ -19,7 +19,7 @@
 namespace sunrise::client::content::activity::sdk_generation::one_shot {
 namespace {
 
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 namespace publication = tree_publication;
 namespace estate = estate_validation;
 
@@ -368,7 +368,7 @@ Status run_process_local(std::wstring_view packageDirectory,
                          Result& output) noexcept {
     output = {};
     static_cast<void>(cacheArtifactDirectory);
-    generated::Digest fingerprint{};
+    generated_world::Digest fingerprint{};
     middleware::content::packages::reader::BlockKeys keys{};
     // The SDK keys on the installed identity; mods never change it.
     if (!state::content_manifest::installed_fingerprint(fingerprint)
@@ -384,7 +384,7 @@ Status run_process_local(std::wstring_view packageDirectory,
 
 /** Returns one process-local result without reopening generated files. */
 Status accept_generated(std::wstring_view artifactDirectory,
-                        const generated::Digest& sourceFingerprint,
+                        const generated_world::Digest& sourceFingerprint,
                         OfflineCancelProbe cancel,
                         void* cancelContext,
                         Result& output) noexcept {
@@ -401,7 +401,7 @@ Status accept_generated(std::wstring_view artifactDirectory,
 /** Publishes one retained sibling without reopening generated files. */
 Status publish_generated(std::wstring_view stageArtifactDirectory,
                          std::wstring_view outputArtifactDirectory,
-                         const generated::Digest& sourceFingerprint,
+                         const generated_world::Digest& sourceFingerprint,
                          OfflineCancelProbe cancel,
                          void* cancelContext,
                          Result& output) noexcept {

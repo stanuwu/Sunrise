@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <limits>
 #include <new>
 #include <span>
 #include <string_view>
@@ -59,8 +58,7 @@ namespace {
         return false;
     }
     const sdk::Snapshot catalog = sdk::snapshot();
-    // A different SDK build is a different module, so that program opens again.
-    if (catalog == nullptr || catalog != instance.view.catalog) {
+    if (catalog == nullptr) {
         return false;
     }
     sdk::BoundView view{};
@@ -69,12 +67,13 @@ namespace {
         .matchingLinks = link.matchingLinks,
         .activityClientGeneration = link.activityClientGeneration,
     };
+    // Compare the catalog the resolve chose, which may be a mod's. Another SDK build reopens.
     if (sdk::resolve(catalog, selection, view) != sdk::Status::ready
-        || view.activityRow != instance.view.activityRow) {
+        || view.catalog != instance.view.catalog || view.activityRow != instance.view.activityRow) {
         return false;
     }
-    generated::GeneratedWorldView worldView{};
-    if (generated::resolve(view, worldView) != generated::BindStatus::ready) {
+    generated_world::GeneratedWorldView worldView{};
+    if (generated_world::resolve(view, worldView) != generated_world::BindStatus::ready) {
         return false;
     }
     const bool sourceChanged =
@@ -108,9 +107,9 @@ namespace {
                                     std::span<const char> source,
                                     mission_state::ProgramKey& output) noexcept {
     output = {};
-    if (instance.view.catalog == nullptr
-        || activity.activityIndex
-               > static_cast<std::uint32_t>((std::numeric_limits<std::int16_t>::max)())) {
+    // A mod row carries no index, so the key takes the merged one the live binding names.
+    const std::int16_t activityIndex = instance.view.binding.destination.activityIndex;
+    if (instance.view.catalog == nullptr || activityIndex < 0) {
         return false;
     }
     const std::span<const std::byte> digest = instance.view.catalog->sdk_build_sha256();
@@ -129,7 +128,7 @@ namespace {
         return false;
     }
     output.activityDefinition = activity.definitionHash;
-    output.activityIndex = static_cast<std::int16_t>(activity.activityIndex);
+    output.activityIndex = activityIndex;
     output.publicTarget = instance.publicTarget;
     return true;
 }
@@ -261,12 +260,14 @@ enum class InitialStateGate : std::uint8_t {
     if (status == activity_sdk_mission::Status::outputBusy) {
         return InitialStateGate::pending;
     }
-    if (status != activity_sdk_mission::Status::ready || !seed.configured
+    // A body the roster could not build never publishes, so waiting for it would never end.
+    if (status != activity_sdk_mission::Status::ready || !seed.configured || seed.publicationRefused
         || seed.plan.effectiveRegion != static_cast<std::uint32_t>(instance.initialStateRegion)) {
         log_line(core::log::Level::warn,
                  &instance,
                  "initial_state",
-                 activity_sdk_mission::status_name(status));
+                 seed.publicationRefused ? "publication_refused"
+                                         : activity_sdk_mission::status_name(status));
         fault_instance(instance, "program initial_state mission-seed selection was refused");
         return InitialStateGate::failed;
     }
@@ -450,25 +451,24 @@ void attach_instance(const host::InstanceSnapshot& hostInstance,
         report_attach_result(hostInstance.binding,
                              AttachResult::sdkStatus,
                              sdk::status_name(status),
-                             format::kAbsentIndex,
+                             nullptr,
                              status);
         return;
     }
-    generated::GeneratedWorldView worldView{};
-    const generated::BindStatus worldStatus = generated::resolve(view, worldView);
-    if (worldStatus != generated::BindStatus::ready) {
+    generated_world::GeneratedWorldView worldView{};
+    const generated_world::BindStatus worldStatus = generated_world::resolve(view, worldView);
+    if (worldStatus != generated_world::BindStatus::ready) {
         report_attach_result(hostInstance.binding,
                              AttachResult::generatedWorldStatus,
-                             generated::status_name(worldStatus),
-                             view.activityRow,
+                             generated_world::status_name(worldStatus),
+                             &view,
                              sdk::Status::notReady,
                              worldStatus);
         return;
     }
     RuntimeInstance* const instance = free_instance();
     if (instance == nullptr) {
-        report_attach_result(
-            hostInstance.binding, AttachResult::capacity, "capacity", view.activityRow);
+        report_attach_result(hostInstance.binding, AttachResult::capacity, "capacity", &view);
         return;
     }
     instance->view = std::move(view);
@@ -477,8 +477,7 @@ void attach_instance(const host::InstanceSnapshot& hostInstance,
     instance->playerKey = link.playerKey;
     instance->occupied = true;
     const AttachResult opened = open_program(*instance, now);
-    report_attach_result(
-        hostInstance.binding, opened, attach_result_name(opened), instance->view.activityRow);
+    report_attach_result(hostInstance.binding, opened, attach_result_name(opened), &instance->view);
 }
 
 } // namespace

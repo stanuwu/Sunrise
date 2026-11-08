@@ -214,9 +214,9 @@ bool collect_descriptor(void* opaque, const tables::SlotDescriptor& source) noex
 }
 
 /**
- * Collects the whole structural descriptor set. The shared native visitor is narrower, because
- * live consumers need class-shaped component and schema fields. Keeping the wider set here stops
- * a mismatched target row from being hidden and upgraded.
+ * Collects the config's descriptor without the class-shape checks. The shared native visitor is
+ * narrower, because live consumers need class-shaped component and schema fields. Keeping the
+ * wider row here stops a mismatched target row from being hidden and upgraded.
  */
 [[nodiscard]] bool collect_structural_descriptors(DescriptorContext& context,
                                                   std::span<const std::byte> blob,
@@ -225,46 +225,31 @@ bool collect_descriptor(void* opaque, const tables::SlotDescriptor& source) noex
         || context.objectIndex >= context.collector->topology->objects.size()) {
         return false;
     }
-    if (blob.size() < tables::kDescriptorSize) {
+    const topology::Object& object = context.collector->topology->objects[context.objectIndex];
+    std::size_t base = 0;
+    std::uint32_t ownerKey = 0;
+    if (!tables::config_descriptor_offset(blob, configTag, base)
+        || !read_value(blob, base + tables::kDescriptorRegistryKeyOffset, ownerKey)
+        || ownerKey != object.objectKey) {
         return true;
     }
-    const topology::Object& object = context.collector->topology->objects[context.objectIndex];
-    const std::size_t last = blob.size() - tables::kDescriptorSize;
-    for (std::size_t base = 0; base <= last; base += tables::kDescriptorStep) {
-        std::uint32_t ownTag = 0;
-        std::uint32_t mark = 0;
-        std::uint32_t ownerKey = 0;
-        if (!read_value(blob, base + tables::kDescriptorOwnTagOffset, ownTag) || ownTag != configTag
-            || !read_value(blob, base + tables::kDescriptorMarkOffset, mark)
-            || mark != tables::kDescriptorMark
-            || !read_value(blob, base + tables::kDescriptorRegistryKeyOffset, ownerKey)
-            || ownerKey != object.objectKey) {
-            continue;
-        }
-        std::int16_t signedSlotIndex = -1;
-        tables::SlotDescriptor descriptor{};
-        descriptor.configTag = configTag;
-        descriptor.descriptorOffset = static_cast<std::uint32_t>(base);
-        if (!read_value(
-                blob, base + tables::kDescriptorComponentClassOffset, descriptor.componentClass)
-            || !read_value(
-                blob, base + tables::kDescriptorBubbleIndexOffset, descriptor.bubbleIndex)
-            || !read_value(
-                blob, base + tables::kDescriptorSenseSchemaOffset, descriptor.senseSchema)
-            || !read_value(blob, base + tables::kDescriptorAuthSchemaOffset, descriptor.authSchema)
-            || !read_value(blob, base + tables::kDescriptorSlotTypeOffset, descriptor.slotType)
-            || !read_value(blob, base + tables::kDescriptorSlotIndexOffset, signedSlotIndex)) {
-            return false;
-        }
-        if (signedSlotIndex < 0) {
-            continue;
-        }
-        descriptor.slotIndex = static_cast<std::uint16_t>(signedSlotIndex);
-        if (!collect_descriptor(&context, descriptor)) {
-            return false;
-        }
+    std::int16_t signedSlotIndex = -1;
+    tables::SlotDescriptor descriptor{};
+    descriptor.configTag = configTag;
+    descriptor.descriptorOffset = static_cast<std::uint32_t>(base);
+    if (!read_value(blob, base + tables::kDescriptorComponentClassOffset, descriptor.componentClass)
+        || !read_value(blob, base + tables::kDescriptorBubbleIndexOffset, descriptor.bubbleIndex)
+        || !read_value(blob, base + tables::kDescriptorSenseSchemaOffset, descriptor.senseSchema)
+        || !read_value(blob, base + tables::kDescriptorAuthSchemaOffset, descriptor.authSchema)
+        || !read_value(blob, base + tables::kDescriptorSlotTypeOffset, descriptor.slotType)
+        || !read_value(blob, base + tables::kDescriptorSlotIndexOffset, signedSlotIndex)) {
+        return false;
     }
-    return true;
+    if (signedSlotIndex < 0) {
+        return true;
+    }
+    descriptor.slotIndex = static_cast<std::uint16_t>(signedSlotIndex);
+    return collect_descriptor(&context, descriptor);
 }
 
 /** Parses and records one path-specific placed config terminal. */

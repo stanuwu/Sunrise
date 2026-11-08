@@ -405,7 +405,6 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         target.actorClassIndex = input.actorClassIndex;
         target.behaviorConfigTag = input.behaviorConfigTag;
         target.behaviorConfigClass = input.behaviorConfigClass;
-        target.behaviorConfigOffset = input.behaviorConfigOffset;
         target.defaultFaction = input.defaultFaction;
         target.behaviorProvenance = input.behaviorProvenance;
         target.factionProvenance = input.factionProvenance;

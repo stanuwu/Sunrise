@@ -395,7 +395,7 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
     return prepare_slot(view, slotRow, output);
 }
 
-/** Verifies exact SDK identity and schema-decodes one retained Auth body. */
+/** Verifies exact SDK identity and admits one Auth body by its slot. */
 [[nodiscard]] Status validate_auth(const sdk::BoundView& view,
                                    std::uint32_t slotRow,
                                    std::uint32_t objectTag,
@@ -479,31 +479,18 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
             format::kSquadSlotType, format::kSquadComponentClass, message::squad_objective::kSchema)
         || typed(message::map_generator_auth::kSlotType,
                  message::map_generator_auth::kComponentClass,
-                 message::map_generator_auth::kSchema)
-        || typed(auth::kType2SlotType, auth::kType2ComponentClass, auth::kType2Schema);
+                 message::map_generator_auth::kSchema);
     const bool occupancy = slotType == format::kOccupancySlotType
                            && authSchema == format::kOccupancyAuthSchema
                            && bitCount == kOccupancyAuthBits && body.size() == kOccupancyAuthBytes;
-    const bool directive =
-        slotType == middleware::bap::activity_message::scriptable_auth::kType68SlotType
-        && authSchema == middleware::bap::activity_message::scriptable_auth::kType68Schema
-        && middleware::bap::activity_message::scriptable_auth::validate_type68_body(body, bitCount);
-    const bool engagement =
-        slotType == middleware::bap::activity_message::scriptable_auth::kType70SlotType
-        && authSchema == middleware::bap::activity_message::scriptable_auth::kType70Schema
-        && middleware::bap::activity_message::scriptable_auth::validate_type70_body(body, bitCount);
-    const bool publicEvent =
-        slotType == middleware::bap::activity_message::scriptable_auth::kType71SlotType
-        && authSchema == middleware::bap::activity_message::scriptable_auth::kType71Schema
-        && middleware::bap::activity_message::scriptable_auth::validate_type71_body(body, bitCount);
-    const bool performance =
-        slotType == middleware::bap::activity_message::scriptable_auth::kType42SlotType
-        && authSchema == middleware::bap::activity_message::scriptable_auth::kType42Schema
-        && middleware::bap::activity_message::scriptable_auth::validate_type42_body(body, bitCount);
-    const bool combatant =
-        slotType == middleware::bap::activity_message::scriptable_auth::kType2SlotType
-        && authSchema == middleware::bap::activity_message::scriptable_auth::kType2Schema
-        && middleware::bap::activity_message::scriptable_auth::validate_type2_body(body, bitCount);
+    const auto exact = [&](std::uint8_t type, std::uint32_t schema) {
+        return slotType == type && authSchema == schema;
+    };
+    const bool scriptable = exact(auth::kType68SlotType, auth::kType68Schema)
+                            || exact(auth::kType70SlotType, auth::kType70Schema)
+                            || exact(auth::kType71SlotType, auth::kType71Schema)
+                            || exact(auth::kType42SlotType, auth::kType42Schema)
+                            || exact(auth::kType2SlotType, auth::kType2Schema);
     auth::Type32VolumeBody volumeBody{};
     bool volumeToggle = slotType == auth::kType32SlotType && authSchema == auth::kType32Schema
                         && slot.componentClass == auth::kType32ComponentClass
@@ -518,8 +505,7 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
         });
         volumeToggle = matches == 1;
     }
-    if (!typedSdkBody && !occupancy && !directive && !engagement && !publicEvent && !performance
-        && !combatant && !volumeToggle) {
+    if (!typedSdkBody && !occupancy && !scriptable && !volumeToggle) {
         return Status::invalidBody;
     }
     return Status::ready;

@@ -7,6 +7,7 @@
 #include "../../../../core/ui/layout/credits/sunrise_credits_badge.h"
 #include "../../../../core/ui/modules/logs/logs.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
+#include "../../../diagnostics/test_input/test_input.h"
 #include "../renderer/renderer.h"
 #include "core/threading/srw_lock.h"
 #include "input.h"
@@ -94,6 +95,13 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM word, LPARAM
     if (message == WM_CAPTURECHANGED) {
         // ReleaseCapture sends this synchronously while Dear ImGui owns the renderer lock.
         return forward(original, window, message, word, value);
+    }
+    if (diagnostics::test_input::handle(window, message, word, value)
+        || diagnostics::test_input::foreign_mouse(message, word)) {
+        return 0;
+    }
+    if (message == WM_INPUT && diagnostics::test_input::foreign_raw_input(value)) {
+        return DefWindowProcW(window, message, word, value);
     }
     // The toggle key is ours in both states, so the game cannot see half of a press.
     const bool toggleKey =

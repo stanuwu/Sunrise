@@ -29,7 +29,7 @@ constexpr std::uint8_t kRecordTrailingValue = 1;
 /** Padding after the last field fills the record to its 4-byte alignment. */
 constexpr std::size_t kTailPadding = 3;
 
-/** The appearance header in record byte order. Field meanings are not decoded. */
+/** The appearance header in record byte order. Fields are named by their record offset. */
 struct HeaderLayout {
     std::uint16_t word00;
     std::uint8_t byte02;
@@ -49,11 +49,6 @@ struct HeaderLayout {
 };
 static_assert(sizeof(HeaderLayout) == state::kAppearanceHeaderSize);
 static_assert(std::is_trivially_copyable_v<HeaderLayout>);
-
-/** Highest valid race, gender and class wire values, matching the state enums. */
-constexpr std::uint8_t kMaxRace = 2;
-constexpr std::uint8_t kMaxGender = 1;
-constexpr std::uint8_t kMaxClass = 2;
 
 /**
  * Reads one presence flag and the 8-bit biased value behind it.
@@ -133,7 +128,7 @@ constexpr std::uint8_t kMaxClass = 2;
  * The trailing 64-byte name is not read.
  * @param message Parsed Web Service envelope.
  * @param request Receives the creation fields, the header in record byte order.
- * @return False when the payload is short, a presence flag is clear, or a value is out of range.
+ * @return False when the payload is short or a presence flag is clear.
  */
 bool parse_request(const Message& message, Request& request) noexcept {
     request = {};
@@ -143,9 +138,7 @@ bool parse_request(const Message& message, Request& request) noexcept {
     encoding::bits::Reader reader(message.payload);
     HeaderLayout header{};
     if (!read_present_byte(reader, request.race) || !read_present_byte(reader, request.gender)
-        || !read_present_byte(reader, request.characterClass) || request.race > kMaxRace
-        || request.gender > kMaxGender || request.characterClass > kMaxClass
-        || !read_header(reader, header)) {
+        || !read_present_byte(reader, request.characterClass) || !read_header(reader, header)) {
         request = {};
         return false;
     }

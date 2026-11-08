@@ -1,5 +1,6 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 3;
+PRAGMA user_version = 5;
+-- open() also creates parked_items; the version 5 upgrade runs the same statement.
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -21,8 +22,7 @@ CREATE TABLE characters (
     equipped_title INTEGER NOT NULL CHECK (equipped_title BETWEEN 0 AND 65535),
     acquired_subclass_mask INTEGER NOT NULL,
     next_inventory_serial INTEGER NOT NULL CHECK (next_inventory_serial BETWEEN 0 AND 4294967295),
-    appearance_header BLOB NOT NULL CHECK (length(appearance_header) = 36),
-    appearance_header_valid INTEGER NOT NULL CHECK (appearance_header_valid IN (0, 1))
+    appearance_header BLOB NOT NULL CHECK (length(appearance_header) = 36)
 ) STRICT;
 
 CREATE TABLE items (

@@ -1,12 +1,8 @@
+#include "../reader/package_file.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::named_tags {
-namespace {
-
-/** Every installed package file carries this extension. */
-constexpr std::wstring_view kExtension = L".pkg";
-
-} // namespace
+namespace {} // namespace
 
 /** Reads the patch index out of one package leaf name. */
 std::uint32_t leaf_patch_index(const wchar_t* fileName) noexcept {
@@ -14,10 +10,12 @@ std::uint32_t leaf_patch_index(const wchar_t* fileName) noexcept {
         return 0;
     }
     const std::wstring_view leaf{fileName};
-    if (leaf.size() <= kExtension.size() || !leaf.ends_with(kExtension)) {
+    if (leaf.size() <= reader::layout::kPackageFileExtension.size()
+        || !leaf.ends_with(reader::layout::kPackageFileExtension)) {
         return 0;
     }
-    const std::wstring_view stem = leaf.substr(0, leaf.size() - kExtension.size());
+    const std::wstring_view stem =
+        leaf.substr(0, leaf.size() - reader::layout::kPackageFileExtension.size());
     const std::size_t separator = stem.rfind(L'_');
     if (separator == std::wstring_view::npos || separator + 1 >= stem.size()) {
         return 0;

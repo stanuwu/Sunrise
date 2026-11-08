@@ -137,7 +137,7 @@ bool request_type2_program(const state::activity::SessionBinding& binding,
     ScriptableRequest request{};
     if ((spawn && retire) || target.slotType != auth::kType2SlotType
         || target.authSchema != auth::kType2Schema || body.size() > request.authBody.size()
-        || !auth::validate_type2_body(body, bits) || expectedActivityClientGeneration == 0
+        || expectedActivityClientGeneration == 0
         || (spawn && (source.slotType != squad::kSlotType || source.authSchema != squad::kSchema))
         || (target.stateLocalRoster
             && (group == nullptr || !valid_state_local_group(target, *group)))) {

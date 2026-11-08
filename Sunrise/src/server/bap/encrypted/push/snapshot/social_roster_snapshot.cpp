@@ -45,13 +45,12 @@ constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFFU;
  * Resolves the selected character's equipped emblem to a native definition index.
  * The client reads this object as the account's emblem, so it must track the live loadout.
  * @param account Account snapshot, already read under the lock by the caller.
- * @param index Receives the native definition index of the equipped emblem.
- * @param definitionHash Receives the equipped emblem hash.
- * @return False when nothing is selected, the emblem slot is empty, or the hash is unknown.
+ * @param index Receives the native definition index; unchanged when no emblem resolves.
+ * @param definitionHash Receives the equipped emblem hash; unchanged when no emblem resolves.
  */
-[[nodiscard]] bool selected_emblem_definition_index(const state::AccountState& account,
-                                                    std::uint16_t& index,
-                                                    std::uint32_t& definitionHash) noexcept {
+void read_selected_emblem(const state::AccountState& account,
+                          std::uint16_t& index,
+                          std::uint32_t& definitionHash) noexcept {
     for (const state::CharacterState& character : account.characters) {
         if (!character.selected) {
             continue;
@@ -59,35 +58,31 @@ constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFFU;
         const auto& slot =
             character.equipment
                 .slots[static_cast<std::size_t>(state::account::inventory::EquipmentSlot::emblem)];
-        if (!slot.has_value()) {
-            return false;
-        }
         state::build_data::items::Definition definition{};
-        if (!state::build_data::items::find_hash(slot->definitionHash, definition)) {
-            return false;
+        if (slot.has_value()
+            && state::build_data::items::find_hash(slot->definitionHash, definition)) {
+            index = definition.definitionIndex;
+            definitionHash = slot->definitionHash;
         }
-        index = definition.definitionIndex;
-        definitionHash = slot->definitionHash;
-        return true;
+        return;
     }
-    return false;
 }
 
 /**
  * Computes the selected character's Power, the same value the banner and character card show.
  * @param account Account snapshot, already read under the lock by the caller.
- * @param power Receives the equipment light plus the artifact bonus, or 0 on failure.
- * @return False when nothing is selected or an equipped item cannot be resolved.
+ * @return Equipment light plus the artifact bonus, or 0 when nothing is selected or an equipped
+ *         item cannot be resolved.
  */
-[[nodiscard]] bool selected_character_power(const state::AccountState& account,
-                                            std::int32_t& power) noexcept {
-    power = 0;
+[[nodiscard]] std::int32_t selected_character_power(const state::AccountState& account) noexcept {
+    std::int32_t power = 0;
     for (std::size_t index = 0; index < account.characterCount; ++index) {
         if (account.characters[index].selected) {
-            return state::equipment::light::resolution::character_light(account, index, power);
+            (void)state::equipment::light::resolution::character_light(account, index, power);
+            break;
         }
     }
-    return false;
+    return power;
 }
 
 } // namespace
@@ -114,19 +109,12 @@ bool prepare_social_roster(Scratch& scratch,
 
     std::uint16_t emblem = kEmptyDefinitionIndex;
     std::uint32_t emblemHash = 0;
-    if (!selected_emblem_definition_index(account, emblem, emblemHash)) {
-        emblem = kEmptyDefinitionIndex;
-    }
-    // Preserve the zero wire fallback when Power resolution fails.
-    std::int32_t power = 0;
-    if (!selected_character_power(account, power)) {
-        power = 0;
-    }
+    read_selected_emblem(account, emblem, emblemHash);
+    const std::int32_t power = selected_character_power(account);
     // The client reads the score as a signed 32-bit value; the store never publishes it negative.
     const std::uint32_t storedScore = state::unlocks::records::score();
-    const std::int32_t triumphScore = static_cast<std::int32_t>(
-        (std::min)(storedScore,
-                   static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())));
+    const std::int32_t triumphScore = static_cast<std::int32_t>((std::min)(
+        storedScore, static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())));
 
     Prepared staged{};
     std::size_t objectCount = 0;

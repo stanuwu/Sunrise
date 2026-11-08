@@ -1,71 +1,88 @@
 #include "quest_initialization_reader.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <limits>
 
+#include "../reader/layout.h"
+#include "../schema/generated/tag_classes_808077.h"
+#include "../schema/generated/tag_classes_80807b.h"
+#include "../schema/generated/tag_classes_80807c.h"
+#include "../schema/generated/tag_classes_80807d.h"
 #include "definition_index_table.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::tables::items {
 namespace {
 
+namespace generated = schema::generated;
 using Quest = state::build_data::items::QuestInitialization;
 
 /** Policy: shorter item blobs stay outside the supported quest layout. */
-constexpr std::size_t kMinimumQuestDefinitionSize = 0xF0;
+constexpr std::size_t kMinimumQuestDefinitionSize = sizeof(generated::ItemDefinition);
 /** A serialized block's 32-bit class ID sits immediately before its payload. */
-constexpr std::size_t kBlockClassPrefixSize = sizeof(std::uint32_t);
-/** Policy: keep the full fixed block prefix before reading nested arrays. */
-constexpr std::size_t kMinimumQuestBlockSize = 0x20;
+constexpr std::size_t kBlockClassPrefixSize = reader::layout::kClassWordSize;
+/** Policy: every quest block keeps at least the smallest quest block's fixed part. */
+constexpr std::size_t kMinimumQuestBlockSize = (std::min)({sizeof(generated::ItemObjectiveBlock),
+                                                           sizeof(generated::QuestSetBlock),
+                                                           sizeof(generated::ItemUnlockBlock)});
 
-/** Item +0x30 holds a signed 64-bit offset relative to that field. */
-constexpr std::size_t kItemObjectiveBlockOffset = 0x30;
+/** Signed 64-bit offset to the objective block, relative to the field. */
+constexpr std::size_t kItemObjectiveBlockOffset =
+    offsetof(generated::ItemDefinition, objectiveItemBlock);
 /** This block holds objective indices and the item index that owns the quest set. */
-constexpr std::uint32_t kItemObjectiveBlockClass = 0x808077EBU;
-/** Objective block +0x1C holds a 16-bit item-table index, not a definition hash. */
-constexpr std::size_t kObjectiveParentItemOffset = 0x1C;
+constexpr std::uint32_t kItemObjectiveBlockClass = generated::ItemObjectiveBlock::kClass;
+/** A 16-bit item-table index, not a definition hash. */
+constexpr std::size_t kObjectiveParentItemOffset =
+    offsetof(generated::ItemObjectiveBlock, parentItemIndex);
 /** Objective array entries are 16-bit table indices. */
-constexpr std::size_t kObjectiveReferenceStride = sizeof(std::uint16_t);
+constexpr std::size_t kObjectiveArrayDescriptor =
+    offsetof(generated::ItemObjectiveBlock, objectives);
+constexpr std::size_t kObjectiveReferenceStride = sizeof(generated::ObjectiveReferenceArray);
 
-/** Item +0x60 holds the quest-set block offset relative to that field. */
-constexpr std::size_t kItemQuestSetBlockOffset = 0x60;
+/** Quest-set block offset, relative to the field. */
+constexpr std::size_t kItemQuestSetBlockOffset = offsetof(generated::ItemDefinition, setItemBlock);
 /** This block holds ordered quest members and the value slot that selects the active step. */
-constexpr std::uint32_t kQuestSetBlockClass = 0x808077C8U;
-/** Set +0x10 holds a 16-bit unlock value slot; a map supplies its saved bank row. */
-constexpr std::size_t kQuestSetValueSlotOffset = 0x10;
-/** Set +0x1C holds a one-byte mode separate from the member values. */
-constexpr std::size_t kQuestSetModeOffset = 0x1C;
+constexpr std::uint32_t kQuestSetBlockClass = generated::QuestSetBlock::kClass;
+constexpr std::size_t kQuestSetMemberDescriptor = offsetof(generated::QuestSetBlock, itemList);
+/** A 16-bit unlock value slot; a map supplies its saved bank row. */
+constexpr std::size_t kQuestSetValueSlotOffset = offsetof(generated::QuestSetBlock, valueSlot);
+/** A one-byte mode separate from the member values. */
+constexpr std::size_t kQuestSetModeOffset = offsetof(generated::QuestSetBlock, mode);
 /** Policy: only mode 1 permits first-step writes; the other modes are not decoded. */
 constexpr std::uint8_t kSupportedQuestSetMode = 1;
 /** Each member pairs a signed step value with the item that represents it. */
-constexpr std::uint32_t kQuestSetMemberClass = 0x808077CAU;
+constexpr std::uint32_t kQuestSetMemberClass = generated::QuestSetMember::kClass;
 /** A member is a 32-bit value, a 16-bit item index, then a 16-bit reserved field. */
-constexpr std::size_t kQuestSetMemberStride = 8;
-/** Member +0 holds the signed step identifier; values are not ordered progress counts. */
-constexpr std::size_t kQuestSetMemberValueOffset = 0;
-/** Member +4 holds the item-table index for that step. */
-constexpr std::size_t kQuestSetMemberItemOffset = 4;
+constexpr std::size_t kQuestSetMemberStride = sizeof(generated::QuestSetMember);
+/** The signed step identifier; values are not ordered progress counts. */
+constexpr std::size_t kQuestSetMemberValueOffset = offsetof(generated::QuestSetMember, stepValue);
+/** The item-table index for that step. */
+constexpr std::size_t kQuestSetMemberItemOffset = offsetof(generated::QuestSetMember, itemIndex);
 /** Only member rows whose final 16 bits are zero are supported. */
-constexpr std::size_t kQuestSetMemberReservedOffset = 6;
+constexpr std::size_t kQuestSetMemberReservedOffset = offsetof(generated::QuestSetMember, reserved);
 
-/** Item +0x90 holds the unlock block offset relative to that field; zero means absent. */
-constexpr std::size_t kItemUnlockBlockOffset = 0x90;
+/** Unlock block offset, relative to the field; zero means absent. */
+constexpr std::size_t kItemUnlockBlockOffset = offsetof(generated::ItemDefinition, unlockItemBlock);
 /** This block's first array names the flags supplied by item presence. */
-constexpr std::uint32_t kItemUnlockBlockClass = 0x808077ABU;
+constexpr std::uint32_t kItemUnlockBlockClass = generated::ItemUnlockBlock::kClass;
 /** Presence-flag entries hold unlock slot indices, not saved bank rows. */
-constexpr std::uint32_t kItemPresenceFlagClass = 0x80807D4BU;
+constexpr std::uint32_t kItemPresenceFlagClass = generated::ItemPresenceFlag::kClass;
+constexpr std::size_t kItemPresenceFlagDescriptor =
+    offsetof(generated::ItemUnlockBlock, presenceFlags);
 /** Each presence-flag entry occupies one 16-bit slot. */
-constexpr std::size_t kItemPresenceFlagStride = sizeof(std::uint16_t);
+constexpr std::size_t kItemPresenceFlagStride = sizeof(generated::ItemPresenceFlag);
 /** Authored value/flag slots must fit the nonnegative range of a signed 16-bit mapping. */
 constexpr std::uint16_t kUnlockSlotLimit = 0x8000U;
 /** Policy: pursuits without presence flags need a bucket-37 root with no objective block. */
 constexpr std::uint8_t kSeparateQuestRootBucketId = 37;
 
-/** Map +40 has no supported save bank; a matching slot makes initialization unsafe. */
-constexpr std::size_t kThirdValueMapDescriptor = 40;
-/** Map +56 is also checked for duplicate slots but has no supported save bank. */
-constexpr std::size_t kFourthValueMapDescriptor = 56;
+/** The third map has no supported save bank; a matching slot makes initialization unsafe. */
+constexpr std::size_t kThirdValueMapDescriptor = offsetof(generated::C80807c80, h201ada27);
+/** The fourth map is also checked for duplicate slots but has no supported save bank. */
+constexpr std::size_t kFourthValueMapDescriptor = offsetof(generated::C80807c80, hD4a626c1);
 /** A matching map row is supported only when its final 16 bits are zero. */
-constexpr std::size_t kValueMapReservedOffset = 6;
+constexpr std::size_t kValueMapReservedOffset = offsetof(generated::UnlockValueMapRow, reserved);
 /** The all-one 16-bit row is reserved and cannot name saved state. */
 constexpr std::uint16_t kUnavailableValueMapRow = 0xFFFFU;
 
@@ -95,7 +112,8 @@ constexpr std::uint16_t kUnavailableValueMapRow = 0xFFFFU;
     }
     offset = static_cast<std::size_t>(target);
     std::uint32_t actualClass = 0;
-    return read(bytes, offset - kBlockClassPrefixSize, actualClass) && actualClass == expectedClass;
+    return reader::layout::class_word_before(bytes, offset, actualClass)
+           && actualClass == expectedClass;
 }
 
 /**
@@ -134,7 +152,7 @@ std::uint16_t quest_parent(std::span<const std::byte> definition) noexcept {
         || bucket != state::build_data::items::kPursuitBucketId
         || !block(definition, kItemObjectiveBlockOffset, kItemObjectiveBlockClass, objective)
         || !array(definition,
-                  objective,
+                  objective + kObjectiveArrayDescriptor,
                   kObjectiveReferenceArrayClass,
                   kObjectiveReferenceStride,
                   objectives)
@@ -169,7 +187,11 @@ Quest read_quest_initialization(std::span<const std::byte> definition,
         || !block(parent, kItemQuestSetBlockOffset, kQuestSetBlockClass, set)
         || !read(parent, set + kQuestSetModeOffset, mode) || mode != kSupportedQuestSetMode
         || !read(parent, set + kQuestSetValueSlotOffset, slot) || slot >= kUnlockSlotLimit
-        || !array(parent, set, kQuestSetMemberClass, kQuestSetMemberStride, members)
+        || !array(parent,
+                  set + kQuestSetMemberDescriptor,
+                  kQuestSetMemberClass,
+                  kQuestSetMemberStride,
+                  members)
         || members.count > itemCount) {
         return {};
     }
@@ -177,10 +199,10 @@ Quest read_quest_initialization(std::span<const std::byte> definition,
     if (!read(definition, kItemUnlockBlockOffset, unlockRelative)
         || (unlockRelative != 0
             && (!block(definition, kItemUnlockBlockOffset, kItemUnlockBlockClass, unlock)
-                || !find_optional_array_at(definition, unlock, flags)
+                || !find_optional_array_at(definition, unlock + kItemPresenceFlagDescriptor, flags)
                 || (flags.count != 0
                     && !array(definition,
-                              unlock,
+                              unlock + kItemPresenceFlagDescriptor,
                               kItemPresenceFlagClass,
                               kItemPresenceFlagStride,
                               flags))))) {

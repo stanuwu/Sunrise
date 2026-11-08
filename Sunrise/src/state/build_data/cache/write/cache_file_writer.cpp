@@ -54,7 +54,8 @@ namespace {
            && domains.rewardItems.size() <= kMaximumCount
            && domains.rewardInstructions.size() <= kMaximumCount
            && domains.rewardModifiers.size() <= kMaximumCount
-           && domains.rewardSockets.size() <= kMaximumCount;
+           && domains.rewardSockets.size() <= kMaximumCount
+           && domains.starterSets.size() <= kMaximumCount;
 }
 
 /** @return True when the requested final-name rule is one of the declared values. */

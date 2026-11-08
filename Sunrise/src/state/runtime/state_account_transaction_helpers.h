@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -10,6 +11,7 @@
 
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
+#include "../investment/store.h"
 #include "runtime.h"
 
 namespace sunrise::state::runtime::detail {
@@ -125,6 +127,35 @@ struct GrantSource {
 
 /** @return The selected character's index, or the character count when none is selected. */
 [[nodiscard]] std::size_t selected_character_index(const AccountState& account) noexcept;
+/**
+ * @param quest A valid, nonempty first-step plan.
+ * @return The saved value bank of the plan's scope.
+ */
+[[nodiscard]] investment::store::Bank
+quest_bank(const build_data::items::QuestInitialization& quest) noexcept;
+/**
+ * Prepares inventory rows and consumed-wrapper flags against one account view.
+ * @param claimedRecordIndex Record already claimed in the banks, or kUnclaimedRecordIndex.
+ * @param wrapperFlags Flags of the wrappers a draw consumed, or null for direct rows.
+ * @param refusal Receives a static reason when the result is not prepared.
+ * @return Deferred only when State may still change the answer; unresolvable is final.
+ */
+[[nodiscard]] RewardPreparation
+prepare_reward_grant(std::span<const DirectRecordReward> rewards,
+                     std::uint16_t claimedRecordIndex,
+                     const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
+                     PendingRecordRewardGrant& mutation,
+                     const char** refusal) noexcept;
+/**
+ * Replaces the socket lanes a reward names; other lanes keep their initial plugs.
+ * @param sockets Receives the authored socket block; unchanged on failure.
+ * @param refusal Receives a static reason on failure when not null.
+ */
+[[nodiscard]] bool
+apply_reward_sockets(const build_data::items::details::Definition& detail,
+                     std::span<const build_data::rewards::SocketOverride> overrides,
+                     account::inventory::Sockets& sockets,
+                     const char** refusal = nullptr) noexcept;
 /**
  * Hold investment::store::g_mutex while capturing inventory and quest state together.
  * @param account State before any acquisition charge.

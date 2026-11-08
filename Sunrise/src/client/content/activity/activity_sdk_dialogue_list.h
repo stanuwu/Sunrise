@@ -23,15 +23,15 @@ struct Line final {
 
 /** How one cue definition was matched to the content tree the list authors for it. */
 enum class CueStatus : std::uint8_t {
-    /** Exactly one tree carrying the definition hash matches the authored duration. */
+    /** Exactly one tree carrying the definition hash matches the authored window. */
     resolved,
-    /** Several trees share the definition hash and none or several match the authored duration. */
+    /** Several trees share the definition hash and none or several match the authored window. */
     ambiguous,
     /** No tree carries the definition hash. */
     missing,
     /** A tree carrying the definition hash is malformed. */
     malformed,
-    /** The one tree carrying the definition hash differs from the authored duration. */
+    /** The one tree carrying the definition hash differs from the authored window. */
     mismatched,
 };
 

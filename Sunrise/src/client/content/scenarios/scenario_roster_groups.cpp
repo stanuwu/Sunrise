@@ -55,7 +55,7 @@ struct ChainReadContext {
  * @param storage Working storage for this pass.
  * @param handle Tag from a placed object's per-bubble sub-block.
  * @param registryKey Registry key the descriptors must name.
- * @return True only when the bounded chain and complete descriptor scan finished.
+ * @return True only when the bounded chain and every config's descriptor read finished.
  */
 [[nodiscard]] bool follow_handle(const reader::Source& source,
                                  reader::Scratch& scratch,

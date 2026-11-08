@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80807d.h"
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
 #include "scriptable_auth_body.h"
@@ -15,6 +16,7 @@
 namespace sunrise::middleware::bap::activity_message::combatant_auth {
 
 namespace fields = auth_fields;
+namespace generated = middleware::content::packages::schema::generated;
 
 // Actor control bodies use the Type 2 Auth schema.
 inline constexpr std::uint32_t kSchema = scriptable_auth::kType2Schema;
@@ -37,7 +39,9 @@ inline constexpr std::uint8_t kCompletionWidth = 2;
 inline constexpr std::uint32_t kCompletionValue = 1;
 /** A path program names a type-58 authored path and one of its two markers. */
 inline constexpr std::uint32_t kPathSlotType = 58;
-inline constexpr std::uint32_t kPathComponentClass = 0x80807D9BU;
+/** Component class a type-58 path slot carries. */
+inline constexpr std::uint32_t kAbilityPointComponentClass =
+    generated::AbilityPointComponent::kClass;
 inline constexpr std::uint8_t kPathMarkerWidth = 8;
 /** Marker 0 is the path start, marker 1 its destination. */
 inline constexpr std::uint32_t kPathDestinationMarker = 1;

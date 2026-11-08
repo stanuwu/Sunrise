@@ -5,13 +5,16 @@
 #include <cstdio>
 #include <memory>
 #include <new>
+#include <string>
 #include <string_view>
 
 #include "../../../resources/resource.h"
 #include "../filesystem/path.h"
+#include "../filesystem/temporary_sibling.h"
 #include "../logging/log.h"
 #include "parser.h"
 #include "settings.h"
+#include "settings_upgrade.h"
 
 namespace sunrise::core::settings {
 namespace {
@@ -131,6 +134,19 @@ void report_version(std::uint32_t fileVersion) noexcept {
     return document.starts_with(kMark) ? document.substr(kMark.size()) : document;
 }
 
+/** Reports one in-place upgrade; settings load before the log sinks exist. */
+void report_upgrade(std::uint32_t fileVersion) noexcept {
+    std::array<char, 96> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=settings stage=upgrade result=ok file=%u build=%u",
+                                      static_cast<unsigned>(fileVersion),
+                                      static_cast<unsigned>(kSettingsVersion));
+    if (written > 0) {
+        log::early({line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
 } // namespace
 
 /** Loads the settings file from the owned folder, or creates the default one. */
@@ -200,7 +216,16 @@ bool initialize(void* module) noexcept {
     if (!parser::Parser(document).parse_version(version)) {
         return fail("version");
     }
-    if (version < kSettingsVersion) {
+    // Holds the upgraded text; `document` points into it after an upgrade.
+    std::string upgraded;
+    if (version < kSettingsVersion && upgrade::to_current(document, version, upgraded)) {
+        if (!path::replace_file(std::wstring_view(configPath.chars.data(), configPath.length),
+                                upgraded)) {
+            return fail("write_upgrade");
+        }
+        report_upgrade(version);
+        document = upgraded;
+    } else if (version < kSettingsVersion) {
         if (!DeleteFileW(configPath.chars.data())) {
             return fail("delete_old");
         }

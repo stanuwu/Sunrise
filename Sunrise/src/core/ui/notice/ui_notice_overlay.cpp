@@ -17,8 +17,6 @@ namespace {
 constexpr float kNoticeSeconds = 12.0F;
 /** A slot with no time left is free. */
 constexpr float kExpired = 0.0F;
-/** Fixed animation key. Every visibility-lane user needs its own, so keep these distinct. */
-constexpr ImGuiID kOverlayAnimationId = 3;
 /** Response rates for showing and hiding, matching the other overlays. */
 constexpr animation::transition::Rates kVisibilityRates{16.0F, 14.0F};
 /** A hidden overlay has finished its transition and draws nothing. */
@@ -102,11 +100,12 @@ bool draw() noexcept {
     }
     ReleaseSRWLockExclusive(&g_lock);
 
-    const float progress = animation::transition::update(kOverlayAnimationId,
-                                                         animation::transition::Lane::visibility,
-                                                         pendingCount != 0,
-                                                         kVisibilityRates,
-                                                         kHiddenProgress);
+    const float progress = animation::transition::update(
+        animation::transition::fixed_id(animation::transition::FixedKey::notice),
+        animation::transition::Lane::visibility,
+        pendingCount != 0,
+        kVisibilityRates,
+        kHiddenProgress);
     if (progress <= kHiddenProgress) {
         return false;
     }

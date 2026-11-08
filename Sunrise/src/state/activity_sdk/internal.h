@@ -43,8 +43,13 @@ load_path(const wchar_t* path, std::shared_ptr<Catalog>& output, Status& result)
                                       std::shared_ptr<Catalog>& output,
                                       Status& result) noexcept;
 #endif
+/** Opens and maps one pack read-only; the caller validates it before publication. */
+[[nodiscard]] bool
+open_pack(const wchar_t* path, std::shared_ptr<Catalog>& output, Status& result) noexcept;
 /** Checks every row and cross-section relation before publication. */
 [[nodiscard]] bool valid_catalog(const Catalog& value) noexcept;
+/** Checks the rows a mod pack carries: what resolve and the roster read, and nothing global. */
+[[nodiscard]] bool valid_mod_catalog(const Catalog& value) noexcept;
 /** Names the check the last refused catalog failed, with its row where the check is row-local. */
 [[nodiscard]] const char* last_catalog_reason() noexcept;
 

@@ -9,7 +9,10 @@ namespace sunrise::state::unlocks {
 /** Stack slots one expression may use. The deepest installed reward condition needs 20. */
 inline constexpr std::size_t kExpressionStackCapacity = 32;
 
-/** Opcodes the client's expression evaluator implements that the server evaluates. */
+/**
+ * Opcodes of the client's expression evaluator. Opcode 12 names a shared expression, which
+ * extraction expands in place, so the server never evaluates it.
+ */
 enum class Opcode : std::uint8_t {
     /** Pushes 1 when the bound flag is set, otherwise 0. */
     flag = 1,
@@ -18,18 +21,41 @@ enum class Opcode : std::uint8_t {
     /** Binary operators pop right then left and push the result. */
     logicalOr = 3,
     logicalAnd = 4,
+    /** Pushes 1 when both operands are zero. */
+    logicalNor = 5,
+    notEqual = 6,
+    /** Pushes 0 only when both operands are nonzero. */
+    logicalNand = 7,
     equal = 8,
+    /** The client tests a != b for both 6 and 9. */
+    notEqualAlias = 9,
     /** Pushes one bound value. */
     loadValue = 10,
     /** Pushes the operand as a signed constant. */
     constant = 11,
+    /** Comparisons are signed. */
     greaterThan = 13,
     greaterOrEqual = 14,
     lessThan = 15,
     lessOrEqual = 16,
+    /** Arithmetic wraps at 32 bits. */
     add = 17,
+    subtract = 18,
+    multiply = 19,
+    /** Signed; a zero divisor yields 0, and the one overflowing quotient is refused. */
+    divide = 20,
+    remainder = 21,
     /** Pops one value and pushes its two's-complement negation. */
     negate = 22,
+    /** Pops one value and pushes the 32-bit FNV-1a hash of its four big-endian bytes. */
+    hash = 23,
+    /** Pushes the FNV-1a hash of the right operand's big-endian bytes, seeded with the left. */
+    hashCombine = 24,
+    bitAnd = 25,
+    bitOr = 26,
+    bitXor = 27,
+    /** Pops one value and pushes its bitwise complement. */
+    bitNot = 28,
 };
 
 /** Saved bank a flag or value instruction reads once its authored unlock slot is bound. */

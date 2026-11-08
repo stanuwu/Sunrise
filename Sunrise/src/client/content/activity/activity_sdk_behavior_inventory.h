@@ -56,7 +56,7 @@ struct Owner final {
     SubmissionKind submissionKind{SubmissionKind::unresolved};
 };
 
-/** Full installed class-0x8080941E inventory. */
+/** Full installed object-behavior root inventory. */
 struct Snapshot final {
     std::vector<Program> programs{};
     std::vector<Input> inputs{};

@@ -11,6 +11,7 @@
 #include <span>
 
 #include "../../../core/logging/log.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808099.h"
 #include "../../memory/current_process_memory.h"
 #include "dynamic_object_registry.h"
 #include "internal.h"
@@ -26,9 +27,9 @@ constexpr std::size_t kFrameCount = 4;
 thread_local bool t_inInstantiate{};
 
 /**
- * Reads the placed entry's authored world position, held at entry `+0x20`.
+ * Reads the placed entry's authored world position.
  * Two entries at one position under different object lists are the same authored prop placed
- * twice, which an identity-keyed count cannot see because each source carries its own `+0x70`.
+ * twice, which an identity-keyed count cannot see because each source carries its own identity.
  */
 [[nodiscard]] bool read_entry_position(const void* entry, std::array<float, 3>& output) noexcept {
     if (entry == nullptr) {
@@ -36,8 +37,10 @@ thread_local bool t_inInstantiate{};
     }
     return memory::read_current_process(
         nullptr,
-        reinterpret_cast<std::uintptr_t>(entry) + 0x20U,
-        std::span(reinterpret_cast<std::byte*>(output.data()), sizeof(float) * output.size()));
+        reinterpret_cast<std::uintptr_t>(entry)
+            + offsetof(middleware::content::packages::schema::generated::AuthoredPlacementEntry,
+                       position),
+        std::as_writable_bytes(std::span(output)));
 }
 
 /**

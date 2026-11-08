@@ -18,6 +18,7 @@
 #include "../../activity/host_runtime.h"
 #include "activity_host_anchor_render_controls.h"
 #include "activity_host_package_tag_names.h"
+#include "activity_host_scriptable_labels.h"
 #include "activity_host_table_layout.h"
 
 namespace sunrise::server::ui::activity_host::authored_anchors {
@@ -27,6 +28,7 @@ namespace catalog = state::build_data::scriptables;
 namespace render_controls = server::ui::activity_host::anchor_render_controls;
 namespace marker = client::ui::activity::authored_placement_marker;
 namespace tag_names = server::ui::activity_host::package_tag_names;
+namespace labels = server::ui::activity_host::scriptable_labels;
 namespace tables = middleware::content::packages::tables;
 namespace teleport = client::hooks::teleport;
 
@@ -102,13 +104,6 @@ void draw_name(const catalog::Snapshot& snapshot, std::uint32_t row) noexcept {
     return false;
 }
 
-[[nodiscard]] bool scope_matches(const catalog::Object& object, int scope) noexcept {
-    // Registry descriptor values the scope combo selects, in its entry order.
-    constexpr std::array<std::uint16_t, 4> descriptors{0, 8, 24, 40};
-    return scope <= 0 || scope >= static_cast<int>(descriptors.size())
-           || object.registryDescriptor == descriptors[static_cast<std::size_t>(scope)];
-}
-
 /** @return True when an authored placement's package provenance rows are all present. */
 [[nodiscard]] bool placement_valid(const catalog::Snapshot& snapshot,
                                    const catalog::AuthoredPlacement& placement) noexcept {
@@ -133,7 +128,7 @@ void draw_name(const catalog::Snapshot& snapshot, std::uint32_t row) noexcept {
          && bubble.index != static_cast<std::uint32_t>(filters.bubbleIndex))
         || (filters.stateIndex >= 0
             && owner.index != static_cast<std::uint32_t>(filters.stateIndex))
-        || !scope_matches(object, filters.scope)) {
+        || !labels::scope_matches(object.registryDescriptor, filters.scope)) {
         return false;
     }
     if (filters.text == nullptr || !filters.text->IsActive()) {

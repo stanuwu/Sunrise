@@ -43,7 +43,7 @@ using auth_fields::write_absent_client_ref;
            && padding == 0 && reader.remaining_bits() == 0;
 }
 
-/** Reads and requires the exact nested 0x80809C42 unset ClientRef. */
+/** Reads and requires an exact nested unset ClientRef. */
 [[nodiscard]] inline bool read_absent_client_ref(encoding::bits::Reader& reader) noexcept {
     std::uint64_t key = 0;
     std::uint64_t type = 0;

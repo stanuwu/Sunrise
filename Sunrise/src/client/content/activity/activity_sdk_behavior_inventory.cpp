@@ -13,28 +13,114 @@
 
 #include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/reader/parallel.h"
+#include "../../../middleware/content/packages/reader/typed_array.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808029.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80802a.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80802d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80802f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808031.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808039.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80803e.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808044.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80804d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80804e.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80805f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808067.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808072.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808084.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808092.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808093.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808094.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809a.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809c.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809f.h"
+#include "activity_sdk_behavior_node_shapes.h"
 
 namespace sunrise::client::content::activity::sdk_generation::behavior_inventory {
 namespace {
 
 namespace reader = middleware::content::packages::reader;
 namespace parallel = middleware::content::packages::reader::parallel;
+namespace generated = middleware::content::packages::schema::generated;
 
 // Package class ids of the behavior graph nodes this pass reads.
-constexpr std::uint32_t kRootClass = 0x8080941EU;
-constexpr std::uint32_t kStorageChannelClass = 0x80802A6FU;
-constexpr std::uint32_t kConditionClass = 0x80804D7DU;
-constexpr std::uint32_t kFilterClass = 0x80804E3DU;
-constexpr std::uint32_t kTargetClass = 0x80804E10U;
-constexpr std::uint32_t kConditionGroupClass = 0x80809310U;
+constexpr std::uint32_t kRootClass = generated::ObjectBehaviorRoot::kClass;
+constexpr std::uint32_t kStorageChannelClass = generated::BehaviorStorageChannel::kClass;
+constexpr std::uint32_t kConditionClass = generated::BehaviorChannelComparison::kClass;
+constexpr std::uint32_t kFilterClass = generated::BehaviorFilter::kClass;
+constexpr std::uint32_t kTargetClass = generated::BehaviorTarget::kClass;
+constexpr std::uint32_t kConditionGroupClass = generated::BehaviorConditionGroup::kClass;
 // Extraction bounds; one malformed blob must not exhaust memory.
 constexpr std::uint32_t kMaximumRows = 1U << 20U;
 constexpr std::uint32_t kMaximumDepth = 256U;
-// Array header marker and the element classes it may carry.
-constexpr std::uint32_t kArrayMarker = 0x80809FBDU;
-constexpr std::uint32_t kBuildElementClass = 0x80809C04U;
-constexpr std::uint32_t kDescriptorElementClass = 0x80809C22U;
-constexpr std::uint32_t kMetadataElementClass = 0x80809C20U;
+// Element classes an actor-definition array may carry.
+constexpr std::uint32_t kBuildElementClass = generated::SPatternComponent::kClass;
+constexpr std::uint32_t kDescriptorElementClass = generated::ActorDescriptorRow::kClass;
+constexpr std::uint32_t kMetadataElementClass = generated::ActorDescriptorMetadata::kClass;
+// A class id word sits just before each inline struct; array rows follow the typed-array header.
+constexpr std::size_t kClassWordSize = reader::layout::kClassWordSize;
+constexpr std::size_t kHeaderSize = reader::layout::TypedArrayHeader::kSize;
+// A behavior root lists graph elements; each element points at one node.
+constexpr std::size_t kRootCountOffset = offsetof(generated::ObjectBehaviorRoot, behaviors.count);
+constexpr std::size_t kRootRelativeOffset =
+    offsetof(generated::ObjectBehaviorRoot, behaviors.relative);
+constexpr std::size_t kElementStride = sizeof(generated::SBehaviorGraphElement);
+constexpr std::size_t kElementNodeOffset = offsetof(generated::SBehaviorGraphElement, behavior);
+using Expression = generated::C80809419;
+// A compiled expression lists its channel inputs, then carries its evaluator words.
+constexpr std::size_t kInputCountOffset = offsetof(Expression, inputs.count);
+constexpr std::size_t kInputRelativeOffset = offsetof(Expression, inputs.relative);
+constexpr std::size_t kInputStride = sizeof(generated::BehaviorExpressionInput);
+constexpr std::size_t kInputSelectorOffset =
+    offsetof(generated::BehaviorExpressionInput, objectSelector);
+constexpr std::size_t kInputChannelOffset = offsetof(generated::BehaviorExpressionInput, channel);
+constexpr std::size_t kStorageChannelHashOffset =
+    offsetof(generated::BehaviorStorageChannel, channelHash);
+constexpr std::size_t kInputOrModeOffset = offsetof(Expression, expression.unknown56One);
+constexpr std::size_t kActiveFieldOffset = offsetof(Expression, expression.activeField);
+constexpr std::size_t kNativeOverrideOffset = offsetof(Expression, expression.evaluatorOverride);
+// Filters and condition groups list filter rows; each row points at one node.
+constexpr std::size_t kFilterRowStride = sizeof(generated::C80809316);
+constexpr std::size_t kFilterRowNodeOffset = offsetof(generated::C80809316, filter);
+constexpr std::size_t kFilterCountOffset =
+    offsetof(generated::BehaviorFilter, filters.filtersInline.filters.count);
+constexpr std::size_t kFilterRelativeOffset =
+    offsetof(generated::BehaviorFilter, filters.filtersInline.filters.relative);
+constexpr std::size_t kGroupCountOffset =
+    offsetof(generated::BehaviorConditionGroup, filters.filters.count);
+constexpr std::size_t kGroupRelativeOffset =
+    offsetof(generated::BehaviorConditionGroup, filters.filters.relative);
+// A comparison holds two expressions; a target points at its action node.
+constexpr std::size_t kConditionLeftOffset =
+    offsetof(generated::BehaviorChannelComparison, h70b1574d);
+constexpr std::size_t kConditionRightOffset =
+    offsetof(generated::BehaviorChannelComparison, h8c8ef163);
+constexpr std::size_t kTargetActionOffset = offsetof(generated::BehaviorTarget, action);
+// An actor definition lists its builds, interface descriptors and descriptor metadata.
+constexpr std::size_t kBuildCountOffset = offsetof(generated::SEntity, components.count);
+constexpr std::size_t kBuildRelativeOffset = offsetof(generated::SEntity, components.relative);
+constexpr std::size_t kBuildStride = sizeof(generated::SPatternComponent);
+constexpr std::size_t kBuildConfigOffset = offsetof(generated::SPatternComponent, config);
+constexpr std::size_t kDescriptorCountOffset =
+    offsetof(generated::SEntity, h83bfb495.interfaceDescriptors.count);
+constexpr std::size_t kDescriptorRelativeOffset =
+    offsetof(generated::SEntity, h83bfb495.interfaceDescriptors.relative);
+constexpr std::size_t kDescriptorStride = sizeof(generated::ActorDescriptorRow);
+constexpr std::size_t kDescriptorSubtypeOffset =
+    offsetof(generated::ActorDescriptorRow, componentKey);
+constexpr std::size_t kDescriptorConfigOffset = offsetof(generated::ActorDescriptorRow, config.tag);
+constexpr std::size_t kMetadataCountOffset =
+    offsetof(generated::SEntity, h83bfb495.linksD24ByteRowsConfigAt0.count);
+constexpr std::size_t kMetadataRelativeOffset =
+    offsetof(generated::SEntity, h83bfb495.linksD24ByteRowsConfigAt0.relative);
+constexpr std::size_t kMetadataStride = sizeof(generated::ActorDescriptorMetadata);
+constexpr std::size_t kMetadataConfigOffset =
+    offsetof(generated::ActorDescriptorMetadata, config.tag);
+constexpr std::size_t kMetadataSubtypeOffset =
+    offsetof(generated::ActorDescriptorMetadata, config.word);
+constexpr std::size_t kMetadataBuildOffset =
+    offsetof(generated::ActorDescriptorMetadata, buildOrdinal);
 // All-ones marks an absent row index in every extracted table.
 constexpr std::uint32_t kAbsentIndex = (std::numeric_limits<std::uint32_t>::max)();
 
@@ -44,64 +130,7 @@ enum class InputRole : std::uint8_t {
     conditionRight = 3,
 };
 
-struct NodeShape final {
-    std::uint32_t classId{};
-    std::uint16_t size{};
-    std::array<std::uint8_t, 3> roots{};
-    std::uint8_t rootCount{};
-    std::uint8_t expressionOffset{};
-};
-
-// Class id, blob size, root field offsets and expression offset of each node.
-constexpr std::array kNodeShapes{
-    NodeShape{0x80804E0FU, 0x58, {}, 0, 0x10},
-    NodeShape{0x80804E10U, 0x10},
-    NodeShape{0x80804E17U, 0x20},
-    NodeShape{0x80804E19U, 0x20},
-    NodeShape{0x80804E23U, 0x30, {0x10}, 1},
-    NodeShape{0x80804E27U, 0x10},
-    NodeShape{0x80804E30U, 0x0C},
-    NodeShape{0x80804E31U, 0x20, {0x08}, 1},
-    NodeShape{0x80804E35U, 0xA8},
-    NodeShape{0x80804E38U, 0x08},
-    NodeShape{0x80804E39U, 0x38, {0x08, 0x20}, 2},
-    NodeShape{0x80804E3AU, 0x01},
-    NodeShape{0x80804E3BU, 0x04},
-    NodeShape{0x80804E3CU, 0x28, {0x08}, 1},
-    NodeShape{0x80804E3DU, 0x68, {0x28, 0x48}, 2},
-    NodeShape{0x80804E3EU, 0x10},
-    NodeShape{0x80804E3FU, 0x18, {0x00}, 1},
-    NodeShape{0x80804E40U, 0x50, {}, 0, 0x10},
-    NodeShape{0x80804E41U, 0x10},
-    NodeShape{0x80802A6EU, 0x01},
-    NodeShape{0x80802A6FU, 0x50, {}, 0, 0x10},
-    NodeShape{0x80802DA7U, 0x38},
-    NodeShape{0x80804D7DU, 0x90},
-    NodeShape{0x80804D5EU, 0x10},
-    NodeShape{0x80804D71U, 0x08},
-    NodeShape{0x80804D72U, 0x04},
-    NodeShape{0x80804D73U, 0x60},
-    NodeShape{0x80804D74U, 0x0C},
-    NodeShape{0x80804D75U, 0x04},
-    NodeShape{0x80804D76U, 0x01},
-    NodeShape{0x80804D78U, 0x10},
-    NodeShape{0x80804D7AU, 0x08},
-    NodeShape{0x80804D7BU, 0x01},
-    NodeShape{0x80804D7CU, 0x01},
-    NodeShape{0x80804D80U, 0x01},
-    NodeShape{0x80804D81U, 0x04},
-    NodeShape{0x80804D82U, 0x0C},
-    NodeShape{0x80804D83U, 0x04},
-    NodeShape{0x80809310U, 0x18},
-    NodeShape{0x80804E0EU, 0x01},
-    NodeShape{0x80804E12U, 0x20, {0x08}, 1},
-    NodeShape{0x80804E13U, 0x01},
-    NodeShape{0x80804E14U, 0x01},
-    NodeShape{0x80804E15U, 0x01},
-    NodeShape{0x80804E1CU, 0x60, {0x18, 0x30, 0x48}, 3},
-    NodeShape{0x80802907U, 0x58, {}, 0, 0x10},
-    NodeShape{0x80802DA6U, 0x0C},
-};
+using node_shapes::NodeShape;
 
 template <typename Value>
 [[nodiscard]] bool
@@ -127,13 +156,6 @@ relative_target(std::span<const std::byte> bytes, std::size_t field, std::size_t
     }
     output = static_cast<std::size_t>(static_cast<std::int64_t>(field) + relative);
     return output <= bytes.size();
-}
-
-[[nodiscard]] const NodeShape* shape(std::uint32_t classId) noexcept {
-    const auto found = std::find_if(kNodeShapes.begin(),
-                                    kNodeShapes.end(),
-                                    [classId](const auto& row) { return row.classId == classId; });
-    return found == kNodeShapes.end() ? nullptr : &*found;
 }
 
 /** Walks one behavior program's bytes, collecting its inputs and channel writes. */
@@ -176,11 +198,11 @@ private:
             return true;
         }
         if (!relative_target(bytes_, relativeField, header) || !read_value(bytes_, header, repeated)
-            || repeated != count || header > bytes_.size() - 16U
-            || count > (bytes_.size() - header - 16U) / stride) {
+            || repeated != count || bytes_.size() - header < kHeaderSize
+            || count > (bytes_.size() - header - kHeaderSize) / stride) {
             return false;
         }
-        data = header + 16U;
+        data = header + kHeaderSize;
         return true;
     }
 
@@ -194,11 +216,16 @@ private:
         }
         std::uint64_t count = 0;
         std::size_t data = 0;
-        if (!array(offset + 8U, offset + 16U, 16U, count, data)) {
+        if (!array(offset + kRootCountOffset,
+                   offset + kRootRelativeOffset,
+                   kElementStride,
+                   count,
+                   data)) {
             return false;
         }
         for (std::uint64_t index = 0; index < count; ++index) {
-            const std::size_t field = data + static_cast<std::size_t>(index) * 16U + 8U;
+            const std::size_t field =
+                data + static_cast<std::size_t>(index) * kElementStride + kElementNodeOffset;
             std::size_t child = 0;
             if (!relative_target(bytes_, field, child) || !node(child, depth + 1U)) {
                 return false;
@@ -221,20 +248,25 @@ private:
         std::uint64_t inputOrMode = 0;
         std::uint32_t activeField = 0;
         std::int32_t nativeOverride = 0;
-        if (!array(offset, offset + 8U, 8U, count, data)
-            || !read_value(bytes_, offset + 0x30U, inputOrMode)
-            || !read_value(bytes_, offset + 0x38U, activeField)
-            || !read_value(bytes_, offset + 0x3CU, nativeOverride)) {
+        if (!array(offset + kInputCountOffset,
+                   offset + kInputRelativeOffset,
+                   kInputStride,
+                   count,
+                   data)
+            || !read_value(bytes_, offset + kInputOrModeOffset, inputOrMode)
+            || !read_value(bytes_, offset + kActiveFieldOffset, activeField)
+            || !read_value(bytes_, offset + kNativeOverrideOffset, nativeOverride)) {
             return false;
         }
         if (inputs_.size() > kMaximumRows - count) {
             return false;
         }
         for (std::uint64_t index = 0; index < count; ++index) {
-            const std::size_t row = data + static_cast<std::size_t>(index) * 8U;
+            const std::size_t row = data + static_cast<std::size_t>(index) * kInputStride;
             std::uint8_t selector = 0;
             std::uint32_t hash = 0;
-            if (!read_value(bytes_, row, selector) || !read_value(bytes_, row + 4U, hash)) {
+            if (!read_value(bytes_, row + kInputSelectorOffset, selector)
+                || !read_value(bytes_, row + kInputChannelOffset, hash)) {
                 return false;
             }
             inputs_.push_back({programRow_,
@@ -255,11 +287,12 @@ private:
     node_array(std::size_t countField, std::size_t relativeField, std::uint32_t depth) {
         std::uint64_t count = 0;
         std::size_t data = 0;
-        if (!array(countField, relativeField, 16U, count, data)) {
+        if (!array(countField, relativeField, kFilterRowStride, count, data)) {
             return false;
         }
         for (std::uint64_t index = 0; index < count; ++index) {
-            const std::size_t field = data + static_cast<std::size_t>(index) * 16U + 8U;
+            const std::size_t field =
+                data + static_cast<std::size_t>(index) * kFilterRowStride + kFilterRowNodeOffset;
             std::size_t child = 0;
             if (!relative_target(bytes_, field, child) || !node(child, depth + 1U)) {
                 return false;
@@ -270,7 +303,7 @@ private:
 
     /** Walks one known node layout and its nested roots. */
     [[nodiscard]] bool node(std::size_t offset, std::uint32_t depth) {
-        if (depth > kMaximumDepth || offset < 4U
+        if (depth > kMaximumDepth || offset < kClassWordSize
             || offset > (std::numeric_limits<std::uint32_t>::max)()) {
             return false;
         }
@@ -278,10 +311,10 @@ private:
             return true;
         }
         std::uint32_t classId = 0;
-        if (!read_value(bytes_, offset - 4U, classId)) {
+        if (!read_value(bytes_, offset - kClassWordSize, classId)) {
             return false;
         }
-        const NodeShape* const spec = shape(classId);
+        const NodeShape* const spec = node_shapes::shape(classId);
         if (spec == nullptr || offset > bytes_.size() || spec->size > bytes_.size() - offset) {
             return false;
         }
@@ -293,33 +326,38 @@ private:
         }
         if (classId == kStorageChannelClass) {
             std::uint32_t hash = 0;
-            if (!read_value(bytes_, offset, hash) || writes_.size() >= kMaximumRows) {
+            if (!read_value(bytes_, offset + kStorageChannelHashOffset, hash)
+                || writes_.size() >= kMaximumRows) {
                 return false;
             }
             writes_.push_back({programRow_, static_cast<std::uint32_t>(offset), hash});
         }
         if (classId == kConditionClass
-            && (!expression(
-                    offset + 8U, static_cast<std::uint32_t>(offset), InputRole::conditionLeft)
-                || !expression(offset + 0x48U,
+            && (!expression(offset + kConditionLeftOffset,
+                            static_cast<std::uint32_t>(offset),
+                            InputRole::conditionLeft)
+                || !expression(offset + kConditionRightOffset,
                                static_cast<std::uint32_t>(offset),
                                InputRole::conditionRight))) {
             return false;
         }
-        if (classId == kFilterClass && !node_array(offset + 0x18U, offset + 0x20U, depth)) {
+        if (classId == kFilterClass
+            && !node_array(offset + kFilterCountOffset, offset + kFilterRelativeOffset, depth)) {
             return false;
         }
-        if (classId == kConditionGroupClass && !node_array(offset + 8U, offset + 0x10U, depth)) {
+        if (classId == kConditionGroupClass
+            && !node_array(offset + kGroupCountOffset, offset + kGroupRelativeOffset, depth)) {
             return false;
         }
         if (classId == kTargetClass) {
             std::size_t child = 0;
             std::int64_t relative = 0;
-            if (!read_value(bytes_, offset + 8U, relative)) {
+            if (!read_value(bytes_, offset + kTargetActionOffset, relative)) {
                 return false;
             }
             if (relative != 0
-                && (!relative_target(bytes_, offset + 8U, child) || !node(child, depth + 1U))) {
+                && (!relative_target(bytes_, offset + kTargetActionOffset, child)
+                    || !node(child, depth + 1U))) {
                 return false;
             }
         }
@@ -358,36 +396,36 @@ struct BuildOwner final {
 /** Maps one proved submitter subtype without guessing unresolved rows. */
 [[nodiscard]] SubmissionKind submission_kind(std::uint32_t subtype) noexcept {
     switch (subtype) {
-    case 0x80804DBAU:
-    case 0x80804DA6U:
-    case 0x80804DD1U:
-    case 0x80804DC2U:
-    case 0x80804DACU:
-    case 0x80806779U:
-    case 0x80804DBEU:
-    case 0x80804D8DU:
-    case 0x80804DCCU:
-    case 0x80804DC0U:
-    case 0x80804DEBU:
-    case 0x80802F92U:
-    case 0x80804FBBU:
+    case generated::C80804dba::kClass:
+    case generated::C80804da6::kClass:
+    case generated::C80804dd1::kClass:
+    case generated::C80804dc2::kClass:
+    case generated::C80804dac::kClass:
+    case generated::C80806779::kClass:
+    case generated::C80804dbe::kClass:
+    case generated::C80804d8d::kClass:
+    case generated::C80804dcc::kClass:
+    case generated::C80804dc0::kClass:
+    case generated::C80804deb::kClass:
+    case generated::C80802f92::kClass:
+    case generated::C80804fbb::kClass:
         return SubmissionKind::activeNative;
-    case 0x80804DE4U:
-    case 0x80804FB0U:
-    case 0x80806785U:
-    case 0x808031D1U:
-    case 0x808072C0U:
-    case 0x80803E70U:
-    case 0x80805FB3U:
-    case 0x80805FB0U:
-    case 0x80804DB2U:
-    case 0x80804491U:
-    case 0x80803926U:
-    case 0x808092A4U:
-    case 0x80802FF8U:
-    case 0x80806782U:
-    case 0x808072CBU:
-    case 0x808084D7U:
+    case generated::C80804de4::kClass:
+    case generated::C80804fb0::kClass:
+    case generated::C80806785::kClass:
+    case generated::C808031d1::kClass:
+    case generated::C808072c0::kClass:
+    case generated::UnknownWeaponPrimaryComponent::kClass:
+    case generated::C80805fb3::kClass:
+    case generated::C80805fb0::kClass:
+    case generated::C80804db2::kClass:
+    case generated::C80804491::kClass:
+    case generated::C80803926::kClass:
+    case generated::UnknownTriggerPhysicsShape::kClass:
+    case generated::C80802ff8::kClass:
+    case generated::C80806782::kClass:
+    case generated::C808072cb::kClass:
+    case generated::C808084d7::kClass:
         return SubmissionKind::passive;
     default:
         return SubmissionKind::unresolved;
@@ -415,19 +453,12 @@ struct BuildOwner final {
         return false;
     }
     std::size_t header = 0;
-    if (!relative_target(bytes, relativeField, header) || header < sizeof(std::uint32_t)) {
+    reader::TypedArrayRows rows{};
+    if (!relative_target(bytes, relativeField, header)
+        || !reader::read_typed_array(bytes, header, count, elementClass, stride, rows)) {
         return false;
     }
-    std::uint32_t marker = 0;
-    std::uint64_t repeated = 0;
-    std::uint32_t actualClass = 0;
-    if (!read_value(bytes, header - 4U, marker) || !read_value(bytes, header, repeated)
-        || !read_value(bytes, header + 8U, actualClass) || marker != kArrayMarker
-        || repeated != count || actualClass != elementClass || bytes.size() < 16U
-        || header > bytes.size() - 16U || count > (bytes.size() - header - 16U) / stride) {
-        return false;
-    }
-    data = header + 16U;
+    data = rows.data;
     return true;
 }
 
@@ -438,8 +469,8 @@ struct BuildOwner final {
                                 std::vector<std::uint32_t>& configTags) {
     std::uint64_t buildCount = 0;
     std::int64_t buildRelative = 0;
-    if (!read_value(bytes, 0x10U, buildCount) || !read_value(bytes, 0x18U, buildRelative)
-        || buildCount > kMaximumRows) {
+    if (!read_value(bytes, kBuildCountOffset, buildCount)
+        || !read_value(bytes, kBuildRelativeOffset, buildRelative) || buildCount > kMaximumRows) {
         return false;
     }
     if (buildCount == 0 && buildRelative == 0) {
@@ -448,29 +479,41 @@ struct BuildOwner final {
     if (buildCount == 0 || buildRelative < 0) {
         return false;
     }
-    const std::size_t header = static_cast<std::size_t>(buildRelative);
-    std::uint32_t marker = 0;
-    std::uint64_t repeated = 0;
-    std::uint32_t elementClass = 0;
-    if (!read_value(bytes, header + 20U, marker) || !read_value(bytes, header + 24U, repeated)
-        || !read_value(bytes, header + 32U, elementClass) || marker != kArrayMarker
-        || repeated != buildCount || elementClass != kBuildElementClass || bytes.size() < 40U
-        || header > bytes.size() - 40U || buildCount > (bytes.size() - header - 40U) / 12U) {
+    // The typed-array header sits at the field plus its non-negative relative value.
+    const std::size_t header = kBuildRelativeOffset + static_cast<std::size_t>(buildRelative);
+    reader::TypedArrayRows builds{};
+    if (!reader::read_typed_array(
+            bytes, header, buildCount, kBuildElementClass, kBuildStride, builds)) {
         return false;
     }
     std::uint64_t descriptorCount = 0;
     std::uint64_t metadataCount = 0;
     std::size_t descriptorData = 0;
     std::size_t metadataData = 0;
-    if (!array(bytes, 0x58U, 0x60U, 40U, kDescriptorElementClass, descriptorCount, descriptorData)
-        || !array(bytes, 0x68U, 0x70U, 24U, kMetadataElementClass, metadataCount, metadataData)) {
+    if (!array(bytes,
+               kDescriptorCountOffset,
+               kDescriptorRelativeOffset,
+               kDescriptorStride,
+               kDescriptorElementClass,
+               descriptorCount,
+               descriptorData)
+        || !array(bytes,
+                  kMetadataCountOffset,
+                  kMetadataRelativeOffset,
+                  kMetadataStride,
+                  kMetadataElementClass,
+                  metadataCount,
+                  metadataData)) {
         return false;
     }
     const std::uint64_t pairedDescriptorCount = (std::min)(descriptorCount, metadataCount);
-    const std::size_t buildData = header + 40U;
+    const std::size_t buildData = builds.data;
     for (std::uint64_t build = 0; build < buildCount; ++build) {
         std::uint32_t configTag = 0;
-        if (!read_value(bytes, buildData + static_cast<std::size_t>(build) * 12U, configTag)) {
+        if (!read_value(bytes,
+                        buildData + static_cast<std::size_t>(build) * kBuildStride
+                            + kBuildConfigOffset,
+                        configTag)) {
             return false;
         }
         if (configTag == 0 || configTag == kAbsentIndex) {
@@ -479,18 +522,20 @@ struct BuildOwner final {
         configTags.push_back(configTag);
         bool exposed = false;
         for (std::uint64_t descriptor = 0; descriptor < pairedDescriptorCount; ++descriptor) {
-            const std::size_t row = metadataData + static_cast<std::size_t>(descriptor) * 24U;
+            const std::size_t row =
+                metadataData + static_cast<std::size_t>(descriptor) * kMetadataStride;
             const std::size_t descriptorRow =
-                descriptorData + static_cast<std::size_t>(descriptor) * 40U;
+                descriptorData + static_cast<std::size_t>(descriptor) * kDescriptorStride;
             std::uint32_t metadataConfig = 0;
             std::uint32_t subtype = 0;
             std::uint32_t metadataBuild = 0;
             std::uint32_t descriptorSubtype = 0;
             std::uint32_t descriptorConfig = 0;
-            if (!read_value(bytes, row, metadataConfig) || !read_value(bytes, row + 4U, subtype)
-                || !read_value(bytes, row + 16U, metadataBuild)
-                || !read_value(bytes, descriptorRow + 12U, descriptorSubtype)
-                || !read_value(bytes, descriptorRow + 16U, descriptorConfig)) {
+            if (!read_value(bytes, row + kMetadataConfigOffset, metadataConfig)
+                || !read_value(bytes, row + kMetadataSubtypeOffset, subtype)
+                || !read_value(bytes, row + kMetadataBuildOffset, metadataBuild)
+                || !read_value(bytes, descriptorRow + kDescriptorSubtypeOffset, descriptorSubtype)
+                || !read_value(bytes, descriptorRow + kDescriptorConfigOffset, descriptorConfig)) {
                 return false;
             }
             if (metadataConfig == configTag && metadataBuild == build

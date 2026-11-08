@@ -5,23 +5,33 @@
 #include <cstdint>
 #include <span>
 
+#include "../schema/generated/tag_classes_808000.h"
+#include "../schema/generated/tag_classes_808092.h"
+#include "../schema/generated/tag_classes_808099.h"
+#include "../schema/generated/tag_classes_80809b.h"
+#include "../schema/generated/tag_classes_80809f.h"
 #include "container_placement_reader.h"
 
 namespace sunrise::middleware::content::packages::tables {
 
 /** Component classes and row classes proved by the package and native shape readers. */
-inline constexpr std::uint32_t kTriggerVolumeComponentClass = 0x808099C8U;
-inline constexpr std::uint32_t kTriggerVolumeComponentHeaderClass = 0x808099C9U;
-inline constexpr std::uint32_t kTriggerVolumeRowClass = 0x808099D0U;
-inline constexpr std::uint32_t kTriggerVolumeArrayMarker = 0x80809FBDU;
-inline constexpr std::uint32_t kTriggerVolumeVertexClass = 0x80800094U;
-inline constexpr std::uint32_t kTriggerVolumeTriangleClass = 0x80809B92U;
-inline constexpr std::uint32_t kTriggerVolumeShapeReferenceClass = 0x8080929BU;
+inline constexpr std::uint32_t kTriggerVolumeComponentClass =
+    schema::generated::STriggerComponent::kClass;
+inline constexpr std::uint32_t kTriggerVolumeComponentHeaderClass =
+    schema::generated::STriggerComponentPeer::kClass;
+inline constexpr std::uint32_t kTriggerVolumeRowClass =
+    schema::generated::STriggerVolumeRow::kClass;
+inline constexpr std::uint32_t kTriggerVolumeVertexClass = schema::generated::SVec4Point::kClass;
+inline constexpr std::uint32_t kTriggerVolumeTriangleClass =
+    schema::generated::TriggerVolumeTriangle::kClass;
+inline constexpr std::uint32_t kTriggerVolumeShapeReferenceClass =
+    schema::generated::TriggerShapeReference::kClass;
 
 /** Installed row layout and conservative per-record limits. */
-inline constexpr std::size_t kTriggerVolumeRowStride = 0x120;
-inline constexpr std::size_t kTriggerVolumeVertexStride = 16;
-inline constexpr std::size_t kTriggerVolumeTriangleStride = 3;
+inline constexpr std::size_t kTriggerVolumeRowStride = sizeof(schema::generated::STriggerVolumeRow);
+inline constexpr std::size_t kTriggerVolumeVertexStride = sizeof(schema::generated::SVec4Point);
+inline constexpr std::size_t kTriggerVolumeTriangleStride =
+    sizeof(schema::generated::TriggerVolumeTriangle);
 inline constexpr std::size_t kTriggerVolumeRowCapacity = 4'096;
 inline constexpr std::size_t kTriggerVolumeVertexCapacity = 4'096;
 inline constexpr std::size_t kTriggerVolumeTriangleCapacity = 8'192;
@@ -33,7 +43,7 @@ struct TriggerVolumeIdentity final {
     std::uint8_t type{};
 };
 
-/** One class-0x808099C8 component root and its authored 0x120-byte rows. */
+/** One trigger-volume component root and its authored rows. */
 struct TriggerVolumeRoot final {
     Array rows{};
     TriggerVolumeIdentity identity{};
@@ -65,7 +75,7 @@ struct TriggerVolumeRow final {
     std::uint8_t active{};
 };
 
-/** Resolves one exact 0x808099C8 component row to its typed root. */
+/** Resolves one trigger-volume component row to its typed root. */
 [[nodiscard]] bool trigger_volume_root_at(std::span<const std::byte> blob,
                                           const Array& components,
                                           std::size_t componentIndex,
@@ -78,7 +88,7 @@ struct TriggerVolumeRow final {
                                                   std::size_t index,
                                                   TriggerVolumeIdentity& output) noexcept;
 
-/** Reads one fixed-stride authored row and its required 0x8080929B shape reference. */
+/** Reads one fixed-stride authored row and its required shape reference. */
 [[nodiscard]] bool trigger_volume_row_at(std::span<const std::byte> blob,
                                          const TriggerVolumeRoot& root,
                                          std::size_t index,

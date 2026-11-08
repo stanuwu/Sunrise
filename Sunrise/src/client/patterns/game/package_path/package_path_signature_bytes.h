@@ -36,15 +36,29 @@ inline constexpr std::size_t kRootOffsetOperand = 31;
 /** Byte offset of the path flags displacement in `mov eax, [rcx + disp32]`. */
 inline constexpr std::size_t kFlagsOffsetOperand = 53;
 
+/**
+ * Runs one schema callback of a loading tag: slot, tag, blob. Index 2, the fixup, is the first
+ * callback after the bytes land, and it runs for every tag a load request brings in.
+ */
+inline constexpr std::string_view kSchemaCallbackText =
+    "4C 8B DC 49 89 5B ? 49 89 6B ? 49 89 73 ? 57 41 54 41 55 41 56 41 57 48 83 EC ? 4C 8B BC 24 "
+    "? ? ? ? 4D 8D 71 ? 41 8B 1E 33 C0 45 32 ED 49 89 43 ? C6 44 24 ? 01 41 BC 01 00 00 00 49 89 "
+    "43 ? 41 8B F8 49 89 43 ? 8B EA 45 89 63 ? 88 84 24 ? ? ? ? 4D 85 FF 74 ? 49 89 07 4C 8D 44 "
+    "24 ? 8B D3 49 8B C9 E8";
+
 /** Package path builder signature byte count. */
 inline constexpr std::size_t kSetPathPatternSize = signature_length(kSetPathText);
 /** Path object file opener signature byte count. */
 inline constexpr std::size_t kOpenFilePatternSize = signature_length(kOpenFileText);
 /** Path resolver signature byte count. */
 inline constexpr std::size_t kResolvePathPatternSize = signature_length(kResolvePathText);
+/** Schema callback dispatcher signature byte count. */
+inline constexpr std::size_t kSchemaCallbackPatternSize = signature_length(kSchemaCallbackText);
 
 extern constinit const std::array<patterns::PatternByte, kSetPathPatternSize> kSetPath;
 extern constinit const std::array<patterns::PatternByte, kOpenFilePatternSize> kOpenFile;
 extern constinit const std::array<patterns::PatternByte, kResolvePathPatternSize> kResolvePath;
+extern constinit const std::array<patterns::PatternByte, kSchemaCallbackPatternSize>
+    kSchemaCallback;
 
 } // namespace sunrise::client::patterns::game::package_path

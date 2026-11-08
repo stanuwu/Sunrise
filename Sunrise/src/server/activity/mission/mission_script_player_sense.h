@@ -5,21 +5,25 @@
 #include <span>
 
 #include "../../../middleware/bap/activity_message/sense_update.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808094.h"
 
 namespace sunrise::server::activity::mission {
 
+namespace generated = middleware::content::packages::schema::generated;
+
 /** Type-13 participation records carry one player each; this is their slot type and root schema. */
 inline constexpr std::uint8_t kParticipationSlotType = 13;
-inline constexpr std::uint32_t kParticipationSenseSchema = 0x80804F2FU;
+inline constexpr std::uint32_t kParticipationSenseSchema = generated::C80804f2f::kClass;
 /** Object tag that owns the participation records. Assumed the same in every activity. */
 inline constexpr std::uint32_t kParticipationObjectTag = 0x80FEB3DCU;
 /** Player records occupy sixteen slots starting at slot five. */
 inline constexpr std::uint16_t kFirstParticipationSlot = 5;
 inline constexpr std::size_t kParticipationSlotCount = 16;
 /** The identity block carries the player key in field 0. */
-inline constexpr std::uint32_t kParticipationIdentitySchema = 0x808094DDU;
+inline constexpr std::uint32_t kParticipationIdentitySchema = generated::C808094dd::kClass;
 /** The state block carries the region, loaded, settled and Ghost flags. */
-inline constexpr std::uint32_t kParticipationStateSchema = 0x808094E4U;
+inline constexpr std::uint32_t kParticipationStateSchema = generated::C808094e4::kClass;
 inline constexpr std::uint16_t kParticipationKeyOrdinal = 0;
 inline constexpr std::uint16_t kParticipationRegionOrdinal = 0;
 inline constexpr std::uint16_t kParticipationLoadedOrdinal = 2;

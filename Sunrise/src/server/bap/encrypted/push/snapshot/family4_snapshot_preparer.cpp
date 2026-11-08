@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstring>
 #include <optional>
 #include <span>
 
@@ -55,6 +56,7 @@ bool prepare(Scratch& scratch,
              std::uint32_t accountObjectId,
              const Reservation& reservation,
              std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+             bool accountSelectionCleared,
              Prepared& prepared) noexcept {
     if (reservation.rawWriteOffset > scratch.plaintext.size()
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
@@ -90,6 +92,15 @@ bool prepare(Scratch& scratch,
     const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
     if (!family4_datagen::account::encode(account, accountBytes)) {
         return report_failure("account_object");
+    }
+    // Only the account object drops the selection; the character object stays resident.
+    if (accountSelectionCleared) {
+        // Soid 0 is the account object's no-selection value.
+        constexpr std::uint64_t kNoSelection = 0;
+        std::memcpy(accountBytes.data()
+                        + family4_datagen::account::layout::kSelectedCharacterSoidOffset,
+                    &kNoSelection,
+                    sizeof kNoSelection);
     }
     if (!append_object(scratch,
                        accountBytes,

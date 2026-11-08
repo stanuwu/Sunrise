@@ -567,7 +567,7 @@ struct ContainerPlacementDiagnostics final {
     bool complete{};
 };
 
-/** One class-0x8080966D table reached through a container member's typed package chain. */
+/** One spatial candidate table reached through a container member's typed package chain. */
 struct StaticSpatialTable final {
     std::uint32_t tableTag{};
     std::uint32_t boundsTag{};
@@ -608,7 +608,7 @@ struct StaticSpatialInstance final {
     std::array<std::byte, 16> boundsOpaque{};
 };
 
-/** One unique class-0x808099C8 root discovered inside a reached placed-object config. */
+/** One unique trigger-volume root found inside a reached placed-object config. */
 struct TriggerVolumeTable final {
     std::uint32_t configTag{};
     std::uint32_t configNameRow{kNoRow};

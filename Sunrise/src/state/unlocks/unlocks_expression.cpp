@@ -1,6 +1,9 @@
 #include "unlocks_expression.h"
 
 #include <array>
+#include <climits>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 
 #include "../account/account_state.h"
@@ -40,15 +43,48 @@ private:
     std::size_t depth_{};
 };
 
-/** Signed arithmetic wraps rather than overflowing. */
-[[nodiscard]] std::int32_t wrapping_add(std::int32_t left, std::int32_t right) noexcept {
-    return static_cast<std::int32_t>(static_cast<std::uint32_t>(left)
-                                     + static_cast<std::uint32_t>(right));
+/** FNV-1a starts from the standard 32-bit offset basis. */
+constexpr std::uint32_t kFnvOffsetBasis = 0x811C9DC5U;
+/** FNV-1a multiplies by the standard 32-bit prime after each byte. */
+constexpr std::uint32_t kFnvPrime = 0x01000193U;
+
+/** @return The bits of a value, so arithmetic wraps rather than overflowing. */
+[[nodiscard]] constexpr std::uint32_t bits(std::int32_t value) noexcept {
+    return static_cast<std::uint32_t>(value);
+}
+
+/** @return FNV-1a of the four bytes of value, most significant first, from seed. */
+[[nodiscard]] std::int32_t fnv1a_word(std::uint32_t seed, std::uint32_t value) noexcept {
+    std::uint32_t hash = seed;
+    for (std::size_t byte = sizeof value; byte-- > 0;) {
+        hash = (hash ^ ((value >> (byte * CHAR_BIT)) & UINT8_MAX)) * kFnvPrime;
+    }
+    return static_cast<std::int32_t>(hash);
+}
+
+/**
+ * Applies a quotient or a remainder the way the client's signed divide does.
+ * @return False for the one quotient that overflows; a zero divisor yields 0.
+ */
+[[nodiscard]] bool division_result(Opcode opcode,
+                                   std::int32_t left,
+                                   std::int32_t right,
+                                   std::int32_t& value) noexcept {
+    if (right == 0) {
+        value = 0;
+        return true;
+    }
+    // The client's divide traps on this pair, so no installed condition can depend on it.
+    if (left == (std::numeric_limits<std::int32_t>::min)() && right == -1) {
+        return false;
+    }
+    value = opcode == Opcode::divide ? left / right : left % right;
+    return true;
 }
 
 /**
  * Applies one binary operator.
- * @return False when the opcode is not a binary operator.
+ * @return False when the opcode is not a binary operator or its result overflows.
  */
 [[nodiscard]] bool
 binary_result(Opcode opcode, std::int32_t left, std::int32_t right, std::int32_t& value) noexcept {
@@ -59,8 +95,18 @@ binary_result(Opcode opcode, std::int32_t left, std::int32_t right, std::int32_t
     case Opcode::logicalAnd:
         value = left != 0 && right != 0;
         return true;
+    case Opcode::logicalNor:
+        value = left == 0 && right == 0;
+        return true;
+    case Opcode::logicalNand:
+        value = left == 0 || right == 0;
+        return true;
     case Opcode::equal:
         value = left == right;
+        return true;
+    case Opcode::notEqual:
+    case Opcode::notEqualAlias:
+        value = left != right;
         return true;
     case Opcode::greaterThan:
         value = left > right;
@@ -75,7 +121,28 @@ binary_result(Opcode opcode, std::int32_t left, std::int32_t right, std::int32_t
         value = left <= right;
         return true;
     case Opcode::add:
-        value = wrapping_add(left, right);
+        value = static_cast<std::int32_t>(bits(left) + bits(right));
+        return true;
+    case Opcode::subtract:
+        value = static_cast<std::int32_t>(bits(left) - bits(right));
+        return true;
+    case Opcode::multiply:
+        value = static_cast<std::int32_t>(bits(left) * bits(right));
+        return true;
+    case Opcode::divide:
+    case Opcode::remainder:
+        return division_result(opcode, left, right, value);
+    case Opcode::hashCombine:
+        value = fnv1a_word(bits(left), bits(right));
+        return true;
+    case Opcode::bitAnd:
+        value = static_cast<std::int32_t>(bits(left) & bits(right));
+        return true;
+    case Opcode::bitOr:
+        value = static_cast<std::int32_t>(bits(left) | bits(right));
+        return true;
+    case Opcode::bitXor:
+        value = static_cast<std::int32_t>(bits(left) ^ bits(right));
         return true;
     default:
         return false;
@@ -106,7 +173,11 @@ step(const Instruction& instruction, const Inputs& inputs, Stack& stack) noexcep
     case Opcode::logicalNot:
         return stack.pop(left) && stack.push(left == 0 ? 1 : 0);
     case Opcode::negate:
-        return stack.pop(left) && stack.push(wrapping_add(~left, 1));
+        return stack.pop(left) && stack.push(static_cast<std::int32_t>(0U - bits(left)));
+    case Opcode::hash:
+        return stack.pop(left) && stack.push(fnv1a_word(kFnvOffsetBasis, bits(left)));
+    case Opcode::bitNot:
+        return stack.pop(left) && stack.push(static_cast<std::int32_t>(~bits(left)));
     default:
         // The right operand was pushed last, so it comes off first.
         return stack.pop(right) && stack.pop(left)
@@ -116,7 +187,11 @@ step(const Instruction& instruction, const Inputs& inputs, Stack& stack) noexcep
 
 } // namespace
 
-/** Converts one native opcode word to an evaluated opcode. */
+/**
+ * Converts one native opcode word to an evaluated opcode.
+ * @param opcode Receives the opcode; unchanged on failure.
+ * @return False for the shared-expression opcode and any word the client does not evaluate.
+ */
 bool decode_opcode(std::uint32_t native, Opcode& opcode) noexcept {
     if (native > (std::numeric_limits<std::uint8_t>::max)()) {
         return false;
@@ -126,7 +201,11 @@ bool decode_opcode(std::uint32_t native, Opcode& opcode) noexcept {
     case Opcode::logicalNot:
     case Opcode::logicalOr:
     case Opcode::logicalAnd:
+    case Opcode::logicalNor:
+    case Opcode::notEqual:
+    case Opcode::logicalNand:
     case Opcode::equal:
+    case Opcode::notEqualAlias:
     case Opcode::loadValue:
     case Opcode::constant:
     case Opcode::greaterThan:
@@ -134,7 +213,17 @@ bool decode_opcode(std::uint32_t native, Opcode& opcode) noexcept {
     case Opcode::lessThan:
     case Opcode::lessOrEqual:
     case Opcode::add:
+    case Opcode::subtract:
+    case Opcode::multiply:
+    case Opcode::divide:
+    case Opcode::remainder:
     case Opcode::negate:
+    case Opcode::hash:
+    case Opcode::hashCombine:
+    case Opcode::bitAnd:
+    case Opcode::bitOr:
+    case Opcode::bitXor:
+    case Opcode::bitNot:
         opcode = static_cast<Opcode>(native);
         return true;
     default:
@@ -142,7 +231,10 @@ bool decode_opcode(std::uint32_t native, Opcode& opcode) noexcept {
     }
 }
 
-/** Checks one instruction's bank and its operand against that bank's capacity. */
+/**
+ * Checks one instruction's bank and its operand against that bank's capacity.
+ * @return False for an unknown opcode, a bank the opcode cannot read, or an operand past it.
+ */
 bool valid(const Instruction& instruction) noexcept {
     Opcode decoded{};
     if (!decode_opcode(static_cast<std::uint32_t>(instruction.opcode), decoded)) {
@@ -180,7 +272,11 @@ bool valid(const Instruction& instruction) noexcept {
     return instruction.bank == Bank::none;
 }
 
-/** Evaluates one expression program. */
+/**
+ * Evaluates one expression program.
+ * @param result Receives whether the final value is nonzero; cleared on any refusal.
+ * @return False for an empty program, a refused step, or a final stack other than one value.
+ */
 bool evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& result) noexcept {
     result = false;
     if (program.empty() || inputs.flag == nullptr || inputs.value == nullptr) {

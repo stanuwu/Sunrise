@@ -3,15 +3,24 @@
 #include <cstring>
 
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
+#include "../../../middleware/content/packages/reader/container_framing.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808095.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809c.h"
 #include "../../../state/activity_sdk/format.h"
 #include "../../../state/build_data/scenarios/definition.h"
 
 namespace sunrise::client::content::activity::scriptables::internal {
 namespace {
 
-// Client references: the package class id and the fixed row stride.
-constexpr std::uint32_t kClientReferenceClass = 0x80809C42U;
-constexpr std::size_t kClientReferenceSize = 16;
+namespace generated = middleware::content::packages::schema::generated;
+using ClientRef = generated::ClientRef;
+// An inline client reference: class word, a zero word, then the ClientRef body.
+constexpr std::uint32_t kClientReferenceClass = ClientRef::kClass;
+constexpr std::size_t kClientReferenceReserved =
+    middleware::content::packages::reader::layout::kClassWordSize;
+constexpr std::size_t kClientReferenceBodyOffset =
+    middleware::content::packages::reader::layout::kInlineRecordHeaderSize;
+constexpr std::size_t kClientReferenceSize = kClientReferenceBodyOffset + sizeof(ClientRef);
 /** Native ClientRef uses the empty-name hash for an absent key. */
 constexpr std::uint32_t kAbsentClientReferenceKey = 0x811C9DC5U;
 
@@ -55,10 +64,9 @@ bool read_type2_squad_reference(
         static_cast<std::size_t>(descriptor.descriptorOffset) + tables::kType2SquadReferenceOffset;
     RawReference row{};
     if (offset > (std::numeric_limits<std::uint32_t>::max)()
-        || !read_value(blob, offset, row.targetKey)
-        || !read_value(blob, offset + sizeof(row.targetKey), row.targetType)
-        || !read_value(
-            blob, offset + sizeof(row.targetKey) + sizeof(row.targetType), row.targetIndex)
+        || !read_value(blob, offset + offsetof(ClientRef, targetKey), row.targetKey)
+        || !read_value(blob, offset + offsetof(ClientRef, targetSlotType), row.targetType)
+        || !read_value(blob, offset + offsetof(ClientRef, targetSlotIndex), row.targetIndex)
         || row.targetKey == 0 || row.targetKey == format::kAbsentIndex
         || row.targetKey == kAbsentClientReferenceKey || row.targetType != format::kSquadSlotType
         || row.targetIndex > (std::numeric_limits<std::int16_t>::max)()) {
@@ -81,9 +89,9 @@ bool read_type30_volume_reference(
     namespace format = state::activity_sdk::format;
     output = {};
     if (descriptor.slotType != format::kOccupancySlotType
-        || descriptor.componentClass != format::kOccupancyComponentClass
-        || descriptor.senseSchema != format::kOccupancySenseSchema
-        || descriptor.authSchema != format::kOccupancyAuthSchema
+        || descriptor.componentClass != generated::MonitorSlotHandleType30::kClass
+        || descriptor.senseSchema != generated::C80809531::kClass
+        || descriptor.authSchema != generated::C80809532::kClass
         || descriptor.slotIndex > (std::numeric_limits<std::int16_t>::max)()) {
         return false;
     }
@@ -91,10 +99,9 @@ bool read_type30_volume_reference(
                                + tables::kType30MeasuredReferenceOffset;
     RawReference row{};
     if (offset > (std::numeric_limits<std::uint32_t>::max)()
-        || !read_value(blob, offset, row.targetKey)
-        || !read_value(blob, offset + sizeof(row.targetKey), row.targetType)
-        || !read_value(
-            blob, offset + sizeof(row.targetKey) + sizeof(row.targetType), row.targetIndex)
+        || !read_value(blob, offset + offsetof(ClientRef, targetKey), row.targetKey)
+        || !read_value(blob, offset + offsetof(ClientRef, targetSlotType), row.targetType)
+        || !read_value(blob, offset + offsetof(ClientRef, targetSlotIndex), row.targetIndex)
         || row.targetKey == 0 || row.targetKey == format::kAbsentIndex
         || row.targetKey == kAbsentClientReferenceKey || row.targetType != auth::kType60SlotType
         || row.targetIndex > (std::numeric_limits<std::int16_t>::max)()) {
@@ -115,11 +122,13 @@ void collect_typed_references(std::span<const std::byte> blob,
         std::uint32_t classId = 0;
         std::uint32_t reserved = 0;
         RawReference row{};
+        const std::size_t body = offset + kClientReferenceBodyOffset;
         if (!read_value(blob, offset, classId) || classId != kClientReferenceClass
-            || !read_value(blob, offset + 4, reserved) || reserved != 0
-            || !read_value(blob, offset + 8, row.targetKey)
-            || !read_value(blob, offset + 12, row.targetType)
-            || !read_value(blob, offset + 14, row.targetIndex) || row.targetType == 0
+            || !read_value(blob, offset + kClientReferenceReserved, reserved) || reserved != 0
+            || !read_value(blob, body + offsetof(ClientRef, targetKey), row.targetKey)
+            || !read_value(blob, body + offsetof(ClientRef, targetSlotType), row.targetType)
+            || !read_value(blob, body + offsetof(ClientRef, targetSlotIndex), row.targetIndex)
+            || row.targetType == 0
             || row.targetType > state::build_data::scenarios::kMaximumSlotType) {
             continue;
         }

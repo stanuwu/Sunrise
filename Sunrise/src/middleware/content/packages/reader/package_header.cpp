@@ -27,9 +27,9 @@ bool parse_header(std::span<const std::byte, layout::kHeaderSize> bytes, Header&
     header.patchId = field<std::uint16_t>(bytes, layout::HeaderOffsets::kPatchId);
     header.entryCount = field<std::uint32_t>(bytes, layout::HeaderOffsets::kEntryCount);
     header.blockCount = field<std::uint32_t>(bytes, layout::HeaderOffsets::kBlockCount);
-    header.entryTable =
-        static_cast<std::uint64_t>(field<std::uint32_t>(bytes, layout::HeaderOffsets::kEntryTable))
-        + layout::kEntryTableAdjustment;
+    header.entryTable = static_cast<std::uint64_t>(
+                            field<std::uint32_t>(bytes, layout::HeaderOffsets::kMetadataOffset))
+                        + layout::kEntryTableAdjustment;
     return header.entryCount != 0 && header.blockCount != 0;
 }
 

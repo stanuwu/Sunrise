@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "../../../middleware/content/packages/tables/activity_definition_reader.h"
 #include "catalog_manifest.h"
 
 namespace sunrise::state::activity_sdk::generated_world::manifest::internal {
@@ -21,11 +22,7 @@ constexpr std::size_t kDiskScenarioNameCapacity = 64;
 /** Version one remains readable so existing scenario shards can seed a current rebuild. */
 constexpr std::uint32_t kLegacyVersion = 1;
 /** Activity records retain three source-field locators from this installed table. */
-constexpr std::uint32_t kActivityDefinitionTableTag = 0x81327CF0U;
-/** Exact activity roots expose their scenario tag at this payload offset. */
-constexpr std::uint64_t kActivityRootScenarioOffset = 0x40U;
-/** Exact activity roots expose their transition descriptor at this payload offset. */
-constexpr std::uint64_t kActivityRootTransitionOffset = 0x44U;
+using middleware::content::packages::tables::kActivityDefinitionTableTag;
 /** Three activity locators plus two exact-root locators bound each activity row. */
 constexpr std::size_t kMaximumPackageLocatorsPerVariant = 5;
 /** All candidate and union sets are retained rather than compressed or discarded. */

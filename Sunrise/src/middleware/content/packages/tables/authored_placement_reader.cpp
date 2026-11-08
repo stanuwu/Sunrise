@@ -4,9 +4,25 @@
 #include <cmath>
 #include <limits>
 
+#include "../reader/container_framing.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::tables {
+
+/** Reads the flags byte and the gameworld byte of one placement entry into one raw word. */
+bool authored_placement_flags(std::span<const std::byte> blob,
+                              std::size_t entry,
+                              std::uint32_t& raw) noexcept {
+    raw = 0;
+    std::uint8_t flags = 0;
+    std::uint8_t gameworld = 0;
+    if (!read(blob, entry + kAuthoredPlacementFlagsOffset, flags)
+        || !read(blob, entry + kAuthoredPlacementGameworldOffset, gameworld)) {
+        return false;
+    }
+    raw = flags | (std::uint32_t{gameworld} << kAuthoredPlacementGameworldShift);
+    return true;
+}
 
 /** Finds and validates an authored placement array. */
 bool authored_placements(std::span<const std::byte> blob, Array& output) noexcept {
@@ -62,7 +78,7 @@ bool authored_placement_at(std::span<const std::byte> blob,
     }
     if (!read(blob, offset + kAuthoredPlacementScaleOffset, output.uniformScaleBits)
         || !read(blob, offset + kAuthoredPlacementNameHashOffset, output.nameHash)
-        || !read(blob, offset + kAuthoredPlacementFlagsOffset, output.placementFlagsRaw)
+        || !authored_placement_flags(blob, offset, output.placementFlagsRaw)
         || !read(blob, offset + kAuthoredPlacementIdentifierOffset, output.placementIdentifier)
         || !read(blob, offset + kAuthoredPlacementAuxiliaryOffset, output.auxiliaryRelative)) {
         output = {};
@@ -76,7 +92,7 @@ bool authored_placement_at(std::span<const std::byte> blob,
     return true;
 }
 
-/** Reads the opaque identifier at entry +0x70 without assigning it semantics. */
+/** Reads the opaque placement identifier without assigning it semantics. */
 bool authored_placement_identifier_at(std::span<const std::byte> blob,
                                       const Array& array,
                                       std::size_t index,
@@ -129,7 +145,8 @@ bool authored_placement_auxiliary_parent(std::span<const std::byte> blob,
     }
     const auto payload = static_cast<std::size_t>(target);
     std::uint32_t marker = 0;
-    return read(blob, payload - sizeof marker, marker) && marker == kStaticSpatialAuxiliaryClass
+    return reader::layout::class_word_before(blob, payload, marker)
+           && marker == kStaticSpatialAuxiliaryClass
            && read(blob, payload + kStaticSpatialAuxiliaryParentOffset, tag)
            && package_of(tag) != kAbsentPackageId;
 }

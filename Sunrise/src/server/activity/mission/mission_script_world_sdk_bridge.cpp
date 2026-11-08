@@ -17,7 +17,7 @@ namespace sunrise::server::activity::mission::sdk_bridge {
 namespace {
 
 namespace sdk = state::activity_sdk;
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 namespace catalog = state::build_data::scriptables;
 namespace crypto = middleware::crypto::sha256;
 
@@ -315,7 +315,7 @@ constexpr std::size_t kProgramGenerationBytes =
                                  std::uint32_t localRow,
                                  lua_vm::WorldRowDefinition& output) noexcept {
     output = {};
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    const generated_world::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr) {
         return false;
     }
@@ -344,7 +344,7 @@ constexpr std::size_t kProgramGenerationBytes =
 [[nodiscard]] std::size_t squad_anchor_count(const void* context,
                                              const lua_vm::WorldGenerationIdentity& generation,
                                              std::uint32_t squadRow) noexcept {
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    const generated_world::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr || squadRow == 0) {
         return 0;
     }
@@ -362,7 +362,7 @@ constexpr std::size_t kProgramGenerationBytes =
                                         std::uint32_t localRow,
                                         lua_vm::SquadAnchorDefinition& output) noexcept {
     output = {};
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    const generated_world::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr || squadRow == 0 || localRow == 0) {
         return false;
     }
@@ -403,7 +403,7 @@ constexpr std::size_t kProgramGenerationBytes =
                                           std::uint32_t localRow,
                                           lua_vm::TriggerVertexDefinition& output) noexcept {
     output = {};
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    const generated_world::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr || triggerRow == 0 || localRow == 0) {
         return false;
     }
@@ -432,7 +432,7 @@ constexpr std::size_t kProgramGenerationBytes =
                                             std::uint32_t localRow,
                                             lua_vm::TriggerTriangleDefinition& output) noexcept {
     output = {};
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    const generated_world::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr || triggerRow == 0 || localRow == 0) {
         return false;
     }
@@ -459,7 +459,7 @@ constexpr std::size_t kProgramGenerationBytes =
                                        const lua_vm::WorldGenerationIdentity& generation,
                                        lua_vm::WorldDiagnosticsDefinition& output) noexcept {
     output = {};
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    const generated_world::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr) {
         return false;
     }
@@ -533,7 +533,7 @@ coverage_count(const void* context, const lua_vm::WorldGenerationIdentity& gener
                                     std::uint32_t localRow,
                                     lua_vm::WorldCoverageDefinition& output) noexcept {
     output = {};
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    const generated_world::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr || localRow == 0 || localRow > catalog::kStructuralFamilyCount) {
         return false;
     }
@@ -555,7 +555,7 @@ coverage_count(const void* context, const lua_vm::WorldGenerationIdentity& gener
 std::size_t world_sdk_internal::world_count(const void* context,
                                             const lua_vm::WorldGenerationIdentity& generation,
                                             lua_vm::WorldCollectionKind kind) noexcept {
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    const generated_world::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr) {
         return 0;
     }
@@ -636,7 +636,7 @@ std::size_t world_sdk_internal::world_count(const void* context,
 }
 
 /** Builds the identity that pins a world view. @return False when the view is not fully bound. */
-bool world_generation_identity(const generated::GeneratedWorldView& world,
+bool world_generation_identity(const generated_world::GeneratedWorldView& world,
                                lua_vm::WorldGenerationIdentity& output) noexcept {
     output = {};
     const sdk::BoundView& activity = world.activity_sdk_view();
@@ -645,7 +645,7 @@ bool world_generation_identity(const generated::GeneratedWorldView& world,
         || world.scenario_tag() == 0 || world.scenario_tag() != world.snapshot()->scenarioTag) {
         return false;
     }
-    const generated::GenerationIdentity& source = world.generation_identity();
+    const generated_world::GenerationIdentity& source = world.generation_identity();
     output.sdkBuildSha256 = source.sdkBuildSha256;
     output.sdkPayloadSha256 = source.sdkPayloadSha256;
     output.sourceFingerprint = source.sourceFingerprint;
@@ -662,7 +662,7 @@ bool world_generation_identity(const generated::GeneratedWorldView& world,
 }
 
 /** The byte layout is explicit so compiler padding cannot enter durable identity. */
-bool world_program_generation_sha256(const generated::GeneratedWorldView& world,
+bool world_program_generation_sha256(const generated_world::GeneratedWorldView& world,
                                      std::array<std::byte, 32>& output) noexcept {
     output = {};
     lua_vm::WorldGenerationIdentity generation{};
@@ -690,7 +690,7 @@ bool world_program_generation_sha256(const generated::GeneratedWorldView& world,
 
 /** Adds the world and manifest surfaces to the definition API, but only for a matching view. */
 lua_vm::DefinitionApi definition_api(const sdk::BoundView& view,
-                                     const generated::GeneratedWorldView& world) noexcept {
+                                     const generated_world::GeneratedWorldView& world) noexcept {
     lua_vm::DefinitionApi output = definition_api(view);
     lua_vm::WorldGenerationIdentity generation{};
     if (!world_generation_identity(world, generation)

@@ -236,6 +236,8 @@ struct MissionSeedLease {
     std::uint64_t bindingGeneration{};
     std::uint64_t revision{};
     std::uint64_t publishedRevision{};
+    /** Revision whose roster body was refused. The next selection is owed again. */
+    std::uint64_t refusedRevision{};
     /**
      * Every authored region this lease has selected, in selection order. The peer's registered set
      * only grows: a group is torn down by a changed state byte, never by being left out, and every
@@ -449,8 +451,6 @@ struct Session {
     authority_reset::Owner activityAuthorityReset{};
     /** Operator incident held until the complete encrypted frame reaches the transport caller. */
     IncidentPublication activityIncidentStaged{};
-    /** Earliest tick at which a refused incident frame may be rebuilt. */
-    std::uint64_t activityIncidentRetryDueTick{};
     /** Host rows retained by the last delivered host directory. */
     AdvertisementRetains activityAdvertisementHeld{};
     /** Host rows retained by a staged membership body until publication is known. */
@@ -479,7 +479,7 @@ struct Session {
     std::uint64_t bannerRepushRoot{};
     /** True while one banner re-push is still owed to this peer. */
     bool bannerRepushArmed{};
-    /** Root the last family-two subscribe was answered against, and the re-push must reuse. */
+    /** Root of the last family-two subscribe, which the re-push reuses. Zero once unsubscribed. */
     std::uint64_t socialRosterRepushRoot{};
     /** True while one family-two re-push is still owed to this peer. */
     bool socialRosterRepushArmed{};

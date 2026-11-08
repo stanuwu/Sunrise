@@ -30,6 +30,7 @@ namespace sunrise::client::content::items::packages {
 
 namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Equippable rows, their initial plugs, and authored override plugs. */
 inline constexpr std::size_t kDetailCapacity =
@@ -269,7 +270,7 @@ read_investment_constants(const reader::Source& source,
  * @param scratch Reader scratch.
  * @param root Investment root bytes.
  * @param blob Scratch storage for the table blob.
- * @return False only when the tag does not read, so a later slice retries it.
+ * @return False when the tag does not read or the publish fails, so a later slice retries it.
  */
 [[nodiscard]] bool build_starter_sets(const reader::Source& source,
                                       reader::Scratch& scratch,

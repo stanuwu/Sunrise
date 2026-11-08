@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <span>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808078.h"
+
 namespace sunrise::state::build_data::vendors {
 
 /** Hash scans increment a signed 16-bit cursor before comparing the row count. */
@@ -16,33 +18,40 @@ inline constexpr std::size_t kSaleRowCapacity = 16'384;
 /** Category rows across every definition. The live total is 2,479 and one vendor declares 129. */
 inline constexpr std::size_t kInstalledRowCapacity = 4'096;
 
-/** One vendor index row is 24 bytes: hash at +0, definition tag at +16. */
-inline constexpr std::size_t kIndexRowStride = 24;
-/** One sale row is 184 bytes. */
-inline constexpr std::size_t kSaleRowStride = 184;
-/** One installed row is 24 bytes. */
-inline constexpr std::size_t kInstalledRowStride = 24;
-/** One interaction row is 80 bytes. */
-inline constexpr std::size_t kThirdRowStride = 80;
-/** One cost entry is 48 bytes. `SaleCost` documents its layout. */
-inline constexpr std::size_t kSaleCostRowStride = 48;
+/** Row sizes of the vendor index, sale, installed, interaction and cost arrays. */
+inline constexpr std::size_t kIndexRowStride =
+    sizeof(middleware::content::packages::schema::generated::VendorIndexRow);
+inline constexpr std::size_t kSaleRowStride =
+    sizeof(middleware::content::packages::schema::generated::SVendorSale);
+inline constexpr std::size_t kInstalledRowStride =
+    sizeof(middleware::content::packages::schema::generated::VendorInstalledRow);
+inline constexpr std::size_t kInteractionRowStride =
+    sizeof(middleware::content::packages::schema::generated::C80807857);
+inline constexpr std::size_t kSaleCostRowStride =
+    sizeof(middleware::content::packages::schema::generated::SVendorCost);
 /** Element class of a sale row's cost array. */
-inline constexpr std::uint32_t kSaleCostRowClass = 0x80807865U;
+inline constexpr std::uint32_t kSaleCostRowClass =
+    middleware::content::packages::schema::generated::SVendorCost::kClass;
 
 /** Wrapper class of the vendor index blob. */
-inline constexpr std::uint32_t kIndexWrapperClass = 0x8080784AU;
+inline constexpr std::uint32_t kIndexWrapperClass =
+    middleware::content::packages::schema::generated::SVendorIndex::kClass;
 /** Element class of the vendor index array. */
-inline constexpr std::uint32_t kIndexRowClass = 0x8080784EU;
+inline constexpr std::uint32_t kIndexRowClass =
+    middleware::content::packages::schema::generated::VendorIndexRow::kClass;
 /** Class of a vendor definition blob. */
-inline constexpr std::uint32_t kDefinitionClass = 0x80807850U;
+inline constexpr std::uint32_t kDefinitionClass =
+    middleware::content::packages::schema::generated::SInvestmentVendor::kClass;
 /** Element class of a definition's installed array. */
-inline constexpr std::uint32_t kInstalledRowClass = 0x80807860U;
+inline constexpr std::uint32_t kInstalledRowClass =
+    middleware::content::packages::schema::generated::VendorInstalledRow::kClass;
 /** Element class of a definition's sale array. */
-inline constexpr std::uint32_t kSaleRowClass = 0x80807861U;
+inline constexpr std::uint32_t kSaleRowClass =
+    middleware::content::packages::schema::generated::SVendorSale::kClass;
 
-/** Sale row +176 carries this when the row names no secondary item. */
+/** `SVendorSale::secondaryItem` carries this when the row names no secondary item. */
 inline constexpr std::uint16_t kAbsentSecondaryItem = 0xFFFFU;
-/** Sale row +100 carries this when the row belongs to no category. The client tests for it. */
+/** `SVendorSale::categoryIndex` carries this for a row in no category. The client tests it. */
 inline constexpr std::int32_t kAbsentCategoryIndex = -1;
 
 /** One row of the installed vendor index, which maps a vendor hash to its definition tag. */
@@ -67,22 +76,22 @@ struct Definition {
     /** First sale row, as an offset into the definition blob. */
     std::uint32_t saleRowBase{};
     std::uint32_t saleRowClass{};
-    /** First row of the unnamed third array, as an offset into the definition blob. */
-    std::uint32_t thirdRowBase{};
-    std::uint32_t thirdRowClass{};
+    /** First row of the interactions array, as an offset into the definition blob. */
+    std::uint32_t interactionRowBase{};
+    std::uint32_t interactionRowClass{};
     /** First row of this definition's range in the flat sale bank. */
     std::uint32_t saleRowOffset{};
     /** First row of this definition's range in the flat installed bank. */
     std::uint32_t installedRowOffset{};
-    /** Raw definition +20. Its unit, epoch and scope are open, so it is not converted. */
+    /** Raw `resetInterval`. Its unit, epoch and scope are open, so it is not converted. */
     std::uint32_t resetIntervalRaw{};
-    /** Raw definition +24, paired with the interval and equally open. */
+    /** Raw `resetPhase`, paired with the interval and equally open. */
     std::uint32_t resetPhaseRaw{};
     /** Row of the vendor index this definition is named by. */
     std::uint16_t index{};
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
-    std::uint16_t thirdCount{};
+    std::uint16_t interactionCount{};
 };
 
 /** A cost entry naming no item carries this. */
@@ -90,19 +99,19 @@ inline constexpr std::uint16_t kAbsentCostItem = 0xFFFFU;
 /** Cost entries one sale row may declare. The widest row in the installed catalog declares four. */
 inline constexpr std::size_t kSaleCostCapacity = 4;
 /**
- * Cost entry +40 in every expression-free entry of the installed catalog. Its role is not
+ * `SVendorCost::scale` in every expression-free entry of the installed catalog. Its role is not
  * decoded, so an entry carrying anything else is conditional rather than priced statically.
  */
 inline constexpr std::uint32_t kPlainCostWord = 100'000U;
 
 /**
- * One cost entry of a sale row (row +32 array, `kSaleCostRowClass`, 48 bytes), reduced to its
+ * One `SVendorSale::costs` entry, reduced to its
  * static item and quantity. Whether those are the price is the row's `PriceState`.
  */
 struct SaleCost {
-    /** Entry +0. Cost item-definition index. */
+    /** Cost item-definition index. */
     std::uint16_t itemIndex{kAbsentCostItem};
-    /** Entry +4. Units charged. */
+    /** Units charged. */
     std::uint32_t quantity{};
 };
 
@@ -122,11 +131,11 @@ enum class PriceState : std::uint8_t {
 
 /** One sale row of one vendor definition. */
 struct SaleRow {
-    /** Row +100. The row's vendor category. The catalog bounds it by the category count. */
+    /** The row's vendor category. The catalog bounds it by the category count. */
     std::int32_t categoryIndex{};
-    /** Row +70. Main sale item-definition index. */
+    /** Main sale item-definition index. */
     std::uint16_t itemIndex{};
-    /** Row +176. `kAbsentSecondaryItem` when the row names none. */
+    /** `kAbsentSecondaryItem` when the row names none. */
     std::uint16_t secondaryItemIndex{};
     /** Every cost entry, in declared order. A plain row charges all of them together. */
     std::array<SaleCost, kSaleCostCapacity> costs{};

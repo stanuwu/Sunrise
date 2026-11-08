@@ -1,7 +1,10 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "activity_sdk_authored_scene_inventory.h"
@@ -28,6 +31,24 @@ struct PackageContext final {
             reader::close_files(*scratch);
         }
     }
+};
+
+/** Reads one unaligned value. @return False when it does not fit the bytes. */
+template <typename Value>
+[[nodiscard]] bool
+read_value(std::span<const std::byte> bytes, std::size_t offset, Value& output) noexcept {
+    output = {};
+    if (offset > bytes.size() || sizeof output > bytes.size() - offset) {
+        return false;
+    }
+    std::memcpy(&output, bytes.data() + offset, sizeof output);
+    return true;
+}
+
+/** One package tag read once per pass, with its physical class. */
+struct CachedTag final {
+    std::vector<std::byte> bytes{};
+    std::uint32_t classId{};
 };
 
 /** @return True when the caller asked this pass to stop. */

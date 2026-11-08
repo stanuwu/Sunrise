@@ -6,6 +6,7 @@
 #include "internal.h"
 #include "locator_cache.h"
 #include "overlay.h"
+#include "package_file.h"
 
 namespace sunrise::middleware::content::packages::reader {
 namespace {
@@ -75,14 +76,14 @@ bool parse_leaf(std::wstring_view fileName,
                 std::uint32_t& patchIndex) noexcept {
     packageId = 0;
     patchIndex = 0;
-    /** Every installed package file carries this extension. */
-    constexpr std::wstring_view kExtension = L".pkg";
     /** The package id is written as exactly 4 hex digits. */
     constexpr std::size_t kIdentifierDigits = 4;
-    if (fileName.size() <= kExtension.size() || !fileName.ends_with(kExtension)) {
+    if (fileName.size() <= layout::kPackageFileExtension.size()
+        || !fileName.ends_with(layout::kPackageFileExtension)) {
         return false;
     }
-    std::wstring_view stem = fileName.substr(0, fileName.size() - kExtension.size());
+    std::wstring_view stem =
+        fileName.substr(0, fileName.size() - layout::kPackageFileExtension.size());
     const std::size_t patchSeparator = stem.rfind(L'_');
     if (patchSeparator == std::wstring_view::npos || patchSeparator + 1 >= stem.size()) {
         return false;
@@ -262,6 +263,11 @@ bool resolve_latest(Scratch& scratch,
                     const PackageLocation*& output) noexcept {
     output = nullptr;
     const std::wstring_view directory = source.directory;
+    // A new overlay table can move a package to another generation or file.
+    if (const std::uint64_t epoch = overlay::epoch(); epoch != scratch.overlayEpoch) {
+        drop_source_caches(scratch);
+        scratch.overlayEpoch = epoch;
+    }
     if (source.installedOnly != scratch.packageInstalledOnly) {
         drop_source_caches(scratch);
         scratch.packageInstalledOnly = source.installedOnly;

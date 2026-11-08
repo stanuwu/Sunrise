@@ -7,14 +7,14 @@ namespace sunrise::server::activity::mission::sdk_bridge {
 namespace {
 
 namespace sdk = state::activity_sdk;
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 namespace catalog = state::build_data::scriptables;
 
 /** Every digest, generation, and row identity of a bound view must still match. */
-[[nodiscard]] bool same_generation(const generated::GeneratedWorldView& world,
+[[nodiscard]] bool same_generation(const generated_world::GeneratedWorldView& world,
                                    const lua_vm::WorldGenerationIdentity& expected) noexcept {
     const sdk::BoundView& activity = world.activity_sdk_view();
-    const generated::GenerationIdentity& identity = world.generation_identity();
+    const generated_world::GenerationIdentity& identity = world.generation_identity();
     return world.snapshot() != nullptr && activity.catalog != nullptr
            && identity.sdkBuildSha256 == expected.sdkBuildSha256
            && identity.sdkPayloadSha256 == expected.sdkPayloadSha256
@@ -220,9 +220,9 @@ bool selected_name_field(const catalog::Snapshot& snapshot,
     return false;
 }
 
-const generated::GeneratedWorldView*
+const generated_world::GeneratedWorldView*
 checked_world(const void* context, const lua_vm::WorldGenerationIdentity& generation) noexcept {
-    const auto* const world = static_cast<const generated::GeneratedWorldView*>(context);
+    const auto* const world = static_cast<const generated_world::GeneratedWorldView*>(context);
     return world != nullptr && same_generation(*world, generation) ? world : nullptr;
 }
 

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,6 +33,8 @@ namespace package_reader = middleware::content::packages::reader;
 
 /** Merged package generations live below the Sunrise cache folder. */
 constexpr std::wstring_view kMergeFolder = L"cache\\mods";
+/** Package moves of remapped mods, kept beside the mods folder. */
+constexpr std::wstring_view kRemapsFile = L"mod_remaps.json";
 /** Separates a directory from its leaf. */
 constexpr std::wstring_view kSeparator = L"\\";
 /** One notice line stays free for the summary. */
@@ -66,6 +69,23 @@ std::array<Record, kModCapacity> g_records{};
 resolution::Order g_order{};
 std::array<OverlayFile, kOverlayCapacity> g_stagedFiles{};
 
+/**
+ * What a package reload needs from boot. The manifest holds the mod rows once boot applied them,
+ * so the installed rows are kept as boot saw them.
+ */
+struct ReloadInputs final {
+    SRWLOCK lock{SRWLOCK_INIT};
+    std::wstring gameDirectory;
+    std::wstring packagesDirectory;
+    std::wstring modsDirectory;
+    std::wstring mergeDirectory;
+    std::wstring remapsFile;
+    std::vector<content_manifest::Row> installedRows;
+    bool ready{};
+};
+
+ReloadInputs g_reload;
+
 /** Carries the package stage through the installed-manifest visit. */
 struct StageContext final {
     const packages::Paths* paths{};
@@ -73,6 +93,18 @@ struct StageContext final {
     std::span<const std::size_t> order;
     packages::Result result{};
 };
+
+/** Runs the package stage on the manifest rows the installed packages leave free. */
+[[nodiscard]] packages::Result stage_packages(const StageContext& stage,
+                                              std::span<const content_manifest::Row> installed,
+                                              std::span<OverlayFile> output) noexcept {
+    const std::size_t free = content_manifest::kRowCapacity - installed.size();
+    return packages::build(*stage.paths,
+                           installed,
+                           stage.records,
+                           stage.order,
+                           output.first((std::min)(free, output.size())));
+}
 
 /** Clears published fields, leaving the initialized Windows lock alone. */
 void clear_storage() noexcept {
@@ -94,10 +126,12 @@ void clear_storage() noexcept {
  */
 [[nodiscard]] bool run_package_stage(void* opaque, const content_manifest::View& view) noexcept {
     auto& stage = *static_cast<StageContext*>(opaque);
-    const std::size_t free = content_manifest::kRowCapacity - view.rows.size();
-    const std::span<OverlayFile> files =
-        std::span(g_stagedFiles).first((std::min)(free, g_stagedFiles.size()));
-    stage.result = packages::build(*stage.paths, view.rows, stage.records, stage.order, files);
+    try {
+        g_reload.installedRows.assign(view.rows.begin(), view.rows.end());
+    } catch (...) {
+        g_reload.installedRows.clear();
+    }
+    stage.result = stage_packages(stage, view.rows, g_stagedFiles);
     return true;
 }
 
@@ -374,8 +408,12 @@ bool initialize(const Directories& directories) noexcept {
         return false;
     }
 
-    const packages::Paths paths{
-        directories.gameDirectory, directories.packagesDirectory, modsDirectory, mergeDirectory};
+    const std::wstring remapsFile = joined(directories.artifactDirectory, kRemapsFile);
+    const packages::Paths paths{directories.gameDirectory,
+                                directories.packagesDirectory,
+                                modsDirectory,
+                                mergeDirectory,
+                                remapsFile};
     StageContext stage{&paths, records, std::span(g_order).first(orderCount)};
     // The stage also runs with no mods, so merged files from an earlier boot are removed.
     if (orderCount != 0) {
@@ -454,10 +492,162 @@ bool initialize(const Directories& directories) noexcept {
                       g_storage.mergedPackages);
     raise_notices(found.skipped);
     ReleaseSRWLockExclusive(&g_storage.lock);
+    AcquireSRWLockExclusive(&g_reload.lock);
+    try {
+        g_reload.gameDirectory = directories.gameDirectory;
+        g_reload.packagesDirectory = directories.packagesDirectory;
+        g_reload.modsDirectory = modsDirectory;
+        g_reload.mergeDirectory = mergeDirectory;
+        g_reload.remapsFile = remapsFile;
+        g_reload.ready = true;
+    } catch (...) {
+        g_reload.ready = false;
+    }
+    ReleaseSRWLockExclusive(&g_reload.lock);
     packages::prune(paths, stage.result);
     g_records.fill(Record{});
     g_stagedFiles.fill(OverlayFile{});
     return true;
+}
+
+namespace {
+
+/** Writes the reason into the result and the log. */
+ReloadResult reload_failure(const char* reason, std::string_view detail = {}) noexcept {
+    ReloadResult result{};
+    std::snprintf(result.message.data(),
+                  result.message.size(),
+                  "%s%s%.*s",
+                  reason,
+                  detail.empty() ? "" : " ",
+                  static_cast<int>(detail.size()),
+                  detail.data());
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::warn,
+                      "ev=mods stage=reload result=refused reason=\"%s\"",
+                      result.message.data());
+    return result;
+}
+
+/** @return The ids of the mods that loaded at boot, in load order. */
+[[nodiscard]] std::vector<std::string> boot_loaded_ids() {
+    std::vector<std::string> ids;
+    AcquireSRWLockShared(&g_storage.lock);
+    ids.reserve(g_storage.loadedCount);
+    for (std::size_t index = 0; index < g_storage.loadedCount; ++index) {
+        ids.emplace_back(g_storage.records[index].manifest.id.view());
+    }
+    ReleaseSRWLockShared(&g_storage.lock);
+    return ids;
+}
+
+/** @return True when the two tables serve the same generations from the same files. */
+[[nodiscard]] bool same_table(std::span<const package_reader::overlay::File> left,
+                              std::span<const package_reader::overlay::File> right) noexcept {
+    return std::equal(
+        left.begin(), left.end(), right.begin(), right.end(), [](const auto& a, const auto& b) {
+            return a.packageId == b.packageId && a.patchIndex == b.patchIndex
+                   && std::wstring_view(a.path.chars.data())
+                          == std::wstring_view(b.path.chars.data());
+        });
+}
+
+} // namespace
+
+/**
+ * Stages every mod again exactly as boot did and publishes the server's reader table. The
+ * client's manifest is not touched, and cache files are not pruned, so nothing the game opened
+ * goes away.
+ */
+ReloadResult reload_packages() noexcept {
+    if (TryAcquireSRWLockExclusive(&g_reload.lock) == FALSE) {
+        return reload_failure("A package reload is already running.");
+    }
+    struct Unlock final {
+        ~Unlock() {
+            ReleaseSRWLockExclusive(&g_reload.lock);
+        }
+    } unlock;
+    if (!g_reload.ready || g_reload.installedRows.empty()) {
+        return reload_failure(
+            "Mods did not finish loading at boot, so their packages cannot be reloaded.");
+    }
+    try {
+        auto records = std::make_unique<std::array<Record, kModCapacity>>();
+        auto order = std::make_unique<resolution::Order>();
+        auto files = std::make_unique<std::array<OverlayFile, kOverlayCapacity>>();
+        const discovery::Result found = discovery::discover(g_reload.modsDirectory, *records);
+        if (!found.complete) {
+            return reload_failure("Mod folders could not be listed.");
+        }
+        const std::span<Record> listed = std::span(*records).first(found.count);
+        const std::size_t orderCount = resolution::resolve(listed, *order);
+        const packages::Paths paths{g_reload.gameDirectory,
+                                    g_reload.packagesDirectory,
+                                    g_reload.modsDirectory,
+                                    g_reload.mergeDirectory,
+                                    g_reload.remapsFile};
+        const StageContext stage{&paths, listed, std::span(*order).first(orderCount)};
+        const packages::Result staged = stage_packages(stage, g_reload.installedRows, *files);
+        if (!staged.complete) {
+            return reload_failure("Mod files could not be checked.");
+        }
+        // The same mods must load, or the reader would serve a set the client never saw.
+        const std::vector<std::string> before = boot_loaded_ids();
+        for (const std::string& id : before) {
+            const auto record =
+                std::find_if(listed.begin(), listed.end(), [&id](const Record& value) {
+                    return value.manifest.id.view() == id;
+                });
+            if (record == listed.end() || record->status != Status::loaded) {
+                const Problem* refusal =
+                    record == listed.end() ? nullptr : problem::first_refusal(*record);
+                return reload_failure("Mod",
+                                      refusal != nullptr ? std::string(id) + " no longer loads: "
+                                                               + refusal->message.bytes.data()
+                                                         : std::string(id) + " is gone.");
+            }
+        }
+        const std::size_t loaded = static_cast<std::size_t>(
+            std::count_if(listed.begin(), listed.end(), [](const Record& value) {
+                return value.status == Status::loaded;
+            }));
+        if (loaded != before.size()) {
+            return reload_failure(
+                "A mod that did not load at boot loads now. Restart the game to add it.");
+        }
+        const auto served = std::span(*files).first(staged.fileCount);
+        std::vector<package_reader::overlay::File> table;
+        table.resize(served.size());
+        for (std::size_t index = 0; index < served.size(); ++index) {
+            content_manifest::scanner::package::ParsedName parsed{};
+            if (!content_manifest::scanner::package::parse_stem(
+                    {served[index].row.name.data(), served[index].row.nameLength}, parsed)
+                || !served_path(g_reload.gameDirectory, served[index], table[index].path)) {
+                return reload_failure("A served package path does not fit.");
+            }
+            table[index].packageId = served[index].row.packageId;
+            table[index].patchIndex = parsed.patchIndex;
+        }
+        std::sort(table.begin(), table.end(), [](const auto& first, const auto& second) {
+            return first.packageId != second.packageId ? first.packageId < second.packageId
+                                                       : first.patchIndex < second.patchIndex;
+        });
+        ReloadResult result{.ok = true, .files = table.size()};
+        // An unchanged table is not published, so readers keep their caches.
+        result.changed = !same_table(table, package_reader::overlay::files());
+        if (result.changed && !package_reader::overlay::publish(table)) {
+            return reload_failure("The new package table could not be published.");
+        }
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::info,
+                          "ev=mods stage=reload result=ok files=%zu changed=%d",
+                          table.size(),
+                          result.changed ? 1 : 0);
+        return result;
+    } catch (...) {
+        return reload_failure("The package reload ran out of memory.");
+    }
 }
 
 /** Clears the published mod list and the config values. */

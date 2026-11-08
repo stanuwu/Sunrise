@@ -1,3 +1,6 @@
+#include <cstddef>
+
+#include "../schema/generated/tag_classes_808077.h"
 #include "definition_index_table.h"
 #include "internal.h"
 #include "items.h"
@@ -5,21 +8,29 @@
 namespace sunrise::middleware::content::packages::tables::items {
 namespace {
 
+namespace generated = schema::generated;
+
+/** The art block declares its art rows first. */
+constexpr std::size_t kArtRowDescriptor = offsetof(generated::ItemTranslationBlock, artRows);
 /** The art block declares its gear art definition index here. */
-constexpr std::size_t kGearArtIndexOffset = 88;
-/** One art row is 4 bytes: signed class, one pad byte, then its art index. */
-constexpr std::size_t kArtRowStride = 4;
-constexpr std::size_t kArtRowValueOffset = 2;
+constexpr std::size_t kGearArtIndexOffset = offsetof(generated::ItemTranslationBlock, gearArtIndex);
+/** One art row: signed class, one pad byte, then its art index. */
+constexpr std::size_t kArtRowStride = sizeof(generated::ItemArtRow);
+constexpr std::size_t kArtRowValueOffset = offsetof(generated::ItemArtRow, arrangementRow);
 /** Material override arrays sit at these art-block offsets, one per stage. */
-constexpr std::size_t kMaterialStageOffsets[]{40, 56, 72};
-/** One material override row is 4 bytes: a signed key, one pad byte, then a value. */
-constexpr std::size_t kMaterialRowStride = 4;
+constexpr std::size_t kMaterialStageOffsets[]{
+    offsetof(generated::ItemTranslationBlock, materialOverrides0),
+    offsetof(generated::ItemTranslationBlock, materialOverrides1),
+    offsetof(generated::ItemTranslationBlock, materialOverrides2)};
+/** One material override row: a signed key, one pad byte, then a value. */
+constexpr std::size_t kMaterialRowStride = sizeof(generated::ItemMaterialOverride);
 /** A material override row carries its value after its key and one pad byte. */
-constexpr std::size_t kMaterialRowValueOffset = 2;
-/** The stat block holds the sandbox perk array descriptor at this offset inside itself. */
-constexpr std::size_t kSandboxPerkDescriptor = 16;
-/** One sandbox perk entry is 24 bytes and begins with its perk index. */
-constexpr std::size_t kSandboxPerkStride = 24;
+constexpr std::size_t kMaterialRowValueOffset = offsetof(generated::ItemMaterialOverride, value);
+/** The stat block holds the sandbox perk array descriptor here. */
+constexpr std::size_t kSandboxPerkDescriptor =
+    offsetof(generated::SItemSandboxPerkBlock, itemPerks);
+/** One sandbox perk entry begins with its perk index. */
+constexpr std::size_t kSandboxPerkStride = sizeof(generated::ItemSandboxPerk);
 /** All bits set marks a declared-empty sandbox perk entry. */
 constexpr std::uint16_t kUnavailableSandboxPerk = 0xFFFF;
 
@@ -54,7 +65,8 @@ constexpr std::uint16_t kUnavailableSandboxPerk = 0xFFFF;
 void read_art(std::span<const std::byte> definition, std::size_t art, Row& row) noexcept {
     (void)read(definition, art + kGearArtIndexOffset, row.gearArtIndex);
     Array rows{};
-    if (!find_array_at(definition, art, rows) || rows.elementClass != kArtRowClass) {
+    if (!find_array_at(definition, art + kArtRowDescriptor, rows)
+        || rows.elementClass != kArtRowClass) {
         return;
     }
     for (std::uint64_t index = 0; index < rows.count; ++index) {

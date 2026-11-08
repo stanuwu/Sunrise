@@ -295,6 +295,21 @@ void request_investment_slice() noexcept {
     }
 }
 
+/** A perk the walk set reaches every peer through the account image, as after a pick. */
+void grant_published_season_perks() noexcept {
+    const std::lock_guard lock(g_lock);
+    bool earned = false;
+    if (!state::grant_earned_season_perks(earned)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=season_xp stage=published_perks result=fail");
+        return;
+    }
+    if (earned) {
+        arm_account_resync_everywhere();
+    }
+}
+
 /** @return True while any authenticated peer holds a Family-4 subscription. */
 bool has_active_family4_peer() noexcept {
     return std::any_of(g_sessions.begin(), g_sessions.end(), [](const Session& session) {
@@ -370,8 +385,17 @@ void arm_acquisition_presentation_hold(Session& session) noexcept {
  * @return True when the XP was granted.
  */
 bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
+    const std::uint16_t previousBonus = state::artifact_power_bonus();
     if (amount <= 0 || !state::grant_seasonal_experience(amount)) {
         return false;
+    }
+    // The family-two member record carries Power, which includes the artifact bonus.
+    if (state::artifact_power_bonus() != previousBonus) {
+        for (auto& peer : g_sessions) {
+            if (peer.socialRosterRepushRoot != 0) {
+                peer.socialRosterRepushArmed = true;
+            }
+        }
     }
     for (auto& peer : g_sessions) {
         if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active

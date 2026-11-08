@@ -7,12 +7,13 @@
 #include <span>
 
 #include "../../../middleware/bap/activity_message/sense_update.h"
+#include "../../../state/activity_sdk/format.h"
 
 namespace sunrise::server::activity::mission::trigger_observation {
 
 namespace sense = middleware::bap::activity_message::sense_update;
 /** Type-30 occupancy Sense: two required flags, then two required signed 32-bit values. */
-constexpr std::uint32_t kSchema = 0x80809531U;
+constexpr std::uint32_t kSchema = state::activity_sdk::format::kOccupancySenseSchema;
 constexpr std::size_t kValueCount = 4;
 /** Root ordinals: any member inside, all inside, intersection count, copied Auth value. */
 constexpr std::uint16_t kOccupiedOrdinal = 0;

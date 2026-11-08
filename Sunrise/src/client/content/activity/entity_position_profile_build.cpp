@@ -15,6 +15,10 @@
 #include "../../../core/filesystem/path.h"
 #include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/named_tags.h"
+#include "../../../middleware/content/packages/reader/package_file.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808091.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808099.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809d.h"
 #include "../../../middleware/content/packages/tables/entity_position_profile_extractor.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/content_manifest/content_manifest_state_runtime.h"
@@ -28,14 +32,16 @@ namespace extractor = middleware::content::packages::position_profiles;
 namespace named = middleware::content::packages::named_tags;
 namespace reader = middleware::content::packages::reader;
 using Blob = std::vector<std::byte>;
+namespace generated = middleware::content::packages::schema::generated;
+/** One hash64 reference row of the package metadata. */
+using ReferenceRow = generated::Hash64ReferenceRow;
 /** One installed package directory never holds more `.pkg` files than this. */
 constexpr std::size_t kMaximumPackageFileCount = 65536;
-/** Package files carry the header prefix this pass reads before any metadata. */
-constexpr std::size_t kHeaderBytes = 0x180;
+/** Package file header fields this pass reads before any metadata. */
+using HeaderOffsets = reader::layout::HeaderOffsets;
+using MiscRegion = reader::layout::MiscRegion;
 /** The hash64 reference directory is refused above this size. */
 constexpr std::uint64_t kMaximumMetadataBytes = 64ULL * 1024ULL * 1024ULL;
-/** Package file names carry this extension and nothing else is read. */
-constexpr std::wstring_view kPackageExtension = L".pkg";
 struct Name final {
     extractor::NamedTag value;
     std::uint32_t patch{};
@@ -148,7 +154,8 @@ read_at(HANDLE file, std::uint64_t offset, std::span<std::byte> output) noexcept
 bool collect_name(void* opaque, const named::Entry& entry) noexcept {
     try {
         auto& names = *static_cast<Names*>(opaque);
-        if (entry.classId != 0x808091DE && entry.classId != 0x80809994) {
+        if (entry.classId != generated::SMapRoot::kClass
+            && entry.classId != generated::SScenario::kClass) {
             return true;
         }
         const std::string_view name(entry.name.data(), entry.nameLength);
@@ -208,11 +215,14 @@ void merge_references(const std::vector<Reference>& family, std::vector<MergedRe
 /** Parses one `<family>_<patch>.pkg` file name. @return False when the name has no patch suffix. */
 [[nodiscard]] bool parse_file_name(std::wstring_view name, File& output) noexcept {
     output = {};
-    if (name.size() <= kPackageExtension.size() || name.size() >= output.name.size()
-        || name.substr(name.size() - kPackageExtension.size()) != kPackageExtension) {
+    if (name.size() <= reader::layout::kPackageFileExtension.size()
+        || name.size() >= output.name.size()
+        || name.substr(name.size() - reader::layout::kPackageFileExtension.size())
+               != reader::layout::kPackageFileExtension) {
         return false;
     }
-    const std::wstring_view stem = name.substr(0, name.size() - kPackageExtension.size());
+    const std::wstring_view stem =
+        name.substr(0, name.size() - reader::layout::kPackageFileExtension.size());
     const std::size_t separator = stem.rfind(L'_');
     if (separator == std::wstring_view::npos || separator + 1 == stem.size()) {
         return false;
@@ -250,8 +260,9 @@ void merge_references(const std::vector<Reference>& family, std::vector<MergedRe
         }
         File file{};
         const std::wstring_view name(entry.cFileName);
-        if (name.size() <= kPackageExtension.size()
-            || name.substr(name.size() - kPackageExtension.size()) != kPackageExtension) {
+        if (name.size() <= reader::layout::kPackageFileExtension.size()
+            || name.substr(name.size() - reader::layout::kPackageFileExtension.size())
+                   != reader::layout::kPackageFileExtension) {
             continue;
         }
         if (files.size() >= kMaximumPackageFileCount || !parse_file_name(name, file)) {
@@ -301,19 +312,21 @@ bool inventory(std::wstring_view directory,
             || length.QuadPart <= 0) {
             return false;
         }
-        Blob header(kHeaderBytes);
-        if (!read_at(handle.get(), 0, header) || value<std::uint16_t>(header, 0) != 38) {
+        Blob header(reader::layout::kHeaderSize);
+        if (!read_at(handle.get(), 0, header)
+            || value<std::uint16_t>(header, HeaderOffsets::kVersion)
+                   != reader::layout::kSupportedVersion) {
             return false;
         }
-        /** Beta metadata has no hash64 reference directory at offset 48. */
-        if (value<std::uint8_t>(header, 0x1A) == 0) {
+        // Beta metadata has no hash64 reference array.
+        if (value<std::uint8_t>(header, HeaderOffsets::kVariant) == 0) {
             continue;
         }
-        if (value<std::uint8_t>(header, 0x1A) != 1) {
+        if (value<std::uint8_t>(header, HeaderOffsets::kVariant) != 1) {
             return false;
         }
-        const auto offset = value<std::uint32_t>(header, 0xF0),
-                   size = value<std::uint32_t>(header, 0xF4);
+        const auto offset = value<std::uint32_t>(header, HeaderOffsets::kMiscOffset),
+                   size = value<std::uint32_t>(header, HeaderOffsets::kMiscSize);
         if (size == 0) {
             continue;
         }
@@ -326,18 +339,23 @@ bool inventory(std::wstring_view directory,
         if (!read_at(handle.get(), offset, metadata)) {
             return false;
         }
-        if (metadata.size() < 64) {
+        if (metadata.size() < MiscRegion::kMinimumSize) {
             continue;
         }
         std::vector<std::size_t> offsets;
-        if (!extractor::array(metadata, 48, 16, 0x80809D02, offsets)) {
+        if (!extractor::array(metadata,
+                              MiscRegion::kReferenceArray,
+                              sizeof(ReferenceRow),
+                              ReferenceRow::kClass,
+                              offsets)) {
             return false;
         }
         for (auto member : offsets) {
-            set_reference(family,
-                          {value<std::uint64_t>(metadata, member),
-                           value<std::uint32_t>(metadata, member + 8),
-                           value<std::uint32_t>(metadata, member + 12)});
+            set_reference(
+                family,
+                {value<std::uint64_t>(metadata, member + offsetof(ReferenceRow, wideHash)),
+                 value<std::uint32_t>(metadata, member + offsetof(ReferenceRow, tag)),
+                 value<std::uint32_t>(metadata, member + offsetof(ReferenceRow, classReference))});
         }
     }
     merge_references(family, merged);

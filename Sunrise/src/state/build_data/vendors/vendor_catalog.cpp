@@ -71,11 +71,11 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
                          kSaleRowStride,
                          kSaleRowClass,
                          definition.definitionSize)
-           // The third array has no closed element class, so only its bounds are checked.
-           && array_fits(definition.thirdCount,
-                         definition.thirdRowBase,
-                         definition.thirdRowClass,
-                         kThirdRowStride,
+           // Only the bounds of the interaction array are checked.
+           && array_fits(definition.interactionCount,
+                         definition.interactionRowBase,
+                         definition.interactionRowClass,
+                         kInteractionRowStride,
                          0,
                          definition.definitionSize);
 }
@@ -91,7 +91,7 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
                                        std::span<const SaleRow> saleRows) noexcept {
     for (std::size_t row = 0; row < definition.saleCount; ++row) {
         const SaleRow& value = saleRows[definition.saleRowOffset + row];
-        // Row +100 is bounded by the category count before any reader strides with it.
+        // The category index is bounded by the category count before any reader strides with it.
         const bool selects =
             value.categoryIndex == kAbsentCategoryIndex
             || (value.categoryIndex >= 0 && value.categoryIndex < definition.installedCount);

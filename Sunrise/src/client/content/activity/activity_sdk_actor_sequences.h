@@ -3,21 +3,60 @@
 #include <string>
 #include <unordered_map>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808069.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807e.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808081.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808082.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809c.h"
 #include "../../../state/build_data/scriptables/inline_name_evidence.h"
 #include "activity_sdk_actor_rsat_inventory_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::actor_rsat_inventory {
 namespace sequence_inventory {
 
+namespace generated = middleware::content::packages::schema::generated;
+
 /** Declared component references and action entries retain their native package classes. */
-inline constexpr std::uint32_t kComponentClass = 0x80809C04U;
-inline constexpr std::uint32_t kConfigClass = 0x80809C36U;
-inline constexpr std::uint32_t kActorGroupClass = 0x80807EE1U;
-inline constexpr std::uint32_t kActionEntryClass = 0x808081AEU;
-inline constexpr std::size_t kComponentArrayOffset = 16, kComponentStride = 12;
-inline constexpr std::size_t kNativeRootRelativeOffset = 16;
-inline constexpr std::size_t kLocalTableOffset = 760, kGlobalTableOffset = 768;
-inline constexpr std::size_t kActionStride = 24, kPathOffset = 8, kResourceOffset = 16;
+inline constexpr std::uint32_t kComponentClass = generated::SPatternComponent::kClass;
+inline constexpr std::uint32_t kConfigClass = generated::SEntityConfig::kClass;
+inline constexpr std::uint32_t kActorGroupClass = generated::ActorGroupComponent::kClass;
+inline constexpr std::uint32_t kActionSystemClass = generated::ActionSystemComponent::kClass;
+inline constexpr std::uint32_t kActionEntryClass = generated::ActorActionEntry::kClass;
+inline constexpr std::size_t kComponentArrayOffset = offsetof(generated::SEntity, components);
+inline constexpr std::size_t kComponentStride = sizeof(generated::SPatternComponent);
+inline constexpr std::size_t kComponentConfigOffset =
+    offsetof(generated::SPatternComponent, config);
+inline constexpr std::size_t kNativeRootRelativeOffset =
+    offsetof(generated::SEntityConfig, defaultInstance);
+/** Spawn tuple an ActorGroup keeps when no spawn override node replaces it. */
+inline constexpr std::size_t kGroupProfileOffset =
+    offsetof(generated::ActorGroupComponent, profileTupleLive);
+inline constexpr std::size_t kLocalTableOffset =
+    offsetof(generated::ActorGroupSource, localDefinition);
+inline constexpr std::size_t kGlobalTableOffset =
+    offsetof(generated::ActorGroupSource, globalDefinition);
+inline constexpr std::size_t kActionStride = sizeof(generated::ActorActionEntry);
+/** Global and actor-local sequence definitions own their action tables in these fields. */
+inline constexpr std::uint32_t kGlobalDefinitionClass =
+    generated::ActorSequenceGlobalDefinition::kClass;
+inline constexpr std::uint32_t kLocalDefinitionClass =
+    generated::ActorStateMachineDefinition::kClass;
+inline constexpr std::uint32_t kGlobalActionArrayOffset =
+    offsetof(generated::ActorSequenceGlobalDefinition, sequenceDefinitions);
+inline constexpr std::uint32_t kLocalActionArrayOffset =
+    offsetof(generated::ActorStateMachineDefinition, sequenceDefinitions);
+inline constexpr std::uint32_t kOwnerSourceClass = generated::ActorGroupSource::kClass;
+inline constexpr std::size_t kKindOffset = offsetof(generated::ActorActionEntry, kind);
+inline constexpr std::size_t kPathOffset = offsetof(generated::ActorActionEntry, sourcePath);
+inline constexpr std::size_t kResourceOffset = offsetof(generated::ActorActionEntry, resource);
+/** An ActorGroup and its source both open with a pointer: own tag, native class, native offset. */
+inline constexpr std::size_t kGroupClassOffset =
+    offsetof(generated::ActorGroupComponent, ownTag.word);
+inline constexpr std::size_t kGroupSourceOffset =
+    offsetof(generated::ActorGroupComponent, ownTag.offset);
+inline constexpr std::size_t kSourceClassOffset = offsetof(generated::ActorGroupSource, unk0.word);
+inline constexpr std::size_t kSourceNativeOffset =
+    offsetof(generated::ActorGroupSource, unk0.offset);
 /** Diagnostic paths are bounded while searching for their terminator. */
 inline constexpr std::size_t kMaximumPathBytes = 4096;
 
@@ -97,14 +136,13 @@ inline bool table(BuildState& state, SequenceTableSource source, std::uint32_t& 
         output = found->second;
         return state.snapshot.sequenceTables[output].definitionClass == source.definitionClass;
     }
-    const bool global = source.definitionClass == format::kActorSequenceGlobalDefinitionClass;
-    if (!global && source.definitionClass != format::kActorSequenceLocalDefinitionClass) {
+    const bool global = source.definitionClass == kGlobalDefinitionClass;
+    if (!global && source.definitionClass != kLocalDefinitionClass) {
         return false;
     }
     std::vector<std::byte> blob;
     TypedArray array{};
-    const auto arrayOffset =
-        global ? format::kActorSequenceGlobalArrayOffset : format::kActorSequenceLocalArrayOffset;
+    const auto arrayOffset = global ? kGlobalActionArrayOffset : kLocalActionArrayOffset;
     if (!state.readTag(state.readContext, source.definitionTag, source.definitionClass, blob)
         || !typed_array(blob, arrayOffset, kActionEntryClass, kActionStride, array)
         || state.snapshot.sequenceEntries.size() > (std::numeric_limits<std::uint32_t>::max)()
@@ -126,7 +164,8 @@ inline bool table(BuildState& state, SequenceTableSource source, std::uint32_t& 
         const auto offset = static_cast<std::size_t>(array.dataOffset) + ordinal * kActionStride;
         SequenceEntry entry{};
         std::uint8_t kind = 0;
-        if (!read_value(blob, offset, entry.row.keyHash) || !read_value(blob, offset + 4, kind)
+        if (!read_value(blob, offset, entry.row.keyHash)
+            || !read_value(blob, offset + kKindOffset, kind)
             || !read_value(blob, offset + kResourceOffset, entry.row.resourceTag)
             || !source_path(blob, offset + kPathOffset, entry.sourcePath)
             || !to_u32(offset, entry.row.sourceOffset)
@@ -156,7 +195,14 @@ inline bool table(BuildState& state, SequenceTableSource source, std::uint32_t& 
     return true;
 }
 
-/** The native ActorGroup source names its local definition, program and global definition. */
+/**
+ * Reads one component config once: its native class and, for an ActorGroup, the source that names
+ * the local and global definitions plus the default spawn profile.
+ * @param state Build state that caches each config tag.
+ * @param configTag Component config tag; a tag that is not a config is remembered as empty.
+ * @param output Receives the cached facts.
+ * @return False when an ActorGroup config is malformed.
+ */
 inline bool owner(BuildState& state, std::uint32_t configTag, SequenceOwner& output) {
     const auto cached = state.sequenceOwners.find(configTag);
     if (cached != state.sequenceOwners.end()) {
@@ -170,35 +216,43 @@ inline bool owner(BuildState& state, std::uint32_t configTag, SequenceOwner& out
         std::size_t native = 0;
         std::uint32_t nativeClass = 0;
         if (!read_value(config, kNativeRootRelativeOffset, relative)
-            || !relative_offset(kNativeRootRelativeOffset, relative, native) || native < 4
-            || !read_value(config, native - 4, nativeClass)) {
+            || !relative_offset(kNativeRootRelativeOffset, relative, native)
+            || native < reader::layout::kClassWordSize
+            || !read_value(config, native - reader::layout::kClassWordSize, nativeClass)) {
             return false;
         }
+        output.nativeClass = nativeClass;
         if (nativeClass == kActorGroupClass) {
             std::uint32_t ownTag = 0, sourceClass = 0;
             std::uint64_t source = 0;
             if (!read_value(config, native, ownTag) || ownTag != configTag
-                || !read_value(config, native + 4, sourceClass)
-                || sourceClass != format::kActorSequenceOwnerSourceClass
-                || !read_value(config, native + 8, source)
+                || !read_value(config, native + kGroupClassOffset, sourceClass)
+                || sourceClass != kOwnerSourceClass
+                || !read_value(config, native + kGroupSourceOffset, source)
                 || source > (std::numeric_limits<std::uint32_t>::max)()
-                || !contains(config, static_cast<std::size_t>(source), kGlobalTableOffset + 4)) {
+                || !contains(config,
+                             static_cast<std::size_t>(source),
+                             kGlobalTableOffset
+                                 + sizeof(generated::ActorGroupSource::globalDefinition))) {
                 return false;
             }
             std::uint32_t sourceOwn = 0, sourceNativeClass = 0;
             std::uint64_t sourceNative = 0;
             if (!read_value(config, static_cast<std::size_t>(source), sourceOwn)
                 || sourceOwn != configTag
-                || !read_value(config, static_cast<std::size_t>(source) + 4U, sourceNativeClass)
+                || !read_value(config,
+                               static_cast<std::size_t>(source) + kSourceClassOffset,
+                               sourceNativeClass)
                 || sourceNativeClass != kActorGroupClass
-                || !read_value(config, static_cast<std::size_t>(source) + 8U, sourceNative)
+                || !read_value(
+                    config, static_cast<std::size_t>(source) + kSourceNativeOffset, sourceNative)
                 || sourceNative != native) {
                 return false;
             }
             output.sourceOffset = static_cast<std::uint32_t>(source);
             if (!read_value(config, output.sourceOffset + kLocalTableOffset, output.localTag)
-                || !read_value(
-                    config, output.sourceOffset + kGlobalTableOffset, output.globalTag)) {
+                || !read_value(config, output.sourceOffset + kGlobalTableOffset, output.globalTag)
+                || !read_value(config, native + kGroupProfileOffset, output.spawnProfile)) {
                 return false;
             }
             output.present = true;
@@ -224,7 +278,8 @@ actor(BuildState& state, std::uint32_t actorIndex, std::span<const std::byte> ac
             static_cast<std::size_t>(components.dataOffset) + ordinal * kComponentStride;
         std::uint32_t configTag = 0;
         SequenceOwner source{};
-        if (!read_value(actorBlob, offset, configTag) || !owner(state, configTag, source)) {
+        if (!read_value(actorBlob, offset + kComponentConfigOffset, configTag)
+            || !owner(state, configTag, source)) {
             return false;
         }
         if (!source.present) {
@@ -235,17 +290,61 @@ actor(BuildState& state, std::uint32_t actorIndex, std::span<const std::byte> ac
         binding.componentOrdinal = ordinal;
         binding.configTag = configTag;
         binding.sourceOffset = source.sourceOffset;
-        binding.sourceClass = format::kActorSequenceOwnerSourceClass;
+        binding.sourceClass = kOwnerSourceClass;
         binding.flags = format::kActorSequenceExact;
-        if (!table(state,
-                   {source.globalTag, format::kActorSequenceGlobalDefinitionClass},
-                   binding.globalTableIndex)
-            || !table(state,
-                      {source.localTag, format::kActorSequenceLocalDefinitionClass},
-                      binding.localTableIndex)) {
+        if (!table(state, {source.globalTag, kGlobalDefinitionClass}, binding.globalTableIndex)
+            || !table(state, {source.localTag, kLocalDefinitionClass}, binding.localTableIndex)) {
             return false;
         }
         state.snapshot.sequenceBindings.push_back(binding);
+    }
+    return true;
+}
+
+/** The actor facts two of its components carry. */
+struct ActorComponents final {
+    /** Config of the action-system component, the actor's behavior config. */
+    std::uint32_t behaviorConfigTag{format::kAbsentIndex};
+    /** ActorGroup default tuple; zero when the actor has no ActorGroup. */
+    std::array<std::int8_t, 4> spawnProfile{};
+};
+
+/**
+ * Finds the behavior config and spawn profile among the actor's declared components.
+ * @param state Build state; shares the per-config cache with the sequence walk.
+ * @param actorBlob Actor definition bytes.
+ * @param output Receives the facts; absent tag and zero tuple when a component is missing.
+ * @return False on a malformed component, two action-system components, or two ActorGroups
+ *         with different tuples.
+ */
+inline bool
+components(BuildState& state, std::span<const std::byte> actorBlob, ActorComponents& output) {
+    output = {};
+    TypedArray rows{};
+    if (!typed_array(actorBlob, kComponentArrayOffset, kComponentClass, kComponentStride, rows)) {
+        return false;
+    }
+    bool group = false;
+    for (std::uint32_t ordinal = 0; ordinal < rows.count; ++ordinal) {
+        const auto offset = static_cast<std::size_t>(rows.dataOffset) + ordinal * kComponentStride;
+        std::uint32_t configTag = 0;
+        SequenceOwner config{};
+        if (!read_value(actorBlob, offset + kComponentConfigOffset, configTag)
+            || !owner(state, configTag, config)) {
+            return false;
+        }
+        if (config.nativeClass == kActionSystemClass) {
+            if (output.behaviorConfigTag != format::kAbsentIndex) {
+                return false;
+            }
+            output.behaviorConfigTag = configTag;
+        } else if (config.present) {
+            if (group && output.spawnProfile != config.spawnProfile) {
+                return false;
+            }
+            output.spawnProfile = config.spawnProfile;
+            group = true;
+        }
     }
     return true;
 }
@@ -316,12 +415,10 @@ inline bool validate(const Snapshot& snapshot) noexcept {
     std::size_t cursor = 0;
     for (std::size_t index = 0; index < snapshot.sequenceTables.size(); ++index) {
         const auto& table = snapshot.sequenceTables[index];
-        const bool global = table.definitionClass == format::kActorSequenceGlobalDefinitionClass;
+        const bool global = table.definitionClass == kGlobalDefinitionClass;
         if (table.flags != format::kActorSequenceExact || is_absent_tag(table.definitionTag)
-            || (!global && table.definitionClass != format::kActorSequenceLocalDefinitionClass)
-            || table.arrayOffset
-                   != (global ? format::kActorSequenceGlobalArrayOffset
-                              : format::kActorSequenceLocalArrayOffset)
+            || (!global && table.definitionClass != kLocalDefinitionClass)
+            || table.arrayOffset != (global ? kGlobalActionArrayOffset : kLocalActionArrayOffset)
             || table.entries.first != cursor || cursor > snapshot.sequenceEntries.size()
             || table.entries.count > snapshot.sequenceEntries.size() - cursor) {
             return false;
@@ -362,8 +459,7 @@ inline bool validate(const Snapshot& snapshot) noexcept {
     for (std::size_t index = 0; index < snapshot.sequenceBindings.size(); ++index) {
         const auto& row = snapshot.sequenceBindings[index];
         if (row.actorClassIndex >= snapshot.actorClasses.size() || is_absent_tag(row.configTag)
-            || row.flags != format::kActorSequenceExact
-            || row.sourceClass != format::kActorSequenceOwnerSourceClass
+            || row.flags != format::kActorSequenceExact || row.sourceClass != kOwnerSourceClass
             || (index != 0
                 && (snapshot.sequenceBindings[index - 1].actorClassIndex > row.actorClassIndex
                     || (snapshot.sequenceBindings[index - 1].actorClassIndex == row.actorClassIndex
@@ -376,8 +472,7 @@ inline bool validate(const Snapshot& snapshot) noexcept {
             if (table != format::kAbsentIndex
                 && (table >= snapshot.sequenceTables.size()
                     || snapshot.sequenceTables[table].definitionClass
-                           != (global ? format::kActorSequenceGlobalDefinitionClass
-                                      : format::kActorSequenceLocalDefinitionClass))) {
+                           != (global ? kGlobalDefinitionClass : kLocalDefinitionClass))) {
                 return false;
             }
         }
@@ -404,8 +499,7 @@ inline bool visit_table(void* raw, std::uint32_t tag) noexcept {
 /** Scans both physical definition classes without limiting them to currently bound actors. */
 inline bool scan_tables(const reader::Source& source, std::vector<SequenceTableSource>& output) {
     output.clear();
-    for (const auto cls : {format::kActorSequenceGlobalDefinitionClass,
-                           format::kActorSequenceLocalDefinitionClass}) {
+    for (const auto cls : {kGlobalDefinitionClass, kLocalDefinitionClass}) {
         ScanContext context{&output, cls};
         reader::ScanResult result{};
         if (!reader::scan_class(source, cls, &visit_table, &context, result)) {

@@ -24,7 +24,7 @@ struct ActivitySdkGenerationSettings final {
  * Raise it when a key is renamed, removed, changes meaning, or must take a new default. Adding a
  * key needs no raise, because a missing key already takes its default.
  */
-inline constexpr std::uint32_t kSettingsVersion = 18;
+inline constexpr std::uint32_t kSettingsVersion = 19;
 
 /** Parsed read-only process settings. */
 struct Settings {

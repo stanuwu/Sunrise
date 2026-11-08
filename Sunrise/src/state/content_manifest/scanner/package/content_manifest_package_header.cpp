@@ -8,9 +8,12 @@
 #include <string_view>
 
 #include "../../../../core/filesystem/path.h"
+#include "../../../../middleware/content/packages/reader/package_file.h"
 
 namespace sunrise::state::content_manifest::scanner::package {
 namespace {
+
+namespace package_layout = middleware::content::packages::reader::layout;
 
 /** Installed packages for this supported build carry header version 38. */
 constexpr std::uint16_t kSupportedHeaderVersion = 38;
@@ -18,8 +21,6 @@ constexpr std::uint16_t kSupportedHeaderVersion = 38;
 constexpr std::uint16_t kSupportedPlatform = 2;
 /** The public package header prefix ends after its 8-byte build signature. */
 constexpr std::size_t kPublicHeaderPrefixSize = 16;
-/** Package stems become file paths by adding the native `.pkg` extension. */
-constexpr std::wstring_view kPackageExtension = L".pkg";
 
 #pragma pack(push, 1)
 /** Public prefix read from every installed package header. */
@@ -60,14 +61,15 @@ static_assert(sizeof(HeaderPrefix) == kPublicHeaderPrefixSize);
             return false;
         }
     }
-    if (output.length + parsed.stemLength + kPackageExtension.size() >= output.chars.size()) {
+    if (output.length + parsed.stemLength + package_layout::kPackageFileExtension.size()
+        >= output.chars.size()) {
         return false;
     }
     for (std::size_t index = 0; index < parsed.stemLength; ++index) {
         output.chars[output.length++] = static_cast<wchar_t>(parsed.stem[index]);
     }
     output.chars[output.length] = L'\0';
-    return core::path::append(output, kPackageExtension);
+    return core::path::append(output, package_layout::kPackageFileExtension);
 }
 
 /**

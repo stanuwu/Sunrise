@@ -61,6 +61,7 @@ Status query(const sdk::BoundView& view, Snapshot& output) noexcept {
     output.publishedRevision = lease.publishedRevision;
     output.configured = lease.configured;
     output.publicationPending = lease.publicationPending;
+    output.publicationRefused = lease.publicationRefused;
     output.regionArrivalPending = lease.regionArrivalPending;
 
     server::bap::ActivityMissionSeedPlan generated{};

@@ -1,6 +1,8 @@
 #include <Windows.h>
 
 #include "../../../../core/ui/busy/busy.h"
+#include "../../../../server/bap/runtime.h"
+#include "../../../../state/runtime/runtime.h"
 #include "../../../targets/game/content.h"
 #include "../../diagnostics/content_readiness_report.h"
 #include "../internal.h"
@@ -39,13 +41,16 @@ void activate() noexcept {
     });
 }
 
-/** Runs one due bounded refresh slice on the caller-owned game thread. */
+/**
+ * Runs one due bounded refresh slice on the caller-owned game thread.
+ * @param nowMilliseconds Monotonic tick count that gates the next slice.
+ */
 void service(std::uint64_t nowMilliseconds) noexcept {
-    g_lifecycle.lock([nowMilliseconds](Lifecycle& lifecycle) {
+    const bool perksPublished = g_lifecycle.lock([nowMilliseconds](Lifecycle& lifecycle) {
         if (!lifecycle.accepting || lifecycle.complete
             || !sunrise::client::targets::game::content::is_resolved()
             || nowMilliseconds < lifecycle.nextEligible) {
-            return;
+            return false;
         }
         lifecycle.nextEligible = nowMilliseconds + kRefreshIntervalMilliseconds;
 
@@ -53,7 +58,7 @@ void service(std::uint64_t nowMilliseconds) noexcept {
             lifecycle.overlayPending = true;
             if (sunrise::core::ui::busy::raise_early(
                     sunrise::core::ui::busy::Task::contentExtraction)) {
-                return;
+                return false;
             }
         } else if (lifecycle.overlayPending) {
             // A stale preflight must not leave a task raised after another path publishes the rows.
@@ -61,10 +66,16 @@ void service(std::uint64_t nowMilliseconds) noexcept {
             lifecycle.overlayPending = false;
         }
 
+        const bool perksWalkable = sunrise::state::season_perks_walkable();
         lifecycle.complete = sunrise::client::content::investment::refresh();
         sunrise::client::content::diagnostics::report_readiness();
         lifecycle.overlayPending = false;
+        return !perksWalkable && sunrise::state::season_perks_walkable();
     });
+    // The Server takes this lock while holding its own, so it is told only after release.
+    if (perksPublished) {
+        sunrise::server::bap::grant_published_season_perks();
+    }
 }
 
 /** Stops taking refresh slices and clears the pending overlay. */

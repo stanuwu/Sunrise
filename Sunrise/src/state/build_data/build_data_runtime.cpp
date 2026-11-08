@@ -31,6 +31,7 @@
 #include "sobjects/sobject_catalog.h"
 #include "socket_entry_lists/socket_entry_list_catalog.h"
 #include "spawn_sets/spawn_set_catalog.h"
+#include "starter_sets/starter_set_catalog.h"
 #include "vendors/vendor_catalog.h"
 
 namespace sunrise::state::build_data {
@@ -81,10 +82,12 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     persistenceState.enabled = true;
 
     cache::records::DomainCounts counts{};
+    std::size_t namedRows = 0;
+    cache::read_named_count(persistenceState.cachePath.chars.data(), namedRows);
     const cache::LoadStatus status =
         cache::load(persistenceState.cachePath.chars.data(),
                     persistenceState.buildIdentity,
-                    runtime::persistence::scratch_domains(persistenceState),
+                    runtime::persistence::scratch_domains(persistenceState, namedRows),
                     counts);
     if (status == cache::LoadStatus::missing) {
         runtime::persistence::release_scratch_locked(persistenceState);
@@ -112,6 +115,8 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     const bool catalystCatalogAvailable = !domains.exoticCatalysts.empty();
     const bool catalystsReplaced =
         !catalystCatalogAvailable || items::catalysts::replace(domains.exoticCatalysts);
+    // A checked cache with no reward pools records a refused reward graph.
+    const bool rewardsCached = !domains.rewardPools.empty();
     const constants::InvestmentConstants cachedConstants{
         domains.constants.extracted != 0,
         domains.constants.lightStatRow,
@@ -120,12 +125,13 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     };
     if (!constants::replace(cachedConstants) || !content::replace(domains.named) || !content::seal()
         || !items::replace(domains.items) || !collectibles::replace(domains.collectibles)
-        || !rewards::replace({domains.rewardPools,
-                              domains.rewardEntries,
-                              domains.rewardItems,
-                              domains.rewardInstructions,
-                              domains.rewardModifiers,
-                              domains.rewardSockets})
+        || (rewardsCached
+            && !rewards::replace({domains.rewardPools,
+                                  domains.rewardEntries,
+                                  domains.rewardItems,
+                                  domains.rewardInstructions,
+                                  domains.rewardModifiers,
+                                  domains.rewardSockets}))
         || !material_requirements::replace(domains.materialRequirementSets)
         || !inventory::buckets::replace(domains.inventoryBuckets)
         || !socket_entry_lists::replace(domains.socketEntryLists)
@@ -139,6 +145,8 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         // An empty catalog is complete: a build with no installed pass declares no reward.
         || (!domains.seasonPassRewards.empty() && !season_pass::replace(domains.seasonPassRewards))
         || !bounties::replace(domains.bounties)
+        // An empty table publishes too, so creation keeps refusing an unknown layout.
+        || !starter_sets::replace(domains.starterSets)
         || !records::replace(domains.records,
                              domains.recordObjectives,
                              domains.recordIntervals,
@@ -180,6 +188,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     persistenceState.catalystError = catalystCatalogAvailable
                                          ? items::catalysts::Error::none
                                          : items::catalysts::Error::unsupportedBuild;
+    persistenceState.rewardsUnsupported = !rewardsCached;
     persistenceState.persisted = true;
     runtime::persistence::release_scratch_locked(persistenceState);
     ReleaseSRWLockExclusive(&persistenceState.lock);

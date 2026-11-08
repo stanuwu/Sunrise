@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808095.h"
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
 #include "scriptable_auth_body.h"
@@ -14,11 +15,12 @@
 namespace sunrise::middleware::bap::activity_message::mission_effect {
 
 namespace fields = auth_fields;
+namespace generated = middleware::content::packages::schema::generated;
 
 // Type 26 uses this schema and fixed body size.
 inline constexpr std::uint8_t kSlotType = 26;
-inline constexpr std::uint32_t kComponentClass = 0x8080953FU;
-inline constexpr std::uint32_t kSchema = 0x8080954BU;
+inline constexpr std::uint32_t kComponentClass = generated::C8080953f::kClass;
+inline constexpr std::uint32_t kSchema = generated::C8080954b::kClass;
 inline constexpr std::size_t kBits = 186;
 inline constexpr std::size_t kBytes = 24;
 

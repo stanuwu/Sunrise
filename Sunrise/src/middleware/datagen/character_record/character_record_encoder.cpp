@@ -20,6 +20,8 @@ constexpr std::size_t kFamily3TailSize = 16;
 constexpr std::size_t kFamily0TailSize = 24;
 /** Family-three tail offset of the card flag this record raises as local card bit 0. */
 constexpr std::size_t kCardFlagOffset = 8;
+/** The saved appearance header fills the record's header block exactly. */
+static_assert(state::kAppearanceHeaderSize == layout::kHeaderBlockSize);
 
 /**
  * Builds the identity prefix and appearance block both records share byte for byte.
@@ -42,9 +44,9 @@ constexpr std::size_t kCardFlagOffset = 8;
         static_cast<std::int8_t>(character.gender),
         static_cast<std::int8_t>(character.characterClass),
     };
-    const auto& headerSource =
-        character.appearanceHeaderValid ? character.appearanceHeader : layout::kHeaderBlockBytes;
-    std::memcpy(identity.headerBlock.data(), headerSource.data(), headerSource.size());
+    std::memcpy(identity.headerBlock.data(),
+                character.appearanceHeader.data(),
+                character.appearanceHeader.size());
 
     output = {};
     appearance::apply_sentinels(output);

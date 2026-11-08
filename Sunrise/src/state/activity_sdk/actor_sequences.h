@@ -6,11 +6,29 @@
 #include <span>
 #include <string_view>
 
+#include "../../middleware/content/packages/schema/generated/tag_classes_808081.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_808082.h"
 #include "../build_data/scriptables/inline_name_evidence.h"
 #include "runtime.h"
 
 namespace sunrise::state::activity_sdk {
 namespace sequence_detail {
+
+namespace generated = middleware::content::packages::schema::generated;
+
+/** Global and actor-local definitions own the action tables; the group source names both. */
+inline constexpr std::uint32_t kGlobalDefinitionClass =
+    generated::ActorSequenceGlobalDefinition::kClass;
+inline constexpr std::uint32_t kLocalDefinitionClass =
+    generated::ActorStateMachineDefinition::kClass;
+inline constexpr std::uint32_t kOwnerSourceClass = generated::ActorGroupSource::kClass;
+inline constexpr std::uint32_t kGlobalArrayOffset =
+    offsetof(generated::ActorSequenceGlobalDefinition, sequenceDefinitions);
+inline constexpr std::uint32_t kLocalArrayOffset =
+    offsetof(generated::ActorStateMachineDefinition, sequenceDefinitions);
+inline constexpr std::uint32_t kArrayFieldSize =
+    sizeof(generated::TagArray<generated::ActorActionEntry>);
+inline constexpr std::uint32_t kActionStride = sizeof(generated::ActorActionEntry);
 
 /** Duplicate declarations may share one table pair; distinct owner choices remain ambiguous. */
 [[nodiscard]] inline const format::ActorSequenceBinding*
@@ -155,13 +173,13 @@ actor_sequence_at(const Catalog& catalog, std::uint32_t actorClass, std::size_t 
     std::size_t cursor = 0;
     for (std::size_t index = 0; index < tables.size(); ++index) {
         const auto& table = tables[index];
-        const bool global = table.definitionClass == format::kActorSequenceGlobalDefinitionClass;
+        const bool global = table.definitionClass == sequence_detail::kGlobalDefinitionClass;
         if (table.flags != format::kActorSequenceExact || table.definitionTag == 0
             || table.definitionTag == format::kAbsentIndex
-            || (!global && table.definitionClass != format::kActorSequenceLocalDefinitionClass)
+            || (!global && table.definitionClass != sequence_detail::kLocalDefinitionClass)
             || table.arrayOffset
-                   != (global ? format::kActorSequenceGlobalArrayOffset
-                              : format::kActorSequenceLocalArrayOffset)
+                   != (global ? sequence_detail::kGlobalArrayOffset
+                              : sequence_detail::kLocalArrayOffset)
             || table.entries.first != cursor || table.entries.count > entries.size() - cursor) {
             return false;
         }
@@ -184,16 +202,19 @@ actor_sequence_at(const Catalog& catalog, std::uint32_t actorClass, std::size_t 
                 }
             }
             if (row.tableIndex != index || row.ordinal != ordinal || row.kind > 255
-                || row.sourceOffset < table.arrayOffset + 16U || row.flags == 0
-                || (row.flags & ~format::kActorSequenceEntryFlagMask) != 0
+                || row.sourceOffset < table.arrayOffset + sequence_detail::kArrayFieldSize
+                || row.flags == 0 || (row.flags & ~format::kActorSequenceEntryFlagMask) != 0
                 || (row.flags & format::kActorSequenceExact) == 0 || row.reserved != 0 || id.empty()
                 || symbol.empty() || id.find('\0') != std::string_view::npos
                 || path.find('\0') != std::string_view::npos
                 || name.find('\0') != std::string_view::npos
                 || (ordinal != 0
                     && (entries[cursor + ordinal - 1].keyHash > row.keyHash
-                        || entries[cursor + ordinal - 1].sourceOffset > format::kAbsentIndex - 24U
-                        || entries[cursor + ordinal - 1].sourceOffset + 24U != row.sourceOffset))) {
+                        || entries[cursor + ordinal - 1].sourceOffset
+                               > format::kAbsentIndex - sequence_detail::kActionStride
+                        || entries[cursor + ordinal - 1].sourceOffset
+                                   + sequence_detail::kActionStride
+                               != row.sourceOffset))) {
                 return false;
             }
             if (((row.flags & format::kActorSequenceNameVerified) != 0) != !name.empty()) {
@@ -225,7 +246,7 @@ actor_sequence_at(const Catalog& catalog, std::uint32_t actorClass, std::size_t 
         if (row.actorClassIndex >= catalog.actor_classes().size()
             || row.flags != format::kActorSequenceExact || row.configTag == 0
             || row.configTag == format::kAbsentIndex
-            || row.sourceClass != format::kActorSequenceOwnerSourceClass
+            || row.sourceClass != sequence_detail::kOwnerSourceClass
             || (index != 0
                 && (bindings[index - 1].actorClassIndex > row.actorClassIndex
                     || (bindings[index - 1].actorClassIndex == row.actorClassIndex
@@ -237,8 +258,8 @@ actor_sequence_at(const Catalog& catalog, std::uint32_t actorClass, std::size_t 
             if (table != format::kAbsentIndex
                 && (table >= tables.size()
                     || tables[table].definitionClass
-                           != (global ? format::kActorSequenceGlobalDefinitionClass
-                                      : format::kActorSequenceLocalDefinitionClass))) {
+                           != (global ? sequence_detail::kGlobalDefinitionClass
+                                      : sequence_detail::kLocalDefinitionClass))) {
                 return false;
             }
         }

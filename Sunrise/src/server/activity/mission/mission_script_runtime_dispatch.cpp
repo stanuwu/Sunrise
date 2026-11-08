@@ -284,6 +284,12 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                             host::EffectOutcome::refused);
             return;
         }
+        // A body the roster could not build never publishes, so the selection fails now.
+        if (selected.publicationRefused) {
+            refuse_delivery(
+                instance, "state_refused", "publication_refused", host::EffectOutcome::refused);
+            return;
+        }
         // The selected effective region is an authored-state key, not a region the client reports.
         // Publishing this lease revision is the completion edge, except when publication waits for
         // arrival: there the teleport is armed first, because arrival closes that window.

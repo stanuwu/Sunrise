@@ -298,7 +298,7 @@ bool encode_roster_reply(const middleware::web_service::Message& message,
     ws::StatusResponse status{};
     status.value = family4Version;
     if (!outcome.hasRosterChange) {
-        // A refusal stages nothing, so the version wait must not wait.
+        // A refusal publishes nothing, so the reply names no revision to wait for.
         status.code = kRefusedStatus;
         status.value = ws::kNoFamily4Publication;
     }

@@ -27,8 +27,9 @@ constexpr std::size_t kAttachDiagnosticCapacity = host::kInstanceCapacity + 1;
 struct AttachDiagnostic final {
     state::activity::SessionBinding binding{};
     sdk::Status sdkStatus{sdk::Status::notReady};
-    generated::BindStatus generatedWorldStatus{generated::BindStatus::invalidBoundView};
+    generated_world::BindStatus generatedWorldStatus{generated_world::BindStatus::invalidBoundView};
     std::uint32_t activityRow{format::kAbsentIndex};
+    std::array<char, kControllerFileCapacity> controllerFile{};
     AttachResult result{AttachResult::none};
     bool occupied{};
 };
@@ -130,12 +131,13 @@ void copy_attach_diagnostics(const AttachDiagnostic& source, AttachDiagnostics& 
     copy_text(output.detail,
               source.result == AttachResult::sdkStatus ? sdk::status_name(source.sdkStatus)
               : source.result == AttachResult::generatedWorldStatus
-                  ? generated::status_name(source.generatedWorldStatus)
+                  ? generated_world::status_name(source.generatedWorldStatus)
                   : attach_result_name(source.result));
     if (source.activityRow != format::kAbsentIndex) {
         output.activityRow = source.activityRow + 1;
         output.hasActivityRow = true;
     }
+    output.controllerFile = source.controllerFile;
 }
 
 } // namespace
@@ -172,17 +174,23 @@ const char* attach_result_name(AttachResult value) noexcept {
 /**
  * Reports an attach result when it changes for the binding.
  * @param name Stable result token written to the log.
- * @param activityRow Zero-based SDK row, or the absent sentinel before one resolves.
+ * @param view The resolved activity, or null before one resolves.
  */
 void report_attach_result(const state::activity::SessionBinding& binding,
                           AttachResult result,
                           std::string_view name,
-                          std::uint32_t activityRow,
+                          const sdk::BoundView* view,
                           sdk::Status sdkStatus,
-                          generated::BindStatus generatedWorldStatus) noexcept {
+                          generated_world::BindStatus generatedWorldStatus) noexcept {
+    const std::uint32_t activityRow = view != nullptr ? view->activityRow : format::kAbsentIndex;
+    // A row number alone does not say which catalog, installed or mod, it came from.
+    std::array<char, kControllerFileCapacity> controllerFile{};
+    if (view != nullptr) {
+        controller_file(*view, controllerFile);
+    }
     AttachDiagnostic* diagnostic = find_attach_diagnostic(binding);
     if (diagnostic != nullptr && diagnostic->result == result
-        && diagnostic->activityRow == activityRow
+        && diagnostic->activityRow == activityRow && diagnostic->controllerFile == controllerFile
         && (result != AttachResult::sdkStatus || diagnostic->sdkStatus == sdkStatus)
         && (result != AttachResult::generatedWorldStatus
             || diagnostic->generatedWorldStatus == generatedWorldStatus)) {
@@ -196,6 +204,7 @@ void report_attach_result(const state::activity::SessionBinding& binding,
         diagnostic->sdkStatus = sdkStatus;
         diagnostic->generatedWorldStatus = generatedWorldStatus;
         diagnostic->activityRow = activityRow;
+        diagnostic->controllerFile = controllerFile;
         diagnostic->result = result;
         diagnostic->occupied = true;
     }
@@ -236,6 +245,7 @@ void copy_diagnostics(const RuntimeInstance& instance, InstanceDiagnostics& outp
     output = {};
     output.binding = instance.view.binding;
     output.activityId = instance.identity.activityId;
+    controller_file(instance.view, output.controllerFile);
     copy_text(output.programStatus, program_status_name(instance.programStatus));
     copy_text(output.deliveryStage, delivery_stage_name(instance.deliveryStage));
     output.lastVmStage = instance.lastVmStage;

@@ -6,12 +6,16 @@
 #include <optional>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80807e.h"
+
 namespace sunrise::middleware::bap::activity_message::squad_auth {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** ClientRef slot type for the activity-local squad sensor body. */
 inline constexpr std::uint8_t kSlotType = 1;
 /** Runtime schema handle for the slot-type-1 auth body. */
-inline constexpr std::uint32_t kSchema = 0x80807EC9;
+inline constexpr std::uint32_t kSchema = generated::C80807ec9::kClass;
 /**
  * The count lane is four bits wide, but the array it indexes holds eight elements.
  * The client walker does not clamp, so a count of 9 to 15 runs past the array.
@@ -26,7 +30,7 @@ inline constexpr std::size_t kRequestedCountBitCount = 32;
 /** The name hash is always sent: an absent field reads as zero, which is a real name. */
 inline constexpr std::size_t kNameHashBitCount = 32;
 /**
- * Spawn references `.11` and `.12`, each one nested 0x80809C42 ClientRef after a presence bit.
+ * Spawn references `.11` and `.12`, each one nested ClientRef after a presence bit.
  * The unset form keeps the package's authored rule; only `.12` may carry a set spawn rule.
  */
 inline constexpr std::size_t kSpawnReferenceBitCount = 55;

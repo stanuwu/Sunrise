@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -9,14 +8,15 @@
 
 // The fixed-width scriptable-auth bodies that drive mission progress and the HUD: sequences,
 // cinematics, objective resets, tasks, directives, the encounter observer, the
-// public-event sensor and the area watcher. Each family has one encoder and one checker.
+// public-event sensor and the area watcher. Each family has an encoder, and a decoder where the
+// host reads the body back.
 
 namespace sunrise::middleware::bap::activity_message::scriptable_auth {
 namespace {
 
 namespace bits = encoding::bits;
 
-/** Client no-timer sentinel for the 0x808099C4 epoch field; 0 means a live 0-second timer. */
+/** Client no-timer sentinel for the timed-state epoch; 0 means a live 0-second timer. */
 constexpr std::uint64_t kNoTimerEpoch = 0xFFFFFFFFFFFFFFFFULL;
 /** Type-5 reserves the largest revision as its inactive value, and its table is fixed width. */
 constexpr std::uint8_t kSequenceInactiveRevision = 0xFFU;
@@ -34,9 +34,8 @@ constexpr std::uint32_t kFlaggedMarkerMode = 1;
 constexpr std::uint32_t kWaypointMarkerMode = 2;
 
 /**
- * Writes the 353-bit 0x808099C4 child with no timer: epoch -1, all other fields 0.
- * Epoch 0
- * arms the client's goal-timer pin and the directive banner never hides.
+ * Writes the 353-bit timed-state child with no timer: epoch -1, all other fields 0.
+ * Epoch 0 arms the client's goal-timer pin and the directive banner never hides.
  */
 [[nodiscard]] bool write_neutral_timed_state(bits::Writer& writer) noexcept {
     if (!writer.write(0, kBoolWidth)) {
@@ -157,34 +156,6 @@ bool encode_type5(const Type5Preset& preset,
            && written == kType5ByteCount;
 }
 
-/** Accepts only the canonical closed type-5 body emitted by encode_type5. */
-bool validate_type5_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    if (bitCount != kType5BitCount || input.size() != kType5ByteCount) {
-        return false;
-    }
-    bits::Reader reader(input);
-    std::uint64_t first = 0;
-    std::uint64_t second = 0;
-    std::uint64_t revision = 0;
-    if (!reader.read(kWideIntegerWidth, first) || !reader.read(kWideIntegerWidth, second)
-        || !reader.read(8U, revision) || first != 0 || second != 0
-        || revision == kSequenceInactiveRevision) {
-        return false;
-    }
-    for (std::size_t index = 0; index < 4U; ++index) {
-        std::uint64_t value = 0;
-        if (!reader.read(kSigned32Width, value) || value != 0) {
-            return false;
-        }
-    }
-    for (std::size_t index = 0; index < kSequenceReferenceCount + 1U; ++index) {
-        if (!read_absent_client_ref(reader)) {
-            return false;
-        }
-    }
-    return finish_padding(reader);
-}
-
 /** Finds the next cinematic generation without wrapping. */
 bool next_type6_generation(const Type6GenerationGuard& guard, std::uint32_t& next) noexcept {
     next = 1U;
@@ -220,33 +191,6 @@ bool encode_type6(const Type6Preset& preset,
                    && writer.write(0, 5U) && writer.write(0, 3U) && writer.write(0, kSigned32Width);
     return encoded && writer.bit_count() == kType6BitCount && writer.finish(written)
            && written == kType6ByteCount;
-}
-
-/** Accepts only the canonical closed type-6 body emitted by encode_type6. */
-bool validate_type6_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    if (bitCount != kType6BitCount || input.size() != kType6ByteCount) {
-        return false;
-    }
-    bits::Reader reader(input);
-    std::uint64_t first = 0;
-    std::uint64_t second = 0;
-    std::uint64_t generation = 0;
-    std::uint64_t active = 0;
-    std::uint64_t force = 0;
-    std::uint64_t role = 0;
-    std::uint64_t count = 0;
-    if (!reader.read(kWideIntegerWidth, first) || !reader.read(kWideIntegerWidth, second)
-        || !reader.read(kSigned32Width, generation) || !reader.read(kBoolWidth, active)
-        || !reader.read(kBoolWidth, force) || !read_absent_client_ref(reader)
-        || !reader.read(6U, role) || !reader.read(5U, count) || first != 0 || second != 0
-        || generation == 0 || force != 0 || role != 2U || count != 0) {
-        return false;
-    }
-    if (!reader.read(3U, count) || count != 0) {
-        return false;
-    }
-    std::uint64_t trailing = 0;
-    return reader.read(kSigned32Width, trailing) && trailing == 0 && finish_padding(reader);
 }
 
 /** Advances the exact signed type-3 generation without wrapping its terminal value. */
@@ -310,12 +254,6 @@ bool decode_type3_body(std::span<const std::byte> input, Type3Body& body) noexce
     return body.generation > 0;
 }
 
-/** Validates the exact type-3 bit count and canonical fixed-width body. */
-bool validate_type3_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    Type3Body body{};
-    return bitCount == kType3BitCount && decode_type3_body(input, body);
-}
-
 /** Finds the next positive task generation without wrapping. */
 bool next_type38_generation(const Type38GenerationGuard& guard, std::int32_t& next) noexcept {
     return next_positive_generation(guard.hasLast, guard.last, next);
@@ -349,12 +287,6 @@ bool decode_type38_body(std::span<const std::byte> input, std::int32_t& generati
     }
     generation = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(wire) - kSigned32Bias);
     return generation > 0;
-}
-
-/** Checks one packed type-38 task generation. */
-bool validate_type38_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    std::int32_t generation = 0;
-    return bitCount == kType38BitCount && decode_type38_body(input, generation);
 }
 
 /** Encodes one complete three-lane type-68 directive state. */
@@ -401,60 +333,6 @@ bool encode_type68(const Type68Preset& preset,
            && written == kType68ByteCount;
 }
 
-/** Validates the crash-bearing selector fields and the exact type-68 body shape. */
-bool validate_type68_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    if (bitCount != kType68BitCount || input.size() != kType68ByteCount) {
-        return false;
-    }
-    bits::Reader reader(input);
-    auto skip = [&reader](std::size_t count) noexcept {
-        std::uint64_t discarded = 0;
-        while (count != 0) {
-            const auto width = static_cast<std::uint8_t>((std::min)(count, std::size_t{64}));
-            if (!reader.read(width, discarded)) {
-                return false;
-            }
-            count -= width;
-        }
-        return true;
-    };
-    if (!skip(110)) {
-        return false;
-    }
-    std::array<std::uint32_t, kType68EntryCount> names{};
-    std::array<std::int32_t, kType68EntryCount> elements{};
-    std::array<std::int32_t, kType68EntryCount> states{};
-    for (std::size_t index = 0; index < kType68EntryCount; ++index) {
-        std::uint64_t name = 0;
-        std::uint64_t element = 0;
-        std::uint64_t state = 0;
-        if (!reader.read(32, name) || !reader.read(32, element)
-            || !reader.read(kDirectiveStateWidth, state) || !skip(1'497)) {
-            return false;
-        }
-        names[index] = static_cast<std::uint32_t>(name);
-        elements[index] =
-            std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(element) - kSigned32Bias);
-        states[index] = static_cast<std::int32_t>(state) - 1;
-    }
-    std::uint64_t activeWire = 0;
-    if (!reader.read(kDirectiveActiveIndexWidth, activeWire)) {
-        return false;
-    }
-    const std::int32_t active = static_cast<std::int32_t>(activeWire) - 1;
-    if (active < -1 || active >= static_cast<std::int32_t>(kType68EntryCount)) {
-        return false;
-    }
-    if (active >= 0) {
-        const std::size_t selected = static_cast<std::size_t>(active);
-        if (names[selected] == 0 || names[selected] == kClientRefAbsentKey || elements[selected] < 0
-            || states[selected] < -1 || states[selected] > 2) {
-            return false;
-        }
-    }
-    return finish_padding(reader);
-}
-
 /** Encodes the no-filter type-70 encounter engagement state. */
 bool encode_type70(const Type70Preset& preset,
                    std::span<std::byte> output,
@@ -472,22 +350,6 @@ bool encode_type70(const Type70Preset& preset,
                          && writer.write(0, kBoolWidth);
     return encoded && writer.bit_count() == kType70BitCount && writer.finish(written)
            && written == kType70ByteCount;
-}
-
-/** Validates the exact no-filter type-70 form while preserving all five flag bits. */
-bool validate_type70_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    if (bitCount != kType70BitCount || input.size() != kType70ByteCount) {
-        return false;
-    }
-    bits::Reader reader(input);
-    std::uint64_t flags = 0;
-    std::uint64_t playerListPresent = 0;
-    std::uint64_t revision = 0;
-    std::uint64_t definitionListPresent = 0;
-    return reader.read(5U, flags) && flags <= 0x1FU && reader.read(kBoolWidth, playerListPresent)
-           && playerListPresent == 0 && reader.read(16U, revision)
-           && reader.read(kBoolWidth, definitionListPresent) && definitionListPresent == 0
-           && finish_padding(reader);
 }
 
 bool next_type42_generation(const Type42GenerationGuard& guard, std::int32_t& next) noexcept {
@@ -519,24 +381,6 @@ bool encode_type42(const Type42Preset& preset,
                          && writer.write(0, kBoolWidth);
     return encoded && writer.bit_count() == kType42BitCount && writer.finish(written)
            && written == kType42ByteCount;
-}
-
-/** Accepts only the command group present, a real state name, and an absent row table. */
-bool validate_type42_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    if (bitCount != kType42BitCount || input.size() != kType42ByteCount) {
-        return false;
-    }
-    bits::Reader reader(input);
-    std::uint64_t commandPresent = 0;
-    std::uint64_t nameHash = 0;
-    std::uint64_t value = 0;
-    std::uint64_t generation = 0;
-    std::uint64_t rowsPresent = 0;
-    return reader.read(kBoolWidth, commandPresent) && commandPresent == kEnabled
-           && reader.read(32U, nameHash) && valid_type42_name(static_cast<std::uint32_t>(nameHash))
-           && reader.read(32U, value) && reader.read(kSigned32Width, generation)
-           && generation > kSigned32Bias && reader.read(kBoolWidth, rowsPresent) && rowsPresent == 0
-           && finish_padding(reader);
 }
 
 /** @return True when the area reference names a real slot the client evaluator can resolve. */
@@ -600,12 +444,6 @@ bool decode_type71_body(std::span<const std::byte> input, Type71Body& body) noex
     }
     body = parsed;
     return true;
-}
-
-/** Validates the exact type-71 body shape and its present area reference. */
-bool validate_type71_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    Type71Body body{};
-    return bitCount == kType71BitCount && decode_type71_body(input, body);
 }
 
 } // namespace sunrise::middleware::bap::activity_message::scriptable_auth

@@ -1,6 +1,7 @@
 // The client opens each manifest package as `packages\<stem>.pkg` relative to the game folder.
 // It builds that path twice: in the package file object, and again in the header cache.
 // Mod files live in the Sunrise folder, so their stems get a path relative to the game folder.
+// The client keeps the generations it registered at boot, so a live update reaches a tag at load.
 
 #include "package_path_redirect.h"
 
@@ -16,7 +17,10 @@
 #include "../../../core/logging/log.h"
 #include "../../../core/ui/notice/ui_notice_overlay.h"
 #include "../../../state/mods/mods_runtime.h"
+#include "../../../state/mods/packages/mod_load_patch.h"
+#include "../../content/handles/layout.h"
 #include "../../hooking/detour.h"
+#include "../../memory/current_process_memory.h"
 #include "../../targets/game/package_path.h"
 
 namespace sunrise::client::hooks::package_path {
@@ -39,11 +43,23 @@ using SetPath = char*(__fastcall*)(void* file, const char* name) noexcept;
 using OpenFile = void*(__fastcall*)(const void* object,
                                     std::uint32_t access,
                                     std::uint32_t share) noexcept;
+/** Exact ABI of the schema callback dispatcher; the full return register is passed through. */
+using SchemaCallback = std::uint64_t(__fastcall*)(void* request,
+                                                  std::uint32_t index,
+                                                  std::int32_t phase,
+                                                  void* slot,
+                                                  std::uint32_t tag,
+                                                  void* blob,
+                                                  void** output) noexcept;
+
+/** Schema callback index of the fixup, the first callback after a tag's bytes land. */
+constexpr std::uint32_t kFixupCallback = 2;
 
 /** Detour slots, attached and removed together. */
 enum Slot : std::size_t {
     kSetPathSlot,
     kOpenFileSlot,
+    kSchemaCallbackSlot,
     kSlotCount,
 };
 
@@ -257,9 +273,83 @@ __declspec(noinline) void* __fastcall open_file(const void* object,
 }
 #pragma code_seg(pop, package_guard_opener)
 
+/**
+ * Writes a mod's later generations into a tag the client just loaded from its boot generation.
+ * The kept size is the boot generation's entry size, since a kept update never changes it.
+ * @param slot The tag's content slot, which the dispatcher passes; it links to the blob.
+ * @param kept Bytes the kept updates cover.
+ */
+void patch_loaded(const void* slot, std::uint32_t tag, void* blob, std::uint32_t kept) noexcept {
+    namespace layout = client::content::handles::layout;
+    layout::ContentSlot words{};
+    const auto at = reinterpret_cast<std::uintptr_t>(slot);
+    const bool read = client::memory::copy_current_process(
+        nullptr, at, std::as_writable_bytes(std::span(&words, 1)));
+    // Word 0 holds the class instead of the size for some entry types; the loading bit may be set.
+    const bool sized = (words.sizeWord & layout::kSlotSizeForm) == layout::kSlotSizeForm;
+    if (!read || (sized && (words.sizeWord & layout::kSlotSizeMask) < kept)
+        || words.classId == layout::kSlotNoClass
+        || at - static_cast<std::uintptr_t>(words.link) != reinterpret_cast<std::uintptr_t>(blob)) {
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::warn,
+                          "ev=package_path stage=load_patch tag=%08X result=fail reason=slot "
+                          "size=%08X type=%08X class=%08X",
+                          tag,
+                          words.sizeWord,
+                          words.typeWord,
+                          words.classId);
+        return;
+    }
+    (void)state::mods::load_patch::apply(
+        tag, words.classId, std::span(static_cast<std::byte*>(blob), kept));
+}
+
+/**
+ * Patches a tag at its fixup, before any class code reads it, then runs the callback.
+ * @param tag The tag hash, which is its runtime handle.
+ * @param blob The tag's loaded bytes.
+ */
+__declspec(noinline) std::uint64_t schema_callback_body(const CallLease& lease,
+                                                        void* request,
+                                                        std::uint32_t index,
+                                                        std::int32_t phase,
+                                                        void* slot,
+                                                        std::uint32_t tag,
+                                                        void* blob,
+                                                        void** output) noexcept {
+    if (index == kFixupCallback && slot != nullptr && blob != nullptr) {
+        if (const std::uint32_t kept = state::mods::load_patch::kept_size(tag); kept != 0) {
+            patch_loaded(slot, tag, blob, kept);
+        }
+    }
+    return reinterpret_cast<SchemaCallback>(lease.original)(
+        request, index, phase, slot, tag, blob, output);
+}
+
+#pragma code_seg(push, package_guard_loader, ".srpkg")
+/** The __finally drops the call count even when the original faults. */
+__declspec(noinline) std::uint64_t __fastcall schema_callback(void* request,
+                                                              std::uint32_t index,
+                                                              std::int32_t phase,
+                                                              void* slot,
+                                                              std::uint32_t tag,
+                                                              void* blob,
+                                                              void** output) noexcept {
+    CallLease lease;
+    ingress(lease, kSchemaCallbackSlot);
+    std::uint64_t result{};
+    __try {
+        result = schema_callback_body(lease, request, index, phase, slot, tag, blob, output);
+    } __finally {
+        egress();
+    }
+    return result;
+}
+#pragma code_seg(pop, package_guard_loader)
+
 } // namespace
 
-/** Points mod package stems at their files. */
+/** Points mod package stems at their files and patches tags at load. */
 bool install() noexcept {
     if (state::mods::file_count() == 0) {
         return true;
@@ -276,6 +366,8 @@ bool install() noexcept {
         const std::array<hooking::detour::Spec, kSlotCount> specs{
             hooking::detour::Spec{g_targets.setPath, reinterpret_cast<void*>(&set_path)},
             hooking::detour::Spec{g_targets.openFile, reinterpret_cast<void*>(&open_file)},
+            hooking::detour::Spec{g_targets.schemaCallback,
+                                  reinterpret_cast<void*>(&schema_callback)},
         };
         installed = hooking::detour::install(specs, g_handles);
     }
@@ -293,16 +385,17 @@ bool install() noexcept {
     return true;
 }
 
-/** @return True when the builder and the opener are no longer detoured. */
+/** @return True when none of the three detours is attached. */
 bool uninstall() noexcept {
     AcquireSRWLockExclusive(&g_lock);
     const std::array protectedEntries{
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&set_path)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&open_file)},
+        hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&schema_callback)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&ingress)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&egress)},
     };
-    // .srpkg holds both replacement bodies and their finally blocks.
+    // .srpkg holds the three replacement entries and their finally blocks.
     const std::array protectedSpans{hooking::detour::section_span(".srpkg")};
     const bool removed = idle()
                          && (!g_handles[kSetPathSlot].attached

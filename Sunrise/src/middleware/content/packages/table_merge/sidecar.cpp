@@ -12,19 +12,16 @@ using internal::Cursor;
 
 /** Pointer reach of a shape that holds no row pointer. */
 constexpr std::int64_t kNoPointer = -1;
-/** Bytes of a u32 key, the only key width. */
-constexpr std::uint8_t kKeyWidth = 4;
-/** A site holds a u8, u16 or u32 row number. */
-constexpr std::uint8_t kByteSite = 1, kShortSite = 2, kWordSite = 4;
 /** Every OpRecord flag bit version 2 defines. */
 constexpr std::uint8_t kOpFlags = kUniqueKey | kOrdered;
 
 /**
- * Reads one shape; element refs must point at later shapes, so shapes form no cycle.
+ * Reads one shape; shape refs must point at later shapes, so shapes form no cycle.
+ * @param objects False for a version 2 file, whose object pointers name no shape.
  * @return ok, or format when a field breaks a layout rule.
  */
-[[nodiscard]] Status
-read_shape(Cursor& cursor, std::uint32_t index, std::uint32_t shapeCount, Shape& output) {
+[[nodiscard]] Status read_shape(
+    Cursor& cursor, std::uint32_t index, std::uint32_t shapeCount, bool objects, Shape& output) {
     ShapeHeader header{};
     if (!cursor.take(header) || header.stride == 0
         || !cursor.fits(header.fieldCount, sizeof(ShapeField))) {
@@ -39,8 +36,7 @@ read_shape(Cursor& cursor, std::uint32_t index, std::uint32_t shapeCount, Shape&
                 && field.kind != FieldKind::objectPointer)) {
             return Status::format;
         }
-        // An object pointer names no shape and no op.
-        if (field.kind == FieldKind::objectPointer && field.ref != kNoElementShape) {
+        if (!objects && field.kind == FieldKind::objectPointer && field.ref != kNoElementShape) {
             return Status::format;
         }
         const std::uint64_t fieldEnd = std::uint64_t{field.rowOffset} + field_size(field.kind);
@@ -48,7 +44,7 @@ read_shape(Cursor& cursor, std::uint32_t index, std::uint32_t shapeCount, Shape&
             return Status::format;
         }
         end = fieldEnd;
-        if (field.kind == FieldKind::ownedArray && field.ref != kNoElementShape
+        if (field.kind != FieldKind::rowPointer && field.ref != kNoElementShape
             && (field.ref <= index || field.ref >= shapeCount)) {
             return Status::format;
         }
@@ -57,8 +53,8 @@ read_shape(Cursor& cursor, std::uint32_t index, std::uint32_t shapeCount, Shape&
 }
 
 /**
- * Per shape, the largest op a row pointer in it or in its owned elements names, or -1.
- * Element refs only point forward, so one backward pass sees every child first.
+ * Per shape, the largest op a row pointer in it or in what it owns names, or -1.
+ * Shape refs only point forward, so one backward pass sees every child first.
  */
 [[nodiscard]] std::vector<std::int64_t> pointer_reach(const std::vector<Shape>& shapes) {
     std::vector<std::int64_t> reach(shapes.size(), kNoPointer);
@@ -66,7 +62,7 @@ read_shape(Cursor& cursor, std::uint32_t index, std::uint32_t shapeCount, Shape&
         for (const ShapeField& field : shapes[index].fields) {
             if (field.kind == FieldKind::rowPointer) {
                 reach[index] = (std::max)(reach[index], std::int64_t{field.ref});
-            } else if (field.kind == FieldKind::ownedArray && field.ref != kNoElementShape) {
+            } else if (field.ref != kNoElementShape) {
                 reach[index] = (std::max)(reach[index], reach[field.ref]);
             }
         }
@@ -255,7 +251,7 @@ Status parse(std::vector<std::byte> file,
             return Status::format;
         }
         // A new version may define flag bits, so the version is checked first.
-        if (header.version != kSidecarVersion) {
+        if (header.version != kSidecarVersion && header.version != kOldestSidecarVersion) {
             return Status::version;
         }
         if (header.flags != 0) {
@@ -273,7 +269,12 @@ Status parse(std::vector<std::byte> file,
         }
         result.shapes_.resize(header.shapeCount);
         for (std::uint32_t index = 0; index < header.shapeCount; ++index) {
-            if (read_shape(cursor, index, header.shapeCount, result.shapes_[index]) != Status::ok) {
+            if (read_shape(cursor,
+                           index,
+                           header.shapeCount,
+                           header.version != kOldestSidecarVersion,
+                           result.shapes_[index])
+                != Status::ok) {
                 return Status::format;
             }
         }

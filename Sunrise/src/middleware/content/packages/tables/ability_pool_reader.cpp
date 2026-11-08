@@ -1,34 +1,44 @@
 #include "ability_pool_reader.h"
 
+#include <cstddef>
+#include <limits>
+
+#include "../schema/generated/tag_classes_80807a.h"
+#include "../schema/generated/tag_classes_80809f.h"
 #include "definition_index_table.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::tables::abilities {
 namespace {
 
+namespace generated = schema::generated;
+/** Pool blob root, one group, one variant and one record. */
+using Pool = generated::C80807a8b;
+using Group = generated::C80807a8d;
+using Variant = generated::C80807a97;
+using Record = generated::AbilityPoolRecord;
+
 /** Entry field offsets this pass reads beyond the shared socket entry layout. */
-constexpr std::size_t kEntrySelector = 32;
-constexpr std::size_t kEntryPool = 56;
+constexpr std::size_t kEntrySelector = offsetof(generated::SocketEntry, selector);
+constexpr std::size_t kEntryPool = offsetof(generated::SocketEntry, pool);
 
 /** The pool blob declares its group count and its group array here. */
-constexpr std::size_t kPoolGroupCount = 8;
-constexpr std::size_t kPoolGroupArray = 16;
-/** One pool group is 144 bytes after the array header. */
-constexpr std::size_t kPoolGroupStride = 144;
-/** The group array header is 16 bytes wide. */
-constexpr std::size_t kPoolGroupHeader = 16;
-/** A group declares its variant count first and its variant array offset 8 bytes later. */
-constexpr std::size_t kGroupVariantOffset = 8;
-/** The variant array begins 32 bytes into the group. */
-constexpr std::size_t kGroupVariantArray = 32;
-/** One variant is 88 bytes. */
-constexpr std::size_t kVariantStride = 88;
+constexpr std::size_t kPoolGroupCount = offsetof(Pool, stepList.count);
+constexpr std::size_t kPoolGroupArray = offsetof(Pool, stepList.relative);
+/** One pool group after the array header. */
+constexpr std::size_t kPoolGroupStride = sizeof(Group);
+/** A group declares its variant count first and its variant array offset after it. */
+constexpr std::size_t kGroupVariantCount = offsetof(Group, h6ea4a4fb.count);
+constexpr std::size_t kGroupVariantOffset = offsetof(Group, h6ea4a4fb.relative);
+/** One variant row. */
+constexpr std::size_t kVariantStride = sizeof(Variant);
+/** A variant holds its record array descriptor here. */
+constexpr std::size_t kVariantRecordField = offsetof(Variant, abilityList.relative);
 /** A variant's record count comes before its self-relative record offset. */
-constexpr std::size_t kVariantCountBack = 8;
-/** The record array begins 16 bytes past the variant's own offset field. */
-constexpr std::size_t kVariantRecordHeader = 16;
-/** One pool record is 16 bytes. */
-constexpr std::size_t kPoolRecordStride = 16;
+constexpr std::size_t kVariantCountBack =
+    offsetof(Variant, abilityList.relative) - offsetof(Variant, abilityList.count);
+/** One pool record. */
+constexpr std::size_t kPoolRecordStride = sizeof(Record);
 /**
  * Runtime state that picks the pool variant.
  * A pool that declares one group and whose entry carries a live selector picks its variant by
@@ -37,15 +47,20 @@ constexpr std::size_t kPoolRecordStride = 16;
 constexpr std::int32_t kActiveStateSelector = 18;
 /** A pool declaring exactly one group takes the selector path. */
 constexpr std::int64_t kSingleGroupPool = 1;
+/** Array counts are 64-bit; the variant pick takes a count that fits 32 bits. */
+constexpr std::int64_t kMaximumCount = (std::numeric_limits<std::int32_t>::max)();
 
-/** Record field offsets inside one 16-byte pool record. */
-constexpr std::size_t kRecordHash = 0;
-constexpr std::size_t kRecordCategory = 4;
-constexpr std::size_t kRecordLinkEntry = 8;
-constexpr std::size_t kRecordLinkSubgroup = 9;
-constexpr std::size_t kRecordLinkElement = 10;
-constexpr std::size_t kRecordKind = 11;
-constexpr std::size_t kRecordDestination = 12;
+/** Record field offsets inside one pool record. */
+constexpr std::size_t kRecordHash = offsetof(Record, definitionHash);
+constexpr std::size_t kRecordCategory = offsetof(Record, category);
+constexpr std::size_t kRecordLinkEntry = offsetof(Record, linkEntry);
+constexpr std::size_t kRecordLinkSubgroup = offsetof(Record, linkSubgroup);
+constexpr std::size_t kRecordLinkElement = offsetof(Record, linkElement);
+constexpr std::size_t kRecordKind = offsetof(Record, kind);
+constexpr std::size_t kRecordDestination = offsetof(Record, destination);
+// Each record field is read at the width of the view member it names.
+static_assert(sizeof(Record::category) == sizeof(PoolRecord::category)
+              && sizeof(Record::destination) == sizeof(PoolRecord::destination));
 
 /**
  * Turns a self-relative offset into an absolute blob offset.
@@ -123,25 +138,27 @@ std::size_t read_pool_records(std::span<const std::byte> blob,
     if (!read(blob, kPoolGroupCount, groupCount) || !follow(blob, kPoolGroupArray, groupArray)) {
         return 0;
     }
-    const std::size_t group =
-        groupArray + kPoolGroupHeader + static_cast<std::size_t>(subgroup) * kPoolGroupStride;
-    std::int32_t variantCount = 0;
+    const std::size_t group = groupArray + reader::layout::TypedArrayHeader::kSize
+                              + static_cast<std::size_t>(subgroup) * kPoolGroupStride;
+    std::int64_t variantCount = 0;
     std::size_t variantArray = 0;
-    if (!read(blob, group, variantCount) || variantCount <= 0
+    if (!read(blob, group + kGroupVariantCount, variantCount) || variantCount <= 0
+        || variantCount > kMaximumCount
         || !follow(blob, group + kGroupVariantOffset, variantArray)) {
         return 0;
     }
-    const auto variant = static_cast<std::size_t>(active_variant(groupCount, variantCount, entry));
-    const std::size_t variantField =
-        variantArray + kGroupVariantArray - kGroupVariantOffset + variant * kVariantStride;
-    std::int32_t recordCount = 0;
+    const auto variant = static_cast<std::size_t>(
+        active_variant(groupCount, static_cast<std::int32_t>(variantCount), entry));
+    const std::size_t variantField = variantArray + reader::layout::TypedArrayHeader::kSize
+                                     + variant * kVariantStride + kVariantRecordField;
+    std::int64_t recordCount = 0;
     std::size_t records = 0;
     if (variantField < kVariantCountBack
         || !read(blob, variantField - kVariantCountBack, recordCount) || recordCount <= 0
-        || !follow(blob, variantField, records)) {
+        || recordCount > kMaximumCount || !follow(blob, variantField, records)) {
         return 0;
     }
-    records += kVariantRecordHeader;
+    records += reader::layout::TypedArrayHeader::kSize;
     std::size_t count = 0;
     while (count < static_cast<std::size_t>(recordCount) && count < output.size()) {
         const std::size_t base = records + count * kPoolRecordStride;

@@ -13,6 +13,7 @@
 #include <intrin.h>
 
 #include "../../diagnostics/module_range.h"
+#include "../../diagnostics/test_input/test_input.h"
 #include "runtime.h"
 
 namespace sunrise::client::hooks::polled_input {
@@ -49,7 +50,8 @@ std::array<void*, kHandleCount> g_targets{};
  * Reports every key released to game code while the interface is open.
  * The scan writes an up-bit from a zero result, so held keys release instead of latching down.
  * @param virtualKey Windows virtual-key code.
- * @return Released while the interface is open and the caller is the game, else the real state.
+ * @return Released to the game while the interface is open or in a test process, held for the
+ *         forced key, else the real state.
  */
 __declspec(noinline) SHORT WINAPI get_key_state(int virtualKey) noexcept {
     if (caller_is_game(_ReturnAddress())) {
@@ -58,6 +60,10 @@ __declspec(noinline) SHORT WINAPI get_key_state(int virtualKey) noexcept {
         }
         if (is_forced(virtualKey)) {
             return kKeyHeld;
+        }
+        // A test process runs in the background; the user's own keyboard must not reach it.
+        if (diagnostics::test_input::enabled()) {
+            return kKeyReleased;
         }
     }
     const GetKeyState next = original<GetKeyState>(HookSlot::getKeyState);
@@ -70,11 +76,16 @@ __declspec(noinline) SHORT WINAPI get_key_state(int virtualKey) noexcept {
 /**
  * Reports every key released to game code while the interface is open.
  * @param virtualKey Windows virtual-key code.
- * @return Released while the interface is open and the caller is the game, else the real state.
+ * @return Released to the game while the interface is open; in a test process only the forced key
+ *         reads held, for every caller; else the real state.
  */
 __declspec(noinline) SHORT WINAPI get_async_key_state(int virtualKey) noexcept {
     if (g_interfaceOpen.load(std::memory_order_relaxed) && caller_is_game(_ReturnAddress())) {
         return kKeyReleased;
+    }
+    // A test process answers only the held test key, to the game and to Sunrise's own features.
+    if (diagnostics::test_input::enabled()) {
+        return is_forced(virtualKey) ? kKeyHeld : kKeyReleased;
     }
     const GetAsyncKeyState next = original<GetAsyncKeyState>(HookSlot::getAsyncKeyState);
     if (next == nullptr) {

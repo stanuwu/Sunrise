@@ -1,4 +1,5 @@
 #include "../runtime.h"
+#include "../runtime/persistence/publication_transaction.h"
 #include "starter_set_catalog.h"
 
 namespace sunrise::state::build_data {
@@ -8,9 +9,11 @@ bool starter_sets_ready() noexcept {
     return starter_sets::ready();
 }
 
-/** Publishes the new-character table outside the disk cache, so a warm boot reads it again. */
+/** Publishes the new-character table, and writes the cache once every domain is ready. */
 bool publish_starter_sets(std::span<const starter_sets::Definition> definitions) noexcept {
-    return starter_sets::replace(definitions);
+    runtime::persistence::Transaction transaction;
+    return transaction.active()
+           && transaction.finish(starter_sets::replace(definitions), starter_sets::clear);
 }
 
 /** Finds the items the packages give a new character of one class. */

@@ -4,66 +4,96 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <tuple>
 
+#include "../schema/generated/tag_classes_80807e.h"
+#include "../schema/generated/tag_classes_808083.h"
+#include "../schema/generated/tag_classes_808094.h"
+#include "../schema/generated/tag_classes_808098.h"
+#include "../schema/generated/tag_classes_808099.h"
+#include "../schema/generated/tag_classes_80809a.h"
+#include "../schema/generated/tag_classes_80809c.h"
+#include "authored_placement_reader.h"
 #include "definition_index_table.h"
 
 namespace sunrise::middleware::content::packages::tables {
 
 /** Config fields holding the two self-relative component pointers. */
-inline constexpr std::size_t kConfigPrimaryComponentPointerOffset = 0x10;
-inline constexpr std::size_t kConfigSecondaryComponentPointerOffset = 0x18;
+inline constexpr std::size_t kConfigPrimaryComponentPointerOffset =
+    offsetof(schema::generated::SEntityConfig, defaultInstance);
+inline constexpr std::size_t kConfigSecondaryComponentPointerOffset =
+    offsetof(schema::generated::SEntityConfig, definition);
 
 /** Exact component classes and slot type of an authored type-1 squad spawner. */
-inline constexpr std::uint32_t kAuthoredSquadSpawnerPrimaryClass = 0x80809A3BU;
-inline constexpr std::uint32_t kAuthoredSquadSpawnerSecondaryClass = 0x8080948FU;
+inline constexpr std::uint32_t kAuthoredSquadSpawnerPrimaryClass =
+    schema::generated::SSquadComponent::kClass;
+inline constexpr std::uint32_t kAuthoredSquadSpawnerSecondaryClass =
+    schema::generated::SSquadComponentPeer::kClass;
 inline constexpr std::uint16_t kAuthoredSquadSpawnerSlotType = 1;
 /** Spawner-secondary fields for its two raw object-slot refs and member array. */
-inline constexpr std::size_t kAuthoredSquadSpawnerRawReference98Offset = 0x98;
-inline constexpr std::size_t kAuthoredSquadSpawnerRawReferenceA0Offset = 0xA0;
-inline constexpr std::size_t kAuthoredSquadSpawnerMemberArrayOffset = 0xA8;
+inline constexpr std::size_t kAuthoredSquadSpawnerRawReference98Offset =
+    offsetof(schema::generated::SSquadComponentPeer, h81eeb835.ruleSlotAObjectKey);
+inline constexpr std::size_t kAuthoredSquadSpawnerRawReferenceA0Offset =
+    offsetof(schema::generated::SSquadComponentPeer, h81eeb835.ruleSlotBObjectKey);
+inline constexpr std::size_t kAuthoredSquadSpawnerMemberArrayOffset =
+    offsetof(schema::generated::SSquadComponentPeer, h81eeb835.cells);
+/** Each raw ref is one u64 over the slot key, type and index. */
+static_assert(kAuthoredSquadSpawnerRawReferenceA0Offset
+              == kAuthoredSquadSpawnerRawReference98Offset + sizeof(std::uint64_t));
+static_assert(kAuthoredSquadSpawnerMemberArrayOffset
+              == kAuthoredSquadSpawnerRawReferenceA0Offset + sizeof(std::uint64_t));
 /** Exact member array element class and stride. */
-inline constexpr std::uint32_t kAuthoredSquadMemberClass = 0x80808356U;
-inline constexpr std::size_t kAuthoredSquadMemberStride = 0x68;
+inline constexpr std::uint32_t kAuthoredSquadMemberClass = schema::generated::SquadMember::kClass;
+inline constexpr std::size_t kAuthoredSquadMemberStride = sizeof(schema::generated::SquadMember);
 /** Six consecutive candidate-array descriptors begin after the member key and reserved word. */
-inline constexpr std::size_t kAuthoredSquadVariantCount = 6;
-inline constexpr std::size_t kAuthoredSquadFirstCandidateArrayOffset = 8;
-inline constexpr std::size_t kAuthoredSquadCandidateArrayStride = 16;
+inline constexpr std::size_t kAuthoredSquadVariantCount =
+    std::tuple_size_v<decltype(schema::generated::C8080467d::candidateVariants)>;
+inline constexpr std::size_t kAuthoredSquadFirstCandidateArrayOffset =
+    offsetof(schema::generated::SquadMember, characterChoices.candidateVariants);
+inline constexpr std::size_t kAuthoredSquadCandidateArrayStride =
+    sizeof(schema::generated::G8080467d0);
 /** Exact candidate array element class and stride. */
-inline constexpr std::uint32_t kAuthoredSquadCandidateClass = 0x80808358U;
-inline constexpr std::size_t kAuthoredSquadCandidateStride = 0x18;
+inline constexpr std::uint32_t kAuthoredSquadCandidateClass =
+    schema::generated::SquadCandidate::kClass;
+inline constexpr std::size_t kAuthoredSquadCandidateStride =
+    sizeof(schema::generated::SquadCandidate);
 
 /** Exact component classes and slot type of an authored type-66 spawn rule. */
-inline constexpr std::uint32_t kAuthoredSquadRulePrimaryClass = 0x808094CFU;
-inline constexpr std::uint32_t kAuthoredSquadRuleSecondaryClass = 0x808094D0U;
+inline constexpr std::uint32_t kAuthoredSquadRulePrimaryClass =
+    schema::generated::SSquadRuleComponent::kClass;
+inline constexpr std::uint32_t kAuthoredSquadRuleSecondaryClass =
+    schema::generated::SSquadRuleComponentPeer::kClass;
 inline constexpr std::uint16_t kAuthoredSquadRuleSlotType = 66;
 /** Rule-primary field and exact type of its authored point array. */
-inline constexpr std::size_t kAuthoredSquadRulePointArrayOffset = 0x1A0;
-inline constexpr std::uint32_t kAuthoredSquadRulePointClass = 0x80809840U;
-inline constexpr std::size_t kAuthoredSquadRulePointStride = 0x48;
+inline constexpr std::size_t kAuthoredSquadRulePointArrayOffset =
+    offsetof(schema::generated::SSquadRuleComponent, hE6533acf.points);
+inline constexpr std::uint32_t kAuthoredSquadRulePointClass =
+    schema::generated::SquadRulePoint::kClass;
+inline constexpr std::size_t kAuthoredSquadRulePointStride =
+    sizeof(schema::generated::SquadRulePoint);
 
 /**
  * A spawner with both raw refs absent may carry its own point set. The primary component points
  * at a point-set component, the secondary at its placement peer. The pair is reciprocal.
  */
-inline constexpr std::uint32_t kAuthoredSquadInlinePointSetClass = 0x80807EBEU;
-inline constexpr std::uint32_t kAuthoredSquadInlinePlacementClass = 0x80807EBFU;
-inline constexpr std::size_t kAuthoredSquadSpawnerInlinePointSetOffset = 0x5D0;
-inline constexpr std::size_t kAuthoredSquadSpawnerInlinePlacementOffset = 0xB8;
+inline constexpr std::uint32_t kAuthoredSquadInlinePointSetClass =
+    schema::generated::SquadInlinePointSet::kClass;
+inline constexpr std::uint32_t kAuthoredSquadInlinePlacementClass =
+    schema::generated::SquadInlinePlacement::kClass;
+inline constexpr std::size_t kAuthoredSquadSpawnerInlinePointSetOffset =
+    offsetof(schema::generated::SSquadComponent, h81eeb835.inlinePointSet);
+inline constexpr std::size_t kAuthoredSquadSpawnerInlinePlacementOffset =
+    offsetof(schema::generated::SSquadComponentPeer, h81eeb835.inlinePlacement);
 /** Point-set fields: the typed point array and the initial point index. */
-inline constexpr std::size_t kAuthoredSquadInlinePointArrayOffset = 0x40;
-inline constexpr std::size_t kAuthoredSquadInlineInitialPointOffset = 0x80;
+inline constexpr std::size_t kAuthoredSquadInlinePointArrayOffset =
+    offsetof(schema::generated::SquadInlinePointSet, hE6533acf.points);
+inline constexpr std::size_t kAuthoredSquadInlineInitialPointOffset =
+    offsetof(schema::generated::SquadInlinePointSet, hE6533acf.initialPoint);
 /** The placement record sits inside the peer component and has no class marker before it. */
-inline constexpr std::size_t kAuthoredSquadInlinePlacementRecordOffset = 0x10;
+inline constexpr std::size_t kAuthoredSquadInlinePlacementRecordOffset =
+    offsetof(schema::generated::SquadInlinePlacement, placementRecord);
 
-/** Exact placed-entry marker and layout reached by one non-null candidate pointer. */
-inline constexpr std::uint32_t kAuthoredSquadPlacementClass = 0x808099D8U;
-inline constexpr std::size_t kAuthoredSquadPlacementStride = 0x90;
-inline constexpr std::size_t kAuthoredSquadPlacementRotationOffset = 0x10;
-inline constexpr std::size_t kAuthoredSquadPlacementPositionOffset = 0x20;
-inline constexpr std::size_t kAuthoredSquadPlacementScaleOffset = 0x2C;
-inline constexpr std::size_t kAuthoredSquadPlacementNameHashOffset = 0x64;
-inline constexpr std::size_t kAuthoredSquadPlacementFlagsOffset = 0x68;
-inline constexpr std::size_t kAuthoredSquadPlacementIdentityOffset = 0x70;
+/** All bits set marks a candidate with no placement identity. */
 inline constexpr std::uint64_t kAbsentAuthoredSquadPlacementIdentity = 0xFFFFFFFFFFFFFFFFULL;
 
 /** The two config components after their owner, class, peer class, and peer offset agree. */

@@ -605,7 +605,7 @@ build_roster_snapshot(Session& session,
         server::activity::host::SenseObservationKey key{};
         key.registryKey = auth.key;
         key.objectTag = auth.objectTag;
-        key.senseSchema = 0x80807ECCU;
+        key.senseSchema = middleware::bap::activity_message::squad_sense::kSchema;
         key.slotIndex = auth.slotIndex;
         key.slotType = auth.slotType;
         middleware::bap::activity_message::squad_sense::State recovered{};

@@ -108,7 +108,8 @@ bool payload_checksum(records::Domains domains, std::uint64_t& checksum) noexcep
            && checksum_domain<records::RewardInstructionRecord>(domains.rewardInstructions,
                                                                 checksum)
            && checksum_domain<records::RewardModifierRecord>(domains.rewardModifiers, checksum)
-           && checksum_domain<records::RewardSocketOverrideRecord>(domains.rewardSockets, checksum);
+           && checksum_domain<records::RewardSocketOverrideRecord>(domains.rewardSockets, checksum)
+           && checksum_domain<records::StarterSetRecord>(domains.starterSets, checksum);
 }
 
 /** Writes every array in the same order used by the payload checksum. */
@@ -154,7 +155,8 @@ bool write_payload(HANDLE file, records::Domains domains) noexcept {
            && write_domain<records::RewardItemRecord>(file, domains.rewardItems)
            && write_domain<records::RewardInstructionRecord>(file, domains.rewardInstructions)
            && write_domain<records::RewardModifierRecord>(file, domains.rewardModifiers)
-           && write_domain<records::RewardSocketOverrideRecord>(file, domains.rewardSockets);
+           && write_domain<records::RewardSocketOverrideRecord>(file, domains.rewardSockets)
+           && write_domain<records::StarterSetRecord>(file, domains.starterSets);
 }
 
 } // namespace sunrise::state::build_data::cache::writer

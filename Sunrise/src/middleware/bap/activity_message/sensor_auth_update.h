@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808062.h"
 #include "../../encoding/bit_writer.h"
 #include "activity_patch_epoch_parser.h"
 #include "definition.h"
@@ -13,6 +14,8 @@
 #include "squad_sense_state.h"
 
 namespace sunrise::middleware::bap::activity_message::sensor_auth_update {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** The client roster and its bubble grants both use activity message type 5. */
 inline constexpr std::uint32_t kMessageType = 5;
@@ -35,9 +38,9 @@ inline constexpr std::size_t kClientGroupCapacity = 128;
 inline constexpr std::size_t kClientRecordCapacity = 3072;
 /** Exact auth bodies one snapshot accepts, bounded by the widest authored roster object. */
 inline constexpr std::size_t kAuthOverrideCapacity = 1280;
-/** Authored scene sensors are slot type 43 and consume reflection schema 0x8080626B. */
+/** Slot type and Auth schema of an authored scene sensor. */
 inline constexpr std::uint8_t kAuthoredSceneSlotType = 43;
-inline constexpr std::uint32_t kAuthoredSceneAuthSchema = 0x8080626B;
+inline constexpr std::uint32_t kAuthoredSceneAuthSchema = generated::C8080626b::kClass;
 /** Fixed fields plus bounded dependency references and event keys in the complete Auth schema. */
 inline constexpr std::size_t kAuthoredSceneBaseAuthBitCount = 74;
 inline constexpr std::size_t kAuthoredSceneDependencyBitCount = 55;

@@ -5,12 +5,22 @@
 #include <cstdint>
 #include <string_view>
 
+#include "../../middleware/content/packages/schema/generated/tag_classes_808048.h"
 #include "../content_manifest/definition.h"
 
 namespace sunrise::state::mods {
 
 /** Newest manifest format this build reads. A higher version needs a newer Sunrise. */
-inline constexpr std::uint32_t kManifestVersion = 3;
+inline constexpr std::uint32_t kManifestVersion = 4;
+/** New package ids a mod may own: the registrar floor up to the client header check's 0x0CFF. */
+inline constexpr std::uint16_t kFirstOwnPackageId = content_manifest::kMinimumPackageId,
+                               kLastOwnPackageId = 0x0CFF;
+/** @return True for a package id a mod may own. */
+[[nodiscard]] constexpr bool own_package_id(std::uint64_t id) noexcept {
+    return id >= kFirstOwnPackageId && id <= kLastOwnPackageId;
+}
+/** Own package ids one manifest may list. */
+inline constexpr std::size_t kOwnPackageLimit = 256;
 /** Oldest manifest format still read. Version 1 has no `cheat` and no `config`. */
 inline constexpr std::uint32_t kOldestManifestVersion = 1;
 /** Mods one boot can hold. Caps the fixed State tables. */
@@ -42,7 +52,8 @@ inline constexpr std::size_t kConfigBindingLimit = 256;
 /** Largest entry a config value or a merged replacement may rewrite. */
 inline constexpr std::uint32_t kConfigEntryByteLimit = 64U * 1024U * 1024U;
 /** Config scalar profiles operate on CUI resource entries. */
-inline constexpr std::uint32_t kConfigCuiResourceClass = 0x80804825U;
+inline constexpr std::uint32_t kConfigCuiResourceClass =
+    middleware::content::packages::schema::generated::CuiResource::kClass;
 /** Longest config key, in characters. */
 inline constexpr std::size_t kConfigKeyMaximumLength = 32;
 /** The longest key and one spare byte, so a stored key is always null-terminated. */
@@ -161,6 +172,9 @@ struct Manifest final {
     std::size_t configCount{};
     std::array<ConfigBinding, kConfigBindingLimit> configBindings{};
     std::size_t configBindingCount{};
+    /** The new package ids the mod ships, ascending; its reference map names the same set. */
+    std::array<std::uint16_t, kOwnPackageLimit> packages{};
+    std::size_t packageCount{};
 };
 
 /** Why a mod did not load, or what it overrides. The log names the reason by `reason_name`. */
@@ -183,6 +197,8 @@ enum class Reason : std::uint8_t {
     patchInvalid,
     mergeFailed,
     assetOverride,
+    /** A warning: the mod's packages moved to free ids because another source holds them. */
+    packageRemapped,
 };
 
 /** Refusals keep a mod out; warnings load it and say what it overrides. */

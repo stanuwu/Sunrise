@@ -2,14 +2,24 @@
 
 #include <algorithm>
 
+#include "../reader/container_framing.h"
+#include "authored_placement_reader.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::tables {
 
-/** Reads the resource one component wraps. */
+/** Reads the spawn set one component wraps. */
 bool component_resource(std::span<const std::byte> blob, std::uint32_t& tag) noexcept {
     tag = 0;
-    return read(blob, kComponentResourceOffset, tag);
+    Array placements{};
+    std::size_t payload = 0;
+    std::uint32_t payloadClass = 0;
+    return find_array_at(blob, kAuthoredPlacementDescriptor, placements)
+           && placements.elementClass == kAuthoredPlacementClass
+           && relative(blob, placements.dataOffset + kAuthoredPlacementAuxiliaryOffset, payload)
+           && reader::layout::class_word_before(blob, payload, payloadClass)
+           && payloadClass == kComponentSpawnPayloadClass
+           && read(blob, payload + kComponentSpawnSetOffset, tag);
 }
 
 /** Reads the bubble mask of one container. */

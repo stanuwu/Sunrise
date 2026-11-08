@@ -148,6 +148,7 @@ enum class WriteStatus {
         static_cast<std::uint32_t>(domains.rewardInstructions.size()),
         static_cast<std::uint32_t>(domains.rewardModifiers.size()),
         static_cast<std::uint32_t>(domains.rewardSockets.size()),
+        static_cast<std::uint32_t>(domains.starterSets.size()),
         domains.positionFingerprint,
         domains.constants,
         checksum,

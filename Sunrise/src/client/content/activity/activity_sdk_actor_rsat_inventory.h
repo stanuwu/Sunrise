@@ -8,31 +8,38 @@
 #include <vector>
 
 #include "../../../middleware/content/packages/reader/reader.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808088.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809b.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809c.h"
 #include "../../../state/activity_sdk/format.h"
 
 namespace sunrise::client::content::activity::sdk_generation::actor_rsat_inventory {
 
-/** Tag class of an actor definition row. */
-inline constexpr std::uint32_t kActorClassDefinitionClass = 0x80809C0FU;
-/** Tag class of the reciprocal RSAT row named by an actor definition. */
-inline constexpr std::uint32_t kActorRsatClass = 0x80809BB6U;
+/** Package layouts of an actor definition, its RSAT row, and the rows the RSAT reaches. */
+using ActorDefinitionLayout = middleware::content::packages::schema::generated::SEntity;
+using ActorRsatLayout = middleware::content::packages::schema::generated::SNetworkClassRecord;
+using RsatDescriptorLayout = middleware::content::packages::schema::generated::RsatDescriptor;
+using RsatSchemaLayout = middleware::content::packages::schema::generated::SReplicationSchema;
+using RsatSchemaFieldLayout = middleware::content::packages::schema::generated::RsatSchemaField;
+
+// Class ids the packages store for these two tag types.
+inline constexpr std::uint32_t kActorClassDefinitionClass = ActorDefinitionLayout::kClass;
+inline constexpr std::uint32_t kActorRsatClass = ActorRsatLayout::kClass;
 /** Actor definitions must contain every field used by this projection. */
-inline constexpr std::size_t kActorDefinitionMinimumSize = 0x97U;
-/** Actor definitions carry their name hash at this byte offset. */
-inline constexpr std::size_t kActorNameHashOffset = 0x08U;
-/** Actor definitions carry the four values forwarded by type-1 Auth field 5 at +56..+59. */
-inline constexpr std::size_t kActorAuthoredSpawnProfileOffset = 0x38U;
-/** Actor definitions name their RSAT row at this byte offset. */
-inline constexpr std::size_t kActorRsatTagOffset = 0x88U;
-/** Actor definitions carry their one-byte object type at this byte offset. */
-inline constexpr std::size_t kActorObjectTypeOffset = 0x96U;
-/** Actor definitions name their behavior configuration at this byte offset. */
-inline constexpr std::size_t kActorBehaviorConfigOffset = 0x300U;
-/** RSAT rows name their owning actor definition at this byte offset. */
-inline constexpr std::size_t kActorRsatReverseDefinitionOffset = 0x08U;
-/** Exact descriptor and schema-field strides in package data. */
-inline constexpr std::size_t kDescriptorStride = 0x20U;
-inline constexpr std::size_t kSchemaFieldStride = 0x28U;
+inline constexpr std::size_t kActorDefinitionMinimumSize =
+    offsetof(ActorDefinitionLayout, objectType) + sizeof(ActorDefinitionLayout::objectType);
+inline constexpr std::size_t kActorNameHashOffset = offsetof(ActorDefinitionLayout, nameHash);
+inline constexpr std::size_t kActorRsatTagOffset =
+    offsetof(ActorDefinitionLayout, classRecordGameplayRoot);
+inline constexpr std::size_t kActorObjectTypeOffset = offsetof(ActorDefinitionLayout, objectType);
+inline constexpr std::size_t kActorRsatReverseDefinitionOffset =
+    offsetof(ActorRsatLayout, ownerDefinition);
+inline constexpr std::uint32_t kRsatDescriptorArrayOffset = offsetof(ActorRsatLayout, components);
+/** A schema's root field node lists the schema's fields. */
+inline constexpr std::uint32_t kSchemaFieldArrayOffset =
+    offsetof(RsatSchemaLayout, h9d85f81d.children);
+inline constexpr std::size_t kDescriptorStride = sizeof(RsatDescriptorLayout);
+inline constexpr std::size_t kSchemaFieldStride = sizeof(RsatSchemaFieldLayout);
 /** Deferred SDK strings must fit this fixed storage including their terminator. */
 inline constexpr std::size_t kTextCapacity = 48U;
 
@@ -57,6 +64,7 @@ struct ActorClass final {
     std::uint32_t descriptorElementClass{state::activity_sdk::format::kAbsentIndex};
     state::activity_sdk::format::Range descriptors{};
     std::uint32_t dynamicPresenceTailCount{};
+    /** ActorGroup default tuple; zero also stands for no ActorGroup. */
     std::array<std::int8_t, 4> authoredSpawnProfile{};
 };
 
@@ -76,7 +84,7 @@ struct RsatDescriptor final {
     std::uint32_t schemaFirstFieldRawU32At10{state::activity_sdk::format::kAbsentIndex};
     std::uint32_t flags{};
     std::uint32_t dynamicPresenceTailOrdinal{state::activity_sdk::format::kAbsentIndex};
-    std::array<std::byte, state::activity_sdk::format::kRsatDescriptorRawRowSize> rawRow{};
+    std::array<std::byte, kDescriptorStride> rawRow{};
 };
 
 /** One exact RSAT schema row before its id is linked. */
@@ -98,7 +106,7 @@ struct RsatSchema final {
 
 /** One exact RSAT field row. */
 struct RsatField final {
-    std::array<std::byte, state::activity_sdk::format::kRsatSchemaFieldRawRowSize> rawRow{};
+    std::array<std::byte, kSchemaFieldStride> rawRow{};
 };
 
 /** One versioned executable-derived actor command message. */
@@ -133,12 +141,11 @@ struct ActorCommandDefinition final {
     std::uint32_t flags{};
 };
 
-/** One package behavior configuration and the engine faction default for an actor. */
+/** The action-system component config and the engine faction default for an actor. */
 struct ActorBehaviorProfile final {
     std::uint32_t actorClassIndex{};
     std::uint32_t behaviorConfigTag{};
     std::uint32_t behaviorConfigClass{};
-    std::uint32_t behaviorConfigOffset{};
     std::int32_t defaultFaction{};
     state::activity_sdk::format::ActorSemanticProvenance behaviorProvenance{
         state::activity_sdk::format::ActorSemanticProvenance::packageField};

@@ -272,6 +272,7 @@ void report_squad_damage(const state::activity::SessionBinding& binding,
                          std::uint16_t slotIndex,
                          std::uint16_t health,
                          std::uint16_t shield) noexcept {
+    // A pool level above the wire's full value is malformed.
     constexpr std::uint16_t full = middleware::gameplay::external::kDamageLevelFull;
     if (sourceGeneration == 0 || registryKey == 0 || health > full || shield > full
         || slotIndex > static_cast<std::uint16_t>((std::numeric_limits<std::int16_t>::max)())) {

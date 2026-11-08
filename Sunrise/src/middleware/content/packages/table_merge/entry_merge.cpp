@@ -318,13 +318,6 @@ void merge_range(ByteMerge& merge,
     return delta;
 }
 
-/** Writes the output size into the size word when the stock entry keeps one there. */
-void write_size_word(std::span<const std::byte> stock, std::vector<std::byte>& output) noexcept {
-    if (internal::has_size_word(stock)) {
-        internal::store<std::uint64_t>(output, 0, output.size());
-    }
-}
-
 /**
  * Merges one table entry: proof, added regions, byte edits, rows, size word.
  * @return ok, or why the entry cannot merge.
@@ -362,7 +355,7 @@ void write_size_word(std::span<const std::byte> stock, std::vector<std::byte>& o
         conflicts[index].entryIndex = entry.entryIndex;
     }
     if (status == Status::ok) {
-        write_size_word(stock, output);
+        reader::layout::carry_size_word(stock, output);
     }
     return status;
 }

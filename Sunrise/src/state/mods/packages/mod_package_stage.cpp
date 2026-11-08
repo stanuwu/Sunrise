@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <bitset>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -20,23 +21,12 @@ namespace named_tags = middleware::content::packages::named_tags;
 
 /** Lists every entry of one directory. */
 constexpr std::wstring_view kWildcard = L"*";
-/** Merge data sits next to its package file under the same stem. */
-constexpr std::wstring_view kSidecarExtension = L".merge";
 /** Leaf characters quoted in a message, so one bad name cannot fill it. */
 constexpr int kQuotedLeafLimit = 80;
 /** One flag per possible generation of one package id. */
 constexpr std::size_t kGenerationCount = 256;
 /** Wide characters below this are ASCII and quote as themselves. */
 constexpr wchar_t kAsciiLimit = 0x80;
-
-/** One `.pkg` file listed in a mod subfolder. */
-struct Listed final {
-    std::wstring path;
-    /** ASCII form of the leaf for messages; other characters become '?'. */
-    std::string leaf;
-    name::ParsedName parsed{};
-    name::NameStatus status{};
-};
 
 /** Generations of one new package id found in one mod. */
 struct NewPackage final {
@@ -51,6 +41,8 @@ struct Staged final {
     std::vector<Claim> claims;
     std::vector<AddedFile> added;
     std::vector<table_merge::Sidecar> sidecars;
+    /** Older patches of a chain, served from files as parents of the claimed newest one. */
+    std::size_t chainParents{};
 };
 
 /**
@@ -60,36 +52,19 @@ struct Staged final {
  */
 [[nodiscard]] table_merge::Status
 read_sidecar(const std::wstring& packagePath, std::vector<std::byte>& bytes, bool& present) {
-    const std::wstring path = packagePath.substr(0, packagePath.size() - kPackageExtension.size())
-                                  .append(kSidecarExtension);
-    const HANDLE file = CreateFileW(path.c_str(),
-                                    GENERIC_READ,
-                                    FILE_SHARE_READ,
-                                    nullptr,
-                                    OPEN_EXISTING,
-                                    FILE_ATTRIBUTE_NORMAL,
-                                    nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        const DWORD error = GetLastError();
-        present = error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND;
-        return table_merge::Status::format;
-    }
-    const std::unique_ptr<void, decltype(&CloseHandle)> owner(file, &CloseHandle);
-    present = true;
-    LARGE_INTEGER size{};
-    if (GetFileSizeEx(file, &size) == FALSE || size.QuadPart < 0) {
-        return table_merge::Status::format;
-    }
-    if (static_cast<std::uint64_t>(size.QuadPart) > table_merge::kSidecarByteLimit) {
+    const std::wstring path =
+        packagePath.substr(0, packagePath.size() - kPackageFileExtension.size())
+            .append(table_merge::kSidecarFileExtension);
+    const FileRead read = read_whole_file(path, table_merge::kSidecarByteLimit, bytes);
+    present = read != FileRead::missing;
+    switch (read) {
+    case FileRead::ok:
+        return table_merge::Status::ok;
+    case FileRead::tooLarge:
         return table_merge::Status::capacity;
+    default:
+        return table_merge::Status::format;
     }
-    bytes.resize(static_cast<std::size_t>(size.QuadPart));
-    // The size limit keeps the whole file inside one read.
-    DWORD count = 0;
-    return ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &count, nullptr) != FALSE
-                   && count == bytes.size()
-               ? table_merge::Status::ok
-               : table_merge::Status::format;
 }
 
 /**
@@ -125,14 +100,14 @@ read_sidecar(const std::wstring& packagePath, std::vector<std::byte>& bytes, boo
 
 /** @return True when the leaf ends in `.pkg`, in any case. */
 [[nodiscard]] bool is_package_file(std::wstring_view leaf) noexcept {
-    if (leaf.size() <= kPackageExtension.size()) {
+    if (leaf.size() <= kPackageFileExtension.size()) {
         return false;
     }
-    const std::wstring_view tail = leaf.substr(leaf.size() - kPackageExtension.size());
+    const std::wstring_view tail = leaf.substr(leaf.size() - kPackageFileExtension.size());
     return CompareStringOrdinal(tail.data(),
                                 static_cast<int>(tail.size()),
-                                kPackageExtension.data(),
-                                static_cast<int>(kPackageExtension.size()),
+                                kPackageFileExtension.data(),
+                                static_cast<int>(kPackageFileExtension.size()),
                                 TRUE)
            == CSTR_EQUAL;
 }
@@ -305,13 +280,14 @@ read_sidecar(const std::wstring& packagePath, std::vector<std::byte>& bytes, boo
                         identity.patchId);
         return false;
     }
-    if (packageId > kNewPackageIdMaximum) {
+    if (packageId > kLastOwnPackageId) {
         problem::refuse(record,
                         Reason::packageInvalid,
-                        "%.*s: new package ids must be 0x0100 to 0x%04X.",
+                        "%.*s: new package ids must be 0x%04X to 0x%04X.",
                         quoted(file.leaf),
                         file.leaf.c_str(),
-                        kNewPackageIdMaximum);
+                        kFirstOwnPackageId,
+                        kLastOwnPackageId);
         return false;
     }
     const Base& taken = work.bases[packageId];
@@ -422,9 +398,31 @@ stage_patch(Work& work, std::size_t recordIndex, const Listed& file, Staged& sta
                         packageId);
         return false;
     }
+    // A chain cannot be merged with another mod's patch of the same package, in either order.
+    const auto earlier =
+        std::find_if(work.claims.begin(), work.claims.end(), [packageId](const Claim& claim) {
+            return claim.file.row.packageId == packageId;
+        });
+    if (earlier != work.claims.end() && earlier->chained) {
+        problem::refuse(
+            record,
+            Reason::patchInvalid,
+            "Package 0x%04X is patched in several generations by %s, so no other mod may patch it.",
+            packageId,
+            work.records[earlier->record].manifest.id.bytes.data());
+        return false;
+    }
+    // Patch files arrive sorted by package and generation, so a chain's previous link is the last
+    // claim.
+    const auto previous =
+        std::find_if(staged.claims.begin(), staged.claims.end(), [packageId](const Claim& claim) {
+            return claim.file.row.packageId == packageId;
+        });
+    const bool chained = previous != staged.claims.end();
+    const std::uint32_t expected = chained ? previous->generation + 1 : base.patch + 1;
     const std::string_view baseIdentity(base.newest.name.data(), base.identityLength);
     const std::string_view identity(file.parsed.stem.data(), file.parsed.identityLength);
-    if (identity != baseIdentity || file.parsed.patchIndex != base.patch + 1) {
+    if (identity != baseIdentity || file.parsed.patchIndex != expected) {
         problem::refuse(record,
                         Reason::patchInvalid,
                         "%.*s: the next generation of package 0x%04X is %.*s_%u.pkg.",
@@ -433,18 +431,23 @@ stage_patch(Work& work, std::size_t recordIndex, const Listed& file, Staged& sta
                         packageId,
                         static_cast<int>(baseIdentity.size()),
                         baseIdentity.data(),
-                        base.patch + 1);
+                        expected);
         return false;
     }
-    if (std::any_of(staged.claims.begin(), staged.claims.end(), [packageId](const Claim& claim) {
-            return claim.file.row.packageId == packageId;
-        })) {
-        problem::refuse(record, Reason::patchInvalid, "Two patches for package 0x%04X.", packageId);
+    if (chained && earlier != work.claims.end()) {
+        problem::refuse(
+            record,
+            Reason::patchInvalid,
+            "Package 0x%04X is also patched by %s, so it cannot be patched in several generations.",
+            packageId,
+            work.records[earlier->record].manifest.id.bytes.data());
         return false;
     }
     merge::PatchSummary summary{};
     const merge::Status status =
-        merge::inspect(base_path(work, base).c_str(), file.path.c_str(), summary);
+        merge::inspect(chained ? previous->path.c_str() : base_path(work, base).c_str(),
+                       file.path.c_str(),
+                       summary);
     if (status != merge::Status::ok) {
         problem::refuse(record,
                         Reason::patchInvalid,
@@ -457,11 +460,21 @@ stage_patch(Work& work, std::size_t recordIndex, const Listed& file, Staged& sta
     if (!check_names(record, file, Reason::patchInvalid)) {
         return false;
     }
+    std::bitset<merge::kEntryLimit> changed = summary.changedEntries;
+    if (chained) {
+        // The older link stays served as a parent; the claim moves to the newer one.
+        changed |= previous->changed;
+        staged.files.push_back(previous->file);
+        ++staged.chainParents;
+        staged.claims.erase(previous);
+    }
     Claim& claim = staged.claims.emplace_back();
     claim.record = recordIndex;
     claim.path = file.path;
     claim.file.row = row_for(file.parsed, summary.buildSignature);
-    claim.changed = summary.changedEntries;
+    claim.changed = changed;
+    claim.generation = file.parsed.patchIndex;
+    claim.chained = chained;
     if (!client_path(work, file.path, claim.file)) {
         problem::refuse(record,
                         Reason::folderPath,
@@ -512,6 +525,38 @@ void commit(Work& work,
 
 } // namespace
 
+/** A file that exists but cannot be opened or read is failed, not missing. */
+FileRead
+read_whole_file(const std::wstring& path, std::size_t limit, std::vector<std::byte>& bytes) {
+    const HANDLE file = CreateFileW(path.c_str(),
+                                    GENERIC_READ,
+                                    FILE_SHARE_READ,
+                                    nullptr,
+                                    OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? FileRead::missing
+                                                                              : FileRead::failed;
+    }
+    const std::unique_ptr<void, decltype(&CloseHandle)> owner(file, &CloseHandle);
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(file, &size) == FALSE || size.QuadPart < 0) {
+        return FileRead::failed;
+    }
+    if (static_cast<std::uint64_t>(size.QuadPart) > limit
+        || static_cast<std::uint64_t>(size.QuadPart) > (std::numeric_limits<DWORD>::max)()) {
+        return FileRead::tooLarge;
+    }
+    bytes.resize(static_cast<std::size_t>(size.QuadPart));
+    DWORD count = 0;
+    return ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &count, nullptr) != FALSE
+                   && count == bytes.size()
+               ? FileRead::ok
+               : FileRead::failed;
+}
+
 /** Checks one loaded mod's packages and patches, and commits them if the mod stays loaded. */
 void stage_mod(Work& work, std::size_t recordIndex) {
     Record& record = work.records[recordIndex];
@@ -526,8 +571,16 @@ void stage_mod(Work& work, std::size_t recordIndex) {
     std::vector<NewPackage> packages;
     Staged staged;
     std::vector<Listed> files;
+    std::vector<Listed> patchFiles;
     if (!list(join(directory, kPackagesFolder), files)) {
         problem::refuse(record, Reason::packageInvalid, "The packages folder could not be listed.");
+        return;
+    }
+    if (!list(join(directory, kPatchesFolder), patchFiles)) {
+        problem::refuse(record, Reason::packageInvalid, "The patches folder could not be listed.");
+        return;
+    }
+    if (!relocate(work, recordIndex, directory, files, patchFiles)) {
         return;
     }
     for (const Listed& file : files) {
@@ -538,11 +591,14 @@ void stage_mod(Work& work, std::size_t recordIndex) {
     if (!check_generations(record, packages, staged.files)) {
         return;
     }
-    if (!list(join(directory, kPatchesFolder), files)) {
-        problem::refuse(record, Reason::packageInvalid, "The patches folder could not be listed.");
-        return;
-    }
-    for (const Listed& file : files) {
+    // By package, then generation, so each link of a chain follows the one it extends.
+    std::stable_sort(
+        patchFiles.begin(), patchFiles.end(), [](const Listed& first, const Listed& second) {
+            return first.parsed.packageId != second.parsed.packageId
+                       ? first.parsed.packageId < second.parsed.packageId
+                       : first.parsed.patchIndex < second.parsed.patchIndex;
+        });
+    for (const Listed& file : patchFiles) {
         if (!stage_patch(work, recordIndex, file, staged)) {
             return;
         }
@@ -560,8 +616,8 @@ void stage_mod(Work& work, std::size_t recordIndex) {
                         work.fileCapacity);
         return;
     }
-    record.newPackageFiles = static_cast<std::uint32_t>(staged.files.size());
-    record.patchFiles = static_cast<std::uint32_t>(staged.claims.size());
+    record.newPackageFiles = static_cast<std::uint32_t>(staged.files.size() - staged.chainParents);
+    record.patchFiles = static_cast<std::uint32_t>(staged.claims.size() + staged.chainParents);
     work.bindings.insert(work.bindings.end(), bindings.begin(), bindings.end());
     commit(work, recordIndex, packages, staged);
 }

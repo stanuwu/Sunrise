@@ -6,41 +6,63 @@
 #include <cstring>
 #include <span>
 
+#include "../../../../middleware/content/packages/reader/layout.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80802e.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80809f.h"
+
 namespace sunrise::client::hooks::network::investment::relocation {
 
+namespace generated = middleware::content::packages::schema::generated;
+/** Header of a typed array: count, element class, padding. */
+using ArrayHeader = generated::STypedArrayMarker;
+
 /** Class marker every native content array and condition record starts with. */
-inline constexpr std::uint32_t kMarker = 0x80809FBDU;
+inline constexpr std::uint32_t kMarker = ArrayHeader::kClass;
 /** Element class the plug-set member array declares. */
-inline constexpr std::uint32_t kMemberClass = 0x80802E03U;
+inline constexpr std::uint32_t kMemberClass = generated::PlugSetMember::kClass;
 /** Element class one member's own condition record declares. */
-inline constexpr std::uint32_t kConditionClass = 0x80807D31U;
-/** Member rows start here; the array header occupies everything before it. */
-inline constexpr std::size_t kDataOffset = 24;
-/** The largest member array this build relocates. */
-inline constexpr std::size_t kMaximumMembers = 56;
-/** One member row is 32 bytes. */
-inline constexpr std::size_t kMemberSize = 32;
-/** One condition record is 32 bytes. */
-inline constexpr std::size_t kConditionSize = 32;
-
-/** Array header fields, as byte offsets from the array start. */
-inline constexpr std::size_t kArrayMarkerOffset = 4;
-inline constexpr std::size_t kArrayCountOffset = 8;
-inline constexpr std::size_t kArrayClassOffset = 16;
-
-/** Member row fields, as byte offsets from the row start. */
-inline constexpr std::size_t kMemberConditionCountOffset = 8;
-inline constexpr std::size_t kMemberConditionRelativeOffset = 16;
-
-/** Condition record fields, as byte offsets from the record start. */
-inline constexpr std::size_t kConditionCountOffset = 4;
-inline constexpr std::size_t kConditionClassOffset = 12;
-inline constexpr std::size_t kConditionReservedOffset = 16;
-/** A member's relative reference names this offset inside its condition record. */
-inline constexpr std::size_t kConditionReferenceOffset = 4;
-
+inline constexpr std::uint32_t kConditionClass = generated::InvestmentExpressionRow::kClass;
 /** The native reader dereferences these records as 8-byte aligned. */
 inline constexpr std::size_t kRecordAlignment = 8;
+/** The marker word sits right before the header it names. */
+inline constexpr std::size_t kMarkerSize =
+    middleware::content::packages::reader::layout::kClassWordSize;
+
+/** Array header fields, as byte offsets from the array start; the header is aligned. */
+inline constexpr std::size_t kArrayHeaderOffset = kRecordAlignment;
+inline constexpr std::size_t kArrayMarkerOffset = kArrayHeaderOffset - kMarkerSize;
+inline constexpr std::size_t kArrayCountOffset = kArrayHeaderOffset + offsetof(ArrayHeader, count);
+inline constexpr std::size_t kArrayClassOffset =
+    kArrayHeaderOffset + offsetof(ArrayHeader, elementClass);
+/** Member rows start here; the array header occupies everything before it. */
+inline constexpr std::size_t kDataOffset = kArrayHeaderOffset + sizeof(ArrayHeader);
+/** The largest member array this build relocates. */
+inline constexpr std::size_t kMaximumMembers = 56;
+/** One member row. */
+inline constexpr std::size_t kMemberSize = sizeof(generated::PlugSetMember);
+
+/** Member row fields, as byte offsets from the row start. */
+inline constexpr std::size_t kMemberPlugItemOffset =
+    offsetof(generated::PlugSetMember, plugItemIndex);
+inline constexpr std::size_t kMemberConditionCountOffset =
+    offsetof(generated::PlugSetMember, h9e951b5a.expressionSteps.count);
+inline constexpr std::size_t kMemberConditionRelativeOffset =
+    offsetof(generated::PlugSetMember, h9e951b5a.expressionSteps.relative);
+
+/** Condition record fields, as byte offsets from the record start: marker, header, one row. */
+inline constexpr std::size_t kConditionCountOffset = kMarkerSize + offsetof(ArrayHeader, count);
+inline constexpr std::size_t kConditionClassOffset =
+    kMarkerSize + offsetof(ArrayHeader, elementClass);
+inline constexpr std::size_t kConditionReservedOffset =
+    kMarkerSize + offsetof(ArrayHeader, padding);
+/** A member's relative reference names this offset inside its condition record. */
+inline constexpr std::size_t kConditionReferenceOffset = kMarkerSize;
+/** One condition record, padded so the next record's header stays aligned. */
+inline constexpr std::size_t kConditionSize =
+    (kMarkerSize + sizeof(ArrayHeader) + sizeof(generated::InvestmentExpressionRow)
+     + kRecordAlignment - 1)
+    / kRecordAlignment * kRecordAlignment;
 
 /** A captured member and its own opaque, single-record condition allocation. */
 struct Row {
@@ -86,8 +108,8 @@ inline bool build(std::span<const Row> rows, std::span<std::byte> output) noexce
             return false;
         }
         for (std::size_t j = 0; j < i; ++j) {
-            if (get<std::uint32_t>(rows[i].bytes.data())
-                == get<std::uint32_t>(rows[j].bytes.data())) {
+            if (get<std::uint32_t>(rows[i].bytes.data() + kMemberPlugItemOffset)
+                == get<std::uint32_t>(rows[j].bytes.data() + kMemberPlugItemOffset)) {
                 return false;
             }
         }

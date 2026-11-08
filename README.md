@@ -14,17 +14,18 @@ Destiny 2 Offline Preservation Mod
 
 ## Opening the overlay
 
-After launching Destiny 2, press Insert to open or close the Sunrise overlay
+After launching Destiny 2, press Insert to open or close the Sunrise overlay. A hint at startup
+names the key.
 
-Insert is the default key and can be changed in `bin\x64\Sunrise\settings.json`
-
-See the [FAQ](https://projectsunrise.dev/faq/) for more information
+To use another key, set `client.ui.toggle_key` in `bin\x64\Sunrise\settings.json`. It accepts
+`insert`, `home`, `end`, `delete` and `f1` to `f12`.
 
 ## Features
 - Load into any Destination (matchmade activities are currently broken)
 - Script Missions
 - Exploration Features (Fly, Noclip, Activity Override, ...)
 - Persistent Save
+- Mods (packages, patches and mission scripts, built with Sunrise Studio)
 
 ## WIP
 

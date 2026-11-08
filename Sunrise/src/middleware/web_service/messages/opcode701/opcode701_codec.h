@@ -12,7 +12,7 @@ namespace sunrise::middleware::web_service::messages::opcode701 {
 /** Web Service opcode used by the Client's account-settings writeback. */
 inline constexpr std::uint16_t kOpcode = 701;
 
-/** Semantic result decoded from one schema-0x80807603 request. */
+/** Semantic result decoded from one opcode-701 request. */
 struct Request {
     state::account::settings::SettingsDelta settings;
     std::optional<state::account::inventory::ProfileNewItems> newItems;

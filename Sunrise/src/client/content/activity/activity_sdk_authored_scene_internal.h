@@ -5,16 +5,103 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <span>
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <vector>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808062.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808063.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808095.h"
 #include "activity_sdk_authored_scene_inventory.h"
 
 namespace sunrise::client::content::activity::sdk_generation::authored_scene_inventory {
 
+namespace generated = middleware::content::packages::schema::generated;
+
+/** A descriptor offset is the start of its slot definition, so these fields are relative to it. */
+inline constexpr std::uint32_t kTaskReferenceOffset =
+    offsetof(generated::TaskSlotDefinitionType38, targetObjectKey);
+inline constexpr std::uint32_t kTaskBitIndexOffset =
+    offsetof(generated::TaskSlotDefinitionType38, objectiveBitIndex);
+inline constexpr std::uint32_t kPerformanceSquadReferenceOffset =
+    offsetof(generated::PerformanceSlotDefinitionType42, squadObjectKey);
+inline constexpr std::uint32_t kSceneResourceOffset =
+    offsetof(generated::AuthoredSceneSlotDescriptor, resource);
+/** A scene's participant rows and squad blocks lie past its slot definition. */
+inline constexpr std::uint32_t kSceneDescriptorSize =
+    sizeof(generated::AuthoredSceneSlotDescriptor);
+
 /** One exact slot schema indexed by the canonical global slot row. */
 using SchemaIndex = std::unordered_map<std::uint32_t, const squad::SlotSchemaFact*>;
+
+/** @return True when one complete range lies in the package blob. */
+[[nodiscard]] inline bool
+contains(std::span<const std::byte> blob, std::size_t offset, std::size_t size) noexcept {
+    return offset <= blob.size() && size <= blob.size() - offset;
+}
+
+/** Reads one unaligned value. @return False when it does not fit the blob. */
+template <typename Value>
+[[nodiscard]] bool
+read_value(std::span<const std::byte> blob, std::size_t offset, Value& output) noexcept {
+    output = {};
+    if (!contains(blob, offset, sizeof output)) {
+        return false;
+    }
+    std::memcpy(&output, blob.data() + offset, sizeof output);
+    return true;
+}
+
+/** One cached package entry and its physical class. */
+struct PackageRow final {
+    std::vector<std::byte> bytes{};
+    std::uint32_t classId{};
+};
+
+/** Package reads are cached by tag for one transaction. */
+using PackageCache = std::unordered_map<std::uint32_t, PackageRow>;
+
+/**
+ * Reads one tag once and retains the physical class beside its bytes.
+ * @param reader Package reader.
+ * @param readerContext Opaque reader state.
+ * @param tag Tag to read.
+ * @param cache Transaction cache the row lives in.
+ * @param output Receives the cached row; null on failure.
+ * @return False when the tag is absent or does not read.
+ */
+[[nodiscard]] bool package_row(squad::TagReader reader,
+                               void* readerContext,
+                               std::uint32_t tag,
+                               PackageCache& cache,
+                               const PackageRow*& output);
+
+/**
+ * Follows a scene resource to its event graph and appends one row per gate.
+ * A graph that cannot be read, or one gate that is not a gate element, leaves the scene with no
+ * keys and is logged. Only a topology inconsistency fails the build.
+ * @param topology Canonical topology.
+ * @param descriptor Scene descriptor that names the resource.
+ * @param reader Package reader.
+ * @param readerContext Opaque reader state.
+ * @param cache Transaction package cache.
+ * @param resourceTag Tag of the scene resource.
+ * @param resource Resource bytes.
+ * @param output Receives the event-key rows.
+ * @return False only on a topology inconsistency.
+ */
+[[nodiscard]] bool collect_event_keys(const topology::Snapshot& topology,
+                                      const squad::DescriptorFact& descriptor,
+                                      squad::TagReader reader,
+                                      void* readerContext,
+                                      PackageCache& cache,
+                                      std::uint32_t resourceTag,
+                                      std::span<const std::byte> resource,
+                                      std::vector<EventKey>& output);
 
 /** Formats one structural ID without truncation. */
 template <typename... Values>
@@ -59,9 +146,9 @@ template <typename... Values>
                                               const squad::DescriptorFact& descriptor) noexcept {
     return descriptor.slotIndex < topology.slots.size()
            && topology.slots[descriptor.slotIndex].slotType == format::kAuthoredSceneSlotType
-           && descriptor.componentClass == format::kAuthoredSceneComponentClass
-           && descriptor.senseSchema == format::kAuthoredSceneSenseSchema
-           && descriptor.authSchema == format::kAuthoredSceneAuthSchema;
+           && descriptor.componentClass == generated::AuthoredSceneComponentType43::kClass
+           && descriptor.senseSchema == generated::C8080626a::kClass
+           && descriptor.authSchema == generated::C8080626b::kClass;
 }
 
 /** Tests the exact type-42 descriptor shape before package projection. */
@@ -70,9 +157,9 @@ is_performance_descriptor(const topology::Snapshot& topology,
                           const squad::DescriptorFact& descriptor) noexcept {
     return descriptor.slotIndex < topology.slots.size()
            && topology.slots[descriptor.slotIndex].slotType == format::kPerformanceSlotType
-           && descriptor.componentClass == format::kPerformanceComponentClass
+           && descriptor.componentClass == generated::PerformanceSensorComponent::kClass
            && descriptor.senseSchema == format::kAbsentIndex
-           && descriptor.authSchema == format::kPerformanceAuthSchema;
+           && descriptor.authSchema == generated::C80809586::kClass;
 }
 
 /** Tests the exact type-38 descriptor shape before package projection. */
@@ -80,9 +167,9 @@ is_performance_descriptor(const topology::Snapshot& topology,
                                              const squad::DescriptorFact& descriptor) noexcept {
     return descriptor.slotIndex < topology.slots.size()
            && topology.slots[descriptor.slotIndex].slotType == format::kTaskSlotType
-           && descriptor.componentClass == format::kTaskComponentClass
+           && descriptor.componentClass == generated::TaskComponent::kClass
            && descriptor.senseSchema == format::kAbsentIndex
-           && descriptor.authSchema == format::kTaskAuthSchema;
+           && descriptor.authSchema == generated::C80807d89::kClass;
 }
 
 /** Sort key matching the final section-19 pack order. */

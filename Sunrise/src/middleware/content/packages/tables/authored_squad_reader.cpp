@@ -5,18 +5,36 @@
 #include <cstring>
 #include <limits>
 
+#include "../reader/layout.h"
+#include "../reader/typed_array.h"
+#include "../schema/generated/tag_classes_808083.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::tables {
 namespace {
 
-/** Exact Tiger typed-array marker and the builder's fail-closed count ceiling. */
-constexpr std::uint32_t kArrayMarker = 0x80809FBDU;
+namespace generated = schema::generated;
+/** A descriptor names a typed array header; its marker sits before it and its rows after it. */
+using Header = reader::layout::TypedArrayHeader;
+/** The builder's fail-closed count ceiling. */
 constexpr std::int64_t kMaximumArrayCount = 1'000'000;
-/** Bytes from the marker through the typed array header. */
-constexpr std::size_t kArrayMarkerAndHeaderSize = 20;
-constexpr std::size_t kArrayHeaderMarkerBack = 4;
-constexpr std::size_t kArrayHeaderDataOffset = 16;
+/** A config component's class word sits just before it; it starts with its owner/peer pointer. */
+constexpr std::size_t kComponentClassBack = reader::layout::kClassWordSize;
+constexpr std::size_t kComponentPrefixSize = kComponentClassBack + sizeof(generated::TagPointer);
+constexpr std::size_t kComponentPeerClassOffset = offsetof(generated::TagPointer, word);
+constexpr std::size_t kComponentPeerOffsetOffset = offsetof(generated::TagPointer, offset);
+/** The member's reserved word follows its key. */
+constexpr std::size_t kMemberReservedOffset = offsetof(generated::SquadMember, reserved);
+/** A placed entry carries its class word just before it. */
+constexpr std::size_t kPlacementClassBack = reader::layout::kClassWordSize;
+/** Raw tails kept after a candidate's blueprint pointer and a rule point's identity. */
+constexpr std::size_t kCandidateTailOffset = offsetof(generated::SquadCandidate, unk8);
+static_assert(sizeof(AuthoredSquadCandidate::descriptorTail)
+              == sizeof(generated::SquadCandidate) - kCandidateTailOffset);
+// Tag layout: a rule point's raw tail starts at its unnamed gap.
+constexpr std::size_t kRulePointTailOffset = offsetof(generated::SquadRulePoint, gap8);
+static_assert(sizeof(AuthoredSquadRulePoint::rawTail)
+              == sizeof(generated::SquadRulePoint) - kRulePointTailOffset);
 
 /** One component endpoint before the reciprocal pair check. */
 struct ComponentEndpoint final {
@@ -41,28 +59,6 @@ contains(std::span<const std::byte> blob, std::size_t offset, std::size_t size) 
     return true;
 }
 
-/** Adds one signed self-relative field without wrapping host size arithmetic. */
-[[nodiscard]] bool
-relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) noexcept {
-    /** Signed range the addition must stay inside. */
-    constexpr std::int64_t kMaximum = (std::numeric_limits<std::int64_t>::max)();
-    constexpr std::int64_t kMinimum = (std::numeric_limits<std::int64_t>::min)();
-    if (base > static_cast<std::size_t>(kMaximum)) {
-        return false;
-    }
-    const auto signedBase = static_cast<std::int64_t>(base);
-    if ((relative > 0 && signedBase > kMaximum - relative)
-        || (relative < 0 && signedBase < kMinimum - relative)) {
-        return false;
-    }
-    const std::int64_t target = signedBase + relative;
-    if (target < 0) {
-        return false;
-    }
-    output = static_cast<std::size_t>(target);
-    return true;
-}
-
 /**
  * Resolves the exact `{i64 count, i64 self-relative header}` typed-array shape. Empty arrays may
  * use either the canonical null pointer or a complete typed header.
@@ -76,39 +72,25 @@ relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) no
     std::int64_t count = 0;
     std::int64_t relative = 0;
     std::size_t relativeField = 0;
-    if (!add_offset(field, sizeof count, relativeField) || !read(blob, field, count)
-        || !read(blob, relativeField, relative) || count < 0 || count > kMaximumArrayCount) {
+    if (!add_offset(field, reader::layout::kArrayFieldRelative, relativeField)
+        || !read(blob, field, count) || !read(blob, relativeField, relative) || count < 0
+        || count > kMaximumArrayCount) {
         return false;
     }
     if (count == 0 && relative == 0) {
         return true;
     }
 
-    std::size_t header = 0;
-    if (!relative_offset(relativeField, relative, header) || header < kArrayHeaderMarkerBack
-        || !contains(blob, header - kArrayHeaderMarkerBack, kArrayMarkerAndHeaderSize)) {
-        return false;
-    }
-
-    std::uint32_t marker = 0;
-    std::int64_t repeatedCount = 0;
-    std::uint32_t elementClass = 0;
-    std::uint32_t padding = 0;
-    if (!read(blob, header - kArrayHeaderMarkerBack, marker) || marker != kArrayMarker
-        || !read(blob, header, repeatedCount) || repeatedCount != count
-        || !read(blob, header + 8, elementClass) || elementClass != expectedClass
-        || !read(blob, header + 12, padding) || padding != 0) {
-        return false;
-    }
-
-    const std::size_t data = header + kArrayHeaderDataOffset;
     const auto unsignedCount = static_cast<std::uint64_t>(count);
-    if (data > blob.size()
-        || (unsignedCount != 0
-            && unsignedCount > static_cast<std::uint64_t>((blob.size() - data) / stride))) {
+    std::size_t header = 0;
+    reader::TypedArrayRows rows{};
+    std::uint32_t padding = 0;
+    if (!relative_offset(relativeField, relative, header)
+        || !reader::read_typed_array(blob, header, unsignedCount, expectedClass, stride, rows)
+        || !read(blob, header + Header::kPadding, padding) || padding != 0) {
         return false;
     }
-    output = Array{unsignedCount, data, elementClass};
+    output = Array{unsignedCount, rows.data, rows.elementClass};
     return true;
 }
 
@@ -138,16 +120,17 @@ relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) no
     std::int64_t relative = 0;
     std::size_t target = 0;
     if (!read(blob, field, relative) || !relative_offset(field, relative, target)
-        || target < sizeof(std::uint32_t)
-        || !contains(blob, target - sizeof(std::uint32_t), kArrayMarkerAndHeaderSize)) {
+        || target < kComponentClassBack
+        || !contains(blob, target - kComponentClassBack, kComponentPrefixSize)) {
         return false;
     }
     std::uint32_t owner = 0;
     ComponentEndpoint candidate{};
     candidate.offset = target;
-    if (!read(blob, target - 4, candidate.componentClass) || !read(blob, target, owner)
-        || owner != configTag || !read(blob, target + 4, candidate.peerClass)
-        || !read(blob, target + 8, candidate.peerOffset)) {
+    if (!reader::layout::class_word_before(blob, target, candidate.componentClass)
+        || !read(blob, target, owner) || owner != configTag
+        || !read(blob, target + kComponentPeerClassOffset, candidate.peerClass)
+        || !read(blob, target + kComponentPeerOffsetOffset, candidate.peerOffset)) {
         return false;
     }
     output = candidate;
@@ -174,19 +157,18 @@ template <std::size_t Size>
 [[nodiscard]] bool read_placement_fields(std::span<const std::byte> blob,
                                          std::size_t placementOffset,
                                          AuthoredSquadCandidate& candidate) noexcept {
-    if (!contains(blob, placementOffset, kAuthoredSquadPlacementStride)
+    if (!contains(blob, placementOffset, kAuthoredPlacementStride)
         || !read(blob, placementOffset, candidate.classDefinitionTag)
         || !read_finite_vector(
-            blob, placementOffset + kAuthoredSquadPlacementRotationOffset, candidate.rotation)
+            blob, placementOffset + kAuthoredPlacementRotationOffset, candidate.rotation)
         || !read_finite_vector(
-            blob, placementOffset + kAuthoredSquadPlacementPositionOffset, candidate.position)
-        || !read(blob, placementOffset + kAuthoredSquadPlacementScaleOffset, candidate.uniformScale)
+            blob, placementOffset + kAuthoredPlacementPositionOffset, candidate.position)
+        || !read(blob, placementOffset + kAuthoredPlacementScaleOffset, candidate.uniformScale)
         || !std::isfinite(candidate.uniformScale)
-        || !read(blob, placementOffset + kAuthoredSquadPlacementNameHashOffset, candidate.nameHash)
-        || !read(
-            blob, placementOffset + kAuthoredSquadPlacementFlagsOffset, candidate.placementFlagsRaw)
+        || !read(blob, placementOffset + kAuthoredPlacementNameHashOffset, candidate.nameHash)
+        || !authored_placement_flags(blob, placementOffset, candidate.placementFlagsRaw)
         || !read(blob,
-                 placementOffset + kAuthoredSquadPlacementIdentityOffset,
+                 placementOffset + kAuthoredPlacementIdentifierOffset,
                  candidate.placementIdentity)) {
         return false;
     }
@@ -276,7 +258,8 @@ bool authored_squad_member_at(std::span<const std::byte> blob,
         return false;
     }
     AuthoredSquadMember candidate{};
-    if (!read(blob, row, candidate.key) || !read(blob, row + 4, candidate.reserved)) {
+    if (!read(blob, row, candidate.key)
+        || !read(blob, row + kMemberReservedOffset, candidate.reserved)) {
         return false;
     }
     for (std::size_t variant = 0; variant < candidate.candidates.size(); ++variant) {
@@ -316,7 +299,7 @@ bool authored_squad_candidate_record_at(std::span<const std::byte> blob,
         return false;
     }
     std::memcpy(candidate.descriptorTail.data(),
-                blob.data() + candidate.descriptorOffset + sizeof(candidate.placementRelative),
+                blob.data() + candidate.descriptorOffset + kCandidateTailOffset,
                 candidate.descriptorTail.size());
     if (candidate.placementRelative == 0) {
         output = candidate;
@@ -324,15 +307,16 @@ bool authored_squad_candidate_record_at(std::span<const std::byte> blob,
     }
     if (!relative_offset(
             candidate.descriptorOffset, candidate.placementRelative, candidate.placementOffset)
-        || candidate.placementOffset < sizeof(std::uint32_t)
+        || candidate.placementOffset < kPlacementClassBack
         || !contains(blob,
-                     candidate.placementOffset - sizeof(std::uint32_t),
-                     sizeof(std::uint32_t) + kAuthoredSquadPlacementStride)) {
+                     candidate.placementOffset - kPlacementClassBack,
+                     kPlacementClassBack + kAuthoredPlacementStride)) {
         return false;
     }
 
-    if (!read(blob, candidate.placementOffset - 4, candidate.placementClass)
-        || candidate.placementClass != kAuthoredSquadPlacementClass
+    if (!reader::layout::class_word_before(
+            blob, candidate.placementOffset, candidate.placementClass)
+        || candidate.placementClass != kAuthoredPlacementClass
         || !read_placement_fields(blob, candidate.placementOffset, candidate)) {
         return false;
     }
@@ -393,7 +377,7 @@ bool authored_squad_inline_point_set(std::span<const std::byte> blob,
         || !read_placement_fields(blob, candidate.placementOffset, candidate.placement)) {
         return false;
     }
-    candidate.placement.placementClass = kAuthoredSquadPlacementClass;
+    candidate.placement.placementClass = kAuthoredPlacementClass;
     present = true;
     output = candidate;
     return true;
@@ -459,7 +443,7 @@ bool authored_squad_rule_point_at(std::span<const std::byte> blob,
         return false;
     }
     std::memcpy(candidate.rawTail.data(),
-                blob.data() + candidate.rowOffset + sizeof(candidate.placementIdentity),
+                blob.data() + candidate.rowOffset + kRulePointTailOffset,
                 candidate.rawTail.size());
     output = candidate;
     return true;

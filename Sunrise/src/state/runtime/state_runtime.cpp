@@ -300,7 +300,9 @@ bool initialize(void* module,
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
     secure_reset(*initialized);
     // The seeded banks decide every derived bar, gate and seasonal counter, so both run last.
-    (void)seed_seasonal_progression();
+    // No peer holds the account yet, so a perk this sets needs no push.
+    bool perksEarned = false;
+    (void)seed_seasonal_progression(perksEarned);
     unlocks::records::seed();
     return transaction.commit();
 }

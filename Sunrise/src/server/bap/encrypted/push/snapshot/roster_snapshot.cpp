@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <span>
 
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/datagen/character_record/character_record_encoder.h"
 #include "../../../../../middleware/datagen/definitions.h"
 #include "../../../../../middleware/datagen/family3/family3_roster.h"
@@ -14,6 +15,15 @@ namespace sunrise::server::bap::encrypted::push::snapshot {
 namespace {
 
 namespace character_record = middleware::datagen::character_record;
+
+/** Names the step that emptied the roster; it always returns false. */
+[[nodiscard]] bool report_roster_failure(const char* step) noexcept {
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::warn,
+                      "ev=family3 stage=prepare result=fail step=%s",
+                      step);
+    return false;
+}
 
 /**
  * Appends one family-three character record per character in use.
@@ -35,20 +45,22 @@ namespace character_record = middleware::datagen::character_record;
     for (std::size_t index = 0; index < account.characterCount; ++index) {
         middleware::datagen::family4::loadout::ResolvedInstances instances{};
         std::int32_t light = 0;
-        if (!middleware::datagen::family4::loadout::resolve_instances(account, index, instances)
-            || !state::equipment::light::resolution::character_light(account, index, light)) {
-            return false;
+        if (!middleware::datagen::family4::loadout::resolve_instances(account, index, instances)) {
+            return report_roster_failure("loadout");
+        }
+        if (!state::equipment::light::resolution::character_light(account, index, light)) {
+            return report_roster_failure("light");
         }
         if (rawExtent > scratch.plaintext.size()
             || scratch.plaintext.size() - rawExtent < character_record::kFamily3RecordSize
             || objectCount >= staged.objects.size()) {
-            return false;
+            return report_roster_failure("record_storage");
         }
         const auto record =
             std::span(scratch.plaintext).subspan(rawExtent, character_record::kFamily3RecordSize);
         if (!character_record::encode_family3(
                 account.characters[index], instances, light, record)) {
-            return false;
+            return report_roster_failure("record_encode");
         }
         std::size_t compressedSize = 0;
         if (!compress_object(scratch,
@@ -58,7 +70,7 @@ namespace character_record = middleware::datagen::character_record;
                              compressedExtent,
                              staged.objects[objectCount],
                              compressedSize)) {
-            return false;
+            return report_roster_failure("record_object");
         }
         compressedExtent += compressedSize;
         ++objectCount;
@@ -77,12 +89,12 @@ bool prepare_roster(Scratch& scratch,
                     Prepared& prepared) noexcept {
     const state::AccountState account = state::account_snapshot();
     if (reservation.rawWriteOffset > scratch.plaintext.size()) {
-        return false;
+        return report_roster_failure("reservation");
     }
     const auto destination = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     std::size_t rawSize = 0;
     if (!middleware::datagen::family3::encode_roster(account, destination, rawSize)) {
-        return false;
+        return report_roster_failure("roster_encode");
     }
     Prepared staged{};
     std::size_t objectCount = 0;
@@ -96,7 +108,7 @@ bool prepare_roster(Scratch& scratch,
                          compressedExtent,
                          staged.objects[objectCount],
                          listCompressed)) {
-        return false;
+        return report_roster_failure("roster_object");
     }
     compressedExtent += listCompressed;
     ++objectCount;

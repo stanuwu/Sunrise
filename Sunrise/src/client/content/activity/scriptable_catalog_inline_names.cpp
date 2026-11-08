@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "../../../middleware/content/packages/reader/container_framing.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808000.h"
 #include "../../../state/build_data/scriptables/inline_name_evidence.h"
 
 namespace sunrise::client::content::activity::scriptables::internal {
@@ -14,9 +16,13 @@ namespace {
 namespace catalog = state::build_data::scriptables;
 namespace evidence = state::build_data::scriptables::inline_name_evidence;
 
-// Inline strings: the package class id and the header bytes before the text.
-constexpr std::uint32_t kInlineStringClass = 0x80800065U;
-constexpr std::size_t kInlineStringHeaderBytes = 12;
+using InlineString = middleware::content::packages::schema::generated::SInlineString;
+/** An inline string is its class word, then its record, then the text. */
+constexpr std::size_t kInlineStringLengthOffset =
+    middleware::content::packages::reader::layout::kClassWordSize
+    + offsetof(InlineString, byteLength);
+constexpr std::size_t kInlineStringHeaderBytes =
+    middleware::content::packages::reader::layout::kClassWordSize + sizeof(InlineString);
 
 /** Reads one trivially copied value from a bounded package blob. */
 template <typename Value>
@@ -94,8 +100,9 @@ bool visit_inline_names(std::span<const std::byte> blob,
     for (std::size_t offset = 0; offset <= blob.size() - kInlineStringHeaderBytes; offset += 4) {
         std::uint32_t classId = 0;
         std::uint64_t encodedLength = 0;
-        if (!read_value(blob, offset, classId) || classId != kInlineStringClass
-            || !read_value(blob, offset + sizeof(classId), encodedLength) || encodedLength == 0
+        if (!read_value(blob, offset, classId) || classId != InlineString::kClass
+            || !read_value(blob, offset + kInlineStringLengthOffset, encodedLength)
+            || encodedLength == 0
             || encodedLength > blob.size() - offset - kInlineStringHeaderBytes) {
             continue;
         }

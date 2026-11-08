@@ -31,11 +31,18 @@ View view() noexcept {
             g_sockets.rows()};
 }
 
-/** Rejects cycles and bounds combined pool and automatic-wrapper paths, memoizing heights. */
+/**
+ * Rejects cycles and bounds combined pool and automatic-wrapper paths, memoizing heights.
+ * @param index Pool to check.
+ * @param heights Height of each checked pool; zero for an unchecked one.
+ * @param depth Nesting of the path that reached this pool.
+ * @return False on a cycle or a path deeper than the traversal depth.
+ */
 bool valid_depth(View data,
                  std::size_t index,
                  std::array<std::uint8_t, kPoolCapacity>& heights,
                  std::size_t depth = 0) noexcept {
+    // A height no path reaches marks a pool still on the current path.
     constexpr std::uint8_t kVisiting = 0xFF;
     if (depth >= kTraversalDepth) {
         return false;
@@ -107,7 +114,11 @@ bool ready() noexcept {
     return g_pools.count() != 0 && g_items.count() != 0;
 }
 
-/** Checks bank ranges, item references and bounded acyclic pool and wrapper traversal. */
+/**
+ * Checks bank ranges, item references and bounded acyclic pool and wrapper traversal.
+ * @param data Complete candidate graph.
+ * @return False when any bank is empty where it must not be, too large, or names a missing row.
+ */
 bool valid(View data) noexcept {
     if (data.pools.empty() || data.pools.size() > kPoolCapacity || data.entries.empty()
         || data.entries.size() > kEntryCapacity || data.items.empty()

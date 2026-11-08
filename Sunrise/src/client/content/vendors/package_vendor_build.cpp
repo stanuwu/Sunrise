@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "../../../core/logging/log.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808078.h"
 #include "../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/build_data/vendors/definition.h"
@@ -19,6 +20,7 @@ namespace {
 namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
 namespace domain = state::build_data::vendors;
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Every extracted row, kept off the caller stack. */
 struct Storage {
@@ -165,7 +167,7 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
         return false;
     }
     const std::span<const std::byte> blob{storage.blob};
-    if (!tables::find_array_at(blob, tables::kTableArrayDescriptor, array)
+    if (!tables::find_array_at(blob, offsetof(generated::SVendorIndex, table), array)
         || array.elementClass != domain::kIndexRowClass || array.count > domain::kIndexCapacity) {
         return false;
     }
@@ -269,10 +271,11 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
     const std::span<const std::byte> blob{storage.blob};
     ArrayView installed{};
     ArrayView sale{};
-    ArrayView third{};
+    ArrayView interactions{};
     if (!read_array(blob, kInstalledArrayDescriptor, domain::kInstalledRowStride, installed)
         || !read_array(blob, kSaleArrayDescriptor, domain::kSaleRowStride, sale)
-        || !read_array(blob, kThirdArrayDescriptor, domain::kThirdRowStride, third)) {
+        || !read_array(
+            blob, kInteractionArrayDescriptor, domain::kInteractionRowStride, interactions)) {
         return false;
     }
     domain::Definition definition{};
@@ -287,9 +290,9 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
     definition.saleRowBase = sale.base;
     definition.saleRowClass = sale.classId;
     definition.saleCount = sale.count;
-    definition.thirdRowBase = third.base;
-    definition.thirdRowClass = third.classId;
-    definition.thirdCount = third.count;
+    definition.interactionRowBase = interactions.base;
+    definition.interactionRowClass = interactions.classId;
+    definition.interactionCount = interactions.count;
     definition.saleRowOffset = static_cast<std::uint32_t>(storage.saleRowCount);
     definition.installedRowOffset = static_cast<std::uint32_t>(storage.installedRowCount);
     // A skipped definition must leave both banks exactly as it found them; an orphan sale row

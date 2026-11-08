@@ -119,6 +119,8 @@ inline constexpr std::uint16_t kChangeFlags = 0;
  * @param subscription Family id the Client picked.
  * @param accountObjectId Id the account object publishes under.
  * @param reservation Prior payload prefixes that staging must keep.
+ * @param accountSelectionCleared The peer's account object names no character; the character
+ *        object stays resident.
  * @param prepared Gets the compressed object descriptors and scratch clear extents.
  * @return True when State, mappings, layouts and the installed compression all fit.
  */
@@ -128,6 +130,7 @@ prepare(Scratch& scratch,
         std::uint32_t accountObjectId,
         const Reservation& reservation,
         std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+        bool accountSelectionCleared,
         Prepared& prepared) noexcept;
 
 /**

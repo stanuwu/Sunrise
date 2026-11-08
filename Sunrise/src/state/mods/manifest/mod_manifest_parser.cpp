@@ -28,6 +28,9 @@ constexpr std::string_view kConfigKey = "config";
 /** Startup package bindings require manifest version 3. */
 constexpr std::string_view kBindingsKey = "configBindings";
 constexpr std::uint32_t kBindingsVersion = 3;
+/** The mod's own package ids require manifest version 4. */
+constexpr std::string_view kPackagesKey = "packages";
+constexpr std::uint32_t kPackagesVersion = 4;
 /** Dependency object keys. `id` is shared with the root. */
 constexpr std::string_view kMinimumKey = "minVersion";
 constexpr std::string_view kMaximumKey = "maxVersion";
@@ -90,6 +93,7 @@ struct Seen final {
     bool cheat{};
     bool config{};
     bool bindings{};
+    bool packages{};
 };
 
 /** Config entry fields already read, so a repeat is refused. */
@@ -122,6 +126,7 @@ private:
     [[nodiscard]] bool dependencies(Manifest& output) noexcept;
     [[nodiscard]] bool dependency(Dependency& output) noexcept;
     [[nodiscard]] bool incompatible(Manifest& output) noexcept;
+    [[nodiscard]] bool packages(Manifest& output) noexcept;
     [[nodiscard]] bool config(Manifest& output) noexcept;
     [[nodiscard]] bool config_entry(std::span<const ConfigEntry> earlier,
                                     ConfigEntry& output) noexcept;
@@ -354,6 +359,39 @@ bool Parser::incompatible(Manifest& output) noexcept {
     }
 }
 
+/** Reads the own package id list, each a "0x" hex string, and keeps it ascending. */
+bool Parser::packages(Manifest& output) noexcept {
+    if (!consume('[')) {
+        return fail("'packages' must be a list of package ids");
+    }
+    if (!consume(']')) {
+        for (;;) {
+            if (output.packageCount == output.packages.size()) {
+                return fail("'packages' lists more than %zu ids", output.packages.size());
+            }
+            std::uint64_t value = 0;
+            if (!unsigned_value(value) || !own_package_id(value)) {
+                return fail("'packages' ids must be 0x%04X to 0x%04X",
+                            kFirstOwnPackageId,
+                            kLastOwnPackageId);
+            }
+            output.packages[output.packageCount++] = static_cast<std::uint16_t>(value);
+            if (consume(']')) {
+                break;
+            }
+            if (!consume(',')) {
+                return fail("'packages' expected ',' or ']'");
+            }
+        }
+    }
+    const auto ids = std::span(output.packages).first(output.packageCount);
+    std::sort(ids.begin(), ids.end());
+    if (std::adjacent_find(ids.begin(), ids.end()) != ids.end()) {
+        return fail("'packages' lists an id twice");
+    }
+    return true;
+}
+
 /** Reads one config key and checks its characters. */
 bool Parser::config_key(Text<kConfigKeyCapacity>& output) noexcept {
     std::string_view raw;
@@ -542,6 +580,9 @@ bool Parser::root_key(std::string_view key, Manifest& output, Seen& seen) noexce
         }
         return read_bindings(json_.substr(start, position() - start), output, error_);
     }
+    if (key == kPackagesKey) {
+        return once(seen.packages, kPackagesKey) && packages(output);
+    }
     return unknown(key);
 }
 
@@ -629,6 +670,9 @@ bool Parser::root(Manifest& output) noexcept {
     }
     if (output.manifestVersion < kBindingsVersion && seen.bindings) {
         return fail("'configBindings' needs 'manifestVersion' %u or higher", kBindingsVersion);
+    }
+    if (output.manifestVersion < kPackagesVersion && seen.packages) {
+        return fail("'packages' needs 'manifestVersion' %u or higher", kPackagesVersion);
     }
     return check_references(output) && check_bindings(output, error_);
 }

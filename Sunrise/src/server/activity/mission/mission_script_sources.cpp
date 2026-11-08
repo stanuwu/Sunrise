@@ -306,15 +306,15 @@ const std::array<char, lua_vm::kSearchPathByteCapacity>& sdk_lua_search_path() n
     return g_sdkLuaSearchPath;
 }
 
-bool controller_file_name(std::uint32_t oneBasedActivityRow, std::span<char> output) noexcept {
-    if (oneBasedActivityRow == 0 || output.empty()) {
-        return false;
+/** Leaves the output empty when the view names no activity. */
+void controller_file(const sdk::BoundView& view, std::span<char> output) noexcept {
+    if (output.empty()) {
+        return;
     }
-    const sdk::Snapshot catalog = sdk::snapshot();
-    if (catalog == nullptr || oneBasedActivityRow - 1 >= catalog->activities().size()) {
-        return false;
+    const format::Activity* const activity = sdk::bound_activity(view);
+    if (activity == nullptr || !controller_name(*view.catalog, *activity, output)) {
+        output[0] = '\0';
     }
-    return controller_name(*catalog, catalog->activities()[oneBasedActivityRow - 1], output);
 }
 
 /** Resolves the script root and the SDK Lua search path. Logs its own refusal. */

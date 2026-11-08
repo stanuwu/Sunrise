@@ -2,6 +2,7 @@
 #include <limits>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80802f.h"
 #include "../../../../middleware/content/packages/tables/field_reader.h"
 #include "../../../../state/progression/season_pass_reward_catalog.h"
 #include "internal.h"
@@ -23,8 +24,8 @@ bool read_season_reward(Storage& storage,
                         domain::Reward& reward,
                         BankFailure& failure) noexcept {
     std::uint32_t rank = 0;
-    std::uint32_t itemIndex = 0;
-    std::uint32_t claimSlot = 0;
+    std::uint16_t itemIndex = 0;
+    std::uint16_t claimSlot = 0;
     if (!tables::read(progressionTable, at + tables::kProgressionRewardRankOffset, rank)
         || !tables::read(
             progressionTable, at + tables::kProgressionRewardItemIndexOffset, itemIndex)
@@ -35,16 +36,14 @@ bool read_season_reward(Storage& storage,
         return false;
     }
 
-    // Native fields are 32-bit, the stored row keeps the narrower native index widths.
+    // The rank is 32-bit; the stored row keeps it as 8 bits.
     tables::IndexRow entry{};
     if (rank > (std::numeric_limits<std::uint8_t>::max)()
-        || itemIndex > (std::numeric_limits<std::uint16_t>::max)()
-        || claimSlot > (std::numeric_limits<std::uint16_t>::max)()
         || !tables::index_row(storage.itemIndexTable, itemRows, itemIndex, entry)) {
         return false;
     }
     reward.itemHash = entry.definitionHash;
-    reward.itemIndex = static_cast<std::uint16_t>(itemIndex);
+    reward.itemIndex = itemIndex;
     reward.requiredRank = static_cast<std::uint8_t>(rank);
 
     // A reward with no claim flag carries slot 0, any other slot must map to the account bank.
@@ -102,7 +101,7 @@ bool build_season_pass(const reader::Source& source,
     if (!tables::slot_tag(root, tables::kItemTableSlot, itemTableTag) || itemTableTag == 0
         || !reader::read_tag(source, storage.scratch, itemTableTag, storage.itemIndexTable)
         || !tables::find_array_at(std::span<const std::byte>{storage.itemIndexTable},
-                                  tables::kTableArrayDescriptor,
+                                  offsetof(generated::ItemIndexTable, table),
                                   itemRows)
         || itemRows.elementClass != tables::kItemIndexTableClass) {
         return false;
@@ -113,7 +112,7 @@ bool build_season_pass(const reader::Source& source,
     if (!tables::slot_tag(root, tables::kProgressionTableSlot, tableTag) || tableTag == 0
         || !reader::read_tag(source, storage.scratch, tableTag, storage.progressionTable)
         || !tables::find_array_at(std::span<const std::byte>{storage.progressionTable},
-                                  tables::kTableArrayDescriptor,
+                                  offsetof(generated::C80807cd9, table),
                                   progressions)
         || progressions.elementClass != tables::kProgressionTableClass
         || progressions.count <= state::progression::season_pass::kProgressionDefinitionIndex) {

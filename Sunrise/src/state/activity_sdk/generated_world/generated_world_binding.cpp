@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -48,16 +49,6 @@ SRWLOCK g_cacheLock{SRWLOCK_INIT};
 std::array<CacheEntry, kCacheCapacity> g_cache{};
 std::size_t g_nextCacheEntry{};
 
-/** Borrows a fixed activity destination name without reading past its owned bytes. */
-[[nodiscard]] std::string_view
-destination_name(const activity::destination::DestinationSelection& destination) noexcept {
-    if (destination.packageNameLength > destination.packageName.size()) {
-        return {};
-    }
-    return {reinterpret_cast<const char*>(destination.packageName.data()),
-            destination.packageNameLength};
-}
-
 /** Checks the structural identities that make one public BoundView exact. */
 [[nodiscard]] bool exact_bound_view(const activity_sdk::BoundView& view,
                                     const format::Scenario*& scenario,
@@ -68,11 +59,7 @@ destination_name(const activity::destination::DestinationSelection& destination)
         || activity->scenarioIndex != view.scenarioRow
         || (activity->flags & format::kActivityExactMask) != format::kActivityExactMask
         || scenario->tag == 0 || scenario->tag == format::kAbsentIndex
-        || view.binding.destination.activityIndex < 0
-        || static_cast<std::uint32_t>(view.binding.destination.activityIndex)
-               != activity->activityIndex
-        || destination_name(view.binding.destination)
-               != view.catalog->string(activity->internalName)) {
+        || !activity_sdk::destination_matches(*view.catalog, *activity, view.binding.destination)) {
         return false;
     }
     scenarioName = view.catalog->string(scenario->name);
@@ -381,6 +368,45 @@ bool region_is_public(const GeneratedWorldView& view,
         return false;
     }
     isPublic = bubble.isPublic;
+    return true;
+}
+
+/** Reads the public flag through the shard, or a mod pack's own state rows. */
+bool region_is_public(const activity_sdk::BoundView& activitySdkView,
+                      std::int32_t effectiveRegion,
+                      bool& isPublic) noexcept {
+    isPublic = false;
+    if (activitySdkView.catalog != nullptr && activitySdkView.catalog->from_mod()) {
+        return activity_sdk::mod_region_is_public(activitySdkView, effectiveRegion, isPublic);
+    }
+    GeneratedWorldView world{};
+    return resolve(activitySdkView, world) == BindStatus::ready
+           && region_is_public(world, effectiveRegion, isPublic);
+}
+
+/** A bubble whose flag does not read counts as not public. */
+bool public_bubble_mask(const activity_sdk::BoundView& activitySdkView,
+                        std::size_t bubbleCount,
+                        std::int32_t regionsPerBubble,
+                        std::uint64_t& mask) noexcept {
+    mask = 0;
+    const bool mod = activitySdkView.catalog != nullptr && activitySdkView.catalog->from_mod();
+    GeneratedWorldView world{};
+    if (!mod && resolve(activitySdkView, world) != BindStatus::ready) {
+        return false;
+    }
+    const std::size_t count =
+        (std::min)(bubbleCount, std::size_t{std::numeric_limits<std::uint64_t>::digits});
+    for (std::size_t bubble = 0; bubble < count; ++bubble) {
+        const auto region = static_cast<std::int32_t>(bubble) * regionsPerBubble;
+        bool isPublic = false;
+        const bool known =
+            mod ? activity_sdk::mod_region_is_public(activitySdkView, region, isPublic)
+                : region_is_public(world, region, isPublic);
+        if (known && isPublic) {
+            mask |= std::uint64_t{1} << bubble;
+        }
+    }
     return true;
 }
 

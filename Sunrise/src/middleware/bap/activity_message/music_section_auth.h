@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80804e.h"
+#include "../../content/packages/schema/generated/tag_classes_80804f.h"
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
 
@@ -14,11 +16,12 @@
 namespace sunrise::middleware::bap::activity_message::music_section {
 
 namespace fields = auth_fields;
+namespace generated = middleware::content::packages::schema::generated;
 
 // Type 11 uses these component and Auth schema identities.
 inline constexpr std::uint8_t kSlotType = 11;
-inline constexpr std::uint32_t kComponentClass = 0x80804E8EU;
-inline constexpr std::uint32_t kSchema = 0x80804F58U;
+inline constexpr std::uint32_t kComponentClass = generated::MusicSensorComponent::kClass;
+inline constexpr std::uint32_t kSchema = generated::C80804f58::kClass;
 /** The mask spans four 32-bit lanes, one bit per section. */
 inline constexpr std::size_t kSectionCount = 128;
 inline constexpr std::size_t kMaskLaneCount = 4;

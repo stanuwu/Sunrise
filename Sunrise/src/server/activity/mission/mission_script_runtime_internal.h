@@ -38,7 +38,7 @@ struct ActivityMissionSeedPlan;
 namespace sunrise::server::activity::mission {
 
 namespace sdk = state::activity_sdk;
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 namespace format = state::activity_sdk::format;
 namespace mission_state = state::activity::mission;
 
@@ -233,7 +233,7 @@ struct RuntimeInstance final {
     std::uint64_t dispatchInputSequence{};
     lua_vm::Vm vm{};
     sdk::BoundView view{};
-    generated::GeneratedWorldView worldView{};
+    generated_world::GeneratedWorldView worldView{};
     lua_vm::ProgramIdentity identity{};
     mission_state::ProgramKey programKey{};
     std::array<char, 16> lastVmStage{};
@@ -320,9 +320,9 @@ void observe_player_life(RuntimeInstance& instance,
 /** Raises one triggerState per report, and one edge per watched volume whose occupancy changed. */
 void push_trigger_edges(RuntimeInstance& instance,
                         const host::SenseObservationSnapshot& sense) noexcept;
-/** Raises one dedicated type-31 edge from a decoded schema-0x8080879F msg-19 payload. */
+/** Raises one dedicated type-31 edge from a decoded player-trigger msg-19 payload. */
 void push_player_trigger(RuntimeInstance& instance, const host::Event& incident) noexcept;
-/** Raises one exact Type-6 start/finish edge from a decoded schema-0x808087BF msg-19 payload. */
+/** Raises one exact Type-6 start/finish edge from a decoded cinematic msg-19 payload. */
 void push_cinematic(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Raises one event per named actor whose movement or delivery level changed. */
 void push_actor_path_edges(RuntimeInstance& instance,
@@ -400,6 +400,9 @@ void arm_state_region_teleport(RuntimeInstance& instance,
                                const server::bap::ActivityMissionSeedPlan& plan) noexcept;
 /** @return The identity every host-state edge that is not a Sense edge carries. */
 [[nodiscard]] host::Event state_edge_event(const RuntimeInstance& instance) noexcept;
+/** @return The identity every derived Sense edge carries. */
+[[nodiscard]] host::Event sense_edge_event(const RuntimeInstance& instance,
+                                           const host::SenseObservation& observation) noexcept;
 /** Raises one event per peer session that appeared or left this instance's destination. */
 void push_session_roster_edges(RuntimeInstance& instance,
                                std::span<const state::activity::SessionRosterRow> roster) noexcept;
@@ -531,6 +534,8 @@ enum class SourceStatus : std::uint8_t {
 /** @return The Lua require path every program opens with. */
 [[nodiscard]] const std::array<char, lua_vm::kSearchPathByteCapacity>&
 sdk_lua_search_path() noexcept;
+/** Writes the controller path `<stem>/<stem>.lua` read from the view's own catalog. */
+void controller_file(const sdk::BoundView& view, std::span<char> output) noexcept;
 /** Zeroes the bytes `read_source` returned, once the program no longer needs them. */
 void clear_source(std::span<const char> source) noexcept;
 /** Clears the script buffer and both paths. */
@@ -552,15 +557,15 @@ void service_pending_starts(std::uint64_t now) noexcept;
 /**
  * Reports an attach result when it changes for the binding.
  * @param name Stable result token written to the log.
- * @param activityRow Zero-based SDK row, or the absent sentinel before one resolves.
+ * @param view The resolved activity, or null before one resolves.
  */
-void report_attach_result(
-    const state::activity::SessionBinding& binding,
-    AttachResult result,
-    std::string_view name,
-    std::uint32_t activityRow = format::kAbsentIndex,
-    sdk::Status sdkStatus = sdk::Status::notReady,
-    generated::BindStatus generatedWorldStatus = generated::BindStatus::invalidBoundView) noexcept;
+void report_attach_result(const state::activity::SessionBinding& binding,
+                          AttachResult result,
+                          std::string_view name,
+                          const sdk::BoundView* view = nullptr,
+                          sdk::Status sdkStatus = sdk::Status::notReady,
+                          generated_world::BindStatus generatedWorldStatus =
+                              generated_world::BindStatus::invalidBoundView) noexcept;
 /** @return True when the Host still reports this binding as active. */
 [[nodiscard]] bool is_active(const host::DiagnosticsSnapshot& diagnostics,
                              const state::activity::SessionBinding& binding) noexcept;

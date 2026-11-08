@@ -2,7 +2,6 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
-#include <limits>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/material_requirements/material_requirement_catalog.h"
@@ -11,6 +10,10 @@
 
 namespace sunrise::client::content::items::packages {
 namespace {
+
+/** One requirement array field: its count, then its self-relative offset. */
+constexpr std::size_t kRequirementArrayBytes =
+    sizeof(generated::TagArray<generated::MaterialRequirementRow>);
 
 /**
  * Reports the requirement-set extraction result once per build.
@@ -94,8 +97,9 @@ bool build_material_requirements(const reader::Source& source,
         || tables::package_of(tableTag) == tables::kAbsentPackageId
         || !reader::read_tag(source, storage.scratch, tableTag, storage.definition, tableClass)
         || tableClass != tables::kMaterialRequirementTableClass
-        || !tables::find_array_at(
-            std::span<const std::byte>{storage.definition}, tables::kTableArrayDescriptor, sets)
+        || !tables::find_array_at(std::span<const std::byte>{storage.definition},
+                                  offsetof(generated::MaterialRequirementTable, table),
+                                  sets)
         || sets.elementClass != tables::kMaterialRequirementSetRowClass || sets.count == 0
         || sets.count > storage.materialRequirementRows.size()) {
         report_material_requirement_failure("table", 0, 0);
@@ -128,11 +132,9 @@ bool build_material_requirements(const reader::Source& source,
         }
         const auto descriptor = static_cast<std::int64_t>(pointerAt) + relative;
         if (descriptor >= 0 && static_cast<std::size_t>(descriptor) <= table.size()
-            && table.size() - static_cast<std::size_t>(descriptor)
-                   >= tables::kTableArrayDescriptor + sizeof(std::uint64_t)) {
+            && table.size() - static_cast<std::size_t>(descriptor) >= kRequirementArrayBytes) {
             const auto descriptorBytes =
-                table.subspan(static_cast<std::size_t>(descriptor),
-                              tables::kTableArrayDescriptor + sizeof(std::uint64_t));
+                table.subspan(static_cast<std::size_t>(descriptor), kRequirementArrayBytes);
             if (std::all_of(descriptorBytes.begin(), descriptorBytes.end(), [](std::byte value) {
                     return value == std::byte{};
                 })) {
@@ -160,7 +162,7 @@ bool build_material_requirements(const reader::Source& source,
         for (std::size_t row = 0; row < requirements.count; ++row) {
             const std::size_t at =
                 requirements.dataOffset + row * tables::kMaterialRequirementRowStride;
-            std::uint32_t itemIndex = 0;
+            decltype(generated::MaterialRequirementRow::itemIndex) itemIndex = 0;
             std::uint8_t deleted = 0;
             std::uint8_t omitted = 0;
             std::uint16_t condition = 0;
@@ -180,13 +182,11 @@ bool build_material_requirements(const reader::Source& source,
             std::memcpy(&condition,
                         table.data() + at + tables::kMaterialRequirementSentinelOffset,
                         sizeof condition);
-            if (itemIndex >= itemDefinitionCount
-                || itemIndex > (std::numeric_limits<std::uint16_t>::max)() || deleted > 1
-                || omitted > 1) {
+            if (itemIndex >= itemDefinitionCount || deleted > 1 || omitted > 1) {
                 report_material_requirement_failure("row", set, row);
                 return false;
             }
-            requirement.itemDefinitionIndex = static_cast<std::uint16_t>(itemIndex);
+            requirement.itemDefinitionIndex = itemIndex;
             requirement.condition = condition;
             requirement.deleteOnAction = deleted != 0;
             requirement.omitFromRequirements = omitted != 0;

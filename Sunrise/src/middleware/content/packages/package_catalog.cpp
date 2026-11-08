@@ -1,5 +1,6 @@
 #include "package_catalog.h"
 
+#include "../../../core/logging/log.h"
 #include "../../../state/content/content_catalog.h"
 
 namespace sunrise::middleware::content::packages {
@@ -25,6 +26,12 @@ bool load_catalog(std::wstring_view directory, named_tags::DirectoryResult& resu
     if (named_tags::extract_directory(directory, false, &insert_mapping, nullptr, result)) {
         return true;
     }
+    core::log::writef(core::log::Channel::middleware,
+                      core::log::Level::error,
+                      "ev=named_catalog stage=load result=fail files=%zu entries=%zu catalog=%zu",
+                      result.files,
+                      result.entries,
+                      state::content::count());
     state::content::clear();
     result = {};
     return false;

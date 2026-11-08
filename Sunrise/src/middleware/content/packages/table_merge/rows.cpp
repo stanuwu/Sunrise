@@ -15,13 +15,6 @@ namespace {
 
 using Bytes = std::span<const std::byte>;
 
-struct Descriptor final {
-    /** Typed array descriptor: u64 count, then i64 counted from its own field. */
-    static constexpr std::size_t kCount = 0;
-    static constexpr std::size_t kRelative = 8;
-    static constexpr std::size_t kSize = kDescriptorSize;
-};
-
 /** Rows start right after a typed array header. */
 using Header = reader::layout::TypedArrayHeader;
 
@@ -213,6 +206,8 @@ private:
     Status write_added_rows(std::uint32_t id, std::size_t input);
     Status walk(std::size_t source, std::size_t holder, std::size_t field, std::uint16_t shape);
     Status
+    walk_object(std::size_t source, std::size_t holder, std::size_t object, std::uint16_t shape);
+    Status
     relocate(std::size_t source, std::size_t holder, std::size_t at, const ShapeField& field);
     Status check_keys(const Op& op) const;
 
@@ -388,7 +383,7 @@ Status Engine::resolve(std::uint32_t id, std::size_t source, View& output) const
         at += view(parent, source).data + std::uint64_t{op.record.parentRow} * parent.stride;
     }
     tables::Array array{};
-    if (!fits(bytes, at, Descriptor::kSize)
+    if (!fits(bytes, at, kDescriptorSize)
         || !tables::find_optional_array_at(bytes, static_cast<std::size_t>(at), array)) {
         return Status::format;
     }
@@ -573,8 +568,8 @@ Status Engine::read_pointer(std::size_t source,
     }
     std::size_t base = field;
     if (kind == FieldKind::ownedArray) {
-        output.count = load<std::uint64_t>(bytes, field + Descriptor::kCount);
-        base = field + Descriptor::kRelative;
+        output.count = load<std::uint64_t>(bytes, field + reader::layout::kArrayFieldCount);
+        base = field + reader::layout::kArrayFieldRelative;
     }
     const auto value = load<std::int64_t>(bytes, base);
     if (value == 0) {
@@ -601,8 +596,8 @@ void Engine::write_pointer(std::size_t at, FieldKind kind, const Pointer& pointe
     std::vector<std::byte>& output = *frame_->output;
     std::size_t base = at;
     if (kind == FieldKind::ownedArray) {
-        store(output, at + Descriptor::kCount, pointer.count);
-        base = at + Descriptor::kRelative;
+        store(output, at + reader::layout::kArrayFieldCount, pointer.count);
+        base = at + reader::layout::kArrayFieldRelative;
     }
     const auto offset = static_cast<std::int64_t>(pointer.target) - static_cast<std::int64_t>(base);
     store(output, base, pointer.null ? std::int64_t{0} : offset);
@@ -614,7 +609,7 @@ void Engine::write_descriptor(std::size_t at, const Op& op) const {
     write_pointer(at, FieldKind::ownedArray, pointer);
 }
 
-/** Writes one pointer at `at`, then relocates the array it owns. @param field Holder's field. */
+/** Writes one pointer at `at`, then relocates what it owns. @param field Holder's field. */
 Status Engine::emit(std::size_t at,
                     const ShapeField& field,
                     std::size_t holder,
@@ -623,10 +618,12 @@ Status Engine::emit(std::size_t at,
     if (write) {
         write_pointer(at, field.kind, pointer);
     }
-    if (field.kind != FieldKind::ownedArray || pointer.null) {
+    if (pointer.null || field.kind == FieldKind::rowPointer) {
         return Status::ok;
     }
-    return walk(pointer.source, holder, pointer.field, field.ref);
+    return field.kind == FieldKind::ownedArray
+               ? walk(pointer.source, holder, pointer.field, field.ref)
+               : walk_object(pointer.source, holder, pointer.raw, field.ref);
 }
 
 /** Writes one merged op: its descriptor, its rows and its key checks. */
@@ -665,7 +662,7 @@ Status Engine::write_stock_row(std::uint32_t id, std::uint64_t row) {
     }
     for (const std::uint32_t child : nested) {
         const auto at = rowSkip_.begin() + ops_[child].record.descriptorOffset;
-        std::fill_n(at, Descriptor::kSize, kNestedByte);
+        std::fill_n(at, kDescriptorSize, kNestedByte);
     }
     for (std::size_t input = 0; input < inputs_.size(); ++input) {
         const View& from = op.views[input];
@@ -789,6 +786,27 @@ Engine::walk(std::size_t source, std::size_t holder, std::size_t field, std::uin
     return Status::ok;
 }
 
+/** Relocates the pointers in one object once. @param holder Input owning the shapes. */
+Status Engine::walk_object(std::size_t source,
+                           std::size_t holder,
+                           std::size_t object,
+                           std::uint16_t shape) {
+    if (shape == kNoElementShape || !visited_.insert({source, object}).second) {
+        return Status::ok;
+    }
+    const Shape& layout = *inputs_[holder].sidecar->shape(shape);
+    if (!fits(source_bytes(source), object, layout.stride)) {
+        return Status::format;
+    }
+    for (const ShapeField& item : layout.fields) {
+        const Status status = relocate(source, holder, object + item.rowOffset, item);
+        if (status != Status::ok) {
+            return status;
+        }
+    }
+    return Status::ok;
+}
+
 /** Rewrites one pointer field of an owned element at its output address. */
 Status
 Engine::relocate(std::size_t source, std::size_t holder, std::size_t at, const ShapeField& field) {
@@ -850,11 +868,11 @@ void Engine::spans(std::vector<Span>& output) const {
             {static_cast<std::uint32_t>(begin), static_cast<std::uint32_t>(end), structural});
     };
     if (has_size_word(stock_)) {
-        add(0, sizeof(std::uint64_t), true);
+        add(0, reader::layout::kSizeWordSize, true);
     }
     for (const Op& op : ops_) {
         const View& from = op.stock;
-        add(from.descriptor, from.descriptor + Descriptor::kSize, true);
+        add(from.descriptor, from.descriptor + kDescriptorSize, true);
         if (from.header != 0) {
             add(from.header - Header::kMarkerBack,
                 from.data + static_cast<std::size_t>(from.count) * op.stride,
