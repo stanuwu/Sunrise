@@ -38,8 +38,7 @@ struct LoreOrdinalRange final {
     std::uint16_t firstRecord{};
 };
 
-/** Package names the destination snapshot reports for the two destinations that pay loot. */
-constexpr std::string_view kDreamingCityPackage = "dreaming_city_freeroam";
+/** Package name the destination snapshot reports for the Moon, where Jade Rabbits pay loot. */
 constexpr std::string_view kMoonPackage = "luna_freeroam";
 
 /** One target index shared by every interaction that carries no object of its own. */
@@ -288,20 +287,6 @@ void grant_random_moon_loot() noexcept {
     grant_random_world_loot(kMoonWeapons, kMoonTitanArmour, kMoonHunterArmour, kMoonWarlockArmour);
 }
 
-/** Identifies the shared generic target as a Dreaming City cat-statue interaction. */
-[[nodiscard]] bool is_dreaming_city_cat(bool definitionFound,
-                                        const state::build_data::sobjects::Definition& definition,
-                                        std::string_view packageName) noexcept {
-    // Name hash and lane the cat statue's world object carries.
-    constexpr std::uint32_t kCatNameHash = 0x7A0FD954U;
-    constexpr std::uint32_t kCatLane4 = 0x0011FFFFU;
-    if (!definitionFound || definition.typeCode != 2 || definition.nameHash != kCatNameHash
-        || definition.lane4 != kCatLane4) {
-        return false;
-    }
-    return packageName == kDreamingCityPackage;
-}
-
 /**
  * Identifies a Jade Rabbit interaction by its generic target, statue ordinal, and Moon package.
  * @param incident Accepted incident whose extra targets carry the statue.
@@ -472,17 +457,11 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
                       static_cast<int>(packageName.size()),
                       packageName.data());
 
-    // TODO: grant the Derelict, Menagerie, Tribute Hall and Corrupted Egg chapters once the
-    // incident names the object; the shared generic target names the interaction only.
+    // TODO: grant the Derelict, Menagerie, Tribute Hall and Corrupted Egg chapters, and the
+    // Dreaming City cat statues, once the incident names the object; the shared generic target
+    // names the interaction only, so every Dreaming City generic interaction would pass for a cat.
     if (isCorruptedEgg) {
         grant_random_dreaming_city_loot();
-    } else if (is_dreaming_city_cat(primaryFound, primary, packageName)) {
-        grant_random_dreaming_city_loot();
-        // Objective slot counting the cat statues fed.
-        constexpr std::uint16_t kRememberYourMannersFlag = 9448U;
-        if (progress_changed(unlock_records::advance_objective(kRememberYourMannersFlag))) {
-            bap::arm_account_resync_everywhere();
-        }
     } else if (is_moon_rabbit(incident, primaryFound, primary, packageName)) {
         grant_random_moon_loot();
         // Objective slot counting the Jade Rabbit statues fed.
