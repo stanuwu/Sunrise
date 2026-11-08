@@ -3,6 +3,7 @@
  * Helpers here need the Host runtime lock; the entry points take it themselves.
  */
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdio>
@@ -536,8 +537,33 @@ void read_events_after(EventCursor after, EventRead& output) noexcept {
     ReleaseSRWLockShared(&g_lock);
 }
 
-/** Reads the committed Auth state for one exact activity generation. */
-bool auth_state(const state::activity::SessionBinding& binding, AuthState& output) noexcept {
+namespace {
+
+/** @return True when one link refused the instance's current state revision. */
+[[nodiscard]] bool link_refused(const InstanceSnapshot& view, std::uint64_t generation) noexcept {
+    return generation != 0 && view.refusedStateRevision == view.stateRevision
+           && std::find(view.refusedLinks.begin(), view.refusedLinks.end(), generation)
+                  != view.refusedLinks.end();
+}
+
+/** Adds one link to the current revision's refusals; a new revision starts an empty set. */
+void record_link_refusal(InstanceSnapshot& view, std::uint64_t generation) noexcept {
+    if (view.refusedStateRevision != view.stateRevision) {
+        view.refusedLinks.fill(0);
+        view.refusedStateRevision = view.stateRevision;
+    }
+    const auto free = std::find(view.refusedLinks.begin(), view.refusedLinks.end(), 0U);
+    if (!link_refused(view, generation) && free != view.refusedLinks.end()) {
+        *free = generation;
+    }
+}
+
+} // namespace
+
+/** Reads the committed Auth state and the asking link's refusal of it. */
+bool auth_state(const state::activity::SessionBinding& binding,
+                std::uint64_t sourceGeneration,
+                AuthState& output) noexcept {
     output = {};
     AcquireSRWLockShared(&g_lock);
     const Instance* const instance = find_instance(binding);
@@ -545,31 +571,50 @@ bool auth_state(const state::activity::SessionBinding& binding, AuthState& outpu
     if (found) {
         output.revision = instance->view.stateRevision;
         output.lifetimeState = instance->view.lifetimeState;
+        output.refused = link_refused(instance->view, sourceGeneration);
     }
     ReleaseSRWLockShared(&g_lock);
     return found;
 }
 
-/** Records one refused BAP attempt without clearing the committed output. */
+/**
+ * Records one link's refused msg-5 body against the exact state revision it carried.
+ * @param binding Exact activity owning the revision.
+ * @param sourceGeneration ActivityClient generation that attempted the body.
+ * @param revision State revision the body carried, zero before the first commit.
+ * @param lifetimeState Lifetime state the body carried.
+ * @param status Refusal; a missing epoch is the only one the next attempt can clear.
+ * @param soleLink True when no other link can carry the revision, so the output slot is freed.
+ */
 void note_auth_attempt(const state::activity::SessionBinding& binding,
                        std::uint64_t sourceGeneration,
                        std::uint64_t revision,
                        std::uint8_t lifetimeState,
-                       OutputStatus status) noexcept {
-    if (revision == 0 || status == OutputStatus::idle || status == OutputStatus::pending
+                       OutputStatus status,
+                       bool soleLink) noexcept {
+    if (sourceGeneration == 0 || status == OutputStatus::idle || status == OutputStatus::pending
         || status == OutputStatus::transportStaged || status == OutputStatus::canceled) {
         return;
     }
+    const bool refused = status != OutputStatus::waitingForEpoch;
     AcquireSRWLockExclusive(&g_lock);
     Instance* const instance = find_instance(binding);
-    if (instance != nullptr && instance->view.outputPending
-        && instance->view.outputKind == OutputKind::authState
-        && instance->view.stateRevision == revision
+    if (instance != nullptr && instance->view.stateRevision == revision
         && instance->view.lifetimeState == lifetimeState) {
-        instance->view.lastOutputAttemptTick = GetTickCount64();
-        instance->view.lastOutputSourceGeneration = sourceGeneration;
-        ++instance->view.outputAttempts;
-        instance->view.outputStatus = status;
+        // A revision also advances without an output slot, so the refusal is kept on the revision.
+        if (refused) {
+            record_link_refusal(instance->view, sourceGeneration);
+        }
+        if (instance->view.outputPending && instance->view.outputKind == OutputKind::authState) {
+            const std::uint64_t now = GetTickCount64();
+            instance->view.lastOutputAttemptTick = now;
+            instance->view.lastOutputSourceGeneration = sourceGeneration;
+            ++instance->view.outputAttempts;
+            if (refused && soleLink) {
+                cancel_output(*instance, now);
+            }
+            instance->view.outputStatus = status;
+        }
     }
     ReleaseSRWLockExclusive(&g_lock);
 }

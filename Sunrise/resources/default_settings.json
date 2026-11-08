@@ -1,5 +1,5 @@
 {
-  "version": 18,
+  "version": 19,
   "core": {
     "logging": {
       "debugger_sink": true,
@@ -38,7 +38,10 @@
     "socket_menu_routing": false,
     "reveal_lore_books": true,
     "cheats": false,
-    "dump_package_keys": false
+    "exports": {
+      "package_keys": false,
+      "tag_definitions": false
+    }
   },
   "server": {
     "bap_port": 30974,

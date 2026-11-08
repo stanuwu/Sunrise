@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <span>
 #include <string_view>
@@ -31,6 +32,26 @@ struct Directories final {
 
 /** Clears the published mod list and the config values. */
 void shutdown() noexcept;
+
+/** Reload refusal text with its null; it must fit one Studio command reply. */
+inline constexpr std::size_t kReloadMessageCapacity = 192;
+
+/** What a package reload did. */
+struct ReloadResult final {
+    bool ok{};
+    /** True when the reader now serves a different table. */
+    bool changed{};
+    std::size_t files{};
+    /** Why the reload was refused; empty when ok. */
+    std::array<char, kReloadMessageCapacity> message{};
+};
+
+/**
+ * Checks every mod's package files again, exactly as boot does, and points the server's package
+ * reader at the result. The previous table stays live when any mod would no longer load.
+ * Runs on one thread at a time; a second call while one runs is refused.
+ */
+[[nodiscard]] ReloadResult reload_packages() noexcept;
 
 /**
  * Visits the published mod list while State holds its shared lock.

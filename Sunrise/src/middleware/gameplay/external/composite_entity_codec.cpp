@@ -6,6 +6,11 @@
 #include <memory>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80804b.h"
+#include "../../content/packages/schema/generated/tag_classes_80804c.h"
+#include "../../content/packages/schema/generated/tag_classes_808090.h"
+#include "../../content/packages/schema/generated/tag_classes_808092.h"
+#include "../../content/packages/schema/generated/tag_classes_80809c.h"
 #include "composite_entity_codec_internal.h"
 
 namespace sunrise::middleware::gameplay::external {
@@ -14,6 +19,7 @@ namespace {
 namespace format = state::activity_sdk::format;
 namespace wire = actor_wire;
 namespace bits = middleware::encoding::bits;
+namespace generated = middleware::content::packages::schema::generated;
 
 /** The walker view stores the type code and codec parameter 2 as one byte each. */
 constexpr std::uint32_t kMaximumByteField = 0xFFU;
@@ -26,11 +32,11 @@ constexpr std::uint8_t kNullableU32AliasType = 21;
 /** In mode one, field type 37 is a plain nested walk of kNestedCustomSchema. */
 constexpr std::uint8_t kNestedCustomType = 37;
 /** The type-37 schema: a 19-bit real and a 5-bit int8, 24 bits in all. */
-constexpr std::uint32_t kNestedCustomSchema = 0x808092FFU;
+constexpr std::uint32_t kNestedCustomSchema = generated::C808092ff::kClass;
 /** The damage component replicates each level pool as its own walk of kDamagePoolSchema. */
-constexpr std::uint32_t kDamageComponent = 0x80804BEEU;
+constexpr std::uint32_t kDamageComponent = generated::UnknownDamageComponent::kClass;
 /** One pool level; its single field is the only value it decodes. */
-constexpr std::uint32_t kDamagePoolSchema = 0x80804C5CU;
+constexpr std::uint32_t kDamagePoolSchema = generated::C80804c5c::kClass;
 /** Pool 0 is health and pool 1 the shield. */
 constexpr std::uint8_t kHealthPool = 0;
 constexpr std::uint8_t kShieldPool = 1;
@@ -594,11 +600,11 @@ runtime_schema(const CompositeEntityCodecContext& context, std::uint32_t handle)
             || !read_field(&resolverContext, component.firstField, componentField)
             || componentField.typeCode != 1 || componentField.structOffset != 0
             || !read_schema(&resolverContext, componentField.nestedSchemaRow, source)
-            || source.handle != 0x808090E6U || source.fieldCount == 0
+            || source.handle != generated::C808090e6::kClass || source.fieldCount == 0
             || !read_field(&resolverContext, source.firstField, sourceField)
             || sourceField.typeCode != 1 || sourceField.structOffset != 0
             || !read_schema(&resolverContext, sourceField.nestedSchemaRow, reference)
-            || reference.handle != 0x80809C42U || reference.fieldCount != 3) {
+            || reference.handle != generated::ClientRef::kClass || reference.fieldCount != 3) {
             return false;
         }
         std::array<const wire::RuntimeDecodedValue*, 3> fields{};

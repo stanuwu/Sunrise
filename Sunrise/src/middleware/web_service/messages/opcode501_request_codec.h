@@ -22,7 +22,8 @@ struct Request {
  * Race, gender and class each carry a presence bit and a +0x80 bias; the header follows.
  * @param message Parsed Web Service envelope.
  * @param request Receives the creation fields, the header in record byte order.
- * @return False when the payload is short, a presence flag is clear, or a value is out of range.
+ * @return False when the payload is short or a presence flag is clear. The values are not
+ *         range-checked here; the account check refuses an out-of-range one.
  */
 [[nodiscard]] bool parse_request(const Message& message, Request& request) noexcept;
 

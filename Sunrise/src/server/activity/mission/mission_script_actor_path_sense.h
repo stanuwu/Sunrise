@@ -5,12 +5,15 @@
 #include <limits>
 #include <span>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807f.h"
 #include "mission_script_combatant_damage_sense.h"
 
 namespace sunrise::server::activity::mission {
 
+namespace generated = middleware::content::packages::schema::generated;
+
 /** Nested combatant program record: field 0 is the program state, field 1 its revision. */
-inline constexpr std::uint32_t kCombatantProgramSchema = 0x80807F6EU;
+inline constexpr std::uint32_t kCombatantProgramSchema = generated::C80807f6e::kClass;
 /** Root ordinals of the type-2 Sense body. */
 inline constexpr std::uint16_t kActorGenerationOrdinal = kCombatantDamageRevisionOrdinal;
 inline constexpr std::uint16_t kActorDeliveryRevisionOrdinal = 5;

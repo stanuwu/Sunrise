@@ -7,6 +7,12 @@
 #include <set>
 #include <tuple>
 
+#include "../../../middleware/content/packages/reader/layout.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808000.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808081.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808083.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809f.h"
 #include "../../../middleware/content/packages/tables/slot_descriptor_reader.h"
 #include "scriptable_catalog_reference_scan.h"
 
@@ -16,28 +22,36 @@ namespace {
 namespace format = state::activity_sdk::format;
 namespace references = scriptables::internal;
 namespace tables = middleware::content::packages::tables;
+namespace generated = middleware::content::packages::schema::generated;
+namespace layout = middleware::content::packages::reader::layout;
+using ArrayHeader = layout::TypedArrayHeader;
 
-// Ability definitions contain 32-byte groups and four-byte request keys.
-constexpr std::uint32_t kDefinitionClass = 0x8080815FU;
-constexpr std::uint32_t kGroupClass = 0x808081ACU;
-constexpr std::uint32_t kRequestClass = 0x80800070U;
-constexpr std::size_t kGroupsField = 32U;
-constexpr std::size_t kGroupStride = 32U;
-constexpr std::size_t kGroupHashOffset = 12U;
-constexpr std::size_t kRequestsField = 16U;
-// Logical Type 58 points name a resource whose float-selector array starts at +64.
+// Ability definitions contain groups of request keys.
+constexpr std::uint32_t kDefinitionClass = generated::ActorStateMachineDefinition::kClass;
+constexpr std::uint32_t kGroupClass = generated::StateMachineGroup::kClass;
+constexpr std::uint32_t kRequestClass = generated::SU32HashElement::kClass;
+constexpr std::size_t kGroupsField = offsetof(generated::ActorStateMachineDefinition, abilities);
+constexpr std::size_t kGroupStride = sizeof(generated::StateMachineGroup);
+constexpr std::size_t kGroupHashOffset = offsetof(generated::StateMachineGroup, groupHash);
+constexpr std::size_t kRequestsField = offsetof(generated::StateMachineGroup, typeNames);
+constexpr std::size_t kRequestStride = sizeof(generated::SU32HashElement);
+constexpr std::size_t kRequestKeyOffset = offsetof(generated::SU32HashElement, keyHash);
+// Logical Type 58 points name a resource that holds a float-selector array.
 constexpr std::uint32_t kPointSlotType = 58U;
-constexpr std::uint32_t kPointComponentClass = 0x80807D9BU;
-constexpr std::uint32_t kPointResourceClass = 0x8080834CU;
-constexpr std::uint32_t kPointSelectorClass = 0x8080000FU;
-constexpr std::size_t kPointResourceOffset = 88U;
-constexpr std::size_t kPointSelectorsField = 64U;
+constexpr std::uint32_t kPointComponentClass = generated::AbilityPointComponent::kClass;
+constexpr std::uint32_t kPointResourceClass = generated::AbilityPointResource::kClass;
+constexpr std::uint32_t kPointSelectorClass = generated::SF32Column::kClass;
+constexpr std::size_t kPointResourceOffset =
+    offsetof(generated::AbilityPointSlotDefinitionType58, resource);
+constexpr std::size_t kPointSelectorsField =
+    offsetof(generated::AbilityPointResource, floatSelectors);
+constexpr std::size_t kPointSelectorStride = sizeof(generated::SF32Column);
 // Runtime ability keys use the empty-name hash as the absent value.
 constexpr std::uint32_t kAbsentName = 0x811C9DC5U;
 // Logical Type 2 owns the actor controller.
 constexpr std::uint32_t kCombatantSlotType = 2U;
-// Package arrays place their elements after a 16-byte header.
-constexpr std::size_t kArrayHeaderSize = 16U;
+// Package arrays place their elements after the typed-array header.
+constexpr std::size_t kArrayHeaderSize = ArrayHeader::kSize;
 
 /** Reads one bounded package scalar. @return False without changing the output on failure. */
 template <typename Value>
@@ -68,7 +82,7 @@ bool array(std::span<const std::byte> bytes,
     std::uint64_t rawCount = 0;
     std::int64_t relative = 0;
     if (!read(bytes, field, rawCount) || rawCount > format::kAbsentIndex
-        || !read(bytes, field + sizeof rawCount, relative)) {
+        || !read(bytes, field + layout::kArrayFieldRelative, relative)) {
         return false;
     }
     count = static_cast<std::uint32_t>(rawCount);
@@ -76,7 +90,7 @@ bool array(std::span<const std::byte> bytes,
         data = 0;
         return true;
     }
-    const auto base = static_cast<std::int64_t>(field + sizeof rawCount);
+    const auto base = static_cast<std::int64_t>(field + layout::kArrayFieldRelative);
     if ((relative > 0 && base > (std::numeric_limits<std::int64_t>::max)() - relative)
         || (relative < 0 && relative < -base)) {
         return false;
@@ -85,7 +99,7 @@ bool array(std::span<const std::byte> bytes,
     std::uint64_t repeated = 0;
     std::uint32_t actualClass = 0;
     if (!read(bytes, header, repeated) || repeated != count
-        || !read(bytes, header + sizeof repeated, actualClass) || actualClass != expectedClass
+        || !read(bytes, header + ArrayHeader::kClass, actualClass) || actualClass != expectedClass
         || header > bytes.size() || kArrayHeaderSize > bytes.size() - header) {
         return false;
     }
@@ -159,7 +173,7 @@ bool requests(Packages& packages,
             || group == kAbsentName || !groups.insert(group).second
             || !array(package->bytes,
                       row + kRequestsField,
-                      sizeof(std::uint32_t),
+                      kRequestStride,
                       kRequestClass,
                       keys,
                       keyCount)) {
@@ -167,7 +181,7 @@ bool requests(Packages& packages,
         }
         for (std::uint32_t key = 0; key < keyCount; ++key) {
             std::uint32_t request = 0;
-            if (!read(package->bytes, keys + key * sizeof request, request)) {
+            if (!read(package->bytes, keys + key * kRequestStride + kRequestKeyOffset, request)) {
                 return false;
             }
             if (request != 0 && request != kAbsentName && request != format::kAbsentIndex) {
@@ -262,7 +276,7 @@ bool build(const topology_inventory::Snapshot& topology,
                     || point->classId != kPointResourceClass
                     || !array(point->bytes,
                               kPointSelectorsField,
-                              sizeof(float),
+                              kPointSelectorStride,
                               kPointSelectorClass,
                               data,
                               count)) {

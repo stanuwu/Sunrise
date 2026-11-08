@@ -5,28 +5,25 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "../schema/generated/tag_layout_808000_0.h"
+#include "../schema/generated/tag_layout_80809e_0.h"
+#include "../schema/generated/tag_layout_80809f_0.h"
+#include "container_framing.h"
+#include "package_file.h"
+
 namespace sunrise::middleware::content::packages::reader::layout {
 
-/** Only header version 38 is supported. */
-inline constexpr std::uint16_t kSupportedVersion = 38;
-/** The public header prefix that carries every table offset. */
-inline constexpr std::size_t kHeaderSize = 0x180;
-/** A decompressed block is always this size. */
-inline constexpr std::size_t kBlockSize = 0x40000;
-/** Entry table offsets are stored relative to this fixed adjustment. */
-inline constexpr std::uint32_t kEntryTableAdjustment = 96;
-/** The block table follows the entry table after this gap. */
-inline constexpr std::size_t kBlockTableGap = 32;
-/** Typed array metadata immediately before each physical package table. */
-inline constexpr std::size_t kTableArrayPrefixSize = 20;
+/** Typed array metadata immediately before each physical package table: marker word, header. */
+inline constexpr std::size_t kTableArrayPrefixSize =
+    kClassWordSize + sizeof(schema::generated::STypedArrayMarker);
 /** Array marker stored at the start of one table prefix. */
-inline constexpr std::uint32_t kTableArrayMarker = 0x80809FBDU;
+inline constexpr std::uint32_t kTableArrayMarker = schema::generated::STypedArrayMarker::kClass;
 /** Entry-record element class stored eight bytes before the entry data. */
-inline constexpr std::uint32_t kEntryTableElementClass = 0x80809EF3U;
+inline constexpr std::uint32_t kEntryTableElementClass =
+    schema::generated::PackageEntryRecord::kClass;
 /** Block-record element class stored eight bytes before the block data. */
-inline constexpr std::uint32_t kBlockTableElementClass = 0x80809EEEU;
-/** The header's metadata digest is one SHA-1. */
-inline constexpr std::size_t kMetadataDigestSize = 20;
+inline constexpr std::uint32_t kBlockTableElementClass =
+    schema::generated::PackageBlockRecord::kClass;
 /** Tag handles start at this base. */
 inline constexpr std::uint32_t kTagBase = 0x80800000;
 /** The package id sits in the bits above the entry index. */
@@ -34,9 +31,9 @@ inline constexpr std::uint32_t kTagEntryBits = 13;
 /** Entry indices sit in the low bits of a tag handle. */
 inline constexpr std::uint32_t kTagEntryMask = (1U << kTagEntryBits) - 1U;
 /** Element class of a typed array of u32 words. */
-inline constexpr std::uint32_t kU32ArrayClass = 0x8080000BU;
+inline constexpr std::uint32_t kU32ArrayClass = schema::generated::U32ArrayRow::kClass;
 /** Element class of a typed array of u16 values. */
-inline constexpr std::uint32_t kU16ArrayClass = 0x8080000AU;
+inline constexpr std::uint32_t kU16ArrayClass = schema::generated::SU16Element::kClass;
 
 /** @return The tag handle of entry `entry` in package `packageId`. */
 [[nodiscard]] constexpr std::uint32_t tag_of(std::uint16_t packageId,
@@ -57,27 +54,19 @@ inline constexpr std::uint32_t kU16ArrayClass = 0x8080000AU;
 /** Typed array header inside an entry; its rows follow it. */
 struct TypedArrayHeader {
     // Offsets from the header start: marker before it, then {u64 count, u32 class, u32 pad}.
-    static constexpr std::size_t kMarkerBack = 4;
-    static constexpr std::size_t kCount = 0;
-    static constexpr std::size_t kClass = 8;
-    static constexpr std::size_t kSize = 16;
+    static constexpr std::size_t kMarkerBack = kClassWordSize;
+    static constexpr std::size_t kCount = offsetof(schema::generated::STypedArrayMarker, count);
+    static constexpr std::size_t kClass =
+        offsetof(schema::generated::STypedArrayMarker, elementClass);
+    static constexpr std::size_t kPadding = offsetof(schema::generated::STypedArrayMarker, padding);
+    static constexpr std::size_t kSize = sizeof(schema::generated::STypedArrayMarker);
 };
 
-/** Header fields read by their fixed public offsets. */
-struct HeaderOffsets {
-    /** Format version, which the reader checks before trusting any later field. */
-    static constexpr std::size_t kVersion = 0x00;
-    /** Package id, the high bits of every tag handle the file owns. */
-    static constexpr std::size_t kPackageId = 0x04;
-    /** Patch index, which picks the newest file of one package. */
-    static constexpr std::size_t kPatchId = 0x20;
-    /** Logical tag-addressable entry count; the physical region owns a separate prefix count. */
-    static constexpr std::size_t kEntryCount = 0xB4;
-    /** Logical block count used to bound entry placement reads. */
-    static constexpr std::size_t kBlockCount = 0xD0;
-    /** File offset of the entry table, whose rows this reader indexes by tag. */
-    static constexpr std::size_t kEntryTable = 0x110;
-};
+/** A TagArray field holds a u64 count, then an i64 offset counted from its own position. */
+inline constexpr std::size_t kArrayFieldCount =
+    offsetof(schema::generated::TagArray<schema::generated::Unknown>, count);
+inline constexpr std::size_t kArrayFieldRelative =
+    offsetof(schema::generated::TagArray<schema::generated::Unknown>, relative);
 
 /** One 16-byte entry-table record. */
 struct EntryRecord {
@@ -92,8 +81,8 @@ struct BlockRecord {
     std::uint32_t size{};
     std::uint16_t patchId{};
     std::uint16_t flags{};
-    std::array<std::byte, 20> opaque{};
-    std::array<std::byte, 16> tag{};
+    std::array<std::byte, 20> sha1{};
+    std::array<std::byte, 16> gcmTag{};
 };
 
 /** Block flag bits. */
@@ -114,14 +103,28 @@ struct EntryPlacement {
 };
 
 /** The entry table is walked by this stride, so the record must pack to exactly this width. */
-inline constexpr std::size_t kEntryRecordSize = 16;
+inline constexpr std::size_t kEntryRecordSize = sizeof(schema::generated::PackageEntryRecord);
 /** The block table is walked by this stride, so the record must pack to exactly this width. */
-inline constexpr std::size_t kBlockRecordSize = 48;
+inline constexpr std::size_t kBlockRecordSize = sizeof(schema::generated::PackageBlockRecord);
 
 static_assert(sizeof(EntryRecord) == kEntryRecordSize);
 static_assert(sizeof(BlockRecord) == kBlockRecordSize);
 static_assert(std::is_trivially_copyable_v<EntryRecord>);
 static_assert(std::is_trivially_copyable_v<BlockRecord>);
+// Each hand record field sits where the generated package record puts it.
+static_assert(offsetof(EntryRecord, reference)
+                  == offsetof(schema::generated::PackageEntryRecord, classReference)
+              && offsetof(EntryRecord, typeInfo)
+                     == offsetof(schema::generated::PackageEntryRecord, typeInfo)
+              && offsetof(EntryRecord, blockInfo)
+                     == offsetof(schema::generated::PackageEntryRecord, blockInfo));
+static_assert(
+    offsetof(BlockRecord, offset) == offsetof(schema::generated::PackageBlockRecord, fileOffset)
+    && offsetof(BlockRecord, size) == offsetof(schema::generated::PackageBlockRecord, size)
+    && offsetof(BlockRecord, patchId) == offsetof(schema::generated::PackageBlockRecord, patchId)
+    && offsetof(BlockRecord, flags) == offsetof(schema::generated::PackageBlockRecord, flags)
+    && offsetof(BlockRecord, sha1) == offsetof(schema::generated::PackageBlockRecord, sha1)
+    && offsetof(BlockRecord, gcmTag) == offsetof(schema::generated::PackageBlockRecord, gcmTag));
 
 /** @param record Entry-table record. @return Its decoded block placement. */
 [[nodiscard]] constexpr EntryPlacement placement(const EntryRecord& record) noexcept {

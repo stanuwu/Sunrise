@@ -5,6 +5,12 @@
 #include <cstring>
 #include <limits>
 
+#include "../packages/reader/layout.h"
+#include "../packages/reader/typed_array.h"
+#include "../packages/schema/generated/tag_classes_808046.h"
+#include "../packages/schema/generated/tag_classes_808048.h"
+#include "../packages/schema/generated/tag_classes_808049.h"
+#include "../packages/schema/generated/tag_classes_80809f.h"
 #include "config_scalar.h"
 
 namespace sunrise::middleware::content::cui {
@@ -14,44 +20,64 @@ using state::mods::ConfigBinding;
 using state::mods::ConfigBindingProfile;
 using state::mods::ConfigType;
 
+namespace generated = packages::schema::generated;
+using Resource = generated::CuiResource;
+using ArrayHeader = generated::STypedArrayMarker;
+using Comparison = generated::CuiCompareInteger;
+
 /** Offsets and strides of the supported CUI resource layout. */
 struct Layout final {
     /** Resource, typed array and comparison records use these wire offsets and widths. */
-    static constexpr std::size_t kHeaderBytes = 344;
-    static constexpr std::size_t kTypes = 56;
-    static constexpr std::size_t kTypeStride = 16;
-    static constexpr std::size_t kTypeNode = 10;
-    static constexpr std::size_t kObjects = 72;
-    static constexpr std::size_t kObjectStride = 64;
-    static constexpr std::size_t kComponents = 32;
-    static constexpr std::size_t kComponentStride = 24;
-    static constexpr std::size_t kProperties = 8;
-    static constexpr std::size_t kPropertyStride = 24;
-    static constexpr std::size_t kSelector = 8;
-    static constexpr std::size_t kValue = 16;
-    static constexpr std::size_t kBindings = 88;
-    static constexpr std::size_t kBindingStride = 56;
-    static constexpr std::size_t kTransform = 48;
-    static constexpr std::size_t kOperand = 4;
-    static constexpr std::size_t kTransformBytes = 8;
-    static constexpr std::size_t kArrayHeaderBytes = 16;
-    static constexpr std::size_t kArrayClass = 8;
-    static constexpr std::size_t kArrayPointer = 8;
-    static constexpr std::size_t kMarkerBytes = 4;
+    static constexpr std::size_t kHeaderBytes = sizeof(Resource);
+    static constexpr std::size_t kTypes = offsetof(Resource, components);
+    static constexpr std::size_t kTypeStride = sizeof(generated::CuiTypeRow);
+    static constexpr std::size_t kTypeHash = offsetof(generated::CuiTypeRow, typeHash);
+    static constexpr std::size_t kTypeNode = offsetof(generated::CuiTypeRow, nodeId);
+    static constexpr std::size_t kObjects = offsetof(Resource, overlays);
+    static constexpr std::size_t kObjectStride = sizeof(generated::CuiObjectRow);
+    static constexpr std::size_t kComponents = offsetof(generated::CuiObjectRow, components);
+    static constexpr std::size_t kComponentStride = sizeof(generated::CuiComponentRow);
+    static constexpr std::size_t kComponentNode = offsetof(generated::CuiComponentRow, nodeKey);
+    static constexpr std::size_t kProperties = offsetof(generated::CuiComponentRow, properties);
+    static constexpr std::size_t kPropertyStride = sizeof(generated::CuiPropertyRow);
+    static constexpr std::size_t kPath = offsetof(generated::CuiPropertyRow, pathSlot);
+    static constexpr std::size_t kSelector = offsetof(generated::CuiPropertyRow, selector);
+    static constexpr std::size_t kValue = offsetof(generated::CuiPropertyRow, value);
+    static constexpr std::size_t kBindings =
+        offsetof(Resource, bindingSet) + offsetof(generated::C808046d6, bindings);
+    static constexpr std::size_t kBindingStride = sizeof(generated::CuiBindingRow);
+    static constexpr std::size_t kTransform = offsetof(generated::CuiBindingRow, conversion);
+    static constexpr std::size_t kKind = offsetof(Comparison, kind);
+    static constexpr std::size_t kComparison = offsetof(Comparison, comparison);
+    static constexpr std::size_t kOperand = offsetof(Comparison, operand);
+    static constexpr std::size_t kTransformBytes = sizeof(Comparison);
+    static constexpr std::size_t kArrayHeaderBytes = sizeof(ArrayHeader);
+    static constexpr std::size_t kMarkerBytes = packages::reader::layout::kClassWordSize;
 };
 
+// The three comparison records share one layout, so one reader serves them all.
+static_assert(offsetof(generated::CuiCompareFloat, comparison) == Layout::kComparison
+              && offsetof(generated::CuiCompareHash, comparison) == Layout::kComparison
+              && offsetof(generated::CuiCompareFloat, operand) == Layout::kOperand
+              && offsetof(generated::CuiCompareHash, operand) == Layout::kOperand
+              && sizeof(generated::CuiCompareFloat) == Layout::kTransformBytes
+              && sizeof(generated::CuiCompareHash) == Layout::kTransformBytes);
+// Every transform, the not transform too, starts with its kind byte.
+static_assert(offsetof(generated::CuiCompareFloat, kind) == Layout::kKind
+              && offsetof(generated::CuiCompareHash, kind) == Layout::kKind
+              && offsetof(generated::CuiNotTransform, kind) == Layout::kKind);
+
 /** Typed array and transform identifiers of the supported wire grammar. */
-constexpr std::uint32_t kArrayMarker = 0x80809FBDU;
-constexpr std::uint32_t kTypesClass = 0x80804622U;
-constexpr std::uint32_t kObjectsClass = 0x8080462AU;
-constexpr std::uint32_t kComponentsClass = 0x808046D4U;
-constexpr std::uint32_t kPropertiesClass = 0x80804858U;
-constexpr std::uint32_t kPathClass = 0x80804949U;
-constexpr std::uint32_t kBindingsClass = 0x808046D8U;
-constexpr std::uint32_t kNotClass = 0x808046E0U;
-constexpr std::uint32_t kIntegerClass = 0x808046DCU;
-constexpr std::uint32_t kFloatClass = 0x808046DBU;
-constexpr std::uint32_t kHashClass = 0x808046DAU;
+constexpr std::uint32_t kTypesClass = generated::CuiTypeRow::kClass;
+constexpr std::uint32_t kObjectsClass = generated::CuiObjectRow::kClass;
+constexpr std::uint32_t kComponentsClass = generated::CuiComponentRow::kClass;
+constexpr std::uint32_t kPropertiesClass = generated::CuiPropertyRow::kClass;
+constexpr std::uint32_t kPathClass = generated::CuiPathSelector::kClass;
+constexpr std::uint32_t kBindingsClass = generated::CuiBindingRow::kClass;
+constexpr std::uint32_t kNotClass = generated::CuiNotTransform::kClass;
+constexpr std::uint32_t kIntegerClass = generated::CuiCompareInteger::kClass;
+constexpr std::uint32_t kFloatClass = generated::CuiCompareFloat::kClass;
+constexpr std::uint32_t kHashClass = generated::CuiCompareHash::kClass;
 /** Typed arrays above 1M rows are refused. */
 constexpr std::uint64_t kArrayLimit = 1U << 20;
 /** Aliased nested arrays cannot consume unbounded startup work. */
@@ -84,24 +110,37 @@ struct PoolSchema final {
     std::uint32_t classId;
     std::size_t stride;
 };
+
+/**
+ * Describes one value pool of the resource.
+ * @tparam Row Pool element class.
+ * @param member Offset of the pool's array field inside the value-pool block.
+ * @return The pool's resource offset, element class and stride.
+ */
+template <typename Row> constexpr PoolSchema pool(std::size_t member) noexcept {
+    return {offsetof(Resource, valuePool) + member, Row::kClass, sizeof(Row)};
+}
+
+using Pools = generated::C80804608;
 /** Authored wire field definitions; opaque pool values are never interpreted as settings. */
 constexpr std::array kPools{
-    PoolSchema{136, 0x8080468DU, 1},
-    PoolSchema{152, 0x80804696U, 4},
-    PoolSchema{168, 0x80804695U, 8},
-    PoolSchema{184, 0x80804694U, 4},
-    PoolSchema{200, 0x80804694U, 4},
-    PoolSchema{216, 0x80804693U, 16},
-    PoolSchema{232, 0x80804692U, 4},
-    PoolSchema{264, 0x80804690U, 4},
-    PoolSchema{280, 0x8080468BU, 2},
-    PoolSchema{312, 0x8080468FU, 4},
-    PoolSchema{328, 0x80804688U, 16},
+    pool<generated::SCuiBoolValue>(offsetof(Pools, boolValues)),
+    pool<generated::CuiIntegerValue>(offsetof(Pools, poolIntegers)),
+    pool<generated::C80804695>(offsetof(Pools, poolPairs)),
+    pool<generated::SCuiFloatValue>(offsetof(Pools, poolFloatsA)),
+    pool<generated::SCuiFloatValue>(offsetof(Pools, poolFloatsBNormalized)),
+    pool<generated::C80804693>(offsetof(Pools, poolVectors)),
+    pool<generated::C80804692>(offsetof(Pools, poolStringHashes)),
+    pool<generated::C80804690>(offsetof(Pools, handleValues)),
+    pool<generated::CuiShortValue>(offsetof(Pools, componentValues)),
+    pool<generated::C8080468f>(offsetof(Pools, poolWords)),
+    pool<generated::C80804688>(offsetof(Pools, poolRecords)),
 };
 /** Pool descriptors accepted for boolean and float values. */
-constexpr std::size_t kBytePool = 136;
-constexpr std::size_t kFloatPoolA = 184;
-constexpr std::size_t kFloatPoolB = 200;
+constexpr std::size_t kBytePool = offsetof(Resource, valuePool) + offsetof(Pools, boolValues);
+constexpr std::size_t kFloatPoolA = offsetof(Resource, valuePool) + offsetof(Pools, poolFloatsA);
+constexpr std::size_t kFloatPoolB =
+    offsetof(Resource, valuePool) + offsetof(Pools, poolFloatsBNormalized);
 
 /** Per-site facts accumulated while walking each resource array once. */
 struct Match final {
@@ -198,19 +237,19 @@ private:
         if (!structure(field, Layout::kArrayHeaderBytes)) {
             return false;
         }
-        const auto count = get<std::uint64_t>(field);
+        const auto count = get<std::uint64_t>(field + packages::reader::layout::kArrayFieldCount);
         output = {0, 0, stride};
         if (count == 0) {
             return true;
         }
         std::size_t header = 0;
-        if (count > kArrayLimit || !relative(field + Layout::kArrayPointer, header)
+        packages::reader::TypedArrayRows rows{};
+        if (count > kArrayLimit
+            || !relative(field + packages::reader::layout::kArrayFieldRelative, header)
             || header < Layout::kMarkerBytes
             || !structure(header - Layout::kMarkerBytes,
                           Layout::kArrayHeaderBytes + Layout::kMarkerBytes)
-            || get<std::uint32_t>(header - Layout::kMarkerBytes) != kArrayMarker
-            || get<std::uint64_t>(header) != count
-            || get<std::uint32_t>(header + Layout::kArrayClass) != classId) {
+            || !packages::reader::read_typed_array(bytes_, header, count, classId, 0, rows)) {
             return false;
         }
         output = {header + Layout::kArrayHeaderBytes, static_cast<std::size_t>(count), stride};
@@ -285,9 +324,9 @@ bool Validator::property(const Array& rows, std::size_t index, std::uint64_t nod
     if (site.profile != ConfigBindingProfile::cuiProperty || site.propertyOffset != record
         || site.offset != value || width(site) != pools_[poolIndex].stride
         || site.poolOffset != kPools[poolIndex].field || ++match.references != 1
-        || !relative(record, pathField)
-        || !array(pathField, kPathClass, sizeof(std::uint32_t), path) || path.count != 0
-        || node > (std::numeric_limits<std::uint16_t>::max)()) {
+        || !relative(record + Layout::kPath, pathField)
+        || !array(pathField, kPathClass, sizeof(generated::CuiPathSelector), path)
+        || path.count != 0 || node > (std::numeric_limits<std::uint16_t>::max)()) {
         return false;
     }
     match.node = node;
@@ -299,8 +338,8 @@ bool Validator::property(const Array& rows, std::size_t index, std::uint64_t nod
         }
         std::size_t laterPath = 0;
         Array selectors{};
-        if (!relative(row, laterPath)
-            || !array(laterPath, kPathClass, sizeof(std::uint32_t), selectors)
+        if (!relative(row + Layout::kPath, laterPath)
+            || !array(laterPath, kPathClass, sizeof(generated::CuiPathSelector), selectors)
             || selectors.count == 0) {
             return false;
         }
@@ -339,7 +378,7 @@ bool Validator::properties() noexcept {
                 return false;
             }
             for (std::size_t index = 0; index < rows.count; ++index) {
-                if (!property(rows, index, get<std::uint64_t>(at))) {
+                if (!property(rows, index, get<std::uint64_t>(at + Layout::kComponentNode))) {
                     return false;
                 }
             }
@@ -367,12 +406,12 @@ bool Validator::comparisons() noexcept {
             return false;
         }
         const auto classId = get<std::uint32_t>(transform - Layout::kMarkerBytes);
-        const auto kind = get<std::uint8_t>(transform);
+        const auto kind = get<std::uint8_t>(transform + Layout::kKind);
         if (classId == kNotClass && kind == 0) {
             continue;
         }
         if (!has(transform, Layout::kTransformBytes)
-            || get<std::uint8_t>(transform + 1) > kLastComparison
+            || get<std::uint8_t>(transform + Layout::kComparison) > kLastComparison
             || !((classId == kIntegerClass && kind == kIntegerKind)
                  || (classId == kFloatClass && kind == kFloatKind)
                  || (classId == kHashClass && kind == kHashKind))) {
@@ -425,7 +464,7 @@ bool Validator::types() noexcept {
             if (++(*found)->typeMatches != 1) {
                 return false;
             }
-            (*found)->nodeType = get<std::uint64_t>(at);
+            (*found)->nodeType = get<std::uint64_t>(at + Layout::kTypeHash);
         }
     }
     return std::all_of(ordered.begin(), ordered.end(), [](const Match* value) {
@@ -464,7 +503,7 @@ bool Validator::run() noexcept {
             return false;
         }
     }
-    if (!structure(0, Layout::kHeaderBytes) || get<std::uint64_t>(0) != bytes_.size()) {
+    if (!structure(0, Layout::kHeaderBytes) || !packages::reader::layout::has_size_word(bytes_)) {
         return false;
     }
     for (std::size_t index = 0; index < kPools.size(); ++index) {

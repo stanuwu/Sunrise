@@ -266,11 +266,15 @@ void report_perk_refusal(std::size_t index, const char* reason) noexcept {
 // The walk skips an absent acquisition flag and an absent claim flag on one sentinel.
 static_assert(build_data::rewards::kAbsent == build_data::season_pass::kUnavailableFlagIndex);
 
-/** Earned perks set both flags when their rank is reached or an owed walk runs. */
-bool grant_progress_flags(bool& walked) noexcept {
-    if (!build_data::season_pass_ready() || !build_data::reward_definitions_ready()
-        || !build_data::item_definitions_ready()) {
-        investment::store::g_session.perkWalkOwed = true;
+/**
+ * Sets the acquisition and claim flags of every perk the selected character has earned.
+ * It sets only clear flags, so it runs on every rank change, pick, publication and artifact change.
+ * @param earned Set when the walk set at least one flag.
+ * @return False when the save could not be read or written.
+ */
+bool walk_earned_perks(bool& earned) noexcept {
+    // Unpublished rows earn nothing yet; their publication walks again.
+    if (!season_perks_walkable()) {
         return true;
     }
     AccountState account;
@@ -328,9 +332,9 @@ bool grant_progress_flags(bool& walked) noexcept {
                 return false;
             }
             flags.accountFlags[flag] = unlocks::kFlagSet;
+            earned = true;
         }
     }
-    walked = true;
     return true;
 }
 
@@ -370,7 +374,8 @@ std::int32_t seasonal_experience() noexcept {
 }
 
 /** Publishes every seasonal value the seeded XP and artifact ownership imply. */
-bool seed_seasonal_progression() noexcept {
+bool seed_seasonal_progression(bool& perksEarned) noexcept {
+    perksEarned = false;
     const std::int32_t experience = seasonal_experience();
     SaleRows rows{};
     std::size_t count = 0;
@@ -407,18 +412,30 @@ bool seed_seasonal_progression() noexcept {
         }
     }
     const std::uint32_t mask = artifact_mask(rows, count);
-    bool walked = false;
-    // A later character pick publishes only a selection patch, so only an owed walk runs here.
-    const bool published =
-        publish_experience_lanes(experience) && publish_artifact_locked(family, mask, experience)
-        && investment::store::write_family5(family)
-        && (!investment::store::g_session.perkWalkOwed || grant_progress_flags(walked))
-        && transaction.commit();
-    if (published && walked) {
-        investment::store::g_session.perkWalkOwed = false;
-    }
+    // A pick changes which class and character flags the perk conditions read.
+    bool earned = false;
+    const bool published = publish_experience_lanes(experience)
+                           && publish_artifact_locked(family, mask, experience)
+                           && investment::store::write_family5(family) && walk_earned_perks(earned)
+                           && transaction.commit();
+    perksEarned = published && earned;
     investment::store::g_mutex.unlock();
     return published;
+}
+
+bool season_perks_walkable() noexcept {
+    return build_data::season_pass_ready() && build_data::reward_definitions_ready()
+           && build_data::item_definitions_ready();
+}
+
+/** Walks the selected character's earned perks on its own, outside a pick or a rank change. */
+bool grant_earned_season_perks(bool& perksEarned) noexcept {
+    perksEarned = false;
+    investment::store::Transaction transaction;
+    bool earned = false;
+    const bool walked = transaction.ready() && walk_earned_perks(earned) && transaction.commit();
+    perksEarned = walked && earned;
+    return walked;
 }
 
 /** @return One-based Season of Arrivals rank the published XP earns. */
@@ -456,8 +473,8 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
         return false;
     }
     const auto total = previous + amount;
-    const bool walkPerks = investment::store::g_session.perkWalkOwed
-                           || seasonal_rank_for(previous) != seasonal_rank_for(total);
+    // A new rank is the only XP change that can earn a perk.
+    const bool rankChanged = seasonal_rank_for(previous) != seasonal_rank_for(total);
 
     Family5State family;
     if (!investment::store::read_family5(family)) {
@@ -466,15 +483,11 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
     SaleRows rows{};
     std::size_t count = 0;
     const std::uint32_t mask = sale_rows(rows, count) ? artifact_mask(rows, count) : 0U;
-    bool walked = false;
-    const bool granted = publish_experience_lanes(total)
-                         && publish_artifact_locked(family, mask, total)
-                         && investment::store::write_family5(family)
-                         && (!walkPerks || grant_progress_flags(walked)) && transaction.commit();
-    if (granted && walked) {
-        investment::store::g_session.perkWalkOwed = false;
-    }
-    return granted;
+    // The caller publishes the whole account image after every grant, so it needs no report.
+    bool earnedRidesTheImage = false;
+    return publish_experience_lanes(total) && publish_artifact_locked(family, mask, total)
+           && investment::store::write_family5(family)
+           && (!rankChanged || walk_earned_perks(earnedRidesTheImage)) && transaction.commit();
 }
 
 /** @return True when this Season pass reward row is already claimed. */
@@ -531,9 +544,12 @@ bool replace_artifact_mod_mask(std::uint32_t expected, std::uint32_t replacement
         return false;
     }
     bool replaced = artifact_mask(rows, count) == expected;
+    // A reset publishes the account image after this; a refused purchase rolls the walk back.
+    bool earnedRidesTheImage = false;
     if (replaced) {
         replaced = publish_artifact_locked(family, replacement, experience)
-                   && investment::store::write_family5(family) && transaction.commit();
+                   && investment::store::write_family5(family)
+                   && walk_earned_perks(earnedRidesTheImage) && transaction.commit();
     }
     investment::store::g_mutex.unlock();
     return replaced;
@@ -574,14 +590,17 @@ bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,
     const std::uint32_t before = artifact_mask(rows, count);
     const std::uint16_t used = points_used(before);
     bool prepared = (before & bit) == 0 && used < earned && used >= column_tier(saleIndex);
+    bool perksEarned = false;
     if (prepared) {
         prepared = publish_artifact_locked(family, before | bit, experience)
-                   && investment::store::write_family5(family) && transaction.commit();
+                   && investment::store::write_family5(family) && walk_earned_perks(perksEarned)
+                   && transaction.commit();
     }
     investment::store::g_mutex.unlock();
     if (!prepared) {
         return false;
     }
+    mutation.perksEarned = perksEarned;
     mutation.accountSoid = account.primarySoid;
     mutation.characterSoid = account.characters[selected].soid;
     mutation.characterIndex = selected;

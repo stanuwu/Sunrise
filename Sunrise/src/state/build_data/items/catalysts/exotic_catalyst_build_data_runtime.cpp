@@ -46,15 +46,13 @@ valid_publication(const items::catalysts::Source& source,
 }
 
 /**
- * Records the last whole-catalog derivation result for cache policy.
+ * Records the last whole-catalog derivation result for cache policy and the settle check.
  * @param error None after a safe derivation, or its exact failure reason.
  */
 void record_derivation_error(items::catalysts::Error error) noexcept {
     runtime::persistence::Context& state = runtime::persistence::context();
     AcquireSRWLockExclusive(&state.lock);
-    if (state.enabled) {
-        state.catalystError = error;
-    }
+    state.catalystError = error;
     ReleaseSRWLockExclusive(&state.lock);
 }
 
@@ -62,6 +60,15 @@ void record_derivation_error(items::catalysts::Error error) noexcept {
 
 bool exotic_catalysts_ready() noexcept {
     return items::catalysts::count() != 0;
+}
+
+/** A derivation or a cache with no catalyst rows sets the verdict; a clear forgets it. */
+bool exotic_catalysts_unsupported() noexcept {
+    runtime::persistence::Context& state = runtime::persistence::context();
+    AcquireSRWLockShared(&state.lock);
+    const bool unsupported = state.catalystError == items::catalysts::Error::unsupportedBuild;
+    ReleaseSRWLockShared(&state.lock);
+    return unsupported;
 }
 
 /**

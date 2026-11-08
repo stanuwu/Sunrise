@@ -8,34 +8,48 @@
 #include <utility>
 #include <vector>
 
+#include "../reader/layout.h"
+#include "../schema/generated/tag_classes_808000.h"
+#include "../schema/generated/tag_classes_80805e.h"
+#include "../schema/generated/tag_classes_80805f.h"
+#include "../schema/generated/tag_classes_80809a.h"
+#include "activity_presentation_table.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::tables::activity_display_names {
 namespace {
 
+namespace generated = schema::generated;
+/** A descriptor names a typed array header; its rows follow it. */
+using Header = reader::layout::TypedArrayHeader;
+
 /** Field offsets, strides and element classes of the installed string-bank layouts. */
-constexpr std::size_t kActivityIndexFieldOffset = 8;
-constexpr std::size_t kActivityIndexStride = 16;
-constexpr std::size_t kActivityIndexPointerOffset = 8;
-constexpr std::uint32_t kActivityIndexElementClass = 0x80805E15U;
-constexpr std::size_t kDisplayFieldOffset = 24;
-constexpr std::size_t kDisplayStride = 36;
-constexpr std::uint32_t kDisplayElementClass = 0x80805E23U;
-constexpr std::size_t kDisplayNameOffset = 4;
-constexpr std::size_t kBankIndexFieldOffset = 8;
-constexpr std::size_t kBankIndexStride = 8;
-constexpr std::uint32_t kBankIndexElementClass = 0x80805F9EU;
-constexpr std::size_t kContainerHashFieldOffset = 8;
-constexpr std::uint32_t kContainerHashElementClass = 0x80800070U;
-constexpr std::size_t kContainerLanguageOffset = 0x18;
-/** A container carries 13 language slots and English is the first. */
-constexpr std::size_t kLanguageCount = 13;
-constexpr std::size_t kEnglishLanguageIndex = 0;
+constexpr std::size_t kActivityIndexFieldOffset = offsetof(generated::ActivityClientTable, table);
+constexpr std::size_t kActivityIndexHashOffset = offsetof(generated::ActivityClientIndexRow, hash);
+constexpr std::size_t kActivityIndexPaddingOffset =
+    offsetof(generated::ActivityClientIndexRow, gap4);
+constexpr std::uint32_t kActivityIndexElementClass = generated::ActivityClientIndexRow::kClass;
+constexpr std::size_t kDisplayFieldOffset =
+    offsetof(generated::ActivityClientTable, componentStorage.displayRows);
+constexpr std::size_t kDisplayStride = sizeof(generated::ActivityDisplayRow);
+constexpr std::uint32_t kDisplayElementClass = generated::ActivityDisplayRow::kClass;
+constexpr std::size_t kBankIndexFieldOffset = offsetof(generated::StringBankIndex, table);
+constexpr std::size_t kBankIndexStride = sizeof(generated::StringBankRow);
+constexpr std::size_t kBankNameHashOffset = offsetof(generated::StringBankRow, nameHash);
+constexpr std::size_t kBankContainerOffset = offsetof(generated::StringBankRow, container);
+constexpr std::uint32_t kBankIndexElementClass = generated::StringBankRow::kClass;
+constexpr std::size_t kContainerHashFieldOffset = offsetof(generated::SLocalizedStrings, ids);
+constexpr std::uint32_t kContainerHashElementClass = generated::SU32HashElement::kClass;
+/** English is the first language slot; a container must hold every slot through the last. */
+constexpr std::size_t kContainerEnglishOffset =
+    offsetof(generated::SLocalizedStrings, languageData);
+constexpr std::size_t kContainerLanguageEnd =
+    offsetof(generated::SLocalizedStrings, languageDataRussian)
+    + sizeof(generated::SLocalizedStrings::languageDataRussian);
 /** Field offsets, strides and element classes of the installed combination layouts. */
-constexpr std::size_t kLanguageCombinationFieldOffset = 72;
-constexpr std::size_t kCombinationStride = 16;
-constexpr std::uint32_t kCombinationElementClass = 0x80809A8EU;
-constexpr std::size_t kPartStride = 32;
+constexpr std::uint32_t kCombinationElementClass = generated::SStringCombination::kClass;
+constexpr std::size_t kPartHashOffset = offsetof(generated::SStringPart, variableHash);
+constexpr std::size_t kPartStringLengthOffset = offsetof(generated::SStringPart, stringLength);
 /** Ceilings that stop a corrupt array header from driving an unbounded read. */
 constexpr std::size_t kMaximumParts = 64;
 constexpr std::size_t kMaximumArrayRows = 1'000'000;
@@ -43,7 +57,7 @@ constexpr std::size_t kMaximumArrayRows = 1'000'000;
 constexpr std::uint32_t kLiteralPartHash = 0x811C9DC5U;
 
 struct DisplayReference final {
-    std::uint32_t bankIndex{};
+    std::uint16_t bankIndex{};
     std::uint32_t stringHash{};
 };
 
@@ -81,25 +95,6 @@ enum class ResolveStatus : std::uint8_t {
     invalid,
 };
 
-/** Adds a signed self-relative pointer without integer wrap. */
-[[nodiscard]] bool
-add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noexcept {
-    if (relative >= 0) {
-        const auto distance = static_cast<std::uint64_t>(relative);
-        if (distance > (std::numeric_limits<std::size_t>::max)() - member) {
-            return false;
-        }
-        target = member + static_cast<std::size_t>(distance);
-        return true;
-    }
-    const auto distance = static_cast<std::uint64_t>(-(relative + 1)) + 1U;
-    if (distance > member) {
-        return false;
-    }
-    target = member - static_cast<std::size_t>(distance);
-    return true;
-}
-
 /** Resolves one table pointer, accepting the canonical null descriptor for an empty array. */
 [[nodiscard]] bool read_array(std::span<const std::byte> blob,
                               std::size_t field,
@@ -114,21 +109,24 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
     std::uint64_t repeated = 0;
     std::uint32_t elementClass = 0;
     std::uint32_t headerPadding = 0;
-    if (!read(blob, field, count) || count > maximum || !read(blob, field + 8, relative)) {
+    if (!read(blob, field, count) || count > maximum
+        || !read(blob, field + reader::layout::kArrayFieldRelative, relative)) {
         return false;
     }
     if (count == 0 && relative == 0) {
         return true;
     }
-    if (!add_relative(field + 8, relative, header) || header > blob.size()
-        || 16 > blob.size() - header || !read(blob, header, repeated) || repeated != count
-        || !read(blob, header + 8, elementClass) || elementClass != expectedElementClass
-        || !read(blob, header + 12, headerPadding) || headerPadding != 0
+    if (!relative_offset(field + reader::layout::kArrayFieldRelative, relative, header)
+        || header > blob.size() || Header::kSize > blob.size() - header
+        || !read(blob, header + Header::kCount, repeated) || repeated != count
+        || !read(blob, header + Header::kClass, elementClass)
+        || elementClass != expectedElementClass
+        || !read(blob, header + Header::kPadding, headerPadding) || headerPadding != 0
         || count > (std::numeric_limits<std::size_t>::max)() / stride) {
         return false;
     }
     const std::size_t bytes = static_cast<std::size_t>(count) * stride;
-    const std::size_t data = header + 16;
+    const std::size_t data = header + Header::kSize;
     if (data > blob.size() || bytes > blob.size() - data) {
         return false;
     }
@@ -235,7 +233,7 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
     Array displayRows{};
     if (!read_array(blob,
                     kActivityIndexFieldOffset,
-                    kActivityIndexStride,
+                    activities::kDisplayRowStride,
                     definitionHashes.size(),
                     kActivityIndexElementClass,
                     indexRows)
@@ -247,31 +245,40 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
                        kDisplayElementClass,
                        displayRows)
         || displayRows.count == 0
-        || indexRows.count > (std::numeric_limits<std::size_t>::max)() / kActivityIndexStride) {
+        || indexRows.count
+               > (std::numeric_limits<std::size_t>::max)() / activities::kDisplayRowStride) {
         return false;
     }
     output.resize(indexRows.count);
-    const std::size_t indexEnd = indexRows.data + indexRows.count * kActivityIndexStride;
+    const std::size_t indexEnd = indexRows.data + indexRows.count * activities::kDisplayRowStride;
+    const std::size_t displayEnd = displayRows.data + displayRows.count * kDisplayStride;
+    // A merged table moves its index to its end, past the records a mod added. A mod's record
+    // carries its own text block, so a text block need not be a row of the installed array.
+    const auto inside_index = [&](std::size_t offset) noexcept {
+        return offset >= indexRows.data && offset < indexEnd;
+    };
+    const auto inside_array = [&](std::size_t offset) noexcept {
+        return inside_index(offset) || (offset >= displayRows.data && offset < displayEnd);
+    };
     std::size_t previousRecord = 0;
     for (std::size_t index = 0; index < output.size(); ++index) {
-        const std::size_t row = indexRows.data + index * kActivityIndexStride;
+        const std::size_t row = indexRows.data + index * activities::kDisplayRowStride;
         std::uint32_t hash = 0;
         std::uint32_t padding = 0;
         std::int64_t recordRelative = 0;
         std::size_t record = 0;
         std::int64_t displayRelative = 0;
         std::size_t display = 0;
-        if (!read(blob, row, hash) || hash != definitionHashes[index]
-            || !read(blob, row + 4, padding) || padding != 0
-            || !read(blob, row + kActivityIndexPointerOffset, recordRelative)
-            || !add_relative(row + kActivityIndexPointerOffset, recordRelative, record)
-            || record < indexEnd || record >= displayRows.data
-            || (index != 0 && record <= previousRecord) || !read(blob, record, displayRelative)
-            || !add_relative(record, displayRelative, display) || display < displayRows.data
-            || display >= displayRows.data + displayRows.count * kDisplayStride
-            || (display - displayRows.data) % kDisplayStride != 0
-            || !read(blob, display + kDisplayNameOffset, output[index].bankIndex)
-            || !read(blob, display + kDisplayNameOffset + 4, output[index].stringHash)) {
+        if (!read(blob, row + kActivityIndexHashOffset, hash) || hash != definitionHashes[index]
+            || !read(blob, row + kActivityIndexPaddingOffset, padding) || padding != 0
+            || !read(blob, row + activities::kDisplayRecordField, recordRelative)
+            || !relative_offset(row + activities::kDisplayRecordField, recordRelative, record)
+            || inside_array(record) || (index != 0 && record <= previousRecord)
+            || !read(blob, record + activities::kDisplayTextField, displayRelative)
+            || !relative_offset(record + activities::kDisplayTextField, displayRelative, display)
+            || inside_index(display)
+            || !read(blob, display + activities::kTextTitleBankOffset, output[index].bankIndex)
+            || !read(blob, display + activities::kTextTitleHashOffset, output[index].stringHash)) {
             return false;
         }
         previousRecord = record;
@@ -295,9 +302,9 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
     output.resize(rows.count);
     for (std::size_t index = 0; index < output.size(); ++index) {
         const std::size_t offset = rows.data + index * kBankIndexStride;
-        if (!read(blob, offset, output[index].nameHash)
-            || !read(blob, offset + 4, output[index].containerTag) || output[index].nameHash == 0
-            || output[index].containerTag == 0) {
+        if (!read(blob, offset + kBankNameHashOffset, output[index].nameHash)
+            || !read(blob, offset + kBankContainerOffset, output[index].containerTag)
+            || output[index].nameHash == 0 || output[index].containerTag == 0) {
             return false;
         }
     }
@@ -311,27 +318,27 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
                                     Name& output) noexcept {
     if (index >= combinations.count
         || index > ((std::numeric_limits<std::size_t>::max)() - combinations.data)
-                       / kCombinationStride) {
+                       / activities::kCombinationStride) {
         return false;
     }
-    const std::size_t combination = combinations.data + index * kCombinationStride;
+    const std::size_t combination = combinations.data + index * activities::kCombinationStride;
     std::int64_t partsRelative = 0;
     std::int64_t partCount = 0;
     std::size_t parts = 0;
-    if (!read(language, combination, partsRelative)
-        || !add_relative(combination, partsRelative, parts)
-        || !read(language, combination + 8, partCount) || partCount < 0
-        || static_cast<std::uint64_t>(partCount) > kMaximumParts
+    if (!read(language, combination + activities::kCombinationPartsField, partsRelative)
+        || !relative_offset(combination + activities::kCombinationPartsField, partsRelative, parts)
+        || !read(language, combination + activities::kCombinationCountOffset, partCount)
+        || partCount < 0 || static_cast<std::uint64_t>(partCount) > kMaximumParts
         || static_cast<std::uint64_t>(partCount)
-               > (std::numeric_limits<std::size_t>::max)() / kPartStride) {
+               > (std::numeric_limits<std::size_t>::max)() / activities::kPartStride) {
         return false;
     }
-    const std::size_t bytes = static_cast<std::size_t>(partCount) * kPartStride;
+    const std::size_t bytes = static_cast<std::size_t>(partCount) * activities::kPartStride;
     if (parts > language.size() || bytes > language.size() - parts) {
         return false;
     }
     for (std::size_t indexPart = 0; indexPart < static_cast<std::size_t>(partCount); ++indexPart) {
-        const std::size_t part = parts + indexPart * kPartStride;
+        const std::size_t part = parts + indexPart * activities::kPartStride;
         std::int64_t textRelative = 0;
         std::size_t text = 0;
         std::uint32_t valueHash = 0;
@@ -339,11 +346,14 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
         std::uint16_t stringLength = 0;
         std::uint16_t cipher = 0;
         std::uint16_t decodedScalars = 0;
-        if (!read(language, part + 8, textRelative) || !add_relative(part + 8, textRelative, text)
-            || !read(language, part + 16, valueHash) || valueHash != kLiteralPartHash
-            || !read(language, part + 20, byteLength) || !read(language, part + 22, stringLength)
-            || !read(language, part + 24, cipher) || text > language.size()
-            || byteLength > language.size() - text || (byteLength == 0) != (stringLength == 0)
+        if (!read(language, part + activities::kPartDataField, textRelative)
+            || !relative_offset(part + activities::kPartDataField, textRelative, text)
+            || !read(language, part + kPartHashOffset, valueHash) || valueHash != kLiteralPartHash
+            || !read(language, part + activities::kPartByteCountOffset, byteLength)
+            || !read(language, part + kPartStringLengthOffset, stringLength)
+            || !read(language, part + activities::kPartShiftOffset, cipher)
+            || text > language.size() || byteLength > language.size() - text
+            || (byteLength == 0) != (stringLength == 0)
             || !append_text(language.subspan(text, byteLength), cipher, output, decodedScalars)
             || decodedScalars != stringLength) {
             return false;
@@ -363,17 +373,17 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
     Array hashes{};
     if (!read_array(container,
                     kContainerHashFieldOffset,
-                    sizeof(std::uint32_t),
+                    activities::kBankHashStride,
                     kMaximumArrayRows,
                     kContainerHashElementClass,
                     hashes)
-        || kContainerLanguageOffset + kLanguageCount * sizeof(std::uint32_t) > container.size()) {
+        || kContainerLanguageEnd > container.size()) {
         return false;
     }
     output.hashes.reserve(hashes.count);
     for (std::size_t index = 0; index < hashes.count; ++index) {
         std::uint32_t candidate = 0;
-        if (!read(container, hashes.data + index * sizeof candidate, candidate)) {
+        if (!read(container, hashes.data + index * activities::kBankHashStride, candidate)) {
             return false;
         }
         if (index >= (std::numeric_limits<std::uint32_t>::max)()) {
@@ -394,14 +404,11 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
         return false;
     }
     std::uint32_t languageTag = 0;
-    if (!read(container,
-              kContainerLanguageOffset + kEnglishLanguageIndex * sizeof languageTag,
-              languageTag)
-        || languageTag == 0
+    if (!read(container, kContainerEnglishOffset, languageTag) || languageTag == 0
         || !source.read(source.context, languageTag, kLanguageDataClass, output.language)
         || !read_array(output.language,
-                       kLanguageCombinationFieldOffset,
-                       kCombinationStride,
+                       activities::kLanguageCombinationDescriptor,
+                       activities::kCombinationStride,
                        kMaximumArrayRows,
                        kCombinationElementClass,
                        output.combinations)

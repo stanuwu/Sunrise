@@ -7,11 +7,13 @@
 #include <string_view>
 #include <utility>
 
+#include "../../../middleware/content/packages/reader/typed_array.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 
 namespace sunrise::client::content::activity::sdk_generation::activity_inventory {
 namespace {
 
+namespace generated = middleware::content::packages::schema::generated;
 namespace named_tags = middleware::content::packages::named_tags;
 namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
@@ -104,15 +106,50 @@ private:
     }
 }
 
-/** Reads one little-endian u32 without assuming package-buffer alignment. */
+/** Reads one unaligned value from the package buffer. */
+template <typename Value>
 [[nodiscard]] bool
-read_u32(std::span<const std::byte> bytes, std::size_t offset, std::uint32_t& output) noexcept {
-    output = 0;
+read_value(std::span<const std::byte> bytes, std::size_t offset, Value& output) noexcept {
+    output = {};
     if (offset > bytes.size() || sizeof output > bytes.size() - offset) {
         return false;
     }
     std::memcpy(&output, bytes.data() + offset, sizeof output);
     return true;
+}
+
+/**
+ * Reads both bound tags of one activity root through its typed array.
+ * @param bytes Root tag bytes.
+ * @param row Receives the scenario and transition descriptor tags.
+ * @return False unless the root is exactly its two rows long and the rows sit where the
+ *         catalog's locators say.
+ */
+[[nodiscard]] bool read_bound_tags(std::span<const std::byte> bytes, ActivityRoot& row) noexcept {
+    using generated::ActivityRootTagRow;
+    // Tag layout: the bound-tag array descriptor and the tag field of one row.
+    constexpr std::size_t kCountField = offsetof(generated::ActivityRoot, boundTags.count);
+    constexpr std::size_t kRelativeField = offsetof(generated::ActivityRoot, boundTags.relative);
+    constexpr std::size_t kTagOffset = offsetof(ActivityRootTagRow, tag);
+    std::uint64_t count = 0;
+    std::int64_t relative = 0;
+    reader::TypedArrayRows rows{};
+    if (bytes.size() != kActivityRootSize || !read_value(bytes, kCountField, count)
+        || !read_value(bytes, kRelativeField, relative) || count != kActivityRootBoundTagCount
+        || relative < 0 || static_cast<std::uint64_t>(relative) > bytes.size() - kRelativeField
+        || !reader::read_typed_array(bytes,
+                                     kRelativeField + static_cast<std::size_t>(relative),
+                                     count,
+                                     ActivityRootTagRow::kClass,
+                                     sizeof(ActivityRootTagRow),
+                                     rows)
+        || rows.data != kActivityRootRowsOffset) {
+        return false;
+    }
+    return read_value(bytes, rows.data + kTagOffset, row.scenarioTag)
+           && read_value(bytes,
+                         rows.data + sizeof(ActivityRootTagRow) + kTagOffset,
+                         row.transitionDescriptorTag);
 }
 
 /** @return True when the root's exact selected name equals `name`. */
@@ -180,6 +217,13 @@ template <typename Root>
     } catch (...) {
         return false;
     }
+}
+
+/** @return True when the installed table holds exactly the stock rows, or a modded one more. */
+[[nodiscard]] bool expected_definition_count(std::size_t count, bool installedOnly) noexcept {
+    // Mods only append rows after the stock ones.
+    return installedOnly ? count == tables::kStockActivityDefinitionCount
+                         : count >= tables::kStockActivityDefinitionCount;
 }
 
 /** Scans one exact class and requires every match to be copied. */
@@ -517,9 +561,7 @@ bool build(const reader::Source& source,
             row.tag = live.tag;
             if (!select_name(names, live.tag, kActivityRootClass, live.patchIndex, row)
                 || !reader::read_tag(source, *scratch.get(), live.tag, bytes, classId)
-                || classId != kActivityRootClass || bytes.size() != kActivityRootSize
-                || !read_u32(bytes, kActivityRootScenarioOffset, row.scenarioTag)
-                || !read_u32(bytes, kActivityRootTransitionOffset, row.transitionDescriptorTag)
+                || classId != kActivityRootClass || !read_bound_tags(bytes, row)
                 || row.scenarioTag == 0 || row.scenarioTag == kAbsentTag
                 || row.transitionDescriptorTag == 0 || row.transitionDescriptorTag == kAbsentTag
                 || !has_live_tag(liveScenarios, row.scenarioTag)
@@ -539,9 +581,9 @@ bool build(const reader::Source& source,
             return false;
         }
         std::vector<tables::ActivityDefinition> definitions{};
-        definitions.reserve(tables::kActivityDefinitionCount);
+        definitions.reserve(tables::kStockActivityDefinitionCount);
         if (!tables::visit_activity_definitions(bytes, &collect_definition, &definitions)
-            || definitions.size() != tables::kActivityDefinitionCount
+            || !expected_definition_count(definitions.size(), source.installedOnly)
             || !join(definitions,
                      output.activityRoots,
                      output.scenarios,

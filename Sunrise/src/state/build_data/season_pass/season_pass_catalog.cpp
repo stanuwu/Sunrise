@@ -27,6 +27,7 @@ bool valid(std::span<const Reward> rewards) noexcept {
     if (rewards.empty() || rewards.size() > kRewardCapacity) {
         return false;
     }
+    // A granted quantity is published as a signed 32-bit stack size.
     constexpr auto kMaximumQuantity =
         static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)());
     for (const Reward& reward : rewards) {

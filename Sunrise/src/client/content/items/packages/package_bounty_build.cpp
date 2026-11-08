@@ -40,7 +40,7 @@ bool build_bounties(const reader::Source& source,
                           storage.itemStringsTable,
                           tableClass)
         || !tables::find_array_at(std::span<const std::byte>{storage.itemStringsTable},
-                                  tables::kTableArrayDescriptor,
+                                  offsetof(generated::C80805cdb, table),
                                   rows)
         || rows.elementClass != tables::kItemStringsIndexRowClass || rows.count < itemCount) {
         return false;
@@ -60,19 +60,21 @@ bool build_bounties(const reader::Source& source,
         domain::Definition& row = storage.bountyRows[storage.bountyCount];
         row = {};
         row.itemIndex = definition.definitionIndex;
+        std::uint16_t typeBank = 0;
         // A bounty whose strings blob will not read carries no pool key, so it is dropped rather
         // than published with a zero pair that would merge it into every other unnamed row.
         if (!tables::index_row(table, rows, definition.definitionIndex, entry)
             || !reader::read_tag(source, storage.scratch, entry.targetTag, storage.definition)
             || !read(std::span<const std::byte>{storage.definition},
                      tables::kItemStringsTypePairOffset,
-                     row.itemType.bank)
+                     typeBank)
             || !read(std::span<const std::byte>{storage.definition},
                      tables::kItemStringsTypeHashOffset,
                      row.itemType.hash)
             || row.itemType.hash == 0) {
             continue;
         }
+        row.itemType.bank = typeBank;
         ++storage.bountyCount;
     }
     return storage.bountyCount != 0;

@@ -5,13 +5,12 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace sunrise::state::content {
 
 /** Extracted definition names longer than 127 bytes are rejected instead of truncated. */
 inline constexpr std::size_t kDefinitionNameCapacity = 128;
-/** A 4096-slot table keeps the supported catalog below a two-thirds load factor. */
-inline constexpr std::size_t kDefinitionCatalogCapacity = 4096;
 
 /** One name-to-definition mapping extracted from installed content. */
 struct Definition {
@@ -35,7 +34,7 @@ void clear() noexcept;
  * @param name Extracted UTF-8 definition name.
  * @param tag Extracted definition tag.
  * @param classId Extracted definition class.
- * @return False when the name is invalid, the catalog is sealed, or storage is full.
+ * @return False when the name is invalid, the catalog is sealed, or memory runs out.
  */
 [[nodiscard]] bool insert(std::string_view name, std::uint32_t tag, std::uint32_t classId) noexcept;
 
@@ -68,9 +67,16 @@ lookup_hash(std::uint32_t nameHash, std::span<Definition> output, std::size_t& c
 [[nodiscard]] bool snapshot(std::span<Definition> output, std::size_t& count) noexcept;
 
 /**
+ * Copies every used mapping into a vector sized to the catalog.
+ * @param output Receives the mappings; empty on failure.
+ * @return False only when memory runs out.
+ */
+[[nodiscard]] bool snapshot(std::vector<Definition>& output) noexcept;
+
+/**
  * Replaces the catalog with checked cached mappings in one step.
  * @param definitions Complete distinct mapping set loaded from one cache file.
- * @return True when every mapping is valid, distinct, and fits fixed storage.
+ * @return True when every mapping is valid and distinct, and memory holds them.
  */
 [[nodiscard]] bool replace(std::span<const Definition> definitions) noexcept;
 

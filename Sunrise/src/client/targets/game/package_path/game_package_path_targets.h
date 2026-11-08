@@ -8,9 +8,10 @@
 namespace sunrise::client::targets::game::package_path {
 
 /**
- * Finds the package path builder and the path object opener, and reads their layouts.
+ * Finds the package path builder, the path object opener and the schema callback dispatcher, and
+ * reads the layouts.
  * @param image Executable ranges from the main game image.
- * @param output Receives both entries and the layout operands.
+ * @param output Receives the three entries and the layout operands.
  * @return True when every signature matched once and the operands are consistent.
  */
 [[nodiscard]] bool derive(std::span<const patterns::ImageRange> image, Targets& output) noexcept;

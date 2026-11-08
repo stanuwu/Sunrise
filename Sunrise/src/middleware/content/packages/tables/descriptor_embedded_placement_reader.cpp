@@ -3,6 +3,8 @@
 #include <cmath>
 #include <limits>
 
+#include "../reader/layout.h"
+#include "../schema/generated/tag_classes_808099.h"
 #include "authored_placement_reader.h"
 #include "definition_index_table.h"
 #include "internal.h"
@@ -10,38 +12,13 @@
 namespace sunrise::middleware::content::packages::tables {
 namespace {
 
-/** Entry fields not named by the shared authored-placement reader. */
-constexpr std::size_t kNameHashOffset = 0x64;
-constexpr std::size_t kReplicationByteOffset = 0x68;
-constexpr std::size_t kGameworldByteOffset = 0x69;
-
-/** Adds one signed self-relative field without wrapping host offsets. */
-[[nodiscard]] bool
-relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) noexcept {
-    /** Signed bounds keep the self-relative addition defined. */
-    constexpr std::int64_t kMaximum = (std::numeric_limits<std::int64_t>::max)();
-    constexpr std::int64_t kMinimum = (std::numeric_limits<std::int64_t>::min)();
-    if (base > static_cast<std::size_t>(kMaximum)) {
-        return false;
-    }
-    const auto signedBase = static_cast<std::int64_t>(base);
-    if ((relative > 0 && signedBase > kMaximum - relative)
-        || (relative < 0 && signedBase < kMinimum - relative)) {
-        return false;
-    }
-    const auto target = signedBase + relative;
-    if (target < 0) {
-        return false;
-    }
-    output = static_cast<std::size_t>(target);
-    return true;
-}
+namespace generated = schema::generated;
 
 /** Reads a fixed float vector without imposing alignment on package bytes. */
 template <std::size_t Size>
-[[nodiscard]] bool read_vector(std::span<const std::byte> blob,
-                               std::size_t offset,
-                               std::array<float, Size>& output) noexcept {
+[[nodiscard]] bool read_finite_vector(std::span<const std::byte> blob,
+                                      std::size_t offset,
+                                      std::array<float, Size>& output) noexcept {
     output = {};
     for (std::size_t lane = 0; lane < Size; ++lane) {
         if (!read(blob, offset + lane * sizeof(float), output[lane])
@@ -61,17 +38,17 @@ bool descriptor_embedded_placements(std::span<const std::byte> blob,
                                     DescriptorEmbeddedPlacementArray& output) noexcept {
     output = {};
     const auto base = static_cast<std::size_t>(descriptor.descriptorOffset);
-    /** The whole descriptor must sit inside the blob before any field is read. */
-    constexpr std::size_t kRequiredSize = kDescriptorSize;
+    std::size_t configDescriptor = 0;
     if (descriptor.componentClass != kDescriptorEmbeddedPlacementDescriptorClass
         || descriptor.slotType != kDescriptorEmbeddedPlacementSlotType || base > blob.size()
-        || kRequiredSize > blob.size() - base) {
+        || sizeof(generated::ObjectSlotDefinitionType4) > blob.size() - base
+        || !config_descriptor_offset(blob, descriptor.configTag, configDescriptor)
+        || configDescriptor != base) {
         return false;
     }
 
     std::uint32_t configTag = 0;
     std::uint32_t descriptorClass = 0;
-    std::uint32_t descriptorMark = 0;
     std::uint32_t bubbleIndex = 0;
     std::uint32_t senseSchema = 0;
     std::uint32_t authSchema = 0;
@@ -81,8 +58,6 @@ bool descriptor_embedded_placements(std::span<const std::byte> blob,
         || package_of(configTag) == kAbsentPackageId
         || !read(blob, base + kDescriptorComponentClassOffset, descriptorClass)
         || descriptorClass != kDescriptorEmbeddedPlacementDescriptorClass
-        || !read(blob, base + kDescriptorMarkOffset, descriptorMark)
-        || descriptorMark != kDescriptorMark
         || !read(blob, base + kDescriptorSlotTypeOffset, slotType)
         || slotType != kDescriptorEmbeddedPlacementSlotType
         || !read(blob, base + kDescriptorSlotIndexOffset, slotIndex)
@@ -99,7 +74,8 @@ bool descriptor_embedded_placements(std::span<const std::byte> blob,
     std::uint64_t count = 0;
     std::int64_t relative = 0;
     const std::size_t arrayDescriptor = base + kDescriptorEmbeddedPlacementArrayOffset;
-    if (!read(blob, arrayDescriptor, count) || !read(blob, arrayDescriptor + 8, relative)) {
+    if (!read(blob, arrayDescriptor, count)
+        || !read(blob, arrayDescriptor + reader::layout::kArrayFieldRelative, relative)) {
         return false;
     }
     if (count == 0) {
@@ -107,9 +83,9 @@ bool descriptor_embedded_placements(std::span<const std::byte> blob,
     }
     Array array{};
     if (!find_array_at(blob, arrayDescriptor, array)
-        || array.elementClass != kDescriptorEmbeddedPlacementClass || array.count != count
+        || array.elementClass != kAuthoredPlacementClass || array.count != count
         || array.dataOffset > blob.size()
-        || count > (blob.size() - array.dataOffset) / kDescriptorEmbeddedPlacementStride) {
+        || count > (blob.size() - array.dataOffset) / kAuthoredPlacementStride) {
         return false;
     }
     output.count = array.count;
@@ -124,27 +100,26 @@ bool descriptor_embedded_placement_at(std::span<const std::byte> blob,
                                       std::uint64_t index,
                                       DescriptorEmbeddedPlacement& output) noexcept {
     output = {};
-    if (array.elementClass != kDescriptorEmbeddedPlacementClass || index >= array.count
+    if (array.elementClass != kAuthoredPlacementClass || index >= array.count
         || array.dataOffset > blob.size()
         || index > ((std::numeric_limits<std::size_t>::max)() - array.dataOffset)
-                       / kDescriptorEmbeddedPlacementStride) {
+                       / kAuthoredPlacementStride) {
         return false;
     }
     const std::size_t row =
-        array.dataOffset + static_cast<std::size_t>(index) * kDescriptorEmbeddedPlacementStride;
-    if (row > blob.size() || kDescriptorEmbeddedPlacementStride > blob.size() - row) {
+        array.dataOffset + static_cast<std::size_t>(index) * kAuthoredPlacementStride;
+    if (row > blob.size() || kAuthoredPlacementStride > blob.size() - row) {
         return false;
     }
     if (!read(blob, row + kAuthoredPlacementClassListOffset, output.classListTag)
         || package_of(output.classListTag) == kAbsentPackageId
-        || !read_vector(blob, row + kAuthoredPlacementRotationOffset, output.rotation)
-        || !read_vector(blob, row + kAuthoredPlacementPositionOffset, output.position)
-        || !read(blob,
-                 row + kAuthoredPlacementPositionOffset + output.position.size() * sizeof(float),
-                 output.fourthLane)
-        || !std::isfinite(output.fourthLane) || !read(blob, row + kNameHashOffset, output.nameHash)
-        || !read(blob, row + kReplicationByteOffset, output.replicationByte)
-        || !read(blob, row + kGameworldByteOffset, output.gameworldByte)
+        || !read_finite_vector(blob, row + kAuthoredPlacementRotationOffset, output.rotation)
+        || !read_finite_vector(blob, row + kAuthoredPlacementPositionOffset, output.position)
+        || !read(blob, row + kAuthoredPlacementScaleOffset, output.fourthLane)
+        || !std::isfinite(output.fourthLane)
+        || !read(blob, row + kAuthoredPlacementNameHashOffset, output.nameHash)
+        || !read(blob, row + kAuthoredPlacementFlagsOffset, output.replicationByte)
+        || !read(blob, row + kAuthoredPlacementGameworldOffset, output.gameworldByte)
         || !read(blob, row + kAuthoredPlacementIdentifierOffset, output.identifier)
         || !read(blob, row + kAuthoredPlacementAuxiliaryOffset, output.auxiliaryRelative)) {
         output = {};

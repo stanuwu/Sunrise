@@ -5,6 +5,7 @@
 #include <cstring>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808094.h"
 #include "composite_entity_codec_internal.h"
 
 namespace sunrise::middleware::gameplay::external {
@@ -13,6 +14,7 @@ namespace {
 namespace format = state::activity_sdk::format;
 namespace wire = actor_wire;
 namespace bits = middleware::encoding::bits;
+namespace generated = middleware::content::packages::schema::generated;
 
 /** The transform's packed angle code is seven bits. */
 constexpr std::uint8_t kAngleWidth = 7;
@@ -87,7 +89,8 @@ constexpr std::size_t kPositionComponents = 3;
         }
     }
     // The ordered roots follow the native SObject update reader.
-    constexpr std::array<std::uint32_t, 2> kRelationSchemas{0x8080949BU, 0x8080949AU};
+    constexpr std::array<std::uint32_t, 2> kRelationSchemas{generated::C8080949b::kClass,
+                                                            generated::C8080949a::kClass};
     detail::ResolverContext resolver{&context, sobject_family()};
     for (const auto schema : kRelationSchemas) {
         bool present = false;

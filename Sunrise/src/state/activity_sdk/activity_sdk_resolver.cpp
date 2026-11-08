@@ -6,16 +6,6 @@
 namespace sunrise::state::activity_sdk {
 namespace {
 
-/** Borrows the package-name bytes after checking their fixed storage bound. */
-[[nodiscard]] std::string_view
-package_name(const activity::destination::DestinationSelection& destination) noexcept {
-    if (destination.packageNameLength > destination.packageName.size()) {
-        return {};
-    }
-    return {reinterpret_cast<const char*>(destination.packageName.data()),
-            destination.packageNameLength};
-}
-
 /** Finds one activity by its unique validated investment index. */
 [[nodiscard]] const format::Activity*
 find_activity(const Catalog& catalog, std::uint32_t index, std::uint32_t& row) noexcept {
@@ -30,17 +20,34 @@ find_activity(const Catalog& catalog, std::uint32_t index, std::uint32_t& row) n
     return nullptr;
 }
 
-/** Checks the live destination against one exact generated activity row. */
-[[nodiscard]] bool
-destination_matches(const Catalog& catalog,
-                    const format::Activity& activityRow,
-                    const activity::destination::DestinationSelection& destination) noexcept {
-    if (destination.activityIndex < 0
-        || static_cast<std::uint32_t>(destination.activityIndex) != activityRow.activityIndex) {
-        return false;
+/**
+ * Finds the one mod catalog whose activity is named like the destination.
+ * @param row Receives the activity row inside that catalog.
+ * @return The catalog, or null when no mod or more than one names it.
+ */
+[[nodiscard]] Snapshot
+find_mod_activity(const activity::destination::DestinationSelection& destination,
+                  std::uint32_t& row) noexcept {
+    row = format::kAbsentIndex;
+    const auto catalogs = mod_catalogs();
+    if (catalogs == nullptr) {
+        return nullptr;
     }
-    const std::string_view liveName = package_name(destination);
-    return !liveName.empty() && liveName == catalog.string(activityRow.internalName);
+    Snapshot found;
+    for (const Snapshot& catalog : *catalogs) {
+        const auto activities = catalog->activities();
+        for (std::size_t candidate = 0; candidate < activities.size(); ++candidate) {
+            if (!destination_matches(*catalog, activities[candidate], destination)) {
+                continue;
+            }
+            if (found != nullptr) {
+                return nullptr;
+            }
+            found = catalog;
+            row = static_cast<std::uint32_t>(candidate);
+        }
+    }
+    return found;
 }
 
 /** Maps a missing snapshot to its published load reason. */
@@ -74,13 +81,18 @@ Status resolve(Snapshot catalog, const Selection& selection, BoundView& output) 
     }
 
     std::uint32_t activityRow = format::kAbsentIndex;
-    const format::Activity* const activityRowValue =
+    const format::Activity* activityRowValue =
         find_activity(*catalog,
                       static_cast<std::uint32_t>(selection.binding.destination.activityIndex),
                       activityRow);
     if (activityRowValue == nullptr
         || !destination_matches(*catalog, *activityRowValue, selection.binding.destination)) {
-        return Status::wrongActivity;
+        // An activity a mod added is in that mod's own pack.
+        catalog = find_mod_activity(selection.binding.destination, activityRow);
+        if (catalog == nullptr) {
+            return Status::wrongActivity;
+        }
+        activityRowValue = &catalog->activities()[activityRow];
     }
     if (activityRowValue->scenarioIndex >= catalog->scenarios().size()) {
         return Status::missingScenarioLink;

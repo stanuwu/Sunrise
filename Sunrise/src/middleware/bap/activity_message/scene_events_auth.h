@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808062.h"
+#include "../../content/packages/schema/generated/tag_classes_808063.h"
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
 #include "sensor_auth_update.h"
@@ -15,12 +17,13 @@
 namespace sunrise::middleware::bap::activity_message::scene_events {
 
 namespace fields = auth_fields;
+namespace generated = middleware::content::packages::schema::generated;
 
 // Scene events use the Type 43 slot.
-inline constexpr std::uint8_t kSlotType = 43;
+inline constexpr std::uint8_t kSlotType = sensor_auth_update::kAuthoredSceneSlotType;
 /** The SDK format table carries the same class and schema for authored scenes. */
-inline constexpr std::uint32_t kComponentClass = 0x80806382U;
-inline constexpr std::uint32_t kSchema = 0x8080626BU;
+inline constexpr std::uint32_t kComponentClass = generated::AuthoredSceneComponentType43::kClass;
+inline constexpr std::uint32_t kSchema = sensor_auth_update::kAuthoredSceneAuthSchema;
 /** Header: 32-bit generation, clear bit, 4-bit dependency count, 31-bit scalar, 6-bit count. */
 inline constexpr std::uint8_t kDependencyCountWidth = 4;
 inline constexpr std::uint8_t kScalarWidth = 31;

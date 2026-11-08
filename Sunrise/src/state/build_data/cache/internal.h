@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "../definition.h"
@@ -31,6 +32,13 @@ enum class WriteDisposition {
 [[nodiscard]] bool current_build_identity(std::uint64_t configuredEquipmentHash,
                                           std::uint64_t contentHash,
                                           BuildIdentity& identity) noexcept;
+
+/**
+ * Reads the named row count from a cache header, so storage can be sized before the load.
+ * @param path Null-terminated cache path.
+ * @param count Receives the count; zero when the header is unreadable or another format.
+ */
+void read_named_count(const wchar_t* path, std::size_t& count) noexcept;
 
 /**
  * Loads one exact cache file into fixed caller storage.

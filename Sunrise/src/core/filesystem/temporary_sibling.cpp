@@ -258,6 +258,36 @@ bool publish_sibling(const wchar_t* temporaryPath, const wchar_t* finalPath) noe
            != FALSE;
 }
 
+/** A failed write deletes its sibling and leaves the old file in place. */
+bool replace_file(std::wstring_view finalPath, std::string_view bytes) noexcept {
+    Buffer target;
+    Buffer temporary;
+    if (bytes.size() > (std::numeric_limits<DWORD>::max)() || !assign(target, finalPath)
+        || !temporary_sibling(finalPath, temporary)) {
+        return false;
+    }
+    const HANDLE file = CreateFileW(temporary.chars.data(),
+                                    GENERIC_WRITE,
+                                    0,
+                                    nullptr,
+                                    CREATE_ALWAYS,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    DWORD written = 0;
+    const auto size = static_cast<DWORD>(bytes.size());
+    bool complete = WriteFile(file, bytes.data(), size, &written, nullptr) != FALSE
+                    && written == size && FlushFileBuffers(file) != FALSE;
+    complete = CloseHandle(file) != FALSE && complete;
+    complete = complete && publish_sibling(temporary.chars.data(), target.chars.data());
+    if (!complete) {
+        (void)DeleteFileW(temporary.chars.data());
+    }
+    return complete;
+}
+
 /** Removes bounded, old writer-owned temporary siblings whose process has stopped. */
 void remove_stale_siblings(const wchar_t* finalPath) noexcept {
     if (finalPath == nullptr) {

@@ -1,14 +1,19 @@
+#include "../../../middleware/content/packages/reader/layout.h"
 #include "activity_sdk_decode_plans_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal {
 namespace {
 
-/** Codec block: bound handle at +0x10, serialized size at +0x18, field rows from +0x28. */
-constexpr std::uint64_t kCodecHandleAt = 0x10;
-constexpr std::uint64_t kCodecSerializedAt = 0x18;
-constexpr std::uint64_t kCodecFieldsAt = 0x28;
-/** Bit offset of one field inside its 40-byte row. */
-constexpr std::uint64_t kFieldBitAt = 8;
+using CodecBlock = generated::ReflectionCodecBlock;
+using FieldRow = generated::C80800109;
+
+/** The block's row count opens its body. */
+constexpr std::uint64_t kNativeBlockCountAt = kNativeBlockBodyAt;
+constexpr std::uint64_t kCodecHandleAt = kNativeBlockBodyAt + offsetof(CodecBlock, ownHandle);
+constexpr std::uint64_t kCodecSerializedAt =
+    kNativeBlockBodyAt + offsetof(CodecBlock, serializedSize);
+constexpr std::uint64_t kCodecFieldsAt = kNativeBlockBodyAt + sizeof(CodecBlock);
+constexpr std::uint64_t kFieldBitAt = offsetof(FieldRow, bit);
 
 } // namespace
 
@@ -49,8 +54,8 @@ bool build_codec_index(const Image& image,
                 std::uint32_t kind = 0;
                 std::uint32_t count = 0;
                 BlockLayout layout{};
-                if (!image.u32(address + cursor + 4, kind)
-                    || !image.u32(address + cursor + 8, count)) {
+                if (!image.u32(address + cursor + kNativeBlockClassAt, kind)
+                    || !image.u32(address + cursor + kNativeBlockCountAt, count)) {
                     error = "record_read";
                     return false;
                 }

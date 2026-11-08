@@ -192,12 +192,4 @@ bool decode_type53_body(std::span<const std::byte> input,
     return true;
 }
 
-/** Validates a body with at least one fired cue and all unset-reference invariants. */
-bool validate_type53_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    Type53Body body{};
-    return decode_type53_body(input, bitCount, body)
-           && std::any_of(
-               body.rows.begin(), body.rows.end(), [](const Type53Row& row) { return row.active; });
-}
-
 } // namespace sunrise::middleware::bap::activity_message::scriptable_auth

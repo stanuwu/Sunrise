@@ -16,10 +16,10 @@ namespace {
 using encoding::bits::Reader;
 namespace settings = state::account::settings;
 
-// Schema 0x80807603 is presence-driven: an absent node consumes no bits and nothing is byte
+// The request schema is presence-driven: an absent node consumes no bits and nothing is byte
 // aligned, so every presence flag must be read or later fields land at the wrong offset.
 
-/** Wire primitive widths used by schema 0x80807603. */
+/** Wire primitive widths used by the request schema. */
 constexpr std::uint8_t kPresenceWidthBits = 1;
 constexpr std::uint8_t kBooleanWidthBits = 1;
 constexpr std::uint8_t kTwoWidthBits = 2;
@@ -862,7 +862,7 @@ static_assert(kSchemaBits == kCatalogMaximumBits);
 
 } // namespace
 
-/** Decodes the complete schema-0x80807603 request without touching authoritative State. */
+/** Decodes the complete request without touching authoritative State. */
 bool parse_request(const Message& message, Request& output) noexcept {
     output = {};
     if (message.opcode != kOpcode) {

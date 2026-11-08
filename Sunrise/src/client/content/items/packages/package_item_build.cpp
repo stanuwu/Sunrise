@@ -65,7 +65,7 @@ namespace {
     }
     if (!reader::read_tag(source, storage.scratch, tag, blob)
         || !tables::find_array_at(
-            std::span<const std::byte>{blob}, tables::kTableArrayDescriptor, rows)
+            std::span<const std::byte>{blob}, tables::kRestrictedGrantArrayDescriptor, rows)
         || rows.elementClass != tables::kRestrictedGrantElementClass
         || rows.dataOffset > blob.size()
         || rows.count > (blob.size() - rows.dataOffset) / tables::kRestrictedGrantStride) {
@@ -186,7 +186,7 @@ bool build() noexcept {
                     || plugSetTag == 0
                     || !reader::read_tag(source, storage.scratch, plugSetTag, storage.plugSetTable)
                     || !tables::find_array_at(std::span<const std::byte>{storage.plugSetTable},
-                                              tables::kTableArrayDescriptor,
+                                              offsetof(generated::C80802cb6, table),
                                               plugSets)) {
                     continue;
                 }
@@ -232,7 +232,11 @@ bool build() noexcept {
                 (void)storage.rewardBuild.load(
                     source, storage.scratch, storage.root, storage.slotMaps);
             }
-            if (!state::build_data::season_pass_ready() && storage.rewardBuild.conditions.loaded()
+            // A refused reward graph still publishes the pass. A row whose condition cannot bind
+            // stays unavailable, and every claim refuses without the graph.
+            if (!state::build_data::season_pass_ready()
+                && (storage.rewardBuild.conditions.loaded()
+                    || state::build_data::reward_definitions_unsupported())
                 && build_season_pass(source, storage, std::span<const std::byte>{storage.root})
                 && !state::build_data::publish_season_pass(
                     std::span(storage.seasonPassRewards).first(storage.seasonPassRewardCount))) {
@@ -288,7 +292,7 @@ bool build() noexcept {
             }
             reason = "table";
             located = tables::find_array_at(std::span<const std::byte>{storage.child},
-                                            tables::kTableArrayDescriptor,
+                                            offsetof(generated::ItemIndexTable, table),
                                             table)
                       && table.elementClass == tables::kItemIndexTableClass;
         }

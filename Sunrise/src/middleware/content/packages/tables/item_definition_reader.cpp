@@ -1,5 +1,14 @@
 #include <algorithm>
+#include <cstddef>
 
+#include "../reader/typed_array.h"
+#include "../schema/generated/tag_classes_80802d.h"
+#include "../schema/generated/tag_classes_80802e.h"
+#include "../schema/generated/tag_classes_808030.h"
+#include "../schema/generated/tag_classes_808077.h"
+#include "../schema/generated/tag_classes_80807b.h"
+#include "../schema/generated/tag_classes_80807c.h"
+#include "../schema/generated/tag_classes_80809f.h"
 #include "definition_index_table.h"
 #include "internal.h"
 #include "items.h"
@@ -7,76 +16,79 @@
 namespace sunrise::middleware::content::packages::tables::items {
 namespace {
 
+namespace generated = schema::generated;
+
 /** The signed stack limit comes before the bucket id. */
-constexpr std::size_t kMaxStackSizeOffset = 180;
+constexpr std::size_t kMaxStackSizeOffset =
+    offsetof(generated::ItemDefinition, inventoryItemBlock.maximumStack);
 /** A nonzero predicate byte marks an instanced definition. */
-constexpr std::size_t kInstancedOffset = 187;
-/**
- * Definition byte 186 is the item tier: 1 common, 2 uncommon, 3 rare, 4 legendary, 5 exotic, and
- * 0 for rows outside the rarity ladder such as currencies. Confirmed against every installed
- * legendary weapon and armor row and the currency rows.
- */
-constexpr std::size_t kTierOffset = 186;
+constexpr std::size_t kInstancedOffset =
+    offsetof(generated::ItemDefinition, inventoryItemBlock.instanced);
+/** Item tier: 1 common through 5 exotic, and 0 for rows outside the ladder such as currencies. */
+constexpr std::size_t kTierOffset = offsetof(generated::ItemDefinition, inventoryItemBlock.tier);
 /** The manifest's stack-unique label, as the FNV-1 hash of its string. */
-constexpr std::size_t kStackUniqueLabelOffset = 176;
+constexpr std::size_t kStackUniqueLabelOffset =
+    offsetof(generated::ItemDefinition, inventoryItemBlock.unk0);
+/** The manifest's recovery bucket as a runtime bucket id, or all bits set when it has none. */
+constexpr std::size_t kRecoveryBucketOffset =
+    offsetof(generated::ItemDefinition, inventoryItemBlock.gap9);
 /**
- * Definition byte 185 is the manifest's recovery bucket as a runtime bucket id, or all bits set
- * when the item has none.
+ * The second and third bytes after the instanced predicate hold 0 or 1. The client's change-record
+ * writer turns them into the policy bits that skip the acquisition toast and count, or only the
+ * toast.
  */
-constexpr std::size_t kRecoveryBucketOffset = 185;
-/**
- * Bytes 189 and 190 hold 0 or 1. The client's change-record writer turns them into the policy
- * bits that skip the acquisition toast and count, or only the toast.
- */
-constexpr std::size_t kQuietAcquisitionOffset = 189;
-constexpr std::size_t kToastlessAcquisitionOffset = 190;
+constexpr std::size_t kQuietAcquisitionOffset =
+    offsetof(generated::ItemDefinition, inventoryItemBlock.gapC) + 1;
+constexpr std::size_t kToastlessAcquisitionOffset = kQuietAcquisitionOffset + 1;
+static_assert(kStackUniqueLabelOffset == 176 && kRecoveryBucketOffset == 185
+              && kQuietAcquisitionOffset == 189);
 /** The equipment block is self-relative from this offset, zero when absent. */
-constexpr std::size_t kEquipmentBlockOffset = 16;
-/** The equipment block stores its signed slot id here. */
-constexpr std::size_t kEquipmentSlotOffset = 24;
+constexpr std::size_t kEquipmentBlockOffset =
+    offsetof(generated::ItemDefinition, equippingItemBlock);
+/** The slot is read as an i32 over the u16 field and two gap bytes; nonzero gap means no slot. */
+constexpr std::size_t kEquipmentSlotOffset = offsetof(generated::ItemEquippingBlock, equipmentSlot);
+static_assert(kEquipmentSlotOffset + sizeof(std::int32_t) <= sizeof(generated::ItemEquippingBlock));
 /** The socket entry list block is self-relative from this offset, zero when absent. */
-constexpr std::size_t kSocketEntryListBlockOffset = 128;
-/** A present block declares 12 bytes. A shorter tail is not a block. */
-constexpr std::size_t kSocketEntryListBlockSize = 12;
+constexpr std::size_t kSocketEntryListBlockOffset =
+    offsetof(generated::ItemDefinition, talentGridItemBlock);
+/** A present block holds the two-byte list index. A shorter tail is not a block. */
+constexpr std::size_t kSocketEntryListBlockSize = sizeof(generated::ItemTalentGridBlock);
+constexpr std::size_t kSocketEntryListIndexOffset =
+    offsetof(generated::ItemTalentGridBlock, socketEntryListIndex);
 /** Equipment slots run from 0 through 19. */
 constexpr std::int32_t kEquipmentSlotCount = 20;
 /** A socket entry stores its type index first and its initial plug next. */
-constexpr std::size_t kSocketTypeOffset = 0;
-constexpr std::size_t kSocketPlugOffset = 2;
+constexpr std::size_t kSocketTypeOffset = offsetof(generated::ItemOrdinarySocketEntry, socketType);
+constexpr std::size_t kSocketPlugOffset =
+    offsetof(generated::ItemOrdinarySocketEntry, initialPlugItem);
 /** Fixed fields end after the acquisition presentation bytes; every installed item reaches it. */
 constexpr std::size_t kFixedFieldEnd = kToastlessAcquisitionOffset + 1;
-/** Optional plug category used to expand three native reusable plug families. */
-constexpr std::size_t kPlugCategoryOffset = 392;
-/**
- * The plug block is an embedded record whose class marker precedes its fields. It usually starts
- * at byte 388, so the category sits at kPlugCategoryOffset, but an optional record ahead of it
- * moves it, so the block is located by its marker inside this window rather than assumed.
- */
-constexpr std::uint32_t kPlugBlockClass = 0x808077E3U;
-constexpr std::size_t kPlugBlockSearchStart = 0x100;
-constexpr std::size_t kPlugBlockSearchEnd = 0x300;
-/** Category hash and server-roll set ordinal, relative to the plug block marker. */
-constexpr std::size_t kPlugBlockCategoryOffset = 4;
-constexpr std::size_t kPlugBlockRollSetOffset = 0x26;
-/**
- * A plug that grants another plug's effect (a Year-1 armor masterwork result naming the stat
- * perk it stands for) carries one linked-plug record; its item index sits at byte 12.
- */
-constexpr std::uint32_t kLinkedPlugClass = 0x80803036U;
-constexpr std::size_t kLinkedPlugIndexOffset = 12;
+/** The plug block is self-relative from this offset, zero when absent. */
+constexpr std::size_t kPlugBlockOffset = offsetof(generated::ItemDefinition, plugItemBlock);
+/** Plug category, used to expand three native reusable plug families, and server-roll set. */
+constexpr std::size_t kPlugBlockCategoryOffset = offsetof(generated::PlugBlock, plugCategory);
+constexpr std::size_t kPlugBlockRollSetOffset = offsetof(generated::PlugBlock, rollSetOrdinal);
+/** A plug that grants another plug's effect carries one linked-plug row in this array. */
+constexpr std::size_t kLinkedPlugArrayOffset = offsetof(generated::PlugBlock, hE0b00974);
+constexpr std::uint32_t kLinkedPlugClass = generated::LinkedPlugBlock::kClass;
+constexpr std::size_t kLinkedPlugIndexOffset =
+    offsetof(generated::LinkedPlugBlock, linkedPlugIndex);
 /** A roll-set ordinal outside the ladder: none, or the marker for a plug rolled by no set. */
 constexpr std::uint16_t kNoRollSet = 0;
-/** Embedded reusable-list array descriptor inside one 80-byte ordinary socket entry. */
-constexpr std::size_t kEmbeddedPlugListOffset = 64;
+/** Embedded reusable-list array descriptor inside one ordinary socket entry. */
+constexpr std::size_t kEmbeddedPlugListOffset =
+    offsetof(generated::ItemOrdinarySocketEntry, embeddedPlugs);
 /** Reusable and randomized shared plug-set row indices inside one socket entry. */
-constexpr std::size_t kReusablePlugSetIndexOffset = 12;
-constexpr std::size_t kRandomizedPlugSetIndexOffset = 32;
-/** One shared plug-set table row is 24 bytes and carries its member descriptor at byte 8. */
-constexpr std::size_t kPlugSetRowStride = 24;
-constexpr std::size_t kPlugSetMemberDescriptorOffset = 8;
-/** Both embedded and shared plug member rows name an item index first and occupy 32 bytes. */
-constexpr std::size_t kPlugMemberStride = 32;
-constexpr std::size_t kPlugMemberIndexOffset = 0;
+constexpr std::size_t kReusablePlugSetIndexOffset =
+    offsetof(generated::ItemOrdinarySocketEntry, reusablePlugSetRow);
+constexpr std::size_t kRandomizedPlugSetIndexOffset =
+    offsetof(generated::ItemOrdinarySocketEntry, randomizedPlugSetRow);
+/** One shared plug-set table row and its member descriptor. */
+constexpr std::size_t kPlugSetRowStride = sizeof(generated::SPlugSetRow);
+constexpr std::size_t kPlugSetMemberDescriptorOffset = offsetof(generated::SPlugSetRow, entries);
+/** Both embedded and shared plug member rows name an item index first. */
+constexpr std::size_t kPlugMemberStride = sizeof(generated::PlugSetMember);
+constexpr std::size_t kPlugMemberIndexOffset = offsetof(generated::PlugSetMember, plugItemIndex);
 /** Native arrays use 16-bit definition indices even though their serialized field is 32-bit. */
 constexpr std::uint64_t kMaximumPlugMemberCount = 65535;
 
@@ -101,7 +113,7 @@ void read_socket_entry_list(std::span<const std::byte> definition, Row& row) noe
         return;
     }
     std::uint16_t index = 0;
-    if (read(definition, static_cast<std::size_t>(block), index)) {
+    if (read(definition, static_cast<std::size_t>(block) + kSocketEntryListIndexOffset, index)) {
         row.hasSocketEntryList = true;
         row.socketEntryListIndex = index;
     }
@@ -128,8 +140,11 @@ void read_equipment_slot(std::span<const std::byte> definition,
     }
     // A value outside the equippable range marks an item that takes no slot.
     std::int32_t value = 0;
-    if (read(definition, static_cast<std::size_t>(block) + kEquipmentSlotOffset, value)
-        && value >= 0 && value < static_cast<std::int32_t>(kEquipmentSlotCount)) {
+    if (!read(definition, static_cast<std::size_t>(block) + kEquipmentSlotOffset, value)) {
+        return;
+    }
+    raw = value;
+    if (value >= 0 && value < static_cast<std::int32_t>(kEquipmentSlotCount)) {
         slot = static_cast<std::int8_t>(value);
     }
 }
@@ -231,59 +246,53 @@ void read_sockets(std::span<const std::byte> definition, Row& row) noexcept {
            && visit_plug_array(plugSetTable, members, visitor, context);
 }
 
-/** The block header carries its own self-relative pointer to the entries at byte 8. */
-constexpr std::size_t kStatDataMember = 8;
-/** One stat entry is 40 blob bytes. */
-constexpr std::size_t kStatEntryStride = 40;
-/** A stat entry names its stat table row at byte 16. */
-constexpr std::size_t kStatEntryRow = 16;
-/** A stat entry carries its signed contribution at byte 20. */
-constexpr std::size_t kStatEntryValue = 20;
+/** The block's stat array: its count, then a self-relative pointer to the array header. */
+constexpr std::size_t kStatCountMember =
+    offsetof(generated::SItemSandboxPerkBlock, itemStats.count);
+constexpr std::size_t kStatDataMember =
+    offsetof(generated::SItemSandboxPerkBlock, itemStats.relative);
+/** One stat entry. */
+constexpr std::size_t kStatEntryStride = sizeof(generated::SItemStatRow);
+constexpr std::size_t kStatEntryRow = offsetof(generated::SItemStatRow, itemStat.statIndex);
+/** A stat entry carries its signed contribution here. */
+constexpr std::size_t kStatEntryValue = offsetof(generated::SItemStatRow, itemStat.value);
 
 /**
- * Reads the per-item stat contributions declared inside the definition blob.
- * Two self-relative hops: the definition points at a header, the header points at the entries.
- * Both are blob offsets and are valid only against the serialized definition.
+ * Reads the plug block the definition points to: category, roll set, requirement sets and any
+ * linked plug. A definition with no plug block keeps the row's absent values.
  * @param definition Whole item definition bytes.
- * @param row Receives the declared stat rows and values.
- */
-/** @return The offset of the first record of one class inside a window, or the blob size. */
-[[nodiscard]] std::size_t find_record(std::span<const std::byte> definition,
-                                      std::uint32_t recordClass,
-                                      std::size_t start,
-                                      std::size_t end) noexcept {
-    const std::size_t limit = (std::min)(end, definition.size());
-    for (std::size_t offset = start; offset + sizeof(std::uint32_t) <= limit;
-         offset += sizeof(std::uint32_t)) {
-        std::uint32_t marker = 0;
-        if (read(definition, offset, marker) && marker == recordClass) {
-            return offset;
-        }
-    }
-    return definition.size();
-}
-
-/**
- * Reads the located plug block: its category (which corrects the fixed-offset read for a shifted
- * block), the ordinal of the server roll set that grants the plug, and any linked plug.
+ * @param row Receives the plug fields.
  */
 void read_plug_block(std::span<const std::byte> definition, Row& row) noexcept {
     row.rollSetIndex = kNoRollSet;
     row.linkedPlugIndex = kUnavailablePlug;
-    const std::size_t block =
-        find_record(definition, kPlugBlockClass, kPlugBlockSearchStart, kPlugBlockSearchEnd);
-    if (block < definition.size()) {
-        (void)read(definition, block + kPlugBlockCategoryOffset, row.plugCategoryHash);
-        (void)read(definition, block + kPlugBlockRollSetOffset, row.rollSetIndex);
+    std::int64_t relative = 0;
+    if (!read(definition, kPlugBlockOffset, relative) || relative == 0) {
+        return;
     }
-    const std::size_t linked = find_record(definition, kLinkedPlugClass, 0, definition.size());
-    if (linked < definition.size()) {
-        (void)read(definition, linked + kLinkedPlugIndexOffset, row.linkedPlugIndex);
+    const std::int64_t signedBlock = static_cast<std::int64_t>(kPlugBlockOffset) + relative;
+    if (signedBlock < 0) {
+        return;
+    }
+    const auto block = static_cast<std::size_t>(signedBlock);
+    (void)read(definition, block + kPlugBlockCategoryOffset, row.plugCategoryHash);
+    (void)read(definition, block + kPlugBlockRollSetOffset, row.rollSetIndex);
+    (void)read(definition,
+               block + kInsertionMaterialRequirementSetIndexOffset,
+               row.insertionMaterialRequirementSetIndex);
+    (void)read(definition,
+               block + kEnabledMaterialRequirementSetIndexOffset,
+               row.enabledMaterialRequirementSetIndex);
+    Array linked{};
+    if (find_array_at(definition, block + kLinkedPlugArrayOffset, linked)
+        && linked.elementClass == kLinkedPlugClass) {
+        (void)read(definition, linked.dataOffset + kLinkedPlugIndexOffset, row.linkedPlugIndex);
     }
 }
 
 /**
  * Reads the investment stat block into the row.
+ * Two self-relative hops, valid only against the serialized definition.
  * @param definition Whole item definition record.
  * @param row Receives the stats, left empty when the block is absent or malformed.
  */
@@ -300,18 +309,25 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
 
     std::uint64_t count = 0;
     std::int64_t dataRelative = 0;
-    if (!read(definition, static_cast<std::size_t>(header), count) || count == 0
+    if (!read(definition, static_cast<std::size_t>(header) + kStatCountMember, count) || count == 0
         || count > kStatCapacity
         || !read(definition, static_cast<std::size_t>(header) + kStatDataMember, dataRelative)) {
         return;
     }
     const std::int64_t data = header + static_cast<std::int64_t>(kStatDataMember) + dataRelative;
-    if (data < 0 || static_cast<std::size_t>(data) + kStatEntryStride * count > definition.size()) {
+    reader::TypedArrayRows rows{};
+    if (data < 0
+        || !reader::read_typed_array(definition,
+                                     static_cast<std::size_t>(data),
+                                     count,
+                                     reader::kAnyElementClass,
+                                     kStatEntryStride,
+                                     rows)) {
         return;
     }
 
     for (std::uint64_t entry = 0; entry < count; ++entry) {
-        const auto base = static_cast<std::size_t>(data) + kStatEntryStride * entry;
+        const auto base = rows.data + kStatEntryStride * entry;
         if (!read(definition, base + kStatEntryRow, row.statRows[entry])
             || !read(definition, base + kStatEntryValue, row.statValues[entry])) {
             row.statCount = 0;
@@ -354,15 +370,7 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
     row.instanced = instanced != 0;
     row.quietAcquisition = quietAcquisition != 0;
     row.toastlessAcquisition = toastlessAcquisition != 0;
-    // Short legacy definitions simply do not declare a plug category.
-    (void)read(definition, kPlugCategoryOffset, row.plugCategoryHash);
     read_plug_block(definition, row);
-    (void)read(definition,
-               kInsertionMaterialRequirementSetIndexOffset,
-               row.insertionMaterialRequirementSetIndex);
-    (void)read(definition,
-               kEnabledMaterialRequirementSetIndexOffset,
-               row.enabledMaterialRequirementSetIndex);
     read_stats(definition, row);
     read_appearance(definition, row);
     read_socket_entry_list(definition, row);
@@ -397,7 +405,7 @@ bool visit_allowed_plugs(std::span<const std::byte> definition,
         return false;
     }
     Array sets{};
-    if (!find_array_at(plugSetTable, kTableArrayDescriptor, sets)) {
+    if (!find_array_at(plugSetTable, offsetof(generated::C80802cb6, table), sets)) {
         return false;
     }
     const std::size_t socketEntry =

@@ -5,6 +5,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "../account/account_state.h"
 #include "../entitlements/definition.h"
@@ -75,7 +76,14 @@ void set_sign_in_time(std::uint64_t seconds) noexcept;
                                       std::size_t& count) noexcept;
 
 /**
- * Drops one character's slot-keyed unlock and reward rows and moves later slots down one.
+ * Gives a created character the starter unlock rows, the set every default character starts with.
+ * @param slot Character slot the new character holds; it has no unlock rows yet.
+ * @return False when a row does not copy.
+ */
+[[nodiscard]] bool seed_character_unlocks(std::size_t slot) noexcept;
+
+/**
+ * Drops one character's slot-keyed unlock, reward and parked rows and moves later slots down one.
  * @param slot Character slot the removed character held.
  * @return True when every row moved in one transaction.
  */
@@ -90,5 +98,33 @@ struct PendingReward {
 [[nodiscard]] bool enqueue_reward(std::uint32_t definitionHash, std::int32_t quantity) noexcept;
 [[nodiscard]] bool next_reward(PendingReward& output) noexcept;
 [[nodiscard]] bool complete_reward(std::uint64_t id) noexcept;
+
+/** Which account list a parked row came from; the values are the parked_items kind column. */
+enum class ParkedKind : std::uint8_t {
+    item = 0,
+    stack = 1,
+    profile = 2,
+};
+
+/**
+ * One row set aside because the installed content lacks its definition. A stack keeps only its
+ * hash, quantity and serial in `item`; a profile row also keeps its identity and seen state.
+ */
+struct ParkedRow {
+    std::int64_t id{};
+    ParkedKind kind{};
+    /** -1 for a profile row. */
+    int characterSlot{};
+    /** 0 equipment, 1 the unequipped list; stacks and profile rows use 1. */
+    int location{};
+    std::size_t position{};
+    account::inventory::Item item;
+};
+
+/** Adds one parked row; `row.id` is ignored. */
+[[nodiscard]] bool park(const ParkedRow& row) noexcept;
+[[nodiscard]] bool read_parked(std::vector<ParkedRow>& output) noexcept;
+/** Drops one parked row after its content is back in the account. */
+[[nodiscard]] bool unpark(std::int64_t id) noexcept;
 
 } // namespace sunrise::state::investment::store

@@ -6,13 +6,23 @@
 #include <span>
 #include <variant>
 
+#include "../../content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../content/packages/schema/generated/tag_classes_80807f.h"
+#include "../../content/packages/schema/generated/tag_classes_808083.h"
+#include "../../content/packages/schema/generated/tag_classes_808094.h"
+#include "../../content/packages/schema/generated/tag_classes_808095.h"
+#include "../../content/packages/schema/generated/tag_classes_808099.h"
+
 namespace sunrise::middleware::bap::activity_message::scriptable_auth {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** ClientRef slot type for actor lifecycle and named behavior channels. */
 inline constexpr std::uint8_t kType2SlotType = 2;
-inline constexpr std::uint32_t kType2ComponentClass = 0x8080834EU;
-inline constexpr std::uint32_t kType2SenseSchema = 0x80807DA2U;
-inline constexpr std::uint32_t kType2Schema = 0x80807DA1;
+inline constexpr std::uint32_t kType2ComponentClass = generated::C8080834e::kClass;
+inline constexpr std::uint32_t kType2SenseSchema = generated::C80807da2::kClass;
+inline constexpr std::uint32_t kType2Schema = generated::C80807da1::kClass;
 inline constexpr std::size_t kType2ChannelCapacity = 16;
 inline constexpr std::size_t kType2TemperamentCapacity = 6;
 /** Fixed bits around the variable 64-bit channel rows. */
@@ -222,9 +232,9 @@ struct Type2ProgramLayout final {
 
 /** Type-24 controls up to four authored object channels through one counted Auth array. */
 inline constexpr std::uint8_t kType24SlotType = 24;
-inline constexpr std::uint32_t kType24ComponentClass = 0x80804F3BU;
-inline constexpr std::uint32_t kType24SenseSchema = 0x80804F3DU;
-inline constexpr std::uint32_t kType24Schema = 0x80804F40U;
+inline constexpr std::uint32_t kType24ComponentClass = generated::C80804f3b::kClass;
+inline constexpr std::uint32_t kType24SenseSchema = generated::C80804f3d::kClass;
+inline constexpr std::uint32_t kType24Schema = generated::C80804f40::kClass;
 inline constexpr std::size_t kType24ChannelCapacity = 4;
 inline constexpr std::uint8_t kType24CountWidth = 3;
 /** Each channel carries a biased int32 revision and two float32 values. */
@@ -258,8 +268,8 @@ struct Type24Body final {
 
 /** ClientRef slot type and Auth schema for the object-filter sensor. */
 inline constexpr std::uint8_t kType34SlotType = 34;
-inline constexpr std::uint32_t kType34ComponentClass = 0x80809568U;
-inline constexpr std::uint32_t kType34Schema = 0x8080956AU;
+inline constexpr std::uint32_t kType34ComponentClass = generated::C80809568::kClass;
+inline constexpr std::uint32_t kType34Schema = generated::C8080956a::kClass;
 inline constexpr std::size_t kType34PredicateCapacity = 8;
 
 /**
@@ -267,19 +277,19 @@ inline constexpr std::size_t kType34PredicateCapacity = 8;
  * 21-class authored behavior-condition registry.
  */
 enum class Type34PredicateSchema : std::uint32_t {
-    modeU32A = 0x80809571U,
-    modeU32B = 0x80809572U,
-    modeOnlyA = 0x80809573U,
-    unregisteredModeSlotRef = 0x80809574U,
-    modeU32C = 0x80809575U,
-    modeFlagSlotRef = 0x80809576U,
-    modeSlotRefA = 0x80809577U,
-    modeSlotRefB = 0x80809578U,
-    modeSlotRefC = 0x80809579U,
-    modeI32 = 0x8080957AU,
-    modeSlotRefD = 0x8080957BU,
-    modeU32D = 0x8080957CU,
-    modeOnlyB = 0x8080957DU,
+    modeU32A = generated::C80809571::kClass,
+    modeU32B = generated::C80809572::kClass,
+    modeOnlyA = generated::C80809573::kClass,
+    unregisteredModeSlotRef = generated::C80809574::kClass,
+    modeU32C = generated::C80809575::kClass,
+    modeFlagSlotRef = generated::C80809576::kClass,
+    modeSlotRefA = generated::C80809577::kClass,
+    modeSlotRefB = generated::C80809578::kClass,
+    modeSlotRefC = generated::C80809579::kClass,
+    modeI32 = generated::C8080957a::kClass,
+    modeSlotRefD = generated::C8080957b::kClass,
+    modeU32D = generated::C8080957c::kClass,
+    modeOnlyB = generated::C8080957d::kClass,
 };
 
 struct Type34ModeU32A final {
@@ -395,13 +405,9 @@ set_type2_channel(Type2ChannelState& state, std::uint32_t nameHash, float value)
                                          std::size_t& written,
                                          std::size_t& writtenBits) noexcept;
 
-/** Validates only the canonical retained actor-control body emitted above. */
-[[nodiscard]] bool validate_type2_body(std::span<const std::byte> input,
-                                       std::size_t bitCount) noexcept;
-
 /** ClientRef slot type for an authored object entry. */
 inline constexpr std::uint8_t kType4SlotType = 4;
-inline constexpr std::uint32_t kType4Schema = 0x8080992F;
+inline constexpr std::uint32_t kType4Schema = generated::C8080992f::kClass;
 /** Canonical body with no transform override and no dynamic trailing entries. */
 inline constexpr std::size_t kType4BitCount = 252;
 inline constexpr std::size_t kType4ByteCount = (kType4BitCount + 7) / 8;
@@ -429,13 +435,9 @@ struct Type4Preset final {
                                 std::span<std::byte> output,
                                 std::size_t& written) noexcept;
 
-/** Checks the canonical type-4 body used by the typed Host route. */
-[[nodiscard]] bool validate_type4_body(std::span<const std::byte> input,
-                                       std::size_t bitCount) noexcept;
-
 /** ClientRef slot type for the objective reset body. */
 inline constexpr std::uint8_t kType3SlotType = 3;
-inline constexpr std::uint32_t kType3Schema = 0x80807F0C;
+inline constexpr std::uint32_t kType3Schema = generated::C80807f0c::kClass;
 inline constexpr std::size_t kType3ObjectiveCount = 24;
 /**
  * The root has two fields and both are presence-gated. So the body opens with the array's own
@@ -446,7 +448,7 @@ inline constexpr std::size_t kType3ByteCount = (kType3BitCount + 7) / 8;
 /** ClientRef slot type for the three-channel control body. */
 inline constexpr std::uint8_t kType23SlotType = 23;
 /** Runtime schema handle for the type-23 auth body. */
-inline constexpr std::uint32_t kType23Schema = 0x80804F48;
+inline constexpr std::uint32_t kType23Schema = generated::C80804f48::kClass;
 /** Three repetitions of real32, signed int16, and bool. */
 inline constexpr std::size_t kType23ChannelCount = 3;
 inline constexpr std::size_t kType23BitCount = 147;
@@ -454,28 +456,28 @@ inline constexpr std::size_t kType23ByteCount = (kType23BitCount + 7) / 8;
 /** ClientRef slot type for the configured trigger body. */
 inline constexpr std::uint8_t kType31SlotType = 31;
 /** Runtime schema handle for the type-31 auth body. */
-inline constexpr std::uint32_t kType31Schema = 0x80809524;
+inline constexpr std::uint32_t kType31Schema = generated::C80809524::kClass;
 /** One bool followed by two unsigned 64-bit values. */
 inline constexpr std::size_t kType31BitCount = 129;
 inline constexpr std::size_t kType31ByteCount = (kType31BitCount + 7) / 8;
-/** ClientRef slot type for the replicated state carrying schema 0x80809919. */
+/** ClientRef slot type for the replicated activity timer state. */
 inline constexpr std::uint8_t kType18SlotType = 18;
-inline constexpr std::uint32_t kType18Schema = 0x80809919;
+inline constexpr std::uint32_t kType18Schema = generated::C80809919::kClass;
 inline constexpr std::size_t kType18BitCount = 386;
 inline constexpr std::size_t kType18ByteCount = (kType18BitCount + 7) / 8;
 /** ClientRef slot type for the replicated countdown/timer body. */
 inline constexpr std::uint8_t kType35SlotType = 35;
-inline constexpr std::uint32_t kType35Schema = 0x808099BF;
+inline constexpr std::uint32_t kType35Schema = generated::C808099bf::kClass;
 inline constexpr std::size_t kType35BitCount = 359;
 inline constexpr std::size_t kType35ByteCount = (kType35BitCount + 7) / 8;
 /** ClientRef slot type for an authored sequence revision. */
 inline constexpr std::uint8_t kType5SlotType = 5;
-inline constexpr std::uint32_t kType5Schema = 0x80804F04;
+inline constexpr std::uint32_t kType5Schema = generated::C80804f04::kClass;
 inline constexpr std::size_t kType5BitCount = 7'359;
 inline constexpr std::size_t kType5ByteCount = (kType5BitCount + 7) / 8;
 /** ClientRef slot type for an authored cinematic state. */
 inline constexpr std::uint8_t kType6SlotType = 6;
-inline constexpr std::uint32_t kType6Schema = 0x80804F08;
+inline constexpr std::uint32_t kType6Schema = generated::C80804f08::kClass;
 /** Empty participant arrays are encoded by their zero counts, without trailing array storage. */
 inline constexpr std::size_t kType6MinimumBitCount = 263;
 inline constexpr std::size_t kType6MaximumBitCount = 1'671;
@@ -483,12 +485,12 @@ inline constexpr std::size_t kType6BitCount = kType6MinimumBitCount;
 inline constexpr std::size_t kType6ByteCount = (kType6BitCount + 7) / 8;
 /** ClientRef slot type for the authored task sensor generation. */
 inline constexpr std::uint8_t kType38SlotType = 38;
-inline constexpr std::uint32_t kType38Schema = 0x80807D89;
+inline constexpr std::uint32_t kType38Schema = generated::C80807d89::kClass;
 inline constexpr std::size_t kType38BitCount = 32;
 inline constexpr std::size_t kType38ByteCount = 4;
 /** ClientRef slot type for the authored dialogue sensor. */
 inline constexpr std::uint8_t kType53SlotType = 53;
-inline constexpr std::uint32_t kType53Schema = 0x80804F77;
+inline constexpr std::uint32_t kType53Schema = generated::C80804f77::kClass;
 /** The native schema serializes all 128 entries and gates each optional world id separately. */
 inline constexpr std::size_t kType53EntryCount = 128;
 inline constexpr std::size_t kType53MinimumBitCount = 19'767;
@@ -499,7 +501,7 @@ inline constexpr std::size_t kType53BitCount = kType53MinimumBitCount + kType53W
 inline constexpr std::size_t kType53ByteCount = (kType53BitCount + 7) / 8;
 /** ClientRef slot type for the three-lane authored HUD directive state. */
 inline constexpr std::uint8_t kType68SlotType = 68;
-inline constexpr std::uint32_t kType68Schema = 0x80804F67;
+inline constexpr std::uint32_t kType68Schema = generated::C80804f67::kClass;
 inline constexpr std::size_t kType68EntryCount = 3;
 /** Signed progress values each lane carries; a counter element shows the first two. */
 inline constexpr std::size_t kType68ProgressCount = 4;
@@ -511,7 +513,7 @@ inline constexpr std::uint8_t kType47SlotType = 47;
 inline constexpr std::uint8_t kType60SlotType = 60;
 /** ClientRef slot type for the encounter/player engagement observer. */
 inline constexpr std::uint8_t kType70SlotType = 70;
-inline constexpr std::uint32_t kType70Schema = 0x808094F1;
+inline constexpr std::uint32_t kType70Schema = generated::C808094f1::kClass;
 /** Flags, two absent dynamic lists, and the signed 16-bit Sense revision. */
 inline constexpr std::size_t kType70BitCount = 23;
 inline constexpr std::size_t kType70ByteCount = (kType70BitCount + 7) / 8;
@@ -552,7 +554,7 @@ struct Type23Body final {
 struct Type68Preset final {
     std::uint32_t nameHash{};
     std::int32_t elementIndex{};
-    /** Native directive state: -1 disables, 0 enters, 1 completes, 2 exits. */
+    /** Native directive state: 0 enters, 1 completes, and 2 uses the alternate exit state. */
     std::int8_t state{};
     bool visible{true};
     /** Lane progress values, current then maximum first; the HUD reads them as a counter. */
@@ -584,23 +586,16 @@ struct Type70Preset final {
                                  std::span<std::byte> output,
                                  std::size_t& written) noexcept;
 
-/** Validates the two native crash-bearing fields and the fixed type-68 body shape. */
-[[nodiscard]] bool validate_type68_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
-
 /** Encodes the exact 23-bit type-70 body with no player or definition filter rows. */
 [[nodiscard]] bool encode_type70(const Type70Preset& preset,
                                  std::span<std::byte> output,
                                  std::size_t& written) noexcept;
 
-/** Validates the exact bounded no-filter type-70 body emitted by encode_type70. */
-[[nodiscard]] bool validate_type70_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
-
 /** ClientRef slot type for the performance sensor that starts one named actor performance. */
 inline constexpr std::uint8_t kType42SlotType = 42;
-inline constexpr std::uint32_t kType42ComponentClass = 0x80809583U;
-inline constexpr std::uint32_t kType42Schema = 0x80809586U;
+inline constexpr std::uint32_t kType42ComponentClass =
+    generated::PerformanceSensorComponent::kClass;
+inline constexpr std::uint32_t kType42Schema = generated::C80809586::kClass;
 /** Present command group of name, value and generation; the optional row table stays absent. */
 inline constexpr std::size_t kType42BitCount = 98;
 inline constexpr std::size_t kType42ByteCount = (kType42BitCount + 7) / 8;
@@ -630,13 +625,9 @@ struct Type42Preset final {
                                  std::span<std::byte> output,
                                  std::size_t& written) noexcept;
 
-/** Validates the exact body emitted by encode_type42. */
-[[nodiscard]] bool validate_type42_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
-
 /** ClientRef slot type for the per-player public-event sensor. */
 inline constexpr std::uint8_t kType71SlotType = 71;
-inline constexpr std::uint32_t kType71Schema = 0x80804F57;
+inline constexpr std::uint32_t kType71Schema = generated::C80804f57::kClass;
 /** Biased int32 state, 64-bit player identity, one slot reference, one real32. */
 inline constexpr std::size_t kType71BitCount = 183;
 inline constexpr std::size_t kType71ByteCount = (kType71BitCount + 7) / 8;
@@ -662,10 +653,6 @@ encode_type71(const Type71Body& body, std::span<std::byte> output, std::size_t& 
 /** Decodes one complete type-71 body. */
 [[nodiscard]] bool decode_type71_body(std::span<const std::byte> input, Type71Body& body) noexcept;
 
-/** Validates the exact type-71 body shape and its present area reference. */
-[[nodiscard]] bool validate_type71_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
-
 /** Last committed objective reset generation for one ClientRef. */
 struct Type3GenerationGuard final {
     std::int32_t last{};
@@ -690,10 +677,6 @@ struct Type3Body final {
 
 /** Decodes one complete objective reset body. */
 [[nodiscard]] bool decode_type3_body(std::span<const std::byte> input, Type3Body& body) noexcept;
-
-/** Checks one complete objective reset body. */
-[[nodiscard]] bool validate_type3_body(std::span<const std::byte> input,
-                                       std::size_t bitCount) noexcept;
 
 /** Last accepted type-31 generation for one ClientRef. */
 struct Type31GenerationGuard final {
@@ -827,10 +810,6 @@ struct Type53Body final {
 /** Decodes one exact type-23 body and checks its zero byte padding. */
 [[nodiscard]] bool decode_type23_body(std::span<const std::byte> input, Type23Body& body) noexcept;
 
-/** @return True when one packed override is a complete valid type-23 body. */
-[[nodiscard]] bool validate_type23_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
-
 /** Finds the next type-31 generation without reaching its reserved maximum. */
 [[nodiscard]] bool next_type31_generation(const Type31GenerationGuard& guard,
                                           std::uint64_t& next) noexcept;
@@ -852,10 +831,6 @@ struct Type53Body final {
 /** Decodes one exact type-31 body and checks its zero byte padding. */
 [[nodiscard]] bool decode_type31_body(std::span<const std::byte> input, Type31Body& body) noexcept;
 
-/** @return True when one packed override is a complete valid type-31 body. */
-[[nodiscard]] bool validate_type31_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
-
 /** Encodes one complete type-18 body without changing a refused output buffer. */
 [[nodiscard]] bool encode_type18_body(const Type18Body& body,
                                       std::span<std::byte> output,
@@ -864,10 +839,6 @@ struct Type53Body final {
 /** Decodes one exact type-18 body and checks its zero byte padding. */
 [[nodiscard]] bool decode_type18_body(std::span<const std::byte> input, Type18Body& body) noexcept;
 
-/** @return True when one packed override is a complete valid type-18 body. */
-[[nodiscard]] bool validate_type18_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
-
 /** Encodes one complete type-35 body without changing a refused output buffer. */
 [[nodiscard]] bool encode_type35_body(const Type35Body& body,
                                       std::span<std::byte> output,
@@ -875,10 +846,6 @@ struct Type53Body final {
 
 /** Decodes one exact type-35 body and checks its zero byte padding. */
 [[nodiscard]] bool decode_type35_body(std::span<const std::byte> input, Type35Body& body) noexcept;
-
-/** @return True when one packed override is a complete valid type-35 body. */
-[[nodiscard]] bool validate_type35_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
 
 /** Finds the next sequence revision while reserving 0xFF as inactive. */
 [[nodiscard]] bool next_type5_revision(const Type5RevisionGuard& guard,
@@ -890,10 +857,6 @@ struct Type53Body final {
                                 std::span<std::byte> output,
                                 std::size_t& written) noexcept;
 
-/** Validates the canonical closed type-5 body accepted by this host. */
-[[nodiscard]] bool validate_type5_body(std::span<const std::byte> input,
-                                       std::size_t bitCount) noexcept;
-
 /** Finds the next cinematic generation without wrapping. */
 [[nodiscard]] bool next_type6_generation(const Type6GenerationGuard& guard,
                                          std::uint32_t& next) noexcept;
@@ -903,10 +866,6 @@ struct Type53Body final {
                                 const Type6GenerationGuard& guard,
                                 std::span<std::byte> output,
                                 std::size_t& written) noexcept;
-
-/** Validates the canonical closed type-6 body accepted by this host. */
-[[nodiscard]] bool validate_type6_body(std::span<const std::byte> input,
-                                       std::size_t bitCount) noexcept;
 
 /** Finds the next positive task generation without wrapping. */
 [[nodiscard]] bool next_type38_generation(const Type38GenerationGuard& guard,
@@ -921,10 +880,6 @@ struct Type53Body final {
 /** Decodes one exact type-38 body. */
 [[nodiscard]] bool decode_type38_body(std::span<const std::byte> input,
                                       std::int32_t& generation) noexcept;
-
-/** @return True when one packed override is a complete valid type-38 body. */
-[[nodiscard]] bool validate_type38_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
 
 /**
  * Picks the generation of an arm or disarm. The client stores its activity clock at each fire and
@@ -967,9 +922,5 @@ struct Type53Body final {
 [[nodiscard]] bool decode_type53_body(std::span<const std::byte> input,
                                       std::size_t bitCount,
                                       Type53Body& body) noexcept;
-
-/** Validates a dialogue body with at least one fired cue. */
-[[nodiscard]] bool validate_type53_body(std::span<const std::byte> input,
-                                        std::size_t bitCount) noexcept;
 
 } // namespace sunrise::middleware::bap::activity_message::scriptable_auth

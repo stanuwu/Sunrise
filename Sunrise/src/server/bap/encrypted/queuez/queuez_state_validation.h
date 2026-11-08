@@ -17,6 +17,12 @@ namespace sunrise::server::bap::encrypted::queuez {
 [[nodiscard]] bool valid(const SessionState& state) noexcept;
 
 /**
+ * An opcode 505 clears this peer's account selection; only its next opcode 504 sets it again.
+ * @return True from that 505 until that 504.
+ */
+[[nodiscard]] bool account_selection_cleared(const SessionState& state) noexcept;
+
+/**
  * Stages publication of one whole Family-4 snapshot.
  * @param before Current queuez state owned by the peer.
  * @param family Prepared Family-4 snapshot whose object payloads stay borrowed.

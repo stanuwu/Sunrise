@@ -5,32 +5,44 @@
 #include <cstdint>
 #include <span>
 
+#include "../schema/generated/tag_classes_80807d.h"
+#include "../schema/generated/tag_classes_808094.h"
+#include "../schema/generated/tag_classes_808095.h"
+#include "../schema/generated/tag_classes_80809a.h"
+#include "../schema/generated/tag_classes_80809b.h"
+#include "../schema/generated/tag_classes_80809c.h"
+
 namespace sunrise::middleware::content::packages::tables {
 
 /** Tag class of a placed-object blob, which is where slot descriptors live. */
-inline constexpr std::uint32_t kPlacedObjectClass = 0x80809C36U;
-/** A descriptor repeats this constant at its own offset 8. */
-inline constexpr std::uint32_t kDescriptorMark = 0x70U;
-/** One descriptor is this many bytes. */
-inline constexpr std::size_t kDescriptorSize = 128;
-/** Descriptors are found on this alignment inside the blob. */
-inline constexpr std::size_t kDescriptorStep = 4;
+inline constexpr std::uint32_t kPlacedObjectClass = schema::generated::SEntityConfig::kClass;
+/** A config names its slot descriptor and the default instance the descriptor's handle names. */
+inline constexpr std::size_t kConfigDescriptorField =
+    offsetof(schema::generated::SEntityConfig, definition);
+inline constexpr std::size_t kConfigDefaultInstanceField =
+    offsetof(schema::generated::SEntityConfig, defaultInstance);
 /** A component class and a schema both carry this high half word. */
 inline constexpr std::uint32_t kClassHighHalf = 0x8080U;
 /** A slot type that declares no auth or no sense schema records this instead. */
 inline constexpr std::uint32_t kAbsentSchema = 0xFFFFFFFFU;
 /** Classes on the chain from a placed object's handle to its descriptor blob. */
-inline constexpr std::uint32_t kSlotIndirectClass = 0x80809468U;
-inline constexpr std::uint32_t kSlotRedirectClass = 0x80809B14U;
-/** Element class of the indirect blob's descriptor redirect array. */
-inline constexpr std::uint32_t kSlotRedirectElementClass = 0x80809B13U;
+inline constexpr std::uint32_t kSlotIndirectClass = schema::generated::SAuthoredObjectSet::kClass;
+inline constexpr std::uint32_t kSlotRedirectClass = schema::generated::SEntityLink::kClass;
+/** Element class and stride of the indirect blob's descriptor redirect array. */
+inline constexpr std::uint32_t kSlotRedirectElementClass =
+    schema::generated::SAuthoredObjectSetTarget::kClass;
+inline constexpr std::size_t kSlotRedirectElementStride =
+    sizeof(schema::generated::SAuthoredObjectSetTarget);
 /** The indirect blob's direct object-list target, absent on the redirect-array form. */
-inline constexpr std::size_t kSlotDirectTagOffset = 8;
+inline constexpr std::size_t kSlotDirectTagOffset =
+    offsetof(schema::generated::SAuthoredObjectSet, directTarget);
 inline constexpr std::uint32_t kSlotDirectTagAbsent = 0xFFFFFFFFU;
 /** The indirect blob holds its handle array descriptor at this offset. */
-inline constexpr std::size_t kSlotIndirectDescriptor = 16;
+inline constexpr std::size_t kSlotIndirectDescriptor =
+    offsetof(schema::generated::SAuthoredObjectSet, objects);
 /** The redirect blob names its next tag at this offset. */
-inline constexpr std::size_t kSlotRedirectTagOffset = 12;
+inline constexpr std::size_t kSlotRedirectTagOffset =
+    offsetof(schema::generated::SEntityLink, next);
 /** Maximum nodes and depth one descriptor-chain walk may schedule. */
 inline constexpr std::size_t kDescriptorChainCapacity = 256;
 inline constexpr std::size_t kDescriptorChainDepthLimit = 8;
@@ -38,20 +50,30 @@ inline constexpr std::size_t kDescriptorChainDepthLimit = 8;
 inline constexpr std::size_t kPlacedChainCapacity = 256;
 inline constexpr std::size_t kPlacedChainDepthLimit = 9;
 
-/** Descriptor field offsets. */
-inline constexpr std::size_t kDescriptorOwnTagOffset = 0;
-inline constexpr std::size_t kDescriptorComponentClassOffset = 4;
-inline constexpr std::size_t kDescriptorMarkOffset = 8;
-inline constexpr std::size_t kDescriptorRegistryKeyOffset = 48;
-inline constexpr std::size_t kDescriptorSlotTypeOffset = 52;
-inline constexpr std::size_t kDescriptorSlotIndexOffset = 54;
-inline constexpr std::size_t kDescriptorBubbleIndexOffset = 56;
-inline constexpr std::size_t kDescriptorSenseSchemaOffset = 68;
-inline constexpr std::size_t kDescriptorAuthSchemaOffset = 72;
+/** Descriptor field offsets; a descriptor is the shared slot component header. */
+using SlotDescriptorHeader = schema::generated::SlotComponentHeader;
+// Tag layout offsets inside the slot component header.
+inline constexpr std::size_t kDescriptorOwnTagOffset = offsetof(SlotDescriptorHeader, handle.tag);
+inline constexpr std::size_t kDescriptorComponentClassOffset =
+    offsetof(SlotDescriptorHeader, handle.word);
+inline constexpr std::size_t kDescriptorHandleOffsetOffset =
+    offsetof(SlotDescriptorHeader, handle.offset);
+inline constexpr std::size_t kDescriptorRegistryKeyOffset =
+    offsetof(SlotDescriptorHeader, registryKey);
+inline constexpr std::size_t kDescriptorSlotTypeOffset = offsetof(SlotDescriptorHeader, slotType);
+inline constexpr std::size_t kDescriptorSlotIndexOffset = offsetof(SlotDescriptorHeader, slotIndex);
+inline constexpr std::size_t kDescriptorBubbleIndexOffset =
+    offsetof(SlotDescriptorHeader, bubbleIndex);
+inline constexpr std::size_t kDescriptorSenseSchemaOffset =
+    offsetof(SlotDescriptorHeader, senseSchema);
+inline constexpr std::size_t kDescriptorAuthSchemaOffset =
+    offsetof(SlotDescriptorHeader, authSchema);
 /** Type 2 descriptors bind their authored squad through this ClientRef. */
-inline constexpr std::size_t kType2SquadReferenceOffset = 104;
+inline constexpr std::size_t kType2SquadReferenceOffset =
+    offsetof(schema::generated::Type2SquadComponent, squadTargetKey);
 /** Type 30 descriptors name the volume or object their player monitor measures here. */
-inline constexpr std::size_t kType30MeasuredReferenceOffset = 88;
+inline constexpr std::size_t kType30MeasuredReferenceOffset =
+    offsetof(schema::generated::Type30MonitorComponent, measuredTargetKey);
 
 /** What one slot type resolves to. */
 struct SlotDescriptor {
@@ -130,8 +152,20 @@ using PlacedChainRecordVisitor = bool (*)(void* context,
 }
 
 /**
- * Reports descriptors matching the repeated tag, mark, owner key, and class-shaped fields.
- * The visitor may stop the bounded scan by returning false.
+ * Finds the slot descriptor of one config: its definition object, whose handle names the config
+ * and the config's default instance.
+ * @param blob Whole config bytes.
+ * @param ownTag The config's own tag.
+ * @param offset Receives the descriptor offset.
+ * @return False when the config carries no slot descriptor.
+ */
+[[nodiscard]] bool config_descriptor_offset(std::span<const std::byte> blob,
+                                            std::uint32_t ownTag,
+                                            std::size_t& offset) noexcept;
+
+/**
+ * Reports the config's descriptor when it names the owner key and has class-shaped fields.
+ * The visitor may stop the walk by returning false.
  */
 [[nodiscard]] bool visit_slot_descriptors(std::span<const std::byte> blob,
                                           std::uint32_t ownTag,

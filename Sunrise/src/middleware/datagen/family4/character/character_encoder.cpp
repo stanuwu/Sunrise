@@ -33,19 +33,20 @@ constexpr std::uint8_t kNativeFalse = 0;
 /** Stackable quest items needed by the collectible interactions currently supported. */
 struct CollectibleQuest {
     std::uint32_t definitionHash{};
-    /** Lore completion flag which consumes this quest; zero keeps the prerequisite authored. */
+    /** Lore completion flag which consumes this quest. */
     std::uint16_t completionFlag{};
 };
-/** One row per supported collectible quest; a claimed completion flag drops the row. */
-constexpr std::array<CollectibleQuest, 4> kCollectibleQuests{{
-    {0x57C4540AU, 0U},
+/**
+ * One row per supported collectible quest; a claimed completion flag drops the row.
+ * TODO: extract; no package row found yet links a quest item to the record that consumes it.
+ */
+constexpr std::array<CollectibleQuest, 3> kCollectibleQuests{{
     {0x85CC476EU, 10762U},
     {0xB099029AU, 10766U},
     {0xC3535D63U, 10769U},
 }};
 /** One character has one customisation header, so both records carry the same 36 bytes. */
-static_assert(character_record::layout::kHeaderBlockBytes.size()
-              == layout::kCustomisationHeaderSize);
+static_assert(state::kAppearanceHeaderSize == layout::kCustomisationHeaderSize);
 /** Character object B repeats the family-three periodic-reset block byte for byte. */
 static_assert(sizeof(character_record::layout::PeriodicReset) == layout::kPeriodicResetRecordSize);
 
@@ -121,9 +122,8 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
     std::size_t nextRow = 0;
     std::size_t rowLimit = 0;
     for (const CollectibleQuest& quest : kCollectibleQuests) {
-        if (quest.completionFlag != 0
-            && (state::unlocks::records::claimed(quest.completionFlag)
-                || state::unlocks::records::claimable(quest.completionFlag))) {
+        if (state::unlocks::records::claimed(quest.completionFlag)
+            || state::unlocks::records::claimable(quest.completionFlag)) {
             continue;
         }
         state::build_data::items::Definition item{};
@@ -271,10 +271,9 @@ bool encode(const state::CharacterState& state,
     object.identity.race = static_cast<std::int8_t>(state.race);
     object.identity.gender = static_cast<std::int8_t>(state.gender);
     object.identity.characterClass = static_cast<std::int8_t>(state.characterClass);
-    const auto& headerSource = state.appearanceHeaderValid
-                                   ? state.appearanceHeader
-                                   : character_record::layout::kHeaderBlockBytes;
-    std::memcpy(object.customisationHeader.data(), headerSource.data(), headerSource.size());
+    std::memcpy(object.customisationHeader.data(),
+                state.appearanceHeader.data(),
+                state.appearanceHeader.size());
     object.lastOrbitedDestination = state.lastOrbitedDestination;
     // No previous activity is tracked, and a zero here would name the orbit activity.
     object.previousActivityIndex = kAbsentActivityIndex;

@@ -13,6 +13,18 @@ enum class Lane : std::uint8_t {
     visibility,
 };
 
+/** Fixed keys of the transitions no widget ID names; each visibility-lane user owns one. */
+enum class FixedKey : ImGuiID {
+    surface = 1,
+    startupHint = 2,
+    notice = 3,
+};
+
+/** @return The widget ID one fixed key stands for. */
+[[nodiscard]] constexpr ImGuiID fixed_id(FixedKey key) noexcept {
+    return static_cast<ImGuiID>(key);
+}
+
 /** Per-second response rates keep transitions stable across frame rates. */
 struct Rates {
     float risePerSecond{};

@@ -18,7 +18,13 @@ constexpr std::uint16_t kUnresolvedItemIndex = (std::numeric_limits<std::uint16_
 /** Outcome of one settlement attempt. */
 enum class WorldRewardSettlement : std::uint8_t { granted, retired, kept };
 
-/** Grants and retires one earned reward in one transaction, or retires one State rules out. */
+/**
+ * Grants and retires one earned reward in one transaction, or retires one State rules out.
+ * A quest item starts its quest through the acquisition path; any other item resolves through
+ * its reward row.
+ * @param request Oldest saved reward of the selected character.
+ * @return Granted, retired as ungrantable, or kept for a later attempt.
+ */
 WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noexcept {
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
@@ -94,7 +100,11 @@ bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,
     return quantity > 0 && enqueue_world_reward(itemDefinitionIndex, quantity);
 }
 
-/** Restores the selected character's oldest reward, retiring rows that can never be granted. */
+/**
+ * Restores the selected character's oldest reward, retiring rows that can never be granted.
+ * @param request Receives the reward; cleared when none is ready.
+ * @return False when the queue is empty or the item table is not published yet.
+ */
 bool current_world_reward(WorldRewardRequest& request) noexcept {
     state::investment::store::PendingReward saved;
     while (state::investment::store::next_reward(saved)) {
@@ -131,7 +141,12 @@ bool complete_world_reward(std::uint64_t id) noexcept {
     return state::investment::store::complete_reward(id);
 }
 
-/** Deletes the row on the caller's open savepoint, commits, and logs why. */
+/**
+ * Deletes the row on the caller's open savepoint, commits, and logs why.
+ * @param transaction Open savepoint the deletion commits on.
+ * @param reason Static label of the verdict that rules the reward out.
+ * @return False when the row stays saved.
+ */
 bool retire_world_reward(state::investment::store::Transaction& transaction,
                          const WorldRewardRequest& request,
                          const char* reason) noexcept {

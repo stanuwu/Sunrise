@@ -105,6 +105,7 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
 
 namespace {
 
+// The generated member row that names and documents this binding.
 constexpr const api::MemberSpec& kVolumeActive = api::slot_member("set_volume_active");
 
 /** Reads one required boolean argument; any other type is an error. */

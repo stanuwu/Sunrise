@@ -8,6 +8,11 @@
 #include <unordered_set>
 #include <vector>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807e.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808083.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809a.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809c.h"
 #include "activity_sdk_authored_scene_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::authored_scene_inventory {
@@ -68,21 +73,21 @@ constexpr std::size_t kHashCombineConstant = 0x9E3779B9U;
                 return false;
             }
             if (slot.slotType == format::kAuthoredSceneSlotType && schema.exact
-                && schema.componentClass == format::kAuthoredSceneComponentClass
-                && schema.senseSchema == format::kAuthoredSceneSenseSchema
-                && schema.authSchema == format::kAuthoredSceneAuthSchema) {
+                && schema.componentClass == generated::AuthoredSceneComponentType43::kClass
+                && schema.senseSchema == generated::C8080626a::kClass
+                && schema.authSchema == generated::C8080626b::kClass) {
                 projectedOwners[slot.objectIndex] = true;
             }
             if (slot.slotType == format::kTaskSlotType && schema.exact
-                && schema.componentClass == format::kTaskComponentClass
+                && schema.componentClass == generated::TaskComponent::kClass
                 && schema.senseSchema == format::kAbsentIndex
-                && schema.authSchema == format::kTaskAuthSchema) {
+                && schema.authSchema == generated::C80807d89::kClass) {
                 projectedOwners[slot.objectIndex] = true;
             }
             if (slot.slotType == format::kPerformanceSlotType && schema.exact
-                && schema.componentClass == format::kPerformanceComponentClass
+                && schema.componentClass == generated::PerformanceSensorComponent::kClass
                 && schema.senseSchema == format::kAbsentIndex
-                && schema.authSchema == format::kPerformanceAuthSchema) {
+                && schema.authSchema == generated::C80809586::kClass) {
                 projectedOwners[slot.objectIndex] = true;
             }
         }
@@ -92,8 +97,7 @@ constexpr std::size_t kHashCombineConstant = 0x9E3779B9U;
                 || descriptor.configTag == format::kAbsentIndex
                 || descriptor.objectIndex >= topology.objects.size()
                 || descriptor.slotIndex >= topology.slots.size()
-                || descriptor.descriptorOffset
-                       > format::kAbsentIndex - format::kAuthoredSceneParticipantTableRelativeOffset
+                || descriptor.descriptorOffset > format::kAbsentIndex - kSceneDescriptorSize
                 || !descriptor_id(topology, descriptor, expected) || descriptor.id != expected
                 || !ids.emplace(descriptor.id).second) {
                 return false;
@@ -194,15 +198,13 @@ bool validate(const topology::Snapshot& topology,
                            schemas,
                            row.slotIndex,
                            format::kAuthoredSceneSlotType,
-                           format::kAuthoredSceneComponentClass,
-                           format::kAuthoredSceneSenseSchema,
-                           format::kAuthoredSceneAuthSchema)
-            || row.descriptorOffset
-                   > format::kAbsentIndex - format::kAuthoredSceneResourceRelativeOffset
-            || row.resourceFieldOffset
-                   != row.descriptorOffset + format::kAuthoredSceneResourceRelativeOffset
+                           generated::AuthoredSceneComponentType43::kClass,
+                           generated::C8080626a::kClass,
+                           generated::C8080626b::kClass)
+            || row.descriptorOffset > format::kAbsentIndex - kSceneResourceOffset
+            || row.resourceFieldOffset != row.descriptorOffset + kSceneResourceOffset
             || row.resourceTag == 0 || row.resourceTag == format::kAbsentIndex
-            || row.resourceClass != format::kAuthoredSceneResourceClass
+            || row.resourceClass != generated::SEntity::kClass
             || row.flags != format::kAuthoredSceneResourceExact || row.reserved != 0
             || (index != 0 && !resource_less(snapshot.resources[index - 1], row))) {
             return false;
@@ -226,9 +228,9 @@ bool validate(const topology::Snapshot& topology,
                            schemas,
                            slotRow,
                            format::kAuthoredSceneSlotType,
-                           format::kAuthoredSceneComponentClass,
-                           format::kAuthoredSceneSenseSchema,
-                           format::kAuthoredSceneAuthSchema)
+                           generated::AuthoredSceneComponentType43::kClass,
+                           generated::C8080626a::kClass,
+                           generated::C8080626b::kClass)
             || (index != 0 && snapshot.unresourcedSlots[index - 1] >= slotRow)) {
             return false;
         }
@@ -266,28 +268,28 @@ bool validate(const topology::Snapshot& topology,
         Text expectedId{};
         // A row is a type-43 scene edge or a type-42 performance edge; the flag says which. A
         // performance names its squad at a fixed field; a scene names it in a block its
-        // participant table points at, so only the table's position bounds that field here.
+        // participant table points at, so only the end of the slot definition bounds that field.
         const bool performance = row.flags == format::kAuthoredSceneSquadPerformanceTargetExact;
         const std::uint32_t referenceOffset =
-            performance ? format::kPerformanceSquadReferenceRelativeOffset
-                        : format::kAuthoredSceneParticipantTableRelativeOffset;
+            performance ? kPerformanceSquadReferenceOffset : kSceneDescriptorSize;
         const bool referencePlaced =
             performance ? row.referenceFieldOffset == row.descriptorOffset + referenceOffset
                         : row.referenceFieldOffset > row.descriptorOffset + referenceOffset;
-        const bool sourceShape = performance ? slot_shape(topology,
-                                                          schemas,
-                                                          row.sceneSlotIndex,
-                                                          format::kPerformanceSlotType,
-                                                          format::kPerformanceComponentClass,
-                                                          format::kAbsentIndex,
-                                                          format::kPerformanceAuthSchema)
-                                             : slot_shape(topology,
-                                                          schemas,
-                                                          row.sceneSlotIndex,
-                                                          format::kAuthoredSceneSlotType,
-                                                          format::kAuthoredSceneComponentClass,
-                                                          format::kAuthoredSceneSenseSchema,
-                                                          format::kAuthoredSceneAuthSchema);
+        const bool sourceShape = performance
+                                     ? slot_shape(topology,
+                                                  schemas,
+                                                  row.sceneSlotIndex,
+                                                  format::kPerformanceSlotType,
+                                                  generated::PerformanceSensorComponent::kClass,
+                                                  format::kAbsentIndex,
+                                                  generated::C80809586::kClass)
+                                     : slot_shape(topology,
+                                                  schemas,
+                                                  row.sceneSlotIndex,
+                                                  format::kAuthoredSceneSlotType,
+                                                  generated::AuthoredSceneComponentType43::kClass,
+                                                  generated::C8080626a::kClass,
+                                                  generated::C8080626b::kClass);
         if (descriptor == nullptr || descriptor->objectIndex >= topology.objects.size()
             || row.squadSlotIndex >= topology.slots.size()
             || topology.slots[row.squadSlotIndex].objectIndex != descriptor->objectIndex
@@ -300,9 +302,9 @@ bool validate(const topology::Snapshot& topology,
                            schemas,
                            row.squadSlotIndex,
                            format::kSquadSlotType,
-                           format::kSquadComponentClass,
-                           format::kSquadSenseSchema,
-                           format::kSquadAuthSchema)
+                           generated::SSquadComponent::kClass,
+                           generated::C80807ecc::kClass,
+                           generated::C80807ec9::kClass)
             || row.descriptorOffset > format::kAbsentIndex - referenceOffset || !referencePlaced
             || row.targetObjectKey != topology.objects[descriptor->objectIndex].objectKey
             || (row.flags != format::kAuthoredSceneSquadSameObjectExact && !performance)
@@ -331,19 +333,18 @@ bool validate(const topology::Snapshot& topology,
                            schemas,
                            row.taskSlotIndex,
                            format::kTaskSlotType,
-                           format::kTaskComponentClass,
+                           generated::TaskComponent::kClass,
                            format::kAbsentIndex,
-                           format::kTaskAuthSchema)
+                           generated::C80807d89::kClass)
             || !slot_shape(topology,
                            schemas,
                            row.objectiveSlotIndex,
                            format::kObjectiveSlotType,
-                           format::kObjectiveComponentClass,
-                           format::kObjectiveSenseSchema,
-                           format::kObjectiveAuthSchema)
-            || row.descriptorOffset > format::kAbsentIndex - format::kTaskBitIndexRelativeOffset
-            || row.referenceFieldOffset
-                   != row.descriptorOffset + format::kTaskReferenceRelativeOffset
+                           generated::ObjectiveComponentType3::kClass,
+                           generated::C80807f04::kClass,
+                           generated::C80807f0c::kClass)
+            || row.descriptorOffset > format::kAbsentIndex - kTaskBitIndexOffset
+            || row.referenceFieldOffset != row.descriptorOffset + kTaskReferenceOffset
             || topology.slots[row.objectiveSlotIndex].objectIndex >= topology.objects.size()
             || row.targetObjectKey
                    != topology.objects[topology.slots[row.objectiveSlotIndex].objectIndex].objectKey

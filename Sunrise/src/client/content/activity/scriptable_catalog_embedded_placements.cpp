@@ -239,8 +239,7 @@ append_link(BuildContext& context, std::uint32_t descriptorRow, bool configRead)
             continue;
         }
         const std::size_t sourceOffset =
-            array.dataOffset
-            + static_cast<std::size_t>(index) * tables::kDescriptorEmbeddedPlacementStride;
+            array.dataOffset + static_cast<std::size_t>(index) * tables::kAuthoredPlacementStride;
         append_candidate(
             context, retained, linkRow, static_cast<std::uint32_t>(index), sourceOffset, source);
     }

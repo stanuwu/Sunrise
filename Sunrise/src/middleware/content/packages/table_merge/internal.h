@@ -19,17 +19,13 @@ using merge::internal::align;
 using merge::internal::Cursor;
 using merge::internal::load;
 using merge::internal::store;
+using reader::layout::has_size_word;
 using reader::layout::tag_of;
 
 /** Edits clash per aligned 8-byte word, so no field of 8 bytes or less mixes two mods. */
 inline constexpr std::uint32_t kWordSize = 8;
 /** Authored array headers and added entry regions start on 16-byte boundaries. */
 inline constexpr std::uint64_t kRowAlignment = 16;
-
-/** @return True when the stock u64 at +0 holds the stock size, so a merged entry holds its own. */
-[[nodiscard]] inline bool has_size_word(std::span<const std::byte> stock) noexcept {
-    return stock.size() >= sizeof(std::uint64_t) && load<std::uint64_t>(stock, 0) == stock.size();
-}
 
 /** @return The entry description one input carries, or null without merge data. */
 [[nodiscard]] inline const Entry* entry_of(const Input& input, std::uint32_t entryIndex) noexcept {

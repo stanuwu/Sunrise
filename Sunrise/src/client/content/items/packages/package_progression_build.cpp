@@ -21,7 +21,7 @@ bool build_progressions(const reader::Source& source,
     if (!tables::slot_tag(root, tables::kProgressionTableSlot, tableTag) || tableTag == 0
         || !reader::read_tag(source, scratch, tableTag, blob)
         || !tables::find_array_at(
-            std::span<const std::byte>{blob}, tables::kTableArrayDescriptor, rows)
+            std::span<const std::byte>{blob}, offsetof(generated::C80807cd9, table), rows)
         || rows.elementClass != tables::kProgressionTableClass || rows.count > output.size()) {
         return false;
     }
@@ -65,7 +65,8 @@ bool build_progressions(const reader::Source& source,
         for (std::uint64_t step = 0; step < ladder.count; ++step) {
             std::memcpy(&steps[stepCount].cost,
                         table.data() + ladder.dataOffset
-                            + static_cast<std::size_t>(step) * tables::kProgressionStepStride,
+                            + static_cast<std::size_t>(step) * tables::kProgressionStepStride
+                            + offsetof(generated::ProgressionStep, experience),
                         sizeof steps[stepCount].cost);
             ++stepCount;
         }

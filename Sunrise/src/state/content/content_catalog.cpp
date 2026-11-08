@@ -3,6 +3,8 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <new>
+#include <vector>
 
 namespace sunrise::state::content {
 namespace {
@@ -23,21 +25,62 @@ struct Slot {
     bool occupied{};
 };
 
-std::array<Slot, kDefinitionCatalogCapacity> g_slots{};
+/** First table size; it holds the installed packages without growing. */
+constexpr std::size_t kInitialSlots = 4096;
+
+/** Slot count is zero or a power of two, so a hash masks to a slot. */
+std::vector<Slot> g_slots{};
 std::size_t g_count{};
 bool g_sealed{};
 SRWLOCK g_catalogLock{SRWLOCK_INIT};
 
-static_assert((kDefinitionCatalogCapacity & (kDefinitionCatalogCapacity - 1)) == 0);
-
-/** @param name UTF-8 definition name. @return Stable open-addressing start slot. */
+/** @param name UTF-8 definition name. @return Stable open-addressing hash. */
 [[nodiscard]] std::size_t hash_name(std::string_view name) noexcept {
     std::uint64_t hash = kHashOffsetBasis;
     for (const unsigned char value : name) {
         hash ^= value;
         hash *= kHashPrime;
     }
-    return static_cast<std::size_t>(hash) & (kDefinitionCatalogCapacity - 1);
+    return static_cast<std::size_t>(hash);
+}
+
+/**
+ * Finds the first free slot for a name. The table must have one.
+ * @param slots Open-addressing table.
+ * @param name Name to place.
+ * @return The free slot.
+ */
+[[nodiscard]] Slot& free_slot(std::vector<Slot>& slots, std::string_view name) noexcept {
+    const std::size_t mask = slots.size() - 1;
+    std::size_t index = hash_name(name) & mask;
+    while (slots[index].occupied) {
+        index = (index + 1) & mask;
+    }
+    return slots[index];
+}
+
+/**
+ * Doubles the table when one more mapping would pass two-thirds load.
+ * @return False when the larger table cannot be allocated; the old table is kept.
+ */
+[[nodiscard]] bool grow_for_insert() noexcept {
+    if ((g_count + 1) * 3 <= g_slots.size() * 2) {
+        return true;
+    }
+    try {
+        std::vector<Slot> larger(g_slots.empty() ? kInitialSlots : g_slots.size() * 2);
+        for (const Slot& slot : g_slots) {
+            if (slot.occupied) {
+                free_slot(larger,
+                          std::string_view(slot.definition.name.data(),
+                                           slot.definition.nameLength)) = slot;
+            }
+        }
+        g_slots.swap(larger);
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
 }
 
 /** @param name Extracted ASCII name. @return Its compact 32-bit FNV-1 id. */
@@ -77,7 +120,7 @@ equals(const Slot& slot, std::string_view name, std::uint32_t tag, std::uint32_t
 /** Clears every generated content mapping under the catalog lock. */
 void clear() noexcept {
     AcquireSRWLockExclusive(&g_catalogLock);
-    SecureZeroMemory(g_slots.data(), sizeof g_slots);
+    std::vector<Slot>{}.swap(g_slots);
     g_count = 0;
     g_sealed = false;
     ReleaseSRWLockExclusive(&g_catalogLock);
@@ -92,37 +135,35 @@ bool seal() noexcept {
     return result;
 }
 
-/** Inserts one mapping with bounded linear probing, merging exact duplicates. */
+/** Inserts one mapping with linear probing, merging exact duplicates and growing as needed. */
 bool insert(std::string_view name, std::uint32_t tag, std::uint32_t classId) noexcept {
     if (name.empty() || name.size() >= kDefinitionNameCapacity) {
         return false;
     }
     AcquireSRWLockExclusive(&g_catalogLock);
-    if (g_sealed) {
+    if (g_sealed || !grow_for_insert()) {
         ReleaseSRWLockExclusive(&g_catalogLock);
         return false;
     }
-    const std::size_t start = hash_name(name);
-    for (std::size_t probe = 0; probe < g_slots.size(); ++probe) {
-        Slot& slot = g_slots[(start + probe) & (g_slots.size() - 1)];
-        if (slot.occupied && equals(slot, name, tag, classId)) {
+    const std::size_t mask = g_slots.size() - 1;
+    std::size_t index = hash_name(name) & mask;
+    while (g_slots[index].occupied) {
+        if (equals(g_slots[index], name, tag, classId)) {
             ReleaseSRWLockExclusive(&g_catalogLock);
             return true;
         }
-        if (!slot.occupied) {
-            std::copy(name.begin(), name.end(), slot.definition.name.begin());
-            slot.definition.nameLength = name.size();
-            slot.definition.tag = tag;
-            slot.definition.classId = classId;
-            slot.contentNameHash = content_name_hash(name);
-            slot.occupied = true;
-            ++g_count;
-            ReleaseSRWLockExclusive(&g_catalogLock);
-            return true;
-        }
+        index = (index + 1) & mask;
     }
+    Slot& slot = g_slots[index];
+    std::copy(name.begin(), name.end(), slot.definition.name.begin());
+    slot.definition.nameLength = name.size();
+    slot.definition.tag = tag;
+    slot.definition.classId = classId;
+    slot.contentNameHash = content_name_hash(name);
+    slot.occupied = true;
+    ++g_count;
     ReleaseSRWLockExclusive(&g_catalogLock);
-    return false;
+    return true;
 }
 
 /** Copies every mapping for one name without handing out catalog storage. */
@@ -188,6 +229,26 @@ bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
     }
     ReleaseSRWLockShared(&g_catalogLock);
     return true;
+}
+
+/** Copies each used mapping into storage sized under the same lock. */
+bool snapshot(std::vector<Definition>& output) noexcept {
+    output.clear();
+    AcquireSRWLockShared(&g_catalogLock);
+    bool copied = true;
+    try {
+        output.reserve(g_count);
+        for (const Slot& slot : g_slots) {
+            if (slot.occupied) {
+                output.push_back(slot.definition);
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        output.clear();
+        copied = false;
+    }
+    ReleaseSRWLockShared(&g_catalogLock);
+    return copied;
 }
 
 /** Rebuilds the whole catalog, and rolls back bad or duplicate cache rows. */

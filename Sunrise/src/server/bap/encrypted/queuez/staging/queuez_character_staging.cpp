@@ -130,7 +130,7 @@ bool stage_select_character(const SessionState& before,
     }
     // A pick that names the resident character only patches the account. Sending the move for it
     // would delete and re-add the same key, which cost the ship and the banner.
-    const bool changePending = before.family3Phase != Family3Phase::normal;
+    const bool changePending = account_selection_cleared(before);
     const bool samePick =
         seated && before.family4Residents[characterIndex].objectSoid == selectedCharacterSoid;
     for (std::size_t index = 0; !samePick && index < before.family4ResidentCount; ++index) {
@@ -550,6 +550,12 @@ bool stage_record_reward_grant(const SessionState& before,
     return true;
 }
 
+/**
+ * Stages the Family-4 revision that appends a reward's new residents after the manifest.
+ * @param appendedResidents Instance keys the grant adds, in grant order.
+ * @param grant Receives the after-image and the object definitions the push names.
+ * @return False when the session, a resident key or the manifest capacity refuses the append.
+ */
 bool stage_record_reward_grant(const SessionState& before,
                                std::uint64_t accountSoid,
                                std::uint64_t characterSoid,

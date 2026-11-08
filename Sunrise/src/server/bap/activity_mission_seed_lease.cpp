@@ -31,6 +31,8 @@ void read_mission_seed_lease(const Session& session,
     output.publishedRevision = lease.publishedRevision;
     output.configured = lease.configured;
     output.publicationPending = lease.configured && lease.revision != lease.publishedRevision;
+    output.publicationRefused =
+        output.publicationPending && lease.refusedRevision == lease.revision;
     output.regionArrivalPending = lease.configured && lease.regionArrivalPending;
 }
 

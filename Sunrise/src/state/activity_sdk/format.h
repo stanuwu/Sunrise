@@ -5,34 +5,50 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "../../middleware/content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_808062.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_808063.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_80807e.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_80807f.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_808083.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_808088.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_808095.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_808099.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_80809a.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_80809b.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_80809c.h"
+
 namespace sunrise::state::activity_sdk::format {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
-/** Runtime-pack schema version accepted by this reader. 45 adds authored dialogue cue rows. */
-inline constexpr std::uint32_t kVersion = 45;
+/** Runtime-pack schema version accepted by this reader. 47 keeps scenes of up to 128 roles. */
+inline constexpr std::uint32_t kVersion = 47;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 51;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
 /** The runtime accepts only the checked generated SDK build. Each pin is a SHA-256 digest. */
 inline constexpr std::array<std::byte, 32> kExpectedSdkBuildDigest{
-    std::byte{0x07}, std::byte{0xF5}, std::byte{0xB4}, std::byte{0x50}, std::byte{0xC3},
-    std::byte{0x8F}, std::byte{0x2E}, std::byte{0xD5}, std::byte{0x46}, std::byte{0x71},
-    std::byte{0x0C}, std::byte{0xD7}, std::byte{0xE6}, std::byte{0x5A}, std::byte{0x74},
-    std::byte{0xD1}, std::byte{0x49}, std::byte{0xF0}, std::byte{0xC9}, std::byte{0x79},
-    std::byte{0xDB}, std::byte{0x47}, std::byte{0x8D}, std::byte{0xF5}, std::byte{0x0F},
-    std::byte{0xB9}, std::byte{0xD7}, std::byte{0x8A}, std::byte{0x90}, std::byte{0x53},
-    std::byte{0xDB}, std::byte{0xD3},
+    std::byte{0x0F}, std::byte{0x82}, std::byte{0xBB}, std::byte{0x18}, std::byte{0x5E},
+    std::byte{0x0B}, std::byte{0xA9}, std::byte{0x24}, std::byte{0x2F}, std::byte{0x0D},
+    std::byte{0xBF}, std::byte{0xA7}, std::byte{0x0D}, std::byte{0xE0}, std::byte{0x4B},
+    std::byte{0xCD}, std::byte{0xF9}, std::byte{0xA8}, std::byte{0xB3}, std::byte{0xE1},
+    std::byte{0x89}, std::byte{0x54}, std::byte{0x25}, std::byte{0x51}, std::byte{0xD6},
+    std::byte{0x09}, std::byte{0xB6}, std::byte{0x02}, std::byte{0x9E}, std::byte{0x12},
+    std::byte{0xE6}, std::byte{0xBD},
 };
 /** The runtime accepts only the full generated row projection for this build. */
 inline constexpr std::array<std::byte, 32> kExpectedPayloadDigest{
-    std::byte{0xC6}, std::byte{0x68}, std::byte{0xCC}, std::byte{0x09}, std::byte{0x0C},
-    std::byte{0xE8}, std::byte{0x54}, std::byte{0xAB}, std::byte{0x43}, std::byte{0xA1},
-    std::byte{0x6E}, std::byte{0xD3}, std::byte{0xBA}, std::byte{0x17}, std::byte{0x6A},
-    std::byte{0xBA}, std::byte{0xBA}, std::byte{0x46}, std::byte{0xE3}, std::byte{0x18},
-    std::byte{0xF0}, std::byte{0x55}, std::byte{0x03}, std::byte{0x16}, std::byte{0x53},
-    std::byte{0xFE}, std::byte{0x14}, std::byte{0xA5}, std::byte{0x81}, std::byte{0x02},
-    std::byte{0xCF}, std::byte{0x42},
+    std::byte{0x0B}, std::byte{0x16}, std::byte{0x57}, std::byte{0xC0}, std::byte{0x01},
+    std::byte{0x14}, std::byte{0x87}, std::byte{0x0C}, std::byte{0xFB}, std::byte{0xBB},
+    std::byte{0x86}, std::byte{0x21}, std::byte{0xB7}, std::byte{0x82}, std::byte{0xC2},
+    std::byte{0x01}, std::byte{0xAC}, std::byte{0xB9}, std::byte{0x29}, std::byte{0x2D},
+    std::byte{0x33}, std::byte{0xE1}, std::byte{0x6A}, std::byte{0x7F}, std::byte{0xB5},
+    std::byte{0x62}, std::byte{0x0E}, std::byte{0xDD}, std::byte{0xD1}, std::byte{0x15},
+    std::byte{0xD0}, std::byte{0x00},
 };
 /** The runtime pins the independently replayed package and executable identity. */
 inline constexpr std::array<std::byte, 32> kExpectedContentKeyDigest{
@@ -46,13 +62,13 @@ inline constexpr std::array<std::byte, 32> kExpectedContentKeyDigest{
 };
 /** The runtime pins the complete normalized logical-IR identity. */
 inline constexpr std::array<std::byte, 32> kExpectedLogicalIrDigest{
-    std::byte{0xA9}, std::byte{0x7E}, std::byte{0x2A}, std::byte{0x04}, std::byte{0xF4},
-    std::byte{0x0D}, std::byte{0x31}, std::byte{0x56}, std::byte{0xDD}, std::byte{0x6C},
-    std::byte{0x47}, std::byte{0xFD}, std::byte{0x83}, std::byte{0x59}, std::byte{0xB4},
-    std::byte{0x50}, std::byte{0x3C}, std::byte{0xAC}, std::byte{0x81}, std::byte{0xC9},
-    std::byte{0x84}, std::byte{0x33}, std::byte{0x60}, std::byte{0x89}, std::byte{0xB4},
-    std::byte{0xD4}, std::byte{0x39}, std::byte{0xAA}, std::byte{0x81}, std::byte{0xE4},
-    std::byte{0xD7}, std::byte{0x46},
+    std::byte{0xAA}, std::byte{0x0D}, std::byte{0x23}, std::byte{0x5C}, std::byte{0x30},
+    std::byte{0xC1}, std::byte{0xFD}, std::byte{0xFC}, std::byte{0xAC}, std::byte{0x52},
+    std::byte{0x85}, std::byte{0x34}, std::byte{0xAA}, std::byte{0xD0}, std::byte{0xFC},
+    std::byte{0xE2}, std::byte{0x4A}, std::byte{0x0F}, std::byte{0x4E}, std::byte{0x26},
+    std::byte{0x36}, std::byte{0xE2}, std::byte{0x15}, std::byte{0x99}, std::byte{0x14},
+    std::byte{0x31}, std::byte{0xCF}, std::byte{0x63}, std::byte{0x97}, std::byte{0x56},
+    std::byte{0xCD}, std::byte{0xA4},
 };
 #endif
 /** UINT32_MAX is the only out-of-band row or optional-string index. */
@@ -90,52 +106,86 @@ inline constexpr std::uint32_t kSlotAuthoredSceneUnresourced = 0x8U;
 inline constexpr std::uint32_t kSlotFlagMask = kSlotReaderVerified | kSlotSchemaJoinExact
                                                | kSlotDialogueCuesExact
                                                | kSlotAuthoredSceneUnresourced;
-/** Exact generated slot tuples for authored sequence and cinematic actions. */
+/** Component class of an authored type-4 object slot. */
+inline constexpr std::uint32_t kObjectComponentClass = generated::ObjectSlotHandleType4::kClass;
+/** Sense schema of an authored type-4 object slot. */
+inline constexpr std::uint32_t kObjectSenseSchema = generated::C8080992e::kClass;
+/** Auth schema of an authored type-4 object slot. */
+inline constexpr std::uint32_t kObjectAuthSchema = generated::C8080992f::kClass;
+/** Component class of an authored type-5 sequence slot. */
+inline constexpr std::uint32_t kSequenceComponentClass = generated::C80804f01::kClass;
+/** Auth schema of an authored type-5 sequence slot. */
+inline constexpr std::uint32_t kSequenceAuthSchema = generated::C80804f04::kClass;
+/** Component class of an authored type-6 cinematic slot. */
+inline constexpr std::uint32_t kCinematicComponentClass = generated::C80804f06::kClass;
+/** Auth schema of an authored type-6 cinematic slot. */
+inline constexpr std::uint32_t kCinematicAuthSchema = generated::C80804f08::kClass;
+/** Component class of a type-23 device slot. */
+inline constexpr std::uint32_t kDeviceComponentClass = generated::DeviceSlotHandleType23::kClass;
+/** Sense schema of a type-23 device slot. */
+inline constexpr std::uint32_t kDeviceSenseSchema = generated::C80804f47::kClass;
+/** Auth schema of a type-23 device slot. */
+inline constexpr std::uint32_t kDeviceAuthSchema = generated::C80804f48::kClass;
+/** Component class of a type-30 occupancy-condition slot. */
+inline constexpr std::uint32_t kOccupancyComponentClass =
+    generated::MonitorSlotHandleType30::kClass;
+/** Sense schema of a type-30 occupancy-condition slot. */
+inline constexpr std::uint32_t kOccupancySenseSchema = generated::C80809531::kClass;
+/** Auth schema of a type-30 occupancy-condition slot. */
+inline constexpr std::uint32_t kOccupancyAuthSchema = generated::C80809532::kClass;
+/** Component class of a type-68 directive slot. */
+inline constexpr std::uint32_t kDirectiveComponentClass = generated::C80804f53::kClass;
+/** Auth schema of a type-68 directive slot. */
+inline constexpr std::uint32_t kDirectiveAuthSchema = generated::C80804f67::kClass;
+/** Component class of a type-53 dialogue slot. */
+inline constexpr std::uint32_t kDialogueComponentClass = generated::DialogueComponent::kClass;
+/** Auth schema of a type-53 dialogue slot. */
+inline constexpr std::uint32_t kDialogueAuthSchema = generated::C80804f77::kClass;
+/** Component class of a type-43 authored scene slot. */
+inline constexpr std::uint32_t kAuthoredSceneComponentClass =
+    generated::AuthoredSceneComponentType43::kClass;
+/** Sense schema of a type-43 authored scene slot. */
+inline constexpr std::uint32_t kAuthoredSceneSenseSchema = generated::C8080626a::kClass;
+/** Auth schema of a type-43 authored scene slot. */
+inline constexpr std::uint32_t kAuthoredSceneAuthSchema = generated::C8080626b::kClass;
+/** Class of the entity resource a type-43 scene slot names. */
+inline constexpr std::uint32_t kAuthoredSceneResourceClass = generated::SEntity::kClass;
+/** Component class of a type-42 performance sensor slot. */
+inline constexpr std::uint32_t kPerformanceComponentClass =
+    generated::PerformanceSensorComponent::kClass;
+/** Auth schema of a type-42 performance sensor slot. */
+inline constexpr std::uint32_t kPerformanceAuthSchema = generated::C80809586::kClass;
+/** Component class of a type-38 task slot. */
+inline constexpr std::uint32_t kTaskComponentClass = generated::TaskComponent::kClass;
+/** Auth schema of a type-38 task slot. */
+inline constexpr std::uint32_t kTaskAuthSchema = generated::C80807d89::kClass;
+/** Component class of a type-3 objective slot. */
+inline constexpr std::uint32_t kObjectiveComponentClass =
+    generated::ObjectiveComponentType3::kClass;
+/** Sense schema of a type-3 objective slot. */
+inline constexpr std::uint32_t kObjectiveSenseSchema = generated::C80807f04::kClass;
+/** Auth schema of a type-3 objective slot. */
+inline constexpr std::uint32_t kObjectiveAuthSchema = generated::C80807f0c::kClass;
+/** Component class of a type-1 squad source slot. */
+inline constexpr std::uint32_t kSquadComponentClass = generated::SSquadComponent::kClass;
+/** Sense schema of a type-1 squad source slot. */
+inline constexpr std::uint32_t kSquadSenseSchema = generated::C80807ecc::kClass;
+/** Auth schema of a type-1 squad source slot. */
+inline constexpr std::uint32_t kSquadAuthSchema = generated::C80807ec9::kClass;
+/** Slot types of authored objects, sequences and cinematics. */
 inline constexpr std::uint32_t kObjectSlotType = 4U;
-inline constexpr std::uint32_t kObjectComponentClass = 0x80809927U;
-inline constexpr std::uint32_t kObjectSenseSchema = 0x8080992EU;
-inline constexpr std::uint32_t kObjectAuthSchema = 0x8080992FU;
 inline constexpr std::uint32_t kSequenceSlotType = 5U;
-inline constexpr std::uint32_t kSequenceComponentClass = 0x80804F01U;
-inline constexpr std::uint32_t kSequenceAuthSchema = 0x80804F04U;
 inline constexpr std::uint32_t kCinematicSlotType = 6U;
-inline constexpr std::uint32_t kCinematicComponentClass = 0x80804F06U;
-inline constexpr std::uint32_t kCinematicAuthSchema = 0x80804F08U;
-/** Exact generated slot tuple for the three-channel device Auth surface. */
+/** Slot type of the three-channel device Auth surface. */
 inline constexpr std::uint32_t kDeviceSlotType = 23U;
-inline constexpr std::uint32_t kDeviceComponentClass = 0x80804F45U;
-inline constexpr std::uint32_t kDeviceSenseSchema = 0x80804F47U;
-inline constexpr std::uint32_t kDeviceAuthSchema = 0x80804F48U;
-/** Exact generated slot tuple for the occupancy-condition Auth surface. */
+/** Slot type of the occupancy-condition Auth surface. */
 inline constexpr std::uint32_t kOccupancySlotType = 30U;
-inline constexpr std::uint32_t kOccupancyComponentClass = 0x8080952FU;
-inline constexpr std::uint32_t kOccupancySenseSchema = 0x80809531U;
-inline constexpr std::uint32_t kOccupancyAuthSchema = 0x80809532U;
 /** Authored three-lane HUD directive state. */
 inline constexpr std::uint32_t kDirectiveSlotType = 68U;
-inline constexpr std::uint32_t kDirectiveComponentClass = 0x80804F53U;
-inline constexpr std::uint32_t kDirectiveAuthSchema = 0x80804F67U;
-/** Packed directive table layout; only the counter bit of an element's flag word is named. */
-inline constexpr std::uint32_t kDirectiveTableClass = 0x80804F72U;
-inline constexpr std::uint32_t kDirectiveEntryArrayOffset = 0x8U;
-inline constexpr std::uint32_t kDirectiveEntryClass = 0x80804F74U;
-inline constexpr std::uint32_t kDirectiveEntrySize = 0x28U;
-inline constexpr std::uint32_t kDirectiveEntryElementsOffset = 0x18U;
-inline constexpr std::uint32_t kDirectiveElementClass = 0x80804F76U;
-inline constexpr std::uint32_t kDirectiveElementPackedSize = 0x24U;
-inline constexpr std::uint32_t kDirectiveElementTitleOffset = 0x0U;
-inline constexpr std::uint32_t kDirectiveElementDescriptionOffset = 0x8U;
-inline constexpr std::uint32_t kDirectiveElementProgressOffset = 0x10U;
-inline constexpr std::uint32_t kDirectiveElementFlagsOffset = 0x20U;
+/** Only the counter bit of a directive element's flag word is named. */
 inline constexpr std::uint32_t kDirectiveElementCounter = 0x1U;
-/** Exact generated slot tuple and descriptor field for authored dialogue. */
+/** Slot type of authored dialogue. */
 inline constexpr std::uint32_t kDialogueSlotType = 53U;
-inline constexpr std::uint32_t kDialogueComponentClass = 0x80804F4BU;
-inline constexpr std::uint32_t kDialogueAuthSchema = 0x80804F77U;
-inline constexpr std::uint32_t kDialogueAuthoredListRelativeOffset = 0x58U;
-inline constexpr std::uint32_t kDialogueAuthoredListClass = 0x80808D54U;
-inline constexpr std::uint32_t kDialogueDefinitionArrayClass = 0x80808D18U;
-inline constexpr std::uint32_t kDialogueGroupArrayClass = 0x80808D19U;
 inline constexpr std::uint32_t kDialogueMaximumCueCount = 128U;
 /** Every dialogue line holds two takes of the same text. */
 inline constexpr std::uint32_t kDialogueTakeCount = 2U;
@@ -156,16 +206,6 @@ inline constexpr std::uint32_t kExposureMask =
     kInspectExposure | kPanelTestExposure | kScriptExposure;
 /** Signed relative offsets use one value that cannot name a package byte. */
 inline constexpr std::int64_t kAbsentRelativeOffset = (-0x7FFFFFFFFFFFFFFFLL - 1);
-/** Exact package classes retained by the actor RSAT projection. */
-inline constexpr std::uint32_t kActorRsatDescriptorClass = 0x80809BB8U;
-inline constexpr std::uint32_t kActorRsatSchemaClass = 0x80809BBBU;
-inline constexpr std::uint32_t kActorRsatSchemaFieldClass = 0x80808852U;
-/** Actor RSAT descriptor arrays start at this package-row offset. */
-inline constexpr std::uint32_t kActorRsatDescriptorArrayOffset = 0x30U;
-/** Actor definitions name their package-backed behavior configuration at this offset. */
-inline constexpr std::uint32_t kActorBehaviorConfigRelativeOffset = 0x300U;
-/** Physical package class of an exact actor behavior configuration reference. */
-inline constexpr std::uint32_t kActorBehaviorConfigClass = 0x80809C36U;
 /** Engine-semantics rows expose only facts tied to the pinned executable. */
 enum class ActorSemanticProvenance : std::uint32_t {
     executableStatic = 1,
@@ -246,8 +286,6 @@ inline constexpr std::uint32_t kEntityTypeUpdateSupported = 0x4U;
 inline constexpr std::uint32_t kEntityTypeUpdateUsesSobjectRsat = 0x8U;
 inline constexpr std::uint32_t kSobjectRsatFieldBindingExact = 0x1U;
 inline constexpr std::uint32_t kSobjectRsatFieldBindingHasRuntimeSchema = 0x2U;
-/** RSAT schema field arrays start at this package-row offset. */
-inline constexpr std::uint32_t kActorRsatSchemaFieldArrayOffset = 0x20U;
 /** Descriptor flags retain only the exact dynamic-tail eligibility bit. */
 inline constexpr std::uint32_t kRsatDescriptorDynamicPresenceEligible = 0x1U;
 inline constexpr std::uint32_t kRsatDescriptorFlagMask = kRsatDescriptorDynamicPresenceEligible;
@@ -306,43 +344,8 @@ inline constexpr std::uint32_t kSquadAnchorFlagMask =
 inline constexpr std::uint32_t kAuthoredSceneResourceExact = 0x1U;
 inline constexpr std::uint32_t kAuthoredSceneResourceFlagMask = kAuthoredSceneResourceExact;
 inline constexpr std::uint32_t kAuthoredSceneSlotType = 43U;
-inline constexpr std::uint32_t kAuthoredSceneComponentClass = 0x80806382U;
-inline constexpr std::uint32_t kAuthoredSceneSenseSchema = 0x8080626AU;
-inline constexpr std::uint32_t kAuthoredSceneAuthSchema = 0x8080626BU;
-inline constexpr std::uint32_t kAuthoredSceneResourceRelativeOffset = 0x60U;
-inline constexpr std::uint32_t kAuthoredSceneResourceClass = 0x80809C0FU;
-/**
- * The resource names its graph at a fixed field. The graph's gate table is an array field whose
- * rows each name one gate body by absolute offset. A body opens with the graph's tag and the row
- * class, then carries the event key and the gate's ordinal (-1 opens every scene).
- */
-inline constexpr std::uint32_t kAuthoredSceneGraphRelativeOffset = 0xC0U;
-inline constexpr std::uint32_t kAuthoredSceneGraphClass = 0x80809C36U;
-inline constexpr std::uint32_t kPackageArrayMarker = 0x80809FBDU;
-inline constexpr std::uint32_t kAuthoredSceneGateTableOffset = 0xE8U;
-inline constexpr std::uint32_t kAuthoredSceneGateRowClass = 0x8080637DU;
-inline constexpr std::uint32_t kAuthoredSceneGateRowSize = 0xC0U;
-inline constexpr std::uint32_t kAuthoredSceneGateBodyClass = 0x8080638AU;
-inline constexpr std::uint32_t kAuthoredSceneGateBodyOffset = 0x8U;
-inline constexpr std::uint32_t kAuthoredSceneGateSize = 0x60U;
-inline constexpr std::uint32_t kAuthoredSceneGateClassOffset = 0x4U;
-inline constexpr std::uint32_t kAuthoredSceneGateKeyOffset = 0x10U;
-inline constexpr std::uint32_t kAuthoredSceneGateOrdinalOffset = 0x58U;
 /** More gates than any installed scene declares; a larger count is a misread graph. */
 inline constexpr std::uint32_t kAuthoredSceneGateCapacity = 64U;
-/** A gate body's own connection list names the blocks that wait on the gate. */
-inline constexpr std::uint32_t kAuthoredSceneGateConnectionOffset = 0x20U;
-inline constexpr std::uint32_t kAuthoredSceneGateListenerCountOffset = 0x30U;
-/**
- * A connection list names the ports a pin fires: a 64-bit count, then a relative pointer to u32
- * ports, then one port or -1. Ports 0 to gates-2 are the gate ordinals.
- */
-inline constexpr std::uint32_t kAuthoredSceneConnectionClass = 0x80806359U;
-inline constexpr std::uint32_t kAuthoredSceneConnectionCountOffset = 0x10U;
-inline constexpr std::uint32_t kAuthoredSceneConnectionListOffset = 0x18U;
-inline constexpr std::uint32_t kAuthoredSceneConnectionSingleOffset = 0x20U;
-/** Element class of a package array of u32 values. */
-inline constexpr std::uint32_t kPackageU32ArrayClass = 0x80800007U;
 inline constexpr std::uint32_t kAuthoredSceneEventKeyExact = 0x1U;
 /** A graph block waits on the gate. */
 inline constexpr std::uint32_t kAuthoredSceneEventKeyListened = 0x2U;
@@ -352,17 +355,13 @@ inline constexpr std::uint32_t kAuthoredSceneEventKeyFlagMask =
     kAuthoredSceneEventKeyExact | kAuthoredSceneEventKeyListened | kAuthoredSceneEventKeyFired;
 /** Scene-to-squad rows retain one exact same-object package reference. */
 inline constexpr std::uint32_t kAuthoredSceneSquadSameObjectExact = 0x1U;
-/** A type-42 performance sensor names the same-object squad it drives at descriptor +0x58. */
+/** A type-42 performance sensor names the same-object squad it drives. */
 inline constexpr std::uint32_t kAuthoredSceneSquadPerformanceTargetExact = 0x2U;
 inline constexpr std::uint32_t kAuthoredSceneSquadFlagMask =
     kAuthoredSceneSquadSameObjectExact | kAuthoredSceneSquadPerformanceTargetExact;
-/** The package slot type, classes and descriptor offset that name a performance sensor. */
+/** Slot type of a performance sensor. */
 inline constexpr std::uint32_t kPerformanceSlotType = 42U;
-inline constexpr std::uint32_t kPerformanceComponentClass = 0x80809583U;
-inline constexpr std::uint32_t kPerformanceAuthSchema = 0x80809586U;
-inline constexpr std::uint32_t kPerformanceSquadReferenceRelativeOffset = 0x58U;
-/** The actor definition that lists state-machine state names, and that group's name hash. */
-inline constexpr std::uint32_t kActorStateMachineDefinitionClass = 0x8080815FU;
+/** Name hash of the state-machine group that lists state names. */
 inline constexpr std::uint32_t kActorStateMachineGroupHash = 0xAFB11A12U;
 inline constexpr std::uint32_t kActorStateNameExact = 0x1U;
 inline constexpr std::uint32_t kActorStateNameFlagMask = kActorStateNameExact;
@@ -371,45 +370,15 @@ inline constexpr std::uint32_t kActorSequenceExact = 1;
 inline constexpr std::uint32_t kActorSequenceNameVerified = 2;
 inline constexpr std::uint32_t kActorSequenceSymbolFromPath = 4;
 inline constexpr std::uint32_t kActorSequenceEntryFlagMask = 7;
-/** Native global and actor-local definition classes own these two action table fields. */
-inline constexpr std::uint32_t kActorSequenceGlobalDefinitionClass = 0x8080816CU;
-inline constexpr std::uint32_t kActorSequenceLocalDefinitionClass = 0x8080815FU;
-inline constexpr std::uint32_t kActorSequenceGlobalArrayOffset = 152;
-inline constexpr std::uint32_t kActorSequenceLocalArrayOffset = 16;
-inline constexpr std::uint32_t kActorSequenceOwnerSourceClass = 0x808082ECU;
-/**
- * A type-43 config lists its participants as a table: a 64-bit count, the table class, then one
- * 64-bit pointer per participant, each relative to its own field. A pointer lands on a block's
- * payload; the block's class sits in the four bytes before it. Only squad blocks become edges.
- */
-inline constexpr std::uint32_t kAuthoredSceneParticipantCountRelativeOffset = 0x88U;
-inline constexpr std::uint32_t kAuthoredSceneParticipantTableClassRelativeOffset = 0x90U;
-inline constexpr std::uint32_t kAuthoredSceneParticipantTableRelativeOffset = 0x98U;
-inline constexpr std::uint32_t kAuthoredSceneParticipantTableClass = 0x80806268U;
-inline constexpr std::uint32_t kAuthoredSceneParticipantPointerSize = 8U;
-inline constexpr std::uint32_t kAuthoredSceneParticipantClassSize = 4U;
-/** More participants than any installed scene declares; a larger count is a misread config. */
-inline constexpr std::uint32_t kAuthoredSceneParticipantCapacity = 64U;
-inline constexpr std::uint32_t kAuthoredSceneSquadBlockClass = 0x80806262U;
-/** Squad reference inside a squad block's payload: object key, then slot type and index. */
-inline constexpr std::uint32_t kAuthoredSceneSquadPayloadReferenceOffset = 0x8U;
+/** Bounds one scene's participant table; a larger count is a misread config. */
+inline constexpr std::uint32_t kAuthoredSceneParticipantCapacity = 128U;
 /** Exact type-38 task edge to the authored type-3 objective component it mutates. */
 inline constexpr std::uint32_t kTaskSlotType = 38U;
-inline constexpr std::uint32_t kTaskComponentClass = 0x80807D87U;
-inline constexpr std::uint32_t kTaskAuthSchema = 0x80807D89U;
-inline constexpr std::uint32_t kTaskReferenceRelativeOffset = 0x58U;
-inline constexpr std::uint32_t kTaskBitIndexRelativeOffset = 0x60U;
 inline constexpr std::uint32_t kTaskTargetExact = 0x1U;
 inline constexpr std::uint32_t kTaskTargetFlagMask = kTaskTargetExact;
 inline constexpr std::uint32_t kObjectiveSlotType = 3U;
-inline constexpr std::uint32_t kObjectiveComponentClass = 0x80808348U;
-inline constexpr std::uint32_t kObjectiveSenseSchema = 0x80807F04U;
-inline constexpr std::uint32_t kObjectiveAuthSchema = 0x80807F0CU;
-/** Type-1 source slots must retain the exact reflected auth identity. */
+/** Slot type of a squad source. */
 inline constexpr std::uint32_t kSquadSlotType = 1U;
-inline constexpr std::uint32_t kSquadAuthSchema = 0x80807EC9U;
-inline constexpr std::uint32_t kSquadSenseSchema = 0x80807ECCU;
-inline constexpr std::uint32_t kSquadComponentClass = 0x80809A3BU;
 /** Four bits carry a nonempty list of at most fifteen authored members. */
 inline constexpr std::uint32_t kSquadMinimumMemberCount = 1U;
 inline constexpr std::uint32_t kSquadMaximumMemberCount = 15U;
@@ -514,8 +483,9 @@ inline constexpr std::size_t kActorStateNameSize = 24;
 inline constexpr std::size_t kActorSequenceTableSize = 24;
 inline constexpr std::size_t kActorSequenceEntrySize = 64;
 inline constexpr std::size_t kActorSequenceBindingSize = 32;
-inline constexpr std::size_t kRsatDescriptorRawRowSize = 32;
-inline constexpr std::size_t kRsatSchemaFieldRawRowSize = 40;
+/** Raw rows are verbatim package rows. */
+inline constexpr std::size_t kRsatDescriptorRawRowSize = sizeof(generated::RsatDescriptor);
+inline constexpr std::size_t kRsatSchemaFieldRawRowSize = sizeof(generated::RsatSchemaField);
 
 /** Expected packed field offsets pin producer-consumer order as well as total row size. */
 namespace offset {
@@ -1133,6 +1103,7 @@ struct ActorClass final {
     std::uint32_t descriptorElementClass{};
     Range descriptors{};
     std::uint32_t dynamicPresenceTailCount{};
+    /** ActorGroup default spawn tuple; zero also stands for an actor with no ActorGroup. */
     std::array<std::int8_t, 4> authoredSpawnProfile{};
 };
 
@@ -1441,12 +1412,12 @@ struct ActorCommandDefinition final {
     std::uint32_t flags{};
 };
 
-/** One actor joins its package behavior config to the engine's initial faction rule. */
+/** One actor joins its action-system component config to the engine's initial faction rule. */
 struct ActorBehaviorProfile final {
     std::uint32_t actorClassIndex{};
     std::uint32_t behaviorConfigTag{};
     std::uint32_t behaviorConfigClass{};
-    std::uint32_t behaviorConfigOffset{};
+    std::uint32_t reserved{};
     std::int32_t defaultFaction{};
     ActorSemanticProvenance behaviorProvenance{ActorSemanticProvenance::packageField};
     ActorSemanticProvenance factionProvenance{ActorSemanticProvenance::engineZeroDefault};

@@ -64,7 +64,7 @@ bool prepare_record_reward_grant(
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
     if (!mutation.prepared
-        || (mutation.rewardCount == 0 && mutation.wrapperFlags.empty() && mutation.rowCount == 0)
+        || (mutation.rewardCount == 0 && mutation.wrapperFlagCount == 0 && mutation.rowCount == 0)
         || mutation.rewardCount > mutation.rewards.size() || !queuez::valid(before)
         || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
@@ -85,7 +85,10 @@ bool prepare_record_reward_grant(
 
     state::AccountState account{};
     Resolved selected{};
+    // Both objects encode the grant's flags and quest starts, which State holds only after commit.
+    state::unlocks::Table unlocks{};
     if (!state::preview_record_reward_grant(mutation, account)
+        || !state::preview_reward_unlocks(mutation, unlocks)
         || mutation.characterIndex >= account.characterCount
         || account.primarySoid != update.accountSoid
         || account.characters[mutation.characterIndex].soid != update.characterSoid
@@ -178,7 +181,7 @@ bool prepare_record_reward_grant(
     const auto characterBytes = rawStorage.first(character_layout::kObjectSize);
     const state::CharacterState& character = account.characters[mutation.characterIndex];
     if (!family4_datagen::character::encode(
-            character, selected.loadout, selected.lightEvaluation, characterBytes)) {
+            character, selected.loadout, selected.lightEvaluation, characterBytes, unlocks)) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_character_encode");
     }
@@ -242,9 +245,7 @@ bool prepare_record_reward_grant(
     }
 
     const auto accountBytes = rawStorage.first(account_layout::kObjectSize);
-    state::unlocks::Table unlocks{};
-    if (!state::preview_reward_unlocks(mutation, unlocks)
-        || !family4_datagen::account::encode(account, accountBytes, unlocks)) {
+    if (!family4_datagen::account::encode(account, accountBytes, unlocks)) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_account_encode");
     }

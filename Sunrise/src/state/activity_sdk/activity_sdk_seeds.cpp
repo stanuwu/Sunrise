@@ -9,6 +9,8 @@
 namespace sunrise::state::activity_sdk {
 namespace {
 
+namespace generated = middleware::content::packages::schema::generated;
+
 /** @return True when two generated groups carry the same complete msg-5 layout. */
 [[nodiscard]] bool
 same_roster_group(const state::build_data::scenarios::RosterGroup& left,

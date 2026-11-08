@@ -299,9 +299,8 @@ append_placements(BuildContext& context, std::uint32_t listRow, std::uint32_t ob
 /** Reads the list-level resource edge and every placement below one unique list. */
 void materialize_list(BuildContext& context, std::uint32_t listRow) {
     catalog::ContainerPlacementList& list = context.output->containerPlacementLists[listRow];
-    // TODO: no consumer for a list-level resource edge until the component member shape is read.
-    // `component_resource` reads +216, a component field. An object list keeps every list-level
-    // field below its data offset of 48, so +216 lands inside placement entry 1's rotation.
+    // TODO: fill the list's resource fields once the component member shape is read; nothing
+    // reads them yet, and `component_resource` reads a component field, not a list field.
     if (context.cache != nullptr) {
         const auto cached = ContainerPlacementCacheAccess::find(*context.cache, list.objectListTag);
         if (cached != nullptr) {

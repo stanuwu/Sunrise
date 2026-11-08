@@ -303,6 +303,11 @@ bool Image::i32(std::uint64_t address, std::int32_t& value) const noexcept {
     return offset(address, sizeof value, at) && read_at(bytes(), at, value);
 }
 
+bool Image::i64(std::uint64_t address, std::int64_t& value) const noexcept {
+    std::size_t at = 0;
+    return offset(address, sizeof value, at) && read_at(bytes(), at, value);
+}
+
 bool Image::f32(std::uint64_t address, float& value) const noexcept {
     std::size_t at = 0;
     return offset(address, sizeof value, at) && read_at(bytes(), at, value);

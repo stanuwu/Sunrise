@@ -42,11 +42,6 @@ struct ActivityDefaults final {
      * That field is the member record's `+16`, which is the value this key must equal.
      */
     bool rosterKeyFromIdentity{};
-    /**
-     * Fills message 5's participation body on every type-13 slot of the key group.
-     * The gate reads whichever object the player datum names, which need not be the first slot.
-     */
-    bool rosterKeyOnAllSlots{};
 };
 
 } // namespace sunrise::state::activity::defaults

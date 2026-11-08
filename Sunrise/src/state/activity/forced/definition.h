@@ -4,12 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../defaults/definition.h"
 #include "../destination/definition.h"
 
 namespace sunrise::state::activity::forced {
 
 /** The bubble number picks one of the 64 wire slots. */
 inline constexpr std::uint8_t kMaximumBubble = 63;
+static_assert(kMaximumBubble + std::size_t{1} == defaults::kBubbleCapacity);
 /** The slice-set index is a 10-bit bias-1 wire field, so this is the largest it can hold. */
 inline constexpr std::uint16_t kMaximumSliceSet = 1'022;
 /**

@@ -17,17 +17,6 @@ inline constexpr std::int8_t kEmptyKey = -1;
 /** An empty stat row carries -1, not 0, because 0 is a real stat total. */
 inline constexpr std::int32_t kEmptyStatValue = -1;
 
-/**
- * The fixed native header between the identity triple and the appearance block.
- * These are authored client-side ids, not extracted data. The empty fields carry their own
- * sentinels, so the block is written whole rather than field by field.
- */
-inline constexpr std::array<std::uint8_t, 36> kHeaderBlockBytes{
-    0x25, 0x00, 0x05, 0x00, 0x01, 0x00, 0xEA, 0x02, 0x01, 0x03, 0x46, 0x02,
-    0x48, 0x03, 0x49, 0x03, 0x4A, 0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0x13, 0x03,
-    0xC7, 0x02, 0x00, 0x00, 0xC5, 0x9D, 0x1C, 0x81, 0x01, 0x00, 0x00, 0x00,
-};
-
 /** Race, gender and class occupy 3 signed key bytes after the character key. */
 inline constexpr std::size_t kIdentityByteCount = 3;
 /** The opaque native header between the identity triple and the appearance block. */

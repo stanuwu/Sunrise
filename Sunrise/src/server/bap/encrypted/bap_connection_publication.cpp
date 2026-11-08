@@ -58,7 +58,6 @@ void reset_join_state(Session& session) noexcept {
     authority_query::reset(session.activityAuthorityQuery, session.activity.bindingGeneration);
     authority_reset::reset(session.activityAuthorityReset, session.activity.bindingGeneration);
     session.activityIncidentStaged = {};
-    session.activityIncidentRetryDueTick = 0;
     session.activityRosterReason = 0;
     session.activityRosterStaged = {};
     session.activityRosterDecode = {};
@@ -240,7 +239,13 @@ void arm_repushes(Session& session, const queuez::StagedPublication& queuezPubli
     if (queuezPublication.socialRosterRepushRoot != 0) {
         session.socialRosterRepushRoot = queuezPublication.socialRosterRepushRoot;
     }
-    // Armed by the equip that moved the member record. Re-arming coalesces, so a burst owes one
+    // A peer that dropped family two holds no card, so a later change owes it nothing.
+    if (queuezPublication.socialRosterReleaseRoot != 0
+        && queuezPublication.socialRosterReleaseRoot == session.socialRosterRepushRoot) {
+        session.socialRosterRepushRoot = 0;
+        session.socialRosterRepushArmed = false;
+    }
+    // Armed by the change that moved the member record. Re-arming coalesces, so a burst owes one
     // send.
     if (queuezPublication.rearmsSocialRosterRepush && session.socialRosterRepushRoot != 0) {
         session.socialRosterRepushArmed = true;

@@ -5,11 +5,15 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808086.h"
+
 namespace sunrise::middleware::bap::activity_message::bubble_host_state {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Message type and schema the client accepts for the bubble host table. */
 inline constexpr std::uint32_t kMessageType = 54;
-inline constexpr std::uint32_t kSchema = 0x80808652U;
+inline constexpr std::uint32_t kSchema = generated::C80808652::kClass;
 /** The six-bit row count caps the table at 32 rows, and each row is fixed width. */
 inline constexpr std::size_t kMaximumRows = 32;
 inline constexpr std::size_t kSessionIdBytes = 128;

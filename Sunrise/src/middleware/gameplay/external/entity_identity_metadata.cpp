@@ -3,14 +3,20 @@
 #include <array>
 #include <limits>
 
+#include "../../content/packages/schema/generated/tag_classes_80806a.h"
+#include "../../content/packages/schema/generated/tag_classes_80809c.h"
+#include "../../content/packages/schema/generated/tag_classes_80809f.h"
+
 namespace sunrise::middleware::gameplay::external {
 namespace {
 namespace wire = middleware::bap::activity_message::wire_schema;
 namespace format = state::activity_sdk::format;
+namespace generated = middleware::content::packages::schema::generated;
 using Metadata = state::gameplay::entity_identity::Metadata;
-/** Exact baseline roots and the raw eight-byte player-broadcast child schema. */
-constexpr std::uint32_t kSquadSchema = 0x80809C42U, kPlayerSchema = 0x80806ABDU;
-constexpr std::uint32_t kPlayerBytesSchema = 0x80809F7BU;
+/** Baseline roots: a squad is one bare ClientRef; the player root has a raw 8-byte child. */
+constexpr std::uint32_t kClientRefSchema = generated::ClientRef::kClass;
+constexpr std::uint32_t kPlayerSchema = generated::C80806abd::kClass;
+constexpr std::uint32_t kPlayerBytesSchema = generated::C80809f7b::kClass;
 /** The squad baseline's decoded struct offsets and wire widths. */
 constexpr std::array<std::uint32_t, 3> kSquadOffsets{0, 4, 6};
 constexpr std::array<std::uint8_t, 3> kSquadWidths{32, 7, 16};
@@ -58,7 +64,7 @@ bool squad_metadata(const state::activity_sdk::Snapshot& catalog,
     std::array<std::int64_t, kSquadOffsets.size()> scalars{};
     std::array<bool, kSquadOffsets.size()> seen{};
     for (const auto& value : values) {
-        if (value.schemaHandle != kSquadSchema || value.role != wire::ValueRole::scalar
+        if (value.schemaHandle != kClientRefSchema || value.role != wire::ValueRole::scalar
             || !value.present || value.occurrence != 0
             || value.fieldRow >= catalog->runtime_fields().size()) {
             return false;
@@ -190,7 +196,7 @@ bool extract_entity_identity_metadata(const state::activity_sdk::Snapshot& catal
         if (catalog == nullptr) {
             return finish(MetadataStatus::missingCatalog);
         }
-        const auto schema = record.type == EntityType::squad ? kSquadSchema : kPlayerSchema;
+        const auto schema = record.type == EntityType::squad ? kClientRefSchema : kPlayerSchema;
         if ((record.type != EntityType::squad && record.type != EntityType::playerBroadcast)
             || !has_schema(catalog, record.type, schema)) {
             return finish(MetadataStatus::unsupportedSchema);

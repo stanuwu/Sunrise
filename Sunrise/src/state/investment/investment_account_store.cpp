@@ -23,8 +23,7 @@ bool read_characters(AccountState& output) noexcept {
                           character.equippedTitleRecordIndex,
                           character.acquiredSubclassAbilityMask,
                           character.nextInventorySerial,
-                          character.appearanceHeader,
-                          character.appearanceHeaderValid)
+                          character.appearanceHeader)
             || slot != output.characterCount || slot >= output.characters.size()) {
             return false;
         }
@@ -62,7 +61,7 @@ bool read_rewards(AccountState& output) noexcept {
 
 /** Characters are saved before their items to satisfy foreign keys. */
 bool write_characters(const AccountState& value) noexcept {
-    Statement rows("INSERT INTO characters VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    Statement rows("INSERT INTO characters VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     for (std::size_t slot = 0; slot < value.characterCount; ++slot) {
         const auto& character = value.characters[slot];
         if (!rows.write(slot,
@@ -78,8 +77,7 @@ bool write_characters(const AccountState& value) noexcept {
                         character.equippedTitleRecordIndex,
                         character.acquiredSubclassAbilityMask,
                         character.nextInventorySerial,
-                        character.appearanceHeader,
-                        character.appearanceHeaderValid)) {
+                        character.appearanceHeader)) {
             return false;
         }
     }
@@ -207,24 +205,30 @@ bool read_starter_items(std::uint8_t characterClass,
     return result == SQLITE_DONE;
 }
 
-/**
- * Drops one character's slot-keyed unlock and reward rows and moves later slots down one.
- * @param slot Character slot the removed character held.
- * @return True when every row moved in one transaction.
- */
+/** One INSERT copies the starter rows under the new slot. */
+bool seed_character_unlocks(std::size_t slot) noexcept {
+    const std::lock_guard lock(g_mutex);
+    Statement rows("INSERT INTO unlocks SELECT ?,bank,slot,lane,value FROM starter_unlocks");
+    return rows.write(slot);
+}
+
+/** Deletes and moves share one transaction, so a refusal leaves every row in place. */
 bool remove_character_rows(std::size_t slot) noexcept {
     Transaction transaction;
     Statement unlocks("DELETE FROM unlocks WHERE character_slot=?");
     Statement rewards("DELETE FROM pending_rewards WHERE character_slot=?");
+    Statement parked("DELETE FROM parked_items WHERE character_slot=?");
     if (!transaction.ready() || slot >= kCharacterCapacity || !unlocks.write(slot)
-        || !rewards.write(slot)) {
+        || !rewards.write(slot) || !parked.write(slot)) {
         return false;
     }
     Statement moveUnlocks("UPDATE unlocks SET character_slot=? WHERE character_slot=?");
     Statement moveRewards("UPDATE pending_rewards SET character_slot=? WHERE character_slot=?");
+    Statement moveParked("UPDATE parked_items SET character_slot=? WHERE character_slot=?");
     // Ascending, so every target slot is already empty and no key collides.
     for (std::size_t from = slot + 1; from < kCharacterCapacity; ++from) {
-        if (!moveUnlocks.write(from - 1, from) || !moveRewards.write(from - 1, from)) {
+        if (!moveUnlocks.write(from - 1, from) || !moveRewards.write(from - 1, from)
+            || !moveParked.write(from - 1, from)) {
             return false;
         }
     }

@@ -168,7 +168,7 @@ bool build_nodes(const reader::Source& source,
         || tables::package_of(tableTag) == tables::kAbsentPackageId
         || !reader::read_tag(source, storage.scratch, tableTag, storage.child)
         || !tables::find_array_at(
-            std::span<const std::byte>{storage.child}, tables::kTableArrayDescriptor, rows)
+            std::span<const std::byte>{storage.child}, offsetof(generated::C80803041, table), rows)
         || rows.count == 0 || rows.count > storage.nodeRows.size()
         || rows.dataOffset + static_cast<std::size_t>(rows.count) * tables::kNodeRowStride
                > storage.child.size()) {
@@ -211,16 +211,19 @@ bool build_nodes(const reader::Source& source,
         }
 
         // Records the node owns, four bytes each as a row and a gate.
+        using ChildArray = generated::TagArray<generated::PresentationNodeRecordRef>;
         std::int64_t childCount = 0;
         std::int64_t childRelative = 0;
         const std::size_t pointerAt =
-            at + tables::kNodeChildRecordField + tables::kUnlockExpressionPointerOffset;
-        std::memcpy(
-            &childCount, table.data() + at + tables::kNodeChildRecordField, sizeof childCount);
+            at + tables::kNodeChildRecordField + offsetof(ChildArray, relative);
+        std::memcpy(&childCount,
+                    table.data() + at + tables::kNodeChildRecordField + offsetof(ChildArray, count),
+                    sizeof childCount);
         std::memcpy(&childRelative, table.data() + pointerAt, sizeof childRelative);
         if (childCount >= 1 && childCount <= static_cast<std::int64_t>(domain::kChildCapacity)) {
-            const std::int64_t target = static_cast<std::int64_t>(pointerAt) + childRelative
-                                        + static_cast<std::int64_t>(tables::kHeaderSkip);
+            const std::int64_t target =
+                static_cast<std::int64_t>(pointerAt) + childRelative
+                + static_cast<std::int64_t>(reader::layout::TypedArrayHeader::kSize);
             if (target >= 0
                 && static_cast<std::size_t>(target)
                            + static_cast<std::size_t>(childCount) * tables::kNodeChildRecordStride
@@ -231,7 +234,8 @@ bool build_nodes(const reader::Source& source,
                     std::memcpy(&childRow,
                                 table.data() + base
                                     + static_cast<std::size_t>(index)
-                                          * tables::kNodeChildRecordStride,
+                                          * tables::kNodeChildRecordStride
+                                    + offsetof(generated::PresentationNodeRecordRef, recordRow),
                                 sizeof childRow);
                     definition.children[static_cast<std::size_t>(definition.childCount++)] =
                         childRow;

@@ -3,6 +3,9 @@
 #include <cstring>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808074.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808075.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808087.h"
 #include "internal.h"
 
 namespace sunrise::client::content::items::packages {
@@ -10,26 +13,10 @@ namespace {
 
 namespace domain = state::build_data::starter_sets;
 
-/** Package class of the new-character table blob. */
-constexpr std::uint32_t kStarterSetTableClass = 0x808075BAU;
-/** Element class of the table's per-class rows. */
-constexpr std::uint32_t kStarterSetRowClass = 0x808074E7U;
-/** Element class of an array of 16-bit item-table indices. */
-constexpr std::uint32_t kItemIndexArrayClass = 0x808087DBU;
-
-/** An array field is a 64-bit count and a 64-bit self-relative offset. */
-constexpr std::size_t kArrayFieldSize = 16;
-/** The installed class rows are 40 bytes apart. */
-constexpr std::size_t kStarterSetRowSize = 40;
-
-/** One class row: the class byte, then two arrays of item-table indices. */
-struct StarterSetRow {
-    std::uint8_t characterClass;
-    std::array<std::byte, 7> opaque01;
-    std::array<std::byte, kArrayFieldSize> firstItems;
-    std::array<std::byte, kArrayFieldSize> secondItems;
-};
-static_assert(sizeof(StarterSetRow) == kStarterSetRowSize);
+using StarterSetRow = generated::StarterSetRow;
+using ItemIndexRow = generated::ItemIndexU16Row;
+/** One class row opens with its class byte. */
+constexpr std::size_t kCharacterClassByte = offsetof(StarterSetRow, characterClass);
 
 /**
  * Appends one item-index array of a class row to that row's definition.
@@ -48,8 +35,8 @@ static_assert(sizeof(StarterSetRow) == kStarterSetRowSize);
     if (items.count == 0) {
         return true;
     }
-    const std::size_t size = static_cast<std::size_t>(items.count) * sizeof(std::uint16_t);
-    if (items.elementClass != kItemIndexArrayClass
+    const std::size_t size = static_cast<std::size_t>(items.count) * sizeof(ItemIndexRow);
+    if (items.elementClass != ItemIndexRow::kClass
         || items.count > domain::kItemCapacity - output.itemCount || items.dataOffset > blob.size()
         || size > blob.size() - items.dataOffset) {
         return false;
@@ -57,7 +44,8 @@ static_assert(sizeof(StarterSetRow) == kStarterSetRowSize);
     for (std::size_t index = 0; index < items.count; ++index) {
         std::uint16_t itemIndex = 0;
         std::memcpy(&itemIndex,
-                    blob.data() + items.dataOffset + index * sizeof(std::uint16_t),
+                    blob.data() + items.dataOffset + index * sizeof(ItemIndexRow)
+                        + offsetof(ItemIndexRow, itemIndex),
                     sizeof itemIndex);
         output.itemIndices[output.itemCount++] = itemIndex;
     }
@@ -76,7 +64,7 @@ static_assert(sizeof(StarterSetRow) == kStarterSetRowSize);
                              std::size_t& count) noexcept {
     count = 0;
     tables::Array rows{};
-    if (!tables::find_array(blob, kStarterSetRowClass, rows) || rows.count > output.size()
+    if (!tables::find_array(blob, StarterSetRow::kClass, rows) || rows.count > output.size()
         || rows.dataOffset > blob.size()
         || static_cast<std::size_t>(rows.count) * sizeof(StarterSetRow)
                > blob.size() - rows.dataOffset) {
@@ -86,10 +74,9 @@ static_assert(sizeof(StarterSetRow) == kStarterSetRowSize);
         const std::size_t base = rows.dataOffset + row * sizeof(StarterSetRow);
         domain::Definition& definition = output[row];
         definition = {};
-        definition.characterClass =
-            std::to_integer<std::uint8_t>(blob[base + offsetof(StarterSetRow, characterClass)]);
-        if (!append_items(blob, base + offsetof(StarterSetRow, firstItems), definition)
-            || !append_items(blob, base + offsetof(StarterSetRow, secondItems), definition)) {
+        definition.characterClass = std::to_integer<std::uint8_t>(blob[base + kCharacterClassByte]);
+        if (!append_items(blob, base + offsetof(StarterSetRow, defaultGear), definition)
+            || !append_items(blob, base + offsetof(StarterSetRow, h6d26fb8d), definition)) {
             return false;
         }
     }
@@ -106,7 +93,7 @@ static_assert(sizeof(StarterSetRow) == kStarterSetRowSize);
  * @param scratch Reader scratch.
  * @param root Investment root bytes.
  * @param blob Scratch storage for the table blob.
- * @return False only when the tag does not read, so a later slice retries it.
+ * @return False when the tag does not read or the publish fails, so a later slice retries it.
  */
 bool build_starter_sets(const reader::Source& source,
                         reader::Scratch& scratch,
@@ -120,7 +107,7 @@ bool build_starter_sets(const reader::Source& source,
     }
     std::array<domain::Definition, domain::kClassCount> rows{};
     std::size_t count = 0;
-    if (tableClass != kStarterSetTableClass
+    if (tableClass != generated::StarterSetTable::kClass
         || !read_rows(std::span<const std::byte>{blob}, rows, count)) {
         count = 0;
         core::log::writef(core::log::Channel::client,

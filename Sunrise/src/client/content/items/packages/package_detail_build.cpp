@@ -3,6 +3,7 @@
 #include <cstring>
 #include <optional>
 
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808075.h"
 #include "../../../../state/account/account_state.h"
 #include "../../../../state/runtime/runtime.h"
 #include "internal.h"
@@ -72,17 +73,22 @@ namespace domain = state::build_data::items::details;
     return detail;
 }
 
-/** The constants blob's own 8-byte prefix comes before every offset the client quotes. */
-constexpr std::size_t kConstantsPrefix = 8;
-/** Client offset of the stat row the banner's power number is searched by. */
-constexpr std::size_t kLightStatRowOffset = 592;
-/** Client offset of the stat row a weapon's power number is read from. */
-constexpr std::size_t kWeaponPowerStatRowOffset = 606;
-/**
- * Client offsets of the 6 character stat rows, in the two runs the blob stores them in.
- * The client reads these as 6 separate scalars, not as one array, so each is named here.
- */
-constexpr std::size_t kCharacterStatRowOffsets[]{593, 594, 595, 622, 623, 624};
+/** The root's constants slot names this tag; the constants struct sits inside it. */
+using ConstantsTag = generated::C808075c0;
+/** Stat row the banner's power number is searched by. */
+constexpr std::size_t kLightStatRowOffset = offsetof(ConstantsTag, constants.lightStatRow);
+/** Stat row a weapon's power number is read from. */
+constexpr std::size_t kWeaponPowerStatRowOffset =
+    offsetof(ConstantsTag, constants.weaponPowerStatRow);
+/** The 6 character stat rows sit in two runs; the client reads each as its own scalar. */
+constexpr std::size_t kCharacterStatRowOffsets[]{
+    offsetof(ConstantsTag, constants.characterStatRow0),
+    offsetof(ConstantsTag, constants.characterStatRow1),
+    offsetof(ConstantsTag, constants.characterStatRow2),
+    offsetof(ConstantsTag, constants.characterStatRow3),
+    offsetof(ConstantsTag, constants.characterStatRow4),
+    offsetof(ConstantsTag, constants.characterStatRow5),
+};
 
 } // namespace
 
@@ -235,18 +241,15 @@ bool read_investment_constants(const reader::Source& source,
         || !reader::read_tag(source, scratch, tag, blob)) {
         return false;
     }
-    const std::size_t last =
-        kConstantsPrefix + kCharacterStatRowOffsets[std::size(kCharacterStatRowOffsets) - 1];
+    const std::size_t last = kCharacterStatRowOffsets[std::size(kCharacterStatRowOffsets) - 1];
     if (blob.size() <= last) {
         return false;
     }
-    output.lightStatRow =
-        std::to_integer<std::uint8_t>(blob[kConstantsPrefix + kLightStatRowOffset]);
-    output.weaponPowerStatRow =
-        std::to_integer<std::uint8_t>(blob[kConstantsPrefix + kWeaponPowerStatRowOffset]);
+    output.lightStatRow = std::to_integer<std::uint8_t>(blob[kLightStatRowOffset]);
+    output.weaponPowerStatRow = std::to_integer<std::uint8_t>(blob[kWeaponPowerStatRowOffset]);
     for (std::size_t row = 0; row < std::size(kCharacterStatRowOffsets); ++row) {
         output.characterStatRows[row] =
-            std::to_integer<std::uint8_t>(blob[kConstantsPrefix + kCharacterStatRowOffsets[row]]);
+            std::to_integer<std::uint8_t>(blob[kCharacterStatRowOffsets[row]]);
     }
     output.extracted = output.weaponPowerStatRow < state::build_data::constants::kStatRowCount;
     return output.extracted;

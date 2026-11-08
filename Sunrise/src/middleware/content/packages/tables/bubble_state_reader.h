@@ -21,8 +21,8 @@ inline constexpr std::uint8_t kBubbleEnabledByte = 0x80;
 inline constexpr std::uint8_t kBubbleDisabledByte = 0x7F;
 /** A bubble's state count is stored in one byte, so a wider array is reported at this ceiling. */
 inline constexpr std::uint64_t kBubbleStateCountCeiling = 255;
-/** Packages one scenario's slice-set entries name. The widest installed destination names 3. */
-inline constexpr std::size_t kScenarioPackageCapacity = 8;
+/** Packages one scenario's slice-set entries name, plus its own. */
+inline constexpr std::size_t kScenarioPackageCapacity = 16;
 
 static_assert(kBubbleStateCapacity * kSliceSetIndexFactor == 512);
 

@@ -195,6 +195,27 @@ inline const build_data::scriptables::Snapshot* GeneratedWorldView::snapshot() c
 [[nodiscard]] BindStatus resolve(const activity_sdk::BoundView& activitySdkView,
                                  GeneratedWorldView& output) noexcept;
 
+/**
+ * Reads one effective region's public flag for a bound activity: from the shard, or from the pack's
+ * state rows when a mod ships the activity, since mods have no shard.
+ * @return True when exactly one state owns the effective region.
+ */
+[[nodiscard]] bool region_is_public(const activity_sdk::BoundView& activitySdkView,
+                                    std::int32_t effectiveRegion,
+                                    bool& isPublic) noexcept;
+
+/**
+ * Sets bit b of `mask` for each public bubble b, read at the bubble's first effective region.
+ * The shard is bound once for every bubble; a mod activity reads its pack's state rows.
+ * @param bubbleCount Bubbles to read, at most 64.
+ * @param regionsPerBubble Effective regions one bubble spans.
+ * @return False when the activity's shard does not bind.
+ */
+[[nodiscard]] bool public_bubble_mask(const activity_sdk::BoundView& activitySdkView,
+                                      std::size_t bubbleCount,
+                                      std::int32_t regionsPerBubble,
+                                      std::uint64_t& mask) noexcept;
+
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
 /** Resolves explicit artifact paths and a source pin in focused offline tests. */
 [[nodiscard]] BindStatus resolve_paths_for_test(const activity_sdk::BoundView& activitySdkView,

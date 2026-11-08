@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <array>
+#include <atomic>
 #include <vector>
 
 #include "../../../../core/filesystem/path.h"
@@ -28,6 +29,7 @@
 #include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/definition.h"
 #include "../../spawn_sets/definition.h"
+#include "../../starter_sets/definition.h"
 #include "../../vendors/definition.h"
 
 namespace sunrise::state::build_data::runtime::persistence {
@@ -86,6 +88,7 @@ struct Context {
     std::vector<rewards::Instruction> rewardInstructionScratch{};
     std::vector<rewards::Modifier> rewardModifierScratch{};
     std::vector<rewards::SocketOverride> rewardSocketScratch{};
+    std::vector<starter_sets::Definition> starterSetScratch{};
     std::vector<records::Definition> recordScratch{};
     std::vector<records::Objective> recordObjectiveScratch{};
     std::vector<records::Interval> recordIntervalScratch{};
@@ -112,6 +115,11 @@ struct Context {
     BuildIdentity buildIdentity{};
     /** Last catalyst derivation error for this build. */
     items::catalysts::Error catalystError{items::catalysts::Error::none};
+    /**
+     * The installed data refused the reward graph; the cache then holds no reward rows.
+     * Atomic, so a grant reading it never waits on a cache write that holds the lock.
+     */
+    std::atomic<bool> rewardsUnsupported{};
     bool enabled{};
     bool persisted{};
     bool replaceStaleCache{};
@@ -132,9 +140,11 @@ void release_scratch_locked(Context& state) noexcept;
 /**
  * Gives mutable views over every generated domain.
  * @param state Its lock must already be held exclusively.
+ * @param namedRows Rows the named domain needs; it has no fixed size.
  * @return Mutable spans covering each full-size domain buffer.
  */
-[[nodiscard]] cache::records::MutableDomains scratch_domains(Context& state) noexcept;
+[[nodiscard]] cache::records::MutableDomains scratch_domains(Context& state,
+                                                             std::size_t namedRows) noexcept;
 
 /**
  * Gives read-only views over the used rows of one canonical snapshot.

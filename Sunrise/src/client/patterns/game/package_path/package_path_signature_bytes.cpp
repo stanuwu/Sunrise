@@ -14,4 +14,8 @@ constinit const std::array<patterns::PatternByte, kOpenFilePatternSize> kOpenFil
 constinit const std::array<patterns::PatternByte, kResolvePathPatternSize> kResolvePath =
     signature<kResolvePathPatternSize>(kResolvePathText);
 
+// Dispatcher prologue up to its callback table lookup.
+constinit const std::array<patterns::PatternByte, kSchemaCallbackPatternSize> kSchemaCallback =
+    signature<kSchemaCallbackPatternSize>(kSchemaCallbackText);
+
 } // namespace sunrise::client::patterns::game::package_path

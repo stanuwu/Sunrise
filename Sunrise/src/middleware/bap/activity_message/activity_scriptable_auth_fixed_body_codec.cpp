@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -8,8 +7,8 @@
 #include "volume_toggle_auth.h"
 
 // The fixed-width scriptable-auth bodies that drive device state: authored objects, device
-// channels, configured-action pulses, triggers and timers. Each family has one encoder and one
-// checker. The mission and HUD families live in the mission body codec beside this file.
+// channels, configured-action pulses, triggers and timers. Each family has an encoder, and a
+// decoder where the host reads the body back. Mission and HUD families live in the mission codec.
 
 namespace sunrise::middleware::bap::activity_message::scriptable_auth {
 namespace {
@@ -80,7 +79,7 @@ constexpr std::uint64_t kReservedGeneration = std::numeric_limits<std::uint64_t>
            && (!guard.hasLast || preset.generation >= guard.last);
 }
 
-/** Writes the complete fixed-width 0x808099C4 child layout. */
+/** Writes the complete fixed-width shared timed-state child. */
 [[nodiscard]] bool write_shared_timed_state(bits::Writer& writer,
                                             const SharedTimedState& state) noexcept {
     return writer.write(state.running ? 1U : 0U, kBoolWidth)
@@ -92,7 +91,7 @@ constexpr std::uint64_t kReservedGeneration = std::numeric_limits<std::uint64_t>
            && writer.write(std::bit_cast<std::uint32_t>(state.rate), kReal32Width);
 }
 
-/** Reads the complete fixed-width 0x808099C4 child layout. */
+/** Reads the complete fixed-width shared timed-state child. */
 [[nodiscard]] bool read_shared_timed_state(bits::Reader& reader, SharedTimedState& state) noexcept {
     SharedTimedState parsed{};
     std::uint64_t flag = 0;
@@ -148,37 +147,6 @@ bool encode_type4(const Type4Preset& preset,
            && written == kType4ByteCount;
 }
 
-/** Accepts only the canonical package-transform form produced by encode_type4. */
-bool validate_type4_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    if (bitCount != kType4BitCount || input.size() != kType4ByteCount) {
-        return false;
-    }
-    bits::Reader reader(input);
-    std::uint64_t generation = 0;
-    std::uint64_t entry = 0;
-    std::uint64_t active = 0;
-    std::uint64_t transformOverride = 0;
-    std::uint64_t neutral = 0;
-    std::uint64_t key = 0;
-    std::uint64_t type = 0;
-    std::uint64_t index = 0;
-    std::uint64_t position = 0;
-    std::uint64_t liveFlag = 0;
-    std::uint64_t childCount = 0;
-    return reader.read(kSigned32Width, generation) && reader.read(kSigned32Width, entry)
-           && reader.read(kBoolWidth, active) && reader.read(kBoolWidth, transformOverride)
-           && reader.read(kSigned32Width, neutral) && reader.read(kSigned32Width, key)
-           && reader.read(kClientRefTypeWidth, type) && reader.read(kClientRefIndexWidth, index)
-           && reader.read(kReal32Width, position) && position == 0
-           && reader.read(kReal32Width, position) && position == 0
-           && reader.read(kReal32Width, position) && position == 0
-           && reader.read(kBoolWidth, liveFlag) && reader.read(2U, childCount)
-           && generation > kSigned32Bias && entry >= kSigned32Bias && active <= 1U
-           && transformOverride == 0 && neutral == kSigned32Bias && key == kClientRefAbsentKey
-           && type == 0 && index == kClientRefIndexBias - 1U && liveFlag == 0 && childCount == 0
-           && finish_padding(reader);
-}
-
 /** Finds the next positive type-23 sequence without wrapping. */
 bool next_type23_sequence(const Type23SequenceGuard& guard,
                           Type23Channel channel,
@@ -232,12 +200,6 @@ bool decode_type23_body(std::span<const std::byte> input, Type23Body& body) noex
     }
     body = parsed;
     return true;
-}
-
-/** Checks one packed type-23 override body. */
-bool validate_type23_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    Type23Body body{};
-    return bitCount == kType23BitCount && decode_type23_body(input, body);
 }
 
 /** Finds the next type-31 generation without reaching the reserved maximum value. */
@@ -305,12 +267,6 @@ bool decode_type31_body(std::span<const std::byte> input, Type31Body& body) noex
     return true;
 }
 
-/** Checks one packed type-31 override body. */
-bool validate_type31_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    Type31Body body{};
-    return bitCount == kType31BitCount && decode_type31_body(input, body);
-}
-
 /** Encodes one complete type-18 body. */
 bool encode_type18_body(const Type18Body& body,
                         std::span<std::byte> output,
@@ -346,12 +302,6 @@ bool decode_type18_body(std::span<const std::byte> input, Type18Body& body) noex
         std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(encodedValue) - kSigned32Bias);
     body = parsed;
     return true;
-}
-
-/** Checks one packed type-18 override body. */
-bool validate_type18_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    Type18Body body{};
-    return bitCount == kType18BitCount && decode_type18_body(input, body);
 }
 
 /** Encodes one complete type-35 countdown/timer body. */
@@ -402,12 +352,6 @@ bool decode_type35_body(std::span<const std::byte> input, Type35Body& body) noex
     return true;
 }
 
-/** Checks one packed type-35 override body. */
-bool validate_type35_body(std::span<const std::byte> input, std::size_t bitCount) noexcept {
-    Type35Body body{};
-    return bitCount == kType35BitCount && decode_type35_body(input, body);
-}
-
 /**
  * Encodes the counted Type-24 output rows without changing unselected row revisions.
  * @param body Rows in the target object's authored order.
@@ -455,7 +399,7 @@ bool encode_type24(const Type24Body& body,
     return true;
 }
 
-/** Encodes one schema-0x8080955A body: the volume's ClientRef, then its on or off state. */
+/** Encodes one Type-32 volume body: the volume's ClientRef, then its on or off state. */
 bool encode_type32_volume(const Type32VolumeBody& body,
                           std::span<std::byte> output,
                           std::size_t& written) noexcept {

@@ -1,4 +1,5 @@
 #include "../runtime.h"
+#include "../runtime/persistence/build_data_persistence.h"
 #include "../runtime/persistence/publication_transaction.h"
 #include "reward_catalog.h"
 
@@ -7,6 +8,16 @@ namespace sunrise::state::build_data {
 /** @return True when the reward pools and item wrappers are published. */
 bool reward_definitions_ready() noexcept {
     return rewards::ready();
+}
+
+/** @return True when the installed data refused the reward graph for this build. */
+bool reward_definitions_unsupported() noexcept {
+    return runtime::persistence::context().rewardsUnsupported.load();
+}
+
+/** Records the refusal beside the other build-bound facts; a clear forgets it. */
+void settle_reward_definitions_unsupported() noexcept {
+    runtime::persistence::context().rewardsUnsupported.store(true);
 }
 
 /** Publishes the complete reward graph in one step. */

@@ -1,28 +1,55 @@
 #include <bit>
 #include <limits>
 
+#include "../../content/packages/schema/generated/tag_classes_80804d.h"
+#include "../../content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../content/packages/schema/generated/tag_classes_808062.h"
+#include "../../content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../content/packages/schema/generated/tag_classes_80807e.h"
+#include "../../content/packages/schema/generated/tag_classes_80807f.h"
+#include "../../content/packages/schema/generated/tag_classes_808094.h"
+#include "../../content/packages/schema/generated/tag_classes_808095.h"
+#include "../../content/packages/schema/generated/tag_classes_808099.h"
+#include "../../content/packages/schema/generated/tag_classes_80809a.h"
+#include "../../content/packages/schema/generated/tag_classes_80809e.h"
+#include "damage_monitor_auth.h"
+#include "ghost_link_auth.h"
+#include "interactable_object_auth.h"
+#include "scriptable_auth_body.h"
 #include "sense_update_body.h"
+#include "squad_sense_state.h"
 
 // The per-schema msg-6 Sense body readers. Each reads one root body inside its object budget.
 
 namespace sunrise::middleware::bap::activity_message::sense_update::body {
 namespace {
 
+namespace generated = middleware::content::packages::schema::generated;
+
 /** Schema tags the sense-update objects and their nested arrays declare. */
-constexpr std::uint32_t kDevice = 0x80804F47U, kScene = 0x8080626AU;
-constexpr std::uint32_t kSquad = 0x80807ECCU, kObjective = 0x80807F04U;
-constexpr std::uint32_t kOccupancy = 0x80809531U;
-constexpr std::uint32_t kAttachment = 0x8080954AU;
-constexpr std::uint32_t kGhostLink = 0x80804D3EU;
-constexpr std::uint32_t kObject = 0x8080992EU;
-constexpr std::uint32_t kObjectSpawnMask = 0x80809E1BU, kObjectReplies = 0x80809AEAU;
-constexpr std::uint32_t kSceneEvents = 0x808094DFU, kSceneList = 0x808094E1U;
-constexpr std::uint32_t kSquadCounts = 0x80809491U, kSquadList = 0x80807ECFU;
-constexpr std::uint32_t kSquadReals = 0x80807ECDU;
-constexpr std::uint32_t kObjectiveBlock = 0x80807F07U, kObjectiveTasks = 0x80807F08U;
-constexpr std::uint32_t kCombatant = 0x80807DA2U, kCombatantAtoms = 0x80807F6EU;
-constexpr std::uint32_t kCombatantKeyed = 0x80807DA3U, kCombatantLanes = 0x80807DA4U;
-constexpr std::uint32_t kEngagement = 0x808094F0U, kEngagementList = 0x808094F8U;
+constexpr std::uint32_t kDevice = generated::C80804f47::kClass,
+                        kScene = generated::C8080626a::kClass;
+constexpr std::uint32_t kSquad = squad_sense::kSchema, kObjective = generated::C80807f04::kClass;
+constexpr std::uint32_t kOccupancy = generated::C80809531::kClass;
+constexpr std::uint32_t kAttachment = generated::C8080954a::kClass;
+constexpr std::uint32_t kGhostLink = ghost_link::kSenseSchema;
+constexpr std::uint32_t kObject = generated::C8080992e::kClass;
+constexpr std::uint32_t kObjectSpawnMask = generated::C80809e1b::kClass,
+                        kObjectReplies = generated::C80809aea::kClass;
+constexpr std::uint32_t kSceneList = generated::C808094e1::kClass;
+/** A u32 key list; scene events and player keys use the same schema. */
+constexpr std::uint32_t kKeyList = generated::C808094df::kClass;
+constexpr std::uint32_t kSquadCounts = generated::C80809491::kClass,
+                        kSquadList = generated::C80807ecf::kClass;
+constexpr std::uint32_t kSquadReals = generated::C80807ecd::kClass;
+constexpr std::uint32_t kObjectiveBlock = generated::C80807f07::kClass,
+                        kObjectiveTasks = generated::C80807f08::kClass;
+constexpr std::uint32_t kCombatant = scriptable_auth::kType2SenseSchema,
+                        kCombatantAtoms = generated::C80807f6e::kClass;
+constexpr std::uint32_t kCombatantKeyed = generated::C80807da3::kClass,
+                        kCombatantLanes = generated::C80807da4::kClass;
+constexpr std::uint32_t kEngagement = generated::C808094f0::kClass,
+                        kEngagementList = generated::C808094f8::kClass;
 /** The engagement list: a five-bit element count that the native list caps at 16. */
 constexpr std::uint8_t kEngagementCountWidth = 5;
 constexpr std::uint64_t kEngagementCapacity = 16;
@@ -35,15 +62,19 @@ constexpr std::uint16_t kAttachmentCounterCount = 3;
 constexpr std::uint8_t kAttachmentCounterWidth = 32;
 constexpr std::uint16_t kAttachmentFlagOrdinal = kAttachmentCounterCount;
 /** Type-13 participation root and its nested blocks, in body order. */
-constexpr std::uint32_t kPlayer = 0x80804F2FU, kPlayerState = 0x808094E4U;
-constexpr std::uint32_t kPlayerScalars = 0x80804F39U, kPlayerTail = 0x80804F35U;
-constexpr std::uint32_t kPlayerIdentity = 0x808094DDU, kPlayerKeys = 0x808094DFU;
-constexpr std::uint32_t kPlayerPairs = 0x808094E3U, kPlayerFlags = 0x80804F31U;
-constexpr std::uint32_t kPlayerOptional = 0x80804F34U;
+constexpr std::uint32_t kPlayer = generated::C80804f2f::kClass,
+                        kPlayerState = generated::C808094e4::kClass;
+constexpr std::uint32_t kPlayerScalars = generated::C80804f39::kClass,
+                        kPlayerTail = generated::C80804f35::kClass;
+constexpr std::uint32_t kPlayerIdentity = generated::C808094dd::kClass;
+constexpr std::uint32_t kPlayerPairs = generated::C808094e3::kClass,
+                        kPlayerFlags = generated::C80804f31::kClass;
+constexpr std::uint32_t kPlayerOptional = generated::C80804f34::kClass;
 /** Type-20 damage monitor root: health, shield, echoed revision. */
-constexpr std::uint32_t kDamage = 0x80809562U;
+constexpr std::uint32_t kDamage = damage_monitor::kSenseSchema;
 /** Registered object replies: the interaction latch and the ownership key. */
-constexpr std::uint32_t kInteractionReply = 0x80804FB7U, kOwnershipReply = 0x80809ACCU;
+constexpr std::uint32_t kInteractionReply = interactable_object::kInteractionReply,
+                        kOwnershipReply = interactable_object::kOwnershipReply;
 /** Counted lists inside the participation body. */
 constexpr std::uint64_t kPlayerScalarCountMaximum = 4, kPlayerKeyCountMaximum = 32;
 /** Quantization ceilings the combatant reals carry in their own descriptors. */
@@ -266,7 +297,7 @@ real_value(std::uint64_t raw, std::uint8_t width, std::uint32_t maximumBits) noe
     }
     values.put(kSceneList, 0, 0, at, 6, ValueKind::unsignedInteger, count, 0, 0.0F, true);
     for (std::uint32_t index = 0; index < count; ++index) {
-        if (!read_unsigned(reader, values, kSceneEvents, 0, 32, false, index)) {
+        if (!read_unsigned(reader, values, kKeyList, 0, 32, false, index)) {
             return NativeStatus::malformed;
         }
     }
@@ -581,7 +612,7 @@ real_value(std::uint64_t raw, std::uint8_t width, std::uint32_t maximumBits) noe
         return NativeStatus::unsafeCount;
     }
     for (unsigned index = 0; index < count; ++index) {
-        if (!read_unsigned(reader, values, kPlayerKeys, 0, 32, false, index)) {
+        if (!read_unsigned(reader, values, kKeyList, 0, 32, false, index)) {
             return NativeStatus::malformed;
         }
     }

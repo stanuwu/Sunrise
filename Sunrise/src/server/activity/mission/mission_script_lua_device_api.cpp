@@ -234,6 +234,7 @@ constexpr std::int8_t kFilterModeInside = 1;
         || slot.authSchema != auth::kType34Schema) {
         return luaL_error(state, "object filter requires an authored type-34 sensor");
     }
+    // One message for every predicate list that overflows the authored type-34 body.
     constexpr const char* kCapacityError = "object filter exceeds the type-34 predicate capacity";
     auth::Type34Body body{};
     lua_getfield(state, 2, optional_key(kObjectFilter, "inside_any", api::ValueKind::list));

@@ -6,8 +6,11 @@
 
 #include "../../../middleware/bap/activity_message/interactable_object_auth.h"
 #include "../../../middleware/bap/activity_message/sense_update.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809e.h"
 
 namespace sunrise::server::activity::mission {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Type-4 object Sense root ordinals. Ordinal 2 is existence; the client clears it on death. */
 inline constexpr std::uint16_t kObjectGenerationOrdinal = 0;
@@ -16,7 +19,7 @@ inline constexpr std::uint16_t kObjectInteractionOpenOrdinal = 1;
 inline constexpr std::uint16_t kObjectExistsOrdinal = 2;
 /** Authored entry the object instantiated, and its two 32-bit spawn-mask words. */
 inline constexpr std::uint16_t kObjectEntryIndexOrdinal = 3;
-inline constexpr std::uint32_t kObjectSpawnMaskSchema = 0x80809E1BU;
+inline constexpr std::uint32_t kObjectSpawnMaskSchema = generated::C80809e1b::kClass;
 /** Ownership reply: field 0 held, field 1 the owner key. */
 inline constexpr std::uint16_t kOwnerHeldOrdinal = 0;
 inline constexpr std::uint16_t kOwnerKeyOrdinal = 1;

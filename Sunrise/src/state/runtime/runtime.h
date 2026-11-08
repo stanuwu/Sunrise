@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <vector>
 
 #include "../build_data/items/quest_initialization.h"
 #include "../build_data/records/definition.h"
@@ -31,6 +30,23 @@ namespace sunrise::state {
  * Currency, material, and consumable profile rows remain canonically non-instanced.
  */
 [[nodiscard]] bool ensure_profile_item_identities() noexcept;
+
+/** Why one pass over uninstalled content ended. */
+enum class ParkingOutcome : std::uint8_t {
+    /** Every account row resolves against the installed content, as of this call. */
+    ready,
+    /** The build data or account this reads is not published yet, so a retry is still owed. */
+    notReady,
+    /** A database step failed; the account is unchanged. */
+    failed,
+};
+
+/**
+ * Moves account rows whose definition, or a socket plug's, is not installed into parked_items,
+ * and moves parked rows whose content is installed again back. Nothing is deleted, so removing a
+ * mod and adding it back keeps its items.
+ */
+[[nodiscard]] ParkingOutcome reconcile_installed_content() noexcept;
 
 /** Why one attempt to canonicalize the "Emotes" collection item ended. */
 enum class EmoteCollectionOutcome : std::uint8_t {
@@ -231,8 +247,8 @@ struct PreparedRecordReward {
     RecordRewardKind kind{};
     std::uint16_t acquiredFlag{build_data::rewards::kAbsent};
     std::uint8_t previousFlag{};
-    /** First-step value a placed quest item initializes, and the saved value it observed. */
-    build_data::items::QuestInitialization questInitialization{};
+    /** First quest step a placed character instance starts, and the saved value it observed. */
+    build_data::items::QuestInitialization quest{};
     std::int32_t previousQuestValue{};
 };
 
@@ -256,6 +272,9 @@ struct PreparedRewardFlag {
     std::uint8_t previousValue{};
 };
 
+/** Flagged wrappers one grant consumes. Policy: the grant row bound; a draw over it is refused. */
+inline constexpr std::size_t kRewardWrapperFlagCapacity = build_data::rewards::kGrantCapacity;
+
 /** A reward grant that claims no record carries this instead of a record row. */
 inline constexpr std::uint16_t kUnclaimedRecordIndex = 0xFFFFU;
 
@@ -271,8 +290,9 @@ struct PendingRecordRewardGrant {
     /** Rows still present after the whole batch, each announced once in its change ring. */
     std::array<GrantedRow, kRecordRewardGrantCapacity> rows{};
     std::size_t rowCount{};
-    /** Sorted acquisition flags from wrappers which opened without remaining in inventory. */
-    std::vector<PreparedRewardFlag> wrapperFlags;
+    /** Ascending acquisition flags from wrappers which opened without remaining in inventory. */
+    std::array<PreparedRewardFlag, kRewardWrapperFlagCapacity> wrapperFlags{};
+    std::size_t wrapperFlagCount{};
     /** Record claimed with this grant, already written to the banks, or the unclaimed row. */
     std::uint16_t claimedRecordIndex{kUnclaimedRecordIndex};
     std::uint64_t accountSoid{};
@@ -284,6 +304,11 @@ struct PendingRecordRewardGrant {
     /** The rows are existing items a vendor moved, not acquisitions. */
     bool vendorTransfer{};
     bool prepared{};
+
+    /** @return The flags of the wrappers this grant consumes. */
+    [[nodiscard]] std::span<const PreparedRewardFlag> wrapper_flags() const noexcept {
+        return std::span<const PreparedRewardFlag>(wrapperFlags).first(wrapperFlagCount);
+    }
 };
 
 /** A Postmaster claim: the rows it debits and returns, kept private until its update fits. */
@@ -438,6 +463,8 @@ struct PendingArtifactPurchase {
     std::uint32_t afterMask{};
     std::uint16_t saleIndex{};
     bool prepared{};
+    /** The purchase's perk walk set an account flag, which only the account image carries. */
+    bool perksEarned{};
 };
 
 /** Item residents whose authored artifact sockets were cleared by one reset. */
@@ -526,12 +553,15 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
  * The Client names its pick only in the select-character request, so this is where a player's
  * choice enters State.
  * @param characterSoid Picked character key, which must name an authored character.
+ * @param moved Set when the pick replaced another selection or none; a re-pick leaves it clear.
+ * @param perksEarned Set when the pick earned perks for the account flag bank.
  * @return False when no authored character carries that key.
  */
-[[nodiscard]] bool set_selected_character(std::uint64_t characterSoid) noexcept;
+[[nodiscard]] bool
+set_selected_character(std::uint64_t characterSoid, bool& moved, bool& perksEarned) noexcept;
 
 /**
- * Adds an unselected character to a free slot with its starter set and saves the account.
+ * Adds an unselected character to a free slot with its starter set and unlocks, and saves.
  * @param characterClass Character class: 0 Titan, 1 Hunter, 2 Warlock.
  * @param gender Character gender: 0 male, 1 female.
  * @param race Character race: 0 human, 1 awoken, 2 exo.
@@ -547,10 +577,12 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
 
 /**
  * Removes one character with its items and slot-keyed rows and saves the account.
+ * Deleting the selected character leaves no selection; only a pick selects.
  * @param characterSoid Id of the character to remove.
+ * @param selectionMoved Set when the removed character was the selected one.
  * @return False when nothing was saved.
  */
-[[nodiscard]] bool delete_character(std::uint64_t characterSoid) noexcept;
+[[nodiscard]] bool delete_character(std::uint64_t characterSoid, bool& selectionMoved) noexcept;
 
 /**
  * Stores the selected character's equipped title row. The caller proves the record is a claimed
@@ -870,10 +902,22 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 [[nodiscard]] std::int32_t seasonal_experience() noexcept;
 
 /**
- * Publishes every seasonal value the seeded XP and artifact ownership imply.
- * An owed earned-perk walk runs here too.
+ * Publishes every seasonal value the seeded XP and artifact ownership imply, and walks the perks
+ * the selected character has earned.
+ * @param perksEarned Set when the walk set a flag in the account bank.
+ * @return False when a write failed; nothing is committed then.
  */
-[[nodiscard]] bool seed_seasonal_progression() noexcept;
+[[nodiscard]] bool seed_seasonal_progression(bool& perksEarned) noexcept;
+
+/** @return True when the pass, reward and item rows the perk walk reads are in State. */
+[[nodiscard]] bool season_perks_walkable() noexcept;
+
+/**
+ * Sets the flags of every perk the selected character has earned, in one save transaction.
+ * @param perksEarned Set when the walk set a flag in the account bank.
+ * @return False when the save could not be read or written; nothing is committed then.
+ */
+[[nodiscard]] bool grant_earned_season_perks(bool& perksEarned) noexcept;
 
 /** @return One-based Season of Arrivals rank the published XP earns. */
 [[nodiscard]] std::uint16_t seasonal_rank() noexcept;
@@ -883,7 +927,8 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 
 /**
  * Adds base XP to the seasonal lanes and republishes every value derived from the total,
- * including earned-perk flags when a rank is reached or a walk is owed.
+ * including earned-perk flags when the grant reaches a new rank.
+ * The caller must publish the whole account image after it, since that carries those flags.
  * @param amount Positive XP to grant.
  * @return False when the amount is not positive or the total would overflow.
  */
@@ -905,11 +950,14 @@ void revoke_season_pass_reward(std::uint16_t rewardIndex) noexcept;
 /** @return Purchased artifact sale rows, one bit per row. */
 [[nodiscard]] std::uint32_t artifact_mod_mask() noexcept;
 
-/** Replaces the exact published artifact mask, refusing when it already moved. */
+/**
+ * Replaces the exact published artifact mask, refusing when it already moved, then walks the
+ * earned perks. The caller publishes the account image or rolls the change back.
+ */
 [[nodiscard]] bool replace_artifact_mod_mask(std::uint32_t expected,
                                              std::uint32_t replacement) noexcept;
 
-/** Writes one affordable artifact purchase and keeps its before-image for the commit. */
+/** Writes one affordable artifact purchase, walks the earned perks, and keeps the before-image. */
 [[nodiscard]] bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,
                                                PendingArtifactPurchase& mutation) noexcept;
 

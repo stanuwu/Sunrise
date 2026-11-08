@@ -4,12 +4,15 @@
 #include <cstring>
 #include <limits>
 
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/definition.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Sundial/native category families whose socket seed expands to every plug in that family. */
 constexpr std::array<std::uint32_t, 3> kExpandableCategories{
@@ -32,9 +35,10 @@ constexpr std::uint16_t kTrackerSocketType = 518;
 /** FNV-1a constants make pool fingerprints stable and cheap. */
 constexpr std::uint64_t kHashOffsetBasis = 14695981039346656037ULL;
 constexpr std::uint64_t kHashPrime = 1099511628211ULL;
+using AcquisitionRule = generated::InvestmentExpressionRow;
 /** One acquired-state rule is opcode 1, read an unlock flag, then the flag slot. */
 constexpr std::uint32_t kAcquisitionRuleKind = 1;
-constexpr std::size_t kAcquisitionRuleSize = 8;
+constexpr std::size_t kAcquisitionRuleSize = sizeof(AcquisitionRule);
 
 /** Reads one trivially copied scalar from a bounded package blob. */
 template <typename Value>
@@ -82,7 +86,7 @@ bool read_catalyst_acquisition_gates(const reader::Source& source,
     tables::Array table{};
     if (!tables::slot_tag(root, tables::kSocketTypeTableSlot, tableTag) || tableTag == 0
         || !reader::read_tag(source, scratch, tableTag, blob)
-        || !tables::find_array_at(blob, tables::kTableArrayDescriptor, table)
+        || !tables::find_array_at(blob, offsetof(generated::C80807ab5, table), table)
         || table.elementClass != tables::kSocketTypeTableClass || table.count == 0
         || table.count > (std::numeric_limits<std::uint16_t>::max)()) {
         return false;
@@ -110,9 +114,9 @@ bool read_catalyst_acquisition_gates(const reader::Source& source,
         }
         std::uint32_t kind = 0;
         std::uint32_t flag = 0;
-        if (!read(bytes, rules.dataOffset, kind)
-            || !read(bytes, rules.dataOffset + sizeof kind, flag) || kind != kAcquisitionRuleKind
-            || flag >= state::unlocks::kUnlockFlagCapacity) {
+        if (!read(bytes, rules.dataOffset + offsetof(AcquisitionRule, opcode), kind)
+            || !read(bytes, rules.dataOffset + offsetof(AcquisitionRule, operand), flag)
+            || kind != kAcquisitionRuleKind || flag >= state::unlocks::kUnlockFlagCapacity) {
             gate.state = catalysts::AcquisitionState::ambiguous;
             continue;
         }
@@ -140,7 +144,7 @@ bool read_catalyst_objective_values(const reader::Source& source,
     if (!tables::slot_tag(root, tables::kObjectiveTableSlot, tableTag) || tableTag == 0
         || !reader::read_tag(source, scratch, tableTag, blob, tableClass)
         || tableClass != tables::kObjectiveTableClass
-        || !tables::find_array_at(blob, tables::kTableArrayDescriptor, table)
+        || !tables::find_array_at(blob, offsetof(generated::ObjectiveTable, table), table)
         || table.elementClass != tables::kObjectiveRowClass || table.count == 0
         || table.count > catalysts::kUnavailableObjectiveIndex) {
         return false;

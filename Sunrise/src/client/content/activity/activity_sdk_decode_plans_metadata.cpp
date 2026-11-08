@@ -1,57 +1,82 @@
 #include <array>
 #include <cstring>
 
+#include "../../../middleware/content/packages/reader/layout.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808000.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808001.h"
 #include "activity_sdk_decode_plans_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal {
 namespace {
 
-/** Reflection record header: length at 0, struct size at 20, alignment, kind, generic flag. */
-constexpr std::uint64_t kSizeAt = 20;
-constexpr std::uint64_t kAlignmentAt = 24;
-constexpr std::uint64_t kKindAt = 25;
-constexpr std::uint64_t kGenericFlagAt = 30;
-constexpr std::uint8_t kGenericFlag = 6;
-/** Package metadata: the codec and property sections are relative offsets at 72 and 80. */
-constexpr std::size_t kPackageMinimumSize = 88;
-constexpr std::size_t kPackageCodecAt = 72;
-constexpr std::size_t kPackagePropertiesAt = 80;
-constexpr std::size_t kPackageCodecHeader = 32;
-constexpr std::size_t kPackagePropertyHeader = 24;
-constexpr std::size_t kPropertyRowSize = 12;
+namespace generated = middleware::content::packages::schema::generated;
+using PackageMetadata = generated::PackageReflectionMetadata;
+using CodecBlock = generated::ReflectionCodecBlock;
+using PropertyBlock = generated::ReflectionPropertyBlock;
 
-/** Reads one 40-byte field descriptor from the executable. */
+/** Reflection record header: length at 0, then struct size, alignment, kind, generic flag. */
+constexpr std::uint64_t kSizeAt = offsetof(PackageMetadata, structSize);
+constexpr std::uint64_t kAlignmentAt = offsetof(PackageMetadata, alignment);
+constexpr std::uint64_t kKindAt = offsetof(PackageMetadata, kind);
+constexpr std::uint64_t kGenericFlagAt = offsetof(PackageMetadata, genericFlag);
+constexpr std::uint8_t kGenericFlag = 6;
+/** Package metadata: the codec and property sections are self-relative offsets. */
+constexpr std::size_t kPackageMinimumSize = sizeof(PackageMetadata);
+constexpr std::size_t kPackageCodecAt = offsetof(PackageMetadata, rsatData);
+constexpr std::size_t kPackagePropertiesAt = offsetof(PackageMetadata, propertySection);
+constexpr std::size_t kPackageCodecHeader = sizeof(CodecBlock);
+constexpr std::size_t kPackagePropertyHeader = sizeof(PropertyBlock);
+using FieldRow = generated::C80800109;
+using PropertyRow = generated::C8080012e;
+/** Codec field row and property row; the executable and package records share both. */
+constexpr std::size_t kPropertyRowSize = sizeof(PropertyRow);
+static_assert(sizeof(FieldRow) == kFieldRowSize);
+
+/** Reads one field descriptor from the executable. */
 [[nodiscard]] bool read_field(const Image& image, std::uint64_t at, Field& field) noexcept {
-    return image.u32(at, field.offset) && image.u32(at + 4, field.alternate)
-           && image.u32(at + 8, field.bit) && image.f32(at + 0x0C, field.half)
-           && image.u8(at + 0x10, field.type) && image.u8(at + 0x11, field.presence)
-           && image.u16(at + 0x12, field.parameter2) && image.u32(at + 0x14, field.nested)
-           && image.i32(at + 0x18, field.bias) && image.i32(at + 0x1C, field.width)
-           && image.u32(at + 0x20, field.parameter3) && image.u32(at + 0x24, field.parameter4);
+    return image.u32(at + offsetof(FieldRow, fieldOffset), field.offset)
+           && image.u32(at + offsetof(FieldRow, alternate), field.alternate)
+           && image.u32(at + offsetof(FieldRow, bit), field.bit)
+           && image.f32(at + offsetof(FieldRow, half), field.half)
+           && image.u8(at + offsetof(FieldRow, fieldType), field.type)
+           && image.u8(at + offsetof(FieldRow, presence), field.presence)
+           && image.u16(at + offsetof(FieldRow, parameter2), field.parameter2)
+           && image.u32(at + offsetof(FieldRow, nested), field.nested)
+           && image.i32(at + offsetof(FieldRow, bias), field.bias)
+           && image.i32(at + offsetof(FieldRow, width), field.width)
+           && image.u32(at + offsetof(FieldRow, parameter3), field.parameter3)
+           && image.u32(at + offsetof(FieldRow, parameter4), field.parameter4);
 }
 
-/** Reads one 40-byte field descriptor from a package blob. */
+/** Reads one field descriptor from a package blob. */
 [[nodiscard]] bool
 read_field(std::span<const std::byte> blob, std::size_t at, Field& field) noexcept {
-    return read_at(blob, at, field.offset) && read_at(blob, at + 4, field.alternate)
-           && read_at(blob, at + 8, field.bit) && read_at(blob, at + 0x0C, field.half)
-           && read_at(blob, at + 0x10, field.type) && read_at(blob, at + 0x11, field.presence)
-           && read_at(blob, at + 0x12, field.parameter2) && read_at(blob, at + 0x14, field.nested)
-           && read_at(blob, at + 0x18, field.bias) && read_at(blob, at + 0x1C, field.width)
-           && read_at(blob, at + 0x20, field.parameter3)
-           && read_at(blob, at + 0x24, field.parameter4);
+    return read_at(blob, at + offsetof(FieldRow, fieldOffset), field.offset)
+           && read_at(blob, at + offsetof(FieldRow, alternate), field.alternate)
+           && read_at(blob, at + offsetof(FieldRow, bit), field.bit)
+           && read_at(blob, at + offsetof(FieldRow, half), field.half)
+           && read_at(blob, at + offsetof(FieldRow, fieldType), field.type)
+           && read_at(blob, at + offsetof(FieldRow, presence), field.presence)
+           && read_at(blob, at + offsetof(FieldRow, parameter2), field.parameter2)
+           && read_at(blob, at + offsetof(FieldRow, nested), field.nested)
+           && read_at(blob, at + offsetof(FieldRow, bias), field.bias)
+           && read_at(blob, at + offsetof(FieldRow, width), field.width)
+           && read_at(blob, at + offsetof(FieldRow, parameter3), field.parameter3)
+           && read_at(blob, at + offsetof(FieldRow, parameter4), field.parameter4);
 }
 
 [[nodiscard]] bool
 read_property(const Image& image, std::uint64_t at, Property& property) noexcept {
-    return image.u32(at, property.nameHash) && image.u32(at + 4, property.memberType)
-           && image.u32(at + 8, property.byteOffset);
+    return image.u32(at + offsetof(PropertyRow, nameHash), property.nameHash)
+           && image.u32(at + offsetof(PropertyRow, memberType), property.memberType)
+           && image.u32(at + offsetof(PropertyRow, byteOffset), property.byteOffset);
 }
 
 [[nodiscard]] bool
 read_property(std::span<const std::byte> blob, std::size_t at, Property& property) noexcept {
-    return read_at(blob, at, property.nameHash) && read_at(blob, at + 4, property.memberType)
-           && read_at(blob, at + 8, property.byteOffset);
+    return read_at(blob, at + offsetof(PropertyRow, nameHash), property.nameHash)
+           && read_at(blob, at + offsetof(PropertyRow, memberType), property.memberType)
+           && read_at(blob, at + offsetof(PropertyRow, byteOffset), property.byteOffset);
 }
 
 /**
@@ -80,7 +105,8 @@ read_property(std::span<const std::byte> blob, std::size_t at, Property& propert
     const std::int64_t target = static_cast<std::int64_t>(at) + relative;
     std::uint32_t marker = 0;
     if (target < 8 || static_cast<std::uint64_t>(target) + header > blob.size()
-        || !read_at(blob, static_cast<std::size_t>(target) - 4, marker) || marker != expected) {
+        || !read_at(blob, static_cast<std::size_t>(target) - reader::layout::kClassWordSize, marker)
+        || marker != expected) {
         return false;
     }
     body = static_cast<std::size_t>(target);
@@ -144,7 +170,9 @@ bool parse_native(const Image& image,
             std::uint32_t kind = 0;
             std::uint32_t count = 0;
             BlockLayout layout{};
-            if (!image.u32(address + cursor + 4, kind) || !image.u32(address + cursor + 8, count)) {
+            const std::uint64_t body = address + cursor + kNativeBlockBodyAt;
+            if (!image.u32(address + cursor + kNativeBlockClassAt, kind)
+                || !image.u32(body, count)) {
                 error = "metadata_read";
                 return false;
             }
@@ -165,17 +193,18 @@ bool parse_native(const Image& image,
                 }
                 Codec& codec = record.codec;
                 codec.present = true;
-                if (!image.u32(address + cursor + 20, codec.original)
-                    || !image.u32(address + cursor + 24, codec.serialized)
-                    || !image.u32(address + cursor + 28, codec.flags)
-                    || !image.u32(address + cursor + 0x20, codec.array)) {
+                if (!image.u32(body + offsetof(CodecBlock, originalSize), codec.original)
+                    || !image.u32(body + offsetof(CodecBlock, serializedSize), codec.serialized)
+                    || !image.u32(body + offsetof(CodecBlock, flags), codec.flags)
+                    || !image.u32(body + offsetof(CodecBlock, array), codec.array)) {
                     error = "metadata_read";
                     return false;
                 }
                 codec.fields.resize(count);
                 for (std::uint32_t index = 0; index < count; ++index) {
                     if (!read_field(image,
-                                    address + cursor + 0x28 + std::uint64_t{kFieldRowSize} * index,
+                                    body + kPackageCodecHeader
+                                        + std::uint64_t{kFieldRowSize} * index,
                                     codec.fields[index])) {
                         error = "metadata_read";
                         return false;
@@ -187,14 +216,15 @@ bool parse_native(const Image& image,
                     return false;
                 }
                 record.hasProperties = true;
-                if (!read_property(image, address + cursor + 16, record.base)) {
+                if (!read_property(
+                        image, body + offsetof(PropertyBlock, baseNameHash), record.base)) {
                     error = "metadata_read";
                     return false;
                 }
                 record.properties.resize(count);
                 for (std::uint32_t index = 0; index < count; ++index) {
                     if (!read_property(image,
-                                       address + cursor + 32
+                                       body + kPackagePropertyHeader
                                            + std::uint64_t{kPropertyRowSize} * index,
                                        record.properties[index])) {
                         error = "metadata_read";
@@ -263,10 +293,11 @@ bool parse_package(std::uint32_t handle,
         if (present) {
             Codec& codec = record.codec;
             std::uint32_t own = 0;
-            if (!read_at(blob, body + 8, own) || !read_at(blob, body + 12, codec.original)
-                || !read_at(blob, body + 16, codec.serialized)
-                || !read_at(blob, body + 20, codec.flags)
-                || !read_at(blob, body + 24, codec.array)) {
+            if (!read_at(blob, body + offsetof(CodecBlock, ownHandle), own)
+                || !read_at(blob, body + offsetof(CodecBlock, originalSize), codec.original)
+                || !read_at(blob, body + offsetof(CodecBlock, serializedSize), codec.serialized)
+                || !read_at(blob, body + offsetof(CodecBlock, flags), codec.flags)
+                || !read_at(blob, body + offsetof(CodecBlock, array), codec.array)) {
                 error = "package_metadata_read";
                 return false;
             }
@@ -298,7 +329,7 @@ bool parse_package(std::uint32_t handle,
         }
         if (present) {
             record.hasProperties = true;
-            if (!read_property(blob, body + 8, record.base)) {
+            if (!read_property(blob, body + offsetof(PropertyBlock, baseNameHash), record.base)) {
                 error = "package_metadata_read";
                 return false;
             }

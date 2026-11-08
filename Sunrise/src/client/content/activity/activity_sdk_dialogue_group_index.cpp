@@ -4,15 +4,21 @@
 #include <cstring>
 #include <limits>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80808d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809f.h"
 #include "../../../state/activity_sdk/format.h"
 
 namespace sunrise::client::content::activity::sdk_generation::dialogue_group_index {
 namespace {
 
-// The bank stores a counted definition array at +8 with an eight-byte row stride.
-constexpr std::size_t kDefinitionsField = 8U;
-constexpr std::size_t kDefinitionStride = 8U;
-constexpr std::size_t kArrayDataOffset = 16U;
+namespace generated = middleware::content::packages::schema::generated;
+
+// The bank stores a counted definition array; its rows follow the array header.
+constexpr std::size_t kDefinitionsField = offsetof(generated::DialogueAuthoredList, events);
+constexpr std::size_t kDefinitionsRelative =
+    offsetof(generated::DialogueAuthoredList, events.relative);
+constexpr std::size_t kDefinitionStride = sizeof(generated::DialogueDefinition);
+constexpr std::size_t kArrayDataOffset = sizeof(generated::STypedArrayMarker);
 // An empty authored name uses the FNV-1 basis.
 constexpr std::uint32_t kAbsentDefinitionHash = 0x811C9DC5U;
 
@@ -63,11 +69,12 @@ bool definitions(std::span<const std::byte> bytes, std::vector<Definition>& outp
     std::uint64_t repeated = 0;
     std::uint32_t rowClass = 0;
     if (!read_value(bytes, kDefinitionsField, count) || count > format::kDialogueMaximumCueCount
-        || !read_value(bytes, kDefinitionsField + sizeof count, relative)
-        || !add_relative(kDefinitionsField + sizeof count, relative, header)
+        || !read_value(bytes, kDefinitionsRelative, relative)
+        || !add_relative(kDefinitionsRelative, relative, header)
         || !read_value(bytes, header, repeated) || repeated != count
-        || !read_value(bytes, header + sizeof repeated, rowClass)
-        || rowClass != format::kDialogueDefinitionArrayClass || header > bytes.size()
+        || !read_value(
+            bytes, header + offsetof(generated::STypedArrayMarker, elementClass), rowClass)
+        || rowClass != generated::DialogueDefinition::kClass || header > bytes.size()
         || kArrayDataOffset > bytes.size() - header
         || count > (bytes.size() - header - kArrayDataOffset) / kDefinitionStride) {
         return false;
@@ -77,8 +84,11 @@ bool definitions(std::span<const std::byte> bytes, std::vector<Definition>& outp
         for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {
             const std::size_t offset = header + kArrayDataOffset + ordinal * kDefinitionStride;
             Definition row{};
-            if (!read_value(bytes, offset, row.hash)
-                || !read_value(bytes, offset + sizeof row.hash, row.authoredWindowSeconds)
+            if (!read_value(bytes, offset + offsetof(generated::DialogueDefinition, hash), row.hash)
+                || !read_value(bytes,
+                               offset
+                                   + offsetof(generated::DialogueDefinition, authoredWindowSeconds),
+                               row.authoredWindowSeconds)
                 || row.hash == 0 || row.hash == kAbsentDefinitionHash
                 || !std::isfinite(row.authoredWindowSeconds) || row.authoredWindowSeconds < 0.0F) {
                 output.clear();

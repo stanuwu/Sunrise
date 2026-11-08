@@ -106,8 +106,9 @@ bool collect_bucket_definition_tag(void* context, std::uint32_t tag) noexcept {
         report_bucket_equipment_failure("table_class", tableClass, 0);
         return false;
     }
-    if (!tables::find_array_at(
-            std::span<const std::byte>{storage.child}, tables::kTableArrayDescriptor, table)) {
+    if (!tables::find_array_at(std::span<const std::byte>{storage.child},
+                               offsetof(generated::BucketDefinitionTable, definition.h2af7c83b),
+                               table)) {
         report_bucket_equipment_failure("table_array", storage.child.size(), 0);
         return false;
     }
@@ -196,7 +197,8 @@ bool build_buckets(const reader::Source& source,
             &firstSlot, blob.data() + base + tables::kBucketFirstSlotOffset, sizeof firstSlot);
         std::memcpy(
             &slotCount, blob.data() + base + tables::kBucketSlotCountOffset, sizeof slotCount);
-        descriptors[index].bucketId = std::to_integer<std::uint8_t>(blob[base]);
+        descriptors[index].bucketId =
+            std::to_integer<std::uint8_t>(blob[base + tables::kBucketDescriptorIdOffset]);
         descriptors[index].firstSlot = static_cast<std::uint16_t>(firstSlot);
         descriptors[index].slotCount = static_cast<std::uint16_t>(slotCount);
         descriptors[index].arraySelector = static_cast<buckets::ArraySelector>(
@@ -234,7 +236,7 @@ bool build_socket_entry_lists(const reader::Source& source,
     if (!tables::slot_tag(root, tables::kSocketEntryListTableSlot, tableTag) || tableTag == 0
         || !reader::read_tag(source, storage.scratch, tableTag, storage.child)
         || !tables::find_array_at(
-            std::span<const std::byte>{storage.child}, tables::kTableArrayDescriptor, table)
+            std::span<const std::byte>{storage.child}, offsetof(generated::C80807a78, table), table)
         || table.elementClass != tables::kSocketEntryListTableClass) {
         return false;
     }
@@ -264,7 +266,8 @@ bool build_socket_entry_lists(const reader::Source& source,
             const std::size_t base =
                 entries.dataOffset + static_cast<std::size_t>(entry) * tables::kSocketEntrySize;
             std::uint32_t plugSource = 0;
-            if (base + tables::kSocketEntryKind + 1 > target.size()) {
+            if (base + tables::kSocketEntryKind + sizeof(generated::SocketEntry::kind)
+                > target.size()) {
                 break;
             }
             std::memcpy(&plugSource,

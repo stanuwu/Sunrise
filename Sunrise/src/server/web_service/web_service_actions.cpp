@@ -99,7 +99,7 @@ state::SettingsUpdateDisposition mutate_settings(const middleware::web_service::
  * A bad or unknown id leaves the selection alone. The reply is the status pair either way. The
  * Family-4 object move follows this call, and the family-zero pair after it.
  * @param message Parsed select-character request.
- * @param outcome Gets the picked key once the selection has moved in State.
+ * @param outcome Gets the picked key, whether it changed character, and whether it earned perks.
  */
 void select_character(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     middleware::web_service::messages::opcode504::Request picked;
@@ -108,7 +108,8 @@ void select_character(const middleware::web_service::Message& message, Outcome& 
             core::log::Channel::server, core::log::Level::warn, "ev=ws504 stage=parse result=fail");
         return;
     }
-    if (!state::set_selected_character(picked.characterSoid)) {
+    if (!state::set_selected_character(
+            picked.characterSoid, outcome.selectionMoved, outcome.selectionEarnedPerks)) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=ws504 stage=select result=unknown");
@@ -153,13 +154,14 @@ void create_character(const middleware::web_service::Message& message, Outcome& 
 /**
  * Removes the character an opcode-502 request names.
  * @param message Parsed delete-character request.
- * @param outcome Gets the roster change once the removal commits.
+ * @param outcome Gets the roster change once the removal commits, and whether it dropped the
+ *        selection, as a pick reports a moved one.
  */
 void delete_character(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     namespace opcode502 = middleware::web_service::messages::opcode502;
     opcode502::Request request{};
     if (!opcode502::parse_request(message, request)
-        || !state::delete_character(request.characterSoid)) {
+        || !state::delete_character(request.characterSoid, outcome.selectionMoved)) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=ws502 stage=delete result=fail");

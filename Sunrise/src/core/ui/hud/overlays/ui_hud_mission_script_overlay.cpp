@@ -29,13 +29,11 @@ mission::DiagnosticsSnapshot g_snapshot{};
     return instance.vmActive ? "running" : "idle";
 }
 
-/** Draws the controller file the activity row resolves to, so the HUD names what is running. */
-void draw_controller_file(std::uint32_t oneBasedActivityRow) noexcept {
-    std::array<char, 260> file{};
-    if (oneBasedActivityRow == 0 || !mission::controller_file_name(oneBasedActivityRow, file)) {
-        return;
+/** Draws the controller file of the activity, so the HUD names what is running. */
+void draw_controller_file(const std::array<char, mission::kControllerFileCapacity>& file) noexcept {
+    if (file[0] != '\0') {
+        ImGui::TextDisabled("%s", file.data());
     }
-    ImGui::TextDisabled("%s", file.data());
 }
 
 /** Draws the newest attach refusal, which is why no script is attached. */
@@ -53,9 +51,7 @@ void draw_last_attach() noexcept {
         ImGui::TextDisabled("attach %s %s", attach.result.data(), attach.detail.data());
     }
     // A refusal that still reached an exact activity names the file that would have run.
-    if (attach.hasActivityRow) {
-        draw_controller_file(attach.activityRow);
-    }
+    draw_controller_file(attach.controllerFile);
 }
 
 } // namespace
@@ -82,7 +78,7 @@ void draw() noexcept {
                     instance.activityId[0] != '\0' ? instance.activityId.data() : "unnamed",
                     vm_state(instance),
                     instance.phase);
-        draw_controller_file(instance.activityRow);
+        draw_controller_file(instance.controllerFile);
         ImGui::TextDisabled("events %llu/%llu  effects %zu/%llu",
                             static_cast<unsigned long long>(instance.eventsCommitted),
                             static_cast<unsigned long long>(instance.eventsSeen),

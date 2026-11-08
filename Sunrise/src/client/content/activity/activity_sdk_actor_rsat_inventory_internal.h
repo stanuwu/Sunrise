@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -12,7 +13,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include "../../../middleware/content/packages/reader/layout.h"
 #include "../../../middleware/content/packages/reader/reader.h"
+#include "../../../middleware/content/packages/tables/field_reader.h"
 #include "activity_sdk_actor_rsat_inventory.h"
 
 namespace sunrise::client::content::activity::sdk_generation::actor_rsat_inventory {
@@ -22,6 +25,19 @@ namespace reader = middleware::content::packages::reader;
 
 /** Zero and the all-ones sentinel do not name a package row. */
 inline constexpr std::uint32_t kAbsentTag = 0xFFFFFFFFU;
+
+/** A descriptor's raw row names its schema tag here. */
+inline constexpr std::size_t kDescriptorSchemaOffset = offsetof(RsatDescriptorLayout, schemaTag);
+/** A schema field's raw row holds its runtime schema handle here. */
+inline constexpr std::size_t kFieldRawU32At10Offset = offsetof(RsatSchemaFieldLayout, rawU32At10);
+/** A schema field's raw row holds its repeat count here. */
+inline constexpr std::size_t kFieldRepeatOffset = offsetof(RsatSchemaFieldLayout, repeat);
+/** A schema field's child array: its count, then its self-relative offset. */
+inline constexpr std::size_t kFieldChildrenCountOffset =
+    offsetof(RsatSchemaFieldLayout, children.count);
+/** The child array's self-relative offset. */
+inline constexpr std::size_t kFieldChildrenRelativeOffset =
+    offsetof(RsatSchemaFieldLayout, children.relative);
 
 /** One validated typed-array descriptor and its exact stored metadata. */
 struct TypedArray final {
@@ -39,11 +55,13 @@ struct SchemaSource final {
     std::vector<RsatField> fields{};
 };
 
-/** One decoded ActorGroup source, or an unrelated component remembered as absent. */
+/** One component config: its native class, and the source and spawn profile of an ActorGroup. */
 struct SequenceOwner final {
+    std::uint32_t nativeClass{};
     std::uint32_t sourceOffset{};
     std::uint32_t globalTag{};
     std::uint32_t localTag{};
+    std::array<std::int8_t, 4> spawnProfile{};
     bool present{};
 };
 
@@ -118,28 +136,7 @@ read_value(std::span<const std::byte> blob, std::size_t offset, Value& output) n
     return true;
 }
 
-/** Adds one signed self-relative field without wrapping host arithmetic. */
-[[nodiscard]] inline bool
-relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) noexcept {
-    // The blob stores self-relative offsets as int64, so its bounds are the limit.
-    constexpr std::int64_t kMaximum = (std::numeric_limits<std::int64_t>::max)();
-    constexpr std::int64_t kMinimum = (std::numeric_limits<std::int64_t>::min)();
-    output = 0;
-    if (base > static_cast<std::size_t>(kMaximum)) {
-        return false;
-    }
-    const auto signedBase = static_cast<std::int64_t>(base);
-    if ((relative > 0 && signedBase > kMaximum - relative)
-        || (relative < 0 && signedBase < kMinimum - relative)) {
-        return false;
-    }
-    const std::int64_t target = signedBase + relative;
-    if (target < 0) {
-        return false;
-    }
-    output = static_cast<std::size_t>(target);
-    return true;
-}
+using middleware::content::packages::tables::relative_offset;
 
 /** Formats the stable actor-class ID used by the generated pack. */
 [[nodiscard]] inline bool format_actor_id(std::uint32_t tag, Text& output) noexcept {

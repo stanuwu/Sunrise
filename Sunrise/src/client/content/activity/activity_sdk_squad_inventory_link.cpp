@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807e.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809a.h"
 #include "../../../middleware/crypto/sha256.h"
 #include "activity_sdk_squad_graph.h"
 #include "activity_sdk_squad_inventory.h"
@@ -18,6 +20,8 @@
 
 namespace sunrise::client::content::activity::sdk_generation::squad_inventory {
 namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 namespace crypto = middleware::crypto::sha256;
 namespace topology = topology_inventory;
@@ -293,9 +297,9 @@ struct ConfigOccurrenceCountKeyHash final {
         if (spawner.configTag != source.configTag) {
             return false;
         }
-        if (descriptor.componentClass != format::kSquadComponentClass
-            || descriptor.senseSchema != format::kSquadSenseSchema
-            || descriptor.authSchema != format::kSquadAuthSchema
+        if (descriptor.componentClass != generated::SSquadComponent::kClass
+            || descriptor.senseSchema != generated::C80807ecc::kClass
+            || descriptor.authSchema != generated::C80807ec9::kClass
             || !unbound_descriptor_exact(topology, schemas, descriptor)) {
             continue;
         }
@@ -370,6 +374,7 @@ struct ConfigOccurrenceCountKeyHash final {
                 squad.row.flags |= format::kSquadCandidateCountsInvariantComplete;
             }
             std::vector<std::uint32_t> memberKeys{};
+            memberKeys.reserve(squad.members.size());
             for (const SquadMember& member : squad.members) {
                 memberKeys.push_back(member.memberKey);
             }
@@ -546,13 +551,14 @@ bool link(const topology::Snapshot& topology,
                     const auto schema = schemasBySlot.find(edge.sourceDescriptor->slotIndex);
                     if (schema != schemasBySlot.end() && schema->second->exact) {
                         const GraphSlotSchemaProvenance& slotSchema = *schema->second;
-                        sourceExact = topology.slots[edge.sourceDescriptor->slotIndex].objectIndex
-                                          == edge.sourceDescriptor->objectIndex
-                                      && topology.slots[edge.sourceDescriptor->slotIndex].slotType
-                                             == format::kSquadSlotType
-                                      && slotSchema.componentClass == format::kSquadComponentClass
-                                      && slotSchema.senseSchema == format::kSquadSenseSchema
-                                      && slotSchema.authSchema == format::kSquadAuthSchema;
+                        sourceExact =
+                            topology.slots[edge.sourceDescriptor->slotIndex].objectIndex
+                                == edge.sourceDescriptor->objectIndex
+                            && topology.slots[edge.sourceDescriptor->slotIndex].slotType
+                                   == format::kSquadSlotType
+                            && slotSchema.componentClass == generated::SSquadComponent::kClass
+                            && slotSchema.senseSchema == generated::C80807ecc::kClass
+                            && slotSchema.authSchema == generated::C80807ec9::kClass;
                     }
                     if (sourceExact) {
                         squad.row.flags |= format::kSquadSourceDescriptorExact;

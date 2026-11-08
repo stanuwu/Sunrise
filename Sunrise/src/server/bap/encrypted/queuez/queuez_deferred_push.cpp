@@ -15,6 +15,7 @@
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
+#include "queuez_family_repush.h"
 #include "queuez_state_validation.h"
 #include "state/investment/store_internal.h"
 
@@ -56,7 +57,10 @@ selected_character(const state::AccountState& account) noexcept {
     return nullptr;
 }
 
-/** Publishes and commits one world reward resolved through its installed reward definition. */
+/**
+ * Publishes and commits one world reward resolved through its installed reward definition.
+ * @return True only when the grant committed and its update was framed into the response.
+ */
 [[nodiscard]] bool consume_world_record_reward(const WorldRewardRequest& request,
                                                Session& session,
                                                Scratch& scratch,
@@ -263,114 +267,15 @@ selected_character(const state::AccountState& account) noexcept {
     return true;
 }
 
-/** Sends the banner pair the launch cinematic hold armed. */
-[[nodiscard]] bool consume_banner_repush(Session& session,
-                                         Scratch& scratch,
-                                         std::span<std::byte> response,
-                                         std::size_t& written,
-                                         bool& touchesScratch) noexcept {
-    if (!session.bannerRepushArmed || session.bannerRepushRoot == 0
-        || GetTickCount64() < session.bannerRepushDueTick) {
-        return false;
-    }
-    // Retain the arm until the account has a character to name.
-    if (state::account::banner_character_soid(state::account_snapshot()) == 0) {
-        return false;
-    }
-    touchesScratch = true;
-
-    // Reuse the subscription path so its version and the host mirror stay aligned.
-    middleware::queuez::Subscription subscription{};
-    subscription.familyType = queuez::kBannerFamilyType;
-    subscription.familyRootSoid = session.bannerRepushRoot;
-
-    auto nextSendNonce = session.sendNonce;
-    std::size_t framedSize = 0;
-    queuez::SessionState bannerAfter{};
-    bool armsRepush = false;
-    push::append_queuez_notification(scratch,
-                                     session.queuez,
-                                     subscription,
-                                     session.sessionKey,
-                                     nextSendNonce,
-                                     scratch.framed,
-                                     framedSize,
-                                     bannerAfter,
-                                     armsRepush);
-    if (framedSize == 0 || framedSize > response.size()) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=banner_repush result=fail");
-        return false;
-    }
-    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
-    written = framedSize;
-    session.sendNonce = nextSendNonce;
-    // The frame is committed here, so the recorded delivery and the arm are committed with it.
-    if (valid(bannerAfter)) {
-        session.queuez = bannerAfter;
-    }
-    session.bannerRepushArmed = false;
-    return true;
-}
-
 /**
- * Sends the family-two re-push the equip that moved the member record owes.
- * The body is rebuilt against the subscribe's root. The arm is spent before the frame is built.
- * @param session Auth, nonce and queuez state owned by the connection.
+ * Refreshes character records after an asynchronous ability-bucket rebuild.
+ * @param session Auth, nonce, queuez state and the refresh arm owned by the connection.
  * @param scratch Transform buffers owned by the lock.
  * @param response Whole-frame storage owned by the caller.
  * @param written Gets the encoded notification size in bytes.
  * @param touchesScratch Set before any scratch buffer is used.
- * @return True when a whole family-two notification is published.
+ * @return True when a refresh frame is published. With no pick, the arm clears and none is.
  */
-[[nodiscard]] bool consume_social_roster_repush(Session& session,
-                                                Scratch& scratch,
-                                                std::span<std::byte> response,
-                                                std::size_t& written,
-                                                bool& touchesScratch) noexcept {
-    if (!session.socialRosterRepushArmed || session.socialRosterRepushRoot == 0) {
-        return false;
-    }
-    // Spent up front, so no path below can leave it owed.
-    session.socialRosterRepushArmed = false;
-    touchesScratch = true;
-
-    // The same body the subscribe answer builds, rebuilt against current State so the emblem it
-    // carries is the one now worn.
-    middleware::queuez::Subscription subscription{};
-    subscription.familyType = queuez::kSocialRosterFamilyType;
-    subscription.familyRootSoid = session.socialRosterRepushRoot;
-
-    auto nextSendNonce = session.sendNonce;
-    std::size_t framedSize = 0;
-    queuez::SessionState rosterAfter{};
-    bool armsRepush = false;
-    push::append_queuez_notification(scratch,
-                                     session.queuez,
-                                     subscription,
-                                     session.sessionKey,
-                                     nextSendNonce,
-                                     scratch.framed,
-                                     framedSize,
-                                     rosterAfter,
-                                     armsRepush);
-    if (framedSize == 0 || framedSize > response.size()) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=social_roster_repush result=fail");
-        return false;
-    }
-    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
-    written = framedSize;
-    session.sendNonce = nextSendNonce;
-    if (valid(rosterAfter)) {
-        session.queuez = rosterAfter;
-    }
-    return true;
-}
-
-/** Refreshes character records after an asynchronous ability-bucket rebuild. */
 [[nodiscard]] bool consume_ability_refresh(Session& session,
                                            Scratch& scratch,
                                            std::span<std::byte> response,
@@ -646,44 +551,7 @@ bool consume_deferred(Session& session,
                || push::activity::consume_activity_keepalive(
                    session, scratch, response, written, touchesScratch);
     }
-    // One attempt is owed, and it is spent whether or not it lands.
-    touchesScratch = true;
-
-    middleware::queuez::Subscription subscription{};
-    subscription.familyType = queuez::kAccountFamilyType;
-    subscription.familyRootSoid = session.family4RepushRoot;
-
-    auto nextSendNonce = session.sendNonce;
-    std::size_t framedSize = 0;
-    queuez::SessionState after{};
-    bool armsRepush = false;
-    push::append_queuez_notification(scratch,
-                                     session.queuez,
-                                     subscription,
-                                     session.sessionKey,
-                                     nextSendNonce,
-                                     scratch.framed,
-                                     framedSize,
-                                     after,
-                                     armsRepush);
-    if (framedSize == 0 || framedSize > response.size()) {
-        // Neither failure clears on a retry. Holding the arm starves the keepalive, and the
-        // client drops the activity session once the keepalive stops.
-        session.family4RepushArmed = false;
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         framedSize == 0 ? "ev=queuez stage=repush result=fail reason=encode"
-                                         : "ev=queuez stage=repush result=fail reason=capacity");
-        return false;
-    }
-    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
-    written = framedSize;
-    session.sendNonce = nextSendNonce;
-    if (queuez::valid(after)) {
-        session.queuez = after;
-    }
-    session.family4RepushArmed = false;
-    return true;
+    return consume_family4_repush(session, scratch, response, written, touchesScratch);
 }
 
 } // namespace sunrise::server::bap::encrypted

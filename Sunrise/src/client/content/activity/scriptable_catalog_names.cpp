@@ -315,13 +315,8 @@ bool resolve_names(catalog::Snapshot& output,
         std::vector<state::content::Definition> definitions{};
         if (installed != nullptr) {
             definitions = *installed;
-        } else {
-            definitions.resize(state::content::kDefinitionCatalogCapacity);
-            std::size_t definitionCount = 0;
-            if (!state::content::snapshot(definitions, definitionCount)) {
-                return false;
-            }
-            definitions.resize(definitionCount);
+        } else if (!state::content::snapshot(definitions)) {
+            return false;
         }
         std::sort(definitions.begin(),
                   definitions.end(),

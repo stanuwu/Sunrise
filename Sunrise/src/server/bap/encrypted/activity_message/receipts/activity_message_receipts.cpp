@@ -22,10 +22,15 @@
 #include "../../../../../middleware/bap/activity_message/entity_authority.h"
 #include "../../../../../middleware/bap/activity_message/incident.h"
 #include "../../../../../middleware/bap/activity_message/peer_ledger.h"
+#include "../../../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../../../middleware/bap/activity_message/sense_update.h"
+#include "../../../../../middleware/bap/activity_message/squad_sense_state.h"
 #include "../../../../../middleware/bap/activity_message/start_activity.h"
 #include "../../../../../middleware/bap/activity_message/telemetry.h"
 #include "../../../../../middleware/encoding/byte_order.h"
+#include "../../../../../state/activity_sdk/format.h"
+#include "../../../../activity/mission/mission_script_actor_path_sense.h"
+#include "../../../../activity/mission/mission_script_squad_sense.h"
 #include "activity_incident_grants.h"
 
 namespace sunrise::server::bap::encrypted::activity_message::receipts {
@@ -40,17 +45,17 @@ namespace sense = message::sense_update;
 using store::Verdict;
 
 /** Type-4 Sense has seven fixed prefix values when it carries no predicate replies. */
-constexpr std::uint32_t kObjectSenseSchema = 0x8080992EU;
+constexpr std::uint32_t kObjectSenseSchema = state::activity_sdk::format::kObjectSenseSchema;
 constexpr std::uint32_t kObjectSenseValueCount = 7;
 
 /** Type-2 Sense reports the atom runner's progress, so its value count varies with the body. */
-constexpr std::uint32_t kCombatantSenseSchema = 0x80807DA2U;
-constexpr std::uint32_t kCombatantAtomsSchema = 0x80807F6EU;
+constexpr std::uint32_t kCombatantSenseSchema = message::scriptable_auth::kType2SenseSchema;
+constexpr std::uint32_t kCombatantAtomsSchema = server::activity::mission::kCombatantProgramSchema;
 
 /** Type-1 Sense carries the alive count and the eight per-slot member counts. */
-constexpr std::uint32_t kSquadSenseSchema = 0x80807ECCU;
-constexpr std::uint32_t kSquadSlotsSchema = 0x80807ECFU;
-constexpr std::uint32_t kSquadCountsSchema = 0x80809491U;
+constexpr std::uint32_t kSquadSenseSchema = message::squad_sense::kSchema;
+constexpr std::uint32_t kSquadSlotsSchema = server::activity::mission::kSquadCreatedListSchema;
+constexpr std::uint32_t kSquadCountsSchema = server::activity::mission::kSquadCreatedCountSchema;
 constexpr std::uint32_t kSquadSlotCapacity = 8;
 
 /**

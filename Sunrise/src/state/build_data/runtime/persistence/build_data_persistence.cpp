@@ -28,6 +28,7 @@
 #include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/socket_entry_list_catalog.h"
 #include "../../spawn_sets/spawn_set_catalog.h"
+#include "../../starter_sets/starter_set_catalog.h"
 #include "../../vendors/vendor_catalog.h"
 #include "../domain_markers.h"
 
@@ -67,7 +68,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
 [[nodiscard]] bool snapshot_domains_locked(Context& state,
                                            cache::records::DomainCounts& counts) noexcept {
     counts = {};
-    const cache::records::MutableDomains scratch = scratch_domains(state);
+    // The catalog is sealed here, so its count holds until the copy.
+    const cache::records::MutableDomains scratch = scratch_domains(state, content::count());
     *scratch.constants = to_record(constants::snapshot());
     gameplay::entity_object_types::Fingerprint objectFingerprint{};
     return content::snapshot(scratch.named, counts.named)
@@ -98,6 +100,7 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && rewards::snapshot(scratch.rewardInstructions, counts.rewardInstructions)
            && rewards::snapshot(scratch.rewardModifiers, counts.rewardModifiers)
            && rewards::snapshot(scratch.rewardSockets, counts.rewardSockets)
+           && starter_sets::snapshot(scratch.starterSets, counts.starterSets)
            && records::snapshot(scratch.records, counts.records)
            && records::snapshot_objectives(scratch.recordObjectives, counts.recordObjectives)
            && records::snapshot_intervals(scratch.recordIntervals, counts.recordIntervals)
@@ -125,18 +128,22 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && cache::records::canonicalize(scratch, counts);
 }
 
-/** @return True when every required extracted domain is complete in State. */
-[[nodiscard]] bool required_domains_ready() noexcept {
+/**
+ * @param state Persistence context; its reward verdict settles the reward domain.
+ * @return True when every required extracted domain is complete in State.
+ */
+[[nodiscard]] bool required_domains_ready(const Context& state) noexcept {
     constants::InvestmentConstants published{};
+    // A refused reward graph is settled; the cache then carries no reward rows.
     return runtime::named::ready() && item_definitions_ready() && configured_item_details_ready()
            && collectible_definitions_ready() && socket_plug_rules_ready()
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && season_pass_ready() && repeatable_bounties_ready()
-           && reward_definitions_ready() && record_definitions_ready() && node_definitions_ready()
-           && sobject_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
-           && hash_names_ready() && vendor_catalog_ready()
-           && gameplay::entity_position_profiles::available()
+           && starter_sets_ready() && (reward_definitions_ready() || state.rewardsUnsupported)
+           && record_definitions_ready() && node_definitions_ready() && sobject_definitions_ready()
+           && scenario_layouts_ready() && spawn_sets_ready() && hash_names_ready()
+           && vendor_catalog_ready() && gameplay::entity_position_profiles::available()
            && gameplay::entity_object_types::available() && constants::find(published);
 }
 
@@ -147,10 +154,12 @@ Context& context() noexcept {
     return g_context;
 }
 
-/** Gives mutable views over every fixed snapshot buffer. */
-cache::records::MutableDomains scratch_domains(Context& state) noexcept {
-    const auto named = ensure_scratch<content::Definition, content::kDefinitionCatalogCapacity>(
-        state.namedScratch);
+/** Gives mutable views over every snapshot buffer. */
+cache::records::MutableDomains scratch_domains(Context& state, std::size_t namedRows) noexcept {
+    if (state.namedScratch.size() != namedRows) {
+        state.namedScratch.assign(namedRows, content::Definition{});
+    }
+    const std::span<content::Definition> named = state.namedScratch;
     const auto items =
         ensure_scratch<build_data::items::Definition, build_data::items::kDefinitionCapacity>(
             state.itemScratch);
@@ -287,6 +296,8 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         ensure_scratch<rewards::Modifier, rewards::kModifierCapacity>(state.rewardModifierScratch),
         ensure_scratch<rewards::SocketOverride, rewards::kSocketOverrideCapacity>(
             state.rewardSocketScratch),
+        ensure_scratch<starter_sets::Definition, starter_sets::kClassCount>(
+            state.starterSetScratch),
     };
 }
 
@@ -323,6 +334,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.rewardInstructionScratch);
     release_bank(state.rewardModifierScratch);
     release_bank(state.rewardSocketScratch);
+    release_bank(state.starterSetScratch);
     release_bank(state.recordScratch);
     release_bank(state.recordObjectiveScratch);
     release_bank(state.recordIntervalScratch);
@@ -353,6 +365,7 @@ void clear_locked(Context& state) noexcept {
     state.cachePath = {};
     state.buildIdentity = {};
     state.catalystError = items::catalysts::Error::none;
+    state.rewardsUnsupported = false;
     state.enabled = false;
     state.persisted = false;
     state.replaceStaleCache = false;
@@ -437,12 +450,14 @@ cache::records::Domains occupied_domains(Context& state,
                                            counts.rewardModifiers},
         std::span<const rewards::SocketOverride>{state.rewardSocketScratch.data(),
                                                  counts.rewardSockets},
+        std::span<const starter_sets::Definition>{state.starterSetScratch.data(),
+                                                  counts.starterSets},
     };
 }
 
 /** Saves one canonical snapshot when all domains required by its build are ready. */
 bool persist_if_ready_locked(Context& state, bool catalystRequired) noexcept {
-    if (!required_domains_ready() || (catalystRequired && !exotic_catalysts_ready())
+    if (!required_domains_ready(state) || (catalystRequired && !exotic_catalysts_ready())
         || state.persisted || !state.enabled) {
         return true;
     }
@@ -488,7 +503,7 @@ void invalidate_cache() noexcept {
 bool persist() noexcept {
     runtime::persistence::Context& state = runtime::persistence::context();
     AcquireSRWLockExclusive(&state.lock);
-    const bool requiredReady = runtime::persistence::required_domains_ready();
+    const bool requiredReady = runtime::persistence::required_domains_ready(state);
     bool result = false;
     switch (runtime::persistence::cache_action(
         requiredReady, exotic_catalysts_ready(), state.catalystError)) {

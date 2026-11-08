@@ -13,12 +13,15 @@
 #include <vector>
 
 #include "../../../middleware/bap/activity_message/auth_schema_catalog.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808095.h"
 #include "../../../state/activity_sdk/runtime.h"
 #include "../../../state/activity_sdk/scene_triggers.h"
 #include "activity_sdk_lua_missions_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::internal {
 namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
 
@@ -643,7 +646,7 @@ bool render_mission(const Source& source,
     for (const std::uint32_t slotRow : slots) {
         const format::Slot& slot = source.slots[slotRow];
         if (slot.slotType != format::kPerformanceSlotType
-            || slot.authSchema != format::kPerformanceAuthSchema) {
+            || slot.authSchema != generated::C80809586::kClass) {
             continue;
         }
         std::uint32_t squadSlot = format::kAbsentIndex;

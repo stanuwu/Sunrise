@@ -2,12 +2,19 @@
 #include <cstring>
 #include <limits>
 
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80807a.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80807c.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808087.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
 #include "internal.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
+
+/** The sobject table root names its row array here. */
+constexpr std::size_t kSobjectArrayDescriptor =
+    offsetof(generated::C80807c9b, incidentGlobals.hAd7fd470);
 
 /**
  * Reads the one flag slot a collectible's acquired-state expression tests.
@@ -22,17 +29,22 @@ void read_acquired_flag_slot(std::span<const std::byte> table,
     namespace domain = state::build_data::collectibles;
     slot = domain::kUnavailableFlagSlot;
     tables::Array expression{};
-    std::array<std::uint32_t, 2> instruction{};
+    std::uint32_t opcode = 0;
+    std::uint32_t operand = 0;
     if (!tables::find_optional_array_at(
             table, at + tables::kCollectibleAcquiredExpressionField, expression)
         || expression.count != 1 || expression.elementClass != tables::kInvestmentExpressionRowClass
-        || expression.dataOffset + sizeof instruction > table.size()) {
+        || expression.dataOffset + tables::kUnlockInstructionStride > table.size()) {
         return;
     }
-    std::memcpy(instruction.data(), table.data() + expression.dataOffset, sizeof instruction);
-    if (instruction[0] == tables::kUnlockReadFlagOpcode
-        && instruction[1] < domain::kUnavailableFlagSlot) {
-        slot = static_cast<std::uint16_t>(instruction[1]);
+    std::memcpy(&opcode,
+                table.data() + expression.dataOffset + tables::kUnlockInstructionOpcodeOffset,
+                sizeof opcode);
+    std::memcpy(&operand,
+                table.data() + expression.dataOffset + tables::kUnlockInstructionOperandOffset,
+                sizeof operand);
+    if (opcode == tables::kUnlockReadFlagOpcode && operand < domain::kUnavailableFlagSlot) {
+        slot = static_cast<std::uint16_t>(operand);
     }
 }
 
@@ -74,21 +86,19 @@ bool build_collectibles(const reader::Source& source,
         for (const std::uint32_t tag :
              {tables::kSobjectTablePrimaryTag, tables::kSobjectTableAlternateTag}) {
             std::vector<std::byte>& blob = storage.definition;
+            tables::Array sobjectRows{};
             if (!reader::read_tag(source, storage.scratch, tag, blob)
-                || blob.size() < tables::kSobjectFirstRow) {
+                || !tables::read_array(std::span<const std::byte>{blob},
+                                       kSobjectArrayDescriptor,
+                                       generated::SobjectRow::kClass,
+                                       tables::kSobjectRowStride,
+                                       sobjectRows)
+                || sobjectRows.count == 0 || sobjectRows.count > sobjects::kDefinitionCapacity) {
                 continue;
             }
-            std::uint64_t rowCount = 0;
-            std::memcpy(&rowCount, blob.data() + tables::kSobjectCountOffset, sizeof rowCount);
-            if (rowCount == 0 || rowCount > sobjects::kDefinitionCapacity
-                || tables::kSobjectFirstRow
-                           + static_cast<std::size_t>(rowCount) * tables::kSobjectRowStride
-                       > blob.size()) {
-                continue;
-            }
-            const auto count = static_cast<std::size_t>(rowCount);
+            const auto count = static_cast<std::size_t>(sobjectRows.count);
             for (std::size_t row = 0; row < count; ++row) {
-                const std::size_t at = tables::kSobjectFirstRow + row * tables::kSobjectRowStride;
+                const std::size_t at = sobjectRows.dataOffset + row * tables::kSobjectRowStride;
                 sobjects::Definition& definition = storage.sobjectRows[row];
                 std::memcpy(&definition.nameHash,
                             blob.data() + at + tables::kSobjectNameHashOffset,
@@ -124,7 +134,7 @@ bool build_collectibles(const reader::Source& source,
             source, storage.scratch, requirementTableTag, storage.definition, requirementTableClass)
         || requirementTableClass != tables::kMaterialRequirementTableClass
         || !tables::find_array_at(std::span<const std::byte>{storage.definition},
-                                  tables::kTableArrayDescriptor,
+                                  offsetof(generated::MaterialRequirementTable, table),
                                   requirementSets)
         || requirementSets.elementClass != tables::kMaterialRequirementSetRowClass
         || requirementSets.count == 0
@@ -145,7 +155,7 @@ bool build_collectibles(const reader::Source& source,
     if (!tables::slot_tag(root, tables::kUnlockFlagSlotTableSlot, slotTableTag) || slotTableTag == 0
         || !reader::read_tag(source, storage.scratch, slotTableTag, storage.unlockSlotTable)
         || !tables::find_array_at(std::span<const std::byte>{storage.unlockSlotTable},
-                                  tables::kTableArrayDescriptor,
+                                  offsetof(generated::UnlockFlagTable, table),
                                   slotRows)) {
         return false;
     }
@@ -158,8 +168,9 @@ bool build_collectibles(const reader::Source& source,
         || tables::package_of(tableTag) == tables::kAbsentPackageId
         || !reader::read_tag(source, storage.scratch, tableTag, storage.child, tableClass)
         || tableClass != tables::kCollectibleTableClass
-        || !tables::find_array_at(
-            std::span<const std::byte>{storage.child}, tables::kTableArrayDescriptor, rows)
+        || !tables::find_array_at(std::span<const std::byte>{storage.child},
+                                  offsetof(generated::CollectibleTable, table),
+                                  rows)
         || rows.elementClass != tables::kCollectibleRowClass || rows.count == 0
         || rows.count > storage.collectibleRows.size()) {
         return false;
@@ -243,7 +254,7 @@ bool build_collectibles(const reader::Source& source,
         for (std::size_t requirement = 0; requirement < requirements.count; ++requirement) {
             const std::size_t requirementAt =
                 requirements.dataOffset + requirement * tables::kMaterialRequirementRowStride;
-            std::uint32_t nativeItemIndex = 0;
+            std::uint16_t nativeItemIndex = 0;
             std::uint32_t quantity = 0;
             std::uint8_t deleteOnAction = 0;
             std::uint8_t omitFromRequirements = 0;
@@ -268,14 +279,13 @@ bool build_collectibles(const reader::Source& source,
                         requirementTable.data() + requirementAt
                             + tables::kMaterialRequirementSentinelOffset,
                         sizeof sentinel);
-            if (nativeItemIndex >= itemDefinitionCount
-                || nativeItemIndex > (std::numeric_limits<std::uint16_t>::max)() || quantity == 0
-                || deleteOnAction > 1 || omitFromRequirements > 1 || sentinel != 0xFFFFU) {
+            if (nativeItemIndex >= itemDefinitionCount || quantity == 0 || deleteOnAction > 1
+                || omitFromRequirements > 1 || sentinel != 0xFFFFU) {
                 return false;
             }
             output.materialRequirements[requirement] = {
                 quantity,
-                static_cast<std::uint16_t>(nativeItemIndex),
+                nativeItemIndex,
                 deleteOnAction != 0,
                 omitFromRequirements != 0,
             };

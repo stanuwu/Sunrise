@@ -1,14 +1,20 @@
 #include <cstring>
 
+#include "../../../middleware/content/packages/reader/typed_array.h"
 #include "activity_sdk_decode_plans_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal {
 namespace {
 
-/** A selection blob starts its root node at byte 8; a node's array field sits at +24. */
-constexpr std::uint64_t kRootNode = 8;
-constexpr std::uint64_t kNodeArrayAt = 24;
-constexpr std::uint64_t kNodeSize = 40;
+/** A selection blob holds one root node; each node lists its child nodes. */
+constexpr std::uint64_t kRootNode = offsetof(generated::SReplicationSchema, h9d85f81d);
+constexpr std::uint64_t kNodeArrayAt = offsetof(generated::RsatSchemaField, children);
+constexpr std::uint64_t kNodeArrayRelativeAt =
+    offsetof(generated::RsatSchemaField, children.relative);
+constexpr std::uint64_t kNodeSize = sizeof(generated::RsatSchemaField);
+constexpr std::uint64_t kNodeBaseAt = offsetof(generated::RsatSchemaField, nodeBase);
+constexpr std::uint64_t kNodeSelectedAt = offsetof(generated::RsatSchemaField, rawU32At10);
+constexpr std::uint64_t kNodeRepeatAt = offsetof(generated::RsatSchemaField, repeat);
 /** A dynamic container places its payload 16 bytes after a 16-aligned header. */
 constexpr std::uint64_t kDynamicAlignment = 16;
 constexpr std::uint64_t kDynamicHeader = 16;
@@ -89,21 +95,21 @@ bool Compiler::children(std::uint64_t node, std::vector<std::uint64_t>& output) 
         return true;
     }
     std::int64_t relative = 0;
-    std::uint32_t marker = 0;
-    std::uint32_t elementClass = 0;
     const std::int64_t header =
-        static_cast<std::int64_t>(node + kNodeArrayAt + 8)
-        + (read_at(blob_, node + kNodeArrayAt + 8, relative) ? relative : 0);
-    const bool array = header >= 4 && static_cast<std::uint64_t>(header) + 16 <= blob_.size()
-                       && raw <= kMaximumArrayCount
-                       && read_at(blob_, static_cast<std::uint64_t>(header) - 4, marker)
-                       && marker == kArrayMarker
-                       && read_at(blob_, static_cast<std::uint64_t>(header) + 8, elementClass);
-    const std::uint64_t start = array ? static_cast<std::uint64_t>(header) + 16 : 0;
-    if (!array || elementClass != kSelectionChildClass || start + kNodeSize * raw > blob_.size()) {
+        static_cast<std::int64_t>(node + kNodeArrayRelativeAt)
+        + (read_at(blob_, node + kNodeArrayRelativeAt, relative) ? relative : 0);
+    reader::TypedArrayRows rows{};
+    if (header < 0 || raw > kMaximumArrayCount
+        || !reader::read_typed_array(blob_,
+                                     static_cast<std::size_t>(header),
+                                     raw,
+                                     kSelectionChildClass,
+                                     static_cast<std::size_t>(kNodeSize),
+                                     rows)) {
         error_ = "selection_children_extent";
         return false;
     }
+    const std::uint64_t start = rows.data;
     output.reserve(static_cast<std::size_t>(raw));
     for (std::uint64_t index = 0; index < raw; ++index) {
         output.push_back(start + kNodeSize * index);
@@ -213,7 +219,8 @@ bool Compiler::walk_property(const Property& property,
     std::uint32_t selected = 0;
     std::int32_t repeat = 0;
     std::vector<std::uint64_t> nodes;
-    if (!read_at(blob_, node + 16, selected) || !read_at(blob_, node + 20, repeat)) {
+    if (!read_at(blob_, node + kNodeSelectedAt, selected)
+        || !read_at(blob_, node + kNodeRepeatAt, repeat)) {
         error_ = "selection_extent";
         return false;
     }
@@ -326,13 +333,13 @@ bool Compiler::walk(std::uint32_t handle,
         return false;
     }
     std::int64_t relative = 0;
-    if (!read_at(blob_, node + 8, relative)) {
+    if (!read_at(blob_, node + kNodeBaseAt, relative)) {
         error_ = "selection_extent";
         return false;
     }
     const Property base = native->base;
     if (base.memberType != 0 && base.memberType != kAbsent && relative != 0) {
-        const std::int64_t target = static_cast<std::int64_t>(node + 8) + relative;
+        const std::int64_t target = static_cast<std::int64_t>(node + kNodeBaseAt) + relative;
         if (target < 0) {
             error_ = "selection_extent";
             return false;

@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <tuple>
 
+#include "../../middleware/bap/activity_message/scriptable_auth_body.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_80809c.h"
 #include "actor_sequences.h"
 #include "internal.h"
 #include "squad_profiles.h"
@@ -11,6 +14,9 @@
 
 namespace sunrise::state::activity_sdk::validation {
 namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
+namespace scriptable_auth = middleware::bap::activity_message::scriptable_auth;
 
 /** @return True when every member certificate belongs to its declared squad lane. */
 [[nodiscard]] bool squad_profiles(const Catalog& catalog) noexcept {
@@ -30,13 +36,12 @@ namespace {
 
 // An empty authored name uses the FNV-1 basis.
 constexpr std::uint32_t kAbsentDefinitionHash = 0x811C9DC5U;
-// Ability owners and targets use these exact package slot classes and schemas.
-constexpr std::uint32_t kAbilitySlotType = 2U;
-constexpr std::uint32_t kAbilityComponentClass = 0x8080834EU;
-constexpr std::uint32_t kAbilitySenseSchema = 0x80807DA2U;
-constexpr std::uint32_t kAbilityAuthSchema = 0x80807DA1U;
+// Ability owners are type-2 combatant slots; targets use this exact slot type and class.
 constexpr std::uint32_t kAbilityTargetSlotType = 58U;
-constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
+constexpr std::uint32_t kAbilityTargetComponentClass = generated::AbilityPointComponent::kClass;
+/** A task descriptor offset is the start of its slot definition. */
+constexpr std::uint32_t kTaskReferenceOffset =
+    offsetof(generated::TaskSlotDefinitionType38, targetObjectKey);
 
 /**
  * @return True when every scene event key belongs to a resourced type-43 slot, names that
@@ -83,8 +88,7 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
     for (const format::TaskTarget& row : targets) {
         if (row.taskSlotIndex >= slots.size() || row.objectiveSlotIndex >= slots.size()
             || row.flags != format::kTaskTargetExact || row.reserved != 0
-            || row.referenceFieldOffset
-                   != row.descriptorOffset + format::kTaskReferenceRelativeOffset
+            || row.referenceFieldOffset != row.descriptorOffset + kTaskReferenceOffset
             || row.bitIndex >= 24U || (!first && row.taskSlotIndex < previousTask)) {
             return false;
         }
@@ -153,10 +157,11 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
     const auto slots = catalog.slots();
     const format::ActorAbility* priorAbility = nullptr;
     for (const format::ActorAbility& row : catalog.actor_abilities()) {
-        if (row.slotIndex >= slots.size() || slots[row.slotIndex].slotType != kAbilitySlotType
-            || slots[row.slotIndex].componentClass != kAbilityComponentClass
-            || slots[row.slotIndex].senseSchema != kAbilitySenseSchema
-            || slots[row.slotIndex].authSchema != kAbilityAuthSchema
+        if (row.slotIndex >= slots.size()
+            || slots[row.slotIndex].slotType != scriptable_auth::kType2SlotType
+            || slots[row.slotIndex].componentClass != scriptable_auth::kType2ComponentClass
+            || slots[row.slotIndex].senseSchema != scriptable_auth::kType2SenseSchema
+            || slots[row.slotIndex].authSchema != scriptable_auth::kType2Schema
             || (slots[row.slotIndex].flags & format::kSlotSchemaJoinExact) == 0
             || row.actorClassIndex >= catalog.actor_classes().size() || row.definitionTag == 0
             || row.groupHash == 0 || row.groupHash == kAbsentDefinitionHash || row.requestHash == 0
@@ -330,14 +335,15 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
         const format::ActorBehaviorProfile& profile = profiles[index];
         const bool absent =
             profile.behaviorConfigTag == 0 || profile.behaviorConfigTag == format::kAbsentIndex;
+        // TODO: require reserved == 0 once every installed pack is rebuilt; older version-47
+        // packs still hold the retired behavior-config offset there.
         if (profile.actorClassIndex != index
             || (absent
                 && (profile.behaviorConfigClass != format::kAbsentIndex
                     || profile.behaviorProvenance != format::ActorSemanticProvenance::notPresent))
             || (!absent
-                && (profile.behaviorConfigClass != format::kActorBehaviorConfigClass
+                && (profile.behaviorConfigClass != generated::SEntityConfig::kClass
                     || profile.behaviorProvenance != format::ActorSemanticProvenance::packageField))
-            || profile.behaviorConfigOffset != format::kActorBehaviorConfigRelativeOffset
             || profile.defaultFaction != 0
             || profile.factionProvenance != format::ActorSemanticProvenance::engineZeroDefault
             || profile.flags != format::kActorBehaviorProfileExact) {

@@ -5,8 +5,12 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../content/packages/schema/generated/tag_classes_808099.h"
+#include "../../content/packages/schema/generated/tag_classes_80809a.h"
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
+#include "scriptable_auth_body.h"
 
 // Type-4 object Auth that spawns authored entry zero and subscribes to accepted player use.
 // The client answers the subscription on its Sense reply list with the interaction latch.
@@ -14,16 +18,17 @@
 namespace sunrise::middleware::bap::activity_message::interactable_object {
 
 namespace fields = auth_fields;
+namespace generated = middleware::content::packages::schema::generated;
 
-/** Object Auth schema; the SDK format table carries the same value as kObjectAuthSchema. */
-inline constexpr std::uint32_t kSchema = 0x8080992FU;
+/** Object Auth schema: the type-4 slot's Auth schema. */
+inline constexpr std::uint32_t kSchema = scriptable_auth::kType4Schema;
 /** Registered reply the client emits for the interaction subscription below. */
-inline constexpr std::uint32_t kInteractionReply = 0x80804FB7U;
+inline constexpr std::uint32_t kInteractionReply = generated::C80804fb7::kClass;
 /** Subscription schema that makes the client emit kInteractionReply. */
-inline constexpr std::uint32_t kInteractionSubscription = 0x80804FB8U;
+inline constexpr std::uint32_t kInteractionSubscription = generated::C80804fb8::kClass;
 /** Optional ownership subscription; the client answers it with the owner key reply. */
-inline constexpr std::uint32_t kOwnershipSubscription = 0x80809ACDU;
-inline constexpr std::uint32_t kOwnershipReply = 0x80809ACCU;
+inline constexpr std::uint32_t kOwnershipSubscription = generated::C80809acd::kClass;
+inline constexpr std::uint32_t kOwnershipReply = generated::C80809acc::kClass;
 inline constexpr std::size_t kBits = 375;
 inline constexpr std::size_t kBytes = 47;
 /** The ownership subscription adds its presence bit and schema. */

@@ -11,7 +11,15 @@ constexpr std::uint8_t kCharacterSoidWidth = 64;
 
 } // namespace
 
-/** Writes the echoed header, the caller's status pair, the character id, and the trailer. */
+/**
+ * Writes the echoed header, the caller's status pair, the character id, and the trailer.
+ * @param message Parsed request whose envelope fields are echoed.
+ * @param status Refusal code, and the Family-4 revision that carries the new character.
+ * @param characterSoid The new character's id; zero on a refusal.
+ * @param output Caller-owned svc-11 response-body storage.
+ * @param written Receives encoded response-body bytes, zero on failure.
+ * @return True when the fixed response fits the output buffer.
+ */
 bool encode_response(const Message& message,
                      const StatusResponse& status,
                      std::uint64_t characterSoid,

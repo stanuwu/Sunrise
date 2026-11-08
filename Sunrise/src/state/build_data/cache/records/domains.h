@@ -25,6 +25,7 @@
 #include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/definition.h"
 #include "../../spawn_sets/definition.h"
+#include "../../starter_sets/definition.h"
 #include "../../vendors/definition.h"
 #include "format.h"
 
@@ -74,6 +75,7 @@ struct DomainCounts {
     std::size_t rewardInstructions{};
     std::size_t rewardModifiers{};
     std::size_t rewardSockets{};
+    std::size_t starterSets{};
 };
 
 /** Fixed caller storage used while decoding the cache domains. */
@@ -123,6 +125,7 @@ struct MutableDomains {
     std::span<rewards::Instruction> rewardInstructions;
     std::span<rewards::Modifier> rewardModifiers;
     std::span<rewards::SocketOverride> rewardSockets;
+    std::span<starter_sets::Definition> starterSets;
 };
 
 /** Read-only complete views used for the checks and for cache encoding. */
@@ -171,6 +174,7 @@ struct Domains {
     std::span<const rewards::Instruction> rewardInstructions;
     std::span<const rewards::Modifier> rewardModifiers;
     std::span<const rewards::SocketOverride> rewardSockets;
+    std::span<const starter_sets::Definition> starterSets;
 };
 
 } // namespace sunrise::state::build_data::cache::records

@@ -7,6 +7,61 @@ std::recursive_mutex g_mutex;
 Session g_session;
 std::uint64_t g_failureSerial{};
 
+/**
+ * Rows whose definition the installed content lacks. A new save and the version 5 migration both
+ * create the table from this text, so the two cannot differ.
+ */
+constexpr const char* kParkedItemsTable =
+    "CREATE TABLE parked_items ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "kind INTEGER NOT NULL CHECK (kind IN (0, 1, 2)),"
+    "character_slot INTEGER NOT NULL CHECK (character_slot BETWEEN -1 AND 2),"
+    "location INTEGER NOT NULL CHECK (location IN (0, 1)),"
+    "position INTEGER NOT NULL CHECK (position >= 0),"
+    "instance_soid INTEGER NOT NULL,"
+    "definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),"
+    "level INTEGER NOT NULL,"
+    "quantity INTEGER NOT NULL CHECK (quantity > 0),"
+    "mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),"
+    "flags INTEGER NOT NULL,"
+    "socket_policy INTEGER NOT NULL CHECK (socket_policy IN (0, 1)),"
+    "plug_count INTEGER NOT NULL CHECK (plug_count BETWEEN 0 AND 12),"
+    "plugs BLOB NOT NULL CHECK (length(plugs) = 48),"
+    "movement_ability INTEGER NOT NULL,"
+    "grenade_ability INTEGER NOT NULL,"
+    "super_ability INTEGER NOT NULL,"
+    "melee_ability INTEGER NOT NULL,"
+    "class_ability INTEGER NOT NULL,"
+    "seen INTEGER NOT NULL CHECK (seen IN (0, 1))"
+    ") STRICT;";
+
+/** Version 6 records which bucket a parked row left; a new save gets the column at creation. */
+constexpr const char* kParkedPlacementColumn =
+    "ALTER TABLE parked_items ADD COLUMN placement INTEGER NOT NULL DEFAULT 0 "
+    "CHECK (placement IN (0, 1));";
+
+namespace {
+
+/** Newest save schema; open() upgrades an older save one version at a time. */
+constexpr int kSchemaVersion = 6;
+/** Application id every Sunrise save carries; the bundled schema sets it. */
+constexpr int kApplicationId = 1397902921;
+
+/**
+ * Reads the open save's stamp.
+ * @param version Receives the save's schema version.
+ * @return False when the save is not ours or the stamp does not read.
+ */
+[[nodiscard]] bool read_stamp(int& version) noexcept {
+    int application = 0;
+    Statement id("PRAGMA application_id");
+    Statement user("PRAGMA user_version");
+    return id.step() == SQLITE_ROW && id.column(0, application) && application == kApplicationId
+           && user.step() == SQLITE_ROW && user.column(0, version);
+}
+
+} // namespace
+
 /** SQLite requires this sentinel to copy text borrowed from a caller. */
 sqlite3_destructor_type copy_text() noexcept {
     return SQLITE_TRANSIENT; // NOLINT(performance-no-int-to-ptr)
@@ -83,8 +138,8 @@ static_assert(account::inventory::kCharacterItemCapacity == 333);
 static_assert(account::inventory::kCharacterStackCapacity == 333);
 
 /**
- * Widens saved row bounds to the character ABI, adds item and stack placement, and drops the world
- * reward kind, which every reward now ignores because one path places them all.
+ * Widens saved row bounds to the character ABI, adds item, stack and parked-row placement, and
+ * drops the world reward kind, which every reward now ignores because one path places them all.
  */
 static bool migrate_placement_storage() noexcept {
     // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
@@ -95,7 +150,7 @@ static bool migrate_placement_storage() noexcept {
     const bool migrated = []() noexcept {
         Transaction transaction;
         if (!transaction.ready() || !execute(R"sql(
-CREATE TABLE items_v4 (
+CREATE TABLE items_v6 (
     character_slot INTEGER NOT NULL REFERENCES characters(slot),
     location INTEGER NOT NULL CHECK (location IN (0, 1)),
     position INTEGER NOT NULL CHECK (position >= 0),
@@ -119,10 +174,10 @@ CREATE TABLE items_v4 (
            OR (location = 1 AND position < 333)),
     CHECK (placement = 0 OR quantity = 1)
 ) STRICT;
-INSERT INTO items_v4 SELECT items.*, 0 FROM items;
+INSERT INTO items_v6 SELECT items.*, 0 FROM items;
 DROP TABLE items;
-ALTER TABLE items_v4 RENAME TO items;
-CREATE TABLE character_stacks_v4 (
+ALTER TABLE items_v6 RENAME TO items;
+CREATE TABLE character_stacks_v6 (
     character_slot INTEGER NOT NULL REFERENCES characters(slot),
     position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 332),
     definition_hash INTEGER NOT NULL,
@@ -131,21 +186,21 @@ CREATE TABLE character_stacks_v4 (
     placement INTEGER NOT NULL CHECK (placement IN (0, 1)),
     PRIMARY KEY (character_slot, position)
 ) STRICT;
-INSERT INTO character_stacks_v4 SELECT character_stacks.*, 0 FROM character_stacks;
+INSERT INTO character_stacks_v6 SELECT character_stacks.*, 0 FROM character_stacks;
 DROP TABLE character_stacks;
-ALTER TABLE character_stacks_v4 RENAME TO character_stacks;
-CREATE TABLE pending_rewards_v4 (
+ALTER TABLE character_stacks_v6 RENAME TO character_stacks;
+CREATE TABLE pending_rewards_v6 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     character_slot INTEGER NOT NULL CHECK (character_slot BETWEEN 0 AND 2),
     definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
     quantity INTEGER NOT NULL CHECK (quantity > 0)
 ) STRICT;
-INSERT INTO pending_rewards_v4 (id, character_slot, definition_hash, quantity)
+INSERT INTO pending_rewards_v6 (id, character_slot, definition_hash, quantity)
     SELECT id, character_slot, definition_hash, quantity FROM pending_rewards;
 DROP TABLE pending_rewards;
-ALTER TABLE pending_rewards_v4 RENAME TO pending_rewards;
-PRAGMA user_version=4;
-)sql")) {
+ALTER TABLE pending_rewards_v6 RENAME TO pending_rewards;
+PRAGMA user_version=6;
+)sql") || !execute(kParkedPlacementColumn)) {
             return false;
         }
         // Only the rebuilt tables and the sockets that reference them are rechecked.
@@ -205,22 +260,20 @@ bool open(std::string_view path,
         Transaction transaction;
         const std::string schemaText(schema);
         const std::string defaultText(defaults);
+        // The default characters copy the starter unlock rows, so the starter tables come first.
         ready = transaction.ready() && !schema.empty() && !defaults.empty()
-                && execute(schemaText.c_str()) && execute(defaultText.c_str())
+                && !characterStarter.empty() && execute(schemaText.c_str())
+                && execute(kParkedItemsTable) && execute(kParkedPlacementColumn)
+                && execute(starterText.c_str()) && execute(defaultText.c_str())
                 && !settingsSchema.empty() && !settingsDefaults.empty()
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
-                && !characterStarter.empty() && execute(starterText.c_str())
                 && transaction.commit();
+        // The bundled schema stamps the save; it must name the version this build writes.
+        int created = 0;
+        ready = ready && read_stamp(created) && created == kSchemaVersion;
     } else if (ready) {
-        // Version 4 adds saved item placement and room for recovered rows, and drops the world
-        // reward kind. Version 3 added the appearance header and the starter tables; version 2
-        // account preferences and seen state.
-        constexpr int kSchemaVersion = 4;
-        constexpr int kApplicationId = 1397902921;
-        int application = 0;
-        Statement query("PRAGMA application_id");
-        ready = (version >= 1 && version <= kSchemaVersion) && query.step() == SQLITE_ROW
-                && query.column(0, application) && application == kApplicationId;
+        int stamped = 0;
+        ready = version >= 1 && version <= kSchemaVersion && read_stamp(stamped);
     }
     if (ready && version == 1) {
         Transaction transaction;
@@ -238,21 +291,43 @@ bool open(std::string_view path,
     }
     if (ready && version == 2) {
         Transaction transaction;
-        // Older characters keep the fixed default header: their zero blob is marked invalid.
         // ADD COLUMN refuses a function default such as zeroblob(), so the blob is a literal.
-        ready = transaction.ready() && !characterStarter.empty()
+        ready = transaction.ready()
                 && execute("ALTER TABLE characters ADD COLUMN appearance_header BLOB NOT NULL "
                            "DEFAULT (X'000000000000000000000000000000000000000000000000000000000000"
                            "000000000000') CHECK (length(appearance_header) = 36);"
                            "ALTER TABLE characters ADD COLUMN appearance_header_valid INTEGER "
                            "NOT NULL DEFAULT 0 CHECK (appearance_header_valid IN (0, 1));")
-                && execute(starterText.c_str()) && execute("PRAGMA user_version=3")
-                && transaction.commit();
+                && execute("PRAGMA user_version=3") && transaction.commit();
         if (ready) {
             version = 3;
         }
     }
     if (ready && version == 3) {
+        Transaction transaction;
+        // A character saved without a captured header gets the default characters' header. The
+        // starter SQL is idempotent, so it adds only the tables an older save lacks.
+        ready =
+            transaction.ready() && !characterStarter.empty()
+            && execute("UPDATE characters SET appearance_header=X'250005000100EA0201034602480349"
+                       "034A03FFFFFFFF1303C7020000C59D1C8101000000' WHERE "
+                       "appearance_header_valid=0;"
+                       "ALTER TABLE characters DROP COLUMN appearance_header_valid;")
+            && execute(starterText.c_str()) && execute("PRAGMA user_version=4")
+            && transaction.commit();
+        if (ready) {
+            version = 4;
+        }
+    }
+    if (ready && version == 4) {
+        Transaction transaction;
+        ready = transaction.ready() && execute(kParkedItemsTable)
+                && execute("PRAGMA user_version=5") && transaction.commit();
+        if (ready) {
+            version = 5;
+        }
+    }
+    if (ready && version == 5) {
         ready = migrate_placement_storage();
     }
     if (!ready) {

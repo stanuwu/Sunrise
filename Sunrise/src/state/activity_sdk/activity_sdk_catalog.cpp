@@ -6,11 +6,14 @@
 #include <limits>
 #include <utility>
 
+#include "../../middleware/content/packages/schema/generated/tag_classes_808083.h"
 #include "internal.h"
 #include "runtime.h"
 
 namespace sunrise::state::activity_sdk {
 namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 std::atomic<Snapshot> g_snapshot{};
 std::atomic<Status> g_status{Status::notReady};
@@ -101,6 +104,10 @@ std::span<const std::byte> Catalog::logical_ir_sha256() const noexcept {
 
 std::wstring_view Catalog::artifact_directory() const noexcept {
     return {artifactDirectory_.chars.data(), artifactDirectory_.length};
+}
+
+bool Catalog::from_mod() const noexcept {
+    return mod_;
 }
 
 std::span<const std::byte> Catalog::string_bytes() const noexcept {
@@ -815,6 +822,7 @@ std::span<const format::DialogueCueText> cue_dialogue_texts(const Catalog& catal
 
 /** @return Zero for a negative or NaN input; saturates at the 32-bit maximum. */
 std::uint32_t authored_milliseconds(float seconds) noexcept {
+    // Scripts read milliseconds.
     constexpr double kMillisecondsPerSecond = 1000.0;
     const double value = std::round(static_cast<double>(seconds) * kMillisecondsPerSecond);
     if (!(value > 0.0)) {

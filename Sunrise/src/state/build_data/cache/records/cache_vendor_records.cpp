@@ -32,8 +32,8 @@ bool encode(const vendors::Definition& value, VendorDefinitionRecord& record) no
     record.installedRowClass = value.installedRowClass;
     record.saleRowBase = value.saleRowBase;
     record.saleRowClass = value.saleRowClass;
-    record.thirdRowBase = value.thirdRowBase;
-    record.thirdRowClass = value.thirdRowClass;
+    record.interactionRowBase = value.interactionRowBase;
+    record.interactionRowClass = value.interactionRowClass;
     record.saleRowOffset = value.saleRowOffset;
     record.installedRowOffset = value.installedRowOffset;
     record.transferRuleOffset = value.transferRuleOffset;
@@ -42,7 +42,7 @@ bool encode(const vendors::Definition& value, VendorDefinitionRecord& record) no
     record.index = value.index;
     record.installedCount = value.installedCount;
     record.saleCount = value.saleCount;
-    record.thirdCount = value.thirdCount;
+    record.interactionCount = value.interactionCount;
     record.transferRuleCount = value.transferRuleCount;
     return true;
 }
@@ -63,8 +63,8 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
     value.installedRowClass = record.installedRowClass;
     value.saleRowBase = record.saleRowBase;
     value.saleRowClass = record.saleRowClass;
-    value.thirdRowBase = record.thirdRowBase;
-    value.thirdRowClass = record.thirdRowClass;
+    value.interactionRowBase = record.interactionRowBase;
+    value.interactionRowClass = record.interactionRowClass;
     value.saleRowOffset = record.saleRowOffset;
     value.installedRowOffset = record.installedRowOffset;
     value.transferRuleOffset = record.transferRuleOffset;
@@ -73,7 +73,7 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
     value.index = record.index;
     value.installedCount = record.installedCount;
     value.saleCount = record.saleCount;
-    value.thirdCount = record.thirdCount;
+    value.interactionCount = record.interactionCount;
     value.transferRuleCount = record.transferRuleCount;
     return true;
 }

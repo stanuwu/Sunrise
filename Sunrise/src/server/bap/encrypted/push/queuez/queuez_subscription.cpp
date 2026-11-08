@@ -81,10 +81,12 @@ bool append_account_resync_notification(
         return false;
     }
     snapshot::Prepared prepared{};
+    // After opcode 505 this peer's account object holds no selection until its next 504.
     if (!snapshot::prepare_family4_refresh(scratch,
                                            before.family4RootSoid,
                                            before.family4Version + 1,
                                            acquisitionPresentationRows,
+                                           queuez::account_selection_cleared(before),
                                            prepared)
         || !queuez::stage_family4_refresh(before, prepared.family, after)) {
         return false;

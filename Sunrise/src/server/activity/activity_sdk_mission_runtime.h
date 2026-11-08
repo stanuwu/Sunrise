@@ -68,6 +68,8 @@ struct Snapshot final {
     std::int32_t effectiveRegion{-1};
     bool configured{};
     bool publicationPending{};
+    /** True when the roster could not build this revision's body, so it never publishes. */
+    bool publicationRefused{};
     /** True while the selection's publication deliberately waits for the client's arrival. */
     bool regionArrivalPending{};
 };

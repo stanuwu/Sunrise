@@ -42,4 +42,20 @@ bool copy_current_process([[maybe_unused]] void* context,
     }
 }
 
+/** A fault inside the write fails it; the bytes before the fault stay written. */
+bool write_current_process(std::uintptr_t address, std::span<const std::byte> bytes) noexcept {
+    if (address == 0) {
+        return false;
+    }
+    void* target = nullptr;
+    static_assert(sizeof target == sizeof address);
+    std::memcpy(&target, &address, sizeof target);
+    __try {
+        std::memcpy(target, bytes.data(), bytes.size());
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 } // namespace sunrise::client::memory

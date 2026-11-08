@@ -5,13 +5,17 @@
 #include <limits>
 #include <span>
 
+#include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../middleware/bap/activity_message/sense_update.h"
 
 namespace sunrise::server::activity::mission {
 
 /** Type-2 Sense carries two normalized runtime damage pools. */
-inline constexpr std::uint32_t kCombatantDamageSenseSchema = 0x80807DA2U;
-inline constexpr std::uint8_t kCombatantDamageSlotType = 2;
+inline constexpr std::uint32_t kCombatantDamageSenseSchema =
+    middleware::bap::activity_message::scriptable_auth::kType2SenseSchema;
+/** The combatant slot type the Sense rows carry. */
+inline constexpr std::uint8_t kCombatantDamageSlotType =
+    middleware::bap::activity_message::scriptable_auth::kType2SlotType;
 /** Root ordinals of the accepted spawn revision, pools and lifecycle flags. */
 inline constexpr std::uint16_t kCombatantDamageRevisionOrdinal = 0;
 inline constexpr std::uint16_t kCombatantPrimaryDamageOrdinal = 8;

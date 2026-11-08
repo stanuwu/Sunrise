@@ -4,6 +4,8 @@
 #include <limits>
 #include <span>
 
+#include "../../../middleware/content/packages/schema/generated/tag_layout_808073_0.h"
+
 namespace sunrise::client::diagnostics::studio {
 namespace {
 
@@ -24,10 +26,14 @@ struct NativePose final {
 };
 
 /** Offsets belong to the native draw and evaluated-pose records. */
-constexpr std::size_t kDrawBones = 112, kPoseLighting = 96, kModelRows = 96;
+constexpr std::size_t kDrawBones = 112, kPoseLighting = 96;
 static_assert(offsetof(NativeDraw, bones) == kDrawBones);
 static_assert(offsetof(NativePose, lighting) == kPoseLighting);
+using middleware::content::packages::schema::generated::SEntityModel;
 using pose_wire::kNoOwner;
+/** A model row is one vector: the offset and scale W, then the UV scale and offset. */
+static_assert(offsetof(SEntityModel, uvScaleU) - offsetof(SEntityModel, positionOffset)
+              == sizeof(pose_wire::Vector));
 
 /** Runtime table rows link components at byte 20 and store their body displacement at byte 8. */
 struct ComponentEntry final {
@@ -230,8 +236,8 @@ bool describe_draw(const content::handles::Source& source,
     std::uintptr_t model = 0;
     pose_wire::Draw row{};
     if (frame.palettes[slot] == 0 || !content::handles::resolve(source, header.model, model)
-        || !read(source, model + kModelRows, row.fixedRows[0])
-        || !read(source, model + kModelRows + sizeof(pose_wire::Vector), row.fixedRows[1])) {
+        || !read(source, model + offsetof(SEntityModel, positionOffset), row.fixedRows[0])
+        || !read(source, model + offsetof(SEntityModel, uvScaleU), row.fixedRows[1])) {
         return false;
     }
     row.fixedRows[2] = frame.lighting;

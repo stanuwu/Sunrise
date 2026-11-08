@@ -34,7 +34,13 @@ bool refuse(const Context& context, const char* reason) noexcept {
     return false;
 }
 
-/** Reads one validated flag from the caller's unlock banks or selected character. */
+/**
+ * Reads one validated flag from the caller's unlock banks or selected character.
+ * A flag this draw already acquired reads as set before any bank is saved.
+ * @param raw The ConditionInputs of the evaluation.
+ * @param set Receives the flag.
+ * @return False for a bank the saved state does not hold.
+ */
 bool read_flag(const void* raw, const unlocks::Instruction& instruction, bool& set) noexcept {
     const auto& inputs = *static_cast<const ConditionInputs*>(raw);
     const auto& context = inputs.context;
@@ -58,7 +64,12 @@ bool read_flag(const void* raw, const unlocks::Instruction& instruction, bool& s
     }
 }
 
-/** Reads one validated value from the caller's unlock banks. */
+/**
+ * Reads one validated value from the caller's unlock banks.
+ * @param raw The ConditionInputs of the evaluation.
+ * @param value Receives the value.
+ * @return False for a bank that holds no values.
+ */
 bool read_value(const void* raw,
                 const unlocks::Instruction& instruction,
                 std::int32_t& value) noexcept {
@@ -75,7 +86,13 @@ bool read_value(const void* raw,
     }
 }
 
-/** An empty program is unconditional; external identities are not in the saved banks. */
+/**
+ * Evaluates one bound condition program.
+ * An empty program is unconditional; external identities are not in the saved banks.
+ * @param result Receives whether the condition holds.
+ * @param acquiredFlags Flags this draw acquired so far, or null outside a draw.
+ * @return False for a malformed program or an external read; the refusal names which.
+ */
 bool condition(std::span<const definitions::Instruction> program,
                const Context& context,
                bool& result,
@@ -99,6 +116,7 @@ bool condition(std::span<const definitions::Instruction> program,
     return unlocks::evaluate(program, inputs, result) || refuse(context, "condition_shape");
 }
 
+/** Evaluates the condition one bank range names; a range outside the bank is refused. */
 bool condition(definitions::View data,
                definitions::Range expression,
                const Context& context,
@@ -123,6 +141,15 @@ std::uint64_t next_random(std::uint64_t& state) noexcept {
     return bits ^ (bits >> 31);
 }
 
+/** A uniform fraction keeps the top 53 bits of a draw, the precision of a double. */
+constexpr unsigned kFractionShift = 11;
+/** 2^-53 scales those 53 bits into [0, 1). */
+constexpr double kFractionScale = 0x1.0p-53;
+
+/**
+ * Draws for one wrapper. Each wrapper owns its selection history and random stream; nested pools
+ * share them, and nested wrappers share the seed chain and the acquired flags.
+ */
 struct Resolver {
     definitions::View data;
     const Context& context;
@@ -139,10 +166,18 @@ struct Resolver {
     std::array<std::uint32_t, kDrawCapacity> selectedCategories{};
     std::size_t selectedCount{};
 
+    /** @return The next uniform fraction in [0, 1) from this wrapper's stream. */
     double fraction() noexcept {
-        return static_cast<double>(next_random(random) >> 11) * 0x1.0p-53;
+        return static_cast<double>(next_random(random) >> kFractionShift) * kFractionScale;
     }
 
+    /**
+     * Weighs one entry for a category draw: zero when it does not match, was drawn already, or
+     * its condition fails; otherwise its first matching modifier's weight or its own.
+     * @param depth Nesting of the pool the entry sits in.
+     * @param output Receives the weight; zero means the entry cannot be drawn.
+     * @return False when the entry or a nested pool is malformed.
+     */
     bool weight(const definitions::Entry& entry,
                 std::uint32_t category,
                 std::size_t depth,
@@ -212,6 +247,11 @@ struct Resolver {
         return true;
     }
 
+    /**
+     * Sums the weights of one pool's entries for a category draw.
+     * @param total Receives the sum; zero means nothing in the pool can be drawn.
+     * @return False when the pool is too deep, out of range or malformed.
+     */
     bool pool_weight(std::uint16_t index,
                      std::uint32_t category,
                      std::size_t depth,
@@ -237,6 +277,12 @@ struct Resolver {
         return std::isfinite(total) || refuse(context, "weight_shape");
     }
 
+    /**
+     * Draws one entry by weight and follows it to one leaf: a nested pool draws again, an item
+     * is acquired, and a row with no item only counts as drawn.
+     * @param total Weight sum pool_weight returned for the same pool and category.
+     * @return False when the draw is refused; failure then says whether a bound was exceeded.
+     */
     bool
     draw(std::uint16_t index, std::uint32_t category, std::size_t depth, double total) noexcept {
         const auto range = data.pools[index].entries;
@@ -287,7 +333,11 @@ struct Resolver {
         return acquire_item(*chosen);
     }
 
-    /** Completes one acquisition after its children have finished. */
+    /**
+     * Completes one acquisition after its children have finished.
+     * @param wrapper True for a consumed wrapper, whose flag the grant sets without a row.
+     * @return False when the flag lies outside the account bank.
+     */
     bool acquire_flag(const definitions::Item& item, bool wrapper) noexcept {
         if (item.acquiredFlag == definitions::kAbsent) {
             return true;
@@ -302,7 +352,11 @@ struct Resolver {
         return true;
     }
 
-    /** Acquires a selected item, opening automatic wrappers before the next parent draw. */
+    /**
+     * Acquires a selected item, opening automatic wrappers before the next parent draw.
+     * @param chosen Drawn entry that names the item.
+     * @return False when the entry is malformed or the grant rows are full.
+     */
     bool acquire_item(const definitions::Entry& chosen) noexcept {
         if (chosen.quantity == 0 || chosen.quantity > kMaximumQuantity) {
             return refuse(context, "reward_quantity");
@@ -363,7 +417,11 @@ struct Resolver {
         return acquire_flag(item, false);
     }
 
-    /** Each wrapper owns its selection history and random stream; pool references share them. */
+    /**
+     * Draws every category selection a wrapper declares from its pool.
+     * A selection stops early once completed acquisitions leave nothing to draw.
+     * @return False when the wrapper is too deep, malformed, or a draw is refused.
+     */
     bool open_wrapper(const definitions::Item& item) noexcept {
         if (wrapperDepth >= definitions::kTraversalDepth) {
             return refuse(context, "wrapper_depth");
@@ -391,6 +449,13 @@ struct Resolver {
     }
 };
 
+/**
+ * Resolves one item against the published graph: a stored item grants itself, and an automatic
+ * wrapper opens into its draws and its own acquisition flag.
+ * @param result Receives the grants; cleared and left empty on failure.
+ * @param failure Receives ineligible, exceeded or refused when the resolution fails.
+ * @return False when nothing could be granted.
+ */
 bool resolve_item(definitions::View data,
                   const Context& context,
                   std::uint16_t itemIndex,
@@ -458,6 +523,11 @@ bool eligible(std::span<const definitions::Instruction> instructions,
     return condition(instructions, context, result);
 }
 
+/**
+ * Plans an acquisition without changing State, under the reward catalog's read lock.
+ * @param result Receives the grants and consumed wrapper flags.
+ * @return Resolved, or why not; refused also covers an unpublished graph.
+ */
 Resolution resolve(const Context& context,
                    std::uint16_t itemIndex,
                    std::uint32_t quantity,

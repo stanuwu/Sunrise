@@ -8,10 +8,14 @@
 #include <utility>
 #include <vector>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808095.h"
 #include "activity_sdk_policy_inventory_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::policy_inventory {
 namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** The local pool cannot outgrow all bounded policy input and generated strings. */
 constexpr std::size_t kMaximumDeferredStringCount = 2000000;
@@ -24,7 +28,7 @@ constexpr std::size_t kFixedDeferredStringEstimate = 64;
 /** Slot type 31 contributes the currently unimplemented trigger adapter operation. */
 constexpr std::uint32_t kTriggerSlotType = 31;
 /** Auth schema of the type-31 player trigger sensor. */
-constexpr std::uint32_t kTriggerAuthSchema = 0x80809524U;
+constexpr std::uint32_t kTriggerAuthSchema = generated::C80809524::kClass;
 
 /**
  * The compiled host inventory contains three implemented and two refused surfaces.
@@ -433,23 +437,24 @@ bool Builder::build_adapter_capability(const SlotInput& input,
                                        std::string_view operation) {
     const bool type23 = input.slotType == format::kDeviceSlotType;
     const bool type5 = input.slotType == format::kSequenceSlotType
-                       && input.componentClass == format::kSequenceComponentClass
-                       && input.authSchema == format::kSequenceAuthSchema;
+                       && input.componentClass == generated::C80804f01::kClass
+                       && input.authSchema == generated::C80804f04::kClass;
     const bool type6 = input.slotType == format::kCinematicSlotType
-                       && input.componentClass == format::kCinematicComponentClass
-                       && input.authSchema == format::kCinematicAuthSchema;
+                       && input.componentClass == generated::C80804f06::kClass
+                       && input.authSchema == generated::C80804f08::kClass;
     const bool type31 =
         input.slotType == kTriggerSlotType && input.authSchema == kTriggerAuthSchema;
     const bool type53 = input.slotType == format::kDialogueSlotType
-                        && input.componentClass == format::kDialogueComponentClass
-                        && input.authSchema == format::kDialogueAuthSchema
+                        && input.componentClass == generated::DialogueComponent::kClass
+                        && input.authSchema == generated::C80804f77::kClass
                         && (input.flags & format::kSlotDialogueCuesExact) != 0;
     const bool knownAdapter = type5 || type6 || type23 || type31 || type53;
-    const bool shapeExact = knownAdapter && (input.flags & format::kSlotSchemaJoinExact) != 0
-                            && (!type23
-                                || (input.componentClass == format::kDeviceComponentClass
-                                    && input.senseSchema == format::kDeviceSenseSchema
-                                    && input.authSchema == format::kDeviceAuthSchema));
+    const bool shapeExact =
+        knownAdapter && (input.flags & format::kSlotSchemaJoinExact) != 0
+        && (!type23
+            || (input.componentClass == generated::DeviceSlotHandleType23::kClass
+                && input.senseSchema == generated::C80804f47::kClass
+                && input.authSchema == generated::C80804f48::kClass));
     const bool senseDecoded = !type23 || (shapeExact && !input.senseSchemaId.empty());
     const bool authDecoded = shapeExact && !input.authSchemaId.empty();
     const internal::RouteEvidence& route = routes_[input.objectIndex];

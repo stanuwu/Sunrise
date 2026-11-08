@@ -173,11 +173,8 @@ struct CharacterState {
     account::inventory::CharacterStacks stacks;
     /** Next row generation; equip transactions consume two values for the two moved items. */
     std::uint32_t nextInventorySerial{};
-    /** Authored appearance header captured at creation. Meaningless without its own `race`. */
+    /** Appearance header the save holds for this character. It fits only its own `race`. */
     AppearanceHeader appearanceHeader{};
-    /** False for a character predating appearance capture; both encoders fall back to the
-     * fixed default header when this is unset. */
-    bool appearanceHeaderValid{};
 };
 
 /** Call-local account snapshot shared by backend object families. */

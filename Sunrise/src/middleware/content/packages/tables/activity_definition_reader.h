@@ -5,14 +5,19 @@
 #include <cstdint>
 #include <span>
 
+#include "../schema/generated/tag_classes_808076.h"
+
 namespace sunrise::middleware::content::packages::tables {
 
 /** Installed activity-definition table tag. */
 inline constexpr std::uint32_t kActivityDefinitionTableTag = 0x81327CF0U;
 /** Installed activity-definition table class. */
-inline constexpr std::uint32_t kActivityDefinitionTableClass = 0x808076F0U;
-/** The installed table contains this exact number of activity definitions. */
-inline constexpr std::size_t kActivityDefinitionCount = 1170;
+inline constexpr std::uint32_t kActivityDefinitionTableClass =
+    schema::generated::ActivityDefinitionTable::kClass;
+/** The installed table holds this many definitions; a mod only appends rows after them. */
+inline constexpr std::size_t kStockActivityDefinitionCount = 1170;
+/** 12 biased wire bits name activity indices 0 to 4094, so a table holds at most 4095 rows. */
+inline constexpr std::size_t kActivityDefinitionMaximumCount = 4095;
 /** An internal name must terminate within this many bytes. */
 inline constexpr std::size_t kActivityDefinitionInternalNameCapacity = 256;
 /** The all-one tag marks an activity with no matchmaking configuration. */
@@ -45,8 +50,8 @@ using ActivityDefinitionVisitor = bool (*)(void* context,
                                            const ActivityDefinition& definition) noexcept;
 
 /**
- * Validates and visits the complete installed activity-definition table.
- * No visitor call occurs unless every one of the 1,170 definitions is valid.
+ * Validates and visits the complete activity-definition table, stock rows and mod rows alike.
+ * No visitor call occurs unless every definition is valid.
  * @return True when the table is valid and the visitor accepts every definition.
  */
 [[nodiscard]] bool visit_activity_definitions(std::span<const std::byte> blob,

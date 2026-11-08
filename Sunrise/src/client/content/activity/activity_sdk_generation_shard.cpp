@@ -17,7 +17,7 @@ constexpr std::wstring_view kShardExtension = L".pack";
 /** Formats an immutable shard path from its scenario and payload identities. */
 [[nodiscard]] bool shard_path(const std::wstring& directory,
                               std::uint32_t scenarioTag,
-                              const generated::Digest& digest,
+                              const generated_world::Digest& digest,
                               std::wstring& output) noexcept {
     // A shard leaf spells the digest in lowercase hex.
     static constexpr wchar_t kDigits[] = L"0123456789abcdef";
@@ -46,7 +46,7 @@ constexpr std::wstring_view kShardExtension = L".pack";
 
 /** Copies one authenticated full shard into caller-owned storage. */
 [[nodiscard]] bool load_record(const std::wstring& scenarioDirectory,
-                               const generated::Digest& sourceFingerprint,
+                               const generated_world::Digest& sourceFingerprint,
                                const Scenario& scenario,
                                const manifest::Record& record,
                                catalog::Snapshot& output) noexcept {
@@ -73,7 +73,7 @@ constexpr std::wstring_view kShardExtension = L".pack";
 
 /** Reopens one generator-owned row only when every full extraction family is present. */
 [[nodiscard]] bool load_full_record(const std::wstring& scenarioDirectory,
-                                    const generated::Digest& sourceFingerprint,
+                                    const generated_world::Digest& sourceFingerprint,
                                     const Scenario& scenario,
                                     const manifest::Record& record,
                                     std::shared_ptr<const catalog::Snapshot>& output) noexcept {

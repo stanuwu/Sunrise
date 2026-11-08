@@ -8,12 +8,12 @@
 namespace sunrise::server::activity::mission::sdk_bridge {
 namespace {
 
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 namespace manifest = state::activity_sdk::generated_world::manifest;
 
-[[nodiscard]] const generated::GeneratedWorldView*
+[[nodiscard]] const generated_world::GeneratedWorldView*
 checked_view(const void* context, const lua_vm::WorldGenerationIdentity& expected) noexcept {
-    const auto* const view = static_cast<const generated::GeneratedWorldView*>(context);
+    const auto* const view = static_cast<const generated_world::GeneratedWorldView*>(context);
     lua_vm::WorldGenerationIdentity current{};
     return view != nullptr && view->manifest_catalog() != nullptr
                    && world_generation_identity(*view, current) && current == expected
@@ -50,7 +50,7 @@ checked_view(const void* context, const lua_vm::WorldGenerationIdentity& expecte
 }
 
 [[nodiscard]] bool field_digest(lua_vm::ManifestFieldDefinition& output,
-                                const generated::Digest& value) noexcept {
+                                const generated_world::Digest& value) noexcept {
     output = {};
     output.kind = lua_vm::ManifestFieldKind::bytes;
     output.bytesValue = value;
@@ -166,7 +166,7 @@ completeness_name(manifest::BindingCompletenessStatus value) noexcept {
 [[nodiscard]] std::size_t manifest_count(const void* context,
                                          const lua_vm::WorldGenerationIdentity& generation,
                                          lua_vm::ManifestCollectionKind kind) noexcept {
-    const generated::GeneratedWorldView* const view = checked_view(context, generation);
+    const generated_world::GeneratedWorldView* const view = checked_view(context, generation);
     if (view == nullptr) {
         return 0;
     }
@@ -361,7 +361,7 @@ evidence_tag_first(std::span<const manifest::ActivityVariantRecord> rows,
                                           std::string_view key,
                                           lua_vm::ManifestFieldDefinition& output) noexcept {
     output = {};
-    const generated::GeneratedWorldView* const view = checked_view(context, generation);
+    const generated_world::GeneratedWorldView* const view = checked_view(context, generation);
     if (view == nullptr) {
         return false;
     }
@@ -400,7 +400,7 @@ variant_tags(const manifest::ActivityVariantRecord& row,
                                             const lua_vm::WorldGenerationIdentity& generation,
                                             std::uint32_t row,
                                             lua_vm::ManifestVariantTagKind kind) noexcept {
-    const generated::GeneratedWorldView* const view = checked_view(context, generation);
+    const generated_world::GeneratedWorldView* const view = checked_view(context, generation);
     const manifest::Catalog* const catalog = view != nullptr ? view->manifest_catalog() : nullptr;
     return catalog != nullptr && row < catalog->activityVariants.size()
                ? variant_tags(catalog->activityVariants[row], kind).size()
@@ -415,7 +415,7 @@ variant_tags(const manifest::ActivityVariantRecord& row,
                                        std::uint32_t localRow,
                                        std::uint32_t& output) noexcept {
     output = 0;
-    const generated::GeneratedWorldView* const view = checked_view(context, generation);
+    const generated_world::GeneratedWorldView* const view = checked_view(context, generation);
     const manifest::Catalog* const catalog = view != nullptr ? view->manifest_catalog() : nullptr;
     if (catalog == nullptr || row >= catalog->activityVariants.size()) {
         return false;
@@ -431,7 +431,7 @@ variant_tags(const manifest::ActivityVariantRecord& row,
 [[nodiscard]] std::size_t variant_locator_count(const void* context,
                                                 const lua_vm::WorldGenerationIdentity& generation,
                                                 std::uint32_t row) noexcept {
-    const generated::GeneratedWorldView* const view = checked_view(context, generation);
+    const generated_world::GeneratedWorldView* const view = checked_view(context, generation);
     const manifest::Catalog* const catalog = view != nullptr ? view->manifest_catalog() : nullptr;
     return catalog != nullptr && row < catalog->activityVariants.size()
                ? catalog->activityVariants[row].locators.size()
@@ -445,7 +445,7 @@ variant_tags(const manifest::ActivityVariantRecord& row,
                                            std::uint32_t localRow,
                                            lua_vm::ManifestLocatorDefinition& output) noexcept {
     output = {};
-    const generated::GeneratedWorldView* const view = checked_view(context, generation);
+    const generated_world::GeneratedWorldView* const view = checked_view(context, generation);
     const manifest::Catalog* const catalog = view != nullptr ? view->manifest_catalog() : nullptr;
     if (catalog == nullptr || row >= catalog->activityVariants.size()
         || localRow >= catalog->activityVariants[row].locators.size()) {
@@ -462,7 +462,7 @@ variant_tags(const manifest::ActivityVariantRecord& row,
 
 /** @return The Lua manifest reader bound to this world, or an empty api when none is bound. */
 lua_vm::ManifestDefinitionApi
-manifest_definition_api(const generated::GeneratedWorldView& world) noexcept {
+manifest_definition_api(const generated_world::GeneratedWorldView& world) noexcept {
     lua_vm::WorldGenerationIdentity generation{};
     if (world.manifest_catalog() == nullptr || !world_generation_identity(world, generation)) {
         return {};

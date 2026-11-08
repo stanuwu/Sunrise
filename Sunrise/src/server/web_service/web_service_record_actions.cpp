@@ -72,7 +72,12 @@ enum class RecordRewardPreparation : std::uint8_t {
     failed,
 };
 
-/** Prepares the reward rows the record names, naming the record its commit would revoke. */
+/**
+ * Prepares the reward rows the record names, naming the record its commit would revoke.
+ * @param recordIndex Record being claimed.
+ * @param outcome Receives the prepared grant as its mutation.
+ * @return Absent when the record grants nothing; failed when a row could not be prepared.
+ */
 [[nodiscard]] RecordRewardPreparation
 prepare_record_reward(const middleware::web_service::Message& message,
                       std::uint16_t recordIndex,
@@ -110,7 +115,12 @@ prepare_record_reward(const middleware::web_service::Message& message,
     return RecordRewardPreparation::prepared;
 }
 
-/** Claims one exact reward-array row from the active Season of Arrivals pass. */
+/**
+ * Claims one exact reward-array row from the active Season of Arrivals pass.
+ * The draw is prepared before the claim is written; a refusal leaves neither behind.
+ * @param message Parsed opcode-2400 request.
+ * @param outcome Receives the prepared reward as its mutation.
+ */
 void claim_season_pass_reward(const middleware::web_service::Message& message,
                               Outcome& outcome) noexcept {
     namespace pass = state::progression::season_pass;

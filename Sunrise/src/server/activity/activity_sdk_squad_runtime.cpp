@@ -5,6 +5,7 @@
 #include <limits>
 #include <string_view>
 
+#include "../../middleware/content/packages/schema/generated/tag_classes_80807e.h"
 #include "../../middleware/content/packages/tables/authored_squad_reader.h"
 #include "../../middleware/content/packages/tables/region_reader.h"
 #include "../../state/activity/runtime.h"

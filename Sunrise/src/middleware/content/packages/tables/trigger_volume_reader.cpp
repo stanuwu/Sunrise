@@ -2,83 +2,90 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <limits>
 
+#include "../reader/layout.h"
+#include "../reader/typed_array.h"
+#include "../schema/generated/tag_classes_808091.h"
 #include "internal.h"
+#include "slot_descriptor_reader.h"
 
 namespace sunrise::middleware::content::packages::tables {
 namespace {
 
+namespace generated = schema::generated;
+using generated::C80809b8f;
+
 /** Field offsets of the installed trigger-volume component, root and row layouts. */
-constexpr std::size_t kComponentHeaderOwnTagOffset = 0;
-constexpr std::size_t kComponentHeaderClassOffset = 4;
-constexpr std::size_t kComponentHeaderRootOffset = 8;
-constexpr std::size_t kRootKeyOffset = 0x18;
-constexpr std::size_t kRootIdentityOffset = 0x1C;
-constexpr std::size_t kRootRowsDescriptor = 0x38;
-constexpr std::size_t kRowKeyOffset = 0x0C;
-constexpr std::size_t kRowIdentityOffset = 0x10;
-constexpr std::size_t kRowFlagsOffset = 0x14;
-constexpr std::size_t kRowSpawnEntryOffset = 0x20;
-constexpr std::size_t kSpawnClassDefinitionOffset = 0;
-constexpr std::size_t kSpawnRotationOffset = 0x10;
-constexpr std::size_t kSpawnPositionOffset = 0x20;
-constexpr std::size_t kSpawnAuxiliaryOffset = 0x78;
-constexpr std::size_t kRowMinimumOffset = 0xB0;
-constexpr std::size_t kRowMaximumOffset = 0xC0;
-constexpr std::size_t kRowVertexDescriptor = 0xD0;
-constexpr std::size_t kRowTriangleDescriptor = 0xE0;
-constexpr std::size_t kRowExtrusionOffset = 0xF0;
-constexpr std::size_t kRowActiveOffset = 0x11C;
-/** An array header sits before its data, with the marker four bytes back. */
-constexpr std::size_t kArrayMarkerBack = 4;
-constexpr std::size_t kArrayClassOffset = 8;
-constexpr std::size_t kArrayDataOffset = 0x10;
+constexpr std::size_t kComponentRowHeaderOffset =
+    offsetof(generated::PlacedConfigComponentRow, componentHeader.relative);
+constexpr std::size_t kComponentRowClassOffset =
+    offsetof(generated::PlacedConfigComponentRow, componentClass);
+constexpr std::size_t kComponentHeaderOwnTagOffset =
+    offsetof(generated::STriggerComponent, ownerConfig.tag);
+constexpr std::size_t kComponentHeaderClassOffset =
+    offsetof(generated::STriggerComponent, ownerConfig.word);
+constexpr std::size_t kComponentHeaderRootOffset =
+    offsetof(generated::STriggerComponent, ownerConfig.offset);
+constexpr std::size_t kRootKeyOffset = offsetof(generated::STriggerComponentPeer, slotKey);
+constexpr std::size_t kRootIdentityOffset = offsetof(generated::STriggerComponentPeer, slotType);
+constexpr std::size_t kRootRowsDescriptor =
+    offsetof(generated::STriggerComponentPeer, triggerShapes);
+constexpr std::size_t kRootRowsRelative =
+    offsetof(generated::STriggerComponentPeer, triggerShapes.relative);
+constexpr std::size_t kRowKeyOffset = offsetof(generated::STriggerVolumeRow, key);
+constexpr std::size_t kRowIdentityOffset = offsetof(generated::STriggerVolumeRow, slotType);
+constexpr std::size_t kRowFlagsOffset = offsetof(generated::STriggerVolumeRow, flags);
+constexpr std::size_t kRowSpawnEntryOffset = offsetof(generated::STriggerVolumeRow, spawnEntry);
+// The spawn entry's position vec4 carries the uniform scale in its w lane.
+static_assert(kAuthoredPlacementScaleOffset
+              == kAuthoredPlacementPositionOffset
+                     + sizeof(generated::AuthoredPlacementEntry::position));
+/** Each bounds vec4 carries its w lane, which must be finite too. */
+constexpr std::size_t kRowMinimumOffset = offsetof(generated::STriggerVolumeRow, sector.boundsMin);
+constexpr std::size_t kRowMaximumOffset = offsetof(generated::STriggerVolumeRow, sector.boundsMax);
+static_assert(offsetof(C80809b8f, boundsMinW)
+              == offsetof(C80809b8f, boundsMin) + sizeof(C80809b8f::boundsMin));
+static_assert(offsetof(C80809b8f, boundsMaxW)
+              == offsetof(C80809b8f, boundsMax) + sizeof(C80809b8f::boundsMax));
+/** A row's sector shape arrays, its extrusion height and its active flag. */
+constexpr std::size_t kRowVertexDescriptor =
+    offsetof(generated::STriggerVolumeRow, sector.vertices);
+constexpr std::size_t kRowTriangleDescriptor =
+    offsetof(generated::STriggerVolumeRow, sector.triangles);
+constexpr std::size_t kRowExtrusionOffset =
+    offsetof(generated::STriggerVolumeRow, sector.extrusionHeight);
+constexpr std::size_t kRowActiveOffset = offsetof(generated::STriggerVolumeRow, active);
 /** Auxiliary links a walk follows before it treats the chain as a loop. */
 constexpr std::size_t kAuxiliaryChainCapacity = 32;
 /** Field offsets of the installed shape-reference layout. */
-constexpr std::size_t kShapeResourceOffset = 0x10;
-constexpr std::size_t kShapeReferenceWordOffset = 0x14;
-constexpr std::size_t kShapeIndexOffset = 0x18;
-constexpr std::size_t kShapeKeyOffset = 0x1C;
-constexpr std::size_t kShapeIdentityOffset = 0x20;
-
-/** Reads a float4 without imposing alignment on package bytes. */
-[[nodiscard]] bool read_vector(std::span<const std::byte> blob,
-                               std::size_t offset,
-                               std::array<float, 4>& output) noexcept {
-    output = {};
-    for (std::size_t lane = 0; lane < output.size(); ++lane) {
-        if (!read(blob, offset + lane * sizeof(float), output[lane])) {
-            output = {};
-            return false;
-        }
-    }
-    return true;
-}
-
-/** Adds one signed self-relative offset without overflowing host size arithmetic. */
-[[nodiscard]] bool
-relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) noexcept {
-    /** Signed range the addition must stay inside. */
-    constexpr std::int64_t kMaximum = (std::numeric_limits<std::int64_t>::max)();
-    constexpr std::int64_t kMinimum = (std::numeric_limits<std::int64_t>::min)();
-    if (base > static_cast<std::size_t>(kMaximum)) {
-        return false;
-    }
-    const std::int64_t signedBase = static_cast<std::int64_t>(base);
-    if ((relative > 0 && signedBase > kMaximum - relative)
-        || (relative < 0 && signedBase < kMinimum - relative)) {
-        return false;
-    }
-    const std::int64_t result = signedBase + relative;
-    if (result < 0) {
-        return false;
-    }
-    output = static_cast<std::size_t>(result);
-    return true;
-}
+constexpr std::size_t kShapeResourceOffset = offsetof(generated::TriggerShapeReference, resource);
+constexpr std::size_t kShapeReferenceWordOffset =
+    offsetof(generated::TriggerShapeReference, referenceWord);
+constexpr std::size_t kShapeIndexOffset = offsetof(generated::TriggerShapeReference, shapeIndex);
+constexpr std::size_t kShapeKeyOffset = offsetof(generated::TriggerShapeReference, key);
+constexpr std::size_t kShapeIdentityOffset =
+    offsetof(generated::TriggerShapeReference, identityType);
+/** A packed identity is {u8 type, u8 zero, u16 index}; the root, row and shape layouts agree. */
+using generated::STriggerComponentPeer;
+using generated::STriggerVolumeRow;
+using generated::TriggerShapeReference;
+// Tag layout: identity fields, measured from the row's slot type.
+constexpr std::size_t kIdentityPaddingOffset =
+    offsetof(STriggerVolumeRow, gap11) - offsetof(STriggerVolumeRow, slotType);
+constexpr std::size_t kIdentityIndexOffset =
+    offsetof(STriggerVolumeRow, slotOrdinal) - offsetof(STriggerVolumeRow, slotType);
+static_assert(offsetof(STriggerComponentPeer, gap1D) - offsetof(STriggerComponentPeer, slotType)
+              == kIdentityPaddingOffset);
+static_assert(offsetof(STriggerComponentPeer, slotIndex) - offsetof(STriggerComponentPeer, slotType)
+              == kIdentityIndexOffset);
+static_assert(offsetof(TriggerShapeReference, gap21) - offsetof(TriggerShapeReference, identityType)
+              == kIdentityPaddingOffset);
+static_assert(offsetof(TriggerShapeReference, identityIndex)
+                  - offsetof(TriggerShapeReference, identityType)
+              == kIdentityIndexOffset);
 
 /** Decodes the packed `{u8 type, u8 zero, u16 index}` identity. */
 [[nodiscard]] bool read_identity(std::span<const std::byte> blob,
@@ -86,8 +93,9 @@ relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) no
                                  TriggerVolumeIdentity& output) noexcept {
     output = {};
     std::uint8_t padding = 0;
-    return read(blob, offset, output.type) && output.type != 0 && read(blob, offset + 1, padding)
-           && padding == 0 && read(blob, offset + 2, output.index);
+    return read(blob, offset, output.type) && output.type != 0
+           && read(blob, offset + kIdentityPaddingOffset, padding) && padding == 0
+           && read(blob, offset + kIdentityIndexOffset, output.index);
 }
 
 /** Resolves one non-empty typed array descriptor used inside an authored volume row. */
@@ -101,25 +109,15 @@ relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) no
     std::int64_t count = 0;
     std::int64_t relative = 0;
     std::size_t header = 0;
-    std::uint32_t marker = 0;
-    std::int64_t repeated = 0;
-    std::uint32_t actualClass = 0;
+    reader::TypedArrayRows rows{};
     if (!read(blob, descriptor, count) || count <= 0 || count > static_cast<std::int64_t>(capacity)
-        || !read(blob, descriptor + 8, relative)
-        || !relative_offset(descriptor + 8, relative, header) || header < kArrayMarkerBack
-        || !read(blob, header - kArrayMarkerBack, marker) || marker != kTriggerVolumeArrayMarker
-        || !read(blob, header, repeated) || repeated != count
-        || !read(blob, header + kArrayClassOffset, actualClass) || actualClass != elementClass
-        || header > blob.size() || kArrayDataOffset > blob.size() - header) {
+        || !read(blob, descriptor + reader::layout::kArrayFieldRelative, relative)
+        || !relative_offset(descriptor + reader::layout::kArrayFieldRelative, relative, header)
+        || !reader::read_typed_array(
+            blob, header, static_cast<std::uint64_t>(count), elementClass, stride, rows)) {
         return false;
     }
-    const std::size_t data = header + kArrayDataOffset;
-    const std::size_t itemCount = static_cast<std::size_t>(count);
-    if (itemCount > (std::numeric_limits<std::size_t>::max)() / stride
-        || itemCount * stride > blob.size() - data) {
-        return false;
-    }
-    output = {static_cast<std::uint64_t>(count), data, actualClass};
+    output = {static_cast<std::uint64_t>(count), rows.data, rows.elementClass};
     return true;
 }
 
@@ -128,7 +126,7 @@ relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) no
                                    std::size_t row,
                                    TriggerVolumeShapeReference& output) noexcept {
     output = {};
-    const std::size_t field = row + kRowSpawnEntryOffset + kSpawnAuxiliaryOffset;
+    const std::size_t field = row + kRowSpawnEntryOffset + kAuthoredPlacementAuxiliaryOffset;
     std::int64_t relative = 0;
     std::size_t payload = 0;
     if (!read(blob, field, relative) || relative == 0
@@ -139,14 +137,13 @@ relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) no
     std::size_t visitedCount = 0;
     while (visitedCount < visited.size()) {
         const auto scanned = static_cast<std::ptrdiff_t>(visitedCount);
-        if (payload < kArrayMarkerBack
-            || std::find(visited.begin(), visited.begin() + scanned, payload)
-                   != visited.begin() + scanned) {
+        if (std::find(visited.begin(), visited.begin() + scanned, payload)
+            != visited.begin() + scanned) {
             return false;
         }
         visited[visitedCount++] = payload;
         std::uint32_t marker = 0;
-        if (!read(blob, payload - kArrayMarkerBack, marker) || (marker >> 16U) != 0x8080U) {
+        if (!reader::layout::class_word_before(blob, payload, marker) || !is_class_id(marker)) {
             return false;
         }
         if (marker == kTriggerVolumeShapeReferenceClass) {
@@ -178,7 +175,7 @@ relative_offset(std::size_t base, std::int64_t relative, std::size_t& output) no
 
 } // namespace
 
-/** Resolves one exact 0x808099C8 component row to its typed root. */
+/** Resolves one trigger-volume component row to its typed root. */
 bool trigger_volume_root_at(std::span<const std::byte> blob,
                             const Array& components,
                             std::size_t componentIndex,
@@ -194,13 +191,14 @@ bool trigger_volume_root_at(std::span<const std::byte> blob,
                            descriptor)) {
         return false;
     }
-    std::int32_t headerRelative = 0;
+    std::int64_t headerRelative = 0;
     std::uint32_t componentClass = 0;
     std::size_t header = 0;
     std::uint32_t ownTag = 0;
     std::uint32_t headerClass = 0;
     std::uint64_t rootOffset = 0;
-    if (!read(blob, descriptor, headerRelative) || !read(blob, descriptor + 8, componentClass)
+    if (!read(blob, descriptor + kComponentRowHeaderOffset, headerRelative)
+        || !read(blob, descriptor + kComponentRowClassOffset, componentClass)
         || componentClass != kTriggerVolumeComponentClass
         || !relative_offset(descriptor, headerRelative, header)
         || !read(blob, header + kComponentHeaderOwnTagOffset, ownTag) || ownTag != configTag
@@ -218,7 +216,7 @@ bool trigger_volume_root_at(std::span<const std::byte> blob,
         || !read_identity(blob, root + kRootIdentityOffset, output.identity)
         || !read(blob, root + kRootRowsDescriptor, rowCount) || rowCount < 0
         || rowCount > static_cast<std::int64_t>(kTriggerVolumeRowCapacity)
-        || !read(blob, root + kRootRowsDescriptor + 8, rowRelative)) {
+        || !read(blob, root + kRootRowsRelative, rowRelative)) {
         output = {};
         return false;
     }
@@ -230,26 +228,18 @@ bool trigger_volume_root_at(std::span<const std::byte> blob,
         return rowRelative == 0;
     }
     std::size_t headerOffset = 0;
-    std::uint32_t marker = 0;
-    std::int64_t repeated = 0;
-    std::uint32_t rowClass = 0;
-    if (!relative_offset(root + kRootRowsDescriptor + 8, rowRelative, headerOffset)
-        || headerOffset < kArrayMarkerBack || !read(blob, headerOffset - kArrayMarkerBack, marker)
-        || marker != kTriggerVolumeArrayMarker || !read(blob, headerOffset, repeated)
-        || repeated != rowCount || !read(blob, headerOffset + kArrayClassOffset, rowClass)
-        || rowClass != kTriggerVolumeRowClass || headerOffset > blob.size()
-        || kArrayDataOffset > blob.size() - headerOffset) {
+    reader::TypedArrayRows rows{};
+    if (!relative_offset(root + kRootRowsRelative, rowRelative, headerOffset)
+        || !reader::read_typed_array(blob,
+                                     headerOffset,
+                                     static_cast<std::uint64_t>(rowCount),
+                                     kTriggerVolumeRowClass,
+                                     kTriggerVolumeRowStride,
+                                     rows)) {
         output = {};
         return false;
     }
-    const std::size_t data = headerOffset + kArrayDataOffset;
-    const std::size_t count = static_cast<std::size_t>(rowCount);
-    if (count > (std::numeric_limits<std::size_t>::max)() / kTriggerVolumeRowStride
-        || count * kTriggerVolumeRowStride > blob.size() - data) {
-        output = {};
-        return false;
-    }
-    output.rows = {static_cast<std::uint64_t>(rowCount), data, rowClass};
+    output.rows = {static_cast<std::uint64_t>(rowCount), rows.data, rows.elementClass};
     return true;
 }
 
@@ -273,7 +263,7 @@ bool trigger_volume_row_identity_at(std::span<const std::byte> blob,
     return true;
 }
 
-/** Reads one fixed-stride authored row and its required 0x8080929B shape reference. */
+/** Reads one fixed-stride authored row and its required shape reference. */
 bool trigger_volume_row_at(std::span<const std::byte> blob,
                            const TriggerVolumeRoot& root,
                            std::size_t index,
@@ -288,11 +278,13 @@ bool trigger_volume_row_at(std::span<const std::byte> blob,
         || !read_identity(blob, row + kRowIdentityOffset, output.identity)
         || !read(blob, row + kRowFlagsOffset, output.flags)
         || !read(blob,
-                 row + kRowSpawnEntryOffset + kSpawnClassDefinitionOffset,
+                 row + kRowSpawnEntryOffset + kAuthoredPlacementClassListOffset,
                  output.classDefinitionTag)
         || package_of(output.classDefinitionTag) == kAbsentPackageId
-        || !read_vector(blob, row + kRowSpawnEntryOffset + kSpawnRotationOffset, output.rotation)
-        || !read_vector(blob, row + kRowSpawnEntryOffset + kSpawnPositionOffset, output.position)
+        || !read_vector(
+            blob, row + kRowSpawnEntryOffset + kAuthoredPlacementRotationOffset, output.rotation)
+        || !read_vector(
+            blob, row + kRowSpawnEntryOffset + kAuthoredPlacementPositionOffset, output.position)
         || !read_vector(blob, row + kRowMinimumOffset, output.minimum)
         || !read_vector(blob, row + kRowMaximumOffset, output.maximum)
         || !row_array(blob,

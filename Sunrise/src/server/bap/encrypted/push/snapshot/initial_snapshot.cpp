@@ -12,14 +12,21 @@ namespace {
 /** Log line capacity. The line carries one family number and nothing else. */
 constexpr std::size_t kEmptyReportCapacity = 64;
 
-} // namespace
-
-/** Builds one full family snapshot at the initial version from State and build mappings. */
-bool prepare_initial(
-    Scratch& scratch,
-    const middleware::queuez::Subscription& subscription,
-    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
-    Prepared& prepared) noexcept {
+/**
+ * Builds one full family snapshot at the initial version from State and build mappings.
+ * @param scratch Object and compression storage owned by the lock.
+ * @param subscription Family and root to build.
+ * @param acquisitionPresentationRows Row identities an open acquisition feed still shows.
+ * @param accountSelectionCleared Family 4 only: the account object names no character.
+ * @param prepared Gets the descriptors and scratch clear extents.
+ * @return False when the snapshot, or its empty fallback, does not fit.
+ */
+[[nodiscard]] bool
+build_full(Scratch& scratch,
+           const middleware::queuez::Subscription& subscription,
+           std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+           bool accountSelectionCleared,
+           Prepared& prepared) noexcept {
     // Family zero never reaches here. It carries the banner pair, and its version and flags come
     // from the peer's own state, so the subscription path builds it directly.
     const Reservation reservation = reserve_prior(scratch, prepared);
@@ -40,8 +47,13 @@ bool prepare_initial(
     } else if (subscription.familyType == kRosterFamilyType && hasDefinition) {
         success = prepare_roster(scratch, subscription, objectId, reservation, staged);
     } else if (subscription.familyType == kAccountFamilyType && hasDefinition) {
-        success = prepare(
-            scratch, subscription, objectId, reservation, acquisitionPresentationRows, staged);
+        success = prepare(scratch,
+                          subscription,
+                          objectId,
+                          reservation,
+                          acquisitionPresentationRows,
+                          accountSelectionCleared,
+                          staged);
     }
     // A family with no generated objects falls back to an empty full snapshot.
     if (!success) {
@@ -77,12 +89,24 @@ bool prepare_initial(
     return true;
 }
 
+} // namespace
+
+/** Builds one full family snapshot at the initial version from State and build mappings. */
+bool prepare_initial(
+    Scratch& scratch,
+    const middleware::queuez::Subscription& subscription,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    Prepared& prepared) noexcept {
+    return build_full(scratch, subscription, acquisitionPresentationRows, false, prepared);
+}
+
 /** Rebuilds the account family at an explicitly staged nonzero version. */
 bool prepare_family4_refresh(
     Scratch& scratch,
     std::uint64_t familyRootSoid,
     std::int32_t version,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    bool accountSelectionCleared,
     Prepared& prepared) noexcept {
     if (familyRootSoid == 0 || version <= kInitialFamilyVersion) {
         return false;
@@ -90,7 +114,8 @@ bool prepare_family4_refresh(
     middleware::queuez::Subscription subscription{};
     subscription.familyType = kAccountFamilyType;
     subscription.familyRootSoid = familyRootSoid;
-    if (!prepare_initial(scratch, subscription, acquisitionPresentationRows, prepared)
+    if (!build_full(
+            scratch, subscription, acquisitionPresentationRows, accountSelectionCleared, prepared)
         || prepared.family.objects.empty() || prepared.family.type != kAccountFamilyType
         || prepared.family.rootSoid != familyRootSoid
         || prepared.family.flags != middleware::queuez::kFullSnapshotFlag) {

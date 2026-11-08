@@ -5,6 +5,7 @@
 #include <cstring>
 #include <span>
 
+#include "../reader/typed_array.h"
 #include "definition_index_table.h"
 
 namespace sunrise::middleware::content::packages::tables {
@@ -31,25 +32,29 @@ namespace sunrise::middleware::content::packages::tables {
         return false;
     }
     const std::size_t pointerAt = rowAt + field + kUnlockExpressionPointerOffset;
-    std::memcpy(&count, table.data() + rowAt + field, sizeof count);
+    std::memcpy(&count, table.data() + rowAt + field + kUnlockExpressionCountOffset, sizeof count);
     std::memcpy(&relative, table.data() + pointerAt, sizeof relative);
     if (count < 1 || count > kNodeExpressionCapacity) {
         return false;
     }
-    const std::int64_t target =
-        static_cast<std::int64_t>(pointerAt) + relative + static_cast<std::int64_t>(kHeaderSkip);
-    if (target < 0
-        || static_cast<std::size_t>(target)
-                   + static_cast<std::size_t>(count) * kUnlockInstructionStride
-               > table.size()) {
+    const std::int64_t header = static_cast<std::int64_t>(pointerAt) + relative;
+    reader::TypedArrayRows rows{};
+    if (header < 0
+        || !reader::read_typed_array(table,
+                                     static_cast<std::size_t>(header),
+                                     static_cast<std::uint64_t>(count),
+                                     kInvestmentExpressionRowClass,
+                                     kUnlockInstructionStride,
+                                     rows)) {
         return false;
     }
-    const auto base = static_cast<std::size_t>(target);
     for (std::int64_t index = 0; index < count; ++index) {
         std::uint32_t instruction = 0;
         std::uint32_t operand = 0;
-        const std::size_t at = base + static_cast<std::size_t>(index) * kUnlockInstructionStride;
-        std::memcpy(&instruction, table.data() + at, sizeof instruction);
+        const std::size_t at =
+            rows.data + static_cast<std::size_t>(index) * kUnlockInstructionStride;
+        std::memcpy(
+            &instruction, table.data() + at + kUnlockInstructionOpcodeOffset, sizeof instruction);
         std::memcpy(&operand, table.data() + at + kUnlockInstructionOperandOffset, sizeof operand);
         if (instruction > kUnlockOpcodeCeiling) {
             return false;

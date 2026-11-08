@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80804d.h"
 #include "../../encoding/bit_reader.h"
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
@@ -14,12 +15,13 @@
 namespace sunrise::middleware::bap::activity_message::ghost_link {
 
 namespace fields = auth_fields;
+namespace generated = middleware::content::packages::schema::generated;
 
 // Type 65 uses these schema identities and fixed body size.
 inline constexpr std::uint8_t kSlotType = 65;
-inline constexpr std::uint32_t kComponentClass = 0x80804D31U;
-inline constexpr std::uint32_t kAuthSchema = 0x80804D3FU;
-inline constexpr std::uint32_t kSenseSchema = 0x80804D3EU;
+inline constexpr std::uint32_t kComponentClass = generated::C80804d31::kClass;
+inline constexpr std::uint32_t kAuthSchema = generated::C80804d3f::kClass;
+inline constexpr std::uint32_t kSenseSchema = generated::C80804d3e::kClass;
 inline constexpr std::size_t kBitCount = 65;
 inline constexpr std::size_t kByteCount = 9;
 /** Field .2 value that preserves the authored interaction. */

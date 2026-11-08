@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <array>
 #include <cstddef>
@@ -55,8 +55,8 @@ inline constexpr std::uint8_t kMaximumSlotType = 72;
  * The longest installed stem is `mercury_destination` at 19 bytes.
  */
 inline constexpr std::size_t kSpawnStemCapacity = 32;
-/** Packages one destination's slice-set entries name. The widest installed one names three. */
-inline constexpr std::size_t kDestinationPackageCapacity = 8;
+/** Packages a destination's slice-set entries name, plus its own and mod template packages. */
+inline constexpr std::size_t kDestinationPackageCapacity = 16;
 
 /**
  * One roster group object and the slots activity message 5 seeds for it.

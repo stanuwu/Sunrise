@@ -42,7 +42,7 @@
 namespace sunrise::client::content::activity::sdk_generation {
 namespace {
 
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 namespace manifest = state::activity_sdk::generated_world::manifest;
 namespace shard_store = state::activity_sdk::generated_world::store;
 namespace package_reader = middleware::content::packages::reader;
@@ -99,7 +99,7 @@ OfflineProgressSink g_offlineProgress{};
 void* g_offlineProgressContext{};
 
 /** Requires a final catalog identity to be derived from its source and packed row digest. */
-[[nodiscard]] bool final_sdk_identity(const generated::Digest& sourceFingerprint,
+[[nodiscard]] bool final_sdk_identity(const generated_world::Digest& sourceFingerprint,
                                       const manifest::SdkIdentity& sdk) noexcept {
     state::activity_sdk::identity::Expected expected{};
     return state::activity_sdk::identity::derive(sourceFingerprint, sdk.payloadSha256, expected)
@@ -234,7 +234,7 @@ DWORD WINAPI thread_main(void* opaque) noexcept {
         publish_progress(state::activity_sdk::generation::Status::preparing,
                          0,
                          static_cast<std::uint32_t>(
-                             middleware::content::packages::tables::kActivityDefinitionCount),
+                             middleware::content::packages::tables::kStockActivityDefinitionCount),
                          0,
                          "building installed activity inventory");
         // The layouts and names State publishes include mod packages whenever a mod serves one.
@@ -614,7 +614,7 @@ void service() noexcept {
     }
     if (state::activity_sdk::status() == state::activity_sdk::Status::ready) {
         const state::activity_sdk::Snapshot loaded = state::activity_sdk::snapshot();
-        generated::Digest fingerprint{};
+        generated_world::Digest fingerprint{};
         manifest::SdkIdentity identity{};
         const bool hasIdentity = loaded
                                  && loaded->sdk_build_sha256().size() == identity.buildSha256.size()
@@ -745,12 +745,12 @@ void service() noexcept {
         return;
     }
     g_cancel.store(false, std::memory_order_relaxed);
-    publish_progress(
-        state::activity_sdk::generation::Status::preparing,
-        0,
-        static_cast<std::uint32_t>(middleware::content::packages::tables::kActivityDefinitionCount),
-        0,
-        "waiting to build installed activity inventory");
+    publish_progress(state::activity_sdk::generation::Status::preparing,
+                     0,
+                     static_cast<std::uint32_t>(
+                         middleware::content::packages::tables::kStockActivityDefinitionCount),
+                     0,
+                     "waiting to build installed activity inventory");
     core::ui::busy::raise(core::ui::busy::Task::sdkGeneration);
     g_thread = CreateThread(nullptr, 0, &thread_main, work, 0, nullptr);
     if (g_thread == nullptr) {
@@ -795,7 +795,7 @@ bool load_cached_scenario(std::uint32_t scenarioTag,
     if (!configured || scenarioDirectory.empty() || catalogPath.empty()) {
         return false;
     }
-    generated::Digest fingerprint{};
+    generated_world::Digest fingerprint{};
     if (!state::content_manifest::installed_fingerprint(fingerprint)) {
         return false;
     }

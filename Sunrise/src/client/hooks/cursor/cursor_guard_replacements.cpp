@@ -1,5 +1,6 @@
 #include "cursor_guard_replacements.h"
 
+#include "../../diagnostics/test_input/test_input.h"
 #include "runtime.h"
 
 namespace sunrise::client::hooks::cursor {
@@ -9,6 +10,11 @@ SRWLOCK g_policyLock{SRWLOCK_INIT};
 bool g_interfaceOpen{};
 bool g_gameClipValid{};
 RECT g_gameClip{};
+
+/** A test process runs in the background, so the game never holds the user's cursor. */
+[[nodiscard]] bool held(bool open) noexcept {
+    return open || diagnostics::test_input::enabled();
+}
 
 } // namespace
 
@@ -20,7 +26,7 @@ BOOL WINAPI set_cursor_pos(int x, int y) noexcept {
     AcquireSRWLockShared(&g_policyLock);
     const bool open = g_interfaceOpen;
     ReleaseSRWLockShared(&g_policyLock);
-    if (open) {
+    if (held(open)) {
         return kCallSucceeded;
     }
 
@@ -45,7 +51,7 @@ BOOL WINAPI clip_cursor(const RECT* bounds) noexcept {
     if (next == nullptr) {
         return kCallSucceeded;
     }
-    return next(open ? nullptr : bounds);
+    return next(held(open) ? nullptr : bounds);
 }
 
 /** Applies one interface-visibility edge to the pointer. */
@@ -69,7 +75,7 @@ void apply_visibility(bool visible) noexcept {
         (void)next(nullptr);
         return;
     }
-    if (restore) {
+    if (restore && !held(false)) {
         (void)next(&bounds);
     }
 }

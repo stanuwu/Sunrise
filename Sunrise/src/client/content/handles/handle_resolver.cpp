@@ -73,10 +73,17 @@ template <typename Value>
                           std::span(reinterpret_cast<std::byte*>(&value), sizeof value));
 }
 
-} // namespace
-
-/** Finds one loaded content handle without holding on to a game pointer. */
-bool resolve(const Source& source, std::uint32_t handle, std::uintptr_t& address) noexcept {
+/**
+ * Finds the slot of one handle and the content address it links to.
+ * @param recordOut Receives the slot address.
+ * @param address Receives the content address; zero for an empty slot.
+ * @return True when every table field is read.
+ */
+[[nodiscard]] bool locate(const Source& source,
+                          std::uint32_t handle,
+                          std::uintptr_t& recordOut,
+                          std::uintptr_t& address) noexcept {
+    recordOut = 0;
     address = 0;
     if (source.tablesSlot == 0 || source.read == nullptr || handle == kUnavailableContentHandle) {
         return false;
@@ -131,7 +138,35 @@ bool resolve(const Source& source, std::uint32_t handle, std::uintptr_t& address
     // Match the native `sub rax, rcx`. With a -1 mask the correction is two's complement, so a
     // large unsigned value must wrap forward rather than be refused as an underflow.
     address = recordAddress - static_cast<std::uintptr_t>(correction);
-    return address != 0;
+    recordOut = recordAddress;
+    return true;
+}
+
+} // namespace
+
+/** Finds one loaded content handle without holding on to a game pointer. */
+bool resolve(const Source& source, std::uint32_t handle, std::uintptr_t& address) noexcept {
+    std::uintptr_t record = 0;
+    return locate(source, handle, record, address) && address != 0;
+}
+
+/** A slot counts only once its bytes are read and its first word holds their size. */
+bool resident(const Source& source, std::uint32_t handle, Resident& output) noexcept {
+    output = {};
+    std::uintptr_t record = 0;
+    std::uintptr_t address = 0;
+    layout::ContentSlot slot{};
+    if (!locate(source, handle, record, address) || address == 0
+        || !read_value(source, record, slot)) {
+        return false;
+    }
+    const std::uint32_t size = slot.sizeWord & layout::kSlotSizeMask;
+    if ((slot.sizeWord & layout::kSlotSizeForm) != layout::kSlotSizeForm || size == 0
+        || (slot.typeWord & layout::kSlotLoading) != 0 || slot.classId == layout::kSlotNoClass) {
+        return false;
+    }
+    output = {address, size, slot.classId};
+    return true;
 }
 
 } // namespace sunrise::client::content::handles

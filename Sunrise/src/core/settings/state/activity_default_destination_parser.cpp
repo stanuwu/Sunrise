@@ -61,7 +61,6 @@ bool Parser::activity_settings(state::activity::defaults::ActivityDefaults& outp
     }
     bool hasDefaultDestination = false;
     bool hasRosterKeyFromIdentity = false;
-    bool hasRosterKeyOnAllSlots = false;
     if (consume('}')) {
         return true;
     }
@@ -80,11 +79,6 @@ bool Parser::activity_settings(state::activity::defaults::ActivityDefaults& outp
                 return false;
             }
             hasRosterKeyFromIdentity = true;
-        } else if (key == "roster_key_on_all_slots") {
-            if (hasRosterKeyOnAllSlots || !boolean(output.rosterKeyOnAllSlots)) {
-                return false;
-            }
-            hasRosterKeyOnAllSlots = true;
         } else if (!skip_value(0)) {
             return false;
         }

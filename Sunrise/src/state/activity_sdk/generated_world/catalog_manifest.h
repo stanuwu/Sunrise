@@ -7,9 +7,15 @@
 #include <string_view>
 #include <vector>
 
+#include "../../../middleware/content/packages/reader/container_framing.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808084.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80808a.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809f.h"
 #include "codec.h"
 
 namespace sunrise::state::activity_sdk::generated_world::manifest {
+
+namespace generated = middleware::content::packages::schema::generated;
 
 /** Version four persists the complete, independently verifiable activity-binding census. */
 inline constexpr std::uint32_t kVersion = 4;
@@ -25,6 +31,19 @@ inline constexpr std::size_t kMaximumActivityVariantRecords = 4096;
 inline constexpr std::size_t kMaximumRecords = kMaximumScenarioRecords;
 /** Activity and activity-root names use one fixed cache width. */
 inline constexpr std::size_t kActivityNameCapacity = 128;
+/** Bound-tag rows start after the root, its array marker and the 16-aligned array header. */
+inline constexpr std::uint64_t kActivityRootRowsOffset =
+    (sizeof(generated::ActivityRoot) + middleware::content::packages::reader::layout::kClassWordSize
+     + generated::STypedArrayMarker::kAlign - 1U)
+        / generated::STypedArrayMarker::kAlign * generated::STypedArrayMarker::kAlign
+    + sizeof(generated::STypedArrayMarker);
+/** Bound-tag row 0 names the scenario. */
+inline constexpr std::uint64_t kActivityRootScenarioOffset =
+    kActivityRootRowsOffset + offsetof(generated::ActivityRootTagRow, tag);
+/** Bound-tag row 1 names the transition descriptor. */
+inline constexpr std::uint64_t kActivityRootTransitionOffset =
+    kActivityRootRowsOffset + sizeof(generated::ActivityRootTagRow)
+    + offsetof(generated::ActivityRootTagRow, tag);
 
 /** One generated scenario shard published by the catalog. */
 struct ScenarioRecord final {

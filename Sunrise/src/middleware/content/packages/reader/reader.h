@@ -162,6 +162,8 @@ struct Scratch {
     std::size_t packageDirectoryLength{};
     /** Source mode the locations, headers, tables and blocks were read under. */
     bool packageInstalledOnly{};
+    /** Overlay epoch the locations were resolved under. */
+    std::uint64_t overlayEpoch{};
     /** Preserves a successful read if caching its location runs out of memory. */
     PackageLocation packageLocationFallback{};
     /** Rising use counter that sets the block cache's replacement order. */

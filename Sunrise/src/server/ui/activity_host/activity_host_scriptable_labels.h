@@ -18,4 +18,10 @@ namespace sunrise::server::ui::activity_host::scriptable_labels {
 /** @return Stable UI text for one registry descriptor scope. */
 [[nodiscard]] const char* scope(std::uint16_t descriptor) noexcept;
 
+/**
+ * Tests one registry descriptor against a scope combo entry.
+ * @param scope Combo index: 0 or out of range is every scope, then shared, registry, state-local.
+ */
+[[nodiscard]] bool scope_matches(std::uint16_t descriptor, int scope) noexcept;
+
 } // namespace sunrise::server::ui::activity_host::scriptable_labels

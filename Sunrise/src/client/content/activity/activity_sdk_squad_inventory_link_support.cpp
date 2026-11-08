@@ -118,7 +118,7 @@ bool descriptor_id(const topology::Snapshot& topology,
                 || spawner.inlinePointSetOffset == spawner.inlinePlacementComponentOffset
                 || placement.state != CandidateState::exactPlacement
                 || placement.placementOffset == 0
-                || placement.placedEntryClass != tables::kAuthoredSquadPlacementClass
+                || placement.placedEntryClass != tables::kAuthoredPlacementClass
                 || !std::isfinite(std::bit_cast<float>(placement.uniformScaleBits))) {
                 return false;
             }
@@ -157,7 +157,7 @@ bool descriptor_id(const topology::Snapshot& topology,
                     }
                     if (candidate.state != CandidateState::exactPlacement
                         || candidate.placementRelative == 0 || candidate.placementOffset == 0
-                        || candidate.placedEntryClass != tables::kAuthoredSquadPlacementClass
+                        || candidate.placedEntryClass != tables::kAuthoredPlacementClass
                         || !std::isfinite(std::bit_cast<float>(candidate.uniformScaleBits))) {
                         return false;
                     }

@@ -6,6 +6,7 @@
 
 #include "../../../../core/ui/layout/layout.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
+#include "../../../diagnostics/test_input/test_input.h"
 #include "../../../ui/mission_launch/mission_launch_art.h"
 #include "../../cursor/runtime.h"
 #include "../../inactivity/inactivity_override.h"
@@ -315,6 +316,7 @@ void present(IDXGISwapChain* swapChain) noexcept {
     bool framed = false;
     if (g_resources.swapChain == swapChain && fully_active_locked()) {
         render_frame_locked();
+        diagnostics::test_input::capture(swapChain, g_resources.device, g_resources.context);
         framed = true;
     }
     ReleaseSRWLockExclusive(&g_rendererLock);

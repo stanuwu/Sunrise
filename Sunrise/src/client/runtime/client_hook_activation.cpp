@@ -12,10 +12,12 @@
 #include "../../core/ui/notice/ui_notice_overlay.h"
 #include "../../server/bap/runtime.h"
 #include "../activity/mission_launch.h"
+#include "../content/activity/activity_sdk_tagdefs_dump.h"
 #include "../content/activity/scriptable_catalog_worker.h"
 #include "../content/bootstrap/bootstrap_token_publish.h"
 #include "../content/investment/worker.h"
 #include "../content/items/packages/build.h"
+#include "../diagnostics/test_input/test_input.h"
 #include "../executable/image.h"
 #include "../hooks/assert_handler/assert_handler_lifecycle.h"
 #include "../hooks/async_io/async_io_lifetime_guard.h"
@@ -23,6 +25,7 @@
 #include "../hooks/cine_probe/cine_probe.h"
 #include "../hooks/config_getter/config_getter_lifecycle.h"
 #include "../hooks/cursor/runtime.h"
+#include "../hooks/exception_probe/exception_probe.h"
 #include "../hooks/graphics/graphics_hook_lifecycle.h"
 #include "../hooks/hitch_probe/hitch_probe.h"
 #include "../hooks/inactivity/inactivity_override.h"
@@ -171,6 +174,7 @@ void clear_game_targets() noexcept {
                      packageKeys ? "ev=activate stage=package_keys result=ok"
                                  : "ev=activate stage=package_keys result=fail");
     content::items::packages::export_keys_if_requested();
+    content::activity::sdk_generation::decode_plans::export_tagdefs_if_requested();
     // Diagnostic capture reports its own outcome and never demotes this stage.
     (void)hooks::retail_log::install();
     (void)hooks::assert_handler::install();
@@ -180,6 +184,9 @@ void clear_game_targets() noexcept {
     // Read-only. Some freezes silence the watchdog too; this watcher dumps every thread's rip
     // and stack from its own thread when the game stops calling the pump.
     (void)hooks::stall_probe::install();
+    // Read-only. Logs Sunrise throws and faults, and game access violations, which the game's
+    // crash handler would otherwise swallow.
+    (void)hooks::exception_probe::install();
     // The stock async-I/O wrapper reloads its singleton after pumping it and can observe the
     // legitimate teardown/recreate null window. This optional guard keeps the owner it pumped.
     (void)hooks::async_io::install();
@@ -290,6 +297,8 @@ bool activate_graphics_once() noexcept {
     // The game reads its action keys by scanning GetKeyState every frame, which no window
     // procedure sees, so the polled guards carry the same terms as the cursor guards.
     (void)hooks::polled_input::install();
+    // A test process reports the game window in front, so a background run takes held keys.
+    (void)diagnostics::test_input::install();
     core::log::write(
         core::log::Channel::client, core::log::Level::info, "ev=activate stage=graphics result=ok");
     ReleaseSRWLockExclusive(&runtime::g_lock);

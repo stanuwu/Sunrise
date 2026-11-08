@@ -463,6 +463,8 @@ bool normalize_stem(std::wstring_view packageFamily,
     constexpr std::wstring_view kPrefix = L"w64_";
     constexpr std::wstring_view kActivities = L"_activities";
     constexpr std::wstring_view kUnpacked = L"_unp";
+    /** Every mod package has this family, so a mod's stem keeps its package id. */
+    constexpr std::wstring_view kModFamily = L"sunrise";
     constexpr std::size_t kPackageIdDigits = 4;
     if (stem.starts_with(kPrefix) && stem.size() > kPrefix.size() + kPackageIdDigits + 1U) {
         const std::size_t idSeparator = stem.size() - kPackageIdDigits - 1U;
@@ -473,7 +475,9 @@ bool normalize_stem(std::wstring_view packageFamily,
                            hexadecimal);
         if (packageId) {
             stem = stem.substr(kPrefix.size(), idSeparator - kPrefix.size());
-            if (stem.ends_with(kActivities)) {
+            if (stem == kModFamily) {
+                stem = packageFamily.substr(kPrefix.size());
+            } else if (stem.ends_with(kActivities)) {
                 stem.remove_suffix(kActivities.size());
             } else {
                 const std::size_t suffix = stem.rfind(kUnpacked);

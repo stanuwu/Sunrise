@@ -149,6 +149,7 @@ void reset(Storage& storage) noexcept;
 
 /**
  * Converts one package family into the map stem its spawn-set tags are grouped under.
+ * A mod package's stem keeps its package id, as all mod packages share one family.
  * @param packageFamily Leaf name without patch suffix or extension.
  * @param output Receives lowercase ASCII stem bytes.
  * @param length Receives the stem length.

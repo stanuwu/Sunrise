@@ -49,7 +49,6 @@ void draw_script_runtime(const host::InstanceSnapshot& hostInstance) noexcept {
     ImGui::SameLine();
     ImGui::TextDisabled("folder %s", runtime.pathReady ? "ready" : "unavailable");
 
-    std::array<char, 260> controller{};
     const mission::InstanceDiagnostics* selected = nullptr;
     for (std::size_t index = 0; index < runtime.instanceCount; ++index) {
         if (same_binding(runtime.instances[index].binding, hostInstance.binding)) {
@@ -64,11 +63,11 @@ void draw_script_runtime(const host::InstanceSnapshot& hostInstance) noexcept {
             break;
         }
     }
-    const std::uint32_t activityRow = selected != nullptr ? selected->activityRow
-                                      : attach != nullptr ? attach->activityRow
-                                                          : 0;
-    if (activityRow != 0 && mission::controller_file_name(activityRow, controller)) {
-        ImGui::Text("File Sunrise/scripts/%s", controller.data());
+    const char* const controller = selected != nullptr ? selected->controllerFile.data()
+                                   : attach != nullptr ? attach->controllerFile.data()
+                                                       : "";
+    if (controller[0] != '\0') {
+        ImGui::Text("File Sunrise/scripts/%s", controller);
     }
     if (attach != nullptr) {
         ImGui::Text("Attach %s", attach->result.data());

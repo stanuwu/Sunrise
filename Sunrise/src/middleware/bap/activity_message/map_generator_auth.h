@@ -7,14 +7,18 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80804e.h"
+#include "../../content/packages/schema/generated/tag_classes_808050.h"
 #include "auth_fields.h"
 
 namespace sunrise::middleware::bap::activity_message::map_generator_auth {
 
+namespace generated = middleware::content::packages::schema::generated;
+
 /** Type-37 Auth contains two generator records and one retained state block. */
 inline constexpr std::uint8_t kSlotType = 37;
-inline constexpr std::uint32_t kComponentClass = 0x80804EF6U;
-inline constexpr std::uint32_t kSchema = 0x80805007U;
+inline constexpr std::uint32_t kComponentClass = generated::C80804ef6::kClass;
+inline constexpr std::uint32_t kSchema = generated::C80805007::kClass;
 inline constexpr std::size_t kRecordCount = 2;
 inline constexpr std::size_t kAnchorCount = 4;
 inline constexpr std::size_t kIntegerCount = 5;

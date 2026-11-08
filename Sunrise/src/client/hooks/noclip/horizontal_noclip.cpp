@@ -97,6 +97,8 @@ struct FlyMeasure {
     float leftOver{};
     std::int32_t islandMax{};
     bool noclip{};
+    /** Body position before the window's last step. */
+    std::array<float, kVectorLanes> position{};
 };
 FlyMeasure g_measure{};
 /** Entity count of the island that held the player on the last lookup. */
@@ -180,9 +182,15 @@ capped_speed(const std::array<float, kVectorLanes>& velocity, float limit) noexc
  * @param asked Speed fly wrote before the step.
  * @param moved Distance the body moved in the step.
  * @param leftOver Speed left in the body after the step, before the cap.
+ * @param position Body position before the step.
  */
-void measure_fly(
-    bool found, bool noclip, float deltaTime, float asked, float moved, float leftOver) noexcept {
+void measure_fly(bool found,
+                 bool noclip,
+                 float deltaTime,
+                 float asked,
+                 float moved,
+                 float leftOver,
+                 const std::array<float, kVectorLanes>& position) noexcept {
     const ULONGLONG now = GetTickCount64();
     if (g_measure.windowStart == 0) {
         g_measure.windowStart = now;
@@ -196,6 +204,7 @@ void measure_fly(
         g_measure.moved += moved;
         g_measure.leftOver += leftOver * deltaTime;
         g_measure.islandMax = (std::max)(g_measure.islandMax, g_playerIslandSize);
+        g_measure.position = position;
     }
     const ULONGLONG wall = now - g_measure.windowStart;
     if (wall < kMeasureWindowMs) {
@@ -204,20 +213,23 @@ void measure_fly(
     // Speeds are averaged over simulated time, so asked, moved and left compare directly.
     const float time = g_measure.simulated > 0.0F ? g_measure.simulated : 1.0F;
     std::array<char, 256> line{};
-    const int written =
-        std::snprintf(line.data(),
-                      line.size(),
-                      "ev=fly stage=measure steps=%u found=%u wall_ms=%llu "
-                      "sim_ms=%.0f asked=%.2f moved=%.2f left=%.2f island=%d noclip=%d",
-                      g_measure.steps,
-                      g_measure.found,
-                      static_cast<unsigned long long>(wall),
-                      static_cast<double>(g_measure.simulated * 1000.0F),
-                      static_cast<double>(g_measure.asked / time),
-                      static_cast<double>(g_measure.moved / time),
-                      static_cast<double>(g_measure.leftOver / time),
-                      g_measure.islandMax,
-                      g_measure.noclip ? 1 : 0);
+    const int written = std::snprintf(
+        line.data(),
+        line.size(),
+        "ev=fly stage=measure steps=%u found=%u wall_ms=%llu "
+        "sim_ms=%.0f asked=%.2f moved=%.2f left=%.2f island=%d noclip=%d at=%.1f,%.1f,%.1f",
+        g_measure.steps,
+        g_measure.found,
+        static_cast<unsigned long long>(wall),
+        static_cast<double>(g_measure.simulated * 1000.0F),
+        static_cast<double>(g_measure.asked / time),
+        static_cast<double>(g_measure.moved / time),
+        static_cast<double>(g_measure.leftOver / time),
+        g_measure.islandMax,
+        g_measure.noclip ? 1 : 0,
+        static_cast<double>(g_measure.position[0]),
+        static_cast<double>(g_measure.position[1]),
+        static_cast<double>(g_measure.position[2]));
     if (written > 0) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::debug,
@@ -349,7 +361,8 @@ std::int32_t __fastcall havok_step(std::byte* simulation, float deltaTime) noexc
                     deltaTime,
                     length_of(nativeVelocity),
                     length_of(moved),
-                    length_of(leftOver));
+                    length_of(leftOver),
+                    nativePosition);
     }
     // With both on this hook drives all three lanes. Fly holds the height, so carrying the
     // vertical one is safe.

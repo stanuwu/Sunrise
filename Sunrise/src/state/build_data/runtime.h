@@ -227,6 +227,9 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
 /** @return True when the build-scoped exotic catalyst catalog is ready. */
 [[nodiscard]] bool exotic_catalysts_ready() noexcept;
 
+/** @return True when the catalyst facts do not pin this executable; a clear forgets it. */
+[[nodiscard]] bool exotic_catalysts_unsupported() noexcept;
+
 /**
  * Derives released and placeholder catalysts from one complete package pass.
  * The active PE identity supplies the build fingerprint.
@@ -423,6 +426,12 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
 /** @return True when the reward pools and item wrappers are in State. */
 [[nodiscard]] bool reward_definitions_ready() noexcept;
 
+/** @return True when the installed data refused the reward graph, so it can never publish. */
+[[nodiscard]] bool reward_definitions_unsupported() noexcept;
+
+/** Records that the installed data refuses the reward graph; a clear or a boot forgets it. */
+void settle_reward_definitions_unsupported() noexcept;
+
 /**
  * Publishes the complete reward graph in one step.
  * @param definitions Pools, entries, item rows, conditions, modifiers and socket overrides.
@@ -586,9 +595,10 @@ publish_investment_constants(const constants::InvestmentConstants& value) noexce
 [[nodiscard]] bool starter_sets_ready() noexcept;
 
 /**
- * Publishes the new-character table. It is read every boot and never joins the disk cache.
- * @param definitions One row per class; empty when the installed table did not read.
- * @return True when every row names a distinct playable class and fits its storage.
+ * Publishes the new-character table. It joins the disk cache with the other domains.
+ * @param definitions One row per class; empty when the installed table has another layout.
+ * @return True when every row names a distinct playable class and fits its storage, and any
+ *         complete cache is on disk.
  */
 [[nodiscard]] bool
 publish_starter_sets(std::span<const starter_sets::Definition> definitions) noexcept;

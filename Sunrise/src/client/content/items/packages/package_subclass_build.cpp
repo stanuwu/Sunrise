@@ -105,7 +105,7 @@ bool build_character_abilities(
         return false;
     }
     if (!tables::find_array_at(
-            std::span<const std::byte>{table}, tables::kTableArrayDescriptor, rows)) {
+            std::span<const std::byte>{table}, offsetof(generated::C80807a78, table), rows)) {
         report_ability_failure("table_array", 0, table.size(), 0);
         return false;
     }

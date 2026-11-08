@@ -3,27 +3,41 @@
 #include <limits>
 
 #include "../../../../state/build_data/activities/activity_catalog.h"
+#include "../schema/generated/tag_classes_808076.h"
+#include "../schema/generated/tag_classes_808077.h"
 #include "definition_index_table.h"
 #include "field_reader.h"
 
 namespace sunrise::middleware::content::packages::tables::activities {
 /** Public activity index, NOT the package-definition index in root slot 29. */
-inline constexpr std::size_t kRootSlot = 4;
-inline constexpr std::uint32_t kRowClass = 0x808076FCU;
+inline constexpr std::size_t kRootSlot =
+    root_slot(offsetof(schema::generated::InvestmentRoot, slot4ActivityIndex));
+inline constexpr std::uint32_t kRowClass = schema::generated::ActivityRecord::kClass;
 /** One index row: the definition hash, then a self-relative pointer to the record. */
-inline constexpr std::size_t kIndexRowStride = 16;
-inline constexpr std::size_t kIndexRecordField = 8;
+inline constexpr std::size_t kIndexRowStride = sizeof(schema::generated::ActivityRecord);
+inline constexpr std::size_t kIndexRecordField =
+    offsetof(schema::generated::ActivityRecord, activityPointer);
 /** Self-relative pointer the route selector needs set before it plays the display row's movie. */
-inline constexpr std::size_t kRecordMovieRouteField = 0x30;
+inline constexpr std::size_t kRecordMovieRouteField =
+    offsetof(schema::generated::ActivityDefinition, movieRoute);
 /** Self-relative pointer to the internal package name, or zero when the row has none. */
-inline constexpr std::size_t kRecordNameField = 0x68;
+inline constexpr std::size_t kRecordNameField =
+    offsetof(schema::generated::ActivityDefinition, internalName);
 /** Activity type, a row of the activity type table. */
-inline constexpr std::size_t kRecordTypeOffset = 0xDA;
-inline constexpr std::size_t kRecordGameplaySettingsOffset = 0xDC;
+inline constexpr std::size_t kRecordTypeOffset =
+    offsetof(schema::generated::ActivityDefinition, activityType);
+inline constexpr std::size_t kRecordGameplaySettingsOffset =
+    offsetof(schema::generated::ActivityDefinition, gameplaySettingsHash);
 /** Destination, a row of the destination table. */
-inline constexpr std::size_t kRecordDestinationOffset = 0xE0;
-/** Every field above sits inside this many bytes of a record. */
-inline constexpr std::size_t kRecordReadBytes = 0xE4;
+inline constexpr std::size_t kRecordDestinationOffset =
+    offsetof(schema::generated::ActivityDefinition, destination);
+/** The index row and its record both carry the definition hash. */
+inline constexpr std::size_t kIndexHashField =
+    offsetof(schema::generated::ActivityRecord, definitionHash);
+inline constexpr std::size_t kRecordHashOffset =
+    offsetof(schema::generated::ActivityDefinition, definitionHash);
+/** A record is a whole definition, so every field above lies inside it. */
+inline constexpr std::size_t kRecordReadBytes = sizeof(schema::generated::ActivityDefinition);
 
 template <class T>
 [[nodiscard]] bool read(std::span<const std::byte> bytes, std::size_t offset, T& value) noexcept {
@@ -45,9 +59,9 @@ template <class T>
                                  std::size_t& count) noexcept {
     count = 0;
     Array array{};
-    if (!find_array_at(bytes, kTableArrayDescriptor, array) || array.elementClass != kRowClass
-        || array.count > output.size() || array.count > state::build_data::activities::kCapacity
-        || array.dataOffset > bytes.size()
+    if (!find_array_at(bytes, offsetof(schema::generated::ActivityDefinitionTable, table), array)
+        || array.elementClass != kRowClass || array.count > output.size()
+        || array.count > state::build_data::activities::kCapacity || array.dataOffset > bytes.size()
         || array.count > (bytes.size() - array.dataOffset) / kIndexRowStride) {
         return false;
     }
@@ -58,10 +72,10 @@ template <class T>
         std::size_t record{};
         std::uint32_t identity{};
         // The record repeats the index row's hash; both copies must agree.
-        if (!read(bytes, entry, row.hash) || row.hash == 0
+        if (!read(bytes, entry + kIndexHashField, row.hash) || row.hash == 0
             || !relative(bytes, entry + kIndexRecordField, record)
-            || bytes.size() - record < kRecordReadBytes || !read(bytes, record, identity)
-            || identity != row.hash
+            || bytes.size() - record < kRecordReadBytes
+            || !read(bytes, record + kRecordHashOffset, identity) || identity != row.hash
             || !read(bytes, record + kRecordGameplaySettingsOffset, row.gameplaySettingsHash)
             || !read(bytes, record + kRecordTypeOffset, row.nativeType)
             || !read(bytes, record + kRecordDestinationOffset, row.destination)) {

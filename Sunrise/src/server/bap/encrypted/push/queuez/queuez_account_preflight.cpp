@@ -36,6 +36,17 @@ void ensure_account_canonical() noexcept {
     if (g_settled.load(std::memory_order_acquire)) {
         return;
     }
+    // A row of uninstalled content fails every family image, so parking runs first.
+    switch (state::reconcile_installed_content()) {
+    case state::ParkingOutcome::ready:
+        break;
+    case state::ParkingOutcome::notReady:
+        report(core::log::Level::debug, "not_ready");
+        return;
+    case state::ParkingOutcome::failed:
+        report(core::log::Level::warn, "parking_failed");
+        return;
+    }
     switch (state::ensure_character_emote_collection()) {
     case state::EmoteCollectionOutcome::ready:
         g_settled.store(true, std::memory_order_release);

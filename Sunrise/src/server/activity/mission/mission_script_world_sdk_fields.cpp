@@ -8,7 +8,7 @@
 namespace sunrise::server::activity::mission::sdk_bridge {
 namespace {
 
-namespace generated = state::activity_sdk::generated_world;
+namespace generated_world = state::activity_sdk::generated_world;
 namespace catalog = state::build_data::scriptables;
 
 } // namespace
@@ -26,7 +26,7 @@ bool world_sdk_internal::resolve_world_field(const void* context,
                                              std::string_view key,
                                              lua_vm::WorldFieldDefinition& output) noexcept {
     output = {};
-    const generated::GeneratedWorldView* const world = checked_world(context, generation);
+    const generated_world::GeneratedWorldView* const world = checked_world(context, generation);
     if (world == nullptr || localRow == 0
         || localRow > world_sdk_internal::world_count(context, generation, kind)) {
         return false;

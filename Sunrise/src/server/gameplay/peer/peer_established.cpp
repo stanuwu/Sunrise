@@ -40,7 +40,7 @@ constexpr std::size_t kMessageReportCapacity = 8;
  * sequences ahead of its window, so this host must not send faster than the peer does.
  */
 constexpr std::uint64_t kResendInterval = 250;
-/** Reflected root 0x80806AE6 after its lane-presence bit. */
+/** Reflected player-snapshot root after its lane-presence bit. */
 constexpr std::size_t kPlayerSnapshotBits = 1373;
 
 /** Eight unique logical packet failures bound the replay sample. */

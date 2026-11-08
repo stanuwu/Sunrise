@@ -5,7 +5,7 @@
 
 namespace sunrise::client::targets::game::package_path {
 
-/** The package path builder, the path object file opener, and the layouts they use. */
+/** The package path builder, the path object file opener, their layouts, and the tag loader. */
 struct Targets {
     /** Entry of the builder the package registration job calls once per file. */
     std::byte* setPath{};
@@ -19,6 +19,8 @@ struct Targets {
     std::uint32_t objectRootOffset{};
     /** Path object bytes the resolver reads: text, root id, then the flags word. */
     std::uint32_t objectSize{};
+    /** Entry of the dispatcher that runs a loading tag's schema callbacks. */
+    std::byte* schemaCallback{};
 };
 
 /** Clears the published package path group. */

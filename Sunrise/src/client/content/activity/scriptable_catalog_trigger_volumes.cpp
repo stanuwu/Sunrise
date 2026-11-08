@@ -339,7 +339,7 @@ void append_root(BuildContext& context,
     }
 }
 
-/** Reads one unique config and parses every dynamically discovered 0x808099C8 component. */
+/** Reads one unique config and parses every trigger-volume component it holds. */
 void append_config(BuildContext& context,
                    std::span<const TriggerVolumeInput> inputs,
                    std::uint32_t configTag,
@@ -385,7 +385,7 @@ void append_config(BuildContext& context,
 
 } // namespace
 
-/** Appends exact 0x808099C8 slot-owned trigger volumes from reached package configs. */
+/** Appends the slot-owned trigger volumes of every reached package config. */
 bool append_trigger_volumes(const package_reader::Source& source,
                             package_reader::Scratch& scratch,
                             std::span<const TriggerVolumeInput> inputs,

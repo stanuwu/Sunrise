@@ -273,7 +273,7 @@ describe_block(void* context, std::uint32_t index, std::span<const std::byte> by
     record.offset = static_cast<std::uint32_t>(output.blocksOffset + index * layout::kBlockSize);
     record.size = static_cast<std::uint32_t>(bytes.size());
     record.patchId = output.source.package.patchId;
-    if (!crypto::sha1::hash(bytes, record.opaque)) {
+    if (!crypto::sha1::hash(bytes, record.sha1)) {
         return false;
     }
     std::memcpy(output.metadata.data() + output.source.package.blockTable

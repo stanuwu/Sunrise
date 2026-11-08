@@ -176,6 +176,9 @@ struct ServiceOutcome {
 
     bool hasSelectCharacter{};
 
+    /** A 504 pick or a 502 delete changed the selected character, even with no move staged. */
+    bool selectionMoved{};
+
     /** One service owns at most one independently versioned, exact-sized transaction. */
 
     using Transaction = std::variant<std::monostate,

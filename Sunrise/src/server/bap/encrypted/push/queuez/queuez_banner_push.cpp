@@ -229,7 +229,17 @@ bool append_equipment_roster_refresh_notification(
     return queuez_frame::append_prepared_frame(scratch, prepared, key, nonce, response, written);
 }
 
-/** Refreshes the selected character's complete Family-0 appearance from committed State. */
+/**
+ * Refreshes the selected character's complete Family-0 appearance from committed State.
+ * @param scratch Lock-owned transform buffers.
+ * @param before Queuez state visible to the current BAP peer.
+ * @param key Active AES-GCM session key.
+ * @param nonce Push-direction nonce, advanced only by a complete frame.
+ * @param response Caller-owned output containing prior frames.
+ * @param written Existing byte count, updated by a complete frame.
+ * @param after Receives the queuez state the frame publishes, or `before` when none is owed.
+ * @return True when the frame is appended or none is owed: no family 0, or no pick yet.
+ */
 bool append_account_resync_appearance_notification(
     Scratch& scratch,
     const queuez::SessionState& before,
@@ -273,7 +283,18 @@ bool append_account_resync_appearance_notification(
     return true;
 }
 
-/** Refreshes the selected character and includes its roster only when roster fields changed. */
+/**
+ * Refreshes the selected character and includes its roster only when roster fields changed.
+ * @param scratch Lock-owned transform buffers.
+ * @param before Queuez state visible to the current BAP peer.
+ * @param key Active AES-GCM session key.
+ * @param nonce Push-direction nonce, advanced only by a complete frame.
+ * @param response Caller-owned output containing prior frames.
+ * @param written Existing byte count, updated by a complete frame.
+ * @param after Receives the queuez state the frame publishes, or `before` when none is owed.
+ * @param includeRoster True when the account roster object goes out with the record.
+ * @return True when the frame is appended or none is owed: no family 3, or no pick yet.
+ */
 bool append_account_resync_roster_notification(Scratch& scratch,
                                                const queuez::SessionState& before,
                                                std::span<const std::byte, state::kAesKeySize> key,

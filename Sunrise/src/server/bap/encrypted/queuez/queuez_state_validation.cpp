@@ -13,6 +13,11 @@ namespace {
 
 } // namespace
 
+/** The 505 moves the roster phase off normal and the 504 moves it back. */
+bool account_selection_cleared(const SessionState& state) noexcept {
+    return state.family3Phase != Family3Phase::normal;
+}
+
 /** @return True when every active field and resident id make a canonical peer state. */
 bool valid(const SessionState& state) noexcept {
     if (!valid_phase(state.family3Phase)) {

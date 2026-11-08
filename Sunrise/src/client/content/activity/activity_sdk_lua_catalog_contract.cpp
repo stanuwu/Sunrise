@@ -229,7 +229,7 @@ constexpr std::array<RowSpec, 41> kRows{{
      "actor_behavior_profiles",
      "CatalogActorBehaviorProfileView",
      "u32:actor_class_index;u32:behavior_config_tag;u32:behavior_config_class;"
-     "u32:behavior_config_offset;i32:default_faction;u32:behavior_provenance;"
+     "u32:reserved;i32:default_faction;u32:behavior_provenance;"
      "u32:faction_provenance;u32:flags"},
     {34,
      "simulation_event_definitions",

@@ -1,4 +1,8 @@
 #pragma once
+#include "../schema/generated/tag_classes_808000.h"
+#include "../schema/generated/tag_classes_80805e.h"
+#include "../schema/generated/tag_classes_80805f.h"
+#include "../schema/generated/tag_classes_80809a.h"
 #include "activity_table.h"
 
 namespace sunrise::middleware::content::packages::tables::activities {
@@ -7,39 +11,61 @@ inline constexpr std::uint32_t kNoBank = 0xFFFFU;
 /** Category of a display row that names none. */
 inline constexpr std::uint16_t kNoCategory = 0xFFFFU;
 /** One display index row: the definition hash, then a self-relative pointer to the record. */
-inline constexpr std::size_t kDisplayRowStride = 16;
-inline constexpr std::size_t kDisplayRecordField = 8;
+inline constexpr std::size_t kDisplayRowStride = sizeof(schema::generated::ActivityClientIndexRow);
+inline constexpr std::size_t kDisplayRecordField =
+    offsetof(schema::generated::ActivityClientIndexRow, activityPointer);
 /** The display record starts with a self-relative pointer to its text block. */
-inline constexpr std::size_t kDisplayTextField = 0;
-inline constexpr std::size_t kDisplayCategoryOffset = 8;
+inline constexpr std::size_t kDisplayTextField =
+    offsetof(schema::generated::ActivityTextRecord, textBlock);
+inline constexpr std::size_t kDisplayCategoryOffset =
+    offsetof(schema::generated::ActivityTextRecord, category);
 /** Package name hash of the row's pre-rendered movie; the empty-string hash names none. */
-inline constexpr std::size_t kDisplayMovieOffset = 0x40;
+inline constexpr std::size_t kDisplayMovieOffset =
+    offsetof(schema::generated::ActivityTextRecord, movie);
 /** String references inside the text block, and the Director style tag after them. */
-inline constexpr std::size_t kTextTitleOffset = 4;
-inline constexpr std::size_t kTextDescriptionOffset = 12;
-inline constexpr std::size_t kTextExpansionOffset = 20;
-inline constexpr std::size_t kTextStyleOffset = 32;
+inline constexpr std::size_t kTextTitleBankOffset =
+    offsetof(schema::generated::ActivityDisplayRow, titleBank);
+inline constexpr std::size_t kTextTitleHashOffset =
+    offsetof(schema::generated::ActivityDisplayRow, titleHash);
+inline constexpr std::size_t kTextDescriptionBankOffset =
+    offsetof(schema::generated::ActivityDisplayRow, descriptionBank);
+inline constexpr std::size_t kTextDescriptionHashOffset =
+    offsetof(schema::generated::ActivityDisplayRow, descriptionHash);
+inline constexpr std::size_t kTextExpansionBankOffset =
+    offsetof(schema::generated::ActivityDisplayRow, expansionBank);
+inline constexpr std::size_t kTextExpansionHashOffset =
+    offsetof(schema::generated::ActivityDisplayRow, expansionHash);
+inline constexpr std::size_t kTextStyleOffset =
+    offsetof(schema::generated::ActivityDisplayRow, styleHash);
 /** Client activity-type rows, with the type name reference after the row hash. */
-inline constexpr std::size_t kTypeRowStride = 128;
-inline constexpr std::size_t kTypeNameOffset = 4;
+inline constexpr std::size_t kTypeRowStride = sizeof(schema::generated::ActivityTypeRow);
+inline constexpr std::size_t kTypeNameBankOffset =
+    offsetof(schema::generated::ActivityTypeRow, typeNameBank);
+inline constexpr std::size_t kTypeNameHashOffset =
+    offsetof(schema::generated::ActivityTypeRow, typeNameHash);
 /** Rows the type table may declare; the type byte on an activity record is one of them. */
 inline constexpr std::size_t kTypeRowLimit = 256;
 
 /** Bank string hashes are packed u32 rows. */
-inline constexpr std::size_t kBankHashStride = 4;
+inline constexpr std::size_t kBankHashStride = sizeof(schema::generated::SU32HashElement);
 /** The language blob's combination array descriptor, and its rows. */
-inline constexpr std::size_t kLanguageCombinationDescriptor = 72;
-inline constexpr std::size_t kCombinationStride = 16;
+inline constexpr std::size_t kLanguageCombinationDescriptor =
+    offsetof(schema::generated::SLocalizedStringsData, strings);
+inline constexpr std::size_t kCombinationStride = sizeof(schema::generated::SStringCombination);
 /** A combination starts with a self-relative pointer to its parts, then the part count. */
-inline constexpr std::size_t kCombinationPartsField = 0;
-inline constexpr std::size_t kCombinationCountOffset = 8;
+inline constexpr std::size_t kCombinationPartsField =
+    offsetof(schema::generated::SStringCombination, firstPart);
+inline constexpr std::size_t kCombinationCountOffset =
+    offsetof(schema::generated::SStringCombination, partCount);
 /** Parts one string may combine; the widest installed string is far below it. */
 inline constexpr std::int64_t kCombinationPartLimit = 32;
 /** A part: a self-relative pointer to its bytes, their count, and the per-byte shift. */
-inline constexpr std::size_t kPartStride = 32;
-inline constexpr std::size_t kPartDataField = 8;
-inline constexpr std::size_t kPartByteCountOffset = 20;
-inline constexpr std::size_t kPartShiftOffset = 24;
+inline constexpr std::size_t kPartStride = sizeof(schema::generated::SStringPart);
+inline constexpr std::size_t kPartDataField = offsetof(schema::generated::SStringPart, text);
+inline constexpr std::size_t kPartByteCountOffset =
+    offsetof(schema::generated::SStringPart, byteLength);
+inline constexpr std::size_t kPartShiftOffset =
+    offsetof(schema::generated::SStringPart, cipherShift);
 /** UTF-8 lead-byte thresholds for two, three and four byte sequences, and the first invalid lead.
  */
 inline constexpr std::uint8_t kUtf8TwoByteLead = 0xC0;
@@ -57,6 +83,26 @@ struct DisplayRefs {
     std::uint32_t movie{state::build_data::activities::kNoMovie};
 };
 /**
+ * Reads one string reference: a 16-bit bank ordinal, then its string hash.
+ * @param blob The blob holding the reference.
+ * @param bankAt Offset of the bank ordinal.
+ * @param hashAt Offset of the string hash.
+ * @param output Receives the reference; unchanged on failure.
+ * @return False when either field lies outside the blob.
+ */
+[[nodiscard]] inline bool read_string_ref(std::span<const std::byte> blob,
+                                          std::size_t bankAt,
+                                          std::size_t hashAt,
+                                          StringRef& output) noexcept {
+    std::uint16_t bank{};
+    std::uint32_t hash{};
+    if (!read(blob, bankAt, bank) || !read(blob, hashAt, hash)) {
+        return false;
+    }
+    output = {bank, hash};
+    return true;
+}
+/**
  * Reads the string references of every activity's display row.
  * Client slot 3 uses the exact same ordinal AND authored identity as public slot 4.
  * @param display The client activity blob.
@@ -71,8 +117,9 @@ display_refs(std::span<const std::byte> display,
              std::span<const state::build_data::activities::Definition> rows,
              std::span<DisplayRefs> output) noexcept {
     Array a{}, t{};
-    if (!find_array_at(display, kTableArrayDescriptor, a) || a.count != rows.size()
-        || output.size() < rows.size() || !find_array_at(types, kTableArrayDescriptor, t)
+    if (!find_array_at(display, offsetof(schema::generated::ActivityClientTable, table), a)
+        || a.count != rows.size() || output.size() < rows.size()
+        || !find_array_at(types, offsetof(schema::generated::ActivityTypeTable, table), t)
         || t.count > kTypeRowLimit || a.dataOffset > display.size()
         || a.count > (display.size() - a.dataOffset) / kDisplayRowStride
         || t.dataOffset > types.size()
@@ -87,18 +134,27 @@ display_refs(std::span<const std::byte> display,
         if (!read(display, entry, hash) || hash != rows[i].hash
             || !relative(display, entry + kDisplayRecordField, record)
             || !relative(display, record + kDisplayTextField, text)
-            || !read(display, text + kTextTitleOffset, output[i].title)
-            || !read(display, text + kTextDescriptionOffset, output[i].description)
-            || !read(display, text + kTextExpansionOffset, output[i].expansion)
+            || !read_string_ref(
+                display, text + kTextTitleBankOffset, text + kTextTitleHashOffset, output[i].title)
+            || !read_string_ref(display,
+                                text + kTextDescriptionBankOffset,
+                                text + kTextDescriptionHashOffset,
+                                output[i].description)
+            || !read_string_ref(display,
+                                text + kTextExpansionBankOffset,
+                                text + kTextExpansionHashOffset,
+                                output[i].expansion)
             || !read(display, record + kDisplayCategoryOffset, output[i].category)
             || !read(display, text + kTextStyleOffset, output[i].style)
             || !read(display, record + kDisplayMovieOffset, output[i].movie)) {
             return false;
         }
+        const std::size_t typeRow = t.dataOffset + rows[i].nativeType * kTypeRowStride;
         if (rows[i].nativeType < t.count
-            && !read(types,
-                     t.dataOffset + rows[i].nativeType * kTypeRowStride + kTypeNameOffset,
-                     output[i].type)) {
+            && !read_string_ref(types,
+                                typeRow + kTypeNameBankOffset,
+                                typeRow + kTypeNameHashOffset,
+                                output[i].type)) {
             return false;
         }
     }
@@ -123,7 +179,8 @@ display_refs(std::span<const std::byte> display,
     }
     output[0] = '\0';
     Array hashes{}, combinations{};
-    if (hash == kNoPlugSource || !find_array_at(container, kTableArrayDescriptor, hashes)
+    if (hash == kNoPlugSource
+        || !find_array_at(container, offsetof(schema::generated::SLocalizedStrings, ids), hashes)
         || !find_array_at(language, kLanguageCombinationDescriptor, combinations)
         || hashes.count != combinations.count || hashes.dataOffset > container.size()
         || hashes.count > (container.size() - hashes.dataOffset) / kBankHashStride

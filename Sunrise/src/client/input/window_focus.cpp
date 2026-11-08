@@ -7,10 +7,15 @@
 
 #include <Windows.h>
 
+#include "../diagnostics/test_input/test_input.h"
+
 namespace sunrise::client::input {
 
-/** Reports whether a window of this process is in front. */
+/** Reports whether a window of this process is in front; a test process always counts. */
 bool game_focused() noexcept {
+    if (diagnostics::test_input::enabled()) {
+        return true;
+    }
     const HWND foreground = GetForegroundWindow();
     if (foreground == nullptr) {
         return false;

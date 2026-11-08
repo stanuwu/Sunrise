@@ -4,32 +4,39 @@
 #include <cstdint>
 #include <span>
 
+#include "../schema/generated/tag_classes_808091.h"
+#include "../schema/generated/tag_classes_808094.h"
+#include "../schema/generated/tag_classes_80809c.h"
 #include "authored_placement_reader.h"
 
 namespace sunrise::middleware::content::packages::tables {
 
 /** Installed class of a placed object definition. */
-inline constexpr std::uint32_t kPlacedClassDefinitionClass = 0x80809C0FU;
+inline constexpr std::uint32_t kPlacedClassDefinitionClass = schema::generated::SEntity::kClass;
 /** Its ordered construction rows use this element class and fixed stride. */
-inline constexpr std::uint32_t kPlacedClassBuildRowClass = 0x80809C04U;
-inline constexpr std::size_t kPlacedClassBuildDescriptor = 0x10;
-inline constexpr std::size_t kPlacedClassBuildStride = 12;
+inline constexpr std::uint32_t kPlacedClassBuildRowClass =
+    schema::generated::SPatternComponent::kClass;
+inline constexpr std::size_t kPlacedClassBuildDescriptor =
+    offsetof(schema::generated::SEntity, components);
+inline constexpr std::size_t kPlacedClassBuildStride = sizeof(schema::generated::SPatternComponent);
 /** The class definition records its authored type byte here. */
-inline constexpr std::size_t kPlacedClassObjectTypeOffset = 0x96;
+inline constexpr std::size_t kPlacedClassObjectTypeOffset =
+    offsetof(schema::generated::SEntity, objectType);
 /** Flag byte after the type; bit 0x10 is what the game's replication predicate reads. */
-inline constexpr std::size_t kPlacedClassFlagsOffset = 0x98;
+inline constexpr std::size_t kPlacedClassFlagsOffset = offsetof(schema::generated::SEntity, flags);
 inline constexpr std::uint8_t kPlacedClassNetworkReplicatedBit = 0x10;
 /** Installed class of one placed object config. */
-inline constexpr std::uint32_t kPlacedConfigClass = 0x80809C36U;
+inline constexpr std::uint32_t kPlacedConfigClass = schema::generated::SEntityConfig::kClass;
 /** Its component rows use this element class and four-word layout. */
-inline constexpr std::uint32_t kPlacedConfigComponentRowClass = 0x808091A4U;
-inline constexpr std::size_t kPlacedConfigComponentDescriptor = 0x30;
-inline constexpr std::size_t kPlacedConfigComponentStride = 16;
+inline constexpr std::uint32_t kPlacedConfigComponentRowClass =
+    schema::generated::PlacedConfigComponentRow::kClass;
+inline constexpr std::size_t kPlacedConfigComponentDescriptor =
+    offsetof(schema::generated::SEntityConfig, componentLinks);
+inline constexpr std::size_t kPlacedConfigComponentStride =
+    sizeof(schema::generated::PlacedConfigComponentRow);
 /** Installed class of an object-behavior root. */
-inline constexpr std::uint32_t kObjectBehaviorRootClass = 0x8080941EU;
-/** The fourth lane beside world translation is the native uniform scale input. */
-inline constexpr std::size_t kContainerPlacementUniformScaleOffset =
-    kAuthoredPlacementPositionOffset + 3 * sizeof(float);
+inline constexpr std::uint32_t kObjectBehaviorRootClass =
+    schema::generated::ObjectBehaviorRoot::kClass;
 
 /** Parsed header fields of one placed class definition. */
 struct PlacedClassDefinition final {

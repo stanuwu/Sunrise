@@ -46,7 +46,7 @@ constexpr std::int32_t kMinimumPoweredLevel = 1;
 
 /**
  * Picks the lowest character id after the account's own that no character holds.
- * Survivors keep their ids across a delete, so a slot index can name a living character.
+ * A delete moves survivors down a slot but keeps their ids, so the id cannot come from the slot.
  * @param account Account the new character joins.
  * @return The free id, or zero when every id is taken.
  */
@@ -161,15 +161,15 @@ void report_refusal(const char* event, const char* stage) noexcept {
 } // namespace
 
 /**
- * Adds a character to a free slot with its starter set and saves the account.
- * The character joins unselected. Only an opcode-504 or 505 pick selects a character.
+ * Adds a character to a free slot with its starter set and unlocks, and saves the account.
+ * The character joins unselected. Only a pick selects a character.
  * @param characterClass Character class: 0 Titan, 1 Hunter, 2 Warlock.
  * @param gender Character gender: 0 male, 1 female.
  * @param race Character race: 0 human, 1 awoken, 2 exo.
  * @param appearanceHeader Appearance header from the request, in record byte order.
  * @param characterSoid Receives the new character's id, zero on failure.
- * @return False when a value is out of range, the roster is full, the starter set does not
- *         resolve, or the save refuses the account.
+ * @return False when the roster is full, the starter set does not resolve, or the save refuses
+ *         the account. The account check refuses an identity value out of range.
  */
 bool create_character(std::uint8_t characterClass,
                       std::uint8_t gender,
@@ -177,12 +177,6 @@ bool create_character(std::uint8_t characterClass,
                       const AppearanceHeader& appearanceHeader,
                       std::uint64_t& characterSoid) noexcept {
     characterSoid = 0;
-    if (characterClass > static_cast<std::uint8_t>(CharacterClass::warlock)
-        || gender > static_cast<std::uint8_t>(CharacterGender::female)
-        || race > static_cast<std::uint8_t>(CharacterRace::exo)) {
-        report_refusal("create_character", "range");
-        return false;
-    }
     const std::lock_guard lock(investment::store::g_mutex);
     AccountState candidate = investment::store::account();
     const std::uint64_t soid =
@@ -194,14 +188,14 @@ bool create_character(std::uint8_t characterClass,
         return false;
     }
     const std::int32_t level = starter_level(candidate);
-    CharacterState& character = candidate.characters[candidate.characterCount];
+    const std::size_t slot = candidate.characterCount;
+    CharacterState& character = candidate.characters[slot];
     character = {};
     character.soid = soid;
     character.race = static_cast<CharacterRace>(race);
     character.gender = static_cast<CharacterGender>(gender);
     character.characterClass = static_cast<CharacterClass>(characterClass);
     character.appearanceHeader = appearanceHeader;
-    character.appearanceHeaderValid = true;
     if (!investment::store::read_starter_character(character)) {
         report_refusal("create_character", "starter_character");
         return false;
@@ -212,7 +206,10 @@ bool create_character(std::uint8_t characterClass,
         report_refusal("create_character", "starter_set");
         return false;
     }
-    if (!investment::store::write_account(candidate)) {
+    // Both writes share one save transaction, so a refused one leaves neither.
+    investment::store::Transaction transaction;
+    if (!transaction.ready() || !investment::store::write_account(candidate)
+        || !investment::store::seed_character_unlocks(slot) || !transaction.commit()) {
         report_refusal("create_character", "commit");
         return false;
     }
@@ -229,11 +226,13 @@ bool create_character(std::uint8_t characterClass,
 
 /**
  * Removes one character, its items and its slot-keyed rows, and saves the account.
- * Survivors keep their ids and move down one slot. The selection never moves.
+ * Survivors keep their ids and move down one slot. Deleting the selection leaves none selected.
  * @param characterSoid Id of the character to remove.
+ * @param selectionMoved Set when the removed character was the selected one.
  * @return False when no character has that id or the save refuses the change.
  */
-bool delete_character(std::uint64_t characterSoid) noexcept {
+bool delete_character(std::uint64_t characterSoid, bool& selectionMoved) noexcept {
+    selectionMoved = false;
     const std::lock_guard lock(investment::store::g_mutex);
     AccountState candidate = investment::store::account();
     const auto begin = candidate.characters.begin();
@@ -246,6 +245,8 @@ bool delete_character(std::uint64_t characterSoid) noexcept {
         return false;
     }
     const auto slot = static_cast<std::size_t>(found - begin);
+    const bool wasSelected = found->selected;
+    // Each survivor takes its own selection flag down a slot; only a pick selects.
     std::move(found + 1, end, found);
     --candidate.characterCount;
     candidate.characters[candidate.characterCount] = {};
@@ -256,11 +257,13 @@ bool delete_character(std::uint64_t characterSoid) noexcept {
         report_refusal("delete_character", "commit");
         return false;
     }
+    selectionMoved = wasSelected;
     core::log::writef(core::log::Channel::state,
                       core::log::Level::info,
-                      "ev=delete_character result=ok soid=0x%016llX chars=%zu",
+                      "ev=delete_character result=ok soid=0x%016llX chars=%zu selected=%d",
                       static_cast<unsigned long long>(characterSoid),
-                      candidate.characterCount);
+                      candidate.characterCount,
+                      wasSelected ? 1 : 0);
     return true;
 }
 

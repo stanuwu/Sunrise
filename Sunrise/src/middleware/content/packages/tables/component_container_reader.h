@@ -5,34 +5,43 @@
 #include <cstdint>
 #include <span>
 
+#include "../schema/generated/tag_classes_80808a.h"
+#include "../schema/generated/tag_classes_80808b.h"
+#include "../schema/generated/tag_classes_808091.h"
+#include "../schema/generated/tag_classes_808099.h"
+#include "authored_placement_reader.h"
 #include "definition_index_table.h"
 
 namespace sunrise::middleware::content::packages::tables {
 
-/** Tag class of a component, which wraps one resource so a container can hold it. */
-inline constexpr std::uint32_t kComponentClass = 0x808099D6U;
-/** A component names the resource it wraps at this offset. */
-inline constexpr std::size_t kComponentResourceOffset = 216;
+/** A component wraps a spawn set through the payload of its first placement. */
+inline constexpr std::uint32_t kComponentSpawnPayloadClass =
+    schema::generated::SSpawnPointsPayload::kClass;
+inline constexpr std::size_t kComponentSpawnSetOffset =
+    offsetof(schema::generated::SSpawnPointsPayload, spawnPoints);
 /** Tag class of the container that groups components. */
-inline constexpr std::uint32_t kContainerClass = 0x80808A54U;
+inline constexpr std::uint32_t kContainerClass = schema::generated::SMapContainer::kClass;
 /** A container holds its bubble mask at this offset. */
-inline constexpr std::size_t kContainerBubbleMaskOffset = 8;
-/** The mask is 32 bytes, one bit per map-global bubble index. */
-inline constexpr std::size_t kContainerBubbleMaskBytes = 32;
+inline constexpr std::size_t kContainerBubbleMaskOffset =
+    offsetof(schema::generated::SMapContainer, bubbleMask);
+/** One mask bit per map-global bubble index. */
+inline constexpr std::size_t kContainerBubbleMaskBytes =
+    sizeof(schema::generated::SMapContainer::bubbleMask);
 /** Bubble indices the mask can name. No installed map declares one above 169. */
 inline constexpr std::size_t kBubbleIndexCapacity = kContainerBubbleMaskBytes * 8;
 /** A container holds its member array descriptor at this offset. */
-inline constexpr std::size_t kContainerMemberDescriptor = 40;
+inline constexpr std::size_t kContainerMemberDescriptor =
+    offsetof(schema::generated::SMapContainer, contents);
 /** Element class of a container's member array. */
-inline constexpr std::uint32_t kContainerMemberClass = 0x80808BB0U;
+inline constexpr std::uint32_t kContainerMemberClass = schema::generated::ContainerMember::kClass;
 /** One member is a bare tag handle. */
-inline constexpr std::size_t kContainerMemberStride = 4;
+inline constexpr std::size_t kContainerMemberStride = sizeof(schema::generated::ContainerMember);
 
 /**
- * Reads the resource one component wraps.
+ * Reads the spawn set one component wraps.
  * @param blob Whole component bytes.
- * @param tag Receives the wrapped resource tag.
- * @return True when the field is inside the blob.
+ * @param tag Receives the wrapped spawn-set tag.
+ * @return True when the first placement carries a spawn payload.
  */
 [[nodiscard]] bool component_resource(std::span<const std::byte> blob, std::uint32_t& tag) noexcept;
 

@@ -12,6 +12,7 @@
 #include "../../../middleware/content/packages/tables/component_container_reader.h"
 #include "../../../middleware/content/packages/tables/spawn_reader.h"
 #include "../../../state/build_data/runtime.h"
+#include "../../../state/build_data/runtime/build_data_invalidation.h"
 #include "spawn_set_catalog_builder.h"
 
 namespace sunrise::client::content::spawn_sets {
@@ -127,6 +128,14 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
     static Storage storage{};
     static std::vector<std::byte> bytes{};
     static std::uint64_t readDeadlineTick{};
+    // A live reload dropped the catalog; the pass starts over from the new packages.
+    static std::uint64_t builtRevision{};
+    if (const auto revision =
+            state::build_data::invalidation::revision(state::build_data::invalidation::kSpawnSets);
+        revision != builtRevision) {
+        builtRevision = revision;
+        reset(storage);
+    }
     if (!storage.collected) {
         reset(storage);
         storage.startedTick = GetTickCount64();
@@ -136,8 +145,11 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
         reader::ScanResult containers{};
         if (!reader::scan_class_entries(source, tables::kSpawnSetClass, &collect, &storage, result)
             || result.matches != storage.entryCount
-            || !reader::scan_class(
-                source, tables::kComponentClass, &collect_component, &storage, components)
+            || !reader::scan_class(source,
+                                   tables::kAuthoredPlacementListClass,
+                                   &collect_component,
+                                   &storage,
+                                   components)
             || !reader::scan_class(
                 source, tables::kContainerClass, &collect_container, &storage, containers)
             || !finish_collection(storage)) {

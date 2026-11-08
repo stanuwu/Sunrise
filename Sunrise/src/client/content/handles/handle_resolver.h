@@ -27,4 +27,20 @@ struct Source {
 [[nodiscard]] bool
 resolve(const Source& source, std::uint32_t handle, std::uintptr_t& address) noexcept;
 
+/** One content tag the client holds in memory. Defrag may move it; resolve again before use. */
+struct Resident {
+    std::uintptr_t address{};
+    /** Bytes the slot owns; at least the package entry's size. */
+    std::uint32_t size{};
+    std::uint32_t classId{};
+};
+
+/**
+ * Reads one package content slot.
+ * @param handle The tag hash, which is its runtime handle.
+ * @param output Receives the slot; zeroed on failure.
+ * @return False when the tag is not loaded, still loading, or not an ordinary entry.
+ */
+[[nodiscard]] bool resident(const Source& source, std::uint32_t handle, Resident& output) noexcept;
+
 } // namespace sunrise::client::content::handles

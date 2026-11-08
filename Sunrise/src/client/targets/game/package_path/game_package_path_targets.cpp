@@ -28,12 +28,13 @@ bool g_resolved{};
 bool derive(std::span<const patterns::ImageRange> image, Targets& output) noexcept {
     namespace signatures = patterns::game::package_path;
     output = {};
-    const std::array<patterns::Pattern, 3> definitions{
+    const std::array<patterns::Pattern, 4> definitions{
         patterns::Pattern{"package_path_set", signatures::kSetPath},
         patterns::Pattern{"package_path_open", signatures::kOpenFile},
         patterns::Pattern{"package_path_resolve", signatures::kResolvePath},
+        patterns::Pattern{"package_schema_callback", signatures::kSchemaCallback},
     };
-    std::array<patterns::Match, 3> matches{};
+    std::array<patterns::Match, 4> matches{};
     if (!patterns::resolve_all(image, definitions, matches)) {
         return false;
     }
@@ -56,6 +57,7 @@ bool derive(std::span<const patterns::ImageRange> image, Targets& output) noexce
     output.openFile = matches[1].address;
     output.objectRootOffset = static_cast<std::uint32_t>(rootOffset);
     output.objectSize = static_cast<std::uint32_t>(flagsOffset + kFlagsAfterRoot);
+    output.schemaCallback = matches[3].address;
     return true;
 }
 

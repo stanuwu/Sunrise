@@ -1,12 +1,121 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <span>
+#include <string_view>
 #include <vector>
 
 #include "../../../middleware/bap/activity_message/auth_schema_catalog.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80802f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80804d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808093.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808095.h"
 #include "activity_sdk_lua_artifacts_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::internal {
+namespace {
+
+namespace generated = middleware::content::packages::schema::generated;
+
+/** One Lua enum entry and the class id it holds. */
+struct ClassEnumEntry {
+    std::string_view name;
+    std::uint32_t value;
+};
+
+// Scripts use these enum names; the values are the package class ids.
+constexpr std::array kCombatantLanePrimarySchema{
+    ClassEnumEntry{"REF_BYTE", generated::C80807f7f::kClass},
+    ClassEnumEntry{"U32", generated::C80807f7e::kClass},
+    ClassEnumEntry{"REAL32", generated::C80807f7d::kClass},
+    ClassEnumEntry{"REF_BYTE_BOOL", generated::C80807f7a::kClass},
+    ClassEnumEntry{"EMPTY", generated::C80807f79::kClass},
+    ClassEnumEntry{"U6", generated::C80807f80::kClass},
+    ClassEnumEntry{"U32_BOOL", generated::C80807f78::kClass},
+    ClassEnumEntry{"U32_REAL32", generated::C80807f81::kClass},
+    ClassEnumEntry{"ALTERNATE_REF_BYTE", generated::C80807f77::kClass},
+    ClassEnumEntry{"TRIPLE_U32_REF_MODES", generated::C80807f76::kClass},
+};
+
+// Scripts use these enum names; the values are the package class ids.
+constexpr std::array kCombatantLaneSecondarySchema{
+    ClassEnumEntry{"EMPTY_A", generated::C80807f8b::kClass},
+    ClassEnumEntry{"EMPTY_B", generated::C80807f8a::kClass},
+    ClassEnumEntry{"QUANTIZED_11", generated::C80807f89::kClass},
+};
+
+// Scripts use these enum names; the values are the package class ids.
+constexpr std::array kAuthoredBehaviorFilterClass{
+    ClassEnumEntry{"ACTIVITY_FLAG", generated::BehaviorConditionLeaf80804D83::kClass},
+    ClassEnumEntry{"ACTOR", generated::BehaviorConditionLeaf80804D82::kClass},
+    ClassEnumEntry{"AIRBORNE", generated::BehaviorConditionLeaf80804D81::kClass},
+    ClassEnumEntry{"CHANNEL", generated::BehaviorChannelComparison::kClass},
+    ClassEnumEntry{"HAS_PARENT", generated::BehaviorConditionLeaf80804D80::kClass},
+    ClassEnumEntry{"DAMAGE_OWNER", generated::BehaviorConditionLeaf80804D7C::kClass},
+    ClassEnumEntry{"DEAD", generated::BehaviorConditionLeaf80804D7B::kClass},
+    ClassEnumEntry{"DISTANCE", generated::BehaviorConditionLeaf80804D7A::kClass},
+    ClassEnumEntry{"FACTION", generated::BehaviorConditionStructure80804D78::kClass},
+    ClassEnumEntry{"FACTION_RELATIONSHIP", generated::BehaviorConditionLeaf80804D76::kClass},
+    ClassEnumEntry{"HOP_ON", generated::BehaviorConditionLeaf80804D75::kClass},
+    ClassEnumEntry{"LINE_OF_SIGHT", generated::BehaviorConditionLeaf80804D74::kClass},
+    ClassEnumEntry{"OBJECT_LABEL", generated::BehaviorConditionStructure80804D73::kClass},
+    ClassEnumEntry{"OBJECT_TYPE", generated::BehaviorConditionLeaf80804D72::kClass},
+    ClassEnumEntry{"PLAYER", generated::BehaviorConditionLeaf80804D71::kClass},
+    ClassEnumEntry{"RESOURCE", generated::C80804d5f::kClass},
+    ClassEnumEntry{"SAME_OBJECT", generated::C80802f95::kClass},
+    ClassEnumEntry{"SCOREBOARD_STAT", generated::BehaviorConditionStructure80804D5E::kClass},
+    ClassEnumEntry{"TEAM_SIDE", generated::C80804d5d::kClass},
+    ClassEnumEntry{"COMPOSITE", generated::BehaviorConditionGroup::kClass},
+    ClassEnumEntry{"EXTERNAL", generated::C8080930f::kClass},
+};
+
+// Scripts use these enum names; the values are the package class ids.
+constexpr std::array kObjectFilterPredicateSchema{
+    ClassEnumEntry{"MODE_U32_A", generated::C80809571::kClass},
+    ClassEnumEntry{"MODE_U32_B", generated::C80809572::kClass},
+    ClassEnumEntry{"MODE_ONLY_A", generated::C80809573::kClass},
+    ClassEnumEntry{"UNREGISTERED_MODE_SLOT_REF", generated::C80809574::kClass},
+    ClassEnumEntry{"MODE_U32_C", generated::C80809575::kClass},
+    ClassEnumEntry{"MODE_FLAG_SLOT_REF", generated::C80809576::kClass},
+    ClassEnumEntry{"MODE_SLOT_REF_A", generated::C80809577::kClass},
+    ClassEnumEntry{"MODE_SLOT_REF_B", generated::C80809578::kClass},
+    ClassEnumEntry{"MODE_SLOT_REF_C", generated::C80809579::kClass},
+    ClassEnumEntry{"MODE_I32", generated::C8080957a::kClass},
+    ClassEnumEntry{"MODE_SLOT_REF_D", generated::C8080957b::kClass},
+    ClassEnumEntry{"MODE_U32_D", generated::C8080957c::kClass},
+    ClassEnumEntry{"MODE_ONLY_B", generated::C8080957d::kClass},
+};
+
+/**
+ * Appends one `sdk.<table> = { ... }` Lua table, then a blank line.
+ * @param table Lua field name under `sdk`.
+ * @param entries Enum entries in emit order.
+ * @param output Receives the table text.
+ * @return False when an entry does not fit the line buffer.
+ */
+[[nodiscard]] bool append_class_enum(std::string_view table,
+                                     std::span<const ClassEnumEntry> entries,
+                                     std::string& output) {
+    output.append("sdk.").append(table).append(" = {\n");
+    std::array<char, 96> line{};
+    for (const ClassEnumEntry& entry : entries) {
+        const int written = std::snprintf(line.data(),
+                                          line.size(),
+                                          "    %.*s = 0x%08X,\n",
+                                          static_cast<int>(entry.name.size()),
+                                          entry.name.data(),
+                                          entry.value);
+        if (written <= 0 || static_cast<std::size_t>(written) >= line.size()) {
+            return false;
+        }
+        output.append(line.data(), static_cast<std::size_t>(written));
+    }
+    output.append("}\n\n");
+    return true;
+}
+
+} // namespace
 
 /** Emits the manifest, the mission API schema, the LuaLS declarations and the behavior module. */
 bool render_contract_files(const Source& source, Bundle& output) noexcept {
@@ -283,68 +392,25 @@ return sdk
 ---@field slot_type integer
 ---@field slot_index integer
 
-sdk.CombatantLanePrimarySchema = {
-    REF_BYTE = 0x80807F7F,
-    U32 = 0x80807F7E,
-    REAL32 = 0x80807F7D,
-    REF_BYTE_BOOL = 0x80807F7A,
-    EMPTY = 0x80807F79,
-    U6 = 0x80807F80,
-    U32_BOOL = 0x80807F78,
-    U32_REAL32 = 0x80807F81,
-    ALTERNATE_REF_BYTE = 0x80807F77,
-    TRIPLE_U32_REF_MODES = 0x80807F76,
-}
-
-sdk.CombatantLaneSecondarySchema = {
-    EMPTY_A = 0x80807F8B,
-    EMPTY_B = 0x80807F8A,
-    QUANTIZED_11 = 0x80807F89,
-}
-
--- Authored behavior-condition classes embedded in package behavior graphs.
-sdk.AuthoredBehaviorFilterClass = {
-    ACTIVITY_FLAG = 0x80804D83,
-    ACTOR = 0x80804D82,
-    AIRBORNE = 0x80804D81,
-    CHANNEL = 0x80804D7D,
-    HAS_PARENT = 0x80804D80,
-    DAMAGE_OWNER = 0x80804D7C,
-    DEAD = 0x80804D7B,
-    DISTANCE = 0x80804D7A,
-    FACTION = 0x80804D78,
-    FACTION_RELATIONSHIP = 0x80804D76,
-    HOP_ON = 0x80804D75,
-    LINE_OF_SIGHT = 0x80804D74,
-    OBJECT_LABEL = 0x80804D73,
-    OBJECT_TYPE = 0x80804D72,
-    PLAYER = 0x80804D71,
-    RESOURCE = 0x80804D5F,
-    SAME_OBJECT = 0x80802F95,
-    SCOREBOARD_STAT = 0x80804D5E,
-    TEAM_SIDE = 0x80804D5D,
-    COMPOSITE = 0x80809310,
-    EXTERNAL = 0x8080930F,
-}
-
--- Compact code-34 Auth predicate schemas. These are a separate runtime registry.
-sdk.ObjectFilterPredicateSchema = {
-    MODE_U32_A = 0x80809571,
-    MODE_U32_B = 0x80809572,
-    MODE_ONLY_A = 0x80809573,
-    UNREGISTERED_MODE_SLOT_REF = 0x80809574,
-    MODE_U32_C = 0x80809575,
-    MODE_FLAG_SLOT_REF = 0x80809576,
-    MODE_SLOT_REF_A = 0x80809577,
-    MODE_SLOT_REF_B = 0x80809578,
-    MODE_SLOT_REF_C = 0x80809579,
-    MODE_I32 = 0x8080957A,
-    MODE_SLOT_REF_D = 0x8080957B,
-    MODE_U32_D = 0x8080957C,
-    MODE_ONLY_B = 0x8080957D,
-}
-
----@class SunriseObjectFilterModeOnly
+)lua");
+        if (!append_class_enum("CombatantLanePrimarySchema", kCombatantLanePrimarySchema, authTypes)
+            || !append_class_enum(
+                "CombatantLaneSecondarySchema", kCombatantLaneSecondarySchema, authTypes)) {
+            return false;
+        }
+        authTypes.append(
+            "-- Authored behavior-condition classes embedded in package behavior graphs.\n");
+        if (!append_class_enum(
+                "AuthoredBehaviorFilterClass", kAuthoredBehaviorFilterClass, authTypes)) {
+            return false;
+        }
+        authTypes.append(
+            "-- Compact code-34 Auth predicate schemas. These are a separate runtime registry.\n");
+        if (!append_class_enum(
+                "ObjectFilterPredicateSchema", kObjectFilterPredicateSchema, authTypes)) {
+            return false;
+        }
+        authTypes.append(R"lua(---@class SunriseObjectFilterModeOnly
 ---@field mode integer
 
 ---@class SunriseObjectFilterModeU32: SunriseObjectFilterModeOnly

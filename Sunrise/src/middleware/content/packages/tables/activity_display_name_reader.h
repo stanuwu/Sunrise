@@ -6,16 +6,22 @@
 #include <span>
 #include <vector>
 
+#include "../schema/generated/tag_classes_80805e.h"
+#include "../schema/generated/tag_classes_80805f.h"
+#include "../schema/generated/tag_classes_80809a.h"
+
 namespace sunrise::middleware::content::packages::tables::activity_display_names {
 
 /** Class of the installed client activity table. */
-inline constexpr std::uint32_t kActivityClientTableClass = 0x80805E0AU;
+inline constexpr std::uint32_t kActivityClientTableClass =
+    schema::generated::ActivityClientTable::kClass;
 /** Class of the installed string-bank index. */
-inline constexpr std::uint32_t kStringBankIndexClass = 0x80805F98U;
+inline constexpr std::uint32_t kStringBankIndexClass = schema::generated::StringBankIndex::kClass;
 /** Per-bank container class. */
-inline constexpr std::uint32_t kStringContainerClass = 0x80809A88U;
+inline constexpr std::uint32_t kStringContainerClass = schema::generated::SLocalizedStrings::kClass;
 /** Per-language string-data class. */
-inline constexpr std::uint32_t kLanguageDataClass = 0x80809A8AU;
+inline constexpr std::uint32_t kLanguageDataClass =
+    schema::generated::SLocalizedStringsData::kClass;
 /** Generated SDK display text must fit this storage including its terminator. */
 inline constexpr std::size_t kDisplayNameCapacity = 256;
 

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -15,12 +16,16 @@
 #include <utility>
 #include <vector>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808063.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80808d.h"
 #include "../../../state/activity_sdk/runtime.h"
 #include "activity_sdk_activity_enrichment_inventory.h"
 #include "activity_sdk_actor_ability_inventory.h"
 #include "activity_sdk_actor_rsat_inventory.h"
 #include "activity_sdk_authored_scene_inventory.h"
 #include "activity_sdk_behavior_inventory.h"
+#include "activity_sdk_dialogue_group_index.h"
 #include "activity_sdk_lua_artifacts.h"
 #include "activity_sdk_native_pack_internal.h"
 #include "activity_sdk_pack_composer.h"
@@ -60,6 +65,7 @@ bool read_localized_tag(void* opaque,
 namespace {
 
 namespace format = state::activity_sdk::format;
+namespace generated = middleware::content::packages::schema::generated;
 namespace activity_enrichment = activity_enrichment_inventory;
 namespace actor_rsat = actor_rsat_inventory;
 namespace authored_scene = authored_scene_inventory;
@@ -70,6 +76,7 @@ namespace policy_adapter = policy_input_adapter;
 namespace policy = policy_inventory;
 namespace squads = squad_inventory;
 namespace topology_enrichment = sdk_generation::topology_enrichment;
+namespace dialogue_groups = dialogue_group_index;
 
 static_assert(sizeof(std::size_t) <= sizeof(std::uint64_t));
 
@@ -233,13 +240,104 @@ bool attach_unresourced_scenes(const topology_inventory::Snapshot& topology,
             return false;
         }
         topology_enrichment::Slot& enriched = enrichment.slots[slotRow];
-        if (enriched.componentClass != format::kAuthoredSceneComponentClass
+        if (enriched.componentClass != generated::AuthoredSceneComponentType43::kClass
             || (enriched.flags & format::kSlotSchemaJoinExact) == 0) {
             return false;
         }
         enriched.flags |= format::kSlotAuthoredSceneUnresourced;
     }
     return true;
+}
+
+/** Resolves the native type-53 authored list and attaches its exact bound to the SDK slot row. */
+bool attach_dialogue_cue_counts(const topology_inventory::Snapshot& topology,
+                                const squads::Facts& facts,
+                                PackageContext& packageContext,
+                                topology_enrichment::Snapshot& enrichment) {
+    if (topology.slots.size() != enrichment.slots.size()) {
+        return false;
+    }
+    std::unordered_map<std::uint32_t, CachedTag> cache{};
+    auto package = [&](std::uint32_t tag, const CachedTag*& output) -> bool {
+        output = nullptr;
+        const auto found = cache.find(tag);
+        if (found != cache.end()) {
+            output = &found->second;
+            return true;
+        }
+        CachedTag row{};
+        if (tag == 0 || tag == format::kAbsentIndex
+            || !read_tag(&packageContext, tag, row.bytes, row.classId)) {
+            return false;
+        }
+        const auto [inserted, accepted] = cache.emplace(tag, std::move(row));
+        if (!accepted) {
+            return false;
+        }
+        output = &inserted->second;
+        return true;
+    };
+
+    try {
+        cache.reserve(facts.descriptors.size());
+        for (std::uint32_t slotRow = 0; slotRow < topology.slots.size(); ++slotRow) {
+            if (topology.slots[slotRow].slotType != format::kDialogueSlotType) {
+                continue;
+            }
+            topology_enrichment::Slot& enriched = enrichment.slots[slotRow];
+            if (enriched.componentClass != generated::DialogueComponent::kClass
+                || enriched.authSchema != generated::C80804f77::kClass
+                || (enriched.flags & format::kSlotSchemaJoinExact) == 0) {
+                continue;
+            }
+            std::uint64_t agreedCount = 0;
+            std::vector<dialogue_groups::Definition> agreedDefinitions{};
+            bool sawDescriptor = false;
+            bool resolved = true;
+            for (const squads::DescriptorFact& descriptor : facts.descriptors) {
+                if (descriptor.slotIndex != slotRow) {
+                    continue;
+                }
+                sawDescriptor = true;
+                const CachedTag* config = nullptr;
+                if (!package(descriptor.configTag, config) || config == nullptr) {
+                    resolved = false;
+                    break;
+                }
+                const std::size_t listField =
+                    static_cast<std::size_t>(descriptor.descriptorOffset)
+                    + offsetof(generated::DialogueSlotDefinitionType53, authoredList);
+                std::uint32_t listTag = 0;
+                if (!read_value(std::span(config->bytes), listField, listTag) || listTag == 0
+                    || listTag == format::kAbsentIndex) {
+                    resolved = false;
+                    break;
+                }
+                const CachedTag* authored = nullptr;
+                std::vector<dialogue_groups::Definition> definitions{};
+                if (!package(listTag, authored) || authored == nullptr
+                    || authored->classId != generated::DialogueAuthoredList::kClass
+                    || !dialogue_groups::definitions(authored->bytes, definitions)
+                    || definitions.empty()
+                    || (agreedCount != 0 && agreedDefinitions != definitions)) {
+                    resolved = false;
+                    break;
+                }
+                agreedCount = definitions.size();
+                agreedDefinitions = std::move(definitions);
+            }
+            if (cancelled(packageContext.cancel, packageContext.cancelContext)) {
+                return false;
+            }
+            if (resolved && sawDescriptor && agreedCount != 0) {
+                enriched.dialogueCueCount = static_cast<std::uint32_t>(agreedCount);
+                enriched.flags |= format::kSlotDialogueCuesExact;
+            }
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 /** Returns the stable log token for each pipeline result. */

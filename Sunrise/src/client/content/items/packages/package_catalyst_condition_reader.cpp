@@ -79,7 +79,7 @@ void read_catalyst_completion_condition(std::span<const std::byte> definition,
             std::memcpy(
                 reference.data(), definition.data() + expression.dataOffset, sizeof reference);
             if (reference[0] < catalysts::kUnavailableObjectiveIndex
-                && reference[1] == tables::kObjectiveReferenceRowClass) {
+                && reference[1] == tables::kPlugBlockClass) {
                 const auto objective = static_cast<std::uint16_t>(reference[0]);
                 if (output.objectiveDefinitionIndex == catalysts::kUnavailableObjectiveIndex) {
                     output.objectiveDefinitionIndex = objective;
@@ -96,37 +96,45 @@ void read_catalyst_completion_condition(std::span<const std::byte> definition,
                                       / tables::kUnlockInstructionStride) {
             continue;
         }
-        for (std::size_t token = 0; token < expression.count; ++token) {
-            std::array<std::uint32_t, 2> current{};
-            std::memcpy(current.data(),
+        // The count check above keeps every row this reads inside the blob.
+        const auto word = [&](std::size_t row, std::size_t field) noexcept {
+            std::uint32_t value = 0;
+            std::memcpy(&value,
                         definition.data() + expression.dataOffset
-                            + token * tables::kUnlockInstructionStride,
-                        sizeof current);
-            if (current[0] == tables::kUnlockReadFlagOpcode
-                && current[1] < state::unlocks::kUnlockFlagCapacity
-                && !append_flag(output.completion, static_cast<std::uint16_t>(current[1]))) {
+                            + row * tables::kUnlockInstructionStride + field,
+                        sizeof value);
+            return value;
+        };
+        const auto opcode = [&](std::size_t row) noexcept {
+            return word(row, tables::kUnlockInstructionOpcodeOffset);
+        };
+        const auto operand = [&](std::size_t row) noexcept {
+            return word(row, tables::kUnlockInstructionOperandOffset);
+        };
+        for (std::size_t token = 0; token < expression.count; ++token) {
+            if (opcode(token) == tables::kUnlockReadFlagOpcode
+                && operand(token) < state::unlocks::kUnlockFlagCapacity
+                && !append_flag(output.completion, static_cast<std::uint16_t>(operand(token)))) {
                 mark_ambiguous(output);
                 return;
             }
-            if (current[0] != tables::kUnlockReadValueOpcode
+            if (opcode(token) != tables::kUnlockReadValueOpcode
                 || token + kValueExpressionTokenCount > expression.count) {
                 continue;
             }
-            std::array<std::uint32_t, kValueExpressionTokenCount * 2> tokens{};
-            std::memcpy(tokens.data(),
-                        definition.data() + expression.dataOffset
-                            + token * tables::kUnlockInstructionStride,
-                        sizeof tokens);
-            if (tokens[2] != tables::kUnlockLiteralOpcode
-                || tokens[4] != tables::kUnlockGreaterEqualOpcode || tokens[5] != UINT32_MAX
-                || tokens[1] >= catalysts::kUnavailableCompletionValueIndex || tokens[3] == 0
-                || tokens[3]
+            const auto slot = operand(token);
+            const auto minimum = operand(token + 1);
+            if (opcode(token + 1) != tables::kUnlockLiteralOpcode
+                || opcode(token + 2) != tables::kUnlockGreaterEqualOpcode
+                || operand(token + 2) != UINT32_MAX
+                || slot >= catalysts::kUnavailableCompletionValueIndex || minimum == 0
+                || minimum
                        > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
                 continue;
             }
             if (!upsert_value(output.completion,
-                              static_cast<std::uint16_t>(tokens[1]),
-                              static_cast<std::int32_t>(tokens[3]))) {
+                              static_cast<std::uint16_t>(slot),
+                              static_cast<std::int32_t>(minimum))) {
                 mark_ambiguous(output);
                 return;
             }

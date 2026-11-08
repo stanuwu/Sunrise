@@ -26,4 +26,13 @@ read_current_process(void* context, std::uintptr_t address, std::span<std::byte>
 [[nodiscard]] bool
 copy_current_process(void* context, std::uintptr_t address, std::span<std::byte> output) noexcept;
 
+/**
+ * Writes one range of this process in place under a fault guard.
+ * @param address Destination address.
+ * @param bytes Bytes to write.
+ * @return False when the address is null or the write faults; part of the range may be written.
+ */
+[[nodiscard]] bool write_current_process(std::uintptr_t address,
+                                         std::span<const std::byte> bytes) noexcept;
+
 } // namespace sunrise::client::memory

@@ -283,20 +283,13 @@ void draw_name(const catalog::Snapshot& snapshot, std::uint32_t row) noexcept {
     return g_filter.PassFilter(identity.data());
 }
 
-[[nodiscard]] bool scope_matches(const catalog::Object& object) noexcept {
-    // Registry descriptor values the scope combo selects, in its entry order.
-    constexpr std::array<std::uint16_t, 4> descriptors{0, 8, 24, 40};
-    return g_scopeFilter <= 0 || g_scopeFilter >= static_cast<int>(descriptors.size())
-           || object.registryDescriptor == descriptors[static_cast<std::size_t>(g_scopeFilter)];
-}
-
 [[nodiscard]] bool structural_filter_matches(const catalog::Snapshot& snapshot,
                                              const catalog::Object& object) noexcept {
     const catalog::State& state = snapshot.states[object.stateRow];
     const catalog::Bubble& bubble = snapshot.bubbles[object.bubbleRow];
     return (g_bubbleFilter < 0 || bubble.index == static_cast<std::uint32_t>(g_bubbleFilter))
            && (g_stateFilter < 0 || state.index == static_cast<std::uint32_t>(g_stateFilter))
-           && scope_matches(object);
+           && labels::scope_matches(object.registryDescriptor, g_scopeFilter);
 }
 
 /** Rebuilds filtered row indices as one commit and preserves the old view on allocation failure. */

@@ -160,19 +160,19 @@ void report_shard_diagnostics(const Scenario& scenario,
         report_shard_diagnostics(scenario, *snapshot);
         return false;
     }
-    generated::PreparedShard prepared{};
-    if (!generated::prepare(work.sourceFingerprint, *snapshot, prepared)) {
+    generated_world::PreparedShard prepared{};
+    if (!generated_world::prepare(work.sourceFingerprint, *snapshot, prepared)) {
         detail = "shard_prepare_failed";
         return false;
     }
-    const generated::Digest payload = prepared.payload_sha256();
+    const generated_world::Digest payload = prepared.payload_sha256();
     std::wstring finalPath;
-    generated::Digest written{};
+    generated_world::Digest written{};
     if (!shard_path(work.scenarioDirectory, scenario.tag, payload, finalPath)) {
         detail = "shard_path_failed";
         return false;
     }
-    if (!generated::publish(finalPath.c_str(), std::move(prepared), written)) {
+    if (!generated_world::publish(finalPath.c_str(), std::move(prepared), written)) {
         detail = "shard_write_failed";
         return false;
     }
@@ -200,9 +200,9 @@ materialize_cached_record(const Work& work,
         return true;
     }
     std::wstring finalPath;
-    generated::Digest written{};
+    generated_world::Digest written{};
     if (!shard_path(work.scenarioDirectory, scenario.tag, record.shardPayloadSha256, finalPath)
-        || !generated::write(finalPath.c_str(), work.sourceFingerprint, *cached, written)) {
+        || !generated_world::write(finalPath.c_str(), work.sourceFingerprint, *cached, written)) {
         return false;
     }
     output = cached;

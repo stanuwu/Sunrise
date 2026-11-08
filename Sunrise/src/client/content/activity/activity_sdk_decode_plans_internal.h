@@ -10,37 +10,45 @@
 #include <span>
 #include <vector>
 
+#include "../../../middleware/content/packages/reader/layout.h"
 #include "../../../middleware/content/packages/reader/reader.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808000.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808001.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808088.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809b.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809c.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809e.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80809f.h"
 #include "../../../middleware/crypto/sha256.h"
 #include "activity_sdk_decode_plans.h"
 
 namespace sunrise::client::content::activity::sdk_generation::decode_plans::internal {
 
 namespace reader = middleware::content::packages::reader;
+namespace generated = middleware::content::packages::schema::generated;
 using Digest = middleware::crypto::sha256::Digest;
 
 /** Absent handle or index in package and reflection data. */
 inline constexpr std::uint32_t kAbsent = 0xFFFFFFFFU;
 /** Reflection record block chain marker and the generic-argument marker before it. */
-inline constexpr std::uint32_t kReflectionMarker = 0x80800050U;
-inline constexpr std::uint32_t kGenericMarker = 0x8080001DU;
+inline constexpr std::uint32_t kReflectionMarker = generated::C80800050::kClass;
+inline constexpr std::uint32_t kGenericMarker = generated::C8080001d::kClass;
 /** Reflection block classes: field codec, property list, method list, empty tail. */
-inline constexpr std::uint32_t kCodecBlock = 0x8080010AU;
-inline constexpr std::uint32_t kPropertyBlock = 0x8080012FU;
-inline constexpr std::uint32_t kMethodBlock = 0x8080010DU;
-inline constexpr std::uint32_t kTailBlock = 0x8080004CU;
+inline constexpr std::uint32_t kCodecBlock = generated::ReflectionCodecBlock::kClass;
+inline constexpr std::uint32_t kPropertyBlock = generated::ReflectionPropertyBlock::kClass;
+inline constexpr std::uint32_t kMethodBlock = generated::C8080010d::kClass;
+inline constexpr std::uint32_t kTailBlock = generated::C8080004c::kClass;
 /** Generic container kinds a property may declare. */
-inline constexpr std::uint32_t kGenericSimple = 0x80809C37U;
-inline constexpr std::uint32_t kGenericDynamicA = 0x80809FBAU;
-inline constexpr std::uint32_t kGenericDynamicB = 0x80809C38U;
-inline constexpr std::uint32_t kDynamicDeclared = 0x80809FBBU;
-inline constexpr std::uint32_t kGenericInline = 0x80809FFCU;
-inline constexpr std::uint32_t kGenericCounted = 0x80809ED8U;
-/** Package classes: the array marker, a selection child row, metadata, and a selection. */
-inline constexpr std::uint32_t kArrayMarker = 0x80809FBDU;
-inline constexpr std::uint32_t kSelectionChildClass = 0x80808852U;
-inline constexpr std::uint32_t kPackageMetadataClass = 0x80800000U;
-inline constexpr std::uint32_t kSelectionClass = 0x80809BBBU;
+inline constexpr std::uint32_t kGenericSimple = generated::C80809c37::kClass;
+inline constexpr std::uint32_t kGenericDynamicA = generated::C80809fba::kClass;
+inline constexpr std::uint32_t kGenericDynamicB = generated::C80809c38::kClass;
+inline constexpr std::uint32_t kDynamicDeclared = generated::C80809fbb::kClass;
+inline constexpr std::uint32_t kGenericInline = generated::C80809ffc::kClass;
+inline constexpr std::uint32_t kGenericCounted = generated::C80809ed8::kClass;
+/** Package classes: a selection child row, metadata, and a selection. */
+inline constexpr std::uint32_t kSelectionChildClass = generated::RsatSchemaField::kClass;
+inline constexpr std::uint32_t kPackageMetadataClass = generated::PackageReflectionMetadata::kClass;
+inline constexpr std::uint32_t kSelectionClass = generated::SReplicationSchema::kClass;
 /** Metadata kinds that select a plan branch: plain value and generic container. */
 inline constexpr std::uint8_t kKindValue = 1;
 inline constexpr std::uint8_t kKindContainer = 11;
@@ -54,7 +62,11 @@ inline constexpr std::uint32_t kMaximumRepeat = 16384;
 inline constexpr std::uint32_t kMaximumSectionCount = 65536;
 inline constexpr std::uint64_t kMaximumArrayCount = 0x100000U;
 /** Stride of one codec field descriptor. */
-inline constexpr std::size_t kFieldRowSize = 40;
+inline constexpr std::size_t kFieldRowSize = sizeof(generated::C80800109);
+/** An executable block is a leading word and the block class word, then the package body. */
+inline constexpr std::uint64_t kNativeBlockClassAt = sizeof(std::uint32_t);
+inline constexpr std::uint64_t kNativeBlockBodyAt =
+    kNativeBlockClassAt + reader::layout::kClassWordSize;
 /** Candidate offsets of the block chain marker inside a reflection record. */
 inline constexpr std::array<std::uint32_t, 4> kMarkerOffsets{0x58, 0x60, 0x68, 0x70};
 
@@ -178,10 +190,15 @@ public:
     [[nodiscard]] std::uint64_t primitive_sizes() const noexcept {
         return primitiveSizes_;
     }
+    /** Base the slot pointers are relative to: the module base when live, else the header's. */
+    [[nodiscard]] std::uint64_t image_base() const noexcept {
+        return imageBase_;
+    }
     [[nodiscard]] bool u8(std::uint64_t address, std::uint8_t& value) const noexcept;
     [[nodiscard]] bool u16(std::uint64_t address, std::uint16_t& value) const noexcept;
     [[nodiscard]] bool u32(std::uint64_t address, std::uint32_t& value) const noexcept;
     [[nodiscard]] bool i32(std::uint64_t address, std::int32_t& value) const noexcept;
+    [[nodiscard]] bool i64(std::uint64_t address, std::int64_t& value) const noexcept;
     [[nodiscard]] bool f32(std::uint64_t address, float& value) const noexcept;
 
 private:

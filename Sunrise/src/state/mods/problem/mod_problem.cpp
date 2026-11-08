@@ -102,6 +102,8 @@ const char* reason_name(Reason reason) noexcept {
         return "merge_failed";
     case Reason::assetOverride:
         return "asset_override";
+    case Reason::packageRemapped:
+        return "package_remapped";
     }
     return "unknown";
 }

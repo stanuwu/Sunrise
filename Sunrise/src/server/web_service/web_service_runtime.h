@@ -27,6 +27,10 @@ struct Outcome {
     /** An opcode-504 pick was recorded and its Family-4 update still has to follow. */
     bool hasSelectedCharacter{};
     std::uint64_t selectedCharacterSoid{};
+    /** A pick or a delete changed the selection, so the family-two Power and emblem moved. */
+    bool selectionMoved{};
+    /** The pick earned perks into the account flag bank, which the account image must carry. */
+    bool selectionEarnedPerks{};
     /** An opcode-501 create or 502 delete saved a roster change; the account resync follows. */
     bool hasRosterChange{};
     /** The character an opcode-501 create added, which its reply names. */

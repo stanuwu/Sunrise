@@ -14,13 +14,6 @@ namespace {
 namespace build_details = state::build_data::items::details;
 namespace build_items = state::build_data::items;
 
-/**
- * Set when a derivation reports the installed executable is not the one the catalyst facts pin.
- * A build identity cannot change while the process runs, so the catalog will never derive here.
- * TODO: replace with a build_data predicate for catalyst build support; nothing exports one yet.
- */
-bool g_catalystsUnsupported = false;
-
 /** @return True when one extracted detail can join the currently published numeric domains. */
 [[nodiscard]] bool publishable_detail(const build_details::Definition& detail) noexcept {
     const std::size_t itemCount = state::build_data::item_definition_count();
@@ -44,7 +37,8 @@ bool g_catalystsUnsupported = false;
 
 /** @return True when the catalyst catalog is published or cannot exist on this executable. */
 bool exotic_catalysts_settled() noexcept {
-    return state::build_data::exotic_catalysts_ready() || g_catalystsUnsupported;
+    return state::build_data::exotic_catalysts_ready()
+           || state::build_data::exotic_catalysts_unsupported();
 }
 
 /**
@@ -279,10 +273,7 @@ bool build_item_rows(const reader::Source& source,
             report_catalyst_catalog(catalystReport, catalystBuilt);
             // An unsupported executable settles the domain: retrying repeats the whole item walk
             // on every refresh slice and reaches the same verdict.
-            g_catalystsUnsupported =
-                catalystReport.error
-                == state::build_data::items::catalysts::Error::unsupportedBuild;
-            published = catalystBuilt || g_catalystsUnsupported;
+            published = catalystBuilt || state::build_data::exotic_catalysts_unsupported();
         }
         if (published && needSocketPlugs) {
             const std::size_t rules = socketPlugBuild.rule_count();

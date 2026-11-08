@@ -5,12 +5,15 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80807e.h"
 #include "sense_update.h"
 
 namespace sunrise::middleware::bap::activity_message::squad_sense {
 
+namespace generated = middleware::content::packages::schema::generated;
+
 /** Native squad Sense schema and its fixed array capacities. */
-inline constexpr std::uint32_t kSchema = 0x80807ECCU;
+inline constexpr std::uint32_t kSchema = generated::C80807ecc::kClass;
 inline constexpr std::size_t kScalarCount = 6, kCountCapacity = 8, kRealCount = 24;
 /** Squad ClientRefs use type one; the largest full Sense body occupies 606 bits. */
 inline constexpr std::uint8_t kSlotType = 1;

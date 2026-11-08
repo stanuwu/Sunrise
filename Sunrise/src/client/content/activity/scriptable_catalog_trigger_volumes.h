@@ -16,7 +16,7 @@ struct TriggerVolumeInput final {
 
 using TriggerVolumeCancelCheck = bool (*)() noexcept;
 
-/** Appends exact 0x808099C8 slot-owned trigger volumes from reached package configs. */
+/** Appends the slot-owned trigger volumes of every reached package config. */
 [[nodiscard]] bool
 append_trigger_volumes(const middleware::content::packages::reader::Source& source,
                        middleware::content::packages::reader::Scratch& scratch,

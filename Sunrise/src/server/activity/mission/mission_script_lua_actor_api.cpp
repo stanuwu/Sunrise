@@ -68,7 +68,7 @@ constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
     SlotDefinition actor{}, path{};
     if (!current_slot(state, *handle, actor) || !exact_combatant_slot(actor)
         || !current_slot(state, reference, path) || path.slotType != combatant::kPathSlotType
-        || path.componentClass != combatant::kPathComponentClass
+        || path.componentClass != combatant::kAbilityPointComponentClass
         || (path.flags & format::kSlotSchemaJoinExact) == 0 || actor.objectTag != path.objectTag
         || actor.registryKey != path.registryKey
         || path.slotIndex > auth_fields::kMaximumClientRefIndex) {

@@ -211,7 +211,9 @@ bool complete_profile_setup() noexcept {
 }
 
 /** Moves the selection to one authored character. */
-bool set_selected_character(std::uint64_t characterSoid) noexcept {
+bool set_selected_character(std::uint64_t characterSoid, bool& moved, bool& perksEarned) noexcept {
+    moved = false;
+    perksEarned = false;
     if (characterSoid == 0) {
         return false;
     }
@@ -228,6 +230,8 @@ bool set_selected_character(std::uint64_t characterSoid) noexcept {
         return false;
     }
 
+    // Selection is exclusive, so only a pick of an unselected character moves it.
+    const bool changes = !candidate.characters[picked].selected;
     for (CharacterState& character : candidate.characters) {
         character.selected = false;
     }
@@ -241,7 +245,8 @@ bool set_selected_character(std::uint64_t characterSoid) noexcept {
         investment::store::g_session.selected[index] = candidate.characters[index].selected;
     }
     investment::store::g_mutex.unlock();
-    (void)seed_seasonal_progression();
+    moved = changes;
+    (void)seed_seasonal_progression(perksEarned);
     return true;
 }
 

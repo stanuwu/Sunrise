@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "../internal.h"
+#include "../records/validation.h"
 #include "cache_payload_reader.h"
 
 namespace sunrise::state::build_data::cache {
@@ -16,51 +17,6 @@ namespace {
            && counts.socketPlugPools != 0 && counts.inventoryBuckets != 0
            && counts.socketEntryLists != 0 && counts.progressions != 0 && counts.scenarios != 0
            && counts.rosterGroups != 0 && counts.positionProfiles != 0 && counts.objectTypes != 0;
-}
-
-/** @return True when every count fits the output storage. */
-[[nodiscard]] bool counts_fit(const records::DomainCounts& counts,
-                              records::MutableDomains output) noexcept {
-    return counts.named <= output.named.size() && counts.items <= output.items.size()
-           && counts.collectibles <= output.collectibles.size()
-           && counts.materialRequirementSets <= output.materialRequirementSets.size()
-           && counts.itemDetails <= output.itemDetails.size()
-           && counts.socketPlugRules <= output.socketPlugRules.size()
-           && counts.socketPlugPools <= output.socketPlugPools.size()
-           && counts.socketPlugMembers <= output.socketPlugMembers.size()
-           && counts.exoticCatalysts <= output.exoticCatalysts.size()
-           && counts.inventoryBuckets <= output.inventoryBuckets.size()
-           && counts.socketEntryLists <= output.socketEntryLists.size()
-           && counts.socketEntryTables <= output.socketEntryTables.size()
-           && counts.abilityBuckets <= output.abilityBuckets.size()
-           && counts.progressions <= output.progressions.size()
-           && counts.records <= output.records.size() && counts.nodes <= output.nodes.size()
-           && counts.sobjects <= output.sobjects.size()
-           && counts.scenarios <= output.scenarios.size()
-           && counts.rosterGroups <= output.rosterGroups.size()
-           && counts.spawnStems <= output.spawnStems.size()
-           && counts.spawnNameHashes <= output.spawnNameHashes.size()
-           && counts.spawnPoints <= output.spawnPoints.size()
-           && counts.hashNames <= output.hashNames.size()
-           && counts.vendorIndex <= output.vendorIndex.size()
-           && counts.vendorDefinitions <= output.vendorDefinitions.size()
-           && counts.vendorSaleRows <= output.vendorSaleRows.size()
-           && counts.vendorInstalledRows <= output.vendorInstalledRows.size()
-           && counts.vendorTransferRules <= output.vendorTransferRules.size()
-           && counts.positionProfiles <= output.positionProfiles.size()
-           && counts.objectTypes <= output.objectTypes.size()
-           && counts.recordObjectives <= output.recordObjectives.size()
-           && counts.recordIntervals <= output.recordIntervals.size()
-           && counts.recordRewards <= output.recordRewards.size()
-           && counts.progressionSteps <= output.progressionSteps.size()
-           && counts.seasonPassRewards <= output.seasonPassRewards.size()
-           && counts.bounties <= output.bounties.size()
-           && counts.rewardPools <= output.rewardPools.size()
-           && counts.rewardEntries <= output.rewardEntries.size()
-           && counts.rewardItems <= output.rewardItems.size()
-           && counts.rewardInstructions <= output.rewardInstructions.size()
-           && counts.rewardModifiers <= output.rewardModifiers.size()
-           && counts.rewardSockets <= output.rewardSockets.size();
 }
 
 /** @return The header's row counts, as platform sizes. */
@@ -108,6 +64,7 @@ namespace {
         header.rewardInstructionCount,
         header.rewardModifierCount,
         header.rewardSocketCount,
+        header.starterSetCount,
     };
 }
 
@@ -154,6 +111,30 @@ bool current_build_identity(std::uint64_t configuredEquipmentHash,
     identity.imageSize = nt.OptionalHeader.SizeOfImage;
     identity.configuredEquipmentHash = configuredEquipmentHash;
     return true;
+}
+
+/** Reads only the header; load repeats every check before it trusts the count. */
+void read_named_count(const wchar_t* path, std::size_t& count) noexcept {
+    count = 0;
+    if (path == nullptr) {
+        return;
+    }
+    const HANDLE file = CreateFileW(path,
+                                    GENERIC_READ,
+                                    FILE_SHARE_READ,
+                                    nullptr,
+                                    OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    records::Header header{};
+    if (read::read_value(file, header) && header.magic == records::kCacheMagic
+        && header.version == records::kCacheFormatVersion) {
+        count = header.namedCount;
+    }
+    (void)CloseHandle(file);
 }
 
 /** Loads every build-bound domain and commits the counts only after the file closes. */
@@ -210,7 +191,8 @@ LoadStatus load(const wchar_t* path,
     const records::DomainCounts pendingCounts = counts_of(header);
     std::uint64_t expectedSize = 0;
     std::uint64_t checksum = 0;
-    bool valid = required_domains_present(pendingCounts) && counts_fit(pendingCounts, output)
+    bool valid = required_domains_present(pendingCounts)
+                 && records::counts_fit(pendingCounts, output)
                  && read::expected_size(pendingCounts, expectedSize)
                  && static_cast<std::uint64_t>(actualSize.QuadPart) == expectedSize
                  && read::read_payload(file,

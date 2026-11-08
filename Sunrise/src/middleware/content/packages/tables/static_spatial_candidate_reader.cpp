@@ -1,25 +1,35 @@
 #include "static_spatial_candidate_reader.h"
 
+#include <cstddef>
 #include <cstring>
 
+#include "../schema/generated/tag_classes_808071.h"
+#include "../schema/generated/tag_classes_808096.h"
 #include "internal.h"
 
 namespace sunrise::middleware::content::packages::tables {
 namespace {
 
-/** Reads one vec4 without imposing package-byte alignment. */
-[[nodiscard]] bool read_vector(std::span<const std::byte> blob,
-                               std::size_t offset,
-                               std::array<float, 4>& output) noexcept {
-    output = {};
-    for (std::size_t lane = 0; lane < output.size(); ++lane) {
-        if (!read(blob, offset + lane * sizeof(float), output[lane])) {
-            output = {};
-            return false;
-        }
-    }
-    return true;
-}
+namespace generated = schema::generated;
+
+/** Range row fields after its leading count. */
+constexpr std::size_t kRangeFirstOffset =
+    offsetof(generated::SStaticMeshInstanceGroup, firstInstance);
+constexpr std::size_t kRangeResourceOffset =
+    offsetof(generated::SStaticMeshInstanceGroup, resourceIndex);
+constexpr std::size_t kRangeTrailingOffset =
+    offsetof(generated::SStaticMeshInstanceGroup, trailing);
+/** Opaque transform vec4 lanes; each spans more than one view field. */
+constexpr std::size_t kTransformSecondOffset =
+    offsetof(generated::SStaticInstanceTransform, position);
+constexpr std::size_t kTransformThirdOffset =
+    offsetof(generated::SStaticInstanceTransform, lodNearScale);
+/** The paired row's second vector. */
+constexpr std::size_t kBoundsSecondOffset = offsetof(generated::SInstanceBoundsRow, maximumW1);
+/** The opaque tail runs from the visibility id to the row end. */
+constexpr std::size_t kBoundsTailOffset = offsetof(generated::SInstanceBoundsRow, visibilityId);
+static_assert(sizeof(StaticSpatialBoundsCandidate::opaque)
+              == sizeof(generated::SInstanceBoundsRow) - kBoundsTailOffset);
 
 /** @return True when a found array names this element class, or holds no entries. */
 [[nodiscard]] bool typed_array(const Array& array, std::uint32_t elementClass) noexcept {
@@ -57,8 +67,8 @@ bool static_spatial_transform_at(std::span<const std::byte> blob,
         || !element_offset(
             transforms.dataOffset, transforms.count, kStaticSpatialTransformStride, index, offset)
         || !read_vector(blob, offset, output.first)
-        || !read_vector(blob, offset + 16, output.second)
-        || !read_vector(blob, offset + 32, output.third)) {
+        || !read_vector(blob, offset + kTransformSecondOffset, output.second)
+        || !read_vector(blob, offset + kTransformThirdOffset, output.third)) {
         output = {};
         return false;
     }
@@ -88,16 +98,17 @@ bool static_spatial_range_at(std::span<const std::byte> blob,
     if (ranges.elementClass != kStaticSpatialRangeClass
         || !element_offset(
             ranges.dataOffset, ranges.count, kStaticSpatialRangeStride, index, offset)
-        || !read(blob, offset, output.count) || !read(blob, offset + 2, output.first)
-        || !read(blob, offset + 4, output.resourceIndex)
-        || !read(blob, offset + 6, output.trailing)) {
+        || !read(blob, offset, output.count)
+        || !read(blob, offset + kRangeFirstOffset, output.first)
+        || !read(blob, offset + kRangeResourceOffset, output.resourceIndex)
+        || !read(blob, offset + kRangeTrailingOffset, output.trailing)) {
         output = {};
         return false;
     }
     return true;
 }
 
-/** Finds the typed row array in one class-0x80809671 record. */
+/** Finds the typed row array in one paired bounds table. */
 bool static_spatial_bounds(std::span<const std::byte> blob, Array& output) noexcept {
     output = {};
     return find_optional_array_at(blob, kStaticSpatialBoundsDescriptor, output)
@@ -115,12 +126,14 @@ bool static_spatial_bounds_at(std::span<const std::byte> blob,
         || !element_offset(
             bounds.dataOffset, bounds.count, kStaticSpatialBoundsStride, index, offset)
         || !read_vector(blob, offset, output.first)
-        || !read_vector(blob, offset + 16, output.second) || offset + 32 > blob.size()
-        || output.opaque.size() > blob.size() - (offset + 32)) {
+        || !read_vector(blob, offset + kBoundsSecondOffset, output.second)
+        || offset + kBoundsTailOffset > blob.size()
+        || output.opaque.size() > blob.size() - (offset + kBoundsTailOffset)) {
         output = {};
         return false;
     }
-    std::memcpy(output.opaque.data(), blob.data() + offset + 32, output.opaque.size());
+    std::memcpy(
+        output.opaque.data(), blob.data() + offset + kBoundsTailOffset, output.opaque.size());
     return true;
 }
 

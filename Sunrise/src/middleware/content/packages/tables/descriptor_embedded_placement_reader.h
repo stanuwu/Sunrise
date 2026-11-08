@@ -5,17 +5,19 @@
 #include <cstdint>
 #include <span>
 
+#include "../schema/generated/tag_classes_808099.h"
+#include "authored_placement_reader.h"
 #include "slot_descriptor_reader.h"
 
 namespace sunrise::middleware::content::packages::tables {
 
-/** Exact on-disk descriptor class and slot type for this family. */
-inline constexpr std::uint32_t kDescriptorEmbeddedPlacementDescriptorClass = 0x80809927U;
+/** Exact handle class the descriptor names, and the slot type for this family. */
+inline constexpr std::uint32_t kDescriptorEmbeddedPlacementDescriptorClass =
+    schema::generated::ObjectSlotHandleType4::kClass;
 inline constexpr std::uint16_t kDescriptorEmbeddedPlacementSlotType = 4;
-/** The descriptor carries a native count/self-relative placed-object array here. */
-inline constexpr std::size_t kDescriptorEmbeddedPlacementArrayOffset = 0x58;
-inline constexpr std::uint32_t kDescriptorEmbeddedPlacementClass = 0x808099D8U;
-inline constexpr std::size_t kDescriptorEmbeddedPlacementStride = 0x90;
+/** The descriptor is the slot's definition object; it carries the placed-object array. */
+inline constexpr std::size_t kDescriptorEmbeddedPlacementArrayOffset =
+    offsetof(schema::generated::ObjectSlotDefinitionType4, embeddedPlacements);
 
 /** One validated native array owned by an exact type-4 slot descriptor. */
 struct DescriptorEmbeddedPlacementArray final {
