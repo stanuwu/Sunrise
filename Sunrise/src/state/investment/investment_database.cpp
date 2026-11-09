@@ -60,6 +60,12 @@ constexpr int kApplicationId = 1397902921;
            && user.step() == SQLITE_ROW && user.column(0, version);
 }
 
+/** SQLite calls this only when a write transaction commits. Returning zero lets it proceed. */
+int count_committed_write(void* /*context*/) noexcept {
+    ++g_session.revision;
+    return 0;
+}
+
 } // namespace
 
 /** SQLite requires this sentinel to copy text borrowed from a caller. */
@@ -247,6 +253,7 @@ bool open(std::string_view path,
     // One short busy wait permits a local database editor to finish its transaction.
     constexpr int kBusyMilliseconds = 5000;
     sqlite3_busy_timeout(g_database, kBusyMilliseconds);
+    sqlite3_commit_hook(g_database, count_committed_write, nullptr);
     bool ready = execute("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;");
     int version = -1;
     {
@@ -373,9 +380,16 @@ bool use_session_copy() noexcept {
         sqlite3_close_v2(memory);
         return false;
     }
+    sqlite3_commit_hook(memory, count_committed_write, nullptr);
     sqlite3_close_v2(g_database);
     g_database = memory;
     return true;
+}
+
+/** The commit hook and selection writes move it under this same lock. */
+std::uint64_t revision() noexcept {
+    const std::lock_guard lock(g_mutex);
+    return g_session.revision;
 }
 
 /** Saves are synchronous, so shutdown only closes the handle and discards session fields. */

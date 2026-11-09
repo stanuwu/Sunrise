@@ -1,5 +1,6 @@
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <span>
 
@@ -16,17 +17,36 @@ namespace {
 constexpr std::uint16_t kUnresolvedItemIndex = (std::numeric_limits<std::uint16_t>::max)();
 
 /** Outcome of one settlement attempt. */
-enum class WorldRewardSettlement : std::uint8_t { granted, retired, kept };
+enum class WorldRewardSettlement : std::uint8_t {
+    granted,
+    retired,
+    /** State refuses the reward until a saved write or selection change. */
+    refused,
+    /** Not ready, or a transient failure. */
+    kept,
+};
+
+/** Revision the last pass with no Family-4 peer started under, and what it left refused. */
+struct PeerlessPass {
+    std::uint64_t revision{};
+    /** Newest row id the pass read; rows up to it were refused when awaitsChange is set. */
+    std::uint64_t refusedThrough{};
+    bool awaitsChange{};
+};
+
+/** Used only under the store lock enqueue_world_reward holds across its pass. */
+PeerlessPass g_peerlessPass;
 
 /**
  * Grants and retires one earned reward in one transaction, or retires one State rules out.
  * The item resolves through its reward row, which also starts a placed quest item's quest.
- * @param request Oldest saved reward of the selected character.
- * @return Granted, retired as ungrantable, or kept for a later attempt.
+ * @param request Saved reward of the selected character.
+ * @return Granted, retired as ungrantable, or refused or kept for a later attempt.
  */
 WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noexcept {
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
+        report_reward_refusal("world_settle", request.itemDefinitionIndex, "transaction");
         return WorldRewardSettlement::kept;
     }
     const std::unique_ptr<state::PendingRecordRewardGrant> grant(
@@ -35,7 +55,7 @@ WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noe
     const bool seeded =
         middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)));
     const char* reason = seeded ? "reward_allocation" : "random_source";
-    auto preparation = state::RewardPreparation::deferred;
+    auto preparation = state::RewardPreparation::notReady;
     if (seeded && grant) {
         preparation = state::prepare_item_reward(request.itemDefinitionIndex,
                                                  static_cast<std::uint32_t>(request.quantity),
@@ -45,19 +65,23 @@ WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noe
     }
     const bool unresolvable = preparation == state::RewardPreparation::unresolvable;
     bool committed = preparation == state::RewardPreparation::prepared;
-    if (committed) {
-        reason = "inventory_commit";
-        committed = state::commit_record_reward(*grant);
-    }
-    if (!committed && !unresolvable) {
-        report_reward_refusal("world_settle", request.itemDefinitionIndex, reason);
-    }
     if (unresolvable) {
         return retire_world_reward(transaction, request, reason) ? WorldRewardSettlement::retired
                                                                  : WorldRewardSettlement::kept;
     }
-    if (!committed || !complete_world_reward(request.id) || !transaction.commit()) {
-        return WorldRewardSettlement::kept;
+    if (committed) {
+        reason = "inventory_commit";
+        committed = state::commit_record_reward(*grant);
+    }
+    // The grant and the row's deletion share the savepoint, so a failed deletion undoes the grant.
+    if (committed) {
+        reason = "queue_commit";
+        committed = complete_world_reward(request.id) && transaction.commit();
+    }
+    if (!committed) {
+        report_reward_refusal("world_settle", request.itemDefinitionIndex, reason);
+        return preparation == state::RewardPreparation::deferred ? WorldRewardSettlement::refused
+                                                                 : WorldRewardSettlement::kept;
     }
     return WorldRewardSettlement::granted;
 }
@@ -65,12 +89,17 @@ WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noe
 /** Saves the reward under its stable definition hash and earning character. */
 bool enqueue_world_reward(std::uint16_t definitionIndex, std::int32_t quantity) noexcept {
     state::build_data::items::Definition definition;
-    if (!state::build_data::find_item_definition_index(definitionIndex, definition)
-        || !state::investment::store::enqueue_reward(definition.definitionHash, quantity)) {
+    if (!state::build_data::find_item_definition_index(definitionIndex, definition)) {
+        return false;
+    }
+    // Holding the store lock, nothing but this row's insert moves the revision before the pass.
+    const std::lock_guard lock(state::investment::store::g_mutex);
+    const std::uint64_t unchanged = state::investment::store::revision();
+    if (!state::investment::store::enqueue_reward(definition.definitionHash, quantity)) {
         return false;
     }
     if (!has_active_family4_peer()) {
-        settle_world_reward();
+        settle_world_reward(unchanged);
     }
     return true;
 }
@@ -99,13 +128,20 @@ bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,
 }
 
 /**
- * Restores the selected character's oldest reward, retiring rows that can never be granted.
+ * Restores the selected character's next reward, retiring rows that can never be granted.
  * @param request Receives the reward; cleared when none is ready.
- * @return False when the queue is empty or the item table is not published yet.
+ * @return False when no reward follows afterId or the item table is not published yet.
  */
-bool current_world_reward(WorldRewardRequest& request) noexcept {
+bool current_world_reward(WorldRewardRequest& request,
+                          std::uint64_t afterId,
+                          bool* exhausted) noexcept {
+    if (exhausted != nullptr) {
+        *exhausted = false;
+    }
     state::investment::store::PendingReward saved;
-    while (state::investment::store::next_reward(saved)) {
+    bool interrupted = false;
+    bool readFailed = false;
+    while (state::investment::store::next_reward(saved, afterId, readFailed)) {
         request = {};
         request.id = saved.id;
         request.definitionHash = saved.definitionHash;
@@ -120,15 +156,29 @@ bool current_world_reward(WorldRewardRequest& request) noexcept {
             }
         } else if (!itemsPublished || !state::build_data::item_definitions_ready()) {
             // An unpublished item table proves nothing; retry later.
+            interrupted = true;
             break;
         } else {
             request.itemDefinitionIndex = kUnresolvedItemIndex;
             verdict = "item_definition";
         }
         state::investment::store::Transaction transaction;
-        if (!transaction.ready() || !retire_world_reward(transaction, request, verdict)) {
+        if (!transaction.ready()) {
+            report_reward_refusal("world_retire", request.itemDefinitionIndex, "transaction");
+            interrupted = true;
             break;
         }
+        if (!retire_world_reward(transaction, request, verdict)) {
+            interrupted = true;
+            break;
+        }
+    }
+    if (readFailed) {
+        report_reward_refusal("world_read", kUnresolvedItemIndex, "store_read");
+        interrupted = true;
+    }
+    if (exhausted != nullptr) {
+        *exhausted = !interrupted;
     }
     request = {};
     return false;
@@ -162,26 +212,43 @@ bool retire_world_reward(state::investment::store::Transaction& transaction,
     return retired;
 }
 
-/** A retired reward lets the next one take its turn; any other failed grant stays saved. */
-void settle_world_reward() noexcept {
+/**
+ * A reward that must wait stays saved and steps aside, so later rewards still take their turn.
+ * A saved row cannot change another row's grant, so while the new row is the only write since
+ * the last pass, the rewards that pass refused are not tried again.
+ */
+void settle_world_reward(std::uint64_t unchanged) noexcept {
+    std::uint64_t afterId = 0;
+    if (g_peerlessPass.awaitsChange && unchanged == g_peerlessPass.revision) {
+        afterId = g_peerlessPass.refusedThrough;
+    }
+    const std::uint64_t revision = state::investment::store::revision();
+    bool awaitsChange = true;
+    bool exhausted = false;
     WorldRewardRequest request;
-    while (current_world_reward(request)) {
+    while (current_world_reward(request, afterId, &exhausted)) {
         const WorldRewardSettlement settlement = commit_world_reward(request);
         if (settlement == WorldRewardSettlement::granted) {
             arm_account_resync_everywhere();
         }
-        if (settlement != WorldRewardSettlement::retired) {
-            return;
+        awaitsChange = awaitsChange && settlement == WorldRewardSettlement::refused;
+        if (settlement == WorldRewardSettlement::refused
+            || settlement == WorldRewardSettlement::kept) {
+            afterId = request.id;
         }
     }
+    g_peerlessPass = {revision, afterId, awaitsChange && exhausted};
 }
 
-/** Shutdown grants or retires rewards until one must wait; other characters' rewards stay saved. */
+/** Shutdown grants or retires every reward it can; other characters' rewards stay saved. */
 void drain_world_rewards() noexcept {
     WorldRewardRequest request;
-    while (current_world_reward(request)) {
-        if (commit_world_reward(request) == WorldRewardSettlement::kept) {
-            break;
+    std::uint64_t afterId = 0;
+    while (current_world_reward(request, afterId, nullptr)) {
+        const WorldRewardSettlement settlement = commit_world_reward(request);
+        if (settlement == WorldRewardSettlement::refused
+            || settlement == WorldRewardSettlement::kept) {
+            afterId = request.id;
         }
     }
 }

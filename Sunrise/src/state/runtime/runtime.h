@@ -367,7 +367,14 @@ struct GrantedResidents {
                                    const build_data::items::Definition& item) noexcept;
 
 /** How one reward preparation ended. */
-enum class RewardPreparation : std::uint8_t { prepared, deferred, unresolvable };
+enum class RewardPreparation : std::uint8_t {
+    prepared,
+    /** Saved State refuses the reward now; only a later State can change that. */
+    deferred,
+    /** A catalog is unpublished, or a saved read or allocation failed, so nothing was decided. */
+    notReady,
+    unresolvable,
+};
 
 /** One uncommitted Season reward, the native row it will claim, and the seed of its draw. */
 struct PendingSeasonPassReward {
@@ -720,6 +727,11 @@ prepare_item_acquisition(std::uint16_t collectibleIndex,
 
 /** Atomically commits one prepared reward grant and its durable Season claim. */
 [[nodiscard]] bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept;
+/**
+ * @return True once every catalog prepare_item_reward reads has published, or the reward graph
+ *         was refused; until then a not-ready answer can change without any saved write.
+ */
+[[nodiscard]] bool catalogs_settled() noexcept;
 /**
  * Resolves an installed item or wrapper for the selected character.
  * @param seed Caller-drawn entropy for any wrapper draws.

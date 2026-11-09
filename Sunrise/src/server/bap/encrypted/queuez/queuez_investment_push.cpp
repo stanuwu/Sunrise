@@ -172,6 +172,7 @@ publish_operation(const GrantItemOperation& request,
     case ItemGrantStage::committed:
         break;
     case ItemGrantStage::waiting:
+    case ItemGrantStage::notReady:
     case ItemGrantStage::deferred:
     case ItemGrantStage::unresolvable:
     case ItemGrantStage::failed:

@@ -104,12 +104,16 @@ prepare_record_reward(const middleware::web_service::Message& message,
             message, "storage", recordIndex, rewards[0].itemDefinitionIndex, rewards[0].quantity);
         return RecordRewardPreparation::failed;
     }
+    const char* reason = nullptr;
     if (state::prepare_record_reward_grant(
-            std::span(rewards).first(rewardCount), recordIndex, *grant)
+            std::span(rewards).first(rewardCount), recordIndex, *grant, &reason)
         != state::RewardPreparation::prepared) {
         clear_mutation(outcome);
-        report_record_reward(
-            message, "state", recordIndex, rewards[0].itemDefinitionIndex, rewards[0].quantity);
+        report_record_reward(message,
+                             reason != nullptr ? reason : "state",
+                             recordIndex,
+                             rewards[0].itemDefinitionIndex,
+                             rewards[0].quantity);
         return RecordRewardPreparation::failed;
     }
     return RecordRewardPreparation::prepared;

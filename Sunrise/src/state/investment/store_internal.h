@@ -27,6 +27,8 @@ struct Session {
     std::array<bool, kCharacterCapacity> selected{};
     std::array<std::uint16_t, kCharacterCapacity> activities{};
     std::uint64_t signInSeconds{};
+    /** Counts committed writes and selection changes; a refused grant waits for it to move. */
+    std::uint64_t revision{};
 };
 extern Session g_session;
 

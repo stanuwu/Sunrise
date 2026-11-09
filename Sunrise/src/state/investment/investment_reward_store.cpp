@@ -27,14 +27,17 @@ bool enqueue_reward(std::uint32_t definitionHash, std::int32_t quantity) noexcep
     return row.write(owner, definitionHash, quantity);
 }
 
-/** Other characters' earned rewards remain queued when the player changes character. */
-bool next_reward(PendingReward& output) noexcept {
+/** Other characters' earned rewards remain queued; only a clean SQL step proves no row follows. */
+bool next_reward(PendingReward& output, std::uint64_t afterId, bool& readFailed) noexcept {
     const std::lock_guard lock(g_mutex);
     output = {};
     Statement row("SELECT id,definition_hash,quantity FROM pending_rewards "
-                  "WHERE character_slot=? ORDER BY id LIMIT 1");
-    return row.parameters(selected()) && row.step() == SQLITE_ROW
-           && row.columns(output.id, output.definitionHash, output.quantity);
+                  "WHERE character_slot=? AND id>? ORDER BY id LIMIT 1");
+    const int step = row.parameters(selected(), afterId) ? row.step() : SQLITE_ERROR;
+    const bool found =
+        step == SQLITE_ROW && row.columns(output.id, output.definitionHash, output.quantity);
+    readFailed = !found && step != SQLITE_DONE;
+    return found;
 }
 
 /** The inventory grant and deletion of this reward must share one outer transaction. */

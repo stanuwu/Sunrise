@@ -57,49 +57,108 @@ selected_character(const state::AccountState& account) noexcept {
     return nullptr;
 }
 
+/** What one world reward attempt leaves owed. */
+enum class WorldRewardAttempt : std::uint8_t {
+    /** Granted, and its frame is in the response. */
+    published,
+    /** Granted without a frame; the armed account resync carries it. */
+    unpublished,
+    /** State refused or retired the reward; another attempt waits for the gate to move. */
+    refused,
+    /** Not ready, or a transient failure; the next poll tries again. */
+    retry,
+};
+
 /** Log stage of every refused world-reward publication. */
 constexpr const char* kWorldRewardStage = "world_publish";
 
-/** Grants and publishes the oldest world reward, retiring one that State can never grant. */
-[[nodiscard]] bool consume_world_reward(const WorldRewardRequest& request,
-                                        Session& session,
-                                        Scratch& scratch,
-                                        std::span<std::byte> response,
-                                        std::size_t& written,
-                                        bool& touchesScratch) noexcept {
-    state::investment::store::Transaction transaction;
-    if (!transaction.ready()) {
-        report_reward_refusal(kWorldRewardStage, request.itemDefinitionIndex, "transaction");
-        return false;
-    }
-    StagedItemGrant staged{};
-    const char* reason = nullptr;
-    const ItemGrantStage stage = stage_item_grant({request.itemDefinitionIndex, request.quantity},
-                                                  session,
-                                                  scratch,
-                                                  response,
-                                                  touchesScratch,
-                                                  staged,
-                                                  reason);
-    if (stage == ItemGrantStage::unresolvable) {
-        (void)bap::retire_world_reward(transaction, request, reason);
-        return false;
-    }
-    if (stage != ItemGrantStage::committed) {
+/** Grants and publishes one world reward, retiring one that State can never grant. */
+[[nodiscard]] WorldRewardAttempt consume_world_reward(const WorldRewardRequest& request,
+                                                      Session& session,
+                                                      Scratch& scratch,
+                                                      std::span<std::byte> response,
+                                                      std::size_t& written,
+                                                      bool& touchesScratch) noexcept {
+    const auto fail = [&](const char* reason, WorldRewardAttempt attempt) noexcept {
         if (reason != nullptr) {
             report_reward_refusal(kWorldRewardStage, request.itemDefinitionIndex, reason);
         }
-        return false;
+        return attempt;
+    };
+    state::investment::store::Transaction transaction;
+    if (!transaction.ready()) {
+        return fail("transaction", WorldRewardAttempt::retry);
+    }
+    StagedItemGrant staged{};
+    const char* reason = nullptr;
+    switch (stage_item_grant({request.itemDefinitionIndex, request.quantity},
+                             session,
+                             scratch,
+                             response,
+                             touchesScratch,
+                             staged,
+                             reason)) {
+    case ItemGrantStage::committed:
+        break;
+    case ItemGrantStage::unresolvable:
+        return bap::retire_world_reward(transaction, request, reason) ? WorldRewardAttempt::refused
+                                                                      : WorldRewardAttempt::retry;
+    case ItemGrantStage::deferred:
+        return fail(reason, WorldRewardAttempt::refused);
+    case ItemGrantStage::waiting:
+    case ItemGrantStage::notReady:
+    case ItemGrantStage::failed:
+        return fail(reason, WorldRewardAttempt::retry);
     }
     if (!bap::complete_world_reward(request.id) || !transaction.commit()) {
-        report_reward_refusal(kWorldRewardStage, request.itemDefinitionIndex, "queue_commit");
-        return false;
+        return fail("queue_commit", WorldRewardAttempt::retry);
     }
     if (!publish_item_grant(staged, session, scratch, response, written)) {
-        report_reward_refusal(kWorldRewardStage, request.itemDefinitionIndex, staged.unpublished);
+        return fail(staged.unpublished, WorldRewardAttempt::unpublished);
+    }
+    return WorldRewardAttempt::published;
+}
+
+/**
+ * Publishes the oldest saved world reward that can go out on this poll. A reward State refuses
+ * steps aside for later ones, and once State refuses every saved reward, polls skip the queue
+ * until saved rows, the selected character or catalog readiness change.
+ */
+[[nodiscard]] bool consume_world_rewards(Session& session,
+                                         Scratch& scratch,
+                                         std::span<std::byte> response,
+                                         std::size_t& written,
+                                         bool& touchesScratch) noexcept {
+    // A draw is not retained, so rewards wait for a buffer any frame is sure to fit.
+    if (!session.queuez.family4Active || response.size() < scratch.framed.size()) {
         return false;
     }
-    return true;
+    const WorldRewardGate gate{state::investment::store::revision(), state::catalogs_settled()};
+    if (session.worldRewardsAwaitChange && gate == session.worldRewardGate) {
+        return false;
+    }
+    bool awaitsChange = true;
+    bool exhausted = false;
+    std::uint64_t afterId = 0;
+    WorldRewardRequest reward{};
+    while (bap::current_world_reward(reward, afterId, &exhausted)) {
+        // Every saved kind is placed by the same grant path, overflow included.
+        const WorldRewardAttempt attempt =
+            consume_world_reward(reward, session, scratch, response, written, touchesScratch);
+        if (attempt == WorldRewardAttempt::published) {
+            return true;
+        }
+        if (attempt == WorldRewardAttempt::unpublished || session.accountResyncArmed) {
+            return false;
+        }
+        // Catalogs that settle move the gate, so a reward waiting on them need not retry per poll.
+        awaitsChange =
+            awaitsChange && (attempt == WorldRewardAttempt::refused || !gate.catalogsSettled);
+        afterId = reward.id;
+    }
+    session.worldRewardsAwaitChange = awaitsChange && exhausted;
+    session.worldRewardGate = gate;
+    return false;
 }
 
 /** Publishes one non-persistent XP reward row so the native seasonal XP HUD animates. */
@@ -489,14 +548,11 @@ bool consume_deferred(Session& session,
     if (session.accountResyncArmed) {
         return false;
     }
-    WorldRewardRequest reward{};
-    if (session.queuez.family4Active && bap::current_world_reward(reward)) {
-        if (consume_world_reward(reward, session, scratch, response, written, touchesScratch)) {
-            return true;
-        }
-        if (session.accountResyncArmed) {
-            return false;
-        }
+    if (consume_world_rewards(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (session.accountResyncArmed) {
+        return false;
     }
     if (consume_seasonal_experience_presentation(
             session, scratch, response, written, touchesScratch)) {

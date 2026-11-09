@@ -61,6 +61,9 @@ ItemGrantStage stage_item_grant(const ItemGrant& grant,
     if (preparation == state::RewardPreparation::unresolvable) {
         return ItemGrantStage::unresolvable;
     }
+    if (preparation == state::RewardPreparation::notReady) {
+        return ItemGrantStage::notReady;
+    }
     if (preparation != state::RewardPreparation::prepared) {
         return ItemGrantStage::deferred;
     }

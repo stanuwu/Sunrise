@@ -343,9 +343,18 @@ struct WorldRewardRequest {
 /** The changed character projections still owed after their source state commits. */
 enum class CharacterRefreshScope : std::uint8_t { none, records, recordsAndRoster };
 
+/** What one world reward pass reads; while it is unchanged, the pass repeats its refusals. */
+struct WorldRewardGate {
+    std::uint64_t revision{};
+    bool catalogsSettled{};
+    [[nodiscard]] bool operator==(const WorldRewardGate&) const noexcept = default;
+};
+
 /** Mutable transport state owned by one BAP connection. */
 struct Session {
     std::uint64_t acquisitionPresentationUntilTick{};
+    /** Gate the last world reward pass ran under. */
+    WorldRewardGate worldRewardGate{};
     std::array<encrypted::queuez::AcquisitionPresentationRow,
                encrypted::queuez::kAcquisitionPresentationRowCapacity>
         acquisitionPresentationRows{};
@@ -481,6 +490,8 @@ struct Session {
     bool accountMutationPublished{};
     /** True while another peer's account mutation still needs a full local refresh. */
     bool accountResyncArmed{};
+    /** Set when State refused every saved world reward, or none was saved, under the gate. */
+    bool worldRewardsAwaitChange{};
     /**
      * Tick count after which the owed ability-icon refresh may go out. A subclass selection
      * invalidates the published ability buckets and the rebuild runs off the Client
@@ -524,7 +535,7 @@ unique_activity_link_locked(const state::activity::SessionBinding& binding,
 session_scenario_layout(const Session& session,
                         state::build_data::scenarios::Definition& output) noexcept;
 
-/** Commits saved world rewards with no presentation until one must wait. */
+/** Commits every saved world reward that can settle with no presentation; the rest stay saved. */
 void drain_world_rewards() noexcept;
 
 /** Arms every other Family-4 peer after the origin publishes a complete account mutation. */
@@ -546,8 +557,15 @@ void arm_artifact_refresh(Session& session) noexcept;
 [[nodiscard]] bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,
                                                       std::int32_t quantity) noexcept;
 
-/** Reads the oldest saved world reward that can still be granted, retiring rows that cannot. */
-[[nodiscard]] bool current_world_reward(WorldRewardRequest& request) noexcept;
+/**
+ * Reads the oldest grantable saved world reward after one row, retiring rows that never can be.
+ * @param request Receives the reward.
+ * @param afterId Row id to read past; zero starts at the oldest reward.
+ * @param exhausted On a false return, set when every saved row after afterId was read.
+ * @return False when no grantable reward follows that row.
+ */
+[[nodiscard]] bool
+current_world_reward(WorldRewardRequest& request, std::uint64_t afterId, bool* exhausted) noexcept;
 
 /** Removes the world reward returned by current_world_reward. */
 [[nodiscard]] bool complete_world_reward(std::uint64_t id) noexcept;
@@ -557,8 +575,11 @@ void arm_artifact_refresh(Session& session) noexcept;
                                        const WorldRewardRequest& request,
                                        const char* reason) noexcept;
 
-/** Grants the oldest saved reward with no flyout, retiring rewards that can never be granted. */
-void settle_world_reward() noexcept;
+/**
+ * Grants every saved reward that can settle with no flyout, retiring those never grantable.
+ * @param unchanged Store revision read before the newest reward was saved, under the same lock.
+ */
+void settle_world_reward(std::uint64_t unchanged) noexcept;
 
 /** Queues one transient XP item update so the native HUD presents a seasonal XP gain. */
 [[nodiscard]] bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept;

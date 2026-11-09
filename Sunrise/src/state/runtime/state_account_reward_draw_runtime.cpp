@@ -54,20 +54,13 @@ namespace {
                                 refusal);
 }
 
-/** @return True when a catalog answer is final: both catalogs published, or rewards refused. */
-[[nodiscard]] bool catalogs_settled() noexcept {
-    return build_data::item_definitions_ready()
-           && (build_data::reward_definitions_ready()
-               || build_data::reward_definitions_unsupported());
-}
-
 /** Classifies a catalog refusal: a verdict unless a catalog was cleared meanwhile. */
 [[nodiscard]] RewardPreparation catalog_refusal(const char*& reason) noexcept {
     if (catalogs_settled()) {
         return RewardPreparation::unresolvable;
     }
     reason = "not_ready";
-    return RewardPreparation::deferred;
+    return RewardPreparation::notReady;
 }
 
 /** A claim draws against the saved flags; a replay clears the row's own claim flag first. */
@@ -86,15 +79,28 @@ enum class PassResolution { claim, replay };
                                 reward_resolution::Result& result,
                                 PassResolution resolution,
                                 const char** reason = nullptr) noexcept {
-    const auto character = selected_character_index(account);
-    unlocks::Table flags{};
-    build_data::rewards::Item source{};
-    if (character >= account.characterCount
-        || !investment::store::read_unlocks(flags, static_cast<int>(character))
-        || !build_data::find_reward_item(reward.itemIndex, source)
-        || source.definitionHash != reward.itemHash || reward.socketCount > reward.sockets.size()
-        || reward.conditionCount > reward.condition.size()) {
+    const auto refuse = [reason](const char* refusal) noexcept {
+        if (reason != nullptr) {
+            *reason = refusal;
+        }
         return false;
+    };
+    const auto character = selected_character_index(account);
+    if (character >= account.characterCount) {
+        return refuse("selected_character");
+    }
+    unlocks::Table flags{};
+    if (!investment::store::read_unlocks(flags, static_cast<int>(character))) {
+        return refuse("unlock_read");
+    }
+    build_data::rewards::Item source{};
+    if (!build_data::find_reward_item(reward.itemIndex, source)
+        || source.definitionHash != reward.itemHash) {
+        return refuse("reward_item");
+    }
+    if (reward.socketCount > reward.sockets.size()
+        || reward.conditionCount > reward.condition.size()) {
+        return refuse("reward_shape");
     }
     if (reason != nullptr) {
         *reason = "reward_condition";
@@ -317,13 +323,22 @@ std::int32_t item_grant_capacity(std::uint16_t itemIndex) noexcept {
     return static_cast<std::int32_t>((std::min)(capacity, std::int64_t{kLargestGrant}));
 }
 
+/** A catalog answer is final once the reward and placement catalogs publish, or rewards refuse. */
+bool catalogs_settled() noexcept {
+    return build_data::item_definitions_ready() && build_data::configured_item_details_ready()
+           && build_data::inventory_bucket_descriptors_ready()
+           && build_data::socket_entry_lists_ready()
+           && (build_data::reward_definitions_ready()
+               || build_data::reward_definitions_unsupported());
+}
+
 /**
  * Resolves an installed item or wrapper for the selected character.
  * A draw that leaves nothing to grant or outgrows a bound is final: a new seed is not a retry.
  * @param seed Caller-drawn entropy for any wrapper draws.
  * @param refusal Receives a static reason on failure.
- * @return Deferred while a catalog, the selected character or inventory room is missing;
- *         unresolvable is final.
+ * @return Not ready while a catalog is unpublished or a saved read fails; deferred while State
+ *         has no selected character or room; unresolvable is final.
  */
 RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
                                       std::uint32_t quantity,
@@ -340,7 +355,7 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
     }
     reason = "not_ready";
     if (!build_data::item_definitions_ready() || !build_data::reward_definitions_ready()) {
-        return RewardPreparation::deferred;
+        return RewardPreparation::notReady;
     }
     reason = "item_definition";
     const std::lock_guard lock(investment::store::g_mutex);
@@ -348,13 +363,20 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
     if (!build_data::find_item_definition_index(itemIndex, item)) {
         return catalog_refusal(reason);
     }
+    reason = "account_read";
+    AccountState account{};
+    if (!investment::store::read_account(account)) {
+        return RewardPreparation::notReady;
+    }
     reason = "selected_character";
-    const AccountState account = account_snapshot();
     const auto character = selected_character_index(account);
-    unlocks::Table flags{};
-    if (character >= account.characterCount
-        || !investment::store::read_unlocks(flags, static_cast<int>(character))) {
+    if (character >= account.characterCount) {
         return RewardPreparation::deferred;
+    }
+    reason = "unlock_read";
+    unlocks::Table flags{};
+    if (!investment::store::read_unlocks(flags, static_cast<int>(character))) {
+        return RewardPreparation::notReady;
     }
     reward_resolution::Result resolved{};
     const auto resolution = reward_resolution::resolve(

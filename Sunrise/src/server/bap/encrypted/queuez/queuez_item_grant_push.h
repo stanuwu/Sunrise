@@ -32,7 +32,9 @@ enum class ItemGrantStage : std::uint8_t {
     committed,
     /** Nothing was written. The response is smaller than a whole frame, so a later poll retries. */
     waiting,
-    /** Nothing was written. State cannot prepare the grant yet but may later. */
+    /** Nothing was written. A catalog or saved read is not ready; the next attempt may succeed. */
+    notReady,
+    /** Nothing was written. State refuses the grant until saved state changes. */
     deferred,
     /** Nothing was written. State can never grant this item. */
     unresolvable,

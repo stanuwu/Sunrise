@@ -241,8 +241,12 @@ bool set_selected_character(std::uint64_t characterSoid, bool& moved, bool& perk
         return false;
     }
     // Publish only after the whole account still meets its identity rules.
+    const auto previousSelection = investment::store::g_session.selected;
     for (std::size_t index = 0; index < candidate.characters.size(); ++index) {
         investment::store::g_session.selected[index] = candidate.characters[index].selected;
+    }
+    if (investment::store::g_session.selected != previousSelection) {
+        ++investment::store::g_session.revision;
     }
     investment::store::g_mutex.unlock();
     moved = changes;

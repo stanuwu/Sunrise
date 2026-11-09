@@ -153,7 +153,7 @@ namespace {
  * @param flags Flags a draw consumed, or null for direct rows.
  * @param reason Receives a static reason on failure.
  * @return Unresolvable when the draw consumed more flagged wrappers than a grant carries;
- *         deferred when a saved flag cannot be read.
+ *         not ready when a saved flag cannot be read.
  */
 [[nodiscard]] RewardPreparation
 prepare_wrapper_flags(const std::bitset<unlocks::kAccountFlagCapacity>* flags,
@@ -175,7 +175,7 @@ prepare_wrapper_flags(const std::bitset<unlocks::kAccountFlagCapacity>* flags,
         if (!investment::store::read_unlock(
                 investment::store::Bank::accountFlags, static_cast<std::uint16_t>(index), before)
             || before < 0 || before > unlocks::kFlagSet) {
-            return RewardPreparation::deferred;
+            return RewardPreparation::notReady;
         }
         mutation.wrapperFlags[mutation.wrapperFlagCount++] = {static_cast<std::uint16_t>(index),
                                                               static_cast<std::uint8_t>(before)};
@@ -185,7 +185,7 @@ prepare_wrapper_flags(const std::bitset<unlocks::kAccountFlagCapacity>* flags,
 
 /**
  * Captures the acquisition flag a resolved reward row sets and the value it holds now.
- * @return Unresolvable when the row has no reward entry; deferred when the flag cannot be read.
+ * @return Unresolvable when the row has no reward entry; not ready when the flag cannot be read.
  */
 [[nodiscard]] RewardPreparation acquisition_flag(const build_data::items::Definition& item,
                                                  PreparedRecordReward& prepared) noexcept {
@@ -199,11 +199,11 @@ prepare_wrapper_flags(const std::bitset<unlocks::kAccountFlagCapacity>* flags,
         return RewardPreparation::prepared;
     }
     std::int32_t before = 0;
-    // The saved flag refuses here, not the definition.
+    // An unreadable saved flag decides nothing about the definition.
     if (!investment::store::read_unlock(
             investment::store::Bank::accountFlags, source.acquiredFlag, before)
         || before < 0 || before > unlocks::kFlagSet) {
-        return RewardPreparation::deferred;
+        return RewardPreparation::notReady;
     }
     prepared.previousFlag = static_cast<std::uint8_t>(before);
     return RewardPreparation::prepared;
@@ -223,7 +223,7 @@ struct GrantView {
  * Reads the saved step a placed quest item starts from. Two rows that start one quest would each
  * see it unset, so the second start is refused.
  * @param reason Receives a static reason on failure.
- * @return Unresolvable for a duplicate or malformed quest; deferred when the value cannot be read.
+ * @return Unresolvable for a duplicate or malformed quest; not ready when the value cannot be read.
  */
 [[nodiscard]] RewardPreparation prepare_quest_start(GrantView view,
                                                     const build_data::items::Definition& item,
@@ -242,7 +242,7 @@ struct GrantView {
     }
     if (!investment::store::read_unlock(
             quest_bank(quest), quest.row, prepared.previousQuestValue)) {
-        return RewardPreparation::deferred;
+        return RewardPreparation::notReady;
     }
     prepared.quest = quest;
     return RewardPreparation::prepared;
@@ -252,7 +252,8 @@ struct GrantView {
  * Prepares one requested row against the working view and the rows before it. The row lands the
  * way the client places it, so a full bucket overflows or drops the remainder rather than refusing.
  * @param reason Receives a static reason when the row is not prepared.
- * @return Deferred only when State may still make the row fit; unresolvable is final.
+ * @return Deferred only when State may still make the row fit; not ready when a saved read
+ *         failed; unresolvable is final.
  */
 [[nodiscard]] RewardPreparation prepare_reward_row(GrantView view,
                                                    const DirectRecordReward& requested,
@@ -441,10 +442,14 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
     if (!build_data::item_definitions_ready() || !build_data::configured_item_details_ready()
         || !build_data::inventory_bucket_descriptors_ready()
         || !build_data::socket_entry_lists_ready()) {
-        return RewardPreparation::deferred;
+        return RewardPreparation::notReady;
+    }
+    reason = "account_read";
+    AccountState working{};
+    if (!investment::store::read_account(working)) {
+        return RewardPreparation::notReady;
     }
     reason = "account_state";
-    AccountState working = account_snapshot();
     const std::size_t characterIndex = selected_character_index(working);
     if (!account::valid(working) || !valid_profile_inventory(working)
         || characterIndex >= working.characterCount) {

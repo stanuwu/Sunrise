@@ -41,6 +41,8 @@ void shutdown() noexcept;
  * @return False when the copy failed; the file handle then stays open and unchanged.
  */
 [[nodiscard]] bool use_session_copy() noexcept;
+/** @return A count that moves on every committed write and selection change. */
+[[nodiscard]] std::uint64_t revision() noexcept;
 [[nodiscard]] bool read_account(AccountState& output) noexcept;
 [[nodiscard]] AccountState account() noexcept;
 [[nodiscard]] bool read_account_identity(AccountIdentity& output) noexcept;
@@ -97,7 +99,13 @@ struct PendingReward {
     std::int32_t quantity{};
 };
 [[nodiscard]] bool enqueue_reward(std::uint32_t definitionHash, std::int32_t quantity) noexcept;
-[[nodiscard]] bool next_reward(PendingReward& output) noexcept;
+/**
+ * Reads the selected character's oldest saved reward after one row.
+ * @param afterId Row id to read past; zero starts at the oldest reward.
+ * @param readFailed Receives true when no row was returned because the read failed.
+ */
+[[nodiscard]] bool
+next_reward(PendingReward& output, std::uint64_t afterId, bool& readFailed) noexcept;
 [[nodiscard]] bool complete_reward(std::uint64_t id) noexcept;
 
 /** Which account list a parked row came from; the values are the parked_items kind column. */
