@@ -194,7 +194,10 @@ void clear_game_targets() noexcept {
             rollbackAdapters();
             return false;
         }
-        (void)hooks::instance_mutex::install();
+        // A second game on one PC needs its own machine id, so only that setup frees the guard.
+        if (core::settings::get().client.machineId != 0) {
+            (void)hooks::instance_mutex::install();
+        }
         if (!hooks::presence_publication::install()) {
             core::log::write(core::log::Channel::client,
                              core::log::Level::error,
