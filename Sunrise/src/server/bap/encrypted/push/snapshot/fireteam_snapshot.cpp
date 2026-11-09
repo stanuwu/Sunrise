@@ -9,6 +9,20 @@
 #include "internal.h"
 
 namespace sunrise::server::bap::encrypted::push::snapshot {
+namespace {
+#pragma pack(push, 1)
+/** The family-six directory: this account's key and the character naming its descriptor. */
+struct FireteamDirectory final {
+    std::uint64_t key;
+    std::uint64_t character;
+};
+/** The family-six descriptor: the character key, then its native fireteam block. */
+struct FireteamDescriptor final {
+    std::uint64_t character;
+    std::array<std::byte, state::social::kNativeFireteamSize> fireteam;
+};
+#pragma pack(pop)
+} // namespace
 
 bool prepare_fireteam(Scratch& scratch,
                       const middleware::queuez::Subscription& subscription,
@@ -16,9 +30,8 @@ bool prepare_fireteam(Scratch& scratch,
                       Prepared& prepared) noexcept {
     namespace datagen = middleware::datagen;
     namespace social = state::social;
-    // The family-six directory is this account's key and the link naming its descriptor.
-    constexpr std::size_t directorySize = 8 + 8;
-    constexpr std::size_t descriptorSize = 8 + social::kNativeFireteamSize;
+    constexpr std::size_t directorySize = sizeof(FireteamDirectory);
+    constexpr std::size_t descriptorSize = sizeof(FireteamDescriptor);
     auto& account = scratch.accountImage;
     const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
     const state::ScopedAccountView bind(handle);
@@ -42,8 +55,8 @@ bool prepare_fireteam(Scratch& scratch,
     }
     auto raw = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset, rawSize);
     std::fill(raw.begin(), raw.end(), std::byte{});
-    std::memcpy(raw.data(), &account.primarySoid, 8);
-    std::memcpy(raw.data() + 8, &character, 8);
+    const FireteamDirectory directory{account.primarySoid, character};
+    std::memcpy(raw.data(), &directory, sizeof directory);
     Prepared staged{};
     std::size_t compressed = reservation.compressedWriteOffset;
     std::size_t size{};
@@ -60,8 +73,8 @@ bool prepare_fireteam(Scratch& scratch,
     std::size_t objectCount = 1;
     if (published) {
         const auto descriptor = raw.subspan(directorySize, descriptorSize);
-        std::memcpy(descriptor.data(), &character, 8);
-        std::copy(payload.begin(), payload.end(), descriptor.begin() + 8);
+        const FireteamDescriptor wire{character, payload};
+        std::memcpy(descriptor.data(), &wire, sizeof wire);
         if (!compress_object(scratch,
                              descriptor,
                              datagen::kFireteamDescriptorObjectId,

@@ -76,6 +76,23 @@ bool native_descriptor(const state::AccountState& account,
     std::copy(chosen.begin(), chosen.end(), body.begin() + state::social::kNativeJoinAddressOffset);
     return join_silo(silo);
 }
+
+#pragma pack(push, 1)
+/** The family-seven directory: this account's key and the link naming its descriptor. */
+struct JoinDirectory final {
+    std::uint64_t key;
+    std::uint64_t descriptorLink;
+};
+/** The descriptor object; the client reads the static join silo last. */
+struct JoinDescriptorRecord final {
+    std::uint64_t key;
+    /** Declared byte length of `body`. */
+    std::uint32_t length;
+    std::array<std::byte, descriptor::kDescriptorSize> body;
+    std::array<std::byte, 4> alignment;
+    std::uint64_t silo;
+};
+#pragma pack(pop)
 } // namespace
 
 bool prepare_join_descriptor(Scratch& scratch,
@@ -83,15 +100,8 @@ bool prepare_join_descriptor(Scratch& scratch,
                              const Reservation& reservation,
                              Prepared& prepared) noexcept {
     namespace datagen = middleware::datagen;
-    // The family-seven directory is this account's key and the link naming its descriptor.
-    constexpr std::size_t directorySize = 8 + 8;
-    // Its descriptor is a u64 key, a u32 declared length, the join descriptor body, four bytes of
-    // alignment, and the u64 static join silo the client reads last.
-    constexpr std::size_t descriptorBodyOffset = 8 + 4;
-    constexpr std::size_t descriptorSiloOffset =
-        descriptorBodyOffset + descriptor::kDescriptorSize + 4;
-    constexpr std::size_t descriptorSize = descriptorSiloOffset + 8;
-    static_assert(descriptorBodyOffset + descriptor::kDescriptorSize <= descriptorSiloOffset);
+    constexpr std::size_t directorySize = sizeof(JoinDirectory);
+    constexpr std::size_t descriptorSize = sizeof(JoinDescriptorRecord);
     auto& account = scratch.accountImage;
     const auto handle = state::account_for_subscription_root(subscription.familyRootSoid);
     const state::ScopedAccountView bind(handle);
@@ -110,8 +120,8 @@ bool prepare_join_descriptor(Scratch& scratch,
     }
     auto raw = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset, rawSize);
     std::fill(raw.begin(), raw.end(), std::byte{});
-    std::memcpy(raw.data(), &account.primarySoid, 8);
-    std::memcpy(raw.data() + 8, &account.primarySoid, 8);
+    const JoinDirectory directory{account.primarySoid, account.primarySoid};
+    std::memcpy(raw.data(), &directory, sizeof directory);
     Prepared staged{};
     std::size_t compressed = reservation.compressedWriteOffset, size{};
     if (!compress_object(scratch,
@@ -127,11 +137,12 @@ bool prepare_join_descriptor(Scratch& scratch,
     std::size_t count = 1;
     if (published) {
         const auto record = raw.subspan(directorySize, descriptorSize);
-        const auto length = static_cast<std::uint32_t>(descriptor::kDescriptorSize);
-        std::memcpy(record.data(), &account.primarySoid, 8);
-        std::memcpy(record.data() + 8, &length, 4);
-        std::copy(body.begin(), body.end(), record.begin() + descriptorBodyOffset);
-        std::memcpy(record.data() + descriptorSiloOffset, &silo, 8);
+        JoinDescriptorRecord wire{};
+        wire.key = account.primarySoid;
+        wire.length = static_cast<std::uint32_t>(descriptor::kDescriptorSize);
+        wire.body = body;
+        wire.silo = silo;
+        std::memcpy(record.data(), &wire, sizeof wire);
         if (!compress_object(scratch,
                              record,
                              datagen::kJoinDescriptorObjectId,

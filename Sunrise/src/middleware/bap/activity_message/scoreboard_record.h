@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../content/packages/schema/generated/tag_classes_808099.h"
 #include "../../encoding/bit_writer.h"
 
 namespace sunrise::middleware::bap::activity_message::scoreboard_record {
@@ -12,9 +13,11 @@ namespace sunrise::middleware::bap::activity_message::scoreboard_record {
 // width and count below is one of those two classes' own field declarations. ---
 
 /** The scoreboard record's own schema class id. */
-inline constexpr std::uint32_t kRecordClassId = 0x808099F9U;
+inline constexpr std::uint32_t kRecordClassId =
+    content::packages::schema::generated::C808099f9::kClass;
 /** Schema class id of the auth-body carrier this record rides in. */
-inline constexpr std::uint32_t kComponentClassId = 0x808099F1U;
+inline constexpr std::uint32_t kComponentClassId =
+    content::packages::schema::generated::C808099f1::kClass;
 /** The wire slot type the global activity group publishes this component at. */
 inline constexpr std::uint8_t kSlotType = 16;
 
