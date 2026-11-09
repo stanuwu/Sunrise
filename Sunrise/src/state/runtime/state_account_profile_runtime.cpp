@@ -396,7 +396,8 @@ static void report_price_refusal(const AccountState& account,
 }
 
 /** Credits a stack through the grant's placement, naming each row it created or grew. */
-bool credit_profile_stack(AccountState& account,
+bool credit_profile_stack(const AccountState& uncharged,
+                          AccountState& account,
                           std::size_t characterIndex,
                           std::uint16_t itemDefinitionIndex,
                           std::int32_t quantity,
@@ -404,8 +405,12 @@ bool credit_profile_stack(AccountState& account,
                           std::size_t& changeCount) noexcept {
     build_data::items::Definition item{};
     item_details::Definition detail{};
+    std::int32_t firstSerial = 0;
+    std::int32_t placedSerial = 0;
     if (!build_data::find_item_definition_index(itemDefinitionIndex, item)
-        || !build_data::find_configured_item_detail(itemDefinitionIndex, detail)) {
+        || !build_data::find_configured_item_detail(itemDefinitionIndex, detail)
+        || !next_profile_serial(uncharged, firstSerial)
+        || !next_profile_serial(account, placedSerial)) {
         return false;
     }
     const Arrival arrival{item, detail, quantity};
@@ -420,14 +425,25 @@ bool credit_profile_stack(AccountState& account,
         || placed != quantity || rows.count > changes.size() - changeCount) {
         return false;
     }
+    // As in a Collections pull, the rows the placement touched rise above every serial the action
+    // began with, so none reuses the serial of a row the charge removed.
+    const std::int32_t lift = (std::max)(firstSerial - placedSerial, 0);
+    for (auto& held : std::span(account.profileItems).first(account.profileItemCount)) {
+        if (held.mutationSerial >= placedSerial) {
+            if (held.mutationSerial > (std::numeric_limits<std::int32_t>::max)() - lift) {
+                return false;
+            }
+            held.mutationSerial += lift;
+        }
+    }
     std::size_t newRows = 0;
     for (const GrantedRow& row : std::span(rows.values).first(rows.count)) {
         if (row.array != GrantedRowArray::profile) {
             return false;
         }
         for (const auto& held : std::span(account.profileItems).first(account.profileItemCount)) {
-            if (held.mutationSerial == row.mutationSerial) {
-                changes[changeCount++] = {row.mutationSerial, held.quantity};
+            if (held.mutationSerial == row.mutationSerial + lift) {
+                changes[changeCount++] = {held.mutationSerial, held.quantity};
             }
         }
         newRows += row.newRow ? 1U : 0U;

@@ -307,12 +307,18 @@ OvenAction stage_oven_bake(const item_details::Definition& oven,
 }
 
 /** Pays the cookie into the charged account and sets a newly discovered recipe's flag. */
-bool pay_oven_bake(AccountState& account,
+bool pay_oven_bake(const AccountState& uncharged,
+                   AccountState& account,
                    std::size_t characterIndex,
                    OvenBake& bake,
                    AccountUnlockWrites& writes) noexcept {
-    if (!credit_profile_stack(
-            account, characterIndex, bake.cookieIndex, 1, bake.changes, bake.changeCount)) {
+    if (!credit_profile_stack(uncharged,
+                              account,
+                              characterIndex,
+                              bake.cookieIndex,
+                              1,
+                              bake.changes,
+                              bake.changeCount)) {
         return false;
     }
     if (bake.discoveryFlagIndex == build_data::items::kUnavailableFlagIndex) {

@@ -254,39 +254,45 @@ scale_socket_costs(std::uint16_t socketType,
 
 /**
  * Pays one profile stack the way a grant lands, but only in full and into free rows: an exchange
- * is refused rather than paid in part or at the cost of an evicted row.
+ * is refused rather than paid in part or at the cost of an evicted row. Paid after the action's
+ * charge, so the charge's compaction cannot move a credited row off the serial the ring names.
+ * @param uncharged Account the action began with; credited serials rise above all of its rows.
+ * @param account Charged account; receives the credit.
  * @param changes Receives the rows the credit created or grew, for the account's change ring.
  * @param changeCount Rows already in changes; receives the new count.
  */
 [[nodiscard]] bool
-credit_profile_stack(AccountState& account,
+credit_profile_stack(const AccountState& uncharged,
+                     AccountState& account,
                      std::size_t characterIndex,
                      std::uint16_t itemDefinitionIndex,
                      std::int32_t quantity,
                      std::array<ProfileStackChange, kProfileStackChangeCapacity>& changes,
                      std::size_t& changeCount) noexcept;
 
-/** What a Synthesizer plug paid ahead of its insertion cost, and the plug its lane returns to. */
+/** What a Synthesizer plug pays once its insertion cost is charged, and its lane's next plug. */
 struct SynthesizerPayout {
+    std::uint16_t itemIndex{};
+    std::int32_t quantity{};
+    /** Rows the payout created or grew. */
     std::array<ProfileStackChange, kProfileStackChangeCapacity> changes{};
     std::size_t changeCount{};
     build_data::items::Definition lanePlug{};
 };
 
-/** Whether a requested plug is a Synthesizer exchange, and whether that exchange was paid. */
+/** Whether a requested plug is a Synthesizer exchange, and whether that exchange is staged. */
 enum class SynthesizerExchange : std::uint8_t { none, paid, refused };
 
 /**
- * Pays a Gambit Prime Synthesizer exchange before the plug's insertion cost is charged, so every
- * credited row's serial stays above the rows that cost may remove. A synthesis plug pays its Mote
- * and a recycle plug refunds the Synths that Mote cost; either lane returns to its initial plug.
- * @param account Account before the insertion cost; receives the credited rows when paid.
+ * Decides what a Gambit Prime Synthesizer exchange pays before the plug's insertion cost is
+ * charged. A synthesis plug pays its Mote and a recycle plug refunds the Synths that Mote cost;
+ * either lane returns to its initial plug.
+ * @param account Account before the insertion cost.
  * @param synthesizer Detail of the item the plug was requested on, whose lane accepts the plug.
- * @return None for any other plug, which leaves the account and the payout untouched.
+ * @return None for any other plug, which leaves the payout empty.
  */
 [[nodiscard]] SynthesizerExchange
-stage_synthesizer_payout(AccountState& account,
-                         std::size_t characterIndex,
+stage_synthesizer_payout(const AccountState& account,
                          const build_data::items::details::Definition& synthesizer,
                          std::uint8_t socketLane,
                          const build_data::items::Definition& requested,
@@ -335,10 +341,12 @@ enum class OvenAction : std::uint8_t {
 /**
  * Pays a staged bake once its cost is charged: credits the cookie, so its rows keep the serials
  * the change ring names, and sets the discovery flag of a newly baked recipe.
+ * @param uncharged Account the bake began with.
  * @param account Charged account; receives the cookie.
  * @param writes The transaction's unlock writes; receive the discovery flag.
  */
-[[nodiscard]] bool pay_oven_bake(AccountState& account,
+[[nodiscard]] bool pay_oven_bake(const AccountState& uncharged,
+                                 AccountState& account,
                                  std::size_t characterIndex,
                                  OvenBake& bake,
                                  AccountUnlockWrites& writes) noexcept;

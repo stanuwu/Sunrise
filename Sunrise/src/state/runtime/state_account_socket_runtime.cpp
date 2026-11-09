@@ -200,11 +200,10 @@ scale_socket_costs(std::uint16_t socketType,
         }
     }
 
-    // A Synthesizer plug is an exchange, paid before its insertion cost is charged.
-    AccountState creditedAccount = snapshot;
+    // A Synthesizer plug is an exchange, paid after its insertion cost is charged.
     SynthesizerPayout payout{};
-    const SynthesizerExchange exchange = stage_synthesizer_payout(
-        creditedAccount, characterIndex, detail, socketLane, plugDefinition, payout);
+    const SynthesizerExchange exchange =
+        stage_synthesizer_payout(snapshot, detail, socketLane, plugDefinition, payout);
     if (exchange == SynthesizerExchange::refused) {
         return fail("synthesizer_exchange");
     }
@@ -229,7 +228,7 @@ scale_socket_costs(std::uint16_t socketType,
         return fail("plug_ownership");
     }
 
-    AccountState chargedAccount = creditedAccount;
+    AccountState chargedAccount = snapshot;
     build_data::material_requirements::Definition materialSet{};
     AccountUnlockWrites unlockWrites = bake.unlockWrites;
     bool profileChanged = false;
@@ -240,10 +239,20 @@ scale_socket_costs(std::uint16_t socketType,
             || materialSet.requirementSetIndex != materialSetIndex
             || !scale_socket_costs(detail.socketTypes[socketLane], materialSet)
             || !apply_action_materials(
-                creditedAccount, materialSet, chargedAccount, profileChanged, unlockWrites))) {
+                snapshot, materialSet, chargedAccount, profileChanged, unlockWrites))) {
         return fail("materials");
     }
-    if (bakes && !pay_oven_bake(chargedAccount, characterIndex, bake, unlockWrites)) {
+    if (exchange == SynthesizerExchange::paid
+        && !credit_profile_stack(snapshot,
+                                 chargedAccount,
+                                 characterIndex,
+                                 payout.itemIndex,
+                                 payout.quantity,
+                                 payout.changes,
+                                 payout.changeCount)) {
+        return fail("synthesizer_payout");
+    }
+    if (bakes && !pay_oven_bake(snapshot, chargedAccount, characterIndex, bake, unlockWrites)) {
         return fail("oven_payout");
     }
 

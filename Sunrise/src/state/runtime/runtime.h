@@ -523,7 +523,7 @@ struct PendingSocketPlug {
     /** Exact account-wide material balances observed before applying the installed cost set. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         beforeProfileItems{};
-    /** Canonical balances after any exchange payout and every consuming row of the cost set. */
+    /** Canonical balances after every consuming row of the cost set and any exchange payout. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         afterProfileItems{};
     std::uint64_t accountSoid{};
