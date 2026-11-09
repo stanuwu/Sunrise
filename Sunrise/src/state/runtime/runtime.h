@@ -489,6 +489,31 @@ struct AccountEditChange {
     bool accountRows{};
 };
 
+/** One account unlock row a transaction writes, and the value its preparation observed. */
+struct AccountUnlockWrite {
+    /** The account flag bank when set, the account value bank otherwise. */
+    bool flag{};
+    std::uint16_t index{};
+    std::int32_t previousValue{};
+    std::int32_t value{};
+
+    bool operator==(const AccountUnlockWrite&) const = default;
+};
+
+/**
+ * Account unlock rows one socket action may write: a debit for each requirement of its cost set,
+ * plus the two ingredient balances a burnt bake debits or the discovery flag a recipe sets.
+ */
+inline constexpr std::size_t kSocketUnlockWriteCapacity = 8;
+
+/** The account unlock rows one socket action writes, each once, in the order first written. */
+struct AccountUnlockWrites {
+    std::array<AccountUnlockWrite, kSocketUnlockWriteCapacity> rows{};
+    std::size_t count{};
+
+    bool operator==(const AccountUnlockWrites&) const = default;
+};
+
 /** Prepared ordinary-socket selection for one selected-character item instance. */
 struct PendingSocketPlug {
     /** Exact prepare-time character view used as the commit staleness guard. */
@@ -513,6 +538,8 @@ struct PendingSocketPlug {
     /** Rows an exchange credited, which the account's change ring announces. */
     std::array<ProfileStackChange, kProfileStackChangeCapacity> changes{};
     std::size_t changeCount{};
+    /** Account values the cost's value-slot rows debit, and flags a bake sets. */
+    AccountUnlockWrites unlockWrites{};
     /** Equipment semantic index or dense inventory index, selected by `targetEquipped`. */
     std::size_t itemIndex{};
     std::uint16_t targetDefinitionIndex{};
@@ -528,6 +555,7 @@ struct PendingSocketPlug {
     std::uint8_t targetBucketId{};
     std::uint8_t plugBucketId{};
     std::uint8_t materialRequirementCount{};
+    /** The account object changes: a profile row or an account unlock row. */
     bool profileChanged{};
     bool targetEquipped{};
     bool prepared{};
@@ -988,7 +1016,8 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  * Prepares one exact opcode-903 ordinary-socket selection on a selected-character item.
  * The target may be equipped or unequipped. Native defaults are materialized into a complete
  * authored socket block, then only the requested lane changes; everything else stays byte-stable.
- * A Gambit Prime Synthesizer plug is an exchange: it also pays a Mote or refunds Synths.
+ * A Gambit Prime Synthesizer plug is an exchange: it also pays a Mote or refunds Synths. A Dawning
+ * oven's Combine or recipe plug bakes a cookie and returns the oven's lanes to their initial plugs.
  * @param targetInstanceSoid Selected-character item-instance key named by the Client.
  * @param socketLane Zero-based ordinary socket lane.
  * @param plugDefinitionIndex Installed plug-definition row selected by the Client.
@@ -1013,9 +1042,26 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
                                                 std::uint16_t plugDefinitionIndex,
                                                 PendingSocketPlug& mutation) noexcept;
 
-/** Produces the complete uncommitted account after-image for a prepared socket transaction. */
+/**
+ * Produces the complete uncommitted account after-image for a prepared socket transaction.
+ * @param afterUnlocks Receives the account unlocks with the action's writes applied.
+ */
 [[nodiscard]] bool preview_socket_plug(const PendingSocketPlug& mutation,
-                                       AccountState& after) noexcept;
+                                       AccountState& after,
+                                       unlocks::Table& afterUnlocks) noexcept;
+
+/**
+ * Prepares crediting one Dawning ingredient pickup to the oven balance its ingredient plug counts.
+ * The caller previews the write over its unlock after-image and writes it in its own transaction,
+ * after checking that the row still holds the observed value.
+ * @param pickupHash Ingredient pickup item the Client acquired.
+ * @param quantity Positive units to credit.
+ * @param credit Receives the account value row, the value it holds and the credited value.
+ * @return False for any other item, an unmapped balance or an overflowing credit.
+ */
+[[nodiscard]] bool prepare_ingredient_credit(std::uint32_t pickupHash,
+                                             std::int32_t quantity,
+                                             AccountUnlockWrite& credit) noexcept;
 
 /**
  * Commits a prepared socket selection only while the complete prepare-time character is unchanged.

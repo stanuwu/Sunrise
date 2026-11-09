@@ -18,6 +18,10 @@ inline constexpr std::uint16_t kUnavailableMaterialRequirementSetIndex = 0xFFFFU
 inline constexpr std::uint16_t kUnavailableLinkedPlugIndex = 0xFFFFU;
 /** The stack-unique label is the FNV-1 hash of its string; this is the hash of the empty one. */
 inline constexpr std::uint32_t kNoStackUniqueLabel = 0x811C9DC5U;
+/** All bits set mark an item that names no account value row. */
+inline constexpr std::uint16_t kUnavailableValueIndex = 0xFFFFU;
+/** All bits set mark an item that names no account flag row. */
+inline constexpr std::uint16_t kUnavailableFlagIndex = 0xFFFFU;
 
 /** One installed-build item identity, used to look up authored definition hashes. */
 struct Definition {
@@ -51,6 +55,13 @@ struct Definition {
     std::uint32_t stackUniqueLabel{kNoStackUniqueLabel};
     /** The installed restricted-grant list names this item; ordinary grants refuse it. */
     bool grantRestricted{};
+    /** Account value row a plug's quantity expression reads alone, as an oven ingredient does. */
+    std::uint16_t quantityValueIndex{kUnavailableValueIndex};
+    /**
+     * Account flag row every shared plug set offering this plug requires set, as a recipe its
+     * discovery; unavailable when the sets require none or disagree.
+     */
+    std::uint16_t plugSetFlagIndex{kUnavailableFlagIndex};
 };
 
 /**

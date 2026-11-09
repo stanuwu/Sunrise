@@ -238,6 +238,7 @@
     <ClCompile Include="src\state\runtime\state_account_equipment_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_identity_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_profile_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\state_account_oven_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_socket_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_synthesizer_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_settings_runtime.cpp" />

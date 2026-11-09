@@ -11,6 +11,7 @@
 
 #include "../../core/logging/log.h"
 #include "../build_data/runtime.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -394,34 +395,143 @@ static void report_price_refusal(const AccountState& account,
     return true;
 }
 
-/** Applies one dense installed action-cost set resolved from the selected plug or action row. */
+/** Credits a stack through the grant's placement, naming each row it created or grew. */
+bool credit_profile_stack(AccountState& account,
+                          std::size_t characterIndex,
+                          std::uint16_t itemDefinitionIndex,
+                          std::int32_t quantity,
+                          std::array<ProfileStackChange, kProfileStackChangeCapacity>& changes,
+                          std::size_t& changeCount) noexcept {
+    build_data::items::Definition item{};
+    item_details::Definition detail{};
+    if (!build_data::find_item_definition_index(itemDefinitionIndex, item)
+        || !build_data::find_configured_item_detail(itemDefinitionIndex, detail)) {
+        return false;
+    }
+    const Arrival arrival{item, detail, quantity};
+    const std::size_t heldRows = account.profileItemCount;
+    // A stackable arrival never allocates an instance identity.
+    std::uint64_t nextInstanceSoid = 0;
+    PlacedRows rows{};
+    std::int32_t placed = 0;
+    const char* reason = nullptr;
+    if (place_arrival(account, characterIndex, arrival, nextInstanceSoid, rows, placed, reason)
+            != RewardPreparation::prepared
+        || placed != quantity || rows.count > changes.size() - changeCount) {
+        return false;
+    }
+    std::size_t newRows = 0;
+    for (const GrantedRow& row : std::span(rows.values).first(rows.count)) {
+        if (row.array != GrantedRowArray::profile) {
+            return false;
+        }
+        for (const auto& held : std::span(account.profileItems).first(account.profileItemCount)) {
+            if (held.mutationSerial == row.mutationSerial) {
+                changes[changeCount++] = {row.mutationSerial, held.quantity};
+            }
+        }
+        newRows += row.newRow ? 1U : 0U;
+    }
+    // An eviction removes a row the placement did not create.
+    return account.profileItemCount == heldRows + newRows;
+}
+
+/** Reads the staged value, or the saved one when the transaction has not written the row. */
+[[nodiscard]] bool read_account_unlock(const AccountUnlockWrites& writes,
+                                       bool flag,
+                                       std::uint16_t index,
+                                       std::int32_t& value) noexcept {
+    for (const AccountUnlockWrite& write : std::span(writes.rows).first(writes.count)) {
+        if (write.flag == flag && write.index == index) {
+            value = write.value;
+            return true;
+        }
+    }
+    return investment::store::read_unlock(flag ? investment::store::Bank::accountFlags
+                                               : investment::store::Bank::objectiveValues,
+                                          index,
+                                          value);
+}
+
+/** Keeps the value the save held before the first write, so commit can check it still does. */
+[[nodiscard]] bool write_account_unlock(AccountUnlockWrites& writes,
+                                        bool flag,
+                                        std::uint16_t index,
+                                        std::int32_t value) noexcept {
+    for (AccountUnlockWrite& write : std::span(writes.rows).first(writes.count)) {
+        if (write.flag == flag && write.index == index) {
+            write.value = value;
+            return true;
+        }
+    }
+    std::int32_t saved = 0;
+    if (writes.count == writes.rows.size() || !read_account_unlock(writes, flag, index, saved)) {
+        return false;
+    }
+    writes.rows[writes.count++] = {flag, index, saved, value};
+    return true;
+}
+
+/** Debits one account value row, refusing a balance short of the quantity. */
+[[nodiscard]] bool debit_account_value(AccountUnlockWrites& writes,
+                                       std::uint16_t index,
+                                       std::uint32_t quantity) noexcept {
+    std::int32_t balance = 0;
+    return read_account_unlock(writes, false, index, balance) && balance >= 0
+           && static_cast<std::uint32_t>(balance) >= quantity
+           && write_account_unlock(
+               writes,
+               false,
+               index,
+               static_cast<std::int32_t>(static_cast<std::uint32_t>(balance) - quantity));
+}
+
+/** Charges value-slot rows against their account values and the rest against inventory. */
 [[nodiscard]] bool
 apply_action_materials(const AccountState& before,
                        const build_data::material_requirements::Definition& definition,
                        AccountState& after,
-                       bool& changed) noexcept {
+                       bool& changed,
+                       AccountUnlockWrites& writes) noexcept {
+    namespace materials = build_data::material_requirements;
+    after = {};
+    changed = false;
     if (definition.requirementSetHash == 0
-        || definition.requirementSetIndex == build_data::material_requirements::kUnavailableSetIndex
+        || definition.requirementSetIndex == materials::kUnavailableSetIndex
         || definition.requirementCount == 0
         || definition.requirementCount > definition.requirements.size()) {
+        return false;
+    }
+    std::array<materials::Requirement, materials::kRequirementCapacity> inventoryRows{};
+    std::size_t inventoryCount = 0;
+    AccountUnlockWrites charged = writes;
+    for (const materials::Requirement& requirement :
+         std::span(definition.requirements).first(definition.requirementCount)) {
+        if (requirement.condition == materials::kUnconditionalRequirement) {
+            inventoryRows[inventoryCount++] = requirement;
+            continue;
+        }
+        // A row kept on use is only checked, so its debit is zero.
+        const std::uint32_t debit = requirement.deleteOnAction ? requirement.quantity : 0;
+        std::int32_t balance = 0;
+        if (requirement.valueIndex == materials::kUnavailableValueIndex
+            || !read_account_unlock(charged, false, requirement.valueIndex, balance)
+            || balance < 0 || static_cast<std::uint32_t>(balance) < requirement.quantity
+            || (debit != 0 && !debit_account_value(charged, requirement.valueIndex, debit))) {
+            return false;
+        }
+    }
+    if (!apply_material_requirements(
+            before,
+            std::span<const materials::Requirement>{inventoryRows.data(), inventoryCount},
+            after,
+            changed)) {
         after = {};
         changed = false;
         return false;
     }
-    for (std::size_t index = 0; index < definition.requirementCount; ++index) {
-        if (definition.requirements[index].condition
-            != build_data::material_requirements::kUnconditionalRequirement) {
-            after = {};
-            changed = false;
-            return false;
-        }
-    }
-    return apply_material_requirements(
-        before,
-        std::span(definition.requirements)
-            .first(static_cast<std::size_t>(definition.requirementCount)),
-        after,
-        changed);
+    writes = charged;
+    return true;
 }
 
 /** @return True when a pending profile acquisition carries canonical dense before/after images. */

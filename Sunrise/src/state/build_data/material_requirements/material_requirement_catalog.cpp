@@ -5,6 +5,7 @@
 #include <mutex>
 #include <shared_mutex>
 
+#include "../../unlocks/definition.h"
 #include "../table.h"
 #include "core/threading/srw_lock.h"
 
@@ -70,7 +71,11 @@ bool valid(std::span<const Definition> definitions,
         for (std::size_t index = 0; index < definition.requirements.size(); ++index) {
             const Requirement& requirement = definition.requirements[index];
             if (index < definition.requirementCount) {
-                if (requirement.itemDefinitionIndex == kUnavailableItemDefinitionIndex) {
+                if (requirement.itemDefinitionIndex == kUnavailableItemDefinitionIndex
+                    || (requirement.condition == kUnconditionalRequirement
+                        && requirement.valueIndex != kUnavailableValueIndex)
+                    || (requirement.valueIndex != kUnavailableValueIndex
+                        && requirement.valueIndex >= unlocks::kObjectiveValueCapacity)) {
                     return false;
                 }
                 for (std::size_t prior = 0; prior < index; ++prior) {
@@ -82,6 +87,7 @@ bool valid(std::span<const Definition> definitions,
             } else if (requirement.itemDefinitionIndex != kUnavailableItemDefinitionIndex
                        || requirement.quantity != 0
                        || requirement.condition != kUnconditionalRequirement
+                       || requirement.valueIndex != kUnavailableValueIndex
                        || requirement.deleteOnAction || requirement.omitFromRequirements) {
                 return false;
             }

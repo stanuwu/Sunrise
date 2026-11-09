@@ -1,6 +1,8 @@
 #include <array>
 #include <span>
+#include <vector>
 
+#include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/tables/quest_initialization_reader.h"
 #include "../../../../state/build_data/items/catalysts/exotic_catalyst_builder.h"
 #include "../../../../state/build_data/items/details/item_detail_catalog.h"
@@ -32,6 +34,45 @@ namespace pursuits = state::build_data::pursuits;
         }
     }
     return true;
+}
+
+/** The plug-set flags read so far, and the items any set has offered yet. */
+struct PlugSetFlagScan {
+    std::vector<std::uint16_t>& flags;
+    std::vector<bool>& offered;
+    const SlotMap& accountFlags;
+};
+
+/** Keeps an item's flag while every set offering it requires the same one, else unmaps it. */
+void record_plug_set_flag(void* context,
+                          std::uint32_t itemDefinitionIndex,
+                          std::int16_t flagSlot) noexcept {
+    auto& scan = *static_cast<PlugSetFlagScan*>(context);
+    if (itemDefinitionIndex >= scan.flags.size()) {
+        return;
+    }
+    const std::uint16_t row = bank_index(scan.accountFlags, flagSlot);
+    std::uint16_t& flag = scan.flags[itemDefinitionIndex];
+    flag = !scan.offered[itemDefinitionIndex] || flag == row ? row : kUnmappedSlot;
+    scan.offered[itemDefinitionIndex] = true;
+}
+
+/**
+ * Resolves, per item, the account flag row the shared plug sets offering it require set, over
+ * rows already unmapped. A table that does not parse leaves every item unmapped, which refuses
+ * whatever needs the flag.
+ */
+void read_plug_set_flags(Storage& storage) noexcept {
+    const std::size_t itemCount = storage.plugSetFlagIndices.size();
+    std::vector<bool> offered(itemCount, false);
+    PlugSetFlagScan scan{storage.plugSetFlagIndices, offered, storage.slotMaps.accountFlag};
+    if (!tables::items::visit_plug_set_flags(
+            std::span<const std::byte>{storage.plugSetTable}, record_plug_set_flag, &scan)) {
+        storage.plugSetFlagIndices.assign(itemCount, kUnmappedSlot);
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         "ev=pkg stage=plug_set_flags result=fail");
+    }
 }
 
 } // namespace
@@ -98,6 +139,10 @@ bool build_item_rows(const reader::Source& source,
     // The fixed request bitset bounds this to the installed 16-bit item-table domain.
     storage.detailRequests.reset();
     storage.specialPlugCategories.fill(0);
+    storage.plugSetFlagIndices.assign(static_cast<std::size_t>(table.count), kUnmappedSlot);
+    if (needDefinitions) {
+        read_plug_set_flags(storage);
+    }
     std::size_t detailCount = 0;
     // One malformed entry is omitted on its own so the rest of the table still publishes. An
     // entry can fail either at its index row or at the definition the row points to, and neither
@@ -213,7 +258,10 @@ bool build_item_rows(const reader::Source& source,
                                                  item.quietAcquisition,
                                                  item.toastlessAcquisition,
                                                  item.stackUniqueLabel,
-                                                 storage.restrictedGrants[item.definitionIndex]};
+                                                 storage.restrictedGrants[item.definitionIndex],
+                                                 bank_index(storage.slotMaps.accountValue,
+                                                            item.quantityValueSlot),
+                                                 storage.plugSetFlagIndices[item.definitionIndex]};
         if (needSocketRows) {
             storage.specialPlugCategories[item.definitionIndex] =
                 special_plug_category(plugCategoryHash);

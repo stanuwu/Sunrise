@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <span>
 
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
@@ -196,15 +198,31 @@ bool prepare_equipped_socket_plug(std::uint64_t targetInstanceSoid,
     return true;
 }
 
+/** Applies a socket action's unlock writes, whose rows the catalogs bound, to the banks. */
+static void apply_unlock_writes(const AccountUnlockWrites& writes, unlocks::Table& banks) noexcept {
+    for (const AccountUnlockWrite& write : std::span(writes.rows).first(writes.count)) {
+        if (write.flag) {
+            banks.accountFlags[write.index] = static_cast<std::uint8_t>(write.value);
+        } else {
+            banks.objectiveValues[write.index] = write.value;
+        }
+    }
+}
+
 /** Produces the complete account after-image while the prepared socket action remains current. */
-bool preview_socket_plug(const PendingSocketPlug& mutation, AccountState& after) noexcept {
+bool preview_socket_plug(const PendingSocketPlug& mutation,
+                         AccountState& after,
+                         unlocks::Table& afterUnlocks) noexcept {
     after = {};
+    afterUnlocks = {};
     if (!mutation.prepared || mutation.accountSoid == 0 || mutation.characterSoid == 0
         || mutation.targetInstanceSoid == 0 || mutation.characterIndex >= kCharacterCapacity
         || mutation.expectedProfileItemCount > authored_inventory::kProfileItemCapacity
         || mutation.afterProfileItemCount > authored_inventory::kProfileItemCapacity) {
         return false;
     }
+    // The account and the unlock rows the action reads come from one locked save view.
+    const std::lock_guard lock(investment::store::g_mutex);
     const AccountState current = account_snapshot();
     if (mutation.characterIndex >= current.characterCount
         || current.primarySoid != mutation.accountSoid
@@ -231,6 +249,7 @@ bool preview_socket_plug(const PendingSocketPlug& mutation, AccountState& after)
         || canonical.expectedProfileItemCount != mutation.expectedProfileItemCount
         || canonical.afterProfileItemCount != mutation.afterProfileItemCount
         || canonical.changes != mutation.changes || canonical.changeCount != mutation.changeCount
+        || canonical.unlockWrites != mutation.unlockWrites
         || canonical.itemIndex != mutation.itemIndex
         || canonical.targetDefinitionIndex != mutation.targetDefinitionIndex
         || canonical.plugDefinitionIndex != mutation.plugDefinitionIndex
@@ -247,14 +266,21 @@ bool preview_socket_plug(const PendingSocketPlug& mutation, AccountState& after)
         return false;
     }
 
+    if (!investment::store::read_unlocks(afterUnlocks,
+                                         static_cast<int>(mutation.characterIndex))) {
+        return false;
+    }
+    apply_unlock_writes(mutation.unlockWrites, afterUnlocks);
     after = current;
     after.profileItems = canonical.afterProfileItems;
     after.profileItemCount = canonical.afterProfileItemCount;
     after.characters[mutation.characterIndex] = canonical.afterCharacter;
-    const bool balancesChanged = !same_profile_inventory(
-        after, mutation.beforeProfileItems, mutation.expectedProfileItemCount);
+    const bool accountChanged = mutation.unlockWrites.count != 0
+                                || !same_profile_inventory(after,
+                                                           mutation.beforeProfileItems,
+                                                           mutation.expectedProfileItemCount);
     family4_loadout::ResolvedLoadout resolved{};
-    return balancesChanged == mutation.profileChanged
+    return accountChanged == mutation.profileChanged
            && same_profile_inventory(
                after, mutation.afterProfileItems, mutation.afterProfileItemCount)
            && account::valid(after) && valid_profile_inventory(after)
@@ -309,71 +335,87 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
                        prepared.targetEquipped,
                        prepared.itemIndex);
 
-    investment::store::g_mutex.lock();
-    AccountState candidate = investment::store::account();
-    if (prepared.characterIndex >= candidate.characterCount
-        || candidate.primarySoid != prepared.accountSoid
-        || !same_profile_inventory(
-            candidate, prepared.beforeProfileItems, prepared.expectedProfileItemCount)
-        || !same_character(candidate.characters[prepared.characterIndex],
-                           prepared.beforeCharacter)) {
-        investment::store::g_mutex.unlock();
-        return fail("stale");
-    }
+    {
+        investment::store::Transaction transaction;
+        if (!transaction.ready()) {
+            return fail("transaction");
+        }
+        AccountState candidate = investment::store::account();
+        if (prepared.characterIndex >= candidate.characterCount
+            || candidate.primarySoid != prepared.accountSoid
+            || !same_profile_inventory(
+                candidate, prepared.beforeProfileItems, prepared.expectedProfileItemCount)
+            || !same_character(candidate.characters[prepared.characterIndex],
+                               prepared.beforeCharacter)) {
+            return fail("stale");
+        }
 
-    PendingSocketPlug canonical{};
-    if (!stage_socket_plug(candidate,
-                           prepared.characterIndex,
-                           prepared.targetInstanceSoid,
-                           prepared.socketLane,
-                           prepared.requestedPlugDefinitionIndex,
-                           canonical,
-                           prepared.plugDefinitionHash)
-        || canonical.characterSoid != prepared.characterSoid
-        || canonical.accountSoid != prepared.accountSoid
-        || canonical.targetDefinitionHash != prepared.targetDefinitionHash
-        || canonical.plugDefinitionHash != prepared.plugDefinitionHash
-        || canonical.materialRequirementSetHash != prepared.materialRequirementSetHash
-        || canonical.characterIndex != prepared.characterIndex
-        || canonical.expectedProfileItemCount != prepared.expectedProfileItemCount
-        || canonical.afterProfileItemCount != prepared.afterProfileItemCount
-        || canonical.changes != prepared.changes || canonical.changeCount != prepared.changeCount
-        || canonical.itemIndex != prepared.itemIndex
-        || canonical.targetDefinitionIndex != prepared.targetDefinitionIndex
-        || canonical.plugDefinitionIndex != prepared.plugDefinitionIndex
-        || canonical.requestedPlugDefinitionIndex != prepared.requestedPlugDefinitionIndex
-        || canonical.materialRequirementSetIndex != prepared.materialRequirementSetIndex
-        || canonical.socketLane != prepared.socketLane
-        || canonical.targetBucketId != prepared.targetBucketId
-        || canonical.plugBucketId != prepared.plugBucketId
-        || canonical.materialRequirementCount != prepared.materialRequirementCount
-        || canonical.profileChanged != prepared.profileChanged
-        || canonical.targetEquipped != prepared.targetEquipped
-        || !same_character(canonical.beforeCharacter, prepared.beforeCharacter)
-        || !same_character(canonical.afterCharacter, prepared.afterCharacter)) {
-        investment::store::g_mutex.unlock();
-        return fail("transition");
-    }
+        // Re-staging reads every unlock row the action writes, so an equal transition proves
+        // each row still holds the value the preparation observed.
+        PendingSocketPlug canonical{};
+        if (!stage_socket_plug(candidate,
+                               prepared.characterIndex,
+                               prepared.targetInstanceSoid,
+                               prepared.socketLane,
+                               prepared.requestedPlugDefinitionIndex,
+                               canonical,
+                               prepared.plugDefinitionHash)
+            || canonical.characterSoid != prepared.characterSoid
+            || canonical.accountSoid != prepared.accountSoid
+            || canonical.targetDefinitionHash != prepared.targetDefinitionHash
+            || canonical.plugDefinitionHash != prepared.plugDefinitionHash
+            || canonical.materialRequirementSetHash != prepared.materialRequirementSetHash
+            || canonical.characterIndex != prepared.characterIndex
+            || canonical.expectedProfileItemCount != prepared.expectedProfileItemCount
+            || canonical.afterProfileItemCount != prepared.afterProfileItemCount
+            || canonical.changes != prepared.changes
+            || canonical.changeCount != prepared.changeCount
+            || canonical.unlockWrites != prepared.unlockWrites
+            || canonical.itemIndex != prepared.itemIndex
+            || canonical.targetDefinitionIndex != prepared.targetDefinitionIndex
+            || canonical.plugDefinitionIndex != prepared.plugDefinitionIndex
+            || canonical.requestedPlugDefinitionIndex != prepared.requestedPlugDefinitionIndex
+            || canonical.materialRequirementSetIndex != prepared.materialRequirementSetIndex
+            || canonical.socketLane != prepared.socketLane
+            || canonical.targetBucketId != prepared.targetBucketId
+            || canonical.plugBucketId != prepared.plugBucketId
+            || canonical.materialRequirementCount != prepared.materialRequirementCount
+            || canonical.profileChanged != prepared.profileChanged
+            || canonical.targetEquipped != prepared.targetEquipped
+            || !same_character(canonical.beforeCharacter, prepared.beforeCharacter)
+            || !same_character(canonical.afterCharacter, prepared.afterCharacter)) {
+            return fail("transition");
+        }
 
-    candidate.profileItems = canonical.afterProfileItems;
-    candidate.profileItemCount = canonical.afterProfileItemCount;
-    if (!same_profile_inventory(
-            candidate, prepared.afterProfileItems, prepared.afterProfileItemCount)) {
-        investment::store::g_mutex.unlock();
-        return fail("materials");
+        candidate.profileItems = canonical.afterProfileItems;
+        candidate.profileItemCount = canonical.afterProfileItemCount;
+        if (!same_profile_inventory(
+                candidate, prepared.afterProfileItems, prepared.afterProfileItemCount)) {
+            return fail("materials");
+        }
+        candidate.characters[prepared.characterIndex] = canonical.afterCharacter;
+        family4_loadout::ResolvedLoadout checked{};
+        if (!account::valid(candidate) || !valid_profile_inventory(candidate)
+            || !family4_loadout::resolve(candidate, prepared.characterIndex, checked)) {
+            return fail("account_or_resolve");
+        }
+        if (!investment::store::write_account(candidate)) {
+            return false;
+        }
+        for (const AccountUnlockWrite& write :
+             std::span(prepared.unlockWrites.rows).first(prepared.unlockWrites.count)) {
+            if (!investment::store::write_unlock(write.flag
+                                                     ? investment::store::Bank::accountFlags
+                                                     : investment::store::Bank::objectiveValues,
+                                                 write.index,
+                                                 write.value)) {
+                return false;
+            }
+        }
+        if (!transaction.commit()) {
+            return false;
+        }
     }
-    candidate.characters[prepared.characterIndex] = canonical.afterCharacter;
-    family4_loadout::ResolvedLoadout checked{};
-    if (!account::valid(candidate) || !valid_profile_inventory(candidate)
-        || !family4_loadout::resolve(candidate, prepared.characterIndex, checked)) {
-        investment::store::g_mutex.unlock();
-        return fail("account_or_resolve");
-    }
-    if (!investment::store::write_account(candidate)) {
-        investment::store::g_mutex.unlock();
-        return false;
-    }
-    investment::store::g_mutex.unlock();
 
     report_socket_plug("commit_end",
                        "ok",

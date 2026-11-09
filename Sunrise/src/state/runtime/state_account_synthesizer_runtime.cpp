@@ -7,7 +7,6 @@
 #include <span>
 
 #include "../build_data/runtime.h"
-#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -108,50 +107,6 @@ constexpr std::array<MoteOutput, 12> kSynthesizerMoteOutputs{{
     return true;
 }
 
-/**
- * Pays one profile stack the way a grant lands, but only in full and into free rows: an exchange
- * is refused rather than paid in part or at the cost of an evicted row.
- * @param payout Receives the rows the credit created or grew, for the account's change ring.
- */
-[[nodiscard]] bool credit_profile_stack(AccountState& account,
-                                        std::size_t characterIndex,
-                                        std::uint16_t itemDefinitionIndex,
-                                        std::int32_t quantity,
-                                        SynthesizerPayout& payout) noexcept {
-    build_data::items::Definition item{};
-    item_details::Definition detail{};
-    if (!build_data::find_item_definition_index(itemDefinitionIndex, item)
-        || !build_data::find_configured_item_detail(itemDefinitionIndex, detail)) {
-        return false;
-    }
-    const Arrival arrival{item, detail, quantity};
-    const std::size_t heldRows = account.profileItemCount;
-    // A stackable arrival never allocates an instance identity.
-    std::uint64_t nextInstanceSoid = 0;
-    PlacedRows rows{};
-    std::int32_t placed = 0;
-    const char* reason = nullptr;
-    if (place_arrival(account, characterIndex, arrival, nextInstanceSoid, rows, placed, reason)
-            != RewardPreparation::prepared
-        || placed != quantity || rows.count > payout.changes.size()) {
-        return false;
-    }
-    std::size_t newRows = 0;
-    for (const GrantedRow& row : std::span(rows.values).first(rows.count)) {
-        if (row.array != GrantedRowArray::profile) {
-            return false;
-        }
-        for (const auto& held : std::span(account.profileItems).first(account.profileItemCount)) {
-            if (held.mutationSerial == row.mutationSerial) {
-                payout.changes[payout.changeCount++] = {row.mutationSerial, held.quantity};
-            }
-        }
-        newRows += row.newRow ? 1U : 0U;
-    }
-    // An eviction removes a row the placement did not create.
-    return account.profileItemCount == heldRows + newRows;
-}
-
 /** Credits the Mote a synthesis plug pays while its tier holds none. */
 [[nodiscard]] bool pay_synthesis(AccountState& account,
                                  std::size_t characterIndex,
@@ -167,7 +122,12 @@ constexpr std::array<MoteOutput, 12> kSynthesizerMoteOutputs{{
            && build_data::find_item_definition_hash(output.moteHash, mote)
            && cost.requirements[0].itemDefinitionIndex != mote.definitionIndex
            && lane_mote_absent(account, synthesizer.definitionIndex, lane)
-           && credit_profile_stack(account, characterIndex, mote.definitionIndex, 1, payout);
+           && credit_profile_stack(account,
+                                   characterIndex,
+                                   mote.definitionIndex,
+                                   1,
+                                   payout.changes,
+                                   payout.changeCount);
 }
 
 /**
@@ -207,7 +167,8 @@ constexpr std::array<MoteOutput, 12> kSynthesizerMoteOutputs{{
                                    characterIndex,
                                    synthesisCost.requirements[0].itemDefinitionIndex,
                                    static_cast<std::int32_t>(refund),
-                                   payout);
+                                   payout.changes,
+                                   payout.changeCount);
 }
 
 } // namespace

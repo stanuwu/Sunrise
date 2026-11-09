@@ -69,6 +69,9 @@ static_assert(kUnmappedSlot == state::build_data::records::kUnavailableValueInde
 static_assert(kUnmappedSlot == state::build_data::season_pass::kUnavailableFlagIndex);
 static_assert(kUnmappedSlot
               == state::build_data::items::catalysts::kUnavailableCompletionFlagIndex);
+static_assert(kUnmappedSlot == state::build_data::items::kUnavailableValueIndex);
+static_assert(kUnmappedSlot == state::build_data::items::kUnavailableFlagIndex);
+static_assert(kUnmappedSlot == state::build_data::material_requirements::kUnavailableValueIndex);
 
 /** Bank index per unlock slot, indexed by slot. The first mapping row of a slot wins. */
 using SlotMap = std::array<std::uint16_t, kSlotSpace>;
@@ -127,6 +130,8 @@ struct Storage {
     std::vector<std::byte> questValueMap{};
     /** Shared reusable/randomized plug-set table read from investment-root slot 51. */
     std::vector<std::byte> plugSetTable{};
+    /** Account flag row the plug sets offering each item require set, by item-table index. */
+    std::vector<std::uint16_t> plugSetFlagIndices{};
     /** Item rows the installed restricted-grant list names, by item-table index. */
     std::vector<bool> restrictedGrants{};
     /** Dense item-indexed catalyst completion expressions for this package pass. */

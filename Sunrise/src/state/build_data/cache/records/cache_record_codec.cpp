@@ -73,6 +73,8 @@ bool encode(const items::Definition& value, ItemRecord& record) noexcept {
         static_cast<std::uint8_t>(value.toastlessAcquisition),
         value.stackUniqueLabel,
         static_cast<std::uint8_t>(value.grantRestricted),
+        value.quantityValueIndex,
+        value.plugSetFlagIndex,
     };
     return items::valid(value.questInitialization);
 }
@@ -100,7 +102,9 @@ bool decode(const ItemRecord& record, items::Definition& value) noexcept {
              record.quietAcquisition != 0,
              record.toastlessAcquisition != 0,
              record.stackUniqueLabel,
-             record.grantRestricted != 0};
+             record.grantRestricted != 0,
+             record.quantityValueIndex,
+             record.plugSetFlagIndex};
     return items::valid(value.questInitialization) && record.quietAcquisition <= 1
            && record.toastlessAcquisition <= 1 && record.grantRestricted <= 1;
 }
@@ -150,6 +154,7 @@ bool decode(const CollectibleRecord& record, collectibles::Definition& value) no
     for (std::size_t index = 0; index < record.materialRequirements.size(); ++index) {
         const MaterialRequirementRecord& requirement = record.materialRequirements[index];
         if (requirement.condition != material_requirements::kUnconditionalRequirement
+            || requirement.valueIndex != material_requirements::kUnavailableValueIndex
             || requirement.deleteOnAction > 1 || requirement.omitFromRequirements > 1) {
             return false;
         }
@@ -181,6 +186,7 @@ bool encode(const material_requirements::Definition& value,
             requirement.condition,
             static_cast<std::uint8_t>(requirement.deleteOnAction),
             static_cast<std::uint8_t>(requirement.omitFromRequirements),
+            requirement.valueIndex,
         };
     }
     return true;
@@ -208,6 +214,7 @@ bool decode(const MaterialRequirementSetRecord& record,
             requirement.condition,
             requirement.deleteOnAction != 0,
             requirement.omitFromRequirements != 0,
+            requirement.valueIndex,
         };
     }
     return true;

@@ -106,7 +106,11 @@ bool valid(std::span<const Definition> definitions) noexcept {
         if (definition.definitionIndex >= definitions.size() || occupied[definition.definitionIndex]
             || !valid(definition.questInitialization)
             || (definition.questInitialization.scope != QuestInitialization::Scope::none
-                && definition.bucketId != kPursuitBucketId)) {
+                && definition.bucketId != kPursuitBucketId)
+            || (definition.quantityValueIndex != kUnavailableValueIndex
+                && definition.quantityValueIndex >= unlocks::kObjectiveValueCapacity)
+            || (definition.plugSetFlagIndex != kUnavailableFlagIndex
+                && definition.plugSetFlagIndex >= unlocks::kAccountFlagCapacity)) {
             return false;
         }
         occupied[definition.definitionIndex] = true;

@@ -15,8 +15,13 @@ inline constexpr std::size_t kRequirementCapacity = 6;
 inline constexpr std::uint16_t kUnavailableItemDefinitionIndex = 0xFFFFU;
 /** All requirement-index bits set mean an item/action declares no requirement set. */
 inline constexpr std::uint16_t kUnavailableSetIndex = 0xFFFFU;
-/** All condition bits set mark a requirement row that applies without a native variant gate. */
+/**
+ * All condition bits set mark a row the native cost reader counts in inventory. Any other value is
+ * a value slot, whose account value the reader counts and the cost debit decrements instead.
+ */
 inline constexpr std::uint16_t kUnconditionalRequirement = 0xFFFFU;
+/** All bits set mark a row whose value slot maps to no account value row. */
+inline constexpr std::uint16_t kUnavailableValueIndex = 0xFFFFU;
 
 /** One exact native material row. Quantity zero is authored by free cosmetic requirements. */
 struct Requirement {
@@ -25,6 +30,8 @@ struct Requirement {
     std::uint16_t condition{kUnconditionalRequirement};
     bool deleteOnAction{};
     bool omitFromRequirements{};
+    /** Account value row the condition's value slot maps to, for a row counted outside inventory. */
+    std::uint16_t valueIndex{kUnavailableValueIndex};
 };
 
 /** One dense native requirement set, addressed by its installed ordinal. Count zero is free. */

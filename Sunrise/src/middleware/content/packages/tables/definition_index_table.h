@@ -184,6 +184,13 @@ inline constexpr std::uint32_t kUnlockOpcodeCeiling = 28;
 inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
 /** The opcode that tests a flag. */
 inline constexpr std::uint32_t kUnlockReadFlagOpcode = 1;
+/** The unary opcodes: logical NOT, negation, hash and bitwise complement each pop one operand. */
+inline constexpr std::uint32_t kUnlockNotOpcode = 2;
+inline constexpr std::uint32_t kUnlockNegateOpcode = 22;
+inline constexpr std::uint32_t kUnlockHashOpcode = 23;
+inline constexpr std::uint32_t kUnlockBitNotOpcode = 28;
+/** The opcode that joins two operands by logical AND. */
+inline constexpr std::uint32_t kUnlockAndOpcode = 4;
 /** The opcode that pushes a literal. */
 inline constexpr std::uint32_t kUnlockLiteralOpcode = 11;
 /** The opcode that expands a shared expression row. Its operand is the row index. */

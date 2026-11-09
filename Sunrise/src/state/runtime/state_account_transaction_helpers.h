@@ -252,6 +252,20 @@ find_resolved_position(const middleware::datagen::family4::loadout::ResolvedLoad
 scale_socket_costs(std::uint16_t socketType,
                    build_data::material_requirements::Definition& materialSet) noexcept;
 
+/**
+ * Pays one profile stack the way a grant lands, but only in full and into free rows: an exchange
+ * is refused rather than paid in part or at the cost of an evicted row.
+ * @param changes Receives the rows the credit created or grew, for the account's change ring.
+ * @param changeCount Rows already in changes; receives the new count.
+ */
+[[nodiscard]] bool
+credit_profile_stack(AccountState& account,
+                     std::size_t characterIndex,
+                     std::uint16_t itemDefinitionIndex,
+                     std::int32_t quantity,
+                     std::array<ProfileStackChange, kProfileStackChangeCapacity>& changes,
+                     std::size_t& changeCount) noexcept;
+
 /** What a Synthesizer plug paid ahead of its insertion cost, and the plug its lane returns to. */
 struct SynthesizerPayout {
     std::array<ProfileStackChange, kProfileStackChangeCapacity> changes{};
@@ -277,6 +291,57 @@ stage_synthesizer_payout(AccountState& account,
                          std::uint8_t socketLane,
                          const build_data::items::Definition& requested,
                          SynthesizerPayout& payout) noexcept;
+
+/** What a Dawning oven plug bakes: its cost, its cookie, its discovery and the reset lanes. */
+struct OvenBake {
+    /** The recipe's cost for a Combine that matched one, otherwise the requested plug's own. */
+    std::uint16_t costSetIndex{build_data::items::kUnavailableMaterialRequirementSetIndex};
+    /** Ingredient balances a burnt bake debits ahead of its cost. */
+    AccountUnlockWrites unlockWrites{};
+    std::uint16_t cookieIndex{};
+    /** Flag of a recipe a Combine matched, or unavailable for a burnt or recipe-lane bake. */
+    std::uint16_t discoveryFlagIndex{build_data::items::kUnavailableFlagIndex};
+    /** The oven's lanes after the bake, and the plug the requested lane returns to. */
+    account::inventory::Sockets sockets{};
+    build_data::items::Definition lanePlug{};
+    /** Cookie rows the payout created or grew. */
+    std::array<ProfileStackChange, kProfileStackChangeCapacity> changes{};
+    std::size_t changeCount{};
+};
+
+/** Whether a requested plug is an oven action, and whether it bakes or is refused. */
+enum class OvenAction : std::uint8_t {
+    /** Any other plug, or a Masterwork the oven's discoveries allow, which lands as selected. */
+    none,
+    baked,
+    refused,
+};
+
+/**
+ * Decides what a Dawning oven plug bakes before its cost is charged. A Combine bakes the recipe
+ * its two ingredients pair or a burnt cookie; a recipe plug bakes its discovered recipe, the
+ * discounted variant only on a masterworked oven. The Masterwork plug needs every recipe
+ * discovered. A bake returns the ingredient, Combine and recipe lanes to their initial plugs.
+ * @param oven Detail of the item the plug was requested on, whose lane accepts the plug.
+ * @param sockets The oven's current lanes, native defaults materialized.
+ * @return None for any other plug, which leaves the bake empty.
+ */
+[[nodiscard]] OvenAction stage_oven_bake(const build_data::items::details::Definition& oven,
+                                         const account::inventory::Sockets& sockets,
+                                         std::uint8_t socketLane,
+                                         const build_data::items::Definition& requested,
+                                         OvenBake& bake) noexcept;
+
+/**
+ * Pays a staged bake once its cost is charged: credits the cookie, so its rows keep the serials
+ * the change ring names, and sets the discovery flag of a newly baked recipe.
+ * @param account Charged account; receives the cookie.
+ * @param writes The transaction's unlock writes; receive the discovery flag.
+ */
+[[nodiscard]] bool pay_oven_bake(AccountState& account,
+                                 std::size_t characterIndex,
+                                 OvenBake& bake,
+                                 AccountUnlockWrites& writes) noexcept;
 [[nodiscard]] bool stage_item_state(const AccountState& snapshot,
                                     std::size_t characterIndex,
                                     std::uint64_t targetInstanceSoid,
@@ -314,11 +379,39 @@ stage_synthesizer_payout(AccountState& account,
 [[nodiscard]] bool holds_plug_source(const AccountState& account,
                                      std::uint32_t definitionHash) noexcept;
 [[nodiscard]] bool spend_plug_source(AccountState& account, std::uint32_t definitionHash) noexcept;
+/**
+ * Reads one account unlock row as a transaction's earlier writes leave it.
+ * @return False when the saved row cannot be read.
+ */
+[[nodiscard]] bool read_account_unlock(const AccountUnlockWrites& writes,
+                                       bool flag,
+                                       std::uint16_t index,
+                                       std::int32_t& value) noexcept;
+/**
+ * Stages one account unlock row's new value over any earlier write to it.
+ * @return False when the row cannot be read or the writes are full.
+ */
+[[nodiscard]] bool write_account_unlock(AccountUnlockWrites& writes,
+                                        bool flag,
+                                        std::uint16_t index,
+                                        std::int32_t value) noexcept;
+/** @return False when the account value row holds less than quantity or cannot be staged. */
+[[nodiscard]] bool debit_account_value(AccountUnlockWrites& writes,
+                                       std::uint16_t index,
+                                       std::uint32_t quantity) noexcept;
+/**
+ * Applies one dense installed action-cost set resolved from the selected plug or action row. A
+ * value-slot row counts and debits its account value row instead of inventory, as the native cost
+ * reader does; one whose slot maps to no account row is refused.
+ * @param writes Receives the value-slot debits over the action's earlier writes; unchanged on
+ *        failure.
+ */
 [[nodiscard]] bool
 apply_action_materials(const AccountState& before,
                        const build_data::material_requirements::Definition& definition,
                        AccountState& after,
-                       bool& changed) noexcept;
+                       bool& changed,
+                       AccountUnlockWrites& writes) noexcept;
 [[nodiscard]] bool inventory_bucket_id(const account::inventory::Item& item,
                                        std::uint8_t& bucketId) noexcept;
 [[nodiscard]] bool same_position(const ResolvedPosition& left,

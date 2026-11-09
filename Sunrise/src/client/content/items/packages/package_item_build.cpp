@@ -166,8 +166,9 @@ bool build() noexcept {
             }
             // The same root names the bucket and socket-list tables.
             storage.root = storage.child;
-            // Quest, record, node, season, catalyst and pursuit reads share these unlock maps.
+            // Quest, record, node, season, catalyst, pursuit and material reads share these maps.
             if (!state::build_data::item_definitions_ready()
+                || !state::build_data::material_requirement_sets_ready()
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
                 || !state::build_data::season_pass_ready() || !reward_definitions_settled()
@@ -185,7 +186,9 @@ bool build() noexcept {
                                        std::span<const std::byte>{storage.root},
                                        storage.slotMaps);
             }
-            if (!state::build_data::socket_plug_rules_ready()) {
+            // Item rows read the flags the plug sets gate their members on.
+            if (!state::build_data::socket_plug_rules_ready()
+                || !state::build_data::item_definitions_ready()) {
                 std::uint32_t plugSetTag = 0;
                 tables::Array plugSets{};
                 reason = "plug_sets";

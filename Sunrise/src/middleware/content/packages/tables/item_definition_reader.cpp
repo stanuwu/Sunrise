@@ -14,6 +14,7 @@
 #include "definition_index_table.h"
 #include "internal.h"
 #include "items.h"
+#include "unlock_expression.h"
 
 namespace sunrise::middleware::content::packages::tables::items {
 namespace {
@@ -82,6 +83,13 @@ constexpr std::size_t kLinkedPlugArrayOffset = offsetof(generated::PlugBlock, hE
 constexpr std::uint32_t kLinkedPlugClass = generated::LinkedPlugBlock::kClass;
 constexpr std::size_t kLinkedPlugIndexOffset =
     offsetof(generated::LinkedPlugBlock, linkedPlugIndex);
+/**
+ * The quantity a plug's chooser shows, as an expression. Unnamed in the generated layout; each
+ * Dawning ingredient plug reads its oven balance here as one value read.
+ */
+constexpr std::size_t kPlugQuantityExpressionOffset =
+    offsetof(generated::PlugBlock, h8941ff52.h1f6a7358);
+static_assert(kPlugQuantityExpressionOffset == 224);
 /** A roll-set ordinal outside the ladder: none, or the marker for a plug rolled by no set. */
 constexpr std::uint16_t kNoRollSet = 0;
 /** Embedded reusable-list array descriptor inside one ordinary socket entry. */
@@ -98,6 +106,8 @@ constexpr std::size_t kPlugSetMemberDescriptorOffset = offsetof(generated::SPlug
 /** Both embedded and shared plug member rows name an item index first. */
 constexpr std::size_t kPlugMemberStride = sizeof(generated::PlugSetMember);
 constexpr std::size_t kPlugMemberIndexOffset = offsetof(generated::PlugSetMember, plugItemIndex);
+/** The condition a shared plug set offers its member under. */
+constexpr std::size_t kPlugMemberConditionOffset = offsetof(generated::PlugSetMember, h9e951b5a);
 /** Native arrays use 16-bit definition indices even though their serialized field is 32-bit. */
 constexpr std::uint64_t kMaximumPlugMemberCount = 65535;
 /**
@@ -328,6 +338,10 @@ void read_plug_block(std::span<const std::byte> definition, Row& row) noexcept {
     (void)read(definition,
                block + kEnabledMaterialRequirementSetIndexOffset,
                row.enabledMaterialRequirementSetIndex);
+    std::int16_t quantitySlot = 0;
+    if (expression_lone_value_slot(definition, block, kPlugQuantityExpressionOffset, quantitySlot)) {
+        row.quantityValueSlot = quantitySlot;
+    }
     Array linked{};
     if (find_array_at(definition, block + kLinkedPlugArrayOffset, linked)
         && linked.elementClass == kLinkedPlugClass) {
@@ -636,6 +650,50 @@ bool visit_allowed_plugs(std::span<const std::byte> definition,
                                     sets,
                                     visitor,
                                     context);
+}
+
+/** Visits every shared plug-set member with the flag its condition requires set. */
+bool visit_plug_set_flags(std::span<const std::byte> plugSetTable,
+                          PlugSetFlagVisitor visitor,
+                          void* context) noexcept {
+    Array sets{};
+    if (visitor == nullptr
+        || !find_array_at(plugSetTable, offsetof(generated::C80802cb6, table), sets)
+        || sets.dataOffset > plugSetTable.size()
+        || sets.count > (plugSetTable.size() - sets.dataOffset) / kPlugSetRowStride) {
+        return false;
+    }
+    for (std::uint64_t set = 0; set < sets.count; ++set) {
+        const std::size_t descriptor = sets.dataOffset
+                                       + static_cast<std::size_t>(set) * kPlugSetRowStride
+                                       + kPlugSetMemberDescriptorOffset;
+        std::uint64_t memberCount = 0;
+        if (!read(plugSetTable, descriptor, memberCount)) {
+            return false;
+        }
+        if (memberCount == 0) {
+            continue;
+        }
+        Array members{};
+        if (!find_array_at(plugSetTable, descriptor, members)
+            || members.count > kMaximumPlugMemberCount || members.dataOffset > plugSetTable.size()
+            || members.count > (plugSetTable.size() - members.dataOffset) / kPlugMemberStride) {
+            return false;
+        }
+        for (std::uint64_t member = 0; member < members.count; ++member) {
+            const std::size_t row =
+                members.dataOffset + static_cast<std::size_t>(member) * kPlugMemberStride;
+            std::uint32_t itemDefinitionIndex = 0;
+            std::int16_t flagSlot = -1;
+            if (!read(plugSetTable, row + kPlugMemberIndexOffset, itemDefinitionIndex)
+                || !expression_required_flag_slot(
+                    plugSetTable, row, kPlugMemberConditionOffset, flagSlot)) {
+                return false;
+            }
+            visitor(context, itemDefinitionIndex, flagSlot);
+        }
+    }
+    return true;
 }
 
 } // namespace sunrise::middleware::content::packages::tables::items

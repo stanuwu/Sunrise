@@ -186,6 +186,20 @@ scale_socket_costs(std::uint16_t socketType,
         return fail("catalyst_lane_requires_atomic_change");
     }
 
+    authored_inventory::Sockets authoredSockets{};
+    if (target->sockets.policy == authored_inventory::SocketPolicy::nativeDefaults) {
+        if (!materialize_native_sockets(detail, authoredSockets)) {
+            return fail("native_sockets");
+        }
+    } else {
+        authoredSockets = target->sockets;
+        if (authoredSockets.policy != authored_inventory::SocketPolicy::authored
+            || authoredSockets.plugCount != detail.ordinarySocketCount
+            || !authored_inventory::valid(authoredSockets)) {
+            return fail("authored_sockets");
+        }
+    }
+
     // A Synthesizer plug is an exchange, paid before its insertion cost is charged.
     AccountState creditedAccount = snapshot;
     SynthesizerPayout payout{};
@@ -194,7 +208,15 @@ scale_socket_costs(std::uint16_t socketType,
     if (exchange == SynthesizerExchange::refused) {
         return fail("synthesizer_exchange");
     }
-    const bool exchanges = exchange == SynthesizerExchange::paid;
+    // An oven plug that bakes charges its recipe's cost and is paid its cookie after it.
+    OvenBake bake{};
+    const OvenAction ovenAction =
+        stage_oven_bake(detail, authoredSockets, socketLane, plugDefinition, bake);
+    if (ovenAction == OvenAction::refused) {
+        return fail("oven_bake");
+    }
+    const bool bakes = ovenAction == OvenAction::baked;
+    const bool exchanges = exchange == SynthesizerExchange::paid || bakes;
 
     // Ownership matters only for a plug the account draws down, such as a shader stack. An
     // ornament is a permanent unlock, so demanding a stack for one would refuse a held plug.
@@ -209,15 +231,20 @@ scale_socket_costs(std::uint16_t socketType,
 
     AccountState chargedAccount = creditedAccount;
     build_data::material_requirements::Definition materialSet{};
+    AccountUnlockWrites unlockWrites = bake.unlockWrites;
     bool profileChanged = false;
-    const std::uint16_t materialSetIndex = plugDefinition.insertionMaterialRequirementSetIndex;
+    const std::uint16_t materialSetIndex =
+        bakes ? bake.costSetIndex : plugDefinition.insertionMaterialRequirementSetIndex;
     if (materialSetIndex != build_data::items::kUnavailableMaterialRequirementSetIndex
         && (!build_data::find_material_requirement_set(materialSetIndex, materialSet)
             || materialSet.requirementSetIndex != materialSetIndex
             || !scale_socket_costs(detail.socketTypes[socketLane], materialSet)
             || !apply_action_materials(
-                creditedAccount, materialSet, chargedAccount, profileChanged))) {
+                creditedAccount, materialSet, chargedAccount, profileChanged, unlockWrites))) {
         return fail("materials");
+    }
+    if (bakes && !pay_oven_bake(chargedAccount, characterIndex, bake, unlockWrites)) {
+        return fail("oven_payout");
     }
 
     // Applying spends the plug's own stack; the insertion cost above is a separate charge. The
@@ -225,30 +252,21 @@ scale_socket_costs(std::uint16_t socketType,
     if (consumesStack && !spend_plug_source(chargedAccount, plugDefinition.definitionHash)) {
         return fail("plug_stack");
     }
-    profileChanged = profileChanged || consumesStack || exchanges;
+    profileChanged = profileChanged || consumesStack || exchanges || unlockWrites.count != 0;
 
-    authored_inventory::Sockets authoredSockets{};
-    if (target->sockets.policy == authored_inventory::SocketPolicy::nativeDefaults) {
-        if (!materialize_native_sockets(detail, authoredSockets)) {
-            return fail("native_sockets");
-        }
-    } else {
-        authoredSockets = target->sockets;
-        if (authoredSockets.policy != authored_inventory::SocketPolicy::authored
-            || authoredSockets.plugCount != detail.ordinarySocketCount
-            || !authored_inventory::valid(authoredSockets)) {
-            return fail("authored_sockets");
-        }
-    }
     // An exchange's plug never stays in the lane, so the lane's current plug does not refuse it.
     if (!exchanges && authoredSockets.plugs[socketLane].has_value()
         && *authoredSockets.plugs[socketLane] == plugDefinition.definitionHash) {
         return fail("already_applied");
     }
+    if (bakes) {
+        authoredSockets = bake.sockets;
+    }
 
     // A rolled socket's apply or re-roll plug is an action: the lane receives a result plug from
     // the roll set. The requested plug still decides the pool check and the material charge.
-    build_data::items::Definition grantedDefinition = exchanges ? payout.lanePlug : plugDefinition;
+    build_data::items::Definition grantedDefinition =
+        bakes ? bake.lanePlug : exchanges ? payout.lanePlug : plugDefinition;
     if (!exchanges
         && classify_rolled_plug(plugDefinition, targetDefinition, socketLane)
                == RolledPlugAction::roll) {
@@ -380,8 +398,9 @@ scale_socket_costs(std::uint16_t socketType,
     mutation.characterIndex = characterIndex;
     mutation.expectedProfileItemCount = snapshot.profileItemCount;
     mutation.afterProfileItemCount = chargedAccount.profileItemCount;
-    mutation.changes = payout.changes;
-    mutation.changeCount = payout.changeCount;
+    mutation.changes = bakes ? bake.changes : payout.changes;
+    mutation.changeCount = bakes ? bake.changeCount : payout.changeCount;
+    mutation.unlockWrites = unlockWrites;
     mutation.itemIndex = location.index;
     mutation.targetDefinitionIndex = targetDefinition.definitionIndex;
     mutation.plugDefinitionIndex = grantedDefinition.definitionIndex;

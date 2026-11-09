@@ -75,6 +75,8 @@ struct Row {
     /** Native material sets used when this definition is inserted or enabled as a plug. */
     std::uint16_t insertionMaterialRequirementSetIndex{kUnavailableMaterialRequirementSetIndex};
     std::uint16_t enabledMaterialRequirementSetIndex{kUnavailableMaterialRequirementSetIndex};
+    /** Value slot a plug's quantity expression reads alone, or -1 when it is anything else. */
+    std::int16_t quantityValueSlot{-1};
     std::uint8_t statCount{};
     std::uint8_t statRows[kStatCapacity]{};
     std::int32_t statValues[kStatCapacity]{};
@@ -141,5 +143,22 @@ using AllowedPlugVisitor = bool (*)(void* context, std::uint32_t itemDefinitionI
                                        std::uint8_t lane,
                                        AllowedPlugVisitor visitor,
                                        void* context) noexcept;
+
+/**
+ * Visitor called for each shared plug-set member with the one flag slot its condition requires
+ * set, or -1 when the condition requires none or more than one.
+ */
+using PlugSetFlagVisitor = void (*)(void* context,
+                                    std::uint32_t itemDefinitionIndex,
+                                    std::int16_t flagSlot) noexcept;
+
+/**
+ * Visits every member of every shared plug set with the flag its condition requires set.
+ * @param plugSetTable Whole shared plug-set definition table from investment-root slot 51.
+ * @return True when every set, member and condition parses.
+ */
+[[nodiscard]] bool visit_plug_set_flags(std::span<const std::byte> plugSetTable,
+                                        PlugSetFlagVisitor visitor,
+                                        void* context) noexcept;
 
 } // namespace sunrise::middleware::content::packages::tables::items

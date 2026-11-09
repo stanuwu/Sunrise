@@ -265,6 +265,9 @@ bool build_material_requirements(const reader::Source& source,
             }
             requirement.itemDefinitionIndex = itemIndex;
             requirement.condition = condition;
+            if (condition != domain::kUnconditionalRequirement) {
+                requirement.valueIndex = bank_index(storage.slotMaps.accountValue, condition);
+            }
             requirement.deleteOnAction = deleted != 0;
             requirement.omitFromRequirements = omitted != 0;
             conditionalRows += condition != domain::kUnconditionalRequirement ? 1U : 0U;

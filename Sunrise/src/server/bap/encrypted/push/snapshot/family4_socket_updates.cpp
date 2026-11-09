@@ -19,7 +19,7 @@ namespace family4_datagen = middleware::datagen::family4;
 
 /**
  * Builds a resident item upsert followed by the account when the cost consumes or an exchange
- * pays, whose change ring names each credited row.
+ * pays, whose change ring names each credited row and whose banks carry the action's unlock rows.
  */
 bool prepare_socket_plug(Scratch& scratch,
                          const queuez::SocketPlug& socketPlug,
@@ -32,13 +32,15 @@ bool prepare_socket_plug(Scratch& scratch,
     }
 
     state::AccountState account{};
+    state::unlocks::Table unlocks{};
     if (!mutation.prepared || mutation.accountSoid == 0 || mutation.characterSoid == 0
         || mutation.targetInstanceSoid == 0 || mutation.accountSoid != socketPlug.accountSoid
         || mutation.characterSoid != socketPlug.characterSoid
         || mutation.targetInstanceSoid != socketPlug.targetInstanceSoid
         || mutation.profileChanged != socketPlug.updatesAccount
         || mutation.accountSoid != socketPlug.after.family4RootSoid
-        || socketPlug.accountDefinitionId == 0 || !state::preview_socket_plug(mutation, account)
+        || socketPlug.accountDefinitionId == 0
+        || !state::preview_socket_plug(mutation, account, unlocks)
         || mutation.characterIndex >= account.characterCount
         || account.primarySoid != mutation.accountSoid
         || account.characters[mutation.characterIndex].soid != mutation.characterSoid) {
@@ -106,7 +108,7 @@ bool prepare_socket_plug(Scratch& scratch,
     std::size_t objectCount = 1;
     if (socketPlug.updatesAccount) {
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes)
+        if (!family4_datagen::account::encode(account, accountBytes, unlocks)
             || write_exchange_changes(
                    *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()),
                    std::span(mutation.changes).first(mutation.changeCount))
