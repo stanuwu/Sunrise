@@ -815,8 +815,10 @@ prepare_item_acquisition(std::uint16_t collectibleIndex,
                                                     PendingRecordRewardGrant& mutation,
                                                     const char** refusal = nullptr) noexcept;
 /**
- * @return True when a vendor row selling this item grants through the reward graph: the item lands
- *         in a character FIFO bucket that discards what it evicts, as a Dawning delivery does.
+ * @return True when a vendor row selling this item grants through the reward graph: the graph
+ *         records the item's acquisition in a flag, which a Store row's ownership gate reads, or
+ *         the item lands in a character FIFO bucket that discards what it evicts, as a Dawning
+ *         delivery does.
  */
 [[nodiscard]] bool vendor_reward_item(std::uint16_t itemIndex) noexcept;
 /**

@@ -506,19 +506,33 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
     return resolve_item_reward(itemIndex, quantity, {}, seed, mutation, refusal);
 }
 
-/** Matches the lane by its policy bits; the shipped build sets both only on the perk bucket. */
+/**
+ * A flagged acquisition, else the lane's policy bits, which the shipped build sets on the perk
+ * bucket alone.
+ */
 bool vendor_reward_item(std::uint16_t itemIndex) noexcept {
     constexpr std::uint8_t kRewardLanePolicy =
         inventory_buckets::kFifo | inventory_buckets::kNoTransferOnEviction;
     build_data::items::Definition item{};
+    if (!build_data::find_item_definition_index(itemIndex, item)) {
+        return false;
+    }
+    // An unpublished graph cannot say whether the item is flagged, so the graph path waits for it.
+    if (!build_data::reward_definitions_ready() && !build_data::reward_definitions_unsupported()) {
+        return true;
+    }
+    build_data::rewards::Item reward{};
+    if (build_data::find_reward_item(itemIndex, reward)
+        && reward.acquiredFlag != build_data::rewards::kAbsent) {
+        return true;
+    }
     inventory_buckets::Descriptor bucket{};
-    return build_data::find_item_definition_index(itemIndex, item)
-           && build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
+    return build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
            && bucket.arraySelector == inventory_buckets::ArraySelector::character
            && (bucket.policyFlags & kRewardLanePolicy) == kRewardLanePolicy;
 }
 
-/** A sale row names no quantity, so it grants one of its item, as every vendor grant does. */
+/** Grants one of the row's item, as every vendor grant does. */
 RewardPreparation prepare_vendor_reward(std::uint16_t itemIndex,
                                         std::span<const build_data::vendors::SaleCost> price,
                                         std::uint64_t seed,

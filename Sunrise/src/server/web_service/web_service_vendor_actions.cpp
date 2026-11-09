@@ -1,5 +1,6 @@
 /** Vendor, bounty, exchange and quest actions the web service prepares from one request. */
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -668,6 +669,21 @@ prepare_vendor_reward_grant(std::uint16_t itemDefinitionIndex,
 }
 
 /**
+ * The server can never credit an item the client refuses to grant, so a row priced in one is not
+ * sold. The installed restricted-grant list names one item, Silver, which only the platform sells.
+ * @param price The row's cost entries.
+ * @return True when any entry charges a restricted item.
+ */
+[[nodiscard]] bool
+charges_restricted_item(std::span<const state::build_data::vendors::SaleCost> price) noexcept {
+    return std::any_of(price.begin(), price.end(), [](const auto& cost) noexcept {
+        state::build_data::items::Definition item{};
+        return state::build_data::find_item_definition_index(cost.itemIndex, item)
+               && item.grantRestricted;
+    });
+}
+
+/**
  * Settles one resolved vendor row, in the order a row's behaviours are tried.
  * A row is a bounty roll, an exchange or a grant. The row does not say which, so each is tried in
  * turn and the first that claims the row owns it. Both vendor opcodes end here.
@@ -702,6 +718,11 @@ void settle_vendor_row(const middleware::web_service::Message& message,
         return;
     }
     const std::span<const vendor_domain::SaleCost> price = vendor_domain::cost_entries(row);
+    if (charges_restricted_item(price)) {
+        report_purchase(
+            opcode, "fail", "restricted_currency", vendorIndex, rowIndex, itemDefinitionIndex);
+        return;
+    }
     std::uint16_t rolledBounty = kUnavailableDefinitionIndex;
     if (roll_vendor_bounty(vendorIndex, categoryIndex, rolledBounty)) {
         report_purchase(opcode,
@@ -747,8 +768,9 @@ void settle_vendor_row(const middleware::web_service::Message& message,
     case Substitution::none:
         break;
     }
-    // A row whose item lands in the lane Dawning deliveries use resolves through the reward graph
-    // and lands under that lane's FIFO policy; the acquisition below would add an instance instead.
+    // A row whose item the graph flags on acquisition, or that lands in the lane Dawning deliveries
+    // use, resolves through the reward graph: the acquisition below sets no flag and adds an
+    // instance instead.
     if (state::vendor_reward_item(granted)) {
         const char* reason = nullptr;
         const bool prepared = prepare_vendor_reward_grant(granted, price, outcome, reason);
