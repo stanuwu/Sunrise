@@ -125,6 +125,7 @@ scale_socket_costs(std::uint16_t socketType,
                                      std::uint64_t targetInstanceSoid,
                                      std::uint8_t socketLane,
                                      std::uint16_t plugDefinitionIndex,
+                                     std::int64_t nowSeconds,
                                      PendingSocketPlug& mutation,
                                      std::uint32_t pinnedPlugHash) noexcept {
     mutation = {};
@@ -260,7 +261,9 @@ scale_socket_costs(std::uint16_t socketType,
                                  payout.changeCount)) {
         return fail("synthesizer_payout");
     }
-    if (bakes && !pay_oven_bake(snapshot, chargedAccount, characterIndex, bake, unlockWrites)) {
+    if (bakes
+        && !pay_oven_bake(
+            snapshot, chargedAccount, characterIndex, bake, unlockWrites, nowSeconds)) {
         return fail("oven_payout");
     }
 
@@ -354,7 +357,8 @@ scale_socket_costs(std::uint16_t socketType,
     }
     authoredSockets.plugs[socketLane] = grantedDefinition.definitionHash;
 
-    CharacterState after = before;
+    // A bake's payout can advance bounties, so the character starts from the charged account.
+    CharacterState after = chargedAccount.characters[characterIndex];
     authored_inventory::Item* changed = character_item_at(after, location);
     if (changed == nullptr || changed->instanceSoid != target->instanceSoid
         || changed->definitionHash != target->definitionHash || changed->level != target->level
@@ -429,6 +433,7 @@ scale_socket_costs(std::uint16_t socketType,
     mutation.targetBucketId = targetDefinition.bucketId;
     mutation.plugBucketId = grantedDefinition.bucketId;
     mutation.materialRequirementCount = materialSet.requirementCount;
+    mutation.nowSeconds = nowSeconds;
     mutation.profileChanged = profileChanged;
     mutation.targetEquipped = location.equipped;
     mutation.prepared = true;

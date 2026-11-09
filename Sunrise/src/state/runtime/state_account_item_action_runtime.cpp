@@ -24,6 +24,7 @@ namespace family4_loadout = middleware::datagen::family4::loadout;
 bool prepare_socket_plug(std::uint64_t targetInstanceSoid,
                          std::uint8_t socketLane,
                          std::uint16_t plugDefinitionIndex,
+                         std::int64_t nowSeconds,
                          PendingSocketPlug& mutation) noexcept {
     mutation = {};
     const AccountState snapshot = account_snapshot();
@@ -42,6 +43,7 @@ bool prepare_socket_plug(std::uint64_t targetInstanceSoid,
                               targetInstanceSoid,
                               socketLane,
                               plugDefinitionIndex,
+                              nowSeconds,
                               mutation)) {
         report_socket_plug("prepare",
                            "fail",
@@ -76,6 +78,7 @@ bool prepare_socket_plug(std::uint64_t targetInstanceSoid,
 bool prepare_equipped_socket_plug(std::uint64_t targetInstanceSoid,
                                   std::uint8_t requestedSocketLane,
                                   std::uint16_t plugDefinitionIndex,
+                                  std::int64_t nowSeconds,
                                   PendingSocketPlug& mutation) noexcept {
     mutation = {};
     const AccountState snapshot = account_snapshot();
@@ -165,6 +168,7 @@ bool prepare_equipped_socket_plug(std::uint64_t targetInstanceSoid,
                               resolvedTarget->instance.instanceSoid,
                               resolvedSocketLane,
                               plugDefinitionIndex,
+                              nowSeconds,
                               mutation)
         || mutation.targetEquipped != expectedEquipped) {
         report_socket_plug("prepare_equipped",
@@ -238,6 +242,7 @@ bool preview_socket_plug(const PendingSocketPlug& mutation,
                            mutation.targetInstanceSoid,
                            mutation.socketLane,
                            mutation.requestedPlugDefinitionIndex,
+                           mutation.nowSeconds,
                            canonical,
                            mutation.plugDefinitionHash)
         || canonical.accountSoid != mutation.accountSoid
@@ -358,6 +363,7 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
                                prepared.targetInstanceSoid,
                                prepared.socketLane,
                                prepared.requestedPlugDefinitionIndex,
+                               prepared.nowSeconds,
                                canonical,
                                prepared.plugDefinitionHash)
             || canonical.characterSoid != prepared.characterSoid

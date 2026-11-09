@@ -639,30 +639,6 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
 }
 
 /**
- * Finds the item lane one objective's progress lives in, and its target.
- * @return False when the objective's progress is not one of the item's own values, or its target
- *         is not a plain count up to its completion value.
- */
-[[nodiscard]] bool objective_lane(const pursuits::Definition& contract,
-                                  std::uint8_t ordinal,
-                                  std::size_t& lane,
-                                  std::int32_t& target) noexcept {
-    objectives::Definition objective{};
-    if (ordinal >= contract.objectiveCount
-        || !build_data::find_objective_definition(contract.objectives[ordinal], objective)
-        || objective.countsDown || !objective.targetAdjustment.empty()
-        || objective.itemValueSlot == objectives::kNoItemValueSlot
-        || objective.completionValue <= 0) {
-        return false;
-    }
-    const auto slots = std::span(contract.itemValueSlots).first(contract.itemValueSlotCount);
-    const auto found = std::find(slots.begin(), slots.end(), objective.itemValueSlot);
-    lane = static_cast<std::size_t>(found - slots.begin());
-    target = objective.completionValue;
-    return found != slots.end() && lane < authored_inventory::kItemObjectiveLaneCount;
-}
-
-/**
  * Advances every open lane of one held item that the kill meets.
  * @return The lanes advanced.
  */
@@ -705,6 +681,30 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
 }
 
 } // namespace
+
+namespace runtime::detail {
+
+/** Reads the lane the objective's item value slot takes in the contract's value list. */
+bool objective_lane(const pursuits::Definition& contract,
+                    std::uint8_t ordinal,
+                    std::size_t& lane,
+                    std::int32_t& target) noexcept {
+    objectives::Definition objective{};
+    if (ordinal >= contract.objectiveCount
+        || !build_data::find_objective_definition(contract.objectives[ordinal], objective)
+        || objective.countsDown || !objective.targetAdjustment.empty()
+        || objective.itemValueSlot == objectives::kNoItemValueSlot
+        || objective.completionValue <= 0) {
+        return false;
+    }
+    const auto slots = std::span(contract.itemValueSlots).first(contract.itemValueSlotCount);
+    const auto found = std::find(slots.begin(), slots.end(), objective.itemValueSlot);
+    lane = static_cast<std::size_t>(found - slots.begin());
+    target = objective.completionValue;
+    return found != slots.end() && lane < authored_inventory::kItemObjectiveLaneCount;
+}
+
+} // namespace runtime::detail
 
 /** Classifies the kill once, then advances the held bounties in one account after-image. */
 KillProgress advance_kill_objectives(const KillObservation& kill,

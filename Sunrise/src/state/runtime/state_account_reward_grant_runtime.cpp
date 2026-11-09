@@ -613,6 +613,18 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         }
         working = *charged;
     }
+    // A delivery spends a cookie, which advances the Dawning bounties that count it.
+    reason = "dawning_bounty";
+    for (const auto& cost : price) {
+        build_data::items::Definition spent{};
+        if (!build_data::find_item_definition_index(cost.itemIndex, spent)
+            || !credit_dawning_bounties(working.characters[characterIndex],
+                                        DawningEvent::delivery,
+                                        spent.definitionHash,
+                                        nowSeconds)) {
+            return RewardPreparation::notReady;
+        }
+    }
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         const GrantView view{working,
                              characterIndex,
@@ -804,6 +816,23 @@ bool granted_residents(const PendingRecordRewardGrant& mutation,
         }
     }
     return true;
+}
+
+/** Compares the unequipped copies by instance identity. */
+bool item_values_edited(const CharacterState& before,
+                        const CharacterState& after,
+                        std::uint64_t instanceSoid) noexcept {
+    const auto find = [instanceSoid](const CharacterState& character) noexcept {
+        const auto held = std::span(character.inventory.values).first(character.inventory.count);
+        const auto found = std::find_if(held.begin(), held.end(), [&](const auto& item) noexcept {
+            return item.instanceSoid == instanceSoid;
+        });
+        return found != held.end() ? &*found : nullptr;
+    };
+    const authored_inventory::Item* earlier = find(before);
+    const authored_inventory::Item* later = find(after);
+    return instanceSoid != 0 && earlier != nullptr && later != nullptr
+           && earlier->objectives != later->objectives;
 }
 
 /** Prepares every direct reward over one cumulative account view. */

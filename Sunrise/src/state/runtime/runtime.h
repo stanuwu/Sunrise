@@ -400,6 +400,15 @@ struct GrantedResidents {
                                      GrantedResidents& output) noexcept;
 
 /**
+ * @return True when a held character instance carries other per-item values after a transaction
+ *         than before it, as a bounty the transaction advanced does. A new instance has no
+ *         earlier copy, so it is not edited.
+ */
+[[nodiscard]] bool item_values_edited(const CharacterState& before,
+                                      const CharacterState& after,
+                                      std::uint64_t instanceSoid) noexcept;
+
+/**
  * Whether a granted row is a new row of an item with a Collections entry whose acquisition flag
  * this grant first sets. Sunrise keeps a collectible's acquired state in that flag; the client's
  * record writer marks such a row for its list of newly acquired collectibles.
@@ -527,7 +536,10 @@ struct AccountUnlockWrites {
 struct PendingSocketPlug {
     /** Exact prepare-time character view used as the commit staleness guard. */
     CharacterState beforeCharacter{};
-    /** Canonical after-image. Only the target item's authored socket block differs. */
+    /**
+     * Canonical after-image. Only the target item's authored socket block differs, and the values
+     * and serials of the bounties a bake advanced.
+     */
     CharacterState afterCharacter{};
     /** Exact account-wide material balances observed before applying the installed cost set. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
@@ -564,6 +576,8 @@ struct PendingSocketPlug {
     std::uint8_t targetBucketId{};
     std::uint8_t plugBucketId{};
     std::uint8_t materialRequirementCount{};
+    /** Server time in Unix seconds the bake's bounty deadlines were compared with. */
+    std::int64_t nowSeconds{};
     /** The account object changes: a profile row or an account unlock row. */
     bool profileChanged{};
     bool targetEquipped{};
@@ -1125,17 +1139,20 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  * The target may be equipped or unequipped. Native defaults are materialized into a complete
  * authored socket block, then only the requested lane changes; everything else stays byte-stable.
  * A Gambit Prime Synthesizer plug is an exchange: it also pays a Mote or refunds Synths. A Dawning
- * oven's Combine or recipe plug bakes a cookie and returns the oven's lanes to their initial plugs.
+ * oven's Combine or recipe plug bakes a cookie, advances the Dawning bounties the bake counts and
+ * returns the oven's lanes to their initial plugs.
  * A Chalice of Opulence plug must pass its insertion rules, and an upgrade purchase sets its flag.
  * @param targetInstanceSoid Selected-character item-instance key named by the Client.
  * @param socketLane Zero-based ordinary socket lane.
  * @param plugDefinitionIndex Installed plug-definition row selected by the Client.
+ * @param nowSeconds Server time in Unix seconds, which a bake's bounty deadlines are compared with.
  * @param mutation Gets the checked before/after images without changing account State.
  * @return True when ownership, item detail, lane, plug compatibility, and both loadouts validate.
  */
 [[nodiscard]] bool prepare_socket_plug(std::uint64_t targetInstanceSoid,
                                        std::uint8_t socketLane,
                                        std::uint16_t plugDefinitionIndex,
+                                       std::int64_t nowSeconds,
                                        PendingSocketPlug& mutation) noexcept;
 
 /**
@@ -1143,12 +1160,14 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  * @param targetInstanceSoid Whole item-instance identity carried by opcode 1901.
  * @param requestedSocketLane Native socket action lane; compatibility resolves the physical lane.
  * @param plugDefinitionIndex Installed plug-definition row selected by the Client.
+ * @param nowSeconds Server time in Unix seconds, which a bake's bounty deadlines are compared with.
  * @param mutation Gets the checked before/after images without changing account State.
  * @return True when one item matches, the plug resolves to that lane, and the transition is valid.
  */
 [[nodiscard]] bool prepare_equipped_socket_plug(std::uint64_t targetInstanceSoid,
                                                 std::uint8_t requestedSocketLane,
                                                 std::uint16_t plugDefinitionIndex,
+                                                std::int64_t nowSeconds,
                                                 PendingSocketPlug& mutation) noexcept;
 
 /**

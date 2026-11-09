@@ -12,6 +12,7 @@
 #include <span>
 
 #include "../build_data/runtime.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -104,6 +105,52 @@ constexpr std::array<std::uint32_t, 4> kTutorialItemHashes{
 
 /** The tutorial quest value that opens the ingredient chooser; no quest step starts from it. */
 constexpr std::int32_t kChooserReadyValue = build_data::items::kInvalidQuestInitialValue;
+
+// TODO: derive these from the objectives' own conditions; no extractor reads which bake or
+// delivery a Dawning bounty objective counts.
+
+/** One Dawning bounty objective a bake or a delivery advances by one. */
+struct DawningBountyRule {
+    std::uint32_t bountyHash{};
+    std::uint32_t objectiveHash{};
+    DawningEvent event{};
+    /** The cookie the event must name, or kAnyCookie. */
+    std::uint32_t cookieHash{};
+};
+
+/** A rule's cookie when any recipe's cookie counts. */
+constexpr std::uint32_t kAnyCookie = 0;
+
+/**
+ * Sweet Gifts counts bakes and The Spirit of Giving counts deliveries. Each Gift bounty after them
+ * counts deliveries of its own cookie.
+ */
+constexpr auto kDawningBountyRules = std::to_array<DawningBountyRule>({
+    {2568759381U, 2757754782U, DawningEvent::bake, kAnyCookie},
+    {2568759380U, 22889993U, DawningEvent::delivery, kAnyCookie},
+    {3089242929U, 2548740524U, DawningEvent::delivery, 2704624939U},
+    {2121605528U, 773356093U, DawningEvent::delivery, 2704624938U},
+    {711780003U, 3624753994U, DawningEvent::delivery, 2704624937U},
+    {1387738947U, 596105834U, DawningEvent::delivery, 2704624936U},
+    {3609320918U, 2454287063U, DawningEvent::delivery, 2704624943U},
+    {782388144U, 1605382853U, DawningEvent::delivery, 2704624942U},
+    {1486111804U, 926975233U, DawningEvent::delivery, 2704624941U},
+    {3529619172U, 874584025U, DawningEvent::delivery, 2704624940U},
+    {3292943447U, 2595545358U, DawningEvent::delivery, 2704624931U},
+    {3512551717U, 2708783760U, DawningEvent::delivery, 2704624930U},
+    {1932203931U, 876421010U, DawningEvent::delivery, 4041767214U},
+    {3112855567U, 2037977526U, DawningEvent::delivery, 4041767215U},
+    {1494697569U, 1080833820U, DawningEvent::delivery, 4041767212U},
+    {789196172U, 355117905U, DawningEvent::delivery, 4041767213U},
+    {729780848U, 2874539525U, DawningEvent::delivery, 4041767210U},
+    {90105468U, 2319574209U, DawningEvent::delivery, 4041767211U},
+    {1491123344U, 3363642277U, DawningEvent::delivery, 4041767208U},
+    {3503381224U, 2462970189U, DawningEvent::delivery, 4041767209U},
+    {2212074115U, 2889593642U, DawningEvent::delivery, 4041767206U},
+    {833201720U, 4279320669U, DawningEvent::delivery, 4041767207U},
+    {2514375981U, 1082188232U, DawningEvent::delivery, 4024989627U},
+    {2420899653U, 3129351088U, DawningEvent::delivery, 4024989626U},
+});
 
 // The bake's charge and its own writes must fit the transaction's unlock writes together.
 static_assert(kSocketUnlockWriteCapacity
@@ -333,7 +380,103 @@ static_assert(kSocketUnlockWriteCapacity
     return false;
 }
 
+/** @return True for the cookie a recipe bakes. */
+[[nodiscard]] bool recipe_cookie(std::uint32_t cookieHash) noexcept {
+    return std::any_of(
+        kOvenRecipes.begin(), kOvenRecipes.end(), [cookieHash](const OvenRecipe& recipe) noexcept {
+            return recipe.cookieHash == cookieHash;
+        });
+}
+
+/** @return True when the rule advances this item on the event. */
+[[nodiscard]] bool rule_counts(const DawningBountyRule& rule,
+                               std::uint32_t itemHash,
+                               DawningEvent event,
+                               std::uint32_t cookieHash) noexcept {
+    return rule.bountyHash == itemHash && rule.event == event
+           && (rule.cookieHash == kAnyCookie || rule.cookieHash == cookieHash);
+}
+
+/**
+ * Advances one objective of a held bounty by one, unless it is finished.
+ * @param advanced Set when the objective moved.
+ * @return False when the contract does not hold the objective or its lane does not resolve.
+ */
+[[nodiscard]] bool advance_objective(const build_data::pursuits::Definition& contract,
+                                     std::uint32_t objectiveHash,
+                                     account::inventory::ItemObjectives& values,
+                                     bool& advanced) noexcept {
+    for (std::uint8_t ordinal = 0; ordinal < contract.objectiveCount; ++ordinal) {
+        build_data::objectives::Definition objective{};
+        if (!build_data::find_objective_definition(contract.objectives[ordinal], objective)) {
+            return false;
+        }
+        if (objective.definitionHash != objectiveHash) {
+            continue;
+        }
+        std::size_t lane = 0;
+        std::int32_t target = 0;
+        if (!objective_lane(contract, ordinal, lane, target) || values[lane] < 0) {
+            return false;
+        }
+        if (values[lane] < target) {
+            ++values[lane];
+            advanced = true;
+        }
+        return true;
+    }
+    return false;
+}
+
 } // namespace
+
+/** Bounties are matched by the authored rules; their lanes come from the installed contract. */
+bool credit_dawning_bounties(CharacterState& character,
+                             DawningEvent event,
+                             std::uint32_t cookieHash,
+                             std::int64_t nowSeconds) noexcept {
+    if (!recipe_cookie(cookieHash)) {
+        return true;
+    }
+    const auto rules = std::span(kDawningBountyRules);
+    for (auto& held : std::span(character.inventory.values).first(character.inventory.count)) {
+        const auto counted = [&](const DawningBountyRule& rule) noexcept {
+            return rule_counts(rule, held.definitionHash, event, cookieHash);
+        };
+        if (std::none_of(rules.begin(), rules.end(), counted)) {
+            continue;
+        }
+        build_data::items::Definition item{};
+        build_data::pursuits::Definition contract{};
+        if (!build_data::find_item_definition_hash(held.definitionHash, item)
+            || !build_data::find_pursuit_definition(item.definitionIndex, contract)
+            || !contract.readable) {
+            return false;
+        }
+        account::inventory::ItemObjectives values =
+            held.objectives.value_or(account::inventory::ItemObjectives{});
+        const std::int32_t deadline = values[account::inventory::kItemExpiryLane];
+        if (contract.lifetimeSeconds > 0 && (deadline <= 0 || nowSeconds >= deadline)) {
+            continue;
+        }
+        bool advanced = false;
+        for (const DawningBountyRule& rule : rules) {
+            if (counted(rule)
+                && !advance_objective(contract, rule.objectiveHash, values, advanced)) {
+                return false;
+            }
+        }
+        if (!advanced) {
+            continue;
+        }
+        held.objectives = values;
+        // A new serial is what tells the client the copy changed, as for any other item mutation.
+        if (!next_character_serial(character, held.mutationSerial)) {
+            return false;
+        }
+    }
+    return true;
+}
 
 /** Chooses what an oven plug bakes, its cost and the lanes it resets, or gates the Masterwork. */
 OvenAction stage_oven_bake(const item_details::Definition& oven,
@@ -372,19 +515,29 @@ OvenAction stage_oven_bake(const item_details::Definition& oven,
     return OvenAction::baked;
 }
 
-/** Pays the cookie into the charged account and sets a newly discovered recipe's flag. */
+/**
+ * Pays the cookie into the charged account, advances the bounties its bake counts and sets a newly
+ * discovered recipe's flag. A burnt cookie is no recipe's, so it advances no bounty.
+ */
 bool pay_oven_bake(const AccountState& uncharged,
                    AccountState& account,
                    std::size_t characterIndex,
                    OvenBake& bake,
-                   AccountUnlockWrites& writes) noexcept {
+                   AccountUnlockWrites& writes,
+                   std::int64_t nowSeconds) noexcept {
+    build_data::items::Definition cookie{};
     if (!credit_profile_stack(uncharged,
                               account,
                               characterIndex,
                               bake.cookieIndex,
                               1,
                               bake.changes,
-                              bake.changeCount)) {
+                              bake.changeCount)
+        || !build_data::find_item_definition_index(bake.cookieIndex, cookie)
+        || !credit_dawning_bounties(account.characters[characterIndex],
+                                    DawningEvent::bake,
+                                    cookie.definitionHash,
+                                    nowSeconds)) {
         return false;
     }
     if (bake.discoveryFlagIndex == build_data::items::kUnavailableFlagIndex) {

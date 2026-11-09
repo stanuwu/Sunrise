@@ -1,4 +1,7 @@
-/** Family-4 socket and subclass updates: one changed item instance, and any charged account. */
+/**
+ * Family-4 socket and subclass updates: one changed item instance, any held items a bake advanced
+ * with their character, and any charged account.
+ */
 
 #include <algorithm>
 #include <cstddef>
@@ -7,6 +10,8 @@
 
 #include "../../../../../middleware/datagen/family4/account/account_encoder.h"
 #include "../../../../../middleware/datagen/family4/account/layout.h"
+#include "../../../../../middleware/datagen/family4/character/character_encoder.h"
+#include "../../../../../middleware/datagen/family4/character/layout.h"
 #include "../../../../../middleware/datagen/family4/instance/instance_encoder.h"
 #include "../../../../../middleware/datagen/family4/instance/layout.h"
 #include "../../../../../state/runtime/runtime.h"
@@ -20,6 +25,7 @@ namespace family4_datagen = middleware::datagen::family4;
 /**
  * Builds a resident item upsert followed by the account when the cost consumes or an exchange
  * pays, whose change ring names each credited row and whose banks carry the action's unlock rows.
+ * Held items a bake advanced follow the target, and the character then carries their new serials.
  */
 bool prepare_socket_plug(Scratch& scratch,
                          const queuez::SocketPlug& socketPlug,
@@ -78,11 +84,22 @@ bool prepare_socket_plug(Scratch& scratch,
     if (changed.itemCount != 1) {
         return report_failure("socket_plug_item_missing");
     }
+    // The target is one of the loadout's items, so the edited ones fit beside it.
+    for (std::size_t index = 0; index < selected.loadout.itemCount; ++index) {
+        const family4_datagen::loadout::ResolvedItem& item = selected.loadout.items[index];
+        if (!item.equipped && item.instance.instanceSoid != mutation.targetInstanceSoid
+            && state::item_values_edited(
+                mutation.beforeCharacter, mutation.afterCharacter, item.instance.instanceSoid)) {
+            changed.items[changed.itemCount++] = {item.equipmentSlot, item.instance};
+        }
+    }
+    const bool editsCharacter = changed.itemCount > 1;
 
     const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
-    const std::size_t requiredRawSize = socketPlug.updatesAccount
-                                            ? family4_datagen::account::layout::kObjectSize
-                                            : family4_datagen::instance::layout::kObjectSize;
+    const std::size_t requiredRawSize = (std::max)(
+        {family4_datagen::instance::layout::kObjectSize,
+         socketPlug.updatesAccount ? family4_datagen::account::layout::kObjectSize : 0,
+         editsCharacter ? family4_datagen::character::layout::kObjectSize : 0});
     if (requiredRawSize > rawStorage.size()) {
         return report_failure("socket_plug_item_storage");
     }
@@ -100,12 +117,35 @@ bool prepare_socket_plug(Scratch& scratch,
                       staged,
                       itemCursor,
                       compressedExtent)
-        || itemCursor != 1) {
+        || itemCursor != changed.itemCount) {
         clear_after(scratch, reservation);
         return report_failure("socket_plug_item_object");
     }
 
-    std::size_t objectCount = 1;
+    std::size_t objectCount = itemCursor;
+    if (editsCharacter) {
+        const auto characterBytes =
+            rawStorage.first(family4_datagen::character::layout::kObjectSize);
+        if (objectCount == staged.objects.size()
+            || !family4_datagen::character::encode(account.characters[mutation.characterIndex],
+                                                   selected.loadout,
+                                                   selected.lightEvaluation,
+                                                   characterBytes,
+                                                   unlocks)
+            || !append_object(scratch,
+                              characterBytes,
+                              selected.characterObjectId,
+                              socketPlug.characterSoid,
+                              staged.objects[objectCount],
+                              compressedExtent)) {
+            clear_after(scratch, reservation);
+            return report_failure("socket_plug_character_object");
+        }
+        staged.rawClearSize = (std::max)(
+            staged.rawClearSize,
+            reservation.rawWriteOffset + family4_datagen::character::layout::kObjectSize);
+        ++objectCount;
+    }
     if (socketPlug.updatesAccount) {
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
         if (!family4_datagen::account::encode(account, accountBytes, unlocks)
@@ -113,11 +153,12 @@ bool prepare_socket_plug(Scratch& scratch,
                    *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()),
                    std::span(mutation.changes).first(mutation.changeCount))
                    != nullptr
+            || objectCount == staged.objects.size()
             || !append_object(scratch,
                               accountBytes,
                               socketPlug.accountDefinitionId,
                               socketPlug.accountSoid,
-                              staged.objects[1],
+                              staged.objects[objectCount],
                               compressedExtent)) {
             clear_after(scratch, reservation);
             return report_failure("socket_plug_account_object");
@@ -125,7 +166,7 @@ bool prepare_socket_plug(Scratch& scratch,
         staged.rawClearSize =
             (std::max)(staged.rawClearSize,
                        reservation.rawWriteOffset + family4_datagen::account::layout::kObjectSize);
-        objectCount = 2;
+        ++objectCount;
     }
 
     staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);

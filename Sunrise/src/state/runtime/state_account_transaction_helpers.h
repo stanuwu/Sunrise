@@ -250,6 +250,8 @@ find_resolved_position(const middleware::datagen::family4::loadout::ResolvedLoad
     std::size_t& movedItemCount) noexcept;
 [[nodiscard]] bool same_character(const CharacterState& left, const CharacterState& right) noexcept;
 /**
+ * @param nowSeconds Server time in Unix seconds a bake's bounty deadlines are compared with; a
+ *        re-staging passes the time the first staging recorded.
  * @param pinnedPlugHash For a rolled socket's apply or re-roll, the result plug an earlier
  *        staging rolled, so a re-staging reproduces the same after-image; 0 rolls afresh.
  */
@@ -258,6 +260,7 @@ find_resolved_position(const middleware::datagen::family4::loadout::ResolvedLoad
                                      std::uint64_t targetInstanceSoid,
                                      std::uint8_t socketLane,
                                      std::uint16_t plugDefinitionIndex,
+                                     std::int64_t nowSeconds,
                                      PendingSocketPlug& mutation,
                                      std::uint32_t pinnedPlugHash = 0) noexcept;
 /**
@@ -356,16 +359,51 @@ enum class OvenAction : std::uint8_t {
 
 /**
  * Pays a staged bake once its cost is charged: credits the cookie, so its rows keep the serials
- * the change ring names, and sets the discovery flag of a newly baked recipe.
+ * the change ring names, sets the discovery flag of a newly baked recipe and advances the Dawning
+ * bounties a recipe bake counts.
  * @param uncharged Account the bake began with.
- * @param account Charged account; receives the cookie.
+ * @param account Charged account; receives the cookie and the advanced bounties.
  * @param writes The transaction's unlock writes; receive the discovery flag.
+ * @param nowSeconds Server time in Unix seconds, which a bounty's deadline is compared with.
  */
 [[nodiscard]] bool pay_oven_bake(const AccountState& uncharged,
                                  AccountState& account,
                                  std::size_t characterIndex,
                                  OvenBake& bake,
-                                 AccountUnlockWrites& writes) noexcept;
+                                 AccountUnlockWrites& writes,
+                                 std::int64_t nowSeconds) noexcept;
+
+/** What advances a Dawning bounty objective. */
+enum class DawningEvent : std::uint8_t {
+    /** A recipe's cookie came out of the oven. */
+    bake,
+    /** A vendor row's price spent a recipe's cookie. */
+    delivery,
+};
+
+/**
+ * Advances by one each held Dawning bounty objective the event counts, and gives each advanced
+ * bounty a new mutation serial so the client re-reads its progress. An expired bounty or a
+ * finished objective is left alone, and a delivery counts only a recipe's cookie.
+ * @param cookieHash The cookie baked or spent.
+ * @param nowSeconds Server time in Unix seconds, which a bounty's deadline is compared with.
+ * @return False when a held bounty's objective does not resolve or the serials run out.
+ */
+[[nodiscard]] bool credit_dawning_bounties(CharacterState& character,
+                                           DawningEvent event,
+                                           std::uint32_t cookieHash,
+                                           std::int64_t nowSeconds) noexcept;
+
+/**
+ * Finds the item lane one objective's progress lives in, and its target.
+ * @param ordinal Objective position in the contract.
+ * @return False when the objective's progress is not one of the item's own values, or its target
+ *         is not a plain count up to its completion value.
+ */
+[[nodiscard]] bool objective_lane(const build_data::pursuits::Definition& contract,
+                                  std::uint8_t ordinal,
+                                  std::size_t& lane,
+                                  std::int32_t& target) noexcept;
 
 /** The flag a Chalice upgrade purchase sets, and the plug its lane shows after it. */
 struct ChaliceUpgrade {

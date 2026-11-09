@@ -151,6 +151,17 @@ bool prepare_record_reward_grant(
             return report_failure("record_reward_resident_order");
         }
     }
+    // Held items whose values the grant changed, such as bounties a delivery advanced, are upserted
+    // after the new residents. The manifest already lists them.
+    family4_datagen::loadout::ResolvedInstances edited{};
+    for (std::size_t itemIndex = 0; itemIndex < selected.loadout.itemCount; ++itemIndex) {
+        const auto& item = selected.loadout.items[itemIndex];
+        if (!item.equipped
+            && state::item_values_edited(
+                mutation.beforeCharacter, mutation.afterCharacter, item.instance.instanceSoid)) {
+            edited.items[edited.itemCount++] = {item.equipmentSlot, item.instance};
+        }
+    }
 
     const Reservation reservation = reserve_prior(scratch, prepared);
     if (reservation.rawWriteOffset > scratch.plaintext.size()
@@ -177,6 +188,18 @@ bool prepare_record_reward_grant(
         || residentCursor != residents.itemCount) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_residents");
+    }
+    if (!append_items(scratch,
+                      rawStorage,
+                      update.itemInstanceDefinitionId,
+                      edited,
+                      0,
+                      staged,
+                      residentCursor,
+                      compressedExtent)
+        || residentCursor != residents.itemCount + edited.itemCount) {
+        clear_after(scratch, reservation);
+        return report_failure("record_reward_edited_items");
     }
 
     const auto characterBytes = rawStorage.first(character_layout::kObjectSize);

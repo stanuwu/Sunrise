@@ -256,6 +256,7 @@ void mutate_socket_plug(const middleware::web_service::Message& message,
     if (!state::prepare_socket_plug(request.instanceSoid,
                                     static_cast<std::uint8_t>(request.socketIndex),
                                     request.plugDefinitionIndex,
+                                    core::runtime::server_clock_seconds(),
                                     *mutation)) {
         clear_mutation(outcome);
         core::log::write(core::log::Channel::server,
@@ -289,6 +290,7 @@ void mutate_equipped_socket_plug(const middleware::web_service::Message& message
     if (!state::prepare_equipped_socket_plug(request.targetInstanceSoid,
                                              static_cast<std::uint8_t>(replacement.socketIndex),
                                              replacement.plugDefinitionIndex,
+                                             core::runtime::server_clock_seconds(),
                                              *mutation)) {
         clear_mutation(outcome);
         core::log::write(core::log::Channel::server,
