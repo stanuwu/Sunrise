@@ -6,10 +6,13 @@
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
 #include "../../middleware/secure_channel/runtime.h"
+#include "../../state/account/account_token.h"
+#include "../../state/coop/compatibility.h"
 #include "../../state/matchmaking/matchmaking_state.h"
 #include "../../state/runtime/runtime.h"
 #include "../../state/social/steam_roster.h"
 #include "account_enrollment.h"
+#include "coop_admission.h"
 #include "encrypted/internal.h"
 #include "internal.h"
 #include "proxy/proxy_runtime.h"
@@ -191,6 +194,79 @@ void arm_encryption(Session& session, const state::BapState& bap) noexcept {
     return true;
 }
 
+/** How a guest's hello fared against this host's compatibility record. */
+enum class GuestCheck : std::uint8_t {
+    admitted,
+    /** The link stays unauthenticated and closes. */
+    refused,
+    /** The reply already names the failed check; the link stays unauthenticated. */
+    refusedWithReply,
+};
+
+/**
+ * Checks one guest hello. A Sunrise link carries a summary and is compared; a native link is
+ * admitted only from the address its account's Sunrise link passed from.
+ * @param session Connection the hello arrived on.
+ * @param scratch Lock-owned staging for the refusal body.
+ * @param frame The hello.
+ * @param token The hello's sign-on token, already bounds-checked.
+ * @param response Whole-frame storage for a refusal reply.
+ * @param written Receives the refusal reply's size.
+ * @return The verdict.
+ */
+[[nodiscard]] GuestCheck check_guest(const Session& session,
+                                     Scratch& scratch,
+                                     const middleware::bap::RequestFrame& frame,
+                                     std::span<const std::byte> token,
+                                     std::span<std::byte> response,
+                                     std::size_t& written) noexcept {
+    namespace compatibility = state::coop::compatibility;
+    const std::uint64_t primarySoid = state::account::soid_from_signon_token(token);
+    const compatibility::Record* host = compatibility::local();
+    if (primarySoid == 0 || host == nullptr) {
+        return GuestCheck::refused;
+    }
+    std::span<const std::byte> summary{};
+    const bool sunriseLink =
+        frame.body.size() > kServerHelloRequestSize
+        && frame.body[kProtocolTagOffset] == kProtocolVersionTag
+        && frame.body[kProtocolVersionOffset] == kProtocolVersion
+        && compatibility::find_hello_field(frame.body.subspan(kServerHelloRequestSize), summary);
+    if (!sunriseLink) {
+        return coop_admission::admitted(primarySoid, session.remoteAddress) ? GuestCheck::admitted
+                                                                            : GuestCheck::refused;
+    }
+    compatibility::Record guest{};
+    if (!compatibility::decode_summary(summary, guest)) {
+        return GuestCheck::refused;
+    }
+    const compatibility::Mismatch mismatch = compatibility::compare(guest, *host);
+    core::log::writef(core::log::Channel::server,
+                      mismatch == compatibility::Mismatch::none ? core::log::Level::info
+                                                                : core::log::Level::warn,
+                      "ev=coop stage=admit result=%s conn=%u from=0x%08X mismatch=%s",
+                      mismatch == compatibility::Mismatch::none ? "ok" : "refused",
+                      session.id,
+                      session.remoteAddress,
+                      compatibility::mismatch_name(mismatch));
+    if (mismatch == compatibility::Mismatch::none) {
+        return coop_admission::admit(primarySoid, session.remoteAddress) ? GuestCheck::admitted
+                                                                         : GuestCheck::refused;
+    }
+    std::size_t bodySize = 0;
+    if (!compatibility::encode_refusal(*host, mismatch, scratch.responseBody, bodySize)
+        || !middleware::bap::encode_response(middleware::bap::ResponseService::serverHello,
+                                             frame.taskId,
+                                             frame.frameType,
+                                             std::span(scratch.responseBody).first(bodySize),
+                                             response,
+                                             written)) {
+        written = 0;
+        return GuestCheck::refused;
+    }
+    return GuestCheck::refusedWithReply;
+}
+
 } // namespace
 
 /**
@@ -238,10 +314,23 @@ bool consume(Session& session,
     if (core::settings::hosts_session()) {
         // Activity-channel hellos may carry more fields after the same bounded token prefix.
         if (frame.body.size() < kTokenOffset + state::kSessionTokenSize
-            || frame.body[0] != kSessionTokenTag || frame.body[1] != kSessionTokenSize
-            || !enroll_account(frame.body.subspan(kTokenOffset, state::kSessionTokenSize),
-                               accountHandle,
-                               enrollment.attachedNow)) {
+            || frame.body[0] != kSessionTokenTag || frame.body[1] != kSessionTokenSize) {
+            report_refusal(session, frame.serviceId, "account_token");
+            return false;
+        }
+        const auto token = frame.body.subspan(kTokenOffset, state::kSessionTokenSize);
+        if (!state::is_local_account_token(token)) {
+            switch (check_guest(session, scratch, frame, token, response, written)) {
+            case GuestCheck::admitted:
+                break;
+            case GuestCheck::refusedWithReply:
+                return true;
+            case GuestCheck::refused:
+                report_refusal(session, frame.serviceId, "coop_unverified");
+                return false;
+            }
+        }
+        if (!enroll_account(token, accountHandle, enrollment.attachedNow)) {
             report_refusal(session, frame.serviceId, "account_token");
             return false;
         }

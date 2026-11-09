@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <limits>
 
 #include "../../state/activity/defaults/activity_defaults_validation.h"
@@ -68,6 +69,7 @@ bool Parser::parse_root(Settings& output) noexcept {
     }
     bool hasVersion = false;
     bool hasMultiplayer = false;
+    bool hasJoinCode = false;
     bool hasCore = false;
     bool hasClient = false;
     bool hasClientEndpoint = false;
@@ -95,6 +97,14 @@ bool Parser::parse_root(Settings& output) noexcept {
                 return false;
             }
             hasMultiplayer = true;
+        } else if (key == "join_code") {
+            std::string_view value;
+            if (hasJoinCode || !string(value) || value.size() > kJoinCodeMaximumLength) {
+                return false;
+            }
+            std::copy(value.begin(), value.end(), output.joinCode.begin());
+            output.joinCodeLength = value.size();
+            hasJoinCode = true;
         } else if (key == "complete_exotic_catalysts") {
             if (hasCompleteExoticCatalysts || !boolean(output.completeExoticCatalysts)) {
                 return false;

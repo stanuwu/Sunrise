@@ -23,6 +23,7 @@
 #include "../../state/activity_sdk/runtime.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/content_manifest/content_manifest_state_runtime.h"
+#include "../../state/coop/compatibility.h"
 #include "../../state/entitlements/entitlement_runtime.h"
 #include "../../state/investment/store.h"
 #include "../../state/mods/mods_runtime.h"
@@ -326,6 +327,9 @@ bool initialize(void* module) noexcept {
             stage = "investment_store";
         } else if (!initialize_cheat_session()) {
             stage = "cheat_session";
+        } else if (settings::multiplayer() && !state::coop::compatibility::initialize(module)) {
+            // Co-op peers compare this record, so it is built before the server can answer one.
+            stage = "coop_compatibility";
         } else if (!state::initialize(module, settings::get().initialActivityDefaults)) {
             stage = "state";
         } else if (!middleware::initialize()) {

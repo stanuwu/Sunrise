@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -189,6 +189,8 @@
     <ClCompile Include="src\core\json\json_reader_structure.cpp" />
     <ClCompile Include="src\core\settings\settings_runtime.cpp" />
     <ClCompile Include="src\core\settings\role.cpp" />
+    <ClCompile Include="src\state\coop\compatibility.cpp" />
+    <ClCompile Include="src\server\bap\coop_admission.cpp" />
     <ClCompile Include="src\client\hooks\network\presence_publication.cpp" />
     <ClCompile Include="src\core\settings\settings_upgrade.cpp" />
     <ClCompile Include="src\core\settings\client\client_settings_parser.cpp" />
@@ -3216,6 +3218,9 @@
     <ClCompile Include="src\state\network\peer_routes.cpp" />
     <ClInclude Include="src\state\network\peer_routes.h" />
     <ClInclude Include="src\core\network_capacity.h" />
+    <ClInclude Include="src\core\network_lan.h" />
+    <ClInclude Include="src\state\coop\compatibility.h" />
+    <ClInclude Include="src\server\bap\coop_admission.h" />
     <ClInclude Include="src\state\activity_sdk\actor_sequences.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_actor_sequences.h" />
   </ItemGroup>

@@ -4,15 +4,18 @@
 
 #include <WS2tcpip.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 
 #include "../../../core/logging/log.h"
 #include "../../../core/settings/settings.h"
+#include "../../../core/ui/notice/ui_notice_overlay.h"
 #include "../../../middleware/encoding/byte_order.h"
 #include "../../../state/account/account_context.h"
 #include "../../../state/account/account_token.h"
 #include "../../../state/account/shared_channel_material.h"
+#include "../../../state/coop/compatibility.h"
 #include "../../../state/runtime/runtime.h"
 #include "../../../state/social/social_feed.h"
 
@@ -22,6 +25,8 @@ using middleware::bap::FrameType;
 using middleware::bap::RequestService;
 using middleware::bap::ResponseService;
 constexpr std::byte kReceiveDirectionMask{1};
+/** Set once the host refused this install; the reason does not change while either side runs. */
+std::atomic_bool g_refused{};
 
 void report(const UpstreamLink& link, const char* stage, const char* reason) noexcept {
     std::array<char, 160> line{};
@@ -95,20 +100,32 @@ bool enqueue_frame(UpstreamLink& link, std::span<const std::byte> frame) noexcep
 }
 
 bool send_hello(UpstreamLink& link) noexcept {
-    // Tag-and-length body: field 1 length-delimited carrying the sign-on token, then field 2 as
-    // a varint whose only accepted value is 1.
+    namespace compatibility = state::coop::compatibility;
+    // Tag-and-length body: field 1 length-delimited carrying the sign-on token, field 2 as a
+    // varint whose only accepted value is 1, then this install's compatibility summary.
     constexpr std::size_t kTokenSize = state::account::kSignOnTokenSize;
     constexpr std::size_t kTokenStart = 2;
-    constexpr std::size_t kBodySize = kTokenStart + kTokenSize + 2;
+    constexpr std::size_t kVersionStart = kTokenStart + kTokenSize;
+    constexpr std::size_t kFieldStart = kVersionStart + 2;
+    constexpr std::size_t kBodySize = kFieldStart + compatibility::kHelloFieldSize;
+    const compatibility::Record* local = compatibility::local();
+    if (local == nullptr) {
+        return false;
+    }
     std::array<std::byte, kBodySize> body{};
     body[0] = std::byte{0x0A};
     body[1] = static_cast<std::byte>(kTokenSize);
     state::account::signon_token(state::account_primary_soid(state::kLocalAccount),
                                  std::span(body).subspan(kTokenStart, kTokenSize));
-    body[kBodySize - 2] = std::byte{0x10};
-    body[kBodySize - 1] = std::byte{1};
+    body[kVersionStart] = std::byte{0x10};
+    body[kVersionStart + 1] = std::byte{1};
+    if (!compatibility::encode_hello_field(
+            *local, std::span(body).subspan<kFieldStart, compatibility::kHelloFieldSize>())) {
+        return false;
+    }
     // Room for that body behind the six-byte request header, and again behind the outer header.
-    std::array<std::byte, 64> payload{}, framed{};
+    constexpr std::size_t kHeaderRoom = 32;
+    std::array<std::byte, kBodySize + kHeaderRoom> payload{}, framed{};
     std::size_t payloadSize{}, framedSize{};
     link.helloTaskId = link.nextOriginatedTaskId++;
     const bool encoded =
@@ -122,6 +139,10 @@ bool send_hello(UpstreamLink& link) noexcept {
 }
 
 bool begin_connect(UpstreamLink& link, std::uint64_t now) noexcept {
+    if (g_refused.load(std::memory_order_acquire)) {
+        fail(link, "incompatible");
+        return false;
+    }
     const auto& upstream = core::settings::get().server.upstream;
     link.socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (link.socket == INVALID_SOCKET) {
@@ -208,15 +229,45 @@ bool inbound(UpstreamLink& link,
     return false;
 }
 
+/**
+ * Shows the host's reason for refusing this install, once, and stops every later dial.
+ * @return True when `body` was a refusal.
+ */
+bool refused_by_host(std::span<const std::byte> body) noexcept {
+    namespace compatibility = state::coop::compatibility;
+    compatibility::Mismatch mismatch{};
+    compatibility::Record host{};
+    const compatibility::Record* local = compatibility::local();
+    if (local == nullptr || !compatibility::decode_refusal(body, mismatch, host)) {
+        return false;
+    }
+    if (!g_refused.exchange(true, std::memory_order_acq_rel)) {
+        std::array<char, 256> text{};
+        const std::size_t length = compatibility::describe(mismatch, *local, host, text);
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::error,
+                          "ev=coop stage=join result=refused mismatch=%s",
+                          compatibility::mismatch_name(mismatch));
+        core::ui::notice::raise({text.data(), length});
+    }
+    return true;
+}
+
 bool receive_hello(UpstreamLink& link,
                    const middleware::bap::OuterFrame& outer,
                    std::uint64_t now) noexcept {
     middleware::bap::ResponseFrame response{};
     state::BapState material{};
-    if ((outer.frameType != FrameType::plaintext0 && outer.frameType != FrameType::plaintext2)
-        || !middleware::bap::parse_response_payload(outer.payload, response)
-        || response.serviceId != static_cast<std::uint16_t>(ResponseService::serverHello)
-        || response.taskId != link.helloTaskId || response.status != middleware::bap::kStatusOk
+    const bool parsed =
+        (outer.frameType == FrameType::plaintext0 || outer.frameType == FrameType::plaintext2)
+        && middleware::bap::parse_response_payload(outer.payload, response)
+        && response.serviceId == static_cast<std::uint16_t>(ResponseService::serverHello)
+        && response.taskId == link.helloTaskId && response.status == middleware::bap::kStatusOk;
+    if (parsed && refused_by_host(response.body)) {
+        fail(link, "incompatible");
+        return false;
+    }
+    if (!parsed
         || !middleware::secure_channel::decode_server_hello(
             state::account::shared_channel_material(), response.body, material)) {
         fail(link, "hello");
@@ -313,7 +364,8 @@ void reset(UpstreamLink& link) noexcept {
 }
 
 bool retry_initial(UpstreamLink& link, std::uint64_t now) noexcept {
-    if (link.stage != LinkStage::failed || link.established) {
+    if (link.stage != LinkStage::failed || link.established
+        || g_refused.load(std::memory_order_acquire)) {
         return false;
     }
     reset(link);

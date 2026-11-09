@@ -1,6 +1,7 @@
 {
   "version": 19,
   "multiplayer_enabled": false,
+  "join_code": "",
   "core": {
     "logging": {
       "debugger_sink": true,

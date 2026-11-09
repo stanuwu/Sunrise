@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <string_view>
 
 #include "../../state/account/account_state.h"
@@ -27,6 +29,9 @@ struct ActivitySdkGenerationSettings final {
  */
 inline constexpr std::uint32_t kSettingsVersion = 19;
 
+/** Longest co-op join code, in bytes. */
+inline constexpr std::size_t kJoinCodeMaximumLength = 64;
+
 /** IPv4 loopback address in network byte order, shared by settings and endpoint policy. */
 inline constexpr std::array<unsigned char, 4> kLoopbackOctets{127, 0, 0, 1};
 
@@ -39,6 +44,9 @@ struct Settings {
     std::uint32_t version{};
     /** Explicit permission to host or join multiplayer and allow its network endpoints. */
     bool multiplayerEnabled{};
+    /** Shared secret a guest must present to join; empty admits any LAN guest. */
+    std::array<char, kJoinCodeMaximumLength> joinCode{};
+    std::size_t joinCodeLength{};
     bool compactClient{};
     bool compactHost{};
     Role configuredRole{Role::embedded};
