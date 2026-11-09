@@ -9,6 +9,7 @@
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/account/account_state.h"
+#include "../../../../state/build_data/objectives/definition.h"
 #include "../../../../state/build_data/rewards/definition.h"
 
 namespace sunrise::client::content::items::packages {
@@ -49,13 +50,16 @@ public:
                                  BankFailure& failure,
                                  std::uint32_t rowClass) const noexcept;
     /**
-     * Names the value slot an expression reads from the item in context.
+     * Names the value slot an expression reads from the held item.
      * @param at Offset of the expression field.
+     * @param mode Receives which held instances the client reads the slot from.
      * @return The slot when the expression is one read of an item-held value, otherwise
      *         objectives::kNoItemValueSlot.
      */
-    [[nodiscard]] std::uint16_t item_value_slot(std::span<const std::byte> blob,
-                                                std::size_t at) const noexcept;
+    [[nodiscard]] std::uint16_t
+    item_value_slot(std::span<const std::byte> blob,
+                    std::size_t at,
+                    state::build_data::objectives::ItemValueMode& mode) const noexcept;
 
 private:
     [[nodiscard]] bool append_expression(std::span<const std::byte> blob,

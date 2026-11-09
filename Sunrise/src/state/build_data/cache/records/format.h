@@ -37,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 86;
+inline constexpr std::uint32_t kCacheFormatVersion = 87;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -739,6 +739,7 @@ struct ObjectiveRecord {
     RewardRangeRecord targetAdjustment{};
     RewardRangeRecord expression{};
     std::uint16_t itemValueSlot{objectives::kNoItemValueSlot};
+    std::uint8_t itemValueMode{};
 };
 
 /** Disk form of one reward row a pursuit shows. */
@@ -803,7 +804,7 @@ static_assert(sizeof(RewardSocketOverrideRecord)
 static_assert(sizeof(RewardInstructionRecord)
               == 2 * sizeof(std::uint8_t) + sizeof(std::uint16_t) + sizeof(std::uint32_t));
 static_assert(sizeof(ObjectiveRecord)
-              == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t)
+              == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 5 * sizeof(std::uint8_t)
                      + 2 * sizeof(RewardRangeRecord));
 static_assert(sizeof(PursuitRewardRecord) == sizeof(std::int32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(PursuitCompletionValueRecord)

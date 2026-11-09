@@ -46,6 +46,7 @@ bool encode(const objectives::Row& value, ObjectiveRecord& record) noexcept {
     record.targetAdjustment = {value.targetAdjustment.first, value.targetAdjustment.count};
     record.expression = {value.expression.first, value.expression.count};
     record.itemValueSlot = value.itemValueSlot;
+    record.itemValueMode = static_cast<std::uint8_t>(value.itemValueMode);
     return true;
 }
 
@@ -55,7 +56,8 @@ bool decode(const ObjectiveRecord& record, objectives::Row& value) noexcept {
     if (!decode_flag(record.optional, value.optional)
         || !decode_flag(record.countsDown, value.countsDown)
         || !decode_flag(record.adjustmentReadable, value.adjustmentReadable)
-        || !decode_flag(record.readable, value.readable)) {
+        || !decode_flag(record.readable, value.readable)
+        || record.itemValueMode > static_cast<std::uint8_t>(objectives::ItemValueMode::maximum)) {
         return false;
     }
     value.definitionHash = record.definitionHash;
@@ -64,6 +66,7 @@ bool decode(const ObjectiveRecord& record, objectives::Row& value) noexcept {
     value.targetAdjustment = {record.targetAdjustment.first, record.targetAdjustment.count};
     value.expression = {record.expression.first, record.expression.count};
     value.itemValueSlot = record.itemValueSlot;
+    value.itemValueMode = static_cast<objectives::ItemValueMode>(record.itemValueMode);
     return true;
 }
 

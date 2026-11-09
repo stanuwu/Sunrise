@@ -675,7 +675,7 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
 
     const reward_resolution::Context context{*banks, character.characterClass, seed, &reason};
     const PursuitCompletionStatus status =
-        inspect_pursuit_completion(contract, context, itemValues);
+        inspect_pursuit_completion(contract, context, itemValues, held);
     const pursuits::QuestStep& step = contract.questStep;
     reason = "quest_progress";
     if (step.membership != pursuits::QuestMembership::none && !progress_item_held(status)) {

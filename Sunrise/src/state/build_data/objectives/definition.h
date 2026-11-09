@@ -19,6 +19,15 @@ inline constexpr std::size_t kDefinitionCapacity = 16384;
 inline constexpr std::size_t kInstructionCapacity = 131072;
 /** All bits set marks an objective whose progress the held item does not carry. */
 inline constexpr std::uint16_t kNoItemValueSlot = 0xFFFF;
+
+/** Which held instances the client reads an item-held value slot from. */
+enum class ItemValueMode : std::uint8_t {
+    /** The held item in context. */
+    context,
+    /** The largest value the slot holds across the character's held instances that carry it. */
+    maximum,
+};
+
 /** One stored objective row, whose two programs are ranges of the instruction bank. */
 struct Row {
     std::uint32_t definitionHash{};
@@ -35,6 +44,8 @@ struct Row {
     rewards::Range expression{};
     /** Value slot the client reads from the held item instead of a bank, or kNoItemValueSlot. */
     std::uint16_t itemValueSlot{kNoItemValueSlot};
+    /** Context for every objective without an item-held value slot. */
+    ItemValueMode itemValueMode{};
 };
 
 /** The dense objective table and the instruction bank its rows name. */
@@ -59,6 +70,8 @@ struct Definition {
     std::vector<unlocks::Instruction> expression;
     /** Value slot the client reads from the held item instead of a bank, or kNoItemValueSlot. */
     std::uint16_t itemValueSlot{kNoItemValueSlot};
+    /** Context for every objective without an item-held value slot. */
+    ItemValueMode itemValueMode{};
 };
 
 } // namespace sunrise::state::build_data::objectives

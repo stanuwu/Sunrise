@@ -563,14 +563,19 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
 }
 
 /**
- * Names the value slot an expression reads from the item in context.
+ * Names the value slot an expression reads from the held item.
  * @param at Offset of the expression field.
+ * @param mode Receives which held instances the client reads the slot from.
  * @return The slot when the expression is one read of an item-held value, otherwise
  *         objectives::kNoItemValueSlot.
  */
-std::uint16_t RewardConditions::item_value_slot(std::span<const std::byte> blob,
-                                                std::size_t at) const noexcept {
+std::uint16_t RewardConditions::item_value_slot(
+    std::span<const std::byte> blob,
+    std::size_t at,
+    state::build_data::objectives::ItemValueMode& mode) const noexcept {
+    using Mode = state::build_data::objectives::ItemValueMode;
     constexpr std::uint16_t kNone = state::build_data::objectives::kNoItemValueSlot;
+    mode = Mode::context;
     tables::Array rows{};
     std::uint32_t native = 0;
     std::uint32_t slot = 0;
@@ -594,9 +599,12 @@ std::uint16_t RewardConditions::item_value_slot(std::span<const std::byte> blob,
     if (!tables::read(bindings, binding + layout::SlotRow::kValueKind, kind)
         || !tables::read(bindings, binding + layout::SlotRow::kValueFlags, flags)
         || kind != layout::SlotRow::kItemValueKind
-        || (flags | layout::SlotRow::kItemValueIgnoredFlag)
-               != layout::SlotRow::kItemValueIgnoredFlag) {
+        || (flags != 0 && flags != layout::SlotRow::kItemValueIgnoredFlag
+            && flags != layout::SlotRow::kItemValueMaximumFlag)) {
         return kNone;
+    }
+    if (flags == layout::SlotRow::kItemValueMaximumFlag) {
+        mode = Mode::maximum;
     }
     return static_cast<std::uint16_t>(slot);
 }

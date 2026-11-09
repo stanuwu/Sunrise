@@ -12,20 +12,15 @@ namespace {
 namespace objectives = build_data::objectives;
 
 /**
- * Reads an objective's progress: the per-item value its slot names when the held item carries it,
- * otherwise its program evaluated against the saved banks.
- * @return False when the value cannot be read.
+ * Reads the per-item value a slot names from one instance's values.
+ * @return False when the instance's contract does not carry the slot.
  */
-[[nodiscard]] bool read_progress(const objectives::Definition& objective,
-                                 const build_data::pursuits::Definition& definition,
-                                 std::span<const std::int32_t> itemValues,
-                                 const reward_resolution::Context& context,
-                                 std::int32_t& value) noexcept {
-    if (objective.itemValueSlot == objectives::kNoItemValueSlot) {
-        return reward_resolution::evaluate(objective.expression, context, value);
-    }
+[[nodiscard]] bool read_item_value(std::uint16_t slot,
+                                   const build_data::pursuits::Definition& definition,
+                                   std::span<const std::int32_t> itemValues,
+                                   std::int32_t& value) noexcept {
     const auto slots = std::span(definition.itemValueSlots).first(definition.itemValueSlotCount);
-    const auto found = std::find(slots.begin(), slots.end(), objective.itemValueSlot);
+    const auto found = std::find(slots.begin(), slots.end(), slot);
     const auto position = static_cast<std::size_t>(found - slots.begin());
     if (found == slots.end() || position >= itemValues.size()) {
         return false;
@@ -34,11 +29,64 @@ namespace objectives = build_data::objectives;
     return true;
 }
 
+/**
+ * Raises a value to the largest one a slot holds across the held pursuits that carry it. An
+ * instance with no values yet holds zero in every lane.
+ * @param found Whether value already holds a read of the slot.
+ * @return True when value holds a read of the slot.
+ */
+[[nodiscard]] bool read_held_maximum(std::uint16_t slot,
+                                     std::span<const account::inventory::Item> heldItems,
+                                     bool found,
+                                     std::int32_t& value) noexcept {
+    for (const account::inventory::Item& held : heldItems) {
+        build_data::items::Definition item{};
+        build_data::pursuits::Definition contract{};
+        const account::inventory::ItemObjectives values =
+            held.objectives.value_or(account::inventory::ItemObjectives{});
+        std::int32_t carried = 0;
+        if (!build_data::find_item_definition_hash(held.definitionHash, item)
+            || !build_data::items::pursuit_bucket_item(item)
+            || !build_data::find_pursuit_definition(item.definitionIndex, contract)
+            || !read_item_value(slot, contract, values, carried)) {
+            continue;
+        }
+        if (!found || carried > value) {
+            value = carried;
+        }
+        found = true;
+    }
+    return found;
+}
+
+/**
+ * Reads an objective's progress: the per-item value its slot names when the held item carries it,
+ * or that slot's largest value across held instances when the objective reads that, otherwise its
+ * program evaluated against the saved banks.
+ * @return False when the value cannot be read.
+ */
+[[nodiscard]] bool read_progress(const objectives::Definition& objective,
+                                 const build_data::pursuits::Definition& definition,
+                                 std::span<const std::int32_t> itemValues,
+                                 std::span<const account::inventory::Item> heldItems,
+                                 const reward_resolution::Context& context,
+                                 std::int32_t& value) noexcept {
+    if (objective.itemValueSlot == objectives::kNoItemValueSlot) {
+        return reward_resolution::evaluate(objective.expression, context, value);
+    }
+    const bool found = read_item_value(objective.itemValueSlot, definition, itemValues, value);
+    if (objective.itemValueMode != objectives::ItemValueMode::maximum) {
+        return found;
+    }
+    return read_held_maximum(objective.itemValueSlot, heldItems, found, value);
+}
+
 /** Evaluates one objective's progress and adjusted target with its installed comparison. */
 [[nodiscard]] PursuitObjectiveStatus
 inspect_pursuit_objective(const objectives::Definition& objective,
                           const build_data::pursuits::Definition& definition,
                           std::span<const std::int32_t> itemValues,
+                          std::span<const account::inventory::Item> heldItems,
                           const reward_resolution::Context& context) noexcept {
     PursuitObjectiveStatus status{};
     status.hash = objective.definitionHash;
@@ -48,7 +96,7 @@ inspect_pursuit_objective(const objectives::Definition& objective,
     if (!objective.readable || !objective.adjustmentReadable
         || (!objective.targetAdjustment.empty()
             && !reward_resolution::evaluate(objective.targetAdjustment, context, adjustment))
-        || !read_progress(objective, definition, itemValues, context, status.value)) {
+        || !read_progress(objective, definition, itemValues, heldItems, context, status.value)) {
         return status;
     }
     // The native signed subtraction wraps at the 32-bit boundary.
@@ -68,7 +116,8 @@ inspect_pursuit_objective(const objectives::Definition& objective,
 PursuitCompletionStatus
 inspect_pursuit_completion(const build_data::pursuits::Definition& definition,
                            const reward_resolution::Context& context,
-                           std::span<const std::int32_t> itemValues) noexcept {
+                           std::span<const std::int32_t> itemValues,
+                           std::span<const account::inventory::Item> heldItems) noexcept {
     PursuitCompletionStatus status{};
     if (!definition.readable) {
         return status;
@@ -91,7 +140,7 @@ inspect_pursuit_completion(const build_data::pursuits::Definition& definition,
             result.target = objective.completionValue;
             continue;
         }
-        result = inspect_pursuit_objective(objective, definition, itemValues, context);
+        result = inspect_pursuit_objective(objective, definition, itemValues, heldItems, context);
         if (!result.known) {
             ++unknown;
         } else if (result.complete) {

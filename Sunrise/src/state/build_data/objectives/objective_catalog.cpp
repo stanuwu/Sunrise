@@ -16,8 +16,8 @@ Table<Row, kDefinitionCapacity> g_rows;
 Table<unlocks::Instruction, kInstructionCapacity> g_instructions;
 
 /**
- * A readable row has a progress program, an unreadable adjustment leaves its range empty, and only
- * a readable program can name an item-held value.
+ * A readable row has a progress program, an unreadable adjustment leaves its range empty, only a
+ * readable program can name an item-held value, and only an item-held value reads past its context.
  */
 [[nodiscard]] bool
 valid_row(const Row& row, std::size_t index, std::span<const unlocks::Instruction> bank) noexcept {
@@ -25,7 +25,9 @@ valid_row(const Row& row, std::size_t index, std::span<const unlocks::Instructio
            && rewards::fits(row.targetAdjustment, bank)
            && row.readable == (row.expression.count != 0)
            && (row.adjustmentReadable || row.targetAdjustment.count == 0)
-           && (row.readable || row.itemValueSlot == kNoItemValueSlot);
+           && (row.readable || row.itemValueSlot == kNoItemValueSlot)
+           && (row.itemValueSlot != kNoItemValueSlot
+               || row.itemValueMode == ItemValueMode::context);
 }
 
 /** Copies one stored program out of the bank. The copy may throw on allocation. */
@@ -96,6 +98,7 @@ bool find(std::uint16_t index, Definition& output) noexcept {
     output.adjustmentReadable = row.adjustmentReadable;
     output.readable = row.readable;
     output.itemValueSlot = row.itemValueSlot;
+    output.itemValueMode = row.itemValueMode;
     return true;
 }
 
