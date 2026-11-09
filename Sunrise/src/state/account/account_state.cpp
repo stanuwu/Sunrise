@@ -134,6 +134,11 @@ constexpr std::uint8_t kDismantleClassMaskBits =
             || (character.selected && selected) || character.race > CharacterRace::exo
             || character.gender > CharacterGender::female
             || character.characterClass > CharacterClass::warlock
+            || std::any_of(character.gambitPrimeHelmetTiers.begin(),
+                           character.gambitPrimeHelmetTiers.end(),
+                           [](GambitPrimeHelmetTier tier) {
+                               return tier > GambitPrimeHelmetTier::notorious;
+                           })
             || !std::isfinite(character.appearanceValue) || !inventory::valid(character.equipment)
             || !inventory::valid(character.inventory) || !inventory::valid(character.stacks)) {
             return false;

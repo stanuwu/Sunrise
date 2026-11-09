@@ -54,10 +54,23 @@ constexpr const char* kParkedObjectivesColumn =
     "CHECK (objectives IS NULL OR length(objectives) = 32);";
 static_assert(sizeof(ObjectiveBlob) == 32);
 
+/**
+ * Version 8 saves each character's Gambit Prime helmet tier per role. A new save and the
+ * migration both run this statement.
+ */
+constexpr const char* kCharacterHelmetTiersTable =
+    "CREATE TABLE character_helmet_tiers ("
+    "character_slot INTEGER PRIMARY KEY REFERENCES characters(slot),"
+    "reaper INTEGER NOT NULL CHECK (reaper BETWEEN 0 AND 3),"
+    "invader INTEGER NOT NULL CHECK (invader BETWEEN 0 AND 3),"
+    "collector INTEGER NOT NULL CHECK (collector BETWEEN 0 AND 3),"
+    "sentry INTEGER NOT NULL CHECK (sentry BETWEEN 0 AND 3)"
+    ") STRICT;";
+
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 7;
+constexpr int kSchemaVersion = 8;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
 
@@ -286,7 +299,8 @@ bool open(std::string_view path,
                 && !characterStarter.empty() && execute(schemaText.c_str())
                 && execute(kParkedItemsTable) && execute(kParkedPlacementColumn)
                 && execute(kItemObjectivesTable) && execute(kParkedObjectivesColumn)
-                && execute(starterText.c_str()) && execute(defaultText.c_str())
+                && execute(kCharacterHelmetTiersTable) && execute(starterText.c_str())
+                && execute(defaultText.c_str())
                 && !settingsSchema.empty() && !settingsDefaults.empty()
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
                 && transaction.commit();
@@ -360,6 +374,14 @@ bool open(std::string_view path,
         ready = transaction.ready() && execute(kItemObjectivesTable)
                 && execute(kParkedObjectivesColumn) && execute("PRAGMA user_version=7")
                 && transaction.commit();
+        if (ready) {
+            version = 7;
+        }
+    }
+    if (ready && version == 7) {
+        Transaction transaction;
+        ready = transaction.ready() && execute(kCharacterHelmetTiersTable)
+                && execute("PRAGMA user_version=8") && transaction.commit();
     }
     if (!ready) {
         shutdown();

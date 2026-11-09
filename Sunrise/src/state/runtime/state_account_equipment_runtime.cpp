@@ -344,6 +344,7 @@ void report_item_state(std::string_view stage,
         || left.contentBypass != right.contentBypass
         || left.equippedTitleRecordIndex != right.equippedTitleRecordIndex
         || left.nextInventorySerial != right.nextInventorySerial
+        || left.gambitPrimeHelmetTiers != right.gambitPrimeHelmetTiers
         || left.inventory.count != right.inventory.count
         || left.stacks.count != right.stacks.count) {
         return false;

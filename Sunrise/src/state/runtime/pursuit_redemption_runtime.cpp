@@ -50,6 +50,8 @@ struct CompletionPlan {
     PreparedQuestStep questStep{};
     PreparedProgressionCredit progression{};
     std::int32_t seasonalExperience{};
+    /** The character's Gambit Prime helmet tiers after the grant. */
+    std::array<GambitPrimeHelmetTier, kGambitPrimeRoleCount> helmetTiers{};
 };
 
 /**
@@ -174,6 +176,8 @@ enum class GearSource : std::uint8_t {
     scourge,
     crown,
     trials,
+    /** Gambit Prime role weeklies: their role marker pays the next helmet tier. */
+    gambitPrimeRole,
 };
 
 /** Bounties that share a cadence and a gear source. */
@@ -231,6 +235,16 @@ struct CurrencyPayout {
 struct RankMarker {
     std::uint32_t hash{};
     std::uint32_t progressionHash{};
+};
+
+/** Helmet tiers a Gambit Prime role pays, Illicit to Notorious. */
+constexpr std::size_t kHelmetTierCount =
+    static_cast<std::size_t>(GambitPrimeHelmetTier::notorious);
+
+/** A Gambit Prime role marker and its helmets, by class in CharacterClass order, then by tier. */
+struct RoleHelmetMarker {
+    std::uint32_t hash{};
+    std::array<std::array<std::uint32_t, kHelmetTierCount>, kCharacterClassCount> classTiers{};
 };
 
 // --- Authored game data --------------------------------------------------------------------
@@ -291,6 +305,26 @@ constexpr std::array<ClassArmourMarker, 5> kRevelryArmour{{
     {3818379434U, 2328435454U, 2477028154U, 492834021U},  // Head
     {323881355U, 1706874193U, 2764769717U, 1561249470U},  // Legs
     {1508024268U, 2837295684U, 2120905920U, 4075522049U}, // Class item
+}};
+
+/** Role markers in GambitPrimeRole order. */
+constexpr std::array<RoleHelmetMarker, kGambitPrimeRoleCount> kRoleHelmets{{
+    {3007303932U, // Reaper
+     {{{223681334U, 223681335U, 223681332U},
+       {1295793306U, 1295793307U, 1295793304U},
+       {1208982393U, 1208982392U, 1208982395U}}}},
+    {1355700046U, // Invader
+     {{{3636943394U, 3636943395U, 3636943392U},
+       {2593076934U, 2593076935U, 2593076932U},
+       {1951201411U, 1951201410U, 1951201409U}}}},
+    {4041437604U, // Collector
+     {{{975478396U, 975478397U, 975478398U},
+       {2698109344U, 2698109345U, 2698109346U},
+       {2565812705U, 2565812704U, 2565812707U}}}},
+    {1045201464U, // Sentry
+     {{{2187982746U, 2187982747U, 2187982744U},
+       {3220030414U, 3220030415U, 3220030412U},
+       {3660501109U, 3660501108U, 3660501111U}}}},
 }};
 
 /** The Legendary Rune marker. No source of the rune it pays is known, so it pays nothing. */
@@ -869,7 +903,7 @@ constexpr std::array<BountyFamily, 21> kBountyFamilies{{
     {kIronBannerBounties, Cadence::weekly, GearSource::ironBanner},
     {kGambitBounties, Cadence::weekly, GearSource::gambit},
     {kGambitPrimeWeaponBounties, Cadence::weekly, GearSource::gambitPrimeWeapons},
-    {kGambitPrimeRoleBounties, Cadence::weekly, GearSource::unresolved},
+    {kGambitPrimeRoleBounties, Cadence::weekly, GearSource::gambitPrimeRole},
     {kLastWishBounties, Cadence::weekly, GearSource::lastWish},
     {kScourgeBounties, Cadence::weekly, GearSource::scourge},
     {kCrownBounties, Cadence::weekly, GearSource::crown},
@@ -883,6 +917,7 @@ enum class PaymentKind : std::uint8_t {
     nothing,
     experience,
     rankPoints,
+    roleHelmet,
     item,
 };
 
@@ -896,6 +931,8 @@ struct RowPayment {
     /** The item an item row pays, which may be a wrapper, and its amount. */
     std::uint16_t itemIndex{pursuits::kAbsent};
     std::int32_t quantity{};
+    /** The role whose next helmet a role-helmet row pays. */
+    std::size_t role{};
 };
 
 /** @return The row of an authored table keyed by this item hash, or null. */
@@ -1105,6 +1142,12 @@ pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcep
         reason = "reward_currency";
         return pay_item(payout->currencyHash, quantity, payment);
     }
+    reason = "reward_role_helmet_source";
+    if (const RoleHelmetMarker* helmet = find_row(kRoleHelmets, hash)) {
+        payment.kind = PaymentKind::roleHelmet;
+        payment.role = static_cast<std::size_t>(helmet - kRoleHelmets.data());
+        return rules.gear == GearSource::gambitPrimeRole;
+    }
     reason = "reward_gear_source";
     if (is_gear_marker(hash)) {
         std::uint16_t gearIndex = pursuits::kAbsent;
@@ -1180,6 +1223,25 @@ void report_skipped_row(std::uint32_t bountyHash,
 }
 
 /**
+ * Pays the helmet one tier past what the character has earned in the role, Notorious again once
+ * that is earned, and records the tier the grant saves.
+ * @return False when the helmet is not installed.
+ */
+[[nodiscard]] bool next_role_helmet(std::size_t role,
+                                    CharacterClass characterClass,
+                                    CompletionPlan& plan,
+                                    RowPayment& payment) noexcept {
+    GambitPrimeHelmetTier& earned = plan.helmetTiers[role];
+    const std::size_t next = (std::min)(static_cast<std::size_t>(earned) + 1, kHelmetTierCount);
+    const auto& tiers = kRoleHelmets[role].classTiers[static_cast<std::size_t>(characterClass)];
+    if (!pay_item(tiers[next - 1], 1, payment)) {
+        return false;
+    }
+    earned = static_cast<GambitPrimeHelmetTier>(next);
+    return true;
+}
+
+/**
  * Resolves the reward rows a pursuit shows into items, seasonal XP and a progression credit. A
  * wrapper draws from its own pool. A row the tables cannot settle is logged and pays nothing.
  * @param bountyHash The pursuit's item hash, which skipped rows are logged with.
@@ -1225,6 +1287,11 @@ void report_skipped_row(std::uint32_t bountyHash,
                 return false;
             }
             continue;
+        }
+        reason = "reward_role_helmet";
+        if (payment.kind == PaymentKind::roleHelmet
+            && !next_role_helmet(payment.role, context.characterClass, plan, payment)) {
+            return false;
         }
         reason = nullptr;
         reward_resolution::Result resolved{};
@@ -1387,6 +1454,7 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     }
 
     CompletionPlan plan{};
+    plan.helmetTiers = character.gambitPrimeHelmetTiers;
     reason = "quest_step";
     if (step.membership == pursuits::QuestMembership::unsupported
         || (step.membership == pursuits::QuestMembership::step
@@ -1448,6 +1516,7 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     }
     mutation.completionValue = completionValue;
     mutation.completionContextValue = completionContextValue;
+    mutation.afterCharacter.gambitPrimeHelmetTiers = plan.helmetTiers;
     mutation.questStep = plan.questStep;
     mutation.progression = plan.progression;
     mutation.seasonalExperience = plan.seasonalExperience;

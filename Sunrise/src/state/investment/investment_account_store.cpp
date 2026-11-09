@@ -3,9 +3,14 @@
 namespace sunrise::state::investment::store {
 namespace {
 
-/** Reads characters in stable slot order and overlays only process-local session fields. */
+/**
+ * Reads characters in stable slot order and overlays only process-local session fields. A
+ * character with no helmet row has earned no tier.
+ */
 bool read_characters(AccountState& output) noexcept {
-    Statement rows("SELECT * FROM characters ORDER BY slot");
+    Statement rows("SELECT c.*,COALESCE(h.reaper,0),COALESCE(h.invader,0),"
+                   "COALESCE(h.collector,0),COALESCE(h.sentry,0) FROM characters c "
+                   "LEFT JOIN character_helmet_tiers h ON h.character_slot=c.slot ORDER BY c.slot");
     int result = rows.step();
     while (result == SQLITE_ROW) {
         std::size_t slot = 0;
@@ -23,7 +28,11 @@ bool read_characters(AccountState& output) noexcept {
                           character.equippedTitleRecordIndex,
                           character.acquiredSubclassAbilityMask,
                           character.nextInventorySerial,
-                          character.appearanceHeader)
+                          character.appearanceHeader,
+                          character.gambitPrimeHelmetTiers[0],
+                          character.gambitPrimeHelmetTiers[1],
+                          character.gambitPrimeHelmetTiers[2],
+                          character.gambitPrimeHelmetTiers[3])
             || slot != output.characterCount || slot >= output.characters.size()) {
             return false;
         }
@@ -78,6 +87,13 @@ bool write_characters(const AccountState& value) noexcept {
                         character.acquiredSubclassAbilityMask,
                         character.nextInventorySerial,
                         character.appearanceHeader)) {
+            return false;
+        }
+    }
+    Statement helmets("INSERT INTO character_helmet_tiers VALUES (?,?,?,?,?)");
+    for (std::size_t slot = 0; slot < value.characterCount; ++slot) {
+        const auto& tiers = value.characters[slot].gambitPrimeHelmetTiers;
+        if (!helmets.write(slot, tiers[0], tiers[1], tiers[2], tiers[3])) {
             return false;
         }
     }
@@ -172,7 +188,8 @@ bool write_account(const AccountState& value) noexcept {
     }
     Transaction transaction;
     if (!transaction.ready()
-        || !execute("DELETE FROM items; DELETE FROM character_stacks; DELETE FROM characters;"
+        || !execute("DELETE FROM items; DELETE FROM character_stacks;"
+                    "DELETE FROM character_helmet_tiers; DELETE FROM characters;"
                     "DELETE FROM profile_items; DELETE FROM dismantle_rewards;")) {
         return false;
     }

@@ -134,6 +134,26 @@ class_ability_bucket(CharacterClass characterClass) noexcept {
     }
 }
 
+/** Gambit Prime roles, in the order the reward tables list them. */
+enum class GambitPrimeRole : std::uint8_t {
+    reaper,
+    invader,
+    collector,
+    sentry,
+};
+
+/** Number of Gambit Prime roles. */
+inline constexpr std::size_t kGambitPrimeRoleCount =
+    static_cast<std::size_t>(GambitPrimeRole::sentry) + 1;
+
+/** The highest Gambit Prime helmet tier a character has earned in one role. */
+enum class GambitPrimeHelmetTier : std::uint8_t {
+    none,
+    illicit,
+    outlawed,
+    notorious,
+};
+
 /** Authored state for one playable character slot. */
 struct CharacterState {
     std::uint64_t soid{};
@@ -175,6 +195,8 @@ struct CharacterState {
     std::uint32_t nextInventorySerial{};
     /** Appearance header the save holds for this character. It fits only its own `race`. */
     AppearanceHeader appearanceHeader{};
+    /** Each role's helmet tier earned from Gambit Prime role bounties; a bounty pays the next. */
+    std::array<GambitPrimeHelmetTier, kGambitPrimeRoleCount> gambitPrimeHelmetTiers{};
 };
 
 /** Call-local account snapshot shared by backend object families. */
