@@ -157,6 +157,8 @@ enum class NotificationService : std::uint16_t {
      * A shim-internal service id, never a retail id (max 307), and never forwarded to the client.
      */
     socialPublication = 0x8003,
+    /** Carries one reward a guest earned on the host to the guest's own install. Shim-internal. */
+    rewardEvent = 0x8004,
 };
 
 /** Parsed BAP request header and borrowed body. */

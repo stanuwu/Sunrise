@@ -16,6 +16,7 @@
 #include "../../../state/account/account_token.h"
 #include "../../../state/account/shared_channel_material.h"
 #include "../../../state/coop/compatibility.h"
+#include "../../../state/coop/reward_mail.h"
 #include "../../../state/runtime/runtime.h"
 #include "../../../state/social/social_feed.h"
 
@@ -185,7 +186,8 @@ bool notification_service(std::uint16_t service) noexcept {
 
 /** Services the shim originates for itself. They never reach native notification forwarding. */
 bool internal_service(std::uint16_t service) noexcept {
-    return service == state::social::feed::kPublicationNotice;
+    return service == state::social::feed::kPublicationNotice
+           || service == state::coop::reward_mail::kService;
 }
 
 bool inbound(UpstreamLink& link,

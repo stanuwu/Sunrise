@@ -190,6 +190,7 @@
     <ClCompile Include="src\core\settings\settings_runtime.cpp" />
     <ClCompile Include="src\core\settings\role.cpp" />
     <ClCompile Include="src\state\coop\compatibility.cpp" />
+    <ClCompile Include="src\state\coop\reward_mail.cpp" />
     <ClCompile Include="src\server\bap\coop_admission.cpp" />
     <ClCompile Include="src\client\hooks\network\presence_publication.cpp" />
     <ClCompile Include="src\core\settings\settings_upgrade.cpp" />
@@ -3220,6 +3221,7 @@
     <ClInclude Include="src\core\network_capacity.h" />
     <ClInclude Include="src\core\network_lan.h" />
     <ClInclude Include="src\state\coop\compatibility.h" />
+    <ClInclude Include="src\state\coop\reward_mail.h" />
     <ClInclude Include="src\server\bap\coop_admission.h" />
     <ClInclude Include="src\state\activity_sdk\actor_sequences.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_actor_sequences.h" />

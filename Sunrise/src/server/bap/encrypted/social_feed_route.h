@@ -29,5 +29,16 @@ void reset_host_social() noexcept;
                                          std::span<std::byte> response,
                                          std::size_t& written,
                                          bool& touchesScratch) noexcept;
+/**
+ * Sends the oldest reward event queued for this account to the connection that registered for
+ * its social delivery, which is the guest's own Sunrise link.
+ * @param touchesScratch Set when the attempt reaches a scratch buffer.
+ * @return True when an event is published; a refusal keeps the event queued and the nonce unspent.
+ */
+[[nodiscard]] bool consume_reward_mail(Session& session,
+                                       Scratch& scratch,
+                                       std::span<std::byte> response,
+                                       std::size_t& written,
+                                       bool& touchesScratch) noexcept;
 } // namespace encrypted
 } // namespace sunrise::server::bap

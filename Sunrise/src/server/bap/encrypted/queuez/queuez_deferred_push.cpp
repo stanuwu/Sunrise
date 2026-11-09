@@ -662,6 +662,9 @@ bool consume_deferred(Session& session,
     if (consume_social_notice(session, scratch, response, written, touchesScratch)) {
         return true;
     }
+    if (consume_reward_mail(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
     if (public_queuez::poll(session, scratch, response, written, touchesScratch)) {
         return true;
     }

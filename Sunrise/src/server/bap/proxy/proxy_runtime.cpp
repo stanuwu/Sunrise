@@ -5,8 +5,11 @@
 #include <new>
 
 #include "../../../core/settings/settings.h"
+#include "../../../middleware/encoding/byte_order.h"
+#include "../../../state/coop/reward_mail.h"
 #include "../../../state/social/social_feed.h"
 #include "../bap_session_nonce.h"
+#include "../encrypted/activity_message/receipts/activity_incident_grants.h"
 #include "../encrypted/social_feed_route.h"
 #include "proxy_internal.h"
 #include "proxy_profile_publisher.h"
@@ -89,6 +92,19 @@ bool notification(UpstreamLink& link, std::span<const std::byte> payload, bool p
 
 /** Shim-originated services. They must never reach notification() or the downstream reply queue. */
 bool internal(UpstreamLink& link, std::span<const std::byte> payload) noexcept {
+    namespace reward_mail = state::coop::reward_mail;
+    // Every notification opens with a two-byte service, a four-byte sequence, then its body.
+    constexpr std::size_t kNotificationHeaderSize = 6;
+    if (payload.size() >= kNotificationHeaderSize
+        && middleware::encoding::read_u16_be(payload.first<2>()) == reward_mail::kService) {
+        reward_mail::Event event{};
+        if (!reward_mail::decode(payload.subspan(kNotificationHeaderSize), event)) {
+            fail_connection(link.downstreamConnectionId, "reward_event_decode");
+            return false;
+        }
+        encrypted::activity_message::receipts::apply_reward_event(event);
+        return true;
+    }
     return social_feed::notify(link.downstreamConnectionId, payload);
 }
 

@@ -5,6 +5,7 @@
 #include "../../../core/settings/settings.h"
 #include "../../../middleware/secure_channel/runtime.h"
 #include "../../../state/account/public_profiles.h"
+#include "../../../state/coop/reward_mail.h"
 #include "../../../state/network/peer_routes.h"
 #include "../../../state/social/steam_roster.h"
 #include "../activity_transport_publication.h"
@@ -14,6 +15,8 @@ namespace sunrise::server::bap::encrypted {
 static_assert(
     state::social::feed::kPublicationNotice
     == static_cast<std::uint16_t>(middleware::bap::NotificationService::socialPublication));
+static_assert(state::coop::reward_mail::kService
+              == static_cast<std::uint16_t>(middleware::bap::NotificationService::rewardEvent));
 namespace {
 void append_peer_routes(state::social::feed::Feed& feed, std::uint64_t primarySoid) noexcept {
     namespace descriptor = middleware::gameplay::descriptor;
@@ -262,6 +265,54 @@ bool consume_social_notice(Session& session,
         // refusal re-attempts on the next poll with no state change and no spent nonce.
         session.socialSentStamp = stamp;
         ++g_nextSocialSerial;
+    }
+    clear_prefix(scratch.sealed, payloadSize);
+    clear_prefix(scratch.plaintext, payloadSize + middleware::secure_channel::kFrameTagSize);
+    return encoded;
+}
+bool consume_reward_mail(Session& session,
+                         Scratch& scratch,
+                         std::span<std::byte> response,
+                         std::size_t& written,
+                         bool& touchesScratch) noexcept {
+    namespace reward_mail = state::coop::reward_mail;
+    written = 0;
+    if (!core::settings::hosts_session() || !session.authenticated
+        || !state::social::session_directory().delivers(
+            session.accountHandle, session.id, session.socialSerial)) {
+        return false;
+    }
+    const std::uint64_t owner = state::account_primary_soid(session.accountHandle);
+    reward_mail::Event event{};
+    if (owner == 0 || !reward_mail::front(owner, event)) {
+        return false;
+    }
+    std::array<std::byte, reward_mail::kEventSize> body{};
+    std::size_t bodySize = 0, payloadSize = 0, sealedSize = 0, frameSize = 0;
+    touchesScratch = true;
+    const bool encoded =
+        reward_mail::encode(event, body, bodySize)
+        && middleware::bap::encode_notification_payload(
+            middleware::bap::NotificationService::rewardEvent,
+            0,
+            std::span(body).first(bodySize),
+            scratch.sealed,
+            payloadSize)
+        && middleware::secure_channel::seal_frame(session.sessionKey,
+                                                  session.sendNonce,
+                                                  std::span(scratch.sealed).first(payloadSize),
+                                                  scratch.plaintext,
+                                                  sealedSize)
+        && middleware::bap::encode_frame(middleware::bap::FrameType::encrypted,
+                                         std::span(scratch.plaintext).first(sealedSize),
+                                         scratch.framed,
+                                         frameSize)
+        && frameSize <= response.size();
+    if (encoded) {
+        std::copy_n(scratch.framed.begin(), frameSize, response.begin());
+        written = frameSize;
+        middleware::secure_channel::advance_nonce(session.sendNonce);
+        reward_mail::pop(owner);
     }
     clear_prefix(scratch.sealed, payloadSize);
     clear_prefix(scratch.plaintext, payloadSize + middleware::secure_channel::kFrameTagSize);
