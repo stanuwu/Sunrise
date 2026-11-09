@@ -230,6 +230,7 @@ bool preview_socket_plug(const PendingSocketPlug& mutation, AccountState& after)
         || canonical.characterIndex != mutation.characterIndex
         || canonical.expectedProfileItemCount != mutation.expectedProfileItemCount
         || canonical.afterProfileItemCount != mutation.afterProfileItemCount
+        || canonical.changes != mutation.changes || canonical.changeCount != mutation.changeCount
         || canonical.itemIndex != mutation.itemIndex
         || canonical.targetDefinitionIndex != mutation.targetDefinitionIndex
         || canonical.plugDefinitionIndex != mutation.plugDefinitionIndex
@@ -336,6 +337,7 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
         || canonical.characterIndex != prepared.characterIndex
         || canonical.expectedProfileItemCount != prepared.expectedProfileItemCount
         || canonical.afterProfileItemCount != prepared.afterProfileItemCount
+        || canonical.changes != prepared.changes || canonical.changeCount != prepared.changeCount
         || canonical.itemIndex != prepared.itemIndex
         || canonical.targetDefinitionIndex != prepared.targetDefinitionIndex
         || canonical.plugDefinitionIndex != prepared.plugDefinitionIndex

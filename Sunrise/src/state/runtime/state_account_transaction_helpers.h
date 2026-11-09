@@ -244,6 +244,39 @@ find_resolved_position(const middleware::datagen::family4::loadout::ResolvedLoad
                                      std::uint16_t plugDefinitionIndex,
                                      PendingSocketPlug& mutation,
                                      std::uint32_t pinnedPlugHash = 0) noexcept;
+/**
+ * Multiplies each requirement by the target socket type's authored scalar for its currency.
+ * @return False before the scalars are published or when a scaled quantity overflows.
+ */
+[[nodiscard]] bool
+scale_socket_costs(std::uint16_t socketType,
+                   build_data::material_requirements::Definition& materialSet) noexcept;
+
+/** What a Synthesizer plug paid ahead of its insertion cost, and the plug its lane returns to. */
+struct SynthesizerPayout {
+    std::array<ProfileStackChange, kProfileStackChangeCapacity> changes{};
+    std::size_t changeCount{};
+    build_data::items::Definition lanePlug{};
+};
+
+/** Whether a requested plug is a Synthesizer exchange, and whether that exchange was paid. */
+enum class SynthesizerExchange : std::uint8_t { none, paid, refused };
+
+/**
+ * Pays a Gambit Prime Synthesizer exchange before the plug's insertion cost is charged, so every
+ * credited row's serial stays above the rows that cost may remove. A synthesis plug pays its Mote
+ * and a recycle plug refunds the Synths that Mote cost; either lane returns to its initial plug.
+ * @param account Account before the insertion cost; receives the credited rows when paid.
+ * @param synthesizer Detail of the item the plug was requested on, whose lane accepts the plug.
+ * @return None for any other plug, which leaves the account and the payout untouched.
+ */
+[[nodiscard]] SynthesizerExchange
+stage_synthesizer_payout(AccountState& account,
+                         std::size_t characterIndex,
+                         const build_data::items::details::Definition& synthesizer,
+                         std::uint8_t socketLane,
+                         const build_data::items::Definition& requested,
+                         SynthesizerPayout& payout) noexcept;
 [[nodiscard]] bool stage_item_state(const AccountState& snapshot,
                                     std::size_t characterIndex,
                                     std::uint64_t targetInstanceSoid,

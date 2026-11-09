@@ -4,6 +4,7 @@
 #include <optional>
 #include <span>
 
+#include "../../../../../middleware/datagen/family4/account/layout.h"
 #include "../../../../../middleware/datagen/family4/loadout/definition.h"
 #include "../../../../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../../../../../state/account/account_state.h"
@@ -76,6 +77,16 @@ change_flags(const state::build_data::items::Definition& item) noexcept {
                            | (item.toastlessAcquisition ? kToastlessChangeFlag : 0U);
     return static_cast<std::uint16_t>(flags);
 }
+
+/**
+ * Names every row an exchange credited, so each gain is drawn and repeats accumulate.
+ * @param accountObject Encoded account object being upserted, whose ring is still empty.
+ * @param changes Rows the exchange credited.
+ * @return Null on success, or the reason the ring could not be written.
+ */
+[[nodiscard]] const char*
+write_exchange_changes(middleware::datagen::family4::account::layout::Object& accountObject,
+                       std::span<const state::ProfileStackChange> changes) noexcept;
 
 /** Pins feed-referenced item identities to their published character rows. */
 [[nodiscard]] bool apply_acquisition_presentation(

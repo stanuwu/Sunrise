@@ -44,46 +44,6 @@ void name_row(account_layout::ProfileInventoryChangeRecord& record,
 }
 
 /**
- * Names every row an exchange credited, so each gain is drawn and repeats accumulate.
- *
- * @param accountObject Encoded account object being upserted.
- * @param mutation Prepared exchange carrying the rows it credited.
- * @return Null on success, or the reason the ring could not be written.
- */
-[[nodiscard]] const char*
-write_exchange_changes(account_layout::Object& accountObject,
-                       const state::PendingProfileItemAcquisition& mutation) noexcept {
-    if (mutation.changeCount > accountObject.profileInventoryChanges.records.size()
-        || !ring_is_empty(accountObject)) {
-        return "exchange_inventory_change_state";
-    }
-    for (std::size_t change = 0; change < mutation.changeCount; ++change) {
-        const state::ProfileStackChange& announced = mutation.changes[change];
-        std::size_t matchedRows = 0;
-        for (const auto& row : accountObject.profileItems) {
-            if (row.mutationSerial != announced.mutationSerial) {
-                continue;
-            }
-            if (row.quantity != announced.afterQuantity) {
-                return "exchange_change_quantity";
-            }
-            ++matchedRows;
-        }
-        if (matchedRows != 1) {
-            return "exchange_change_row";
-        }
-        name_row(accountObject.profileInventoryChanges.records[change],
-                 change,
-                 announced.mutationSerial);
-    }
-    accountObject.profileInventoryChanges.writeSlot =
-        static_cast<std::uint16_t>(mutation.changeCount);
-    accountObject.profileInventoryChanges.nextSequence =
-        static_cast<std::uint16_t>(mutation.changeCount);
-    return nullptr;
-}
-
-/**
  * Names the one row an ordinary acquisition added to or grew.
  *
  * @param accountObject Encoded account object being upserted.
@@ -118,6 +78,38 @@ write_acquisition_change(account_layout::Object& accountObject,
 }
 
 } // namespace
+
+/** Names every row an exchange credited, so each gain is drawn and repeats accumulate. */
+const char* write_exchange_changes(account_layout::Object& accountObject,
+                                   std::span<const state::ProfileStackChange> changes) noexcept {
+    if (changes.size() > accountObject.profileInventoryChanges.records.size()
+        || !ring_is_empty(accountObject)) {
+        return "exchange_inventory_change_state";
+    }
+    for (std::size_t change = 0; change < changes.size(); ++change) {
+        const state::ProfileStackChange& announced = changes[change];
+        std::size_t matchedRows = 0;
+        for (const auto& row : accountObject.profileItems) {
+            if (row.mutationSerial != announced.mutationSerial) {
+                continue;
+            }
+            if (row.quantity != announced.afterQuantity) {
+                return "exchange_change_quantity";
+            }
+            ++matchedRows;
+        }
+        if (matchedRows != 1) {
+            return "exchange_change_row";
+        }
+        name_row(accountObject.profileInventoryChanges.records[change],
+                 change,
+                 announced.mutationSerial);
+    }
+    accountObject.profileInventoryChanges.writeSlot = static_cast<std::uint16_t>(changes.size());
+    accountObject.profileInventoryChanges.nextSequence =
+        static_cast<std::uint16_t>(changes.size());
+    return nullptr;
+}
 
 /** Builds a single full account-object upsert from an uncommitted profile-stack after-image. */
 bool prepare_profile_item_acquisition(Scratch& scratch,
@@ -160,8 +152,10 @@ bool prepare_profile_item_acquisition(Scratch& scratch,
     // An exchange names every row it credited; an ordinary acquisition names the one row it added
     // to or grew. Both write the same kind of record, which is what the observer draws.
     const char* const ringFailure =
-        mutation.changeCount != 0 ? write_exchange_changes(accountObject, mutation)
-                                  : write_acquisition_change(accountObject, mutation, acquiredRow);
+        mutation.changeCount != 0
+            ? write_exchange_changes(accountObject,
+                                     std::span(mutation.changes).first(mutation.changeCount))
+            : write_acquisition_change(accountObject, mutation, acquiredRow);
     if (ringFailure != nullptr) {
         clear_after(scratch, reservation);
         return report_failure(ringFailure);

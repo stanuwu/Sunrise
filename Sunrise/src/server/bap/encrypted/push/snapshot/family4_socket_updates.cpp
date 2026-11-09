@@ -17,7 +17,10 @@ namespace sunrise::server::bap::encrypted::push::snapshot {
 
 namespace family4_datagen = middleware::datagen::family4;
 
-/** Builds a resident item upsert followed by charged account balances when the cost consumes. */
+/**
+ * Builds a resident item upsert followed by the account when the cost consumes or an exchange
+ * pays, whose change ring names each credited row.
+ */
 bool prepare_socket_plug(Scratch& scratch,
                          const queuez::SocketPlug& socketPlug,
                          const state::PendingSocketPlug& mutation,
@@ -104,6 +107,10 @@ bool prepare_socket_plug(Scratch& scratch,
     if (socketPlug.updatesAccount) {
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
         if (!family4_datagen::account::encode(account, accountBytes)
+            || write_exchange_changes(
+                   *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()),
+                   std::span(mutation.changes).first(mutation.changeCount))
+                   != nullptr
             || !append_object(scratch,
                               accountBytes,
                               socketPlug.accountDefinitionId,

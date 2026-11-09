@@ -195,6 +195,8 @@ struct PendingItemAcquisition {
 struct ProfileStackChange {
     std::int32_t mutationSerial{};
     std::int32_t afterQuantity{};
+
+    bool operator==(const ProfileStackChange&) const = default;
 };
 
 /** Rows one exchange may announce. Shader recycling announces two: Glimmer and Legendary Shards. */
@@ -496,7 +498,7 @@ struct PendingSocketPlug {
     /** Exact account-wide material balances observed before applying the installed cost set. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         beforeProfileItems{};
-    /** Canonical material balances after every consuming row in the installed cost set. */
+    /** Canonical balances after any exchange payout and every consuming row of the cost set. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         afterProfileItems{};
     std::uint64_t accountSoid{};
@@ -508,10 +510,16 @@ struct PendingSocketPlug {
     std::size_t characterIndex{};
     std::size_t expectedProfileItemCount{};
     std::size_t afterProfileItemCount{};
+    /** Rows an exchange credited, which the account's change ring announces. */
+    std::array<ProfileStackChange, kProfileStackChangeCapacity> changes{};
+    std::size_t changeCount{};
     /** Equipment semantic index or dense inventory index, selected by `targetEquipped`. */
     std::size_t itemIndex{};
     std::uint16_t targetDefinitionIndex{};
-    /** Plug that lands in the lane. Differs from the request only for a rolled socket. */
+    /**
+     * Plug that lands in the lane. A rolled socket lands a result plug, and an exchange returns its
+     * lane to the initial plug.
+     */
     std::uint16_t plugDefinitionIndex{};
     /** Plug the Client asked for, which decides the pool check and the material charge. */
     std::uint16_t requestedPlugDefinitionIndex{};
@@ -980,6 +988,7 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  * Prepares one exact opcode-903 ordinary-socket selection on a selected-character item.
  * The target may be equipped or unequipped. Native defaults are materialized into a complete
  * authored socket block, then only the requested lane changes; everything else stays byte-stable.
+ * A Gambit Prime Synthesizer plug is an exchange: it also pays a Mote or refunds Synths.
  * @param targetInstanceSoid Selected-character item-instance key named by the Client.
  * @param socketLane Zero-based ordinary socket lane.
  * @param plugDefinitionIndex Installed plug-definition row selected by the Client.

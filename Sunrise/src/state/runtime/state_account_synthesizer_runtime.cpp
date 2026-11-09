@@ -1,0 +1,239 @@
+/** Gambit Prime Synthesizer exchanges: a synthesis plug pays a Mote, a recycle plug its Synths. */
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <span>
+
+#include "../build_data/runtime.h"
+#include "bucket_admission.h"
+#include "runtime.h"
+#include "state_account_transaction_helpers.h"
+
+namespace sunrise::state::runtime::detail {
+
+namespace {
+
+namespace item_details = build_data::items::details;
+namespace material_requirements = build_data::material_requirements;
+
+/** One Mote and the two Synthesizer plugs that exchange it. */
+struct MoteOutput {
+    std::uint32_t synthesisPlugHash{};
+    std::uint32_t recyclePlugHash{};
+    std::uint32_t moteHash{};
+};
+
+// --- Authored game data --------------------------------------------------------------------
+
+// TODO: extract what each Synthesizer plug pays out; no extractor relates a synthesis plug to its
+// Mote, a recycle plug to its refund, or either plug to its lane's reset.
+
+/**
+ * Four roles, each in weak, middling and powerful order. A synthesis plug's own cost names its
+ * Synths and a recycle plug's own cost names its Mote; neither names what the exchange pays.
+ */
+constexpr std::array<MoteOutput, 12> kSynthesizerMoteOutputs{{
+    {456408693U, 1431423016U, 3611551832U},
+    {456408692U, 1431423017U, 3611551833U},
+    {456408695U, 1431423018U, 3611551834U},
+    {3728290549U, 1401078730U, 2657400314U},
+    {3728290548U, 1401078731U, 2657400315U},
+    {3728290551U, 1401078728U, 2657400312U},
+    {3602650887U, 882903534U, 3162804766U},
+    {3602650886U, 882903535U, 3162804767U},
+    {3602650885U, 882903532U, 3162804764U},
+    {1769115309U, 248465794U, 753747954U},
+    {1769115308U, 248465795U, 753747955U},
+    {1769115311U, 248465792U, 753747952U},
+}};
+
+/** @return The output whose synthesis or recycle plug this is, or null for any other plug. */
+[[nodiscard]] const MoteOutput* find_mote_output(std::uint32_t plugHash) noexcept {
+    for (const MoteOutput& output : kSynthesizerMoteOutputs) {
+        if (output.synthesisPlugHash == plugHash || output.recyclePlugHash == plugHash) {
+            return &output;
+        }
+    }
+    return nullptr;
+}
+
+/** @return True when the profile holds a stack of this item. */
+[[nodiscard]] bool holds_profile_item(const AccountState& account,
+                                      std::uint32_t definitionHash) noexcept {
+    for (const auto& item : std::span(account.profileItems).first(account.profileItemCount)) {
+        if (item.definitionHash == definitionHash) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Reads the one unconditional, consumed requirement a Synthesizer plug's insertion cost holds.
+ * @return False when the plug is free or its cost is anything but one such row.
+ */
+[[nodiscard]] bool single_cost(std::uint32_t plugHash,
+                               build_data::items::Definition& plug,
+                               material_requirements::Definition& cost) noexcept {
+    return build_data::find_item_definition_hash(plugHash, plug)
+           && plug.insertionMaterialRequirementSetIndex
+                  != build_data::items::kUnavailableMaterialRequirementSetIndex
+           && build_data::find_material_requirement_set(plug.insertionMaterialRequirementSetIndex,
+                                                        cost)
+           && cost.requirementCount == 1 && cost.requirements[0].quantity > 0
+           && cost.requirements[0].deleteOnAction
+           && cost.requirements[0].condition == material_requirements::kUnconditionalRequirement;
+}
+
+/**
+ * The Synthesizer keeps one Mote out per tier, whichever role it is, so a synthesis lane refuses
+ * while the profile holds a Mote that any plug of the lane's pool synthesizes.
+ * @return False when the lane's Mote is out or an authored plug does not resolve.
+ */
+[[nodiscard]] bool lane_mote_absent(const AccountState& account,
+                                    std::uint16_t synthesizerIndex,
+                                    std::uint8_t lane) noexcept {
+    for (const MoteOutput& output : kSynthesizerMoteOutputs) {
+        build_data::items::Definition plug{};
+        if (!build_data::find_item_definition_hash(output.synthesisPlugHash, plug)) {
+            return false;
+        }
+        if (holds_profile_item(account, output.moteHash)
+            && build_data::is_socket_plug_allowed(synthesizerIndex, lane, plug.definitionIndex)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * Pays one profile stack the way a grant lands, but only in full and into free rows: an exchange
+ * is refused rather than paid in part or at the cost of an evicted row.
+ * @param payout Receives the rows the credit created or grew, for the account's change ring.
+ */
+[[nodiscard]] bool credit_profile_stack(AccountState& account,
+                                        std::size_t characterIndex,
+                                        std::uint16_t itemDefinitionIndex,
+                                        std::int32_t quantity,
+                                        SynthesizerPayout& payout) noexcept {
+    build_data::items::Definition item{};
+    item_details::Definition detail{};
+    if (!build_data::find_item_definition_index(itemDefinitionIndex, item)
+        || !build_data::find_configured_item_detail(itemDefinitionIndex, detail)) {
+        return false;
+    }
+    const Arrival arrival{item, detail, quantity};
+    const std::size_t heldRows = account.profileItemCount;
+    // A stackable arrival never allocates an instance identity.
+    std::uint64_t nextInstanceSoid = 0;
+    PlacedRows rows{};
+    std::int32_t placed = 0;
+    const char* reason = nullptr;
+    if (place_arrival(account, characterIndex, arrival, nextInstanceSoid, rows, placed, reason)
+            != RewardPreparation::prepared
+        || placed != quantity || rows.count > payout.changes.size()) {
+        return false;
+    }
+    std::size_t newRows = 0;
+    for (const GrantedRow& row : std::span(rows.values).first(rows.count)) {
+        if (row.array != GrantedRowArray::profile) {
+            return false;
+        }
+        for (const auto& held : std::span(account.profileItems).first(account.profileItemCount)) {
+            if (held.mutationSerial == row.mutationSerial) {
+                payout.changes[payout.changeCount++] = {row.mutationSerial, held.quantity};
+            }
+        }
+        newRows += row.newRow ? 1U : 0U;
+    }
+    // An eviction removes a row the placement did not create.
+    return account.profileItemCount == heldRows + newRows;
+}
+
+/** Credits the Mote a synthesis plug pays while its tier holds none. */
+[[nodiscard]] bool pay_synthesis(AccountState& account,
+                                 std::size_t characterIndex,
+                                 const item_details::Definition& synthesizer,
+                                 std::uint8_t lane,
+                                 const MoteOutput& output,
+                                 SynthesizerPayout& payout) noexcept {
+    build_data::items::Definition plug{};
+    build_data::items::Definition mote{};
+    material_requirements::Definition cost{};
+    // The plug's cost must not name the Mote, or the charge would spend the row the ring names.
+    return single_cost(output.synthesisPlugHash, plug, cost)
+           && build_data::find_item_definition_hash(output.moteHash, mote)
+           && cost.requirements[0].itemDefinitionIndex != mote.definitionIndex
+           && lane_mote_absent(account, synthesizer.definitionIndex, lane)
+           && credit_profile_stack(account, characterIndex, mote.definitionIndex, 1, payout);
+}
+
+/**
+ * Refunds what the Mote's synthesis plug costs on this Synthesizer, socket scalars included, so
+ * recycling reverses synthesis exactly. The recycle plug's own cost debits the Mote.
+ */
+[[nodiscard]] bool pay_recycle(AccountState& account,
+                               std::size_t characterIndex,
+                               const item_details::Definition& synthesizer,
+                               const MoteOutput& output,
+                               SynthesizerPayout& payout) noexcept {
+    build_data::items::Definition recycle{};
+    build_data::items::Definition synthesis{};
+    build_data::items::Definition mote{};
+    material_requirements::Definition recycleCost{};
+    material_requirements::Definition synthesisCost{};
+    if (!single_cost(output.recyclePlugHash, recycle, recycleCost)
+        || !single_cost(output.synthesisPlugHash, synthesis, synthesisCost)
+        || !build_data::find_item_definition_hash(output.moteHash, mote)
+        || recycleCost.requirements[0].itemDefinitionIndex != mote.definitionIndex
+        || synthesisCost.requirements[0].itemDefinitionIndex == mote.definitionIndex) {
+        return false;
+    }
+    std::uint8_t lane = 0;
+    while (lane < synthesizer.ordinarySocketCount
+           && !build_data::is_socket_plug_allowed(
+               synthesizer.definitionIndex, lane, synthesis.definitionIndex)) {
+        ++lane;
+    }
+    if (lane == synthesizer.ordinarySocketCount
+        || !scale_socket_costs(synthesizer.socketTypes[lane], synthesisCost)) {
+        return false;
+    }
+    const std::uint32_t refund = synthesisCost.requirements[0].quantity;
+    return refund <= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())
+           && credit_profile_stack(account,
+                                   characterIndex,
+                                   synthesisCost.requirements[0].itemDefinitionIndex,
+                                   static_cast<std::int32_t>(refund),
+                                   payout);
+}
+
+} // namespace
+
+/** Pays a Synthesizer exchange and returns its lane to the initial plug. */
+SynthesizerExchange stage_synthesizer_payout(AccountState& account,
+                                             std::size_t characterIndex,
+                                             const item_details::Definition& synthesizer,
+                                             std::uint8_t socketLane,
+                                             const build_data::items::Definition& requested,
+                                             SynthesizerPayout& payout) noexcept {
+    payout = {};
+    const MoteOutput* output = find_mote_output(requested.definitionHash);
+    if (output == nullptr) {
+        return SynthesizerExchange::none;
+    }
+    const bool paid =
+        output->recyclePlugHash == requested.definitionHash
+            ? pay_recycle(account, characterIndex, synthesizer, *output, payout)
+            : pay_synthesis(account, characterIndex, synthesizer, socketLane, *output, payout);
+    const std::uint16_t initialPlugIndex = synthesizer.initialPlugIndices[socketLane];
+    if (!paid || initialPlugIndex == item_details::kUnavailableItemIndex
+        || !build_data::find_item_definition_index(initialPlugIndex, payout.lanePlug)) {
+        return SynthesizerExchange::refused;
+    }
+    return SynthesizerExchange::paid;
+}
+
+} // namespace sunrise::state::runtime::detail

@@ -239,6 +239,7 @@
     <ClCompile Include="src\state\runtime\state_account_identity_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_profile_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_socket_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\state_account_synthesizer_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_settings_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_rolled_socket_plugs.cpp" />
     <ClCompile Include="src\state\runtime\state_account_item_action_runtime.cpp" />

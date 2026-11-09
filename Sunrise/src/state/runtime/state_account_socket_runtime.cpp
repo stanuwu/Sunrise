@@ -100,7 +100,7 @@ void report_socket_plug(std::string_view stage,
  * Multiplies each requirement by the target socket type's authored scalar for its currency.
  * @return False before the scalars are published or when a scaled quantity overflows.
  */
-[[nodiscard]] static bool
+[[nodiscard]] bool
 scale_socket_costs(std::uint16_t socketType,
                    build_data::material_requirements::Definition& materialSet) noexcept {
     for (std::size_t index = 0; index < materialSet.requirementCount; ++index) {
@@ -186,6 +186,16 @@ scale_socket_costs(std::uint16_t socketType,
         return fail("catalyst_lane_requires_atomic_change");
     }
 
+    // A Synthesizer plug is an exchange, paid before its insertion cost is charged.
+    AccountState creditedAccount = snapshot;
+    SynthesizerPayout payout{};
+    const SynthesizerExchange exchange = stage_synthesizer_payout(
+        creditedAccount, characterIndex, detail, socketLane, plugDefinition, payout);
+    if (exchange == SynthesizerExchange::refused) {
+        return fail("synthesizer_exchange");
+    }
+    const bool exchanges = exchange == SynthesizerExchange::paid;
+
     // Ownership matters only for a plug the account draws down, such as a shader stack. An
     // ornament is a permanent unlock, so demanding a stack for one would refuse a held plug.
     const bool consumesStack =
@@ -197,7 +207,7 @@ scale_socket_costs(std::uint16_t socketType,
         return fail("plug_ownership");
     }
 
-    AccountState chargedAccount = snapshot;
+    AccountState chargedAccount = creditedAccount;
     build_data::material_requirements::Definition materialSet{};
     bool profileChanged = false;
     const std::uint16_t materialSetIndex = plugDefinition.insertionMaterialRequirementSetIndex;
@@ -205,7 +215,8 @@ scale_socket_costs(std::uint16_t socketType,
         && (!build_data::find_material_requirement_set(materialSetIndex, materialSet)
             || materialSet.requirementSetIndex != materialSetIndex
             || !scale_socket_costs(detail.socketTypes[socketLane], materialSet)
-            || !apply_action_materials(snapshot, materialSet, chargedAccount, profileChanged))) {
+            || !apply_action_materials(
+                creditedAccount, materialSet, chargedAccount, profileChanged))) {
         return fail("materials");
     }
 
@@ -214,7 +225,7 @@ scale_socket_costs(std::uint16_t socketType,
     if (consumesStack && !spend_plug_source(chargedAccount, plugDefinition.definitionHash)) {
         return fail("plug_stack");
     }
-    profileChanged = profileChanged || consumesStack;
+    profileChanged = profileChanged || consumesStack || exchanges;
 
     authored_inventory::Sockets authoredSockets{};
     if (target->sockets.policy == authored_inventory::SocketPolicy::nativeDefaults) {
@@ -229,16 +240,18 @@ scale_socket_costs(std::uint16_t socketType,
             return fail("authored_sockets");
         }
     }
-    if (authoredSockets.plugs[socketLane].has_value()
+    // An exchange's plug never stays in the lane, so the lane's current plug does not refuse it.
+    if (!exchanges && authoredSockets.plugs[socketLane].has_value()
         && *authoredSockets.plugs[socketLane] == plugDefinition.definitionHash) {
         return fail("already_applied");
     }
 
     // A rolled socket's apply or re-roll plug is an action: the lane receives a result plug from
     // the roll set. The requested plug still decides the pool check and the material charge.
-    build_data::items::Definition grantedDefinition = plugDefinition;
-    if (classify_rolled_plug(plugDefinition, targetDefinition, socketLane)
-        == RolledPlugAction::roll) {
+    build_data::items::Definition grantedDefinition = exchanges ? payout.lanePlug : plugDefinition;
+    if (!exchanges
+        && classify_rolled_plug(plugDefinition, targetDefinition, socketLane)
+               == RolledPlugAction::roll) {
         const std::uint32_t currentPlugHash = authoredSockets.plugs[socketLane].value_or(0);
         const bool reroll = is_rolled_result(currentPlugHash);
         // A re-staging must land on the plug the first staging rolled, so the pinned roll is
@@ -367,6 +380,8 @@ scale_socket_costs(std::uint16_t socketType,
     mutation.characterIndex = characterIndex;
     mutation.expectedProfileItemCount = snapshot.profileItemCount;
     mutation.afterProfileItemCount = chargedAccount.profileItemCount;
+    mutation.changes = payout.changes;
+    mutation.changeCount = payout.changeCount;
     mutation.itemIndex = location.index;
     mutation.targetDefinitionIndex = targetDefinition.definitionIndex;
     mutation.plugDefinitionIndex = grantedDefinition.definitionIndex;
