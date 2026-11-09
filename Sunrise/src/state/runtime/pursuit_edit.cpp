@@ -248,7 +248,18 @@ struct ProgressRow {
     if (at.itemHeld) {
         account::inventory::ItemObjectives values = held.item_values();
         values[at.lane] = value;
-        held.item().objectives = values;
+        account::inventory::Item& item = held.item();
+        item.objectives = values;
+        // A new serial is what tells the client the copy changed, as for any other item mutation.
+        if (!held.itemValuesChanged) {
+            CharacterState& character = held.saved.account.characters[held.saved.slot];
+            reason = "serial";
+            if (character.nextInventorySerial
+                >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+                return false;
+            }
+            item.mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
+        }
         held.itemValuesChanged = true;
         return true;
     }
