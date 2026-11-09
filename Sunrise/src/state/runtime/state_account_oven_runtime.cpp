@@ -1,9 +1,14 @@
-/** Dawning oven bakes: a Combine or recipe plug charges a recipe and pays its cookie. */
+/**
+ * Dawning oven bakes: a Combine or recipe plug charges a recipe and pays its cookie. An acquired
+ * oven opens its ingredient chooser.
+ */
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 
 #include "../build_data/runtime.h"
@@ -84,6 +89,21 @@ constexpr std::array<IngredientPickup, 20> kIngredientPickups{{
     {3173226939U, 3331998405U}, {3173226936U, 3331998406U}, {3173226937U, 3331998407U},
     {3173226934U, 3331998408U}, {3173226935U, 3331998409U},
 }};
+
+// TODO: extract the oven and the Dawning Begins items; no extractor relates the oven to the
+// tutorial quest whose row its ingredient chooser reads.
+
+/** The Dawning oven. */
+constexpr std::uint32_t kOvenHash = 2742763040U;
+/**
+ * Items held while the Dawning Begins tutorial is under way. Three are its quest steps, which name
+ * the quest row the oven's ingredient chooser reads.
+ */
+constexpr std::array<std::uint32_t, 4> kTutorialItemHashes{
+    2457995100U, 613001527U, 2659620686U, 544905217U};
+
+/** The tutorial quest value that opens the ingredient chooser; no quest step starts from it. */
+constexpr std::int32_t kChooserReadyValue = build_data::items::kInvalidQuestInitialValue;
 
 // The bake's charge and its own writes must fit the transaction's unlock writes together.
 static_assert(kSocketUnlockWriteCapacity
@@ -267,6 +287,52 @@ static_assert(kSocketUnlockWriteCapacity
     return nullptr;
 }
 
+/**
+ * Reads the account row the tutorial's quest steps share.
+ * @return False unless a step names an account row and every step names the same one.
+ */
+[[nodiscard]] bool tutorial_quest_row(std::uint16_t& row) noexcept {
+    bool found = false;
+    for (const std::uint32_t hash : kTutorialItemHashes) {
+        build_data::items::Definition item{};
+        build_data::pursuits::Definition contract{};
+        if (!build_data::find_item_definition_hash(hash, item)) {
+            return false;
+        }
+        const build_data::pursuits::QuestStep& step = contract.questStep;
+        if (!build_data::find_pursuit_definition(item.definitionIndex, contract)
+            || step.membership != build_data::pursuits::QuestMembership::step) {
+            continue;
+        }
+        if (step.scope != build_data::items::QuestInitialization::Scope::account
+            || (found && step.row != row)) {
+            return false;
+        }
+        row = step.row;
+        found = true;
+    }
+    return found;
+}
+
+/** @return True when a character holds a tutorial item. */
+[[nodiscard]] bool holds_tutorial_item(const AccountState& saved) noexcept {
+    const auto tutorial = [](const account::inventory::Item& item) noexcept {
+        return item.quantity > 0
+               && std::find(kTutorialItemHashes.begin(),
+                            kTutorialItemHashes.end(),
+                            item.definitionHash)
+                      != kTutorialItemHashes.end();
+    };
+    for (const CharacterState& character :
+         std::span(saved.characters).first(saved.characterCount)) {
+        const auto held = std::span(character.inventory.values).first(character.inventory.count);
+        if (std::any_of(held.begin(), held.end(), tutorial)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 /** Chooses what an oven plug bakes, its cost and the lanes it resets, or gates the Masterwork. */
@@ -357,6 +423,29 @@ bool prepare_ingredient_credit(std::uint32_t pickupHash,
 /** Answers from the authored pickup table alone, without reading the balance. */
 bool is_ingredient_pickup(std::uint32_t definitionHash) noexcept {
     return runtime::detail::find_pickup(definitionHash) != nullptr;
+}
+
+/** A tutorial under way keeps its step, so only an unset row is set to ready. */
+bool prepare_chooser_readiness(const AccountState& account,
+                               std::optional<AccountUnlockWrite>& readiness) noexcept {
+    readiness.reset();
+    std::uint16_t row = 0;
+    std::int32_t saved = 0;
+    if (!runtime::detail::tutorial_quest_row(row)
+        || !investment::store::read_unlock(
+            investment::store::Bank::objectiveValues, row, saved)) {
+        return false;
+    }
+    if (saved == build_data::items::kUnsetQuestValue
+        && !runtime::detail::holds_tutorial_item(account)) {
+        readiness = AccountUnlockWrite{false, row, saved, runtime::detail::kChooserReadyValue};
+    }
+    return true;
+}
+
+/** Answers from the authored oven identity alone. */
+bool is_dawning_oven(std::uint32_t definitionHash) noexcept {
+    return definitionHash == runtime::detail::kOvenHash;
 }
 
 } // namespace sunrise::state

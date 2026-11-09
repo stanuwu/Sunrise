@@ -288,6 +288,8 @@ struct PreparedRecordReward {
      * pickup of the same balance in the batch.
      */
     std::optional<AccountUnlockWrite> ingredientCredit{};
+    /** The tutorial quest value a placed oven writes to open its ingredient chooser, if any. */
+    std::optional<AccountUnlockWrite> chooserReadiness{};
 };
 
 /** The saved array a granted row belongs to. */
@@ -1175,6 +1177,20 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  *         prepare_ingredient_credit stages.
  */
 [[nodiscard]] bool is_ingredient_pickup(std::uint32_t definitionHash) noexcept;
+
+/**
+ * Prepares opening a newly acquired oven's ingredient chooser. The chooser reads the Dawning Begins
+ * tutorial's quest row, which a tutorial never started and with no item held is set to ready.
+ * The caller previews and writes it as prepare_ingredient_credit's caller does.
+ * @param account Account the oven lands in.
+ * @param readiness Receives the quest row write, or stays empty when the row keeps its value.
+ * @return False when the quest row does not resolve or cannot be read.
+ */
+[[nodiscard]] bool prepare_chooser_readiness(const AccountState& account,
+                                             std::optional<AccountUnlockWrite>& readiness) noexcept;
+
+/** @return True for the Dawning oven, whose acquisition stages prepare_chooser_readiness. */
+[[nodiscard]] bool is_dawning_oven(std::uint32_t definitionHash) noexcept;
 
 /**
  * Commits a prepared socket selection only while the complete prepare-time character is unchanged.

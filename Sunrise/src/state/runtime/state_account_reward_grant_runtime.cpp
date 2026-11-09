@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <span>
 
 #include "../../core/logging/log.h"
@@ -99,6 +100,11 @@ namespace {
     // A placed ingredient pickup always carries its balance credit, and nothing else carries one.
     if (reward.ingredientCredit.has_value()
         != (reward.placedQuantity != 0 && is_ingredient_pickup(reward.definitionHash))) {
+        return false;
+    }
+    // Only a placed oven carries chooser readiness.
+    if (reward.chooserReadiness.has_value()
+        && (reward.placedQuantity == 0 || !is_dawning_oven(reward.definitionHash))) {
         return false;
     }
     if (reward.kind == RecordRewardKind::accountUnlock) {
@@ -310,6 +316,28 @@ struct GrantView {
 }
 
 /**
+ * Stages the chooser readiness a placed oven writes. An earlier oven in the batch already wrote
+ * it, so a later one writes nothing.
+ * @param reason Receives a static reason on failure.
+ * @return Not ready when the tutorial's quest row does not resolve or cannot be read.
+ */
+[[nodiscard]] RewardPreparation prepare_oven_readiness(GrantView view,
+                                                       PreparedRecordReward& prepared,
+                                                       const char*& reason) noexcept {
+    reason = "chooser_readiness";
+    const bool staged = std::any_of(
+        view.prior.begin(), view.prior.end(), [](const PreparedRecordReward& earlier) noexcept {
+            return earlier.chooserReadiness.has_value();
+        });
+    if (staged) {
+        return RewardPreparation::prepared;
+    }
+    return prepare_chooser_readiness(view.working, prepared.chooserReadiness)
+               ? RewardPreparation::prepared
+               : RewardPreparation::notReady;
+}
+
+/**
  * Prepares one requested row against the working view and the rows before it. The row lands the
  * way the client places it, so a full bucket overflows or drops the remainder rather than refusing.
  * @param reason Receives a static reason when the row is not prepared.
@@ -413,6 +441,12 @@ struct GrantView {
     }
     if (is_ingredient_pickup(item.definitionHash)) {
         return prepare_pickup_credit(view, prepared, reason);
+    }
+    if (is_dawning_oven(item.definitionHash)) {
+        const auto readiness = prepare_oven_readiness(view, prepared, reason);
+        if (readiness != RewardPreparation::prepared) {
+            return readiness;
+        }
     }
     return quest ? prepare_quest_start(view, item, prepared, reason) : RewardPreparation::prepared;
 }
@@ -611,11 +645,11 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
 } // namespace runtime::detail
 
 /**
- * Applies a prepared grant's flags, quest starts, quest step, progression credit and ingredient
- * credits to the saved banks.
+ * Applies a prepared grant's flags, quest starts, quest step, progression credit, ingredient
+ * credits and chooser readiness to the saved banks.
  * @param after Receives the selected character's unlocks with the grant applied.
- * @return False when a flag, quest value, progression or ingredient balance moved since the grant
- *         was prepared.
+ * @return False when a flag, quest value, progression, ingredient balance or chooser row moved
+ *         since the grant was prepared.
  */
 bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
                             unlocks::Table& after) noexcept {
@@ -676,16 +710,21 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
         progression_value(after, progression) = progression.value;
     }
     // Pickups of one balance chain, so each observes the value the one before it left.
-    for (const auto& reward : rewards) {
-        const auto& credit = reward.ingredientCredit;
-        if (!credit) {
-            continue;
+    const auto apply = [&after](const std::optional<AccountUnlockWrite>& write) noexcept {
+        if (!write) {
+            return true;
         }
-        if (credit->index >= after.objectiveValues.size()
-            || after.objectiveValues[credit->index] != credit->previousValue) {
+        if (write->index >= after.objectiveValues.size()
+            || after.objectiveValues[write->index] != write->previousValue) {
             return false;
         }
-        after.objectiveValues[credit->index] = credit->value;
+        after.objectiveValues[write->index] = write->value;
+        return true;
+    };
+    for (const auto& reward : rewards) {
+        if (!apply(reward.ingredientCredit) || !apply(reward.chooserReadiness)) {
+            return false;
+        }
     }
     return true;
 }
@@ -806,7 +845,7 @@ void report_dropped_rewards(const PendingRecordRewardGrant& mutation) noexcept {
 
 /**
  * Commits the shared reward after-image, its flags, its quest starts and step, its progression
- * and ingredient credits and its claim together.
+ * and ingredient credits, its chooser readiness and its claim together.
  * @param mutation Prepared grant, consumed on every exit.
  * @return False when the account or a saved value moved; a record claim is revoked then.
  */
@@ -840,6 +879,11 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
                 ready = investment::store::write_unlock(investment::store::Bank::objectiveValues,
                                                         reward.ingredientCredit->index,
                                                         reward.ingredientCredit->value);
+            }
+            if (ready && reward.chooserReadiness) {
+                ready = investment::store::write_unlock(investment::store::Bank::objectiveValues,
+                                                        reward.chooserReadiness->index,
+                                                        reward.chooserReadiness->value);
             }
         }
         for (const auto& flag : mutation.wrapper_flags()) {
