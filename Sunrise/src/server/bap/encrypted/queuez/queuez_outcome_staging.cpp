@@ -423,7 +423,7 @@ bool stage_service_outcome(Scratch& scratch,
             return true;
         }
     } else if (itemDismantle != nullptr) {
-        // The character after-image and the empty release descriptor must fit together or the
+        // The character after-image and any empty release descriptor must fit together or the
         // State removal is not committed.
         if (itemDismantle->pending == nullptr) {
             return false;
@@ -435,7 +435,8 @@ bool stage_service_outcome(Scratch& scratch,
             removedCount += static_cast<std::size_t>(before.family4Residents[index].objectSoid
                                                      == dismantle.dismantledInstanceSoid);
         }
-        if (!valid(dismantle.after) || removedCount != 1U
+        if (!valid(dismantle.after)
+            || removedCount != static_cast<std::size_t>(dismantle.dismantledInstanceSoid != 0)
             || dismantle.accountSoid != pending.accountSoid
             || dismantle.characterSoid != pending.characterSoid
             || dismantle.dismantledInstanceSoid != pending.dismantledInstanceSoid

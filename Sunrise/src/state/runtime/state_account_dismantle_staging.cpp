@@ -10,12 +10,14 @@
 #include <cstdio>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <utility>
 
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state.h"
 #include "state_account_transaction_helpers.h"
@@ -604,6 +606,71 @@ apply_dismantle_rewards(const AccountState& before,
     return true;
 }
 
+/**
+ * Builds the one canonical one-unit stack discard for an exact account snapshot. A surviving row
+ * keeps its serial, which holds its grid cell.
+ */
+[[nodiscard]] bool stage_stack_discard(const AccountState& account,
+                                       std::size_t characterIndex,
+                                       std::uint32_t definitionHash,
+                                       std::int32_t heldQuantity,
+                                       PendingItemDismantle& mutation) noexcept {
+    mutation = {};
+    if (!account::valid(account) || characterIndex >= account.characterCount
+        || !account.characters[characterIndex].selected) {
+        return false;
+    }
+    const auto holds = [definitionHash, heldQuantity](const auto& row) noexcept {
+        return row.definitionHash == definitionHash && row.quantity == heldQuantity;
+    };
+    const CharacterState& before = account.characters[characterIndex];
+    AccountState candidate = account;
+    CharacterState& after = candidate.characters[characterIndex];
+    const auto stacks = std::span(before.stacks.values).first(before.stacks.count);
+    const auto stack = std::find_if(stacks.begin(), stacks.end(), holds);
+    const bool profile = stack == stacks.end();
+    std::size_t index = static_cast<std::size_t>(stack - stacks.begin());
+    if (profile) {
+        // A profile row with an instance is an action source, which only its instance names.
+        const auto rows = std::span(account.profileItems).first(account.profileItemCount);
+        const auto row =
+            std::find_if(rows.begin(), rows.end(), [&holds](const auto& item) noexcept {
+                return item.instanceSoid == 0 && holds(item);
+            });
+        if (row == rows.end()) {
+            return false;
+        }
+        index = static_cast<std::size_t>(row - rows.begin());
+        if (heldQuantity > 1) {
+            --candidate.profileItems[index].quantity;
+        } else if (!erase_profile_row(candidate, index)) {
+            return false;
+        }
+    } else if (heldQuantity > 1) {
+        --after.stacks.values[index].quantity;
+    } else if (!erase_character_row(after, kStackRowBase + index)) {
+        return false;
+    }
+
+    mutation.beforeCharacter = before;
+    mutation.afterCharacter = after;
+    mutation.beforeProfileItems = account.profileItems;
+    mutation.afterProfileItems = candidate.profileItems;
+    mutation.dismantledItem.definitionHash = definitionHash;
+    mutation.dismantledItem.quantity = heldQuantity;
+    mutation.accountSoid = account.primarySoid;
+    mutation.characterSoid = before.soid;
+    mutation.characterIndex = characterIndex;
+    mutation.expectedInventoryCount = before.inventory.count;
+    mutation.expectedProfileItemCount = account.profileItemCount;
+    mutation.afterProfileItemCount = candidate.profileItemCount;
+    mutation.inventoryIndex = index;
+    mutation.profileChanged = profile;
+    mutation.paysRewards = false;
+    mutation.prepared = true;
+    return true;
+}
+
 /** @return True when both descriptions name the same credited profile mutation. */
 [[nodiscard]] bool same_dismantle_reward(const DismantleReward& left,
                                          const DismantleReward& right) noexcept {
@@ -653,8 +720,24 @@ apply_dismantle_rewards(const AccountState& before,
                                               const PendingItemDismantle& mutation,
                                               AccountState& after) noexcept {
     after = {};
+    if (mutation.dismantledInstanceSoid == 0) {
+        // Staging the same discard again over the current view must reproduce it exactly.
+        PendingItemDismantle canonical{};
+        if (!stage_stack_discard(current,
+                                 mutation.characterIndex,
+                                 mutation.dismantledItem.definitionHash,
+                                 mutation.dismantledItem.quantity,
+                                 canonical)
+            || !same_dismantle_transition(canonical, mutation)) {
+            return false;
+        }
+        after = current;
+        after.characters[mutation.characterIndex] = mutation.afterCharacter;
+        after.profileItems = mutation.afterProfileItems;
+        after.profileItemCount = mutation.afterProfileItemCount;
+        return account::valid(after) && valid_profile_inventory(after);
+    }
     if (!mutation.prepared || mutation.accountSoid == 0 || mutation.characterSoid == 0
-        || mutation.dismantledInstanceSoid == 0
         || mutation.dismantledItem.instanceSoid != mutation.dismantledInstanceSoid
         || mutation.dismantledItem.definitionHash == authored_inventory::kNoDefinitionHash
         || mutation.characterIndex >= current.characterCount || mutation.expectedInventoryCount == 0

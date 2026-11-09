@@ -132,6 +132,47 @@ bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mu
     return prepare_selected_item_dismantle(instanceSoid, true, nullptr, mutation, reason);
 }
 
+/** Prepares one unit off a held stack without changing account State. */
+bool prepare_stack_discard(std::uint32_t definitionHash,
+                           std::int32_t heldQuantity,
+                           PendingItemDismantle& mutation) noexcept {
+    mutation = {};
+    const auto report = [&](std::string_view result, std::string_view reason) noexcept {
+        report_dismantle("prepare_stack",
+                         result,
+                         reason,
+                         definitionHash,
+                         mutation.characterSoid,
+                         0,
+                         mutation.inventoryIndex,
+                         0,
+                         0,
+                         0,
+                         mutation.afterCharacter.nextInventorySerial);
+    };
+    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
+                                                           AccountState(account_snapshot()));
+    if (!snapshot) {
+        report("fail", "allocation");
+        return false;
+    }
+    if (!account::valid(*snapshot)) {
+        report("fail", "account_state");
+        return false;
+    }
+    const std::size_t characterIndex = selected_character_index(*snapshot);
+    if (characterIndex >= snapshot->characterCount) {
+        report("fail", "character_changed");
+        return false;
+    }
+    if (!stage_stack_discard(*snapshot, characterIndex, definitionHash, heldQuantity, mutation)) {
+        report("fail", "stack_not_held");
+        return false;
+    }
+    report("ok", "ready");
+    return true;
+}
+
 /** Prepares the removal of one exact unequipped instance, crediting no dismantle materials. */
 bool prepare_item_removal(std::uint64_t characterSoid,
                           std::uint64_t instanceSoid,

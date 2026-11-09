@@ -963,7 +963,7 @@ append_profile_item_acquisition_notification(Scratch& scratch,
 
     queuez::SessionState& after) noexcept;
 
-/** Appends a Family-4 character upsert followed by one empty item-instance release. */
+/** Appends a Family-4 character upsert followed by any empty item-instance release. */
 
 [[nodiscard]] bool
 

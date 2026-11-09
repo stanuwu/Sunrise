@@ -589,7 +589,7 @@ bool prepare_item_acquisition(
     return true;
 }
 
-/** Builds character removal, instance release, and any profile-reward pickup descriptors. */
+/** Builds character removal, any instance release, and any changed profile descriptors. */
 bool prepare_item_dismantle(Scratch& scratch,
                             const queuez::ItemDismantle& dismantle,
                             const state::PendingItemDismantle& mutation,
@@ -600,15 +600,18 @@ bool prepare_item_dismantle(Scratch& scratch,
         return report_failure("dismantle_reservation");
     }
 
+    // A stack releases no resident and credits nothing, whichever list held it.
+    const bool releasesInstance = mutation.dismantledInstanceSoid != 0;
     state::AccountState account{};
-    if (!mutation.prepared || mutation.characterSoid == 0 || mutation.dismantledInstanceSoid == 0
+    if (!mutation.prepared || mutation.characterSoid == 0
         || mutation.dismantledItem.instanceSoid != mutation.dismantledInstanceSoid
         || mutation.accountSoid != dismantle.accountSoid
         || mutation.characterSoid != dismantle.characterSoid
         || mutation.dismantledInstanceSoid != dismantle.dismantledInstanceSoid
         || mutation.profileChanged != dismantle.updatesAccount
         || mutation.rewardCount > state::kDismantleRewardCapacity
-        || mutation.profileChanged != (mutation.rewardCount != 0)
+        || (releasesInstance ? mutation.profileChanged != (mutation.rewardCount != 0)
+                             : mutation.rewardCount != 0)
         || dismantle.accountDefinitionId == 0 || dismantle.characterDefinitionId == 0
         || dismantle.itemInstanceDefinitionId == 0
         || !state::preview_item_dismantle(mutation, account)
@@ -659,16 +662,18 @@ bool prepare_item_dismantle(Scratch& scratch,
                        compressedExtent)) {
         return report_failure("dismantle_character_object");
     }
-    // Queuez represents a release with the ordinary object key and an empty payload. The
-    // encoding selector is not read for empty descriptors; oodle matches the surrounding objects.
-    staged.objects[1] = middleware::queuez::Object{
-        dismantle.itemInstanceDefinitionId,
-        dismantle.dismantledInstanceSoid,
-        middleware::queuez::Encoding::oodle,
-        {},
-    };
-
-    std::size_t objectCount = 2;
+    std::size_t objectCount = 1;
+    if (releasesInstance) {
+        // Queuez represents a release with the ordinary object key and an empty payload. The
+        // encoding selector is not read for empty descriptors; oodle matches the surrounding
+        // objects.
+        staged.objects[objectCount++] = middleware::queuez::Object{
+            dismantle.itemInstanceDefinitionId,
+            dismantle.dismantledInstanceSoid,
+            middleware::queuez::Encoding::oodle,
+            {},
+        };
+    }
     if (dismantle.updatesAccount) {
         if (family4_datagen::account::layout::kObjectSize > rawStorage.size()) {
             clear_after(scratch, reservation);
@@ -687,7 +692,6 @@ bool prepare_item_dismantle(Scratch& scratch,
             || !std::all_of(accountObject.profileInventoryChanges.records.cbegin(),
                             accountObject.profileInventoryChanges.records.cend(),
                             kChangeRecordIsZero)
-            || mutation.rewardCount == 0
             || mutation.rewardCount > accountObject.profileInventoryChanges.records.size()) {
             clear_after(scratch, reservation);
             return report_failure("dismantle_account_change_state");
@@ -725,7 +729,7 @@ bool prepare_item_dismantle(Scratch& scratch,
                            accountBytes,
                            dismantle.accountDefinitionId,
                            dismantle.accountSoid,
-                           staged.objects[2],
+                           staged.objects[objectCount++],
                            compressedExtent)) {
             clear_after(scratch, reservation);
             return report_failure("dismantle_account_object");
@@ -733,7 +737,6 @@ bool prepare_item_dismantle(Scratch& scratch,
         staged.rawClearSize =
             (std::max)(staged.rawClearSize,
                        reservation.rawWriteOffset + family4_datagen::account::layout::kObjectSize);
-        objectCount = 3;
     }
     staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
     staged.family = middleware::queuez::Family{

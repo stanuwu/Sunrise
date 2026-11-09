@@ -565,7 +565,7 @@ bool process(const ServiceRoute& route,
                 web_service::take_mutation<state::PendingProfileItemAcquisition>(webOutcome);
         }
         if (itemDismantle != nullptr) {
-            // Promise the revision carrying the character update and resident release.
+            // Promise the revision carrying the character update and any resident release.
             auto* transaction = emplace_transaction<ItemDismantleTransaction>(outcome);
             if (transaction == nullptr
                 || !queuez::stage_item_dismantle(queuezState,

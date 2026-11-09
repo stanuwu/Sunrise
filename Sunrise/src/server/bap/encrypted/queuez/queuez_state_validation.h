@@ -200,12 +200,12 @@ namespace sunrise::server::bap::encrypted::queuez {
                                              RecordRewardGrant& grant) noexcept;
 
 /**
- * Stages one Family-4 increment that removes an item resident and updates its character.
+ * Stages one Family-4 increment that updates a character and removes any item resident it lost.
  *
  * @param before Current active peer state.
  * @param accountSoid Account root the peer's family is rooted with.
  * @param characterSoid Selected resident character losing the item.
- * @param dismantledInstanceSoid Existing item-instance SOID to release.
+ * @param dismantledInstanceSoid Existing item-instance SOID to release, or zero for a stack.
  * @param updatesAccount True when the account object rides the same increment.
  * @param dismantle Gets the exact +1 version and compacted resident after-image.
  * @return True when both schemas and both named residents exist exactly once.

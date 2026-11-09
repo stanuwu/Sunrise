@@ -251,6 +251,11 @@ find_resolved_position(const middleware::datagen::family4::loadout::ResolvedLoad
                                         std::uint64_t instanceSoid,
                                         bool paysRewards,
                                         PendingItemDismantle& mutation) noexcept;
+[[nodiscard]] bool stage_stack_discard(const AccountState& account,
+                                       std::size_t characterIndex,
+                                       std::uint32_t definitionHash,
+                                       std::int32_t heldQuantity,
+                                       PendingItemDismantle& mutation) noexcept;
 [[nodiscard]] bool same_dismantle_transition(const PendingItemDismantle& left,
                                              const PendingItemDismantle& right) noexcept;
 [[nodiscard]] bool materialize_item_dismantle(const AccountState& current,

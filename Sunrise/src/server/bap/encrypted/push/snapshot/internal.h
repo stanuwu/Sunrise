@@ -291,11 +291,12 @@ prepare_profile_item_acquisition(Scratch& scratch,
 
 /**
  * Builds one Family-4 increment containing the changed character and released item instance.
+ * A stack discard releases nothing, and a changed profile adds the account object.
  * @param scratch Object and compression storage owned by the lock.
  * @param dismantle Exact queuez after-image promised by the correlated response.
  * @param mutation Checked State after-image that remains uncommitted while output is staged.
- * @param prepared Gets the character upsert followed by the empty release descriptor.
- * @return True when the character after-image and two-operation update fit atomically.
+ * @param prepared Gets the character upsert followed by any empty release descriptor.
+ * @return True when the character after-image and the whole update fit atomically.
  */
 [[nodiscard]] bool prepare_item_dismantle(Scratch& scratch,
                                           const queuez::ItemDismantle& dismantle,

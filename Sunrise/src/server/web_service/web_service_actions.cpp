@@ -338,7 +338,7 @@ void report_item_dismantle(const middleware::web_service::Message& message,
     write_warning(line, count);
 }
 
-/** Prepares the exact fixed-width opcode-402 Character-inventory removal request. */
+/** Prepares the exact fixed-width opcode-402 removal of an instance or one unit of a stack. */
 void dismantle_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     middleware::web_service::messages::opcode402::Request request{};
     if (!middleware::web_service::messages::opcode402::parse_request(message, request)) {
@@ -366,6 +366,18 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
                               definitionIndex,
                               definition.definitionHash,
                               kSingleQuantity);
+        return;
+    }
+    if (instanceSoid == 0) {
+        if (!state::prepare_stack_discard(definition.definitionHash, request.quantity, *mutation)) {
+            clear_mutation(outcome);
+            report_item_dismantle(message,
+                                  "state",
+                                  instanceSoid,
+                                  definitionIndex,
+                                  definition.definitionHash,
+                                  static_cast<std::uint32_t>(request.quantity));
+        }
         return;
     }
     if (!state::prepare_item_dismantle(instanceSoid, *mutation)) {

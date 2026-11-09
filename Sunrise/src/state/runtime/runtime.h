@@ -397,7 +397,10 @@ struct DismantleReward {
 /** Dismantle feedback can publish every bounded server-authored policy row. */
 inline constexpr std::size_t kDismantleRewardCapacity = kDismantleRewardPolicyCapacity;
 
-/** Prepared selected-character inventory removal kept private until its reply and push fit. */
+/**
+ * Prepared selected-character inventory removal, or one unit off a held stack, kept private until
+ * its reply and push fit.
+ */
 struct PendingItemDismantle {
     /** Exact prepare-time character view used as the commit staleness guard. */
     CharacterState beforeCharacter{};
@@ -409,9 +412,11 @@ struct PendingItemDismantle {
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         afterProfileItems{};
     std::array<DismantleReward, kDismantleRewardCapacity> rewards{};
+    /** The removed instance, or a stack's definition and the quantity it held before. */
     account::inventory::Item dismantledItem{};
     std::uint64_t accountSoid{};
     std::uint64_t characterSoid{};
+    /** Zero for a stack, which releases no resident. */
     std::uint64_t dismantledInstanceSoid{};
     std::size_t characterIndex{};
     std::size_t expectedInventoryCount{};
@@ -422,8 +427,9 @@ struct PendingItemDismantle {
     std::size_t rewardCount{};
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};
+    /** A payout was credited, or the discarded stack is a profile row. */
     bool profileChanged{};
-    /** False for an editor removal, which credits no dismantle materials. */
+    /** False for an editor removal or a stack, which credit no dismantle materials. */
     bool paysRewards{true};
     bool prepared{};
 };
@@ -848,6 +854,20 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  */
 [[nodiscard]] bool prepare_item_dismantle(std::uint64_t instanceSoid,
                                           PendingItemDismantle& mutation) noexcept;
+
+/**
+ * Prepares the removal of one unit from a stack the selected character or the profile holds.
+ * A stack has no instance, so its row is the first that holds exactly the quantity the Client
+ * shows, searching the character's stacks before the profile. The last unit removes the row.
+ * Nothing is credited.
+ * @param definitionHash Stacked item the Client named.
+ * @param heldQuantity Quantity the Client shows for that row.
+ * @param mutation Gets checked before/after images without changing account State.
+ * @return True when such a row is held.
+ */
+[[nodiscard]] bool prepare_stack_discard(std::uint32_t definitionHash,
+                                         std::int32_t heldQuantity,
+                                         PendingItemDismantle& mutation) noexcept;
 
 /**
  * Prepares the same removal as prepare_item_dismantle, but only for the exact instance the caller

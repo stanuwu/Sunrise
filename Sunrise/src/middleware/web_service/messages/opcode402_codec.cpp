@@ -12,13 +12,14 @@ constexpr std::size_t kPayloadSize = 16;
 constexpr std::uint8_t kInstanceWidth = 64;
 /** Signed native definition indices use one presence bit followed by fifteen value bits. */
 constexpr std::uint8_t kDefinitionIndexWidth = 15;
-/** The quantity fills one signed 32-bit field. */
-constexpr std::uint8_t kQuantityWidth = 32;
+/** Signed quantities use the same layout: one presence bit followed by thirty-one value bits. */
+constexpr std::uint8_t kQuantityWidth = 31;
 /** The action's own flag. Read to keep the field walk aligned, never gated on. */
 constexpr std::uint8_t kRequiredFlagWidth = 1;
 /**
  * Bucket ordinal the request was raised from. It counts 0 upward across the character's buckets.
- * The instance identity already names the item, so the ordinal is read and not acted on.
+ * The instance identity, or a stack's definition and quantity, already names the item, so the
+ * ordinal is read and not acted on.
  */
 constexpr std::uint8_t kBucketOrdinalWidth = 7;
 /** Pad runs closing the nested descriptor and the whole payload. */
@@ -38,6 +39,7 @@ bool parse_request(const Message& message, Request& request) noexcept {
     std::uint64_t instanceSoid = 0;
     std::uint64_t definitionPresent = 0;
     std::uint64_t encodedDefinitionIndex = 0;
+    std::uint64_t quantityPresent = 0;
     std::uint64_t encodedQuantity = 0;
     std::uint64_t requiredFlag = 0;
     std::uint64_t bucketOrdinal = 0;
@@ -47,7 +49,7 @@ bool parse_request(const Message& message, Request& request) noexcept {
         message.payload.size() == kPayloadSize && reader.read(1, instancePresent)
         && reader.read(kInstanceWidth, instanceSoid) && reader.read(1, definitionPresent)
         && reader.read(kDefinitionIndexWidth, encodedDefinitionIndex)
-        && reader.read(kQuantityWidth, encodedQuantity)
+        && reader.read(1, quantityPresent) && reader.read(kQuantityWidth, encodedQuantity)
         && reader.read(kRequiredFlagWidth, requiredFlag)
         && reader.read(kBucketOrdinalWidth, bucketOrdinal)
         && reader.read(kNestedPaddingWidth, nestedPadding)
@@ -56,12 +58,13 @@ bool parse_request(const Message& message, Request& request) noexcept {
     // Whatever the read reached is kept, so a refused request still describes itself.
     request.instanceSoid = instanceSoid;
     request.definitionIndex = static_cast<std::uint16_t>(encodedDefinitionIndex);
+    request.quantity = static_cast<std::int32_t>(encodedQuantity);
 
-    // The instance identity already names what to dismantle, so neither field is gated on.
-    (void)encodedQuantity;
+    // The item is already named, so the flag is not gated on. A stack clears both its identity
+    // flag and its identity field.
     (void)requiredFlag;
-    return read && instancePresent != 0 && definitionPresent != 0 && instanceSoid != 0
-           && nestedPadding == 0 && finalPadding == 0;
+    return read && (instancePresent != 0) == (instanceSoid != 0) && definitionPresent != 0
+           && quantityPresent != 0 && nestedPadding == 0 && finalPadding == 0;
 }
 
 } // namespace sunrise::middleware::web_service::messages::opcode402

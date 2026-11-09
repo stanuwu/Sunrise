@@ -199,8 +199,9 @@ struct ItemDismantle {
     std::uint32_t itemInstanceDefinitionId{};
     std::uint64_t accountSoid{};
     std::uint64_t characterSoid{};
+    /** Zero for a stack, which releases no resident. */
     std::uint64_t dismantledInstanceSoid{};
-    /** True when the same revision also publishes credited profile materials. */
+    /** True when the same revision also publishes changed profile rows. */
     bool updatesAccount{};
 };
 
