@@ -56,6 +56,14 @@ constexpr std::size_t kExchangePayoutCapacity = 2;
 // the mutation can announce would pay out silently. Raising one raises the other.
 static_assert(kExchangePayoutCapacity <= state::kProfileStackChangeCapacity);
 
+// --- Authored game data --------------------------------------------------------------------
+
+// TODO: extract this identity from the packages; no extracted field names the currency that
+// stands in for a restricted one.
+
+/** Bright Dust, which a restricted price is charged in instead, one unit for one. */
+constexpr std::uint32_t kBrightDustHash = 2817410917U;
+
 } // namespace
 
 /** Reports an opcode-1820 validation failure. */
@@ -674,18 +682,31 @@ prepare_vendor_reward_grant(std::uint16_t itemDefinitionIndex,
 }
 
 /**
- * The server can never credit an item the client refuses to grant, so a row priced in one is not
- * sold. The installed restricted-grant list names one item, Silver, which only the platform sells.
+ * Charges every restricted cost entry in Bright Dust instead, one unit for one. The server can
+ * never credit an item the client refuses to grant, and the installed restricted-grant list names
+ * one item, Silver, which only the platform sells.
  * @param price The row's cost entries.
- * @return True when any entry charges a restricted item.
+ * @param charged Receives the entries to charge, in declared order.
+ * @return False when a restricted entry has no installed Bright Dust to charge instead.
  */
 [[nodiscard]] bool
-charges_restricted_item(std::span<const state::build_data::vendors::SaleCost> price) noexcept {
-    return std::any_of(price.begin(), price.end(), [](const auto& cost) noexcept {
+reprice_restricted_costs(std::span<const state::build_data::vendors::SaleCost> price,
+                         std::span<state::build_data::vendors::SaleCost> charged) noexcept {
+    std::copy(price.begin(), price.end(), charged.begin());
+    state::build_data::items::Definition brightDust{};
+    for (state::build_data::vendors::SaleCost& cost : charged.first(price.size())) {
         state::build_data::items::Definition item{};
-        return state::build_data::find_item_definition_index(cost.itemIndex, item)
-               && item.grantRestricted;
-    });
+        if (!state::build_data::find_item_definition_index(cost.itemIndex, item)
+            || !item.grantRestricted) {
+            continue;
+        }
+        if (brightDust.definitionHash == 0
+            && !state::build_data::find_item_definition_hash(kBrightDustHash, brightDust)) {
+            return false;
+        }
+        cost.itemIndex = brightDust.definitionIndex;
+    }
+    return true;
 }
 
 /**
@@ -722,12 +743,15 @@ void settle_vendor_row(const middleware::web_service::Message& message,
                         itemDefinitionIndex);
         return;
     }
-    const std::span<const vendor_domain::SaleCost> price = vendor_domain::cost_entries(row);
-    if (charges_restricted_item(price)) {
+    const std::span<const vendor_domain::SaleCost> declared = vendor_domain::cost_entries(row);
+    std::array<vendor_domain::SaleCost, vendor_domain::kSaleCostCapacity> charged{};
+    if (!reprice_restricted_costs(declared, charged)) {
         report_purchase(
-            opcode, "fail", "restricted_currency", vendorIndex, rowIndex, itemDefinitionIndex);
+            opcode, "fail", "bright_dust_missing", vendorIndex, rowIndex, itemDefinitionIndex);
         return;
     }
+    const std::span<const vendor_domain::SaleCost> price =
+        std::span(charged).first(declared.size());
     std::uint16_t rolledBounty = kUnavailableDefinitionIndex;
     if (roll_vendor_bounty(vendorIndex, categoryIndex, rolledBounty)) {
         report_purchase(opcode,
