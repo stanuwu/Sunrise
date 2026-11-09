@@ -117,6 +117,26 @@ constexpr std::string_view kNessus = "planet_x_freeroam";
 constexpr std::string_view kTangledShore = "tangled_shore_freeroam";
 constexpr std::string_view kTitan = "fleet_freeroam";
 
+/** The element one subclass item gives the character that equips it. */
+struct SubclassElement {
+    std::uint32_t itemHash{};
+    Element element{};
+};
+
+// TODO: extract each subclass's element; no extracted item field carries it.
+/** Every subclass item and its element. */
+constexpr auto kSubclassElements = std::to_array<SubclassElement>({
+    {0xB0554739U, Element::arc},
+    {0xB920CE9AU, Element::solar},
+    {0xC99B33E9U, Element::voidDamage},
+    {0x4F91DC97U, Element::arc},
+    {0xD8B8D1FCU, Element::solar},
+    {0xC0483D8BU, Element::voidDamage},
+    {0x686A154AU, Element::arc},
+    {0xCF88FEA5U, Element::solar},
+    {0xE7BC88B0U, Element::voidDamage},
+});
+
 /** Sources one of which must match; a rule naming none places no condition here. */
 struct Alternatives {
     std::array<std::uint32_t, 4> weaponLabels{};
@@ -143,6 +163,8 @@ struct KillRule {
     /** Actor class the victim must be; zero for any. */
     std::uint32_t victimClass{};
     Alternatives anyOf{};
+    /** Element of the subclass the killer has equipped, whatever the final blow's; any for none. */
+    Element subclassElement{Element::any};
 };
 
 /** One row per bounty objective lane; each kill advances a lane by one. */
@@ -295,6 +317,9 @@ constexpr auto kKillRules = std::to_array<KillRule>({
     {.itemHash = 0x2233C57AU, .anyOf = {.weaponLabels = {kShotgun}, .slot = WeaponSlot::heavy}},
     {.itemHash = 0x9B3F41E5U, .destination = kDreamingCity, .race = Race::taken,
      .rankLabel = kEliteLabel},
+    {.itemHash = 0x8DF57AF4U, .subclassElement = Element::arc},
+    {.itemHash = 0x14F1A799U, .subclassElement = Element::solar},
+    {.itemHash = 0x5D76391EU, .subclassElement = Element::voidDamage},
 });
 
 // --- Kill matching -------------------------------------------------------------------------
@@ -309,6 +334,7 @@ struct KillFacts {
     std::uint32_t weaponLabel{};
     WeaponSlot slot{WeaponSlot::any};
     Element element{Element::any};
+    Element subclassElement{Element::any};
 };
 
 /** @return The labels in the named group, and the last of them in `member`. */
@@ -463,7 +489,24 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
            && (rule.slot == WeaponSlot::any || rule.slot == kill.slot)
            && (rule.rankLabel == 0 || rule.rankLabel == kill.rankLabel)
            && (rule.victimClass == 0 || rule.victimClass == kill.victimClass)
+           && (rule.subclassElement == Element::any
+               || rule.subclassElement == kill.subclassElement)
            && alternative_matches(rule.anyOf, kill);
+}
+
+/** @return The element of the subclass the character has equipped; any when none is known. */
+[[nodiscard]] Element equipped_subclass_element(const CharacterState& character) noexcept {
+    constexpr auto kSubclassSlot =
+        static_cast<std::size_t>(authored_inventory::EquipmentSlot::subclass);
+    const auto& subclass = character.equipment.slots[kSubclassSlot];
+    if (!subclass.has_value()) {
+        return Element::any;
+    }
+    const auto found = std::find_if(
+        kSubclassElements.begin(), kSubclassElements.end(), [&](const SubclassElement& row) {
+            return row.itemHash == subclass->definitionHash;
+        });
+    return found != kSubclassElements.end() ? found->element : Element::any;
 }
 
 /**
@@ -564,6 +607,7 @@ KillProgress advance_kill_objectives(const KillObservation& kill,
         || saved->characters[character].soid != kill.killerKey) {
         return KillProgress::refused;
     }
+    facts.subclassElement = equipped_subclass_element(saved->characters[character]);
     auto& inventory = saved->characters[character].inventory;
     std::size_t advanced = 0;
     for (auto& held : std::span(inventory.values).first(inventory.count)) {
