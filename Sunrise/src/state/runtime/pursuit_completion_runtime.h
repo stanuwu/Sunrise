@@ -42,12 +42,11 @@ struct PursuitCompletionStatus {
  * instance.
  * @param definition Installed pursuit contract.
  * @param context Saved banks and class of the character holding the pursuit.
- * @param itemValues The held instance's per-item values in record order. Empty leaves every
- *        item-held objective unknown.
+ * @param itemValues The held instance's per-item values in record order.
  */
 [[nodiscard]] PursuitCompletionStatus
 inspect_pursuit_completion(const build_data::pursuits::Definition& definition,
                            const reward_resolution::Context& context,
-                           std::span<const std::int32_t> itemValues = {}) noexcept;
+                           std::span<const std::int32_t> itemValues) noexcept;
 
 } // namespace sunrise::state

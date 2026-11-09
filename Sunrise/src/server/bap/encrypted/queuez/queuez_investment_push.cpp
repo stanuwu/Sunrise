@@ -8,6 +8,7 @@
 #include <utility>
 #include <variant>
 
+#include "../../../../core/runtime/server_clock.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/investment/store_internal.h"
@@ -368,6 +369,7 @@ publish_operation(const ObjectiveProgressOperation& request,
             request.objectiveHash,
             request.expected,
             request.value,
+            core::runtime::server_clock_seconds(),
             change,
             &reason)) {
         return state_refusal_transition(reason);
@@ -390,6 +392,7 @@ publish_operation(const ObjectiveCompletionOperation& request,
     const char* reason = nullptr;
     if (!state::complete_pursuit_objectives(
             {target.characterSoid, request.instanceSoid, request.itemHash, request.mutationSerial},
+            core::runtime::server_clock_seconds(),
             change,
             &reason)) {
         return state_refusal_transition(reason);

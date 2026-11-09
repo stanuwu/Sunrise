@@ -33,6 +33,32 @@ static_assert((std::max)({unlocks::kAccountFlagCapacity,
 struct HeldPursuit {
     SavedSelection<AccountState> saved{};
     pursuits::Definition contract{};
+    /** The edited copy's row in the selected character's inventory. */
+    std::size_t itemRow{};
+    /** One of the copy's per-item values changed and the account is written before commit. */
+    bool itemValuesChanged{};
+
+    [[nodiscard]] account::inventory::Item& item() noexcept {
+        return saved.account.characters[saved.slot].inventory.values[itemRow];
+    }
+    [[nodiscard]] const account::inventory::Item& item() const noexcept {
+        return saved.account.characters[saved.slot].inventory.values[itemRow];
+    }
+    /** @return The copy's per-item values; a copy that never saved any reads zero in every lane. */
+    [[nodiscard]] account::inventory::ItemObjectives item_values() const noexcept {
+        return item().objectives.value_or(account::inventory::ItemObjectives{});
+    }
+};
+
+/** Where one objective's progress is saved. */
+struct ProgressRow {
+    /** Set for progress kept in the held copy's own values, which then names the lane. */
+    bool itemHeld{};
+    std::size_t lane{};
+    /** The unlock bank and row read for any other progress. */
+    store::Bank bank{};
+    std::uint16_t row{};
+    bool flag{};
 };
 
 /**
@@ -89,6 +115,7 @@ struct HeldPursuit {
  * @param reason Receives the refusal label on failure.
  */
 [[nodiscard]] bool read_held_pursuit(const PursuitIdentity& identity,
+                                     std::int64_t nowSeconds,
                                      HeldPursuit& held,
                                      const char*& reason) noexcept {
     reason = "not_ready";
@@ -119,14 +146,15 @@ struct HeldPursuit {
     const auto items =
         std::span(character.inventory.values)
             .first((std::min)(character.inventory.count, character.inventory.values.size()));
-    const bool copyHeld =
-        std::any_of(items.begin(), items.end(), [&identity](const account::inventory::Item& row) {
+    const auto copy =
+        std::find_if(items.begin(), items.end(), [&identity](const account::inventory::Item& row) {
             return row.instanceSoid == identity.instanceSoid
                    && row.definitionHash == identity.definitionHash
                    && row.mutationSerial == identity.mutationSerial;
         });
+    held.itemRow = static_cast<std::size_t>(copy - items.begin());
     build_data::items::Definition item{};
-    if (!copyHeld || !build_data::find_item_definition_hash(identity.definitionHash, item)
+    if (copy == items.end() || !build_data::find_item_definition_hash(identity.definitionHash, item)
         || !build_data::items::pursuit_bucket_item(item)) {
         return false;
     }
@@ -136,15 +164,114 @@ struct HeldPursuit {
         || held.contract.objectiveCount > pursuits::kObjectiveCapacity) {
         return false;
     }
-    // The edit does not read a bounty's deadline, so an expired one would look live and none is
-    // edited.
-    reason = "expiry_not_saved";
-    return held.contract.lifetimeSeconds <= 0;
+    // An expired bounty can no longer be redeemed, so progress written to it would never count.
+    reason = "expired";
+    if (held.contract.lifetimeSeconds <= 0) {
+        return true;
+    }
+    const std::int32_t deadline = held.item_values()[account::inventory::kItemExpiryLane];
+    return deadline > 0 && nowSeconds < deadline;
 }
 
-/** @return The contract evaluated against the banks as the savepoint holds them. */
+/** @return The contract evaluated against the banks and the copy's values as edited so far. */
 [[nodiscard]] PursuitCompletionStatus inspect_held(const HeldPursuit& held) noexcept {
-    return inspect_pursuit_completion(held.contract, held.saved.context());
+    const account::inventory::ItemObjectives values = held.item_values();
+    return inspect_pursuit_completion(held.contract, held.saved.context(), values);
+}
+
+/**
+ * Finds where one objective's progress is saved: a lane of the held copy's own values when the
+ * objective names a value slot the copy carries, otherwise the one saved row its program reads.
+ * @return False when the progress is neither, or would be a bounty's deadline lane.
+ */
+[[nodiscard]] bool progress_row(const HeldPursuit& held,
+                                const objectives::Definition& objective,
+                                ProgressRow& output) noexcept {
+    output = {};
+    if (objective.itemValueSlot != objectives::kNoItemValueSlot) {
+        const auto slots =
+            std::span(held.contract.itemValueSlots).first(held.contract.itemValueSlotCount);
+        const auto found = std::find(slots.begin(), slots.end(), objective.itemValueSlot);
+        output.itemHeld = true;
+        output.lane = static_cast<std::size_t>(found - slots.begin());
+        const bool deadlineLane = held.contract.lifetimeSeconds > 0
+                                  && output.lane == account::inventory::kItemExpiryLane;
+        return found != slots.end() && output.lane < account::inventory::kItemObjectiveLaneCount
+               && !deadlineLane;
+    }
+    if (objective.expression.size() != 1
+        || !saved_row(objective.expression.front(), output.bank)) {
+        return false;
+    }
+    const unlocks::Instruction& source = objective.expression.front();
+    output.row = static_cast<std::uint16_t>(source.operand);
+    output.flag = source.opcode == unlocks::Opcode::flag;
+    return true;
+}
+
+/**
+ * Reads an objective's saved progress as the editor shows it: a flag as 0 or 1.
+ * @return False when the row cannot be read or a flag holds a value outside its biased range.
+ */
+[[nodiscard]] bool read_progress(const HeldPursuit& held,
+                                 const ProgressRow& at,
+                                 std::int32_t& value,
+                                 const char*& reason) noexcept {
+    if (at.itemHeld) {
+        value = held.item_values()[at.lane];
+        return true;
+    }
+    reason = "transaction";
+    std::int32_t saved = 0;
+    if (!store::read_unlock(at.bank, at.row, saved)) {
+        return false;
+    }
+    reason = "flag_state";
+    if (at.flag && (saved < unlocks::kFlagClear || saved > unlocks::kFlagSet)) {
+        return false;
+    }
+    // The evaluator reads a flag as set only at its biased set value.
+    value = at.flag ? (saved == unlocks::kFlagSet ? 1 : 0) : saved;
+    return true;
+}
+
+/**
+ * Writes an objective's progress inside the caller's savepoint. A lane changes the held copy,
+ * which reaches the store when the edit commits; a row is written at once and the banks re-read.
+ * @param value The editor's value: a flag as 0 or 1.
+ */
+[[nodiscard]] bool write_progress(HeldPursuit& held,
+                                  const ProgressRow& at,
+                                  std::int32_t value,
+                                  AccountEditChange& change,
+                                  const char*& reason) noexcept {
+    if (at.itemHeld) {
+        account::inventory::ItemObjectives values = held.item_values();
+        values[at.lane] = value;
+        held.item().objectives = values;
+        held.itemValuesChanged = true;
+        return true;
+    }
+    reason = "transaction";
+    const std::int32_t saved =
+        at.flag ? (value != 0 ? unlocks::kFlagSet : unlocks::kFlagClear) : value;
+    if (!store::write_unlock(at.bank, at.row, saved)
+        || !store::read_unlocks(held.saved.banks, static_cast<int>(held.saved.slot))) {
+        return false;
+    }
+    change.accountRows = change.accountRows || account_row(at.bank);
+    return true;
+}
+
+/** Saves the held copy's edited values, then commits the edit's savepoint. */
+[[nodiscard]] bool commit_edit(HeldPursuit& held,
+                               store::Transaction& transaction,
+                               const char*& reason) noexcept {
+    reason = "transaction";
+    if (held.itemValuesChanged && !store::write_account(held.saved.account)) {
+        return false;
+    }
+    return transaction.commit();
 }
 
 /**
@@ -180,41 +307,33 @@ struct HeldPursuit {
         return true;
     }
     incomplete = true;
-    store::Bank bank{};
-    if (objective.expression.size() != 1 || !saved_row(objective.expression.front(), bank)) {
+    ProgressRow at{};
+    if (!progress_row(held, objective, at)) {
         return false;
     }
-    const unlocks::Instruction& source = objective.expression.front();
-    const std::int32_t after =
-        source.opcode == unlocks::Opcode::flag ? unlocks::kFlagSet : progress.target;
-    const auto row = static_cast<std::uint16_t>(source.operand);
-    reason = "transaction";
+    const std::int32_t after = at.flag ? 1 : progress.target;
     std::int32_t before = 0;
-    if (!store::read_unlock(bank, row, before)) {
+    if (!read_progress(held, at, before, reason)) {
         return false;
     }
     if (before == after) {
         return true;
     }
-    if (!store::write_unlock(bank, row, after)
-        || !store::read_unlocks(held.saved.banks, static_cast<int>(held.saved.slot))) {
+    if (!write_progress(held, at, after, change, reason)) {
         return false;
     }
-    change.accountRows = change.accountRows || account_row(bank);
     status = inspect_held(held);
     return true;
 }
 
 /**
- * Resolves the single saved row read by the objective the editor named.
- * @param source Receives the objective's only instruction.
+ * Resolves where the progress of the objective the editor named is saved.
  * @param reason Receives the refusal label on failure.
  */
 [[nodiscard]] bool objective_row(const HeldPursuit& held,
                                  std::uint8_t ordinal,
                                  std::uint32_t objectiveHash,
-                                 unlocks::Instruction& source,
-                                 store::Bank& bank,
+                                 ProgressRow& at,
                                  const char*& reason) noexcept {
     reason = "objective_changed";
     objectives::Definition objective{};
@@ -224,11 +343,7 @@ struct HeldPursuit {
         return false;
     }
     reason = "objective_source";
-    if (objective.expression.size() != 1) {
-        return false;
-    }
-    source = objective.expression.front();
-    return saved_row(source, bank);
+    return progress_row(held, objective, at);
 }
 
 /** @return True when every objective that is not optional reads complete. */
@@ -248,12 +363,16 @@ struct HeldPursuit {
 
 } // namespace
 
-/** Only an objective whose bound program is one saved flag or value row can be set. */
+/**
+ * Only an objective kept in one of the copy's own values, or read from one saved flag or value
+ * row, can be set.
+ */
 bool set_pursuit_objective(const PursuitIdentity& identity,
                            std::uint8_t ordinal,
                            std::uint32_t objectiveHash,
                            std::int32_t expected,
                            std::int32_t value,
+                           std::int64_t nowSeconds,
                            AccountEditChange& change,
                            const char** refusal) noexcept {
     const char* unused = nullptr;
@@ -266,31 +385,21 @@ bool set_pursuit_objective(const PursuitIdentity& identity,
     }
     store::Transaction transaction;
     reason = "transaction";
-    if (!transaction.ready() || !read_held_pursuit(identity, *held, reason)) {
+    if (!transaction.ready() || !read_held_pursuit(identity, nowSeconds, *held, reason)) {
         return false;
     }
-    unlocks::Instruction source{};
-    store::Bank bank{};
-    if (!objective_row(*held, ordinal, objectiveHash, source, bank, reason)) {
+    ProgressRow at{};
+    if (!objective_row(*held, ordinal, objectiveHash, at, reason)) {
         return false;
     }
-    const bool flag = source.opcode == unlocks::Opcode::flag;
     reason = "objective_value";
-    if (flag && value != 0 && value != 1) {
+    if (at.flag && value != 0 && value != 1) {
         return false;
     }
-    reason = "transaction";
-    const auto row = static_cast<std::uint16_t>(source.operand);
-    std::int32_t before = 0;
-    if (!store::read_unlock(bank, row, before)) {
+    std::int32_t current = 0;
+    if (!read_progress(*held, at, current, reason)) {
         return false;
     }
-    reason = "flag_state";
-    if (flag && (before < unlocks::kFlagClear || before > unlocks::kFlagSet)) {
-        return false;
-    }
-    // The evaluator reads a flag as set only at its biased set value.
-    const std::int32_t current = flag ? (before == unlocks::kFlagSet ? 1 : 0) : before;
     reason = "value_changed";
     if (current != expected) {
         return false;
@@ -300,22 +409,20 @@ bool set_pursuit_objective(const PursuitIdentity& identity,
     if (current == value) {
         return false;
     }
-    reason = "transaction";
-    const std::int32_t after =
-        flag ? (value != 0 ? unlocks::kFlagSet : unlocks::kFlagClear) : value;
-    if (!store::write_unlock(bank, row, after) || !transaction.commit()) {
+    AccountEditChange edited{
+        held->saved.account.primarySoid, identity.characterSoid, held->saved.slot};
+    if (!write_progress(*held, at, value, edited, reason)
+        || !commit_edit(*held, transaction, reason)) {
         return false;
     }
-    change = {held->saved.account.primarySoid,
-              identity.characterSoid,
-              held->saved.slot,
-              account_row(bank)};
+    change = edited;
     reason = nullptr;
     return true;
 }
 
 /** Writes in contract order, so each objective is evaluated against the rows already written. */
 bool complete_pursuit_objectives(const PursuitIdentity& identity,
+                                 std::int64_t nowSeconds,
                                  AccountEditChange& change,
                                  const char** refusal) noexcept {
     const char* unused = nullptr;
@@ -328,7 +435,7 @@ bool complete_pursuit_objectives(const PursuitIdentity& identity,
     }
     store::Transaction transaction;
     reason = "transaction";
-    if (!transaction.ready() || !read_held_pursuit(identity, *held, reason)) {
+    if (!transaction.ready() || !read_held_pursuit(identity, nowSeconds, *held, reason)) {
         return false;
     }
     AccountEditChange edited{
@@ -351,8 +458,7 @@ bool complete_pursuit_objectives(const PursuitIdentity& identity,
     if (!required_objectives_complete(*held, status)) {
         return false;
     }
-    reason = "transaction";
-    if (!transaction.commit()) {
+    if (!commit_edit(*held, transaction, reason)) {
         return false;
     }
     change = edited;

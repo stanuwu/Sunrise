@@ -56,7 +56,9 @@ using SavedState = SavedSelection<AccountState>;
         return true;
     }
     held.lifetimeSeconds = contract.lifetimeSeconds;
-    held.completion = inspect_pursuit_completion(contract, context);
+    const account::inventory::ItemObjectives values =
+        item.objectives.value_or(account::inventory::ItemObjectives{});
+    held.completion = inspect_pursuit_completion(contract, context, values);
     return true;
 }
 
