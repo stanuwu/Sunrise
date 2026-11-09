@@ -12,6 +12,7 @@
 #include <new>
 #include <span>
 
+#include "../../core/logging/log.h"
 #include "../build_data/runtime.h"
 #include "../build_data/vendors/repeatable_triggers.h"
 #include "../investment/store_internal.h"
@@ -149,17 +150,51 @@ constexpr std::int32_t kCompletionValueSet = 1;
     return true;
 }
 
-/** How often a bounty can be taken, which scales what its markers pay. */
+/** How often a bounty can be taken, which scales what its markers and currencies pay. */
 enum class Cadence : std::uint8_t {
-    /** No endless pool holds the pursuit and it never expires, so it is no bounty. */
+    /** Nothing names the bounty's cadence and it never expires. */
     none,
     repeatable,
     daily,
     weekly,
 };
 
-/** A bounty that lasts a week is a weekly one. */
-constexpr std::int32_t kWeekSeconds = 7 * 24 * 60 * 60;
+/** The source a bounty's gear markers draw from. A source with no gear pool draws world gear. */
+enum class GearSource : std::uint8_t {
+    unresolved,
+    world,
+    blackArmoryArmour,
+    blackArmoryForge,
+    revelry,
+    dreamingCity,
+    gambit,
+    gambitPrimeWeapons,
+    ironBanner,
+    lastWish,
+    scourge,
+    crown,
+    trials,
+};
+
+/** Bounties that share a cadence and a gear source. */
+struct BountyFamily {
+    std::span<const std::uint32_t> bounties;
+    /** None when the bounty's lifetime decides. */
+    Cadence cadence{};
+    GearSource gear{};
+};
+
+/** What one bounty's markers read: its cadence and the source its gear draws from. */
+struct BountyRules {
+    Cadence cadence{};
+    GearSource gear{};
+};
+
+/** A Werner bounty pays its treasure map in place of the rows it shows. */
+struct TreasureMapTransition {
+    std::uint32_t bountyHash{};
+    std::uint32_t mapHash{};
+};
 
 /** Items a gear marker draws from: weapons any class draws and each class's armour. */
 struct GearPool {
@@ -169,13 +204,13 @@ struct GearPool {
     std::span<const std::uint32_t> warlockArmour;
 };
 
-/** A gear marker and the pool it draws one item from. */
-struct GearMarker {
-    std::uint32_t hash{};
+/** A gear source and the pool it draws from. */
+struct SourcePool {
+    GearSource source{};
     GearPool pool{};
 };
 
-/** A gear marker that pays one fixed armour piece per class. */
+/** A Revelry gear marker, which pays one fixed armour piece per class. */
 struct ClassArmourMarker {
     std::uint32_t hash{};
     std::uint32_t titanArmour{};
@@ -200,22 +235,36 @@ struct RankMarker {
 
 // --- Authored game data --------------------------------------------------------------------
 
-// TODO: extract what these markers pay; no extractor relates a reward marker to the experience,
-// currency, progression or loot the retail server paid for it.
+// TODO: extract what these markers and bounties pay; no extractor relates a reward marker or a
+// bounty to the experience, currency, progression or loot the retail server paid for it.
 
 /** Seasonal XP an experience marker pays, by cadence. */
 constexpr std::int32_t kRepeatableBountyExperience = 4'000;
 constexpr std::int32_t kDailyBountyExperience = 6'000;
 constexpr std::int32_t kWeeklyBountyExperience = 12'000;
 
+/** A weekly bounty lasts seven days and a daily one 27 hours; anything past 36 hours is weekly. */
+constexpr std::int32_t kWeeklyLifetimeFloorSeconds = 36 * 60 * 60;
+
 /** The double experience marker pays twice its cadence's XP. */
 constexpr std::uint32_t kExperienceMarkerHash = 2211488305U;
 constexpr std::uint32_t kDoubleExperienceMarkerHash = 583797518U;
 
-constexpr std::array<CurrencyPayout, 3> kCurrencyPayouts{{
+/**
+ * Glimmer and Bright Dust are named twice: a reward row names the one-unit display item, and the
+ * wallet holds the other. A zero-amount row pays the amount the retail bounties paid.
+ */
+constexpr std::array<CurrencyPayout, 10> kCurrencyPayouts{{
     {3085039018U, 3159615086U, 1'000, 3'000}, // Glimmer stand-in
     {3159615086U, 3159615086U, 1'000, 3'000}, // Glimmer
     {3168101969U, 2817410917U, 10, 200},      // Bright Dust stand-in
+    {3853748946U, 3853748946U, 1, 1},         // Enhancement Core, Banshee's dailies
+    {592227263U, 592227263U, 10, 25},         // Baryon Bough
+    {2979281381U, 2979281381U, 1, 1},         // Upgrade Module
+    {1633854071U, 1633854071U, 1, 1},         // Dark Fragment
+    {1531478589U, 1531478589U, 1, 1},         // Offering to the Oracle
+    {1165306707U, 1165306707U, 1, 1},         // Hymn of Desecration
+    {3255036626U, 3255036626U, 1, 1},         // Transcendent Blessing
 }};
 
 constexpr std::array<RankMarker, 2> kRankMarkers{{
@@ -223,84 +272,17 @@ constexpr std::array<RankMarker, 2> kRankMarkers{{
     {372496383U, 2772425241U},  // Infamy
 }};
 
-/** The Legendary Engram, whose own pool decides the item. */
-constexpr std::array<std::uint32_t, 1> kWorldEngram{2223145359U};
-
-/** Black Armory armour the Black Armory gear marker pays a Titan. */
-constexpr std::array<std::uint32_t, 5> kBlackArmoryTitanArmour{
-    89175933U,
-    866063619U,
-    4059853946U,
-    524862116U,
-    2413328031U,
+/** Gear markers, which draw from their bounty's source. */
+constexpr std::array<std::uint32_t, 8> kGearMarkers{
+    2127149322U, // Legendary Gear
+    3407672161U, // Black Armory Legendary Gear
+    3114385605U, // Powerful Gear, tier 1
+    3114385606U, // Powerful Gear, tier 2
+    3114385607U, // Powerful Gear, tier 3
+    73143230U,   // Pinnacle Gear
+    4039143015U, // Powerful Gear without a tier
+    1526650446U, // Trials Engram
 };
-/** Black Armory armour the Black Armory gear marker pays a Hunter. */
-constexpr std::array<std::uint32_t, 5> kBlackArmoryHunterArmour{
-    240988159U,
-    2791841721U,
-    4106007668U,
-    3086191374U,
-    3457205569U,
-};
-/** Black Armory armour the Black Armory gear marker pays a Warlock. */
-constexpr std::array<std::uint32_t, 5> kBlackArmoryWarlockArmour{
-    3128915572U,
-    2153602188U,
-    91359169U,
-    2389815461U,
-    3416654206U,
-};
-
-/** Trials weapons the Trials engram pays. */
-constexpr std::array<std::uint32_t, 6> kTrialsWeapons{
-    1907698332U,
-    679281855U,
-    958384347U,
-    2478792241U,
-    1697682876U,
-    3164743584U,
-};
-/** Trials armour the Trials engram pays a Titan. */
-constexpr std::array<std::uint32_t, 5> kTrialsTitanArmour{
-    435339366U,
-    3702689847U,
-    1127943297U,
-    791799769U,
-    2376585692U,
-};
-/** Trials armour the Trials engram pays a Hunter. */
-constexpr std::array<std::uint32_t, 5> kTrialsHunterArmour{
-    3275117874U,
-    3741471003U,
-    938618741U,
-    2616071821U,
-    18990920U,
-};
-/** Trials armour the Trials engram pays a Warlock. */
-constexpr std::array<std::uint32_t, 5> kTrialsWarlockArmour{
-    1637326795U,
-    3829990714U,
-    2883045518U,
-    1215952756U,
-    3201140055U,
-};
-
-constexpr GearPool kWorldGear{kWorldEngram, {}, {}, {}};
-constexpr GearPool kBlackArmoryGear{
-    {}, kBlackArmoryTitanArmour, kBlackArmoryHunterArmour, kBlackArmoryWarlockArmour};
-constexpr GearPool kTrialsGear{
-    kTrialsWeapons, kTrialsTitanArmour, kTrialsHunterArmour, kTrialsWarlockArmour};
-
-constexpr std::array<GearMarker, 8> kGearMarkers{{
-    {2127149322U, kWorldGear},       // Legendary Gear
-    {3114385605U, kWorldGear},       // Powerful Gear, tier 1
-    {3114385606U, kWorldGear},       // Powerful Gear, tier 2
-    {3114385607U, kWorldGear},       // Powerful Gear, tier 3
-    {73143230U, kWorldGear},         // Pinnacle Gear
-    {4039143015U, kWorldGear},       // Powerful Gear without a tier
-    {3407672161U, kBlackArmoryGear}, // Black Armory Legendary Gear
-    {1526650446U, kTrialsGear},      // Trials engram
-}};
 
 /** Each Revelry marker names one armour slot. */
 constexpr std::array<ClassArmourMarker, 5> kRevelryArmour{{
@@ -310,6 +292,589 @@ constexpr std::array<ClassArmourMarker, 5> kRevelryArmour{{
     {323881355U, 1706874193U, 2764769717U, 1561249470U},  // Legs
     {1508024268U, 2837295684U, 2120905920U, 4075522049U}, // Class item
 }};
+
+/** The Legendary Rune marker. No source of the rune it pays is known, so it pays nothing. */
+constexpr std::uint32_t kLegendaryRuneMarkerHash = 1772646107U;
+
+/** Repeatable bounties. */
+constexpr std::array<std::uint32_t, 159> kRepeatableBounties{
+    3801019451U, 3801019450U, 3801019449U, 3801019448U, 3801019455U, 3801019454U, 3801019453U,
+    3801019452U, 3801019443U, 3801019442U, 4228939450U, 4228939451U, 4228939448U, 4228939449U,
+    4228939454U, 4228939455U, 4228939452U, 4228939453U, 4228939442U, 1932203931U, 1486111804U,
+    782388144U, 3609320918U, 3089242929U, 1494697569U, 789196172U, 3512551717U, 2121605528U,
+    711780003U, 3529619172U, 1387738947U, 3292943447U, 1491123344U, 3503381224U, 2212074115U,
+    833201720U, 2514375981U, 2420899653U, 729780848U, 3112855567U, 90105468U, 429152515U,
+    4104555523U, 1115261524U, 1723091344U, 1400452240U, 3658765719U, 3351200278U, 2731635990U,
+    3675498641U, 3636655077U, 1777618773U, 484780086U, 1774447862U, 4059065847U, 903424492U,
+    2940269474U, 4235693605U, 211068288U, 2462005227U, 3109359405U, 3109359404U, 3109359407U,
+    3109359406U, 3109359401U, 3109359400U, 3109359403U, 3109359402U, 3109359397U, 3109359396U,
+    204755896U, 204755897U, 204755898U, 204755899U, 204755900U, 204755901U, 204755902U,
+    2592950299U, 2592950298U, 2592950297U, 2592950296U, 2592950303U, 2592950302U, 2592950301U,
+    2592950300U, 2592950291U, 2592950290U, 1718124766U, 1718124767U, 1718124764U, 1718124765U,
+    1718124762U, 1718124763U, 2805818748U, 3990791875U, 3683313874U, 3514703992U, 3512622966U,
+    692493341U, 13409814U, 3312152065U, 1913307766U, 3357287242U, 391818767U, 3134246761U,
+    2703627837U, 2816193016U, 874160405U, 146278979U, 4114666828U, 1315013095U, 3155878395U,
+    2653579669U, 2428565738U, 3141795163U, 3696295486U, 1453527970U, 2133176491U, 3697234118U,
+    3178157690U, 2068952036U, 3191735197U, 2675137426U, 1244249306U, 3038846813U, 2695042788U,
+    857633000U, 3971836963U, 3731062163U, 1812672687U, 501758776U, 2903204355U, 3560267478U,
+    3209637560U, 1428740103U, 1258056755U, 2497038231U, 1113031720U, 2003717903U, 1983539982U,
+    1058022683U, 1899370350U, 1561597496U, 2285406418U, 31218063U, 310094086U, 3219965079U,
+    2213620835U, 711490543U, 2267981985U, 130487539U, 2328867053U, 4084493733U, 2858316395U,
+    3438972653U, 847805104U, 3721656876U, 1764928973U, 341098154U,
+};
+/** Petra's daily bounties. */
+constexpr std::array<std::uint32_t, 6> kDreamingCityDailyBounties{
+    1391363409U,
+    2662637005U,
+    4095766153U,
+    2271002093U,
+    2494871935U,
+    1912981534U,
+};
+/** Petra's weekly bounties, Audience with the Queen included. */
+constexpr std::array<std::uint32_t, 7> kDreamingCityWeeklyBounties{
+    3337739523U,
+    128980839U,
+    1147672297U,
+    2338128705U,
+    3207732940U,
+    542328999U,
+    871673916U,
+};
+/** Trials daily bounties. */
+constexpr std::array<std::uint32_t, 18> kTrialsDailyBounties{
+    1807819922U, 2719669554U, 2469435739U, 1649087790U, 3647168216U, 3636568846U, 2849007504U,
+    3238546247U, 836380479U, 712137159U, 303384168U, 2398816281U, 4126111451U, 550008052U,
+    1761112788U, 2943701307U, 1244906310U, 1083494845U,
+};
+/** Trials weekly bounties other than End Game. */
+constexpr std::array<std::uint32_t, 8> kTrialsWeeklyBounties{
+    3051422226U,
+    3497386880U,
+    42252934U,
+    58287472U,
+    225464052U,
+    1148638263U,
+    2780182450U,
+    3099386391U,
+};
+/** End Game, whose engram draws the whole Trials pool since its weekly rotation is not known. */
+constexpr std::array<std::uint32_t, 1> kTrialsEndGameBounties{
+    45262603U,
+};
+/** Werner's weekly bounties. */
+constexpr std::array<std::uint32_t, 12> kWernerWeeklyBounties{
+    3042981914U,
+    3042981915U,
+    3042981912U,
+    3970388282U,
+    3970388283U,
+    3970388280U,
+    1262245655U,
+    1262245654U,
+    1262245653U,
+    504411738U,
+    504411739U,
+    504411736U,
+};
+/** Hawthorne's clan weeklies; A Calus Affair names the un-tiered Powerful Gear marker. */
+constexpr std::array<std::uint32_t, 9> kHawthorneBounties{
+    2655712924U,
+    459676116U,
+    852248609U,
+    1794825180U,
+    2850564884U,
+    2729271716U,
+    1441461394U,
+    1381806136U,
+    504379403U,
+};
+/** Ada-1's weeklies that pay Black Armory armour. */
+constexpr std::array<std::uint32_t, 2> kBlackArmoryArmourBounties{
+    1128713411U,
+    3179992453U,
+};
+/** Ada-1's rare bounties, which pay forge weapons or Black Armory armour. */
+constexpr std::array<std::uint32_t, 8> kBlackArmoryForgeBounties{
+    89995072U,
+    346974120U,
+    774885924U,
+    1085775425U,
+    1126196126U,
+    1727646073U,
+    3357615447U,
+    4237578370U,
+};
+/** Revelry weeklies; each one's marker names the armour slot. */
+constexpr std::array<std::uint32_t, 6> kRevelryBounties{
+    78926733U,
+    3180273074U,
+    3180273075U,
+    3180273072U,
+    3180273073U,
+    3180273078U,
+};
+/** Iron Banner weeklies. */
+constexpr std::array<std::uint32_t, 7> kIronBannerBounties{
+    3063752398U,
+    2099765145U,
+    1960358731U,
+    4068460499U,
+    1284302942U,
+    3780376499U,
+    2352873759U,
+};
+/** Luna's Recall. */
+constexpr std::array<std::uint32_t, 1> kLunasRecallBounties{
+    1264945960U,
+};
+/** Purification Ritual bounties. */
+constexpr std::array<std::uint32_t, 5> kPurificationBounties{
+    346263927U,
+    1123124244U,
+    2256480378U,
+    455233900U,
+    2663541547U,
+};
+/** Invitations of the Nine. */
+constexpr std::array<std::uint32_t, 9> kInvitationsOfTheNineBounties{
+    2716564042U,
+    2716564041U,
+    2716564040U,
+    2716564047U,
+    2716564046U,
+    2716564045U,
+    2716564044U,
+    2716564035U,
+    2716564034U,
+};
+/** The Drifter's ordinary weeklies. */
+constexpr std::array<std::uint32_t, 3> kGambitBounties{
+    2839632402U,
+    2839632400U,
+    2839632405U,
+};
+/** Yes Sir, I'm a Closer, which pays a Gambit Prime weapon. */
+constexpr std::array<std::uint32_t, 1> kGambitPrimeWeaponBounties{
+    4132751916U,
+};
+/** Gambit Prime role weeklies. */
+constexpr std::array<std::uint32_t, 8> kGambitPrimeRoleBounties{
+    53973468U,
+    2724713067U,
+    53973469U,
+    2496824396U,
+    53973470U,
+    1417485797U,
+    53973471U,
+    535212982U,
+};
+/** Hawthorne's Last Wish challenges. */
+constexpr std::array<std::uint32_t, 5> kLastWishBounties{
+    2836954349U,
+    1250327262U,
+    3871581136U,
+    1568895666U,
+    4007940282U,
+};
+/** Hawthorne's Scourge of the Past challenges. */
+constexpr std::array<std::uint32_t, 3> kScourgeBounties{
+    1348944144U,
+    3415614992U,
+    1381881897U,
+};
+/** Hawthorne's Crown of Sorrow challenges. */
+constexpr std::array<std::uint32_t, 3> kCrownBounties{
+    2459033425U,
+    2459033426U,
+    2459033427U,
+};
+/** Forge weapons. */
+constexpr std::array<std::uint32_t, 7> kBlackArmoryForgeWeapons{
+    603242241U,
+    93253474U,
+    3843477312U,
+    2575506895U,
+    421573768U,
+    1449922174U,
+    3704653637U,
+};
+/** Dreaming City weapons. */
+constexpr std::array<std::uint32_t, 7> kDreamingCityWeapons{
+    640114618U,
+    334171687U,
+    3242168339U,
+    3297863558U,
+    346136302U,
+    3740842661U,
+    1644160541U,
+};
+/** Dreaming City armour for a Titan. */
+constexpr std::array<std::uint32_t, 5> kDreamingCityTitanArmour{
+    2503434573U,
+    4070309619U,
+    1980768298U,
+    4097166900U,
+    3174233615U,
+};
+/** Dreaming City armour for a Hunter. */
+constexpr std::array<std::uint32_t, 5> kDreamingCityHunterArmour{
+    1705856569U,
+    1593474975U,
+    3306564654U,
+    2824453288U,
+    344548395U,
+};
+/** Dreaming City armour for a Warlock. */
+constexpr std::array<std::uint32_t, 5> kDreamingCityWarlockArmour{
+    2761343386U,
+    2859583726U,
+    3602032567U,
+    185695659U,
+    188778964U,
+};
+/** Gambit weapons. */
+constexpr std::array<std::uint32_t, 8> kGambitWeapons{
+    1789347249U,
+    4077196130U,
+    2712244741U,
+    2034817450U,
+    2653316158U,
+    2217366863U,
+    3100452337U,
+    991314988U,
+};
+/** Gambit armour for a Titan. */
+constexpr std::array<std::uint32_t, 5> kGambitTitanArmour{
+    3863492689U,
+    1811579911U,
+    2993008662U,
+    2002452096U,
+    3694642467U,
+};
+/** Gambit armour for a Hunter. */
+constexpr std::array<std::uint32_t, 5> kGambitHunterArmour{
+    606902507U,
+    1314666277U,
+    436615288U,
+    1267361154U,
+    1698660093U,
+};
+/** Gambit armour for a Warlock. */
+constexpr std::array<std::uint32_t, 5> kGambitWarlockArmour{
+    4122447870U,
+    725297842U,
+    896081219U,
+    754069623U,
+    671423576U,
+};
+/** Iron Banner weapons. */
+constexpr std::array<std::uint32_t, 8> kIronBannerWeapons{
+    1690783811U,
+    65611680U,
+    136525518U,
+    1972985595U,
+    1982711279U,
+    3169616514U,
+    2108920981U,
+    4292849692U,
+};
+/** Iron Banner armour for a Titan. */
+constexpr std::array<std::uint32_t, 5> kIronBannerTitanArmour{
+    391384020U,
+    3517179757U,
+    1571959827U,
+    3763521327U,
+    4201843274U,
+};
+/** Iron Banner armour for a Hunter. */
+constexpr std::array<std::uint32_t, 5> kIronBannerHunterArmour{
+    3624199242U,
+    3671337107U,
+    4039932861U,
+    3406291173U,
+    1248530160U,
+};
+/** Iron Banner armour for a Warlock. */
+constexpr std::array<std::uint32_t, 5> kIronBannerWarlockArmour{
+    2717305289U,
+    125833536U,
+    2522706952U,
+    3115740538U,
+    4224804453U,
+};
+/** Last Wish weapons. */
+constexpr std::array<std::uint32_t, 8> kLastWishWeapons{
+    2721249463U,
+    601592879U,
+    4094657108U,
+    654370424U,
+    568515759U,
+    3799980700U,
+    686951703U,
+    2545083870U,
+};
+/** Last Wish armour for a Titan. */
+constexpr std::array<std::uint32_t, 5> kLastWishTitanArmour{
+    576683388U,
+    3143067364U,
+    16387641U,
+    4219088013U,
+    3874578566U,
+};
+/** Last Wish armour for a Hunter. */
+constexpr std::array<std::uint32_t, 5> kLastWishHunterArmour{
+    1127835600U,
+    2868042232U,
+    1646520469U,
+    1190016345U,
+    1444894250U,
+};
+/** Last Wish armour for a Warlock. */
+constexpr std::array<std::uint32_t, 5> kLastWishWarlockArmour{
+    3492720019U,
+    776723133U,
+    2280287728U,
+    3445582154U,
+    3227674085U,
+};
+/** Scourge of the Past weapons. */
+constexpr std::array<std::uint32_t, 4> kScourgeWeapons{
+    2753269585U,
+    2186258845U,
+    1931556011U,
+    1664372054U,
+};
+/** Scourge of the Past armour for a Titan. */
+constexpr std::array<std::uint32_t, 5> kScourgeTitanArmour{
+    1989682895U,
+    3491990569U,
+    977326564U,
+    2719710110U,
+    2564183153U,
+};
+/** Scourge of the Past armour for a Hunter. */
+constexpr std::array<std::uint32_t, 5> kScourgeHunterArmour{
+    2334017923U,
+    300528205U,
+    2750983488U,
+    96643258U,
+    384384821U,
+};
+/** Scourge of the Past armour for a Warlock. */
+constexpr std::array<std::uint32_t, 5> kScourgeWarlockArmour{
+    2286640864U,
+    4092373800U,
+    1499503877U,
+    583145321U,
+    940003738U,
+};
+/** Crown of Sorrow weapons. */
+constexpr std::array<std::uint32_t, 4> kCrownWeapons{
+    1286686760U,
+    1496419775U,
+    2338088853U,
+    3861448240U,
+};
+/** Crown of Sorrow armour for a Titan. */
+constexpr std::array<std::uint32_t, 5> kCrownTitanArmour{
+    1595987387U,
+    3406713877U,
+    2104205416U,
+    1129634130U,
+    4450861U,
+};
+/** Crown of Sorrow armour for a Hunter. */
+constexpr std::array<std::uint32_t, 5> kCrownHunterArmour{
+    4017853847U,
+    942205921U,
+    2149271612U,
+    326149062U,
+    1107067065U,
+};
+/** Crown of Sorrow armour for a Warlock. */
+constexpr std::array<std::uint32_t, 5> kCrownWarlockArmour{
+    3211894260U,
+    3381758732U,
+    1319515713U,
+    2472794149U,
+    3499632894U,
+};
+/** Gambit Prime and Reckoning weapons. */
+constexpr std::array<std::uint32_t, 10> kGambitPrimeWeapons{
+    2744715540U,
+    736901634U,
+    821154603U,
+    715338174U,
+    755130877U,
+    2199171672U,
+    3504336176U,
+    299665907U,
+    1115104187U,
+    3116356268U,
+};
+
+/** World gear is the Legendary Engram, whose own pool decides the item. */
+constexpr std::array<std::uint32_t, 1> kWorldEngram{2223145359U};
+
+/** Black Armory armour for a Titan. */
+constexpr std::array<std::uint32_t, 5> kBlackArmoryTitanArmour{
+    89175933U,
+    866063619U,
+    4059853946U,
+    524862116U,
+    2413328031U,
+};
+/** Black Armory armour for a Hunter. */
+constexpr std::array<std::uint32_t, 5> kBlackArmoryHunterArmour{
+    240988159U,
+    2791841721U,
+    4106007668U,
+    3086191374U,
+    3457205569U,
+};
+/** Black Armory armour for a Warlock. */
+constexpr std::array<std::uint32_t, 5> kBlackArmoryWarlockArmour{
+    3128915572U,
+    2153602188U,
+    91359169U,
+    2389815461U,
+    3416654206U,
+};
+
+/** Trials weapons. */
+constexpr std::array<std::uint32_t, 6> kTrialsWeapons{
+    1907698332U,
+    679281855U,
+    958384347U,
+    2478792241U,
+    1697682876U,
+    3164743584U,
+};
+/** Trials armour for a Titan. */
+constexpr std::array<std::uint32_t, 5> kTrialsTitanArmour{
+    435339366U,
+    3702689847U,
+    1127943297U,
+    791799769U,
+    2376585692U,
+};
+/** Trials armour for a Hunter. */
+constexpr std::array<std::uint32_t, 5> kTrialsHunterArmour{
+    3275117874U,
+    3741471003U,
+    938618741U,
+    2616071821U,
+    18990920U,
+};
+/** Trials armour for a Warlock. */
+constexpr std::array<std::uint32_t, 5> kTrialsWarlockArmour{
+    1637326795U,
+    3829990714U,
+    2883045518U,
+    1215952756U,
+    3201140055U,
+};
+
+/** One class's column of the Revelry markers. */
+[[nodiscard]] constexpr std::array<std::uint32_t, kRevelryArmour.size()>
+revelry_armour(std::uint32_t ClassArmourMarker::*piece) noexcept {
+    std::array<std::uint32_t, kRevelryArmour.size()> column{};
+    for (std::size_t index = 0; index < column.size(); ++index) {
+        column[index] = kRevelryArmour[index].*piece;
+    }
+    return column;
+}
+constexpr auto kRevelryTitanArmour = revelry_armour(&ClassArmourMarker::titanArmour);
+constexpr auto kRevelryHunterArmour = revelry_armour(&ClassArmourMarker::hunterArmour);
+constexpr auto kRevelryWarlockArmour = revelry_armour(&ClassArmourMarker::warlockArmour);
+
+constexpr std::array<SourcePool, 12> kSourcePools{{
+    {GearSource::world, {kWorldEngram, {}, {}, {}}},
+    {GearSource::blackArmoryArmour,
+     {{}, kBlackArmoryTitanArmour, kBlackArmoryHunterArmour, kBlackArmoryWarlockArmour}},
+    {GearSource::blackArmoryForge,
+     {kBlackArmoryForgeWeapons,
+      kBlackArmoryTitanArmour,
+      kBlackArmoryHunterArmour,
+      kBlackArmoryWarlockArmour}},
+    {GearSource::revelry, {{}, kRevelryTitanArmour, kRevelryHunterArmour, kRevelryWarlockArmour}},
+    {GearSource::dreamingCity,
+     {kDreamingCityWeapons,
+      kDreamingCityTitanArmour,
+      kDreamingCityHunterArmour,
+      kDreamingCityWarlockArmour}},
+    {GearSource::gambit,
+     {kGambitWeapons, kGambitTitanArmour, kGambitHunterArmour, kGambitWarlockArmour}},
+    {GearSource::gambitPrimeWeapons, {kGambitPrimeWeapons, {}, {}, {}}},
+    {GearSource::ironBanner,
+     {kIronBannerWeapons,
+      kIronBannerTitanArmour,
+      kIronBannerHunterArmour,
+      kIronBannerWarlockArmour}},
+    {GearSource::lastWish,
+     {kLastWishWeapons, kLastWishTitanArmour, kLastWishHunterArmour, kLastWishWarlockArmour}},
+    {GearSource::scourge,
+     {kScourgeWeapons, kScourgeTitanArmour, kScourgeHunterArmour, kScourgeWarlockArmour}},
+    {GearSource::crown,
+     {kCrownWeapons, kCrownTitanArmour, kCrownHunterArmour, kCrownWarlockArmour}},
+    {GearSource::trials,
+     {kTrialsWeapons, kTrialsTitanArmour, kTrialsHunterArmour, kTrialsWarlockArmour}},
+}};
+
+/** Werner's twelve weeklies and his introduction each pay one treasure map. */
+constexpr std::array<TreasureMapTransition, 13> kTreasureMapTransitions{{
+    {3042981914U, 561724901U},
+    {3042981915U, 561724902U},
+    {3042981912U, 561724896U},
+    {3970388282U, 561724898U},
+    {3970388283U, 561724899U},
+    {3970388280U, 561724908U},
+    {1262245655U, 2583850831U},
+    {1262245654U, 2583850830U},
+    {1262245653U, 2583850829U},
+    {504411738U, 2583850828U},
+    {504411739U, 2583850827U},
+    {504411736U, 2583850825U},
+    {2997169129U, 1492273683U},
+}};
+
+/** Werner's treasure maps. Only the world chest a map leads to completes it. */
+[[nodiscard]] constexpr std::array<std::uint32_t, kTreasureMapTransitions.size()>
+treasure_maps() noexcept {
+    std::array<std::uint32_t, kTreasureMapTransitions.size()> maps{};
+    for (std::size_t index = 0; index < maps.size(); ++index) {
+        maps[index] = kTreasureMapTransitions[index].mapHash;
+    }
+    return maps;
+}
+constexpr auto kWernerTreasureMaps = treasure_maps();
+
+/** Every bounty is in at most one family. */
+constexpr std::array<BountyFamily, 21> kBountyFamilies{{
+    {kRepeatableBounties, Cadence::repeatable, GearSource::unresolved},
+    {kDreamingCityDailyBounties, Cadence::daily, GearSource::dreamingCity},
+    {kDreamingCityWeeklyBounties, Cadence::weekly, GearSource::dreamingCity},
+    {kPurificationBounties, Cadence::none, GearSource::dreamingCity},
+    {kTrialsDailyBounties, Cadence::daily, GearSource::unresolved},
+    {kTrialsWeeklyBounties, Cadence::weekly, GearSource::unresolved},
+    {kTrialsEndGameBounties, Cadence::weekly, GearSource::trials},
+    {kWernerWeeklyBounties, Cadence::weekly, GearSource::unresolved},
+    {kHawthorneBounties, Cadence::weekly, GearSource::world},
+    {kLunasRecallBounties, Cadence::weekly, GearSource::world},
+    {kInvitationsOfTheNineBounties, Cadence::none, GearSource::world},
+    {kBlackArmoryArmourBounties, Cadence::weekly, GearSource::blackArmoryArmour},
+    {kBlackArmoryForgeBounties, Cadence::weekly, GearSource::blackArmoryForge},
+    {kRevelryBounties, Cadence::weekly, GearSource::revelry},
+    {kIronBannerBounties, Cadence::weekly, GearSource::ironBanner},
+    {kGambitBounties, Cadence::weekly, GearSource::gambit},
+    {kGambitPrimeWeaponBounties, Cadence::weekly, GearSource::gambitPrimeWeapons},
+    {kGambitPrimeRoleBounties, Cadence::weekly, GearSource::unresolved},
+    {kLastWishBounties, Cadence::weekly, GearSource::lastWish},
+    {kScourgeBounties, Cadence::weekly, GearSource::scourge},
+    {kCrownBounties, Cadence::weekly, GearSource::crown},
+}};
+
 
 // --- Reward rows ---------------------------------------------------------------------------
 
@@ -341,6 +906,11 @@ template <typename Row, std::size_t Size>
     return found != rows.end() ? &*found : nullptr;
 }
 
+/** @return True when the authored list holds this hash. */
+[[nodiscard]] bool lists(std::span<const std::uint32_t> hashes, std::uint32_t hash) noexcept {
+    return std::find(hashes.begin(), hashes.end(), hash) != hashes.end();
+}
+
 /** @return True when a vendor's endless pool holds the bounty. */
 [[nodiscard]] bool in_repeatable_pool(std::uint16_t itemIndex) noexcept {
     std::array<std::uint16_t, build_data::bounties::kPoolCapacity> pool{};
@@ -357,16 +927,31 @@ template <typename Row, std::size_t Size>
     return false;
 }
 
-/** @return The cadence a vendor's endless pool gives the pursuit, or else its lifetime. */
-[[nodiscard]] Cadence pursuit_cadence(std::uint16_t itemIndex,
-                                      std::int32_t lifetimeSeconds) noexcept {
-    if (in_repeatable_pool(itemIndex)) {
-        return Cadence::repeatable;
+/**
+ * Reads a bounty's rules. Its family decides; a bounty no family names takes its cadence from its
+ * lifetime, or else from a vendor's endless pool, and has no gear source.
+ */
+[[nodiscard]] BountyRules bounty_rules(const build_data::items::Definition& bounty,
+                                       std::int32_t lifetimeSeconds) noexcept {
+    BountyRules rules{};
+    const auto family = std::find_if(
+        kBountyFamilies.begin(), kBountyFamilies.end(), [&bounty](const BountyFamily& candidate) {
+            return lists(candidate.bounties, bounty.definitionHash);
+        });
+    if (family != kBountyFamilies.end()) {
+        rules = {family->cadence, family->gear};
     }
-    if (lifetimeSeconds >= kWeekSeconds) {
-        return Cadence::weekly;
+    if (rules.cadence != Cadence::none) {
+        return rules;
     }
-    return lifetimeSeconds > 0 ? Cadence::daily : Cadence::none;
+    if (lifetimeSeconds >= kWeeklyLifetimeFloorSeconds) {
+        rules.cadence = Cadence::weekly;
+    } else if (lifetimeSeconds > 0) {
+        rules.cadence = Cadence::daily;
+    } else if (in_repeatable_pool(bounty.definitionIndex)) {
+        rules.cadence = Cadence::repeatable;
+    }
+    return rules;
 }
 
 /** @return Seasonal XP an experience marker pays at this cadence. */
@@ -423,34 +1008,67 @@ template <typename Row, std::size_t Size>
 }
 
 /**
- * Resolves the one item a gear marker pays.
- * @return False when nothing the marker names is installed.
+ * Resolves the one item a gear marker pays from its bounty's source, or from world gear when the
+ * source has no gear pool. A Revelry bounty pays the slot its Revelry marker names.
+ * @return False when nothing the pool names is installed.
  */
-[[nodiscard]] bool pay_gear(const GearMarker* marker,
-                            const ClassArmourMarker* armourMarker,
+[[nodiscard]] bool pay_gear(std::uint32_t markerHash,
+                            GearSource source,
                             CharacterClass characterClass,
                             std::uint64_t seed,
                             std::uint16_t& itemIndex) noexcept {
-    if (marker != nullptr) {
-        return draw_gear(marker->pool, characterClass, seed, itemIndex);
+    const ClassArmourMarker* slot = find_row(kRevelryArmour, markerHash);
+    if (source == GearSource::revelry && slot != nullptr) {
+        const std::array<std::uint32_t, 1> titan{slot->titanArmour};
+        const std::array<std::uint32_t, 1> hunter{slot->hunterArmour};
+        const std::array<std::uint32_t, 1> warlock{slot->warlockArmour};
+        return draw_gear({{}, titan, hunter, warlock}, characterClass, seed, itemIndex);
     }
-    const std::array<std::uint32_t, 1> titan{armourMarker->titanArmour};
-    const std::array<std::uint32_t, 1> hunter{armourMarker->hunterArmour};
-    const std::array<std::uint32_t, 1> warlock{armourMarker->warlockArmour};
-    return draw_gear({{}, titan, hunter, warlock}, characterClass, seed, itemIndex);
+    const auto pool_of = [](GearSource wanted) noexcept {
+        return std::find_if(
+            kSourcePools.begin(), kSourcePools.end(), [wanted](const SourcePool& candidate) {
+                return candidate.source == wanted;
+            });
+    };
+    auto pool = pool_of(source);
+    if (pool == kSourcePools.end()) {
+        pool = pool_of(GearSource::world);
+    }
+    return pool != kSourcePools.end() && draw_gear(pool->pool, characterClass, seed, itemIndex);
+}
+
+/** @return True when the item is a gear marker, Revelry's included. */
+[[nodiscard]] bool is_gear_marker(std::uint32_t hash) noexcept {
+    return lists(kGearMarkers, hash) || find_row(kRevelryArmour, hash) != nullptr;
+}
+
+/**
+ * Pays an amount of one item named by its hash.
+ * @return False when the item is not installed.
+ */
+[[nodiscard]] bool
+pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcept {
+    build_data::items::Definition item{};
+    if (!build_data::find_item_definition_hash(hash, item)) {
+        return false;
+    }
+    payment = {PaymentKind::item, 0, 0, item.definitionIndex, quantity};
+    return true;
 }
 
 /**
  * Reads what one reward row pays. The authored tables decide a marker or currency they name; any
- * other row pays its own item, unless it has no amount or names a stand-in.
+ * other row pays its own item, unless it names a stand-in.
  * @param seed Draws a gear marker's item.
- * @return False when a gear marker or currency names nothing installed.
+ * @param reason Receives a static reason when the row is not settled.
+ * @return False when the tables cannot settle the row's amount, gear or currency; it pays nothing.
  */
 [[nodiscard]] bool row_payment(const pursuits::RewardPreview& reward,
-                               Cadence cadence,
+                               const BountyRules& rules,
                                CharacterClass characterClass,
                                std::uint64_t seed,
-                               RowPayment& payment) noexcept {
+                               RowPayment& payment,
+                               const char*& reason) noexcept {
     payment = {};
     build_data::items::Definition item{};
     if (!build_data::find_item_definition_index(reward.itemIndex, item)) {
@@ -471,29 +1089,43 @@ template <typename Row, std::size_t Size>
         }
         return true;
     }
+    reason = "reward_quantity";
+    if (reward.quantity < 0) {
+        return false;
+    }
     if (const CurrencyPayout* payout = find_row(kCurrencyPayouts, hash)) {
         std::int32_t quantity = reward.quantity;
-        if (quantity == 0 && cadence != Cadence::none) {
-            quantity = cadence == Cadence::weekly ? payout->weeklyQuantity : payout->dailyQuantity;
-        }
         if (quantity == 0) {
-            return true;
+            if (rules.cadence == Cadence::none) {
+                return false;
+            }
+            quantity =
+                rules.cadence == Cadence::weekly ? payout->weeklyQuantity : payout->dailyQuantity;
         }
-        if (!build_data::find_item_definition_hash(payout->currencyHash, item)) {
+        reason = "reward_currency";
+        return pay_item(payout->currencyHash, quantity, payment);
+    }
+    reason = "reward_gear_source";
+    if (is_gear_marker(hash)) {
+        std::uint16_t gearIndex = pursuits::kAbsent;
+        if (!pay_gear(hash, rules.gear, characterClass, seed, gearIndex)) {
             return false;
         }
-        payment = {PaymentKind::item, 0, 0, item.definitionIndex, quantity};
+        payment = {PaymentKind::item, 0, 0, gearIndex, 1};
         return true;
     }
-    const GearMarker* gear = find_row(kGearMarkers, hash);
-    const ClassArmourMarker* armour = find_row(kRevelryArmour, hash);
-    if (gear != nullptr || armour != nullptr) {
-        payment = {PaymentKind::item, 0, 0, pursuits::kAbsent, 1};
-        return pay_gear(gear, armour, characterClass, seed, payment.itemIndex);
+    reason = "reward_rune_source";
+    if (hash == kLegendaryRuneMarkerHash) {
+        return false;
     }
-    if (reward.quantity != 0 && !names_stand_in(reward.itemIndex)) {
-        payment = {PaymentKind::item, 0, 0, reward.itemIndex, reward.quantity};
+    if (names_stand_in(reward.itemIndex)) {
+        return true;
     }
+    reason = "reward_quantity";
+    if (reward.quantity == 0) {
+        return false;
+    }
+    payment = {PaymentKind::item, 0, 0, reward.itemIndex, reward.quantity};
     return true;
 }
 
@@ -534,21 +1166,35 @@ template <typename Row, std::size_t Size>
     return true;
 }
 
+/** Logs a reward row the tables cannot settle; the redemption skips it. */
+void report_skipped_row(std::uint32_t bountyHash,
+                        std::uint16_t rowItemIndex,
+                        const char* reason) noexcept {
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::warn,
+                      "ev=pursuit_redemption stage=reward_row result=skipped bounty=0x%08X "
+                      "row_item=%u reason=%s",
+                      static_cast<unsigned>(bountyHash),
+                      static_cast<unsigned>(rowItemIndex),
+                      reason);
+}
+
 /**
  * Resolves the reward rows a pursuit shows into items, seasonal XP and a progression credit. A
- * wrapper draws from its own pool.
- * @param pursuitIndex The pursuit's item index, which with its lifetime gives its cadence.
+ * wrapper draws from its own pool. A row the tables cannot settle is logged and pays nothing.
+ * @param bountyHash The pursuit's item hash, which skipped rows are logged with.
+ * @param rules The pursuit's cadence and gear source.
  * @param context Saved banks and class of the redeeming character; its seed starts the draws.
  * @param banks The same saved banks, which a progression credit reads its progress from.
  * @return False when a row is conditional, draws nothing, or outgrows the grant.
  */
-[[nodiscard]] bool plan_rewards(std::uint16_t pursuitIndex,
+[[nodiscard]] bool plan_rewards(std::uint32_t bountyHash,
+                                const BountyRules& rules,
                                 const pursuits::Definition& contract,
                                 const reward_resolution::Context& context,
                                 unlocks::Table& banks,
                                 CompletionPlan& plan,
                                 const char*& reason) noexcept {
-    const Cadence cadence = pursuit_cadence(pursuitIndex, contract.lifetimeSeconds);
     std::int32_t experienceMultiple = 0;
     const auto rewards = std::span(contract.rewards).first(contract.rewardCount);
     for (std::size_t index = 0; index < rewards.size(); ++index) {
@@ -556,9 +1202,10 @@ template <typename Row, std::size_t Size>
         reward_resolution::Context rowContext = context;
         rowContext.seed = context.seed + index;
         RowPayment payment{};
-        reason = "reward_marker";
-        if (!row_payment(reward, cadence, context.characterClass, rowContext.seed, payment)) {
-            return false;
+        if (!row_payment(
+                reward, rules, context.characterClass, rowContext.seed, payment, reason)) {
+            report_skipped_row(bountyHash, reward.itemIndex, reason);
+            continue;
         }
         if (payment.kind == PaymentKind::nothing) {
             continue;
@@ -606,8 +1253,36 @@ template <typename Row, std::size_t Size>
                                           true};
         }
     }
-    plan.seasonalExperience = cadence_experience(cadence) * experienceMultiple;
+    // A bounty with no cadence has no XP amount, so its experience rows pay nothing.
+    if (experienceMultiple != 0 && rules.cadence == Cadence::none) {
+        report_skipped_row(bountyHash, pursuits::kAbsent, "reward_experience_cadence");
+    }
+    plan.seasonalExperience = cadence_experience(rules.cadence) * experienceMultiple;
     return true;
+}
+
+/** @return The treasure map a Werner bounty pays in place of its rows, or null. */
+[[nodiscard]] const TreasureMapTransition* find_treasure_map(std::uint32_t bountyHash) noexcept {
+    const auto found = std::find_if(
+        kTreasureMapTransitions.begin(),
+        kTreasureMapTransitions.end(),
+        [bountyHash](const TreasureMapTransition& row) { return row.bountyHash == bountyHash; });
+    return found != kTreasureMapTransitions.end() ? &*found : nullptr;
+}
+
+/** A treasure map keeps the deadline of the bounty that paid it. */
+void keep_bounty_deadline(std::uint32_t mapHash,
+                          std::int32_t deadline,
+                          PendingRecordRewardGrant& mutation) noexcept {
+    const PreparedRecordReward& placed = mutation.rewards[0];
+    CharacterState& after = mutation.afterCharacter;
+    const auto held = std::span(after.inventory.values).first(after.inventory.count);
+    const auto map = std::find_if(held.begin(), held.end(), [&placed](const auto& item) {
+        return item.instanceSoid != 0 && item.instanceSoid == placed.instanceSoid;
+    });
+    if (placed.definitionHash == mapHash && map != held.end() && map->objectives.has_value()) {
+        (*map->objectives)[authored_inventory::kItemExpiryLane] = deadline;
+    }
 }
 
 } // namespace
@@ -660,6 +1335,10 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     }
     reason = "suppressed";
     if (contract.suppressCompletion) {
+        return PursuitRedemption::notRedeemable;
+    }
+    reason = "treasure_map_world_chest";
+    if (lists(kWernerTreasureMaps, item.definitionHash)) {
         return PursuitRedemption::notRedeemable;
     }
     static constexpr authored_inventory::ItemObjectives kUnsetItemValues{};
@@ -717,9 +1396,24 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     reason = "reward_rows";
     const bool paysRewards = step.membership == pursuits::QuestMembership::none
                              || step.successorIndex == pursuits::kAbsent;
-    if (paysRewards
-        && (!contract.rewardsReadable
-            || !plan_rewards(item.definitionIndex, contract, context, *banks, plan, reason))) {
+    const TreasureMapTransition* treasureMap =
+        paysRewards ? find_treasure_map(item.definitionHash) : nullptr;
+    if (treasureMap != nullptr) {
+        reason = "treasure_map";
+        build_data::items::Definition map{};
+        if (!build_data::find_item_definition_hash(treasureMap->mapHash, map)) {
+            return PursuitRedemption::refused;
+        }
+        plan.rows[plan.rowCount++] = {map.definitionIndex, 1};
+    } else if (paysRewards
+               && (!contract.rewardsReadable
+                   || !plan_rewards(item.definitionHash,
+                                    bounty_rules(item, contract.lifetimeSeconds),
+                                    contract,
+                                    context,
+                                    *banks,
+                                    plan,
+                                    reason))) {
         return PursuitRedemption::refused;
     }
 
@@ -742,6 +1436,15 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     if (plan.questStep.next.scope != Quest::Scope::none
         && mutation.rewards[0].placedQuantity == 0) {
         return PursuitRedemption::refused;
+    }
+    // A bounty redeemed for a map that found no row would pay nothing.
+    reason = "treasure_map_placement";
+    if (treasureMap != nullptr) {
+        if (mutation.rewards[0].placedQuantity == 0) {
+            return PursuitRedemption::refused;
+        }
+        keep_bounty_deadline(
+            treasureMap->mapHash, itemValues[authored_inventory::kItemExpiryLane], mutation);
     }
     mutation.completionValue = completionValue;
     mutation.completionContextValue = completionContextValue;
