@@ -49,24 +49,6 @@ bool publication_input_boundary(const state::activity::SessionBinding& binding,
     return known;
 }
 
-/** Reads the one pending typed ClientRef body without changing its counter. */
-bool pending_scriptable_override(const state::activity::SessionBinding& binding,
-                                 PendingScriptableOverride& output) noexcept {
-    output = {};
-    AcquireSRWLockShared(&g_lock);
-    const Instance* const instance = find_instance(binding);
-    const bool pending = instance != nullptr && instance->view.active
-                         && instance->view.outputPending
-                         && instance->view.outputKind == OutputKind::scriptableOverride
-                         && instance->pendingScriptable.revision != 0;
-    if (pending) {
-        output = instance->pendingScriptable;
-        stamp_output_boundary(binding, output);
-    }
-    ReleaseSRWLockShared(&g_lock);
-    return pending;
-}
-
 /** Reads one pending body only for the ActivityClient generation that authorized it. */
 bool pending_scriptable_override_for_activity_client(const state::activity::SessionBinding& binding,
                                                      std::uint64_t activityClientGeneration,
@@ -455,17 +437,7 @@ bool scriptable_auth_estate(const state::activity::SessionBinding& binding,
         return false;
     }
     AcquireSRWLockShared(&g_lock);
-    const Instance* instance = nullptr;
-    for (const auto& owned : g_instances) {
-        if (!owned) {
-            continue;
-        }
-        const Instance& candidate = *owned;
-        if (candidate.occupied && same_binding(candidate.view.binding, binding)) {
-            instance = &candidate;
-            break;
-        }
-    }
+    const Instance* const instance = find_instance(binding);
     bool copied = true;
     if (instance != nullptr && instance->view.active) {
         try {

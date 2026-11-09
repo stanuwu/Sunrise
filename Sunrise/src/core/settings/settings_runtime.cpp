@@ -15,6 +15,7 @@
 #include "parser.h"
 #include "settings.h"
 #include "steam/platform_identity.h"
+#include "settings_upgrade.h"
 
 namespace sunrise::core::settings {
 namespace {
@@ -219,7 +220,17 @@ bool initialize(void* module) noexcept {
         return fail("version");
     }
     // The compact document has no schema history, so only a versioned or full file is replaced.
-    if (version < kSettingsVersion && (version != 0 || !compact)) {
+    const bool outdated = version < kSettingsVersion && (version != 0 || !compact);
+    // Holds the upgraded text; `document` points into it after an upgrade.
+    std::string upgraded;
+    if (outdated && upgrade::to_current(document, version, upgraded)) {
+        if (!path::replace_file(std::wstring_view(configPath.chars.data(), configPath.length),
+                                upgraded)) {
+            return fail("write_upgrade");
+        }
+        report_upgrade(version);
+        document = upgraded;
+    } else if (outdated) {
         if (!DeleteFileW(configPath.chars.data())) {
             return fail("delete_old");
         }

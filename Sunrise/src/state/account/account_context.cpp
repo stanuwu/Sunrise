@@ -183,11 +183,4 @@ bool account_character_class(AccountHandle handle,
     return true;
 }
 
-bool set_selected_character(AccountHandle handle,
-                            std::uint64_t characterSoid,
-                            bool& changed) noexcept {
-    changed = false;
-    return handle == kLocalAccount && set_selected_character(characterSoid, changed);
-}
-
 } // namespace sunrise::state

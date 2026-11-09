@@ -674,10 +674,7 @@ bool process(const ServiceRoute& route,
                 sunrise::server::bap::arm_account_resync_everywhere();
             }
         }
-        if (!investmentTransaction.commit()) {
-            return false;
-        }
-        return true;
+        return investmentTransaction.commit();
     }
     }
     written = 0;

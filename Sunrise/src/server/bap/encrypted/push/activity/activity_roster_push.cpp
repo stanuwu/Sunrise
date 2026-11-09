@@ -61,42 +61,15 @@ host_output_status(RosterOutcome outcome) noexcept {
     return Status::frameRefused;
 }
 
-/** One outbound body kept for the byte-identical repeat check. */
-struct BodyRecord final {
-    std::array<std::byte, kBodyRecordCapacity> bytes{};
-    std::uint64_t bindingGeneration{};
-    std::uint32_t size{};
-    bool valid{};
-};
-
-/**
- * Activity session and membership revision one body carries.
- * The acknowledgement lives on the member row, so a member holding two links to one activity
- * host would otherwise see the trigger closed by the link that did receive the revision.
- */
-struct MembershipCursor final {
-    std::uint64_t sessionId{};
-    std::uint32_t revision{};
-};
-
-/** Per-connection last-body records for the byte-identical repeat check. */
-struct ConnectionRecord final {
-    BodyRecord rosterSent{};
-    BodyRecord rosterStaged{};
-    BodyRecord membershipSent{};
-    BodyRecord membershipStaged{};
-    MembershipCursor membershipSentCursor{};
-    MembershipCursor membershipStagedCursor{};
-};
-
-// All access runs under the BAP lock, like the Session fields these records extend.
-std::array<ConnectionRecord, kSessionCount> g_connectionRecords{};
-
-/** @return This connection's record, or null for an out-of-range connection id. */
-[[nodiscard]] ConnectionRecord* connection_record(const Session& session) noexcept {
-    return session.id != 0 && session.id <= g_connectionRecords.size()
-               ? &g_connectionRecords[session.id - 1]
-               : nullptr;
+/** @return True when the body writes the participation record, the only field with the hold. */
+[[nodiscard]] bool carries_participation(const message::Roster& roster) noexcept {
+    for (std::size_t index = 0; index < roster.groupCount; ++index) {
+        const message::Group& group = roster.groups[index];
+        if (!group.retired && group.key == roster.playerKeyGroup) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -149,101 +122,6 @@ void refuse_roster_outputs(Session& session,
 }
 
 } // namespace
-
-/** @return True when this body equals the last roster body delivered on this connection. */
-bool repeats_delivered_roster_body(const Session& session,
-                                   std::span<const std::byte> body) noexcept {
-    const ConnectionRecord* const record = connection_record(session);
-    return record != nullptr
-           && matches_record(record->rosterSent, session.activity.bindingGeneration, body);
-}
-
-/** Keeps one staged roster body until its frame outcome is known. */
-void stage_roster_body_record(const Session& session, std::span<const std::byte> body) noexcept {
-    ConnectionRecord* const record = connection_record(session);
-    if (record != nullptr) {
-        fill_record(record->rosterStaged, session.activity.bindingGeneration, body);
-    }
-}
-
-/** Promotes the staged roster body to the delivered record. */
-void commit_roster_body_record(const Session& session) noexcept {
-    ConnectionRecord* const record = connection_record(session);
-    if (record != nullptr) {
-        promote_record(
-            record->rosterStaged, record->rosterSent, session.activity.bindingGeneration);
-    }
-}
-
-/** Drops the staged roster body of a discarded frame. */
-void discard_roster_body_record(const Session& session) noexcept {
-    ConnectionRecord* const record = connection_record(session);
-    if (record != nullptr) {
-        record->rosterStaged.valid = false;
-    }
-}
-
-/** @return True when this body equals the last membership body delivered on this connection. */
-bool repeats_delivered_membership_body(const Session& session,
-                                       std::span<const std::byte> body) noexcept {
-    const ConnectionRecord* const record = connection_record(session);
-    return record != nullptr
-           && matches_record(record->membershipSent, session.activity.bindingGeneration, body);
-}
-
-/** Keeps one staged membership body until its frame outcome is known. */
-void stage_membership_body_record(const Session& session,
-                                  std::span<const std::byte> body,
-                                  std::uint64_t sessionId,
-                                  std::uint32_t revision) noexcept {
-    ConnectionRecord* const record = connection_record(session);
-    if (record != nullptr) {
-        fill_record(record->membershipStaged, session.activity.bindingGeneration, body);
-        record->membershipStagedCursor = {sessionId, revision};
-    }
-}
-
-/** Promotes the staged membership body to the delivered record. */
-void commit_membership_body_record(const Session& session) noexcept {
-    ConnectionRecord* const record = connection_record(session);
-    if (record != nullptr) {
-        // The cursor moves on the same rule as the body record: a body the client never received
-        // was never delivered down this link, so it stays owed.
-        if (record->membershipStaged.valid
-            && record->membershipStaged.bindingGeneration == session.activity.bindingGeneration) {
-            record->membershipSentCursor = record->membershipStagedCursor;
-        }
-        promote_record(
-            record->membershipStaged, record->membershipSent, session.activity.bindingGeneration);
-    }
-}
-
-bool connection_owes_membership(const Session& session,
-                                std::uint64_t sessionId,
-                                std::uint32_t revision) noexcept {
-    if (sessionId == state::activity::kAbsentSessionId
-        || revision == state::activity::membership::kAbsentRevision) {
-        return false;
-    }
-    const ConnectionRecord* const record = connection_record(session);
-    return record == nullptr || !record->membershipSent.valid
-           || record->membershipSent.bindingGeneration != session.activity.bindingGeneration
-           || record->membershipSentCursor.sessionId != sessionId
-           || record->membershipSentCursor.revision != revision;
-}
-
-/** Adopts the join burst's staged membership body under the connection's new generation. */
-void adopt_join_membership_record(const Session& session) noexcept {
-    ConnectionRecord* const record = connection_record(session);
-    if (record == nullptr || !record->membershipStaged.valid) {
-        return;
-    }
-    // The body was staged before the join commit reserved this generation.
-    record->membershipStaged.bindingGeneration = session.activity.bindingGeneration;
-    record->membershipSentCursor = record->membershipStagedCursor;
-    promote_record(
-        record->membershipStaged, record->membershipSent, session.activity.bindingGeneration);
-}
 
 /** Copies the decode identities from one complete, already-encoded msg-5 roster snapshot. */
 bool build_roster_decode_map(const message::Roster& roster,
@@ -301,8 +179,8 @@ bool append_roster_notification(
         server::gameplay::squad_entity_retirement::placed_transition_pending(
             session.activity.session, session.activity.bindingGeneration);
     server::activity::host::AuthState hostState{};
-    const bool hasHostState =
-        server::activity::host::auth_state(session.activity.session, hostState);
+    const bool hasHostState = server::activity::host::auth_state(
+        session.activity.session, session.activity.bindingGeneration, hostState);
     // A link's first roster since it joined carries no line said before it: the cursor starts at
     // the newest pulse, so only the pulses retained after this body are owed to the link.
     if (hasHostState && session.activityRosterSends == 0) {
@@ -546,6 +424,8 @@ bool append_roster_notification(
         return false;
     }
     bool encoded = message::encode_sensor_auth_update(snapshot, scratch.responseBody, messageSize);
+    // Only a body that cannot be built is refused. A full frame or a held purge is tried again.
+    bool bodyRefused = !encoded;
     encoded =
         encoded
         && (!allocationOwed || prepare_mission_entity_allocation(session, entitySlotAllocation));
@@ -563,9 +443,7 @@ bool append_roster_notification(
                                    session.activity.bindingGeneration,
                                    retirementBubble,
                                    entityRetirement);
-    // A retirement-bearing roster must keep its grant and region cursor owed until the
-    // keepalive can atomically advance shared State immediately before copying the frame.
-    // Sending the roster alone would spend the entering-bubble trigger and strand its purge.
+    // A retirement-bearing roster waits until the keepalive can advance the shared epoch first.
     if (hasRetirement && (!allowEntityRetirement || !epochCurrent)) {
         encoded = false;
     }
@@ -971,7 +849,8 @@ void commit_staged_roster(Session& session) noexcept {
         server::activity::host::AuthState hostState{};
         const bool staged =
             scriptableCommitReady
-            && server::activity::host::auth_state(session.activity.session, hostState);
+            && server::activity::host::auth_state(
+                session.activity.session, session.activity.bindingGeneration, hostState);
         session.activityEstateRevision =
             staged ? hostState.estateRevision : session.activityRosterStaged.estateRevision;
         session.activityDialogueRevision =

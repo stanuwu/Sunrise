@@ -282,6 +282,8 @@ struct MissionSeedLease {
     std::uint64_t publishedRevision{};
     /** Last selection whose complete definition set reached this recipient's transport. */
     std::uint64_t fullSetTransportRevision{};
+    /** Revision whose roster body was refused. The next selection is owed again. */
+    std::uint64_t refusedRevision{};
     /**
      * Every authored region this lease has selected, in selection order. The peer's registered set
      * only grows: a group is torn down by a changed state byte, never by being left out, and every
@@ -401,7 +403,6 @@ struct Session {
     std::uint32_t remoteAddress{};
     nat_relay::State relay{};
     state::AccountHandle accountHandle{state::kInvalidAccount};
-    std::uint64_t activityAdvertisementHostGeneration{};
     std::uint64_t acquisitionPresentationUntilTick{};
     std::array<encrypted::queuez::AcquisitionPresentationRow,
                encrypted::queuez::kAcquisitionPresentationRowCapacity>
@@ -513,10 +514,6 @@ struct Session {
     authority_reset::Owner activityAuthorityReset{};
     /** Operator incident held until the complete encrypted frame reaches the transport caller. */
     IncidentPublication activityIncidentStaged{};
-    /** Earliest tick at which a refused incident frame may be rebuilt. */
-    std::uint64_t activityIncidentRetryDueTick{};
-    /** Earliest tick at which a roster owed only for a released bubble's grant may be rebuilt. */
-    std::uint64_t activityGrantRetryDueTick{};
     /** Host rows retained by the last delivered host directory. */
     AdvertisementRetains activityAdvertisementHeld{};
     /** Host rows retained by a staged membership body until publication is known. */
@@ -554,10 +551,6 @@ struct Session {
     std::uint64_t socialSerial{};
     /** Publication stamp this link has already been told about, for feed and notice alike. */
     state::social::Stamp socialSentStamp{};
-    /** Latest shared-account generation this peer has received. */
-    std::uint64_t accountGeneration{};
-    /** Newest shared-account generation owed as a full cross-peer refresh. */
-    std::uint64_t accountResyncGeneration{};
     /** Set by encrypted processing only after one account mutation commits and is copied out. */
     bool accountMutationPublished{};
     /** True while another peer's account mutation still needs a full local refresh. */

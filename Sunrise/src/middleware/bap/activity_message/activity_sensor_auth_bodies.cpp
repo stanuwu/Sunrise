@@ -47,7 +47,7 @@ constexpr std::uint32_t kStatesPerBubble = 8;
  */
 constexpr std::uint32_t kActivityAllowsFireteamJoin = 1;
 /**
- * Empty map-generator body, schema `0x80805007`.
+ * Empty map-generator body.
  * Two 475-bit records, a u32, then fixed arrays of 32 and 64 u8. The fixed array lengths apply
  * even with both dynamic arrays empty; counting one byte each truncates the body by 752 bits.
  */
@@ -125,7 +125,7 @@ constexpr std::size_t kSpawnKeyCount = 32;
     }
     // The participation record is this body's head, so struct +8 and +10 are record +8 and +10.
     // Record +8 is step 36 task 9's own term and +10 is the spawn gate's.
-    // Record +56, the team index, 5 bits at bias 1, must equal the membership blob's team byte.
+    // Record +56's assignment, 5 bits at bias 1, must equal the membership blob's A.P2 value.
     return encoded && writer.write(0, kPresenceWidth) && writer.write(1, kPresenceWidth)
            && writer.write(1, kPresenceWidth) && writer.write(1, kPresenceWidth)
            && writer.write(0, kPresenceWidth) && writer.write(1, 3) && writer.write(1, 2)
@@ -158,19 +158,20 @@ constexpr std::size_t kSpawnKeyCount = 32;
 [[nodiscard]] bool write_lifetime(bits::Writer& writer, const Snapshot& snapshot) noexcept {
     // Field `.4` names an authored spawn entry. No host model owns one, so it carries the empty
     // name hash; zero is a hash that no row matches.
-    bool encoded = writer.write(std::uint32_t{snapshot.lifetime} + kLifetimeBias, kLifetimeWidth)
-                   && writer.write(1, 3) && writer.write(kActivityAllowsFireteamJoin, 1)
-                   && writer.write(kSignedZero, 32)
-                   && writer.write(kEmptyNameHash, 32)
-                   // Under a darkness policy the lifetime names the bubble, or -1 when disabled.
-                   && writer.write(!snapshot.hasDarknessPolicy ? kSignedZero
-                                   : snapshot.darknessEnabled && snapshot.hasRegion
-                                       ? kSignedZero + snapshot.region / kStatesPerBubble
-                                       : kSignedMinusOne,
-                                   32)
-                   && writer.write(1, 6) && writer.write(kWaitingSwitchKey, 32)
-                   && writer.write(1, kPresenceWidth) && writer.write(kWaitingSwitchClass, 32)
-                   && writer.write(kSignedZero, 32) && writer.write(kSignedZero, 32);
+    bool encoded =
+        writer.write(std::uint32_t{snapshot.lifetime} + kLifetimeBias, kLifetimeWidth)
+        && writer.write(1, 3) && writer.write(kActivityAllowsFireteamJoin, kPresenceWidth)
+        && writer.write(kSignedZero, 32)
+        && writer.write(kEmptyNameHash, 32)
+        // `.5` names the published region's bubble; a disabled darkness policy sends -1.
+        && writer.write(snapshot.hasDarknessPolicy && !snapshot.darknessEnabled ? kSignedMinusOne
+                        : snapshot.hasRegion ? kSignedZero + snapshot.region / kStatesPerBubble
+                        : snapshot.hasDarknessPolicy ? kSignedMinusOne
+                                                     : kSignedZero,
+                        32)
+        && writer.write(1, 6) && writer.write(kWaitingSwitchKey, 32)
+        && writer.write(1, kPresenceWidth) && writer.write(kWaitingSwitchClass, 32)
+        && writer.write(kSignedZero, 32) && writer.write(kSignedZero, 32);
     for (std::size_t index = 0; encoded && index < kSpawnOverrideCount; ++index) {
         const std::uint32_t slice =
             snapshot.hasSpawnOverride ? snapshot.spawnSliceSet + kSpawnOverrideIndexBias : 0U;

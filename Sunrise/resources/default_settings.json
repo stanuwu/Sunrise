@@ -37,7 +37,12 @@
     },
     "custom_bootflow_textures": true,
     "socket_menu_routing": false,
-    "reveal_lore_books": true
+    "reveal_lore_books": true,
+    "cheats": false,
+    "exports": {
+      "package_keys": false,
+      "tag_definitions": false
+    }
   },
   "server": {
     "max_players": 32,
@@ -53,6 +58,8 @@
       "client_join_grant_count": 8192
     },
     "activation": {
+      "default_client_activation": true,
+      "activity_public_membership": true,
       "prevent_ownerless_channel_close": false,
       "mission_scripting": true
     }

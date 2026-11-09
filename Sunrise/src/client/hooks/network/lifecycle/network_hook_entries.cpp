@@ -39,8 +39,6 @@ GameSpecs game_specs() noexcept {
         hooking::detour::Spec{resolved.httpExecuteRequest, replacements[2]},
         hooking::detour::Spec{resolved.bubbleAuthorityDecoder, replacements[3]},
         hooking::detour::Spec{resolved.contentUntrackedGetter, replacements[4]},
-        hooking::detour::Spec{resolved.signOnReadinessFailure, replacements[5]},
-        hooking::detour::Spec{resolved.signOnReadinessReady, replacements[6]},
     };
 }
 

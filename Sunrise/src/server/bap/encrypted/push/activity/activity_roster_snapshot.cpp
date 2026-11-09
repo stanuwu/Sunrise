@@ -10,6 +10,7 @@
 #include "../../../../../middleware/content/packages/tables/region_reader.h"
 #include "../../../../../state/activity/bubble_authority/runtime.h"
 #include "../../../../../state/activity/defaults/activity_defaults_snapshot.h"
+#include "../../../../../state/activity/destination/activity_destination_spawn_binding.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/activity/mission/runtime.h"
 #include "../../../../../state/activity/runtime.h"
@@ -51,20 +52,7 @@ namespace {
     return false;
 }
 
-bool client_region_ready(const Session& session, const RefreshReport* refresh) noexcept {
-    const state::activity::membership::ClientPlacement placement =
-        client_placement(session, refresh);
-    const std::int32_t held = state::activity::membership::instantiated_region(placement);
-    const MissionSeedLease& lease = session.activityMissionSeed;
-    // A move is pending only while the client is somewhere other than the region the selection
-    // names. A selection naming the region it already holds moves nobody, and arming the gate
-    // behind a player who has arrived flashed their loading screen for one publish tick.
-    const bool movePending = lease.configured
-                             && lease.bindingGeneration == session.activity.bindingGeneration
-                             && lease.regionArrivalPending
-                             && static_cast<std::int64_t>(lease.plan.effectiveRegion) != held;
-    return !movePending && held >= 0;
-}
+} // namespace
 
 /** Merges one staged squad body after the complete cumulative frame reached transport output. */
 bool activate_staged_squad_override(Session& session) noexcept {
@@ -229,14 +217,13 @@ build_roster_snapshot(Session& session,
         return RosterOutcome::noLayout;
     }
     const std::uint64_t hostedBubbles = hosted_bubble_mask(session);
-    if (!fill_roster(layout,
-                     hostedBubbles,
-                     scratch,
-                     snapshot.roster,
-                     session.activity.role == ActivityClientRole::privateCurrent)) {
+    if (!fill_roster(
+            layout, hostedBubbles, publishes_top_level_groups(session), scratch, snapshot.roster)) {
         return RosterOutcome::noGroups;
     }
 
+    const state::activity::defaults::FallbackPolicy& fallback =
+        defaults.defaultDestination.fallback;
     // One resolution serves this body and the citizen advertisement in message 12. Two would let
     // the join descriptor land in a region record the client is not pending on.
     std::uint16_t arrival{};
@@ -464,9 +451,11 @@ build_roster_snapshot(Session& session,
     // carries matches nothing.
     snapshot.playerKey = published_player_key(session);
     snapshot.lifetime = lifetimeState;
-    // Wait for this client's committed region. Its native participation and spawn predicates
-    // retain the local loading and reported-region checks.
-    snapshot.awaitClientSync = !client_region_ready(session, refresh);
+    // Each player owns its committed region readiness; a local writeback cannot ready peers.
+    // A program that opens on a cutscene holds the spawn too, so no body exists to place.
+    snapshot.awaitClientSync =
+        !client_region_ready(session, refresh)
+        || state::activity::membership::program_spawn_hold(session.activity.source.sessionId);
     // Player_BindComponents walks every type-13 reference and the player datum can name any one of
     // them. So every participation record carries the same player key. Selecting the first slot
     // leaves the authored cinematic participant unbound whenever it names another record.
@@ -483,16 +472,69 @@ build_roster_snapshot(Session& session,
         && members.hasSnapshot) {
         fill_member_roster(snapshot, members.memberDirectory, members.snapshot.identity.opaqueSoid);
     }
-    // The selected arrival already travels in GlobalActivityState. Copying it into lifetime
-    // overrides makes it a persistent named-set requirement for subsequent respawns, bypassing
-    // the client's normal placement choices. Only an explicit host checkpoint owns an override.
+    // The override names the slice set the client is in. The client applies a pair only there, and
+    // a forced set with no point in that slice set leaves the biped picker with no transform.
+    snapshot.spawnSliceSet =
+        region.index >= 0 ? static_cast<std::uint32_t>(region.index) : region.arrival;
+    snapshot.spawnSetHash =
+        state::activity::destination::attachable_spawn_set_hash(selection, fallback.spawnSetHash);
+    // The mission program owns its spawn set. A manual launch pick still wins over it.
+    const std::uint32_t declaredSpawn =
+        state::activity::membership::declared_spawn_set(session.activity.source.sessionId);
+    const bool programOwnsSpawn = declaredSpawn != 0 && !selection.hasSpawnSetOverride;
+    if (programOwnsSpawn) {
+        snapshot.spawnSetHash = declaredSpawn;
+    }
+    // A set answers only the slice sets of the bubble that declares it, so the program's set holds
+    // across a move while a derived set answers the arrival alone.
+    const std::uint16_t setAnswers = programOwnsSpawn
+                                         ? static_cast<std::uint16_t>(snapshot.spawnSliceSet)
+                                         : static_cast<std::uint16_t>(region.arrival);
+    if (snapshot.spawnSliceSet
+        != state::activity::destination::spawn_set_slice_set(
+            selection, snapshot.spawnSetHash, setAnswers)) {
+        snapshot.spawnSetHash = message::kAbsentSpawnSetHash;
+    }
+    // An armed wipe respawns at its checkpoint spawn set, not at the arrival override.
     const std::uint32_t checkpoint = state::activity::membership::checkpoint_spawn_hash(
         session.activity.source.sessionId, region.index);
-    if (checkpoint != 0 && checkpoint != message::kAbsentSpawnSetHash) {
-        snapshot.spawnSliceSet =
-            region.index >= 0 ? static_cast<std::uint32_t>(region.index) : region.arrival;
+    if (checkpoint != 0) {
         snapshot.spawnSetHash = checkpoint;
-        snapshot.hasSpawnOverride = true;
+    }
+    snapshot.hasSpawnOverride =
+        snapshot.spawnSetHash != 0 && snapshot.spawnSetHash != message::kAbsentSpawnSetHash;
+    std::size_t firstAppended = seedGroupCount;
+    if (!promote_scenario_wide_groups(session, scratch, snapshot.roster, firstAppended)) {
+        return refuse_override("scenario_wide_groups");
+    }
+    // The client keys its state bytes by position, so the appended groups take the order of their
+    // first push and keep every bubble they were registered under.
+    order_appended_groups(session, scratch, snapshot.roster, firstAppended);
+    if (!retain_group_bubbles(session, scratch, snapshot.roster)) {
+        return refuse_override("group_bubbles");
+    }
+    order_sub_blocks(session, scratch, snapshot.roster);
+    for (std::size_t index = 0; retainedSquad && index < lease.groupCount; ++index) {
+        if (retainedGroupPositions[index] >= snapshot.roster.groups.size()) {
+            continue;
+        }
+        retainedGroupPositions[index] = snapshot.roster.groups.size();
+        const std::uint32_t key = lease.groups[index].scopeTarget.registryKey;
+        for (std::size_t position = 0; position < snapshot.roster.groupCount; ++position) {
+            if (snapshot.roster.groups[position].key == key) {
+                retainedGroupPositions[index] = position;
+                break;
+            }
+        }
+    }
+    if (pendingStateLocal) {
+        pendingGroupPosition = snapshot.roster.groups.size();
+        for (std::size_t position = 0; position < snapshot.roster.groupCount; ++position) {
+            if (snapshot.roster.groups[position].key == pendingTarget.registryKey) {
+                pendingGroupPosition = position;
+                break;
+            }
+        }
     }
     advance_region_epoch(session, refresh);
     stamp_group_sequences(session, snapshot.roster);

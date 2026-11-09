@@ -20,6 +20,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../../core/settings/settings.h"
+#include "../../../middleware/gameplay/external/external_entity_codec.h"
 #include "../../../state/activity/entity_slots/member_leases.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
@@ -402,7 +403,7 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     std::vector<host::PendingScriptableOverride>{}.swap(instance.estate);
     instance.estateCopied = false;
     instance.liveLinkCount = 0;
-    instance.entityDamageObservations.fill({});
+    instance.entitySourceDamageObservations.fill({});
     instance.damageEntitySources.fill({});
     instance.nextEntityDamageTick = 0;
     instance.view = {};

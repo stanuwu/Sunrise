@@ -87,8 +87,5 @@ private:
 /** Reads a character class without granting private access to a different account. */
 [[nodiscard]] bool
 account_character_class(AccountHandle handle, std::size_t index, CharacterClass& value) noexcept;
-/** Only the local account's selection can change. @return False for any other handle. */
-[[nodiscard]] bool
-set_selected_character(AccountHandle handle, std::uint64_t characterSoid, bool& changed) noexcept;
 
 } // namespace sunrise::state

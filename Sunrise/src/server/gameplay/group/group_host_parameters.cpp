@@ -53,8 +53,8 @@ void fill_activity_host(wire::ActivityHostParameter& body,
                         const HostSessionBinding& binding,
                         std::uint64_t selectionNonce,
                         std::uint32_t memberMask) noexcept {
-    // The peer builds no join request unless this matches the `current-activity` nonce, and its
-    // rejoin blocker refuses a host whose nonce is zero.
+    // The peer builds no join request unless this matches the `current-activity` nonce. The
+    // fireteam's rejoin blocker also refuses a zero nonce.
     body.selectionId = selectionNonce;
     // The peer addresses its activity join request to this id. The activity route refuses one that
     // names no committed activity session, and a gameplay identity is not one.

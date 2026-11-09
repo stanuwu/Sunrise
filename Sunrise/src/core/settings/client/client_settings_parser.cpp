@@ -15,9 +15,10 @@ bool Parser::client_settings(client::Settings& output, bool& endpointConfigured)
     bool hasCustomBootflowTextures = false;
     bool hasSocketMenuRouting = false;
     bool hasRevealLoreBooks = false;
-    bool hasSkipOrbitCinematicWait = false;
+    bool hasCheats = false;
     bool hasServerEndpoint = false;
     bool hasMachineId = false;
+    bool hasExports = false;
     if (consume('}')) {
         return true;
     }
@@ -64,17 +65,62 @@ bool Parser::client_settings(client::Settings& output, bool& endpointConfigured)
                 return false;
             }
             hasRevealLoreBooks = true;
-        } else if (key == "skip_orbit_cinematic_wait") {
-            if (hasSkipOrbitCinematicWait || !boolean(candidate.skipOrbitCinematicWait)) {
+        } else if (key == "cheats") {
+            if (hasCheats || !boolean(candidate.cheats)) {
                 return false;
             }
-            hasSkipOrbitCinematicWait = true;
+            hasCheats = true;
+        } else if (key == "exports") {
+            if (hasExports || !client_exports_settings(candidate.exports)) {
+                return false;
+            }
+            hasExports = true;
         } else if (!skip_value(0)) {
             return false;
         }
         if (consume('}')) {
             output = candidate;
             endpointConfigured = hasServerEndpoint;
+            return true;
+        }
+        if (!consume(',')) {
+            return false;
+        }
+    }
+}
+
+/** Parses the startup export switches. Each key may appear once and must be boolean. */
+bool Parser::client_exports_settings(client::Exports& output) noexcept {
+    if (!consume('{')) {
+        return false;
+    }
+    client::Exports candidate{};
+    if (consume('}')) {
+        output = candidate;
+        return true;
+    }
+    bool hasPackageKeys = false;
+    bool hasTagDefinitions = false;
+    for (;;) {
+        std::string_view key;
+        if (!string(key) || !consume(':')) {
+            return false;
+        }
+        if (key == "package_keys") {
+            if (hasPackageKeys || !boolean(candidate.packageKeys)) {
+                return false;
+            }
+            hasPackageKeys = true;
+        } else if (key == "tag_definitions") {
+            if (hasTagDefinitions || !boolean(candidate.tagDefinitions)) {
+                return false;
+            }
+            hasTagDefinitions = true;
+        } else if (!skip_value(0)) {
+            return false;
+        }
+        if (consume('}')) {
+            output = candidate;
             return true;
         }
         if (!consume(',')) {

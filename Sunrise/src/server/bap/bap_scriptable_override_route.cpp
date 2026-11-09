@@ -344,7 +344,8 @@ bool request_activity_type31_override(
     const activity::host::ScriptableTarget& target,
     std::int32_t expectedRegion,
     std::uint64_t expectedGeneration,
-    const activity::host::ScriptableOutputReservation* reservation) noexcept {
+    const activity::host::ScriptableOutputReservation* reservation,
+    bool enabled) noexcept {
     const std::lock_guard lock(session_lock());
     std::size_t linkCount = 0;
     const Session* const session =
@@ -352,7 +353,7 @@ bool request_activity_type31_override(
     const bool queued = expectedRegion >= 0 && session != nullptr
                         && selected_region_index_locked(*session) == expectedRegion
                         && activity::host::request_type31_override(
-                            binding, target, expectedGeneration, reservation);
+                            binding, target, expectedGeneration, reservation, enabled);
     return queued;
 }
 

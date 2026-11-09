@@ -26,6 +26,8 @@ constexpr std::size_t kMemberDisplayedLight = 0x20;
 constexpr std::size_t kMemberEmblem = 0x24;
 constexpr std::size_t kMemberAbsentA = 0x26;
 constexpr std::size_t kMemberAbsentB = 0x28;
+/** Upstream's social-roster member record (PR #154) places the account Triumph score here. */
+constexpr std::size_t kMemberTriumphScore = 0x2C;
 constexpr std::size_t kMemberTitle = 0x34;
 constexpr std::size_t kMemberLevelA = 0x38;
 constexpr std::size_t kMemberLevelB = 0x39;
@@ -84,6 +86,7 @@ bool encode_member(const Member& member, std::span<std::byte> output) noexcept {
     put(body, kMemberEmblem, member.emblem);
     put(body, kMemberAbsentA, kAbsentDefinition);
     put(body, kMemberAbsentB, kAbsentDefinition);
+    put(body, kMemberTriumphScore, member.triumphScore);
     put(body, kMemberTitle, member.title);
     body[kMemberLevelA] = body[kMemberLevelB] = body[kMemberLevelC] =
         static_cast<std::byte>(member.level);

@@ -61,8 +61,11 @@ std::atomic<std::byte*> g_playerComponent{nullptr};
 /** Frames left before the injected press is released. */
 std::atomic_uint32_t g_pressFrames{0};
 
-std::atomic<ControlledHandle> g_controlledHandle{};
-std::atomic<CameraSingleton> g_cameraSingleton{};
+/** Game-image function, read once per physics component, so it is atomic, not locked. */
+std::atomic<ControlledHandle> g_controlledHandle{nullptr};
+CameraSingleton g_cameraSingleton{};
+/** Target changes invalidate a camera read that began before clear or reinitialization. */
+std::uint64_t g_targetRevision{};
 
 /** Target and pose publication share this lock; callers already hold it exclusively. */
 void reset_camera_locked() noexcept {
@@ -181,7 +184,8 @@ void end_press() noexcept {
  */
 [[nodiscard]] bool owns_player(std::byte* component, ControlledHandle target) noexcept {
     std::uint32_t controlled = kInvalidHandle;
-    if (!current_controlled_handle(controlled)) {
+    target(&controlled);
+    if (controlled == kInvalidHandle) {
         return false;
     }
     std::uint16_t owner = 0;
@@ -329,12 +333,15 @@ void clear_targets() noexcept {
 
 /** Publishes the frame's complete camera pose and its forward vector. */
 void capture_camera_pose(std::uint32_t playerIndex) noexcept {
-    const auto singleton = g_cameraSingleton.load(std::memory_order_acquire);
-    if (playerIndex == kInvalidHandle || singleton == nullptr) {
-        invalidate_camera_pose();
+    AcquireSRWLockShared(&g_cameraPoseLock);
+    const auto target = g_cameraSingleton;
+    const auto revision = g_targetRevision;
+    ReleaseSRWLockShared(&g_cameraPoseLock);
+    if (playerIndex == kInvalidHandle || target == nullptr) {
+        invalidate_camera_pose(revision);
         return;
     }
-    std::byte* const camera = singleton();
+    std::byte* const camera = target();
     if (camera == nullptr) {
         invalidate_camera_pose(revision);
         return;
@@ -496,16 +503,6 @@ bool camera_pose(CameraPose& pose) noexcept {
     pose = valid ? g_cameraPose : CameraPose{};
     ReleaseSRWLockShared(&g_cameraPoseLock);
     return valid;
-}
-
-bool current_controlled_handle(std::uint32_t& handle) noexcept {
-    handle = kInvalidHandle;
-    const auto getter = g_controlledHandle.load(std::memory_order_acquire);
-    if (getter == nullptr) {
-        return false;
-    }
-    getter(&handle);
-    return handle != kInvalidHandle;
 }
 
 } // namespace sunrise::client::hooks::teleport

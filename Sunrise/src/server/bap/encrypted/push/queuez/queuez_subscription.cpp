@@ -11,6 +11,16 @@
 namespace sunrise::server::bap::encrypted::push {
 namespace {
 
+/** Resolves private account families by their root; other families use the bound viewer. */
+[[nodiscard]] state::AccountHandle
+subscription_account(const middleware::queuez::Subscription& subscription) noexcept {
+    return subscription.familyType == queuez::kBannerFamilyType
+                   || subscription.familyType == queuez::kRosterFamilyType
+                   || subscription.familyType == queuez::kAccountFamilyType
+               ? state::account_for_subscription_root(subscription.familyRootSoid)
+               : state::bound_account();
+}
+
 /**
  * Appends the unsolicited Family-4 companion of a Family-3 subscription.
  * @param scratch Lock-owned transform buffers.
@@ -123,16 +133,13 @@ void append_queuez_notification(Scratch& scratch,
                                 std::size_t& written,
                                 queuez::SessionState& after,
                                 bool& armsRepush,
-                                bool& armsBannerRepush) noexcept {
-    const auto accountHandle =
-        subscription.familyType == queuez::kBannerFamilyType
-                || subscription.familyType == queuez::kRosterFamilyType
-                || subscription.familyType == queuez::kAccountFamilyType
-            ? state::account_for_subscription_root(subscription.familyRootSoid)
-            : state::bound_account();
-    const state::ScopedAccountView accountScope(accountHandle);
+                                bool ownSnapshotAnswered) noexcept {
+    const state::ScopedAccountView accountScope(subscription_account(subscription));
     after = before;
     armsRepush = false;
+    if (state::bound_account() == state::kInvalidAccount) {
+        return;
+    }
     // Runs ahead of the dispatch below; inside one family's builder it would leave the other
     // families describing a different account.
     ensure_account_canonical();
@@ -263,11 +270,15 @@ bool prepare_subscription_answer(Scratch& scratch,
                                  std::span<std::byte> body,
                                  std::size_t& bodySize) noexcept {
     bodySize = 0;
-    ensure_account_canonical();
+    const state::ScopedAccountView accountScope(subscription_account(subscription));
+    const bool validAccount = state::bound_account() != state::kInvalidAccount;
+    if (validAccount) {
+        ensure_account_canonical();
+    }
     snapshot::Prepared prepared{};
     bool built = false;
-    if (subscription.familyType == queuez::kBannerFamilyType) {
-        const state::AccountState account = state::account_snapshot();
+    if (validAccount && subscription.familyType == queuez::kBannerFamilyType) {
+        const state::AccountState account = state::bound_account_snapshot();
         const std::uint64_t selected = state::account::banner_character_soid(account);
         if (selected != 0) {
             bool publish = true;
@@ -284,7 +295,7 @@ bool prepare_subscription_answer(Scratch& scratch,
                                              incremental ? before.family0Character : 0,
                                              prepared);
         }
-    } else {
+    } else if (validAccount) {
         // A subscribe establishes a fresh client-side store, so the answer is the live full body
         // even while the push ladder is response-only.
         built = snapshot::prepare_initial(scratch, subscription, {}, prepared);

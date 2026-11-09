@@ -225,6 +225,7 @@ inline void clear_instance(Instance& instance) noexcept {
     instance.view = {};
     std::destroy_at(&instance.senseObservations);
     std::construct_at(&instance.senseObservations);
+    // Inactive records reuse this capacity without allocating on the game service path.
     instance.squadSense.clear();
     instance.squadSenseSequence = 0;
     std::destroy_at(&instance.sceneSenseTrace);

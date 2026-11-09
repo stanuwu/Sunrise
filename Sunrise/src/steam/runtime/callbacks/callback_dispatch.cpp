@@ -11,7 +11,6 @@
 #include "../../../client/hooks/feature_flags/feature_flags.h"
 #include "../../../client/hooks/instance_mutex/instance_mutex_release.h"
 #include "../../../client/hooks/machine_id/machine_id_override.h"
-#include "../../../client/hooks/membership_probe/membership_probe.h"
 #include "../../../client/hooks/net_tick_probe/net_tick_probe.h"
 #include "../../../core/logging/log.h"
 #include "../../../core/settings/settings.h"

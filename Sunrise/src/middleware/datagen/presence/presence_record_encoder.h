@@ -29,6 +29,8 @@ struct Member {
     std::uint16_t emblem{kAbsentDefinition};
     std::uint16_t title{kAbsentDefinition};
     std::int8_t titleKind{};
+    /** The account Triumph score, which the client reads as a signed 32-bit value. */
+    std::int32_t triumphScore{};
 };
 
 /** @return False for a zero account soid, or an `output` smaller than `kDirectorySize`. */

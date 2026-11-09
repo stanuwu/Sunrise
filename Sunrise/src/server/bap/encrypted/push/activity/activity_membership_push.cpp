@@ -140,13 +140,9 @@ build_remote_member(const membership_message::CitizenAdvertisement& advertisemen
                                     std::uint64_t bindingGeneration,
                                     sdk::BoundView& output) noexcept {
     const sdk::Snapshot catalog = sdk::snapshot();
-    sdk::BoundView activityView{};
     const sdk::Selection selection{
         source, activity_link_count_locked(source, bindingGeneration), bindingGeneration};
-    return catalog != nullptr
-           && sdk::resolve(catalog, selection, activityView) == sdk::Status::ready
-           && sdk::generated_world::resolve(activityView, output)
-                  == sdk::generated_world::BindStatus::ready;
+    return catalog != nullptr && sdk::resolve(catalog, selection, output) == sdk::Status::ready;
 }
 
 /** Binds the activity of the connection's own activity session. */
@@ -157,10 +153,7 @@ build_remote_member(const membership_message::CitizenAdvertisement& advertisemen
 /** @return True only when extracted package data selects a private Bubble Host lane. */
 [[nodiscard]] bool remote_member_allowed(const Session& session,
                                          std::int32_t effectiveRegion) noexcept {
-    if (state::activity::forced::override_active()) {
-        return true;
-    }
-    sdk::generated_world::GeneratedWorldView worldView{};
+    sdk::BoundView view{};
     bool isPublic = false;
     return resolve_activity(session, view)
            && sdk::generated_world::region_is_public(view, effectiveRegion, isPublic) && !isPublic;
@@ -366,10 +359,10 @@ bool private_region(const Session& session, std::int32_t region) noexcept {
 bool public_region(const state::activity::SessionBinding& source,
                    std::uint64_t bindingGeneration,
                    std::int32_t region) noexcept {
-    sdk::generated_world::GeneratedWorldView worldView{};
+    sdk::BoundView view{};
     bool isPublic = false;
-    return region >= 0 && resolve_generated_world(source, bindingGeneration, worldView)
-           && sdk::generated_world::region_is_public(worldView, region, isPublic) && isPublic;
+    return region >= 0 && resolve_activity(source, bindingGeneration, view)
+           && sdk::generated_world::region_is_public(view, region, isPublic) && isPublic;
 }
 
 /** Publicity is authored per bubble, so a bubble's state zero answers for all 8 of its states. */

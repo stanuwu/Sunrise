@@ -371,35 +371,31 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
         }
         return context.registry->slots[slot];
     };
-    // As in the build-86657 anchor pass, a recorded parent detaches each unrecorded
-    // direct child before removal. Detached children retain their subtree.
-    // This registry is already partitioned by admitted source, so another peer's
-    // records cannot stamp or prune this tree.
-    const auto recorded = [&](EntityToken token) {
-        for (std::size_t index = 0; index < count; ++index) {
-            const auto& record = entity_record_at(batch, index);
-            if (!candidate.ignoredRecordMask.test(index) && record.token.slot == token.slot
-                && record.token.incarnation == token.incarnation) {
-                return true;
-            }
+    // The client's anchor pass runs before its remove pass: an entity that receives a record
+    // detaches to root every descendant that received none in the same batch. A parent sent as a
+    // direct element therefore loses its children, and they outlive its removal as roots.
+    // This registry is already partitioned by admitted source, so another peer's records cannot
+    // stamp or prune this tree.
+    std::bitset<kMaximumEntitySlot + 1U> recorded{};
+    for (std::size_t index = 0; index < count; ++index) {
+        if (!candidate.ignoredRecordMask.test(index)) {
+            recorded.set(entity_record_at(batch, index).token.slot);
         }
-        return false;
-    };
-    // Only an anchored slot can detach. An unstaged slot still reads as the registry holds it,
-    // so most of the table is rejected before any staged-change or record search.
-    std::bitset<kMaximumEntitySlot + 1U> stagedSlots{};
-    for (std::size_t index = 0; index < changes; ++index) {
-        stagedSlots.set(change_at(index).slot);
     }
-    for (std::size_t slot = 0; slot < context.registry->slots.size(); ++slot) {
-        const auto& retained = context.registry->slots[slot];
-        if (!stagedSlots.test(slot) && (!retained.occupied || !retained.anchorPresent)) {
+    const auto& retained = context.registry->slots;
+    for (std::size_t slot = 0; slot < retained.size(); ++slot) {
+        if (recorded.test(slot) || !retained[slot].occupied || !retained[slot].anchorPresent) {
             continue;
         }
-        const auto child = current_slot(slot);
-        if (!child.occupied || !child.anchorPresent
-            || recorded({static_cast<std::uint16_t>(slot), child.incarnation})
-            || !recorded(child.anchor)) {
+        // The walk detaches such a child without descending into it, so the child's own subtree
+        // moves with it: only the direct parent's record matters.
+        const EntityToken parent = retained[slot].anchor;
+        bool detach = false;
+        if (recorded.test(parent.slot)) {
+            const auto& staged = current_slot(parent.slot);
+            detach = staged.occupied && staged.incarnation == parent.incarnation;
+        }
+        if (!detach) {
             continue;
         }
         if (changes == kEntityBaselineChangeCapacity) {
@@ -407,11 +403,12 @@ bool stage_entity_baseline_mutation(const CompositeEntityCodecContext& context,
         }
         auto& change = change_at(changes++);
         change.slot = static_cast<std::uint16_t>(slot);
-        change.expected = context.registry->slots[slot];
-        change.replacement = child;
+        change.expected = retained[slot];
+        change.replacement = change.expected;
         change.replacement.anchor = {};
         change.replacement.anchorPresent = false;
         change.replacement.anchorOrder = 0;
+        ++candidate.detachedCount;
     }
     std::array<EntityToken, kEntityBaselineChangeCapacity> terminals{};
     std::size_t terminalCount = 0;

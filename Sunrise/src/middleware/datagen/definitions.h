@@ -5,6 +5,8 @@
 
 namespace sunrise::middleware::datagen {
 
+/** An empty item slot is this sentinel; a 0 would assert definition index 0, a real item. */
+inline constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFFU;
 /** Native inspection family and its account/character object schemas. */
 inline constexpr std::uint32_t kInspectionFamily = 1;
 /** Object id for the family-one account slot. */

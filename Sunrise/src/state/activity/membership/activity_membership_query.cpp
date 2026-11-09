@@ -192,8 +192,8 @@ bool hard_wipe_start_unseen(std::uint64_t sessionId) noexcept {
     AcquireSRWLockShared(&runtime::storage::g_stateLock);
     const ActivityState& state = runtime::storage::g_state.activity;
     const auto target = activity::transactions::find_session(state, sessionId);
-    if (target != kInvalidSessionSlot) {
-        const MembershipState& member = state.sessions[target].membership;
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        const MembershipState& member = *selected_member(state.sessions[target]);
         const HardWipeState& wipe = member.hardWipe;
         unseen = wipe.active && wipe.host.state != kHardWipeReleaseState
                  && (member.spawn.opaqueByte != wipe.host.opaqueByte

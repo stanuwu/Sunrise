@@ -31,7 +31,7 @@ constexpr std::uint8_t kNullableU32AliasType = 21;
 /** In mode one, field type 37 is a plain nested walk of kNestedCustomSchema. */
 constexpr std::uint8_t kNestedCustomType = 37;
 /** The type-37 schema: a 19-bit real and a 5-bit int8, 24 bits in all. */
-constexpr std::uint32_t kNestedCustomSchema = 0x808092FFU;
+constexpr std::uint32_t kNestedCustomSchema = generated::C808092ff::kClass;
 
 /** Resolves one schema only when it supports the selected codec family. */
 [[nodiscard]] bool
@@ -93,7 +93,45 @@ read_schema(const void* raw, std::uint32_t rowIndex, wire::runtime::SchemaView& 
            && output.row == rowIndex;
 }
 
-static std::uint8_t canonical_type(const void*, std::uint8_t) noexcept;
+/** Reference types that share one native reader decode through one walker case. */
+[[nodiscard]] std::uint8_t reference_alias(format::RuntimeCodecFamily family,
+                                           std::uint8_t type) noexcept {
+    if (family != format::RuntimeCodecFamily::sobjectModeZero && type == 30) {
+        return 18;
+    }
+    if (type == kNullableU32AliasType) {
+        return kNullableU32Type;
+    }
+    if (family == format::RuntimeCodecFamily::sobjectModeOne) {
+        // Types 18, 20, 30 and 31 share one native mode-one reader.
+        if (type == 20 || type == 31) {
+            return 18;
+        }
+        if (type == 29) {
+            return 43;
+        }
+    }
+    return type;
+}
+
+/** Rewrites one field view to the type its family's native reader implements. */
+[[nodiscard]] bool canonicalize_field(const void* raw,
+                                      format::RuntimeCodecFamily family,
+                                      wire::runtime::FieldView& output) noexcept {
+    output.typeCode = reference_alias(family, output.typeCode);
+    if (family == format::RuntimeCodecFamily::sobjectModeOne
+        && output.typeCode == kNestedCustomType) {
+        wire::runtime::SchemaView nested{};
+        if (!find_schema(raw, kNestedCustomSchema, nested)) {
+            return false;
+        }
+        output.typeCode = wire::runtime::kNestedType;
+        output.nestedSchemaRow = nested.row;
+        // Its fields carry no presence bits, so it needs no slot in the component bitmap.
+        output.hasBitmapOffset = true;
+    }
+    return true;
+}
 
 /** Converts one SDK field row into the generic runtime walker view. */
 [[nodiscard]] bool
@@ -117,8 +155,7 @@ read_field(const void* raw, std::uint32_t rowIndex, wire::runtime::FieldView& ou
             }
             output.nestedSchemaRow = target.row;
         }
-        output.typeCode = canonical_type(raw, output.typeCode);
-        return true;
+        return canonicalize_field(raw, context->family, output);
     }
     const format::RuntimeField& row = context->catalog->runtimeFields[rowIndex];
     if (row.schemaIndex >= context->catalog->runtimeSchemas.size()
@@ -168,7 +205,9 @@ read_field(const void* raw, std::uint32_t rowIndex, wire::runtime::FieldView& ou
                                     ? 0
                                     : static_cast<std::int32_t>(row.bits);
     output.typeCode = static_cast<std::uint8_t>(row.typeCode);
-    output.typeCode = canonical_type(raw, output.typeCode);
+    if (!canonicalize_field(raw, context->family, output)) {
+        return false;
+    }
     output.presence =
         static_cast<std::uint8_t>((row.flags & format::kRuntimeFieldPresenceBit) != 0);
     output.parameter2 = static_cast<std::uint8_t>(
@@ -207,10 +246,6 @@ read_field(const void* raw, std::uint32_t rowIndex, wire::runtime::FieldView& ou
         }
         match = &row;
     }
-    if (typeCode == 1 && match != nullptr) {
-        // Table entry 1 is a no-op; ordinary nested fields bypass this callback.
-        return (match->flags & format::kRuntimeTypeDefinitionExact) != 0;
-    }
     return match != nullptr && (match->flags & format::kRuntimeTypeDefinitionExact) != 0
            && (match->flags & format::kRuntimeTypeUnsupported) != 0 && match->fixedBits == 0
            && match->minimumBits == 0 && match->maximumBits == 0 && match->reserved == 0;
@@ -233,31 +268,7 @@ static std::uint8_t canonical_type(const void* raw, std::uint8_t type) noexcept 
     if (context.family == format::RuntimeCodecFamily::sobjectModeZero && type == 27) {
         return 0;
     }
-    if (context.family != format::RuntimeCodecFamily::sobjectModeZero && type == 30) {
-        return 18;
-    }
-    if (context.family == format::RuntimeCodecFamily::sobjectModeOne) {
-        // Raw-64 type 12 has the explicit 64-bit raw representation of type 35.
-        if (type == 12) {
-            return 35;
-        }
-        // Mode-one entity references include type 31 beside type 20.
-        if (type == 20 || type == 31) {
-            return 18;
-        }
-        // Nullable type 21 has the explicit nullable schema-reference representation of type 23.
-        if (type == 21) {
-            return 23;
-        }
-        // Types 26 and 27 share the nullable-record body.
-        if (type == 27) {
-            return 26;
-        }
-        if (type == 29) {
-            return 43;
-        }
-    }
-    return type;
+    return reference_alias(context.family, type);
 }
 
 /** The native action selector chooses one exact SDK-declared payload schema. */
@@ -283,18 +294,6 @@ resolve_command_payload(const void* raw, std::uint8_t selector, std::uint32_t& o
     return found;
 }
 
-/**
- * Build 86657 mode one reads type 37 as the 808092FF schema, whose 19-bit real and 5-bit
- * biased integer occupy 24 bits. Other families leave type 37 unsupported.
- */
-static std::uint32_t custom_schema(const void* raw, std::uint8_t type) noexcept {
-    const auto& context = *static_cast<const detail::ResolverContext*>(raw);
-    return context.family == format::RuntimeCodecFamily::sobjectModeOne
-                   && type == wire::kRuntimeCustomSchemaType
-               ? 0x808092FFU
-               : 0;
-}
-
 /** Builds borrowed reflection callbacks over one stable resolver context. */
 [[nodiscard]] wire::RuntimeSchemaResolver make_resolver(detail::ResolverContext& context) noexcept {
     wire::RuntimeSchemaResolver resolver{};
@@ -308,7 +307,6 @@ static std::uint32_t custom_schema(const void* raw, std::uint8_t type) noexcept 
     resolver.recordPresence = context.presence.empty() ? nullptr : record_presence;
     resolver.firstFieldBit = context.firstFieldBit;
     resolver.canonicalType = canonical_type;
-    resolver.customSchema = custom_schema;
     resolver.nativeCommandEmptyShortcut =
         context.family == format::RuntimeCodecFamily::sobjectModeOne;
     resolver.resolveCommandPayload = resolve_command_payload;

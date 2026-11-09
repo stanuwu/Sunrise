@@ -7,6 +7,7 @@
 #include "../../../../core/ui/layout/layout.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../../../steam/interfaces/invitations.h"
+#include "../../../diagnostics/test_input/test_input.h"
 #include "../../../ui/mission_launch/mission_launch_art.h"
 #include "../../cursor/runtime.h"
 #include "../../inactivity/inactivity_override.h"

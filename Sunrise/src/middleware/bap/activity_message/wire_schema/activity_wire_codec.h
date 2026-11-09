@@ -135,9 +135,6 @@ using ResolveCommandPayload = bool (*)(const void*, std::uint8_t, std::uint32_t&
 using ValidateRuntimeType = bool (*)(const void*, std::uint8_t) noexcept;
 using IsZeroBitRuntimeType = bool (*)(const void*, std::uint8_t) noexcept;
 
-/** Runtime field type whose body schema the resolver's custom schema supplies, not the wire. */
-inline constexpr std::uint8_t kRuntimeCustomSchemaType = 37;
-
 /** Borrowed adapters for runtime-selected reflection and command payload schemas. */
 struct RuntimeSchemaResolver final {
     const void* context{};
@@ -152,8 +149,6 @@ struct RuntimeSchemaResolver final {
     std::uint32_t firstFieldBit{};
     std::uint8_t (*canonicalType)(const void*, std::uint8_t) noexcept {};
     bool nativeCommandEmptyShortcut{};
-    /** A build-pinned custom reader resolves a body schema without a wire handle. */
-    std::uint32_t (*customSchema)(const void*, std::uint8_t) noexcept {};
 };
 
 /** Why one codec run stopped: complete, or the exact input it still needs. */

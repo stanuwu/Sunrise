@@ -149,11 +149,6 @@ bool valid(const AccountState& state) noexcept {
     return valid_impl(state);
 }
 
-/** Checks settings-authored State before runtime-only profile stack identities are seeded. */
-bool valid_authored(const AccountState& state) noexcept {
-    return valid_impl(state);
-}
-
 bool valid_public(const AccountState& state) noexcept {
     return valid_impl(state, false);
 }

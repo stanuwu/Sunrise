@@ -127,7 +127,7 @@ bool uninstall() noexcept {
         return true;
     }
     const std::array entries{hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&build)}};
-    if (hooking::detour::uninstall(g_hook, entries, &idle)
+    if (hooking::detour::uninstall(g_hook, entries, {}, &idle)
         != hooking::detour::UninstallResult::removed) {
         return false;
     }

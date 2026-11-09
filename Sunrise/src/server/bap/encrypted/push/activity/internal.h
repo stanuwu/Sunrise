@@ -384,8 +384,7 @@ find_existing_group(const state::build_data::scenarios::RosterGroup& candidate,
                                std::uint64_t hostedBubbles,
                                bool publishTopLevel,
                                Scratch& scratch,
-                               message::Roster& roster,
-                               bool includeTopLevel = true) noexcept;
+                               message::Roster& roster) noexcept;
 
 /** Appends one selected-state group and registers its key in its exact authored bubble. */
 [[nodiscard]] bool

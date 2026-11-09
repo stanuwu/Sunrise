@@ -1,5 +1,7 @@
 #include "public_subscriptions.h"
 
+#include <Windows.h>
+
 #include <algorithm>
 #include <limits>
 
@@ -21,6 +23,11 @@ namespace {
 namespace datagen = middleware::datagen;
 namespace profiles = state::account::profiles;
 namespace snapshot = push::snapshot;
+
+/** Clears a prefix once its borrowed snapshot bytes have been consumed. */
+void clear_prefix(std::span<std::byte> buffer, std::size_t size) noexcept {
+    SecureZeroMemory(buffer.data(), (std::min)(buffer.size(), size));
+}
 
 // Every generated public family except unlocks, which never leave the local investment route.
 bool supported(std::uint32_t family) noexcept {
@@ -200,47 +207,72 @@ Result consume(Session& session,
                    : ResponseService::webServiceServer)
             : (removing ? ResponseService::unsubscribeFamily : ResponseService::subscribeFamily);
     const ServiceRoute route{ResponseMode::reply, responseService, BodyCodec::empty};
-    // WS-206 carries the echoed envelope, five status bits and two absent trailer bits.
-    std::array<std::byte, web::kEnvelopeHeaderSize + 1> body{};
-    std::size_t bodySize{};
-    if (webRequest
-        && !web::encode_response(message, web::ResponseShape::statusOnly, {}, body, bodySize)) {
-        return Result::failure;
-    }
-    std::size_t size{};
-    if (!reply::encode(scratch,
-                       route,
-                       request.taskId,
-                       session.sessionKey,
-                       session.sendNonce,
-                       std::span(body).first(bodySize),
-                       size)) {
-        return Result::failure;
-    }
-    auto nonce = session.sendNonce;
-    middleware::secure_channel::advance_nonce(nonce);
+    snapshot::Prepared prepared{};
     bool publishedJoin = false;
-    if (!removing) {
-        snapshot::Prepared prepared;
+    const auto prepareSnapshot = [&]() {
         std::uint64_t character{};
         const auto current = generation(scratch, staged);
         const bool changed = !first && current != 0 && current != staged.generation;
         if (changed && staged.version == (std::numeric_limits<std::int32_t>::max)()) {
-            return refuse();
+            return false;
         }
         const auto version = staged.version + (changed ? 1 : 0);
         if (!prepare(scratch, staged, version, prepared, character)) {
-            return refuse();
+            return false;
         }
         publishedJoin = staged.family == datagen::kJoinFamily && prepared.family.objects.size() > 1;
-        const bool content = !prepared.family.objects.empty();
-        if (!push::queuez_frame::append_prepared_frame(
-                scratch, prepared, session.sessionKey, nonce, scratch.framed, size)) {
-            return Result::failure;
-        }
         staged.version = version;
-        staged.character = content ? character : 0;
+        staged.character = !prepared.family.objects.empty() ? character : 0;
         staged.generation = current;
+        return true;
+    };
+    // Match the local upstream path: WS-206 creates its family from the reply's first blob.
+    // Public projections keep the same account scope; no second copy is pushed for this fetch.
+    std::size_t bodySize{};
+    if (webRequest && !removing) {
+        if (!prepareSnapshot()) {
+            return refuse();
+        }
+        std::size_t snapshotSize{};
+        const std::array families{prepared.family};
+        const bool encoded =
+            middleware::queuez::encode_update(families, scratch.responsePayload, snapshotSize)
+            && web::messages::opcode206::encode_response(
+                message,
+                std::span(scratch.responsePayload).first(snapshotSize),
+                scratch.responseBody,
+                bodySize);
+        push::queuez_frame::clear_object_storage(
+            scratch, prepared.rawClearSize, prepared.compressedClearSize);
+        clear_prefix(scratch.responsePayload, snapshotSize);
+        if (!encoded) {
+            clear_prefix(scratch.responseBody, bodySize);
+            return refuse();
+        }
+    }
+    std::size_t size{};
+    const bool replyEncoded = reply::encode(scratch,
+                                            route,
+                                            request.taskId,
+                                            session.sessionKey,
+                                            session.sendNonce,
+                                            std::span(scratch.responseBody).first(bodySize),
+                                            size);
+    clear_prefix(scratch.responseBody, bodySize);
+    if (!replyEncoded) {
+        return Result::failure;
+    }
+    // Native subscribe replies use sealed scratch too. Prepare the pushed objects only after
+    // that reply is complete, so encryption cannot overwrite their borrowed compressed bytes.
+    if (!removing && !webRequest && !prepareSnapshot()) {
+        return Result::failure;
+    }
+    auto nonce = session.sendNonce;
+    middleware::secure_channel::advance_nonce(nonce);
+    if (!removing && !webRequest
+        && !push::queuez_frame::append_prepared_frame(
+            scratch, prepared, session.sessionKey, nonce, scratch.framed, size)) {
+        return Result::failure;
     }
     if (size > response.size()) {
         return Result::failure;

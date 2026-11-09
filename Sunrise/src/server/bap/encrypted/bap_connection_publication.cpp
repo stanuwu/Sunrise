@@ -78,8 +78,6 @@ void reset_join_state(Session& session) noexcept {
     session.activityMemberSet = {};
     session.activityCharacterSoid = 0;
     session.activityKeepaliveDueTick = 0;
-    session.activityRosterDueTick = 0;
-    session.activityTransitionUntilTick = 0;
     session.activityClientIdentitySeenGeneration = 0;
     session.activityClientIdentityPublishedGeneration = 0;
     session.activityPatchEpoch = {};
@@ -96,8 +94,6 @@ void reset_join_state(Session& session) noexcept {
     authority_query::reset(session.activityAuthorityQuery, session.activity.bindingGeneration);
     authority_reset::reset(session.activityAuthorityReset, session.activity.bindingGeneration);
     session.activityIncidentStaged = {};
-    session.activityIncidentRetryDueTick = 0;
-    session.activityGrantRetryDueTick = 0;
     session.activityRosterReason = 0;
     session.activityRosterStaged = {};
     session.activityRosterDecode = {};
@@ -180,7 +176,8 @@ void publish_connection_fields(Session& session,
             release_shared_grants(session);
         }
         if (!publication.preservesActivitySessionBinding) {
-            release_activity_connection(session);
+            release_activity_ownership(
+                session, fields.joinsActivity && session.activityJoinMembershipStaged);
             session.activity = publication.activity;
             reset_join_state(session);
         }
@@ -234,13 +231,6 @@ void publish_connection_fields(Session& session,
         session.activityClientIdentitySeenGeneration = session.activity.bindingGeneration;
     }
     publish_activity_transport(session, fields.transportBindingGeneration, fields.transportReport);
-    // A join resets the roster container. Its first post-region state change rebuilds the
-    // participation component against the published membership.
-    if (fields.joinsActivity) {
-        session.activityRosterSends = 0;
-        session.activityRosterGroupLeases = {};
-        session.activityRosterRegionBubble = -1;
-    }
     // A private join burst delivered the seed membership body; commit the matching identity so
     // State and the delivered-body record agree with what the client now holds.
     if (fields.joinsActivity && session.activity.role == ActivityClientRole::privateCurrent) {
@@ -287,7 +277,9 @@ void publish_connection_fields(Session& session,
 
 /** Stages one body's retained host directory until the membership frame has an outcome. */
 void stage_activity_advertisement(Session& session, const AdvertisementRetains& retains) noexcept {
-    discard_staged_advertisement(session);
+    // The new membership body is already staged. Release only the previous directory here;
+    // the failure path discards both the body and its matching directory together.
+    release_host_generations(session.activityAdvertisementStaged.retains);
     session.activityAdvertisementStaged.retains = retains;
     session.activityAdvertisementStaged.staged = true;
 }
@@ -311,8 +303,8 @@ void discard_staged_advertisement(Session& session) noexcept {
     }
 }
 
-/** Releases every exact activity owner held by one BAP connection. */
-void release_activity_connection(Session& session) noexcept {
+namespace {
+void release_activity_ownership(Session& session, bool preserveJoinPublication) noexcept {
     server::activity::host::retire_scriptable_client(session.activity.session,
                                                      session.activity.bindingGeneration);
     release_shared_grants(session);
@@ -343,7 +335,9 @@ void release_activity_connection(Session& session) noexcept {
         }
     }
     clear_activity_transport(session);
-    discard_staged_advertisement(session);
+    if (!preserveJoinPublication) {
+        discard_staged_advertisement(session);
+    }
     release_host_generations(session.activityAdvertisementHeld);
     if (session.activity.hostGeneration != 0) {
         server::gameplay::group::release_host_session(session.activity.hostGeneration);
@@ -363,6 +357,13 @@ void release_activity_connection(Session& session) noexcept {
     session.activityClientIdentityPublishedGeneration = 0;
     session.activityRosterStaged.decodeMap = {};
     session.activityRosterDecode = {};
+}
+
+} // namespace
+
+/** Releases every exact activity owner held by one BAP connection. */
+void release_activity_connection(Session& session) noexcept {
+    release_activity_ownership(session, false);
 }
 
 /** Arms the owed ability refresh and Family-4 and family-two re-pushes the publication names. */

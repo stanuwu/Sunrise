@@ -115,12 +115,6 @@ bool read_presence(encoding::bits::Reader& reader, bool& present) noexcept {
     return true;
 }
 
-/** Skips the whole opaque B2 branch and checks its dynamic count. */
-bool skip_opaque_root_branch(encoding::bits::Reader& reader) noexcept {
-    TransportReport ignored{};
-    return read_transport_branch(reader, ignored);
-}
-
 /** Keeps B2 fields 0, 10 and 11 from this exact sparse report. */
 bool read_transport_branch(encoding::bits::Reader& reader, TransportReport& report) noexcept {
     report = {};

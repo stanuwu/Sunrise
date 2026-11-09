@@ -491,6 +491,89 @@ bool apply_reward_sockets(const item_details::Definition& detail,
     if (overrides.empty()) {
         return true;
     }
+    if (detail.ordinarySocketCount > sockets.plugs.size()) {
+        return fail("socket_layout");
+    }
+    authored_inventory::Sockets staged{};
+    staged.policy = authored_inventory::SocketPolicy::authored;
+    staged.plugCount = detail.ordinarySocketCount;
+    for (std::size_t lane = 0; lane < staged.plugCount; ++lane) {
+        const auto index = detail.initialPlugIndices[lane];
+        if (index == item_details::kUnavailableItemIndex) {
+            continue;
+        }
+        build_data::items::Definition plug{};
+        if (!build_data::find_item_definition_index(index, plug)) {
+            return fail("socket_layout");
+        }
+        staged.plugs[lane] = plug.definitionHash;
+    }
+    std::array<bool, item_details::kInitialPlugCapacity> replaced{};
+    for (const auto& override : overrides) {
+        if (override.plugSet != build_data::rewards::kAbsent) {
+            return fail("socket_plug_set");
+        }
+        if (override.rollSet != build_data::rewards::kAbsent) {
+            return fail("socket_roll_set");
+        }
+        // Zero selection preserves the initial plug in every lane of the named type.
+        const bool preserve =
+            override.plugItem == build_data::rewards::kAbsent && override.selection == 0;
+        if (!preserve && override.selection != build_data::rewards::kFixedPlugSelection) {
+            return fail("socket_selection");
+        }
+        build_data::items::Definition plug{};
+        if (!preserve && !build_data::find_item_definition_index(override.plugItem, plug)) {
+            return fail("socket_layout");
+        }
+        bool found = false;
+        for (std::size_t lane = 0; lane < staged.plugCount; ++lane) {
+            if (detail.socketTypes[lane] != override.socketType) {
+                continue;
+            }
+            if (replaced[lane] || (!preserve && found)) {
+                return fail("socket_layout");
+            }
+            replaced[lane] = true;
+            found = true;
+            if (!preserve) {
+                staged.plugs[lane] = plug.definitionHash;
+            }
+        }
+        if (!found) {
+            return fail("socket_layout");
+        }
+    }
+    if (!authored_inventory::valid(staged)) {
+        return fail("socket_layout");
+    }
+    sockets = staged;
+    return true;
+}
+
+/** Rows and flags read one account view, so the grant is one consistent after-image. */
+RewardPreparation
+prepare_reward_grant(std::span<const DirectRecordReward> rewards,
+                     std::uint16_t claimedRecordIndex,
+                     const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
+                     PendingRecordRewardGrant& mutation,
+                     const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    reason = "reward_count";
+    mutation = {};
+    if ((rewards.empty() && (wrapperFlags == nullptr || wrapperFlags->none()))
+        || rewards.size() > mutation.rewards.size()) {
+        return RewardPreparation::unresolvable;
+    }
+    reason = "not_ready";
+    // The loadout check needs these domains, so nothing is decided before they publish.
+    if (!build_data::item_definitions_ready() || !build_data::configured_item_details_ready()
+        || !build_data::inventory_bucket_descriptors_ready()
+        || !build_data::socket_entry_lists_ready()) {
+        return RewardPreparation::deferred;
+    }
+    reason = "account_state";
     const AccountState account = bound_account_snapshot();
     const std::size_t characterIndex = selected_character_index(account);
     if (!account::valid(account) || !valid_profile_inventory(account)

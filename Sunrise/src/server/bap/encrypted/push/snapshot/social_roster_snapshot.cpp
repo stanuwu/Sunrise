@@ -65,23 +65,6 @@ void read_selected_emblem(const state::AccountState& account,
     }
 }
 
-/**
- * Computes the selected character's Power, the same value the banner and character card show.
- * @param account Account snapshot, already read under the lock by the caller.
- * @return Equipment light plus the artifact bonus, or 0 when nothing is selected or an equipped
- *         item cannot be resolved.
- */
-[[nodiscard]] std::int32_t selected_character_power(const state::AccountState& account) noexcept {
-    std::int32_t power = 0;
-    for (std::size_t index = 0; index < account.characterCount; ++index) {
-        if (account.characters[index].selected) {
-            (void)state::equipment::light::resolution::character_light(account, index, power);
-            break;
-        }
-    }
-    return power;
-}
-
 /** Zero is the record's own fill, so an unresolved fireteam writes nothing. */
 constexpr std::uint32_t kNoGroupKey = 0;
 /** All-one bits are the native no-group value and must not be minted from a fold. */
@@ -180,9 +163,7 @@ bool prepare_social_roster(Scratch& scratch,
 
     std::uint16_t emblem = kEmptyDefinitionIndex;
     std::uint32_t emblemHash = 0;
-    if (!selected_emblem_definition_index(account, emblem, emblemHash)) {
-        emblem = kEmptyDefinitionIndex;
-    }
+    read_selected_emblem(account, emblem, emblemHash);
     MemberFacts facts{};
     resolve_member_facts(account, characterSoid, facts);
     middleware::datagen::presence::Member member{};
@@ -204,8 +185,9 @@ bool prepare_social_roster(Scratch& scratch,
         } else if (character.currentActivityIndex <= (std::numeric_limits<std::int16_t>::max)()) {
             member.activityIndex = static_cast<std::int16_t>(character.currentActivityIndex);
         }
+        // Preserve the zero wire fallback when Power resolution fails.
         if (!state::equipment::light::resolution::character_light(account, i, member.light)) {
-            return report_failure("social_roster_light");
+            member.light = 0;
         }
     }
     member.groupKey = facts.groupKey;
@@ -227,7 +209,8 @@ bool prepare_social_roster(Scratch& scratch,
     /**
      * Writes one object and stages it.
      * Both lookups match on the first qword, so the directory leads with the account soid and
-     * links its selected character at +8. That character owns the member record and its emblem.
+     * links its selected character at +8. That character owns the member record and its Power,
+     * emblem and Triumph score.
      */
     const auto emit = [&](std::size_t size, std::uint32_t id, bool directory) noexcept {
         if (objectCount >= staged.objects.size()) {
@@ -290,7 +273,7 @@ bool prepare_social_roster(Scratch& scratch,
                                       line.size(),
                                       "ev=queuez stage=social_roster result=ok soid=0x%016llX"
                                       " objects=%zu bytes=%zu emblem=%u hash=0x%08X"
-                                      " activity=%d prev=%d group=0x%08X",
+                                      " activity=%d prev=%d group=0x%08X power=%d score=%d",
                                       static_cast<unsigned long long>(account.primarySoid),
                                       objectCount,
                                       rawUsed,
@@ -298,7 +281,9 @@ bool prepare_social_roster(Scratch& scratch,
                                       static_cast<unsigned>(emblemHash),
                                       static_cast<int>(member.activityIndex),
                                       static_cast<int>(member.previousActivityIndex),
-                                      member.groupKey);
+                                      member.groupKey,
+                                      static_cast<int>(member.light),
+                                      static_cast<int>(member.triumphScore));
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,

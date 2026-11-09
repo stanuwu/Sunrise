@@ -443,10 +443,12 @@ void allocate_claimed_host_sessions() noexcept {
     free_retired_host_sessions();
     for (;;) {
         HostSessionBinding pending{};
+        bool publicRegion{};
         AcquireSRWLockShared(&g_hostSessionLock);
         for (const HostSession& row : g_hostSessions) {
             if (row.occupied && row.state == HostSessionState::pending) {
                 pending = row.binding;
+                publicRegion = row.publicRegion;
                 break;
             }
         }
@@ -456,9 +458,9 @@ void allocate_claimed_host_sessions() noexcept {
         }
 
         // A public region runs its destination's free-roam activity. The private Bubble Host row,
-        // keyed by this machine, runs the source activity.
+        // keyed by its exact source, runs the source activity.
         state::activity::destination::DestinationSelection destination = pending.source.destination;
-        if (pending.groupSessionId != endpoint::identity().machineId
+        if (publicRegion
             && !state::activity::destination::public_destination(pending.source.destination,
                                                                  destination)) {
             report(core::log::Level::info,

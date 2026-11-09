@@ -34,14 +34,16 @@ constexpr std::int32_t kLegStateBias = 1;
 constexpr std::uint8_t kLeaveReasonWire = 1;
 /** The nested identity block has presence bits on fields 0 through 14. */
 constexpr std::size_t kIdentityPresenceFieldCount = 15;
-/** The player blob includes the native partition field and three zero tail pad bits. */
+/** The player blob includes the native assignment field and three zero tail pad bits. */
 constexpr std::uint16_t kPlayerBlobByteCount = 19;
+/** Zero tail bits round the player blob to its declared byte count. */
+constexpr std::uint8_t kPlayerBlobPadBits = 3;
 /** Field 14 declares that blob's byte count in a 14-bit length. */
 constexpr std::uint8_t kPlayerBlobLengthWidth = 14;
 /** The blob writes the name twice, two bytes per unit, so one character adds four bytes. */
 constexpr std::uint32_t kPlayerBlobNameByteCount = 4;
-/** Native A.P2 uses a six-bit value at bias one; free-roam partition zero is wire one. */
-constexpr std::uint8_t kPlayerPartitionWire = 1;
+/** Native A.P2 must match participation record +56: logical zero at bias one. */
+constexpr std::uint8_t kPlayerAssignmentWire = 1;
 /** The remote member's player-state field zero carries the native-view gate. */
 constexpr std::uint8_t kRemoteViewGate = 0x10;
 /** Player-state field zero is a six-bit scalar. */
@@ -96,7 +98,7 @@ template <std::size_t Size>
     return true;
 }
 
-/** Writes the player blob, including the partition consumed by native participation sensing. */
+/** Writes the player blob, including the assignment consumed by native participation sensing. */
 [[nodiscard]] bool write_player_blob(encoding::bits::Writer& writer,
                                      const client_identity::ClientIdentity& identity,
                                      std::span<const std::uint16_t> nameUnits,
@@ -116,12 +118,12 @@ template <std::size_t Size>
         return writer.write(0, 16);
     };
     // Blob fields in write order: a 3-bit kind, one clear presence bit, the name, a set presence
-    // bit, the 6-bit partition, two clear bits, the name again, five clear bits, a set presence
+    // bit, the 6-bit assignment, two clear bits, the name again, five clear bits, a set presence
     // bit, the account and character SOIDs, and three zero tail pad bits.
     return writer.write(1, 3) && writer.write(0, 1) && name() && writer.write(1, 1)
-           && writer.write(kPlayerPartitionWire, 6) && writer.write(0, 2) && name()
+           && writer.write(kPlayerAssignmentWire, 6) && writer.write(0, 2) && name()
            && writer.write(0, 5) && writer.write(1, 1) && writer.write(identity.accountSoid, 64)
-           && writer.write(identity.field5, 64) && writer.write(0, 3);
+           && writer.write(identity.field5, 64) && writer.write(0, kPlayerBlobPadBits);
 }
 
 /**

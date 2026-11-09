@@ -202,7 +202,7 @@ bool encode_family0(const state::CharacterState& character,
             break;
         }
     }
-    copy_record(identity, block, summary, 0, kFamily0TailSize, record);
+    copy_record(identity, block, summary, 0, record);
     const layout::Family0Tail tail{};
     std::memcpy(record.data() + kFamily0RecordSize - kFamily0TailSize, &tail, sizeof tail);
     return true;

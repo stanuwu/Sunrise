@@ -22,9 +22,6 @@ namespace sunrise::server::bap {
 /** Services shared-service links under the same lock as native request and nonce publication. */
 void service(std::uint64_t now) noexcept;
 
-/** Notes that a committed publication replaced investment state before the next freshness query. */
-using InvestmentPublicationConsumer = void (*)() noexcept;
-
 /** Makes the next investment refresh pump take one more slice. */
 using InvestmentSliceConsumer = void (*)() noexcept;
 
@@ -199,11 +196,10 @@ activity_link_count(const state::activity::SessionBinding& binding) noexcept;
                                       std::uint64_t generation,
                                       ActivityLinkView& output) noexcept;
 
-/** Checks whether one exact ActivityClient can change its SDK selected-state roster lease. */
-[[nodiscard]] ActivityMissionSeedLeaseStatus
-activity_mission_seed_available(const state::activity::SessionBinding& binding,
-                                std::uint32_t scenarioRow,
-                                std::uint64_t expectedGeneration) noexcept;
+/** Resolves the native member that owns a new mission program to one exact live generation. */
+[[nodiscard]] bool activity_link_view_for_member(const state::activity::SessionBinding& binding,
+                                                 std::uint64_t memberKey,
+                                                 ActivityLinkView& output) noexcept;
 
 /** Reads one exact ActivityClient's connection-scoped SDK selected-state roster lease. */
 [[nodiscard]] ActivityMissionSeedLeaseStatus
@@ -334,14 +330,15 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     activity::host::ScriptableOverrideKind kind =
         activity::host::ScriptableOverrideKind::sdkAuth) noexcept;
 
-/** Queues a type-31 pulse only while the requested authenticated client generation owns the
+/** Queues a type-31 arm or disarm only while the requested authenticated client generation owns the
  * binding. */
 [[nodiscard]] bool request_activity_type31_override(
     const state::activity::SessionBinding& binding,
     const activity::host::ScriptableTarget& target,
     std::int32_t expectedRegion,
     std::uint64_t expectedGeneration,
-    const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
+    const activity::host::ScriptableOutputReservation* reservation = nullptr,
+    bool enabled = true) noexcept;
 
 /** Queues a generated state-local type-31 pulse while its exact mission-seed state is live. */
 [[nodiscard]] bool request_activity_state_local_type31_override(

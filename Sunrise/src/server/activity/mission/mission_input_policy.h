@@ -16,6 +16,7 @@ inline bool member_mission_event(host::EventKind kind) noexcept {
     case host::EventKind::playerTrigger:
     case host::EventKind::triggerEntered:
     case host::EventKind::triggerExited:
+    case host::EventKind::triggerState:
     case host::EventKind::objectInteracted:
     case host::EventKind::ghostLinkState:
     case host::EventKind::cinematicStarted:
@@ -99,6 +100,7 @@ mission_input_allowed(host::EventKind kind, bool selectedSource, bool currentMem
            || event.kind == host::EventKind::effectResult
            || event.kind == host::EventKind::phaseEntered
            || event.kind == host::EventKind::triggerEntered
+           || event.kind == host::EventKind::triggerState
            || event.kind == host::EventKind::triggerExited
            || event.kind == host::EventKind::squadState
            || event.kind == host::EventKind::squadProvoked

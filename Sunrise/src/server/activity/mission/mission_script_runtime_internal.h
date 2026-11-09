@@ -302,7 +302,7 @@ struct RuntimeInstance final {
     std::uint64_t dispatchInputSequence{};
     lua_vm::Vm vm{};
     sdk::BoundView view{};
-    generated::GeneratedWorldView worldView{};
+    generated_world::GeneratedWorldView worldView{};
     /**
      * Pins of the binding's retained Auth bodies, copied once per Sense dispatch that reads shared
      * simulation and once per entity poll. They say which link simulates each target, so every
@@ -327,7 +327,7 @@ struct RuntimeInstance final {
     std::array<EntityDamageSource, state::gameplay::entity_identity::kSourceCapacity>
         damageEntitySources{};
     /** Entities whose pools were published, each under its source; they reset with it. */
-    std::array<EntityDamageObservation, kSquadObservationCapacity> entityDamageObservations{};
+    std::array<EntityDamageObservation, kSquadObservationCapacity> entitySourceDamageObservations{};
     std::uint64_t nextEntityDamageTick{};
     lua_vm::ProgramIdentity identity{};
     mission_state::ProgramKey programKey{};
@@ -422,7 +422,7 @@ inline void reset_member_observations(RuntimeInstance& instance) noexcept {
         member.ghostObservations.fill({});
         member.objectInteractionObservations.fill({});
     }
-    instance.entityDamageObservations.fill({});
+    instance.entitySourceDamageObservations.fill({});
     instance.damageEntitySources.fill({});
     instance.nextEntityDamageTick = 0;
 }
@@ -430,7 +430,7 @@ inline void reset_member_observations(RuntimeInstance& instance) noexcept {
 /** Withdraws a retired source's observation history without changing mission or member state. */
 inline void reset_shared_observations(RuntimeInstance& instance) noexcept {
     clear_sense_levels(instance);
-    instance.entityDamageObservations.fill({});
+    instance.entitySourceDamageObservations.fill({});
     instance.damageEntitySources.fill({});
     instance.nextEntityDamageTick = 0;
     instance.activeRegion = -1;
@@ -658,6 +658,9 @@ void arm_state_region_teleport(RuntimeInstance& instance,
 /** @return The identity every derived Sense edge carries. */
 [[nodiscard]] host::Event sense_edge_event(const RuntimeInstance& instance,
                                            const host::SenseObservation& observation) noexcept;
+/** @return A Sense edge of shared simulation, carrying the route's generation. */
+[[nodiscard]] host::Event shared_edge_event(const RuntimeInstance& instance,
+                                            const host::SenseObservation& observation) noexcept;
 /** Raises one event per peer session that appeared or left this instance's destination. */
 void push_session_roster_edges(RuntimeInstance& instance) noexcept;
 

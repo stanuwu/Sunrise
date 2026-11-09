@@ -1247,14 +1247,15 @@ actor_squad_binding_status(const state::activity::SessionBinding& binding,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation = nullptr) noexcept;
 
-/** Queues one type-31 pulse for an exact package-derived ClientRef. */
-[[nodiscard]] bool
-request_type31_override(const state::activity::SessionBinding& binding,
-                        const ScriptableTarget& target,
-                        std::uint64_t expectedActivityClientGeneration,
-                        const ScriptableOutputReservation* reservation = nullptr) noexcept;
+/** Queues one generation-bound type-31 arm or disarm for an exact package-derived ClientRef. */
+[[nodiscard]] bool request_type31_override(const state::activity::SessionBinding& binding,
+                                           const ScriptableTarget& target,
+                                           std::uint64_t expectedActivityClientGeneration,
+                                           const ScriptableOutputReservation* reservation = nullptr,
+                                           bool enabled = true) noexcept;
 
-/** Queues one type-31 pulse carried by the exact generated group in the current activity seed. */
+/** Queues one type-31 arm/disarm carried by the exact generated group in the current activity seed.
+ */
 [[nodiscard]] bool request_state_local_type31_override(
     const state::activity::SessionBinding& binding,
     const ScriptableTarget& target,
@@ -1456,10 +1457,6 @@ void read_mission_inputs_after(MissionInputCursor after, MissionInputRead& outpu
 /** Reads the one pending incident occupying the exact instance's serialized output slot. */
 [[nodiscard]] bool pending_incident(const state::activity::SessionBinding& binding,
                                     PendingIncident& output) noexcept;
-
-/** Reads the one pending typed ClientRef body without changing its counter. */
-[[nodiscard]] bool pending_scriptable_override(const state::activity::SessionBinding& binding,
-                                               PendingScriptableOverride& output) noexcept;
 
 /**
  * Reads an override for one exact ActivityClient generation.

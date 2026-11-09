@@ -88,7 +88,7 @@ find_entity_damage(RuntimeInstance& instance,
                    std::uint64_t sourceGeneration,
                    state::gameplay::entity_identity::Token token) noexcept {
     EntityDamageObservation* spare = nullptr;
-    for (auto& row : instance.entityDamageObservations) {
+    for (auto& row : instance.entitySourceDamageObservations) {
         if (row.used && row.sourceGeneration == sourceGeneration && row.token.slot == token.slot) {
             return &row;
         }
@@ -150,7 +150,7 @@ observe_entity_damage(void* context,
     // A row stays while the registry lists its entity, even one that reports no pools now.
     if (row.known && row.present && row.token.slot < scan.retainedSlots.size()
         && scan.retainedSlots.test(row.token.slot)) {
-        for (auto& retained : scan.instance->entityDamageObservations) {
+        for (auto& retained : scan.instance->entitySourceDamageObservations) {
             if (retained.used && retained.sourceGeneration == scan.sourceGeneration
                 && retained.token == row.token) {
                 retained.listed = true;
@@ -237,7 +237,7 @@ observe_entity_damage(void* context,
 /** Forgets one link's published pools and its capacity warning; a replacement source starts over.
  */
 void reset_entity_damage(RuntimeInstance& instance, std::uint64_t sourceGeneration) noexcept {
-    for (auto& row : instance.entityDamageObservations) {
+    for (auto& row : instance.entitySourceDamageObservations) {
         if (row.used && row.sourceGeneration == sourceGeneration) {
             row = {};
         }
@@ -324,7 +324,7 @@ bool current_entity_damage(RuntimeInstance& instance, const host::Event& event) 
     if (entity_damage_generation(instance, current.actorSource) == event.sourceGeneration) {
         return true;
     }
-    for (auto& row : instance.entityDamageObservations) {
+    for (auto& row : instance.entitySourceDamageObservations) {
         if (row.used && row.sourceGeneration == event.sourceGeneration
             && row.token == event.damageEntityLifetime.token) {
             row.withheld = true;
@@ -381,7 +381,7 @@ push_source_damage_edges(RuntimeInstance& instance,
         return;
     }
     // An entity the registry no longer lists is simulated by no one, so its row frees for others.
-    for (auto& row : instance.entityDamageObservations) {
+    for (auto& row : instance.entitySourceDamageObservations) {
         if (row.used && row.sourceGeneration == generation && !row.listed) {
             row = {};
         }

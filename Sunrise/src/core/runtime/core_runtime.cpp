@@ -57,19 +57,7 @@ constexpr std::wstring_view kInstalledPackagesDirectory = L"packages";
     }
     return state::investment::store::bind_identity(
                state::account::platform::declared_account_soid(settings::get().steam.user.steamId))
-           && state::investment::store::validate()
-           && state::initialize(module, settings::get().initialActivityDefaults);
-}
-
-/** Copies the live public installed-content fingerprint without retaining State-owned memory. */
-[[nodiscard]] bool copy_content_fingerprint(void* opaque,
-                                            const state::content_manifest::View& view) noexcept {
-    if (opaque == nullptr) {
-        return false;
-    }
-    auto& output = *static_cast<state::activity_sdk::identity::Digest*>(opaque);
-    std::copy(view.buildFingerprint.begin(), view.buildFingerprint.end(), output.begin());
-    return state::activity_sdk::identity::valid(output);
+           && state::investment::store::validate();
 }
 
 /**
@@ -223,9 +211,12 @@ initialize_mods(void* module, std::wstring_view game, std::wstring_view packages
     }
     const HMODULE process = GetModuleHandleW(nullptr);
     path::Buffer packages;
-    const bool located = process != nullptr && path::module_directory(process, packages)
-                         && path::append(packages, kInstalledPackagesDirectory);
-    if (!located) {
+    // The module directory keeps its trailing separator; the game folder view drops it.
+    const bool resolved = process != nullptr && path::module_directory(process, packages);
+    const std::size_t gameLength = resolved ? packages.length - 1 : 0;
+    if (!resolved || !path::append(packages, kInstalledPackagesDirectory)
+        || !state::content_manifest::initialize(
+            module, std::wstring_view(packages.chars.data(), packages.length))) {
         log::write(log::Channel::core,
                    log::Level::error,
                    "ev=initialize stage=content_manifest result=fail");

@@ -9,6 +9,7 @@
 #include "../../../core/logging/log.h"
 #include "../../../middleware/encoding/byte_order.h"
 #include "../../../middleware/secure_channel/runtime.h"
+#include "../../../middleware/web_service/messages/opcode206.h"
 #include "../../../state/account/public_profiles.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
 #include "../../../state/activity/fireteam.h"

@@ -516,12 +516,14 @@ Status fire_trigger_reserved(const sdk::BoundView& view,
                   prepared.generatedRosterGroup,
                   prepared.effectiveRegion,
                   prepared.activityClientGeneration,
-                  &reservation)
+                  &reservation,
+                  enabled)
             : server::bap::request_activity_type31_override(view.binding,
                                                             prepared.target,
                                                             prepared.effectiveRegion,
                                                             prepared.activityClientGeneration,
-                                                            &reservation);
+                                                            &reservation,
+                                                            enabled);
     if (queued) {
         return Status::queued;
     }

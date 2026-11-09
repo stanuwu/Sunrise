@@ -199,6 +199,12 @@ struct MembershipState final {
     std::int32_t bubble{kMinimumRefreshBubble};
     /** Membership revision that refresh said the client had applied. */
     std::uint32_t bubbleRevision{kAbsentRevision};
+    /** Region the attached mission program declared as its initial state; -1 when none. */
+    std::int32_t declaredInitialRegion{kAbsentRegionIndex};
+    /** Spawn set the attached mission program declared with that state; zero when none. */
+    std::uint32_t declaredSpawnSetHash{};
+    /** The mission program holds the spawn: the player has no body until it releases. */
+    bool programSpawnHold{};
     std::uint32_t revision{};
     /** Stable within one session; a world replacement changes it to clear the client table. */
     std::uint32_t epoch{kStableEpoch};

@@ -300,9 +300,8 @@ bool consume(std::span<const std::byte> request,
         return false;
     }
     if (message.opcode == middleware::web_service::messages::opcode702::kOpcode) {
-        if (!note_character_writeback(message, presentation, outcome)) {
-            return false;
-        }
+        // A write-back the server cannot read is still answered; no reply drops the connection.
+        static_cast<void>(note_character_writeback(message, presentation, outcome));
     }
     if (message.opcode == middleware::web_service::messages::opcode205::kOpcode) {
         state::InvestmentState investment{};
@@ -335,13 +334,23 @@ bool consume(std::span<const std::byte> request,
         return true;
     }
 
-    if (message.opcode == middleware::web_service::messages::opcode501::kOpcode) {
-        // Returns a SOID family three already publishes. The request body is not parsed.
-        const std::uint64_t characterSoid =
-            state::account::selected_character_soid(state::bound_account_snapshot());
-        return middleware::web_service::messages::opcode501::encode_response(
-                   message, characterSoid, response, written)
-               || encode_echo(message, response, written);
+    if (message.opcode == middleware::web_service::messages::opcode501::kOpcode
+        || message.opcode == middleware::web_service::messages::opcode502::kOpcode) {
+        if (message.opcode == middleware::web_service::messages::opcode501::kOpcode) {
+            create_character(message, outcome);
+        } else {
+            delete_character(message, outcome);
+        }
+        // The caller re-encodes a change with the revision that publishes it.
+        if (encode_roster_reply(message,
+                                middleware::web_service::kNoFamily4Publication,
+                                outcome,
+                                response,
+                                written)) {
+            return true;
+        }
+        // A saved change must not outlive a missing reply; false makes the caller drop it.
+        return !outcome.hasRosterChange && encode_echo(message, response, written);
     }
 
     // The artifact vendor is answered here. Every other vendor purchase falls through to the

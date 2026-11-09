@@ -230,8 +230,11 @@ __declspec(noinline) void invoke_sync(void* component) noexcept {
     (void)next(static_cast<std::byte*>(component), flags.data());
 }
 
-/** Detaches both teleport hooks. */
+/** Detaches both teleport hooks once Studio observers and every hook caller have finished. */
 bool uninstall_locked() noexcept {
+    if (!client::diagnostics::studio::close()) {
+        return false;
+    }
     if (!g_installed.exchange(false, std::memory_order_acq_rel)) {
         return true;
     }
@@ -240,7 +243,7 @@ bool uninstall_locked() noexcept {
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&physics_sync)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&invoke_sync)},
     };
-    if (hooking::detour::uninstall(g_handles, entries, &idle)
+    if (hooking::detour::uninstall(g_handles, entries, {}, &idle)
         != hooking::detour::UninstallResult::removed) {
         g_installed.store(true, std::memory_order_release);
         return false;

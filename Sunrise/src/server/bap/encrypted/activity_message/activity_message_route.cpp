@@ -284,6 +284,12 @@ void complete_snapshot_host_session(const ActivityClientBinding& binding) noexce
     plan.joinCharacterSoid = parsed.characterSoid;
     plan.delivery = Delivery::joinNotifications;
     plan.mutationDomain = MutationDomain::entitySlots;
+    // Keep the upstream public-membership switch effective for the co-op initial burst too.
+    // Admission and native identity still commit; only the unsolicited membership is withheld.
+    if (plan.bindingIntent == BindingIntent::publicTarget
+        && !core::settings::get().server.activation.activityPublicMembership) {
+        return true;
+    }
     // Read, never committed: the domain above is what the commit acts on. Every shared join
     // takes its body from this join's own mutation, so the member the client recognises as the
     // local player is its own row in the session the envelope names. Copying the private

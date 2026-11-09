@@ -33,11 +33,6 @@ constexpr std::uint16_t kDamageRevisionOrdinal = 2;
 constexpr std::uint16_t kSceneTokenOrdinal = 0;
 /** Root ordinal of the authored scene's completion latch. A zero-width boolean. */
 constexpr std::uint16_t kSceneCompletionOrdinal = 1;
-/** The block's ordinal 1 is its one-bit client flag, which separates it from the task list. */
-constexpr std::uint16_t kObjectiveBlockFlagOrdinal = 1;
-constexpr std::uint8_t kObjectiveBlockFlagWidth = 1;
-/** The client clamps a task counter here, so nothing above it is reachable. */
-constexpr std::int32_t kObjectiveTaskCountLimit = 80;
 /** Room for one squad takeover's log fields: two keys, two generations and two flags. */
 constexpr std::size_t kSquadTakeoverFieldCapacity = 128;
 
@@ -73,31 +68,13 @@ sense_value(std::span<const sense_values::DecodedValue> body,
     return value != nullptr && value->present ? static_cast<std::int32_t>(value->signedValue) : 0;
 }
 
-/** @return The identity every derived Sense edge carries. */
-[[nodiscard]] host::Event sense_edge_event(const RuntimeInstance& instance,
-                                           const host::SenseObservation& observation) noexcept {
-    host::Event event{};
-    event.binding = instance.view.binding;
-    event.sequence = observation.sequence;
-    event.tick = observation.tick;
-    event.sourceGeneration = observation.sourceGeneration;
-    event.missionSequence = instance.lastMissionSequence;
-    event.firstRegistryKey = observation.key.registryKey;
-    event.firstSlotIndex = observation.key.slotIndex;
-    event.firstSlotType = observation.key.slotType;
-    event.slotObjectTag = observation.key.objectTag;
-    event.slotSenseSchema = observation.key.senseSchema;
-    return event;
-}
-
-/**
- * @return The identity a shared simulation edge carries. Its report came from the link that
- * simulates the target, but Lua and `eligible_event` read shared simulation as the route's input.
- */
-[[nodiscard]] host::Event shared_edge_event(const RuntimeInstance& instance,
-                                            const host::SenseObservation& observation) noexcept {
-    host::Event event = sense_edge_event(instance, observation);
-    event.sourceGeneration = instance.view.activityClientGeneration;
+/** @return A squad edge carrying the squad's retained spawn generation. */
+[[nodiscard]] host::Event squad_edge_event(const RuntimeInstance& instance,
+                                           const host::SenseObservation& observation,
+                                           const SquadObservation& squad) noexcept {
+    host::Event event = shared_edge_event(instance, observation);
+    event.squadSpawnGeneration = squad.spawnGeneration;
+    event.squadHasSpawnGeneration = squad.hasSpawnGeneration;
     return event;
 }
 
@@ -157,12 +134,15 @@ template <typename Key>
 /**
  * Raises one triggerState event for a report its tracker does not drop. The event only informs;
  * entered and exited follow the level alone.
+ * @param expectedSource The link whose levels the slot holds: a member's own link for a member's
+ * row, else the program's route.
  * @param event The report's level, already filled in.
  */
 void push_trigger_state(RuntimeInstance& instance,
                         const host::SenseObservationSnapshot& sense,
                         const host::SenseObservation& observation,
                         TriggerOccupancy& slot,
+                        std::uint64_t expectedSource,
                         host::Event event) noexcept {
     trigger_observation::Snapshot level{};
     const bool valid =
@@ -171,7 +151,7 @@ void push_trigger_state(RuntimeInstance& instance,
                                          .subspan(observation.firstValue, observation.valueCount),
                                      level);
     const auto result = slot.tracker.observe(valid ? &level : nullptr,
-                                             instance.view.activityClientGeneration,
+                                             expectedSource,
                                              observation.sourceGeneration,
                                              observation.sequence,
                                              observation.generationPlusOne,
@@ -194,7 +174,7 @@ void push_trigger_state(RuntimeInstance& instance,
     event.binding = instance.view.binding;
     event.sequence = observation.sequence;
     event.tick = observation.tick;
-    event.sourceGeneration = instance.view.activityClientGeneration;
+    event.sourceGeneration = observation.sourceGeneration;
     event.missionSequence = instance.lastMissionSequence;
     event.firstRegistryKey = observation.key.registryKey;
     event.firstSlotIndex = observation.key.slotIndex;
@@ -203,6 +183,14 @@ void push_trigger_state(RuntimeInstance& instance,
     event.slotSenseSchema = observation.key.senseSchema;
     event.senseGenerationPlusOne = observation.generationPlusOne;
     event.hasSenseGeneration = observation.hasGeneration;
+    return event;
+}
+
+/** @return A shared simulation edge, which Lua and eligible_event read as the route's input. */
+host::Event shared_edge_event(const RuntimeInstance& instance,
+                              const host::SenseObservation& observation) noexcept {
+    host::Event event = sense_edge_event(instance, observation);
+    event.sourceGeneration = instance.view.activityClientGeneration;
     return event;
 }
 
@@ -258,7 +246,11 @@ void push_trigger_edges(RuntimeInstance& instance,
         event.triggerAll = sense_flag(body, root, trigger::kAllOrdinal);
         event.triggerCount = sense_number(body, root, trigger::kCountOrdinal);
         event.triggerValue = sense_number(body, root, trigger::kThresholdOrdinal);
-        push_trigger_state(instance, sense, observation, *slot, event);
+        // Each member's volume levels are its own, so its tracker expects its own link.
+        const std::uint64_t expectedSource = member != nullptr
+                                                 ? member->life.sourceGeneration
+                                                 : instance.view.activityClientGeneration;
+        push_trigger_state(instance, sense, observation, *slot, expectedSource, event);
         if (first || slot->occupied == occupied) {
             continue;
         }
@@ -413,8 +405,16 @@ void push_damage_edges(RuntimeInstance& instance,
 
 namespace {
 
-/** Copies one object level into the fields its object events carry. */
-void copy_object_level(const ObjectInteractionLevel& level, host::Event& event) noexcept {
+/**
+ * Copies one object level into the fields its object events carry.
+ * @param before The row's level before this report, which says whether it is a first report.
+ */
+void copy_object_level(const ObjectInteractionLevel& before,
+                       const ObjectInteractionLevel& level,
+                       host::Event& event) noexcept {
+    event.initialObservation = !before.stateKnown || before.generation != level.generation;
+    event.objectEntryIndex = level.entryIndex;
+    event.objectSpawnMask = level.spawnMask;
     event.objectGeneration = level.generation;
     event.objectPresent = level.present;
     // The alive lane carries Sense ordinal 1, which the script reads as interaction_open.
@@ -451,7 +451,7 @@ void push_object_state_edge(RuntimeInstance& instance,
         return;
     }
     host::Event event = shared_edge_event(instance, observation);
-    copy_object_level(level, event);
+    copy_object_level(before, level, event);
     event.kind = host::EventKind::objectState;
     std::array<char, 128> details{};
     const int written = std::snprintf(details.data(),
@@ -496,13 +496,16 @@ void push_object_interaction_edges(RuntimeInstance& instance,
         ObjectInteractionObservation* const slot = find_slot_row(
             member ? member->objectInteractionObservations : instance.objectInteractionObservations,
             observation.key);
-        if (slot == nullptr
-            || !update_object_interaction(
+        if (slot == nullptr) {
+            continue;
+        }
+        const ObjectInteractionLevel before = slot->level;
+        if (!update_object_interaction(
                 slot->level, observation_values(observation, sense), observation.key.schemaRow)) {
             continue;
         }
         host::Event event = sense_edge_event(instance, observation);
-        copy_object_level(slot->level, event);
+        copy_object_level(before, slot->level, event);
         event.kind = host::EventKind::objectInteracted;
         push_script_event(instance, event);
     }
@@ -588,6 +591,8 @@ struct SquadLevels final {
     std::uint8_t countLength{};
     bool removal{};
     bool costsChanged{};
+    /** The report carried an alive count. */
+    bool hasAlive{};
     /** False when the report restated no level the row keeps. */
     bool reported{};
 };
@@ -600,7 +605,7 @@ struct SquadLevels final {
     levels.costsChanged = update_squad_objective_costs(row.objectiveCosts, body, root);
     // Cost-only deltas retain combat counts; they must never manufacture a death.
     levels.alive = row.aliveCount;
-    const bool hasAlive = read_squad_alive(body, root, levels.alive);
+    levels.hasAlive = read_squad_alive(body, root, levels.alive);
     levels.removal = sense_flag(body, root, kSquadRemovalOrdinal);
     levels.counts = row.slotCounts;
     levels.countLength = row.slotCountLength;
@@ -610,8 +615,27 @@ struct SquadLevels final {
         levels.counts = incomingCounts;
         levels.countLength = incomingLength;
     }
-    levels.reported = hasAlive || levels.costsChanged || incomingLength != 0;
+    levels.reported = levels.hasAlive || levels.costsChanged || incomingLength != 0;
     return levels;
+}
+
+/**
+ * Retains what a reported squad says about its own placement: whether an alive count was ever
+ * reported, and the spawn generation it echoes. An absent spawn generation keeps the last one
+ * reported, like the other retained levels.
+ */
+void retain_squad_identity(SquadObservation& row,
+                           std::span<const sense_values::DecodedValue> body,
+                           std::uint32_t root,
+                           bool hasAlive) noexcept {
+    row.populationKnown = row.populationKnown || hasAlive;
+    const sense_values::DecodedValue* const spawn =
+        sense_value(body, root, kSquadSpawnGenerationOrdinal);
+    if (spawn != nullptr && spawn->present && spawn->signedValue >= 0
+        && spawn->signedValue <= kMaximumCounter) {
+        row.spawnGeneration = static_cast<std::int32_t>(spawn->signedValue);
+        row.hasSpawnGeneration = true;
+    }
 }
 
 void store_squad_levels(SquadObservation& row, const SquadLevels& levels) noexcept {
@@ -736,6 +760,7 @@ void shadow_squad_report(RuntimeInstance& instance,
         return;
     }
     shadow->used = true;
+    retain_squad_identity(*shadow, body, observation.key.schemaRow, levels.hasAlive);
     store_squad_levels(*shadow, levels);
 }
 
@@ -856,6 +881,7 @@ void push_squad_edges(RuntimeInstance& instance,
         // Levels taken over at a re-pin are a baseline, so they raise no spawn or death.
         const bool first = rebaselined || !squad->used;
         squad->used = true;
+        retain_squad_identity(*squad, body, root, levels.hasAlive);
         const std::int32_t previousAlive = first ? 0 : published.aliveCount;
         const bool changed = first || squad->objectiveCosts != published.objectiveCosts
                              || published.aliveCount != levels.alive
@@ -866,15 +892,17 @@ void push_squad_edges(RuntimeInstance& instance,
             store_squad_levels(*squad, levels);
             continue;
         }
-        host::Event state = shared_edge_event(instance, observation);
+        host::Event state = squad_edge_event(instance, observation, *squad);
         state.squadObjectiveCosts = squad->objectiveCosts.values;
         state.squadObjectiveCostMask = squad->objectiveCosts.known;
         state.squadObjectiveRevision = squad->objectiveCosts.revision;
         state.squadAliveCount = levels.alive;
         state.squadPreviousAliveCount = previousAlive;
+        state.squadPopulationAvailable = squad->populationKnown;
         state.squadRemovalFlag = levels.removal;
         state.squadSlotCounts = levels.counts;
         state.squadSlotCountLength = levels.countLength;
+        state.initialObservation = first;
         state.kind = host::EventKind::squadState;
         if (instance.programStatus == ProgramStatus::loaded) {
             if (!qualify_objective_costs(instance, state)) {
@@ -891,7 +919,7 @@ void push_squad_edges(RuntimeInstance& instance,
             if (levels.counts[slot] <= previous) {
                 continue;
             }
-            host::Event spawned = shared_edge_event(instance, observation);
+            host::Event spawned = squad_edge_event(instance, observation, *squad);
             spawned.squadSlotOrdinal = slot;
             spawned.squadSlotValue = levels.counts[slot];
             spawned.squadPreviousSlotValue = previous;
@@ -901,9 +929,10 @@ void push_squad_edges(RuntimeInstance& instance,
             }
         }
         if (!first && levels.alive < published.aliveCount) {
-            host::Event died = shared_edge_event(instance, observation);
+            host::Event died = squad_edge_event(instance, observation, *squad);
             died.squadAliveCount = levels.alive;
             died.squadPreviousAliveCount = published.aliveCount;
+            died.squadRemovalFlag = levels.removal;
             died.kind = host::EventKind::entityDied;
             if (instance.programStatus == ProgramStatus::loaded) {
                 push_script_event(instance, died);
@@ -1072,59 +1101,6 @@ void push_scene_edges(RuntimeInstance& instance,
         event.sceneActivationToken = sense_number(body, root, kSceneTokenOrdinal);
         event.kind = host::EventKind::sceneFinished;
         push_script_event(instance, event);
-    }
-}
-
-/**
- * Raises one event per watched objective task counter that rose.
- * The client owns the counter and raises it on an actor teardown, so a rise is the only progress
- * signal. A sensor seen for the first time records its counters and raises nothing.
- */
-void push_objective_edges(RuntimeInstance& instance,
-                          const host::SenseObservationSnapshot& sense) noexcept {
-    for (std::size_t index = 0; index < sense.observationCount; ++index) {
-        const host::SenseObservation& observation = sense.observations[index];
-        if (observation.key.slotType != format::kObjectiveSlotType
-            || observation.key.senseSchema != format::kObjectiveSenseSchema
-            || observation.firstValue + observation.valueCount > sense.valueCount
-            || !admitted_report(instance, observation.key, sense.sourceGeneration)) {
-            continue;
-        }
-        const std::span<const sense_values::DecodedValue> body(
-            &sense.values[observation.firstValue], observation.valueCount);
-        ObjectiveCounters counters{};
-        objective_task_counters(body, observation.key.schemaRow, counters);
-        // An unchanged sensor sends an empty delta, which must not read as every counter at zero.
-        if (counters.blocks == 0) {
-            continue;
-        }
-        ObjectiveObservation* const watched = find_objective(instance, observation.key);
-        if (watched == nullptr) {
-            continue;
-        }
-        claim_row(*watched, sense.sourceGeneration, false);
-        const bool first = !watched->used;
-        watched->used = true;
-        for (std::uint8_t block = 0; block < counters.blocks; ++block) {
-            for (std::size_t task = 0; task < kObjectiveTaskCapacity; ++task) {
-                if (!counters.present[block][task]) {
-                    continue;
-                }
-                const std::uint8_t value = counters.value[block][task];
-                const std::uint8_t previous = watched->counters[block][task];
-                watched->counters[block][task] = value;
-                if (first || value <= previous) {
-                    continue;
-                }
-                host::Event event = shared_edge_event(instance, observation);
-                event.objectiveOrdinal = block;
-                event.objectiveTaskOrdinal = static_cast<std::uint8_t>(task);
-                event.objectiveTaskCount = value;
-                event.objectivePreviousTaskCount = previous;
-                event.kind = host::EventKind::objectiveProgress;
-                push_script_event(instance, event);
-            }
-        }
     }
 }
 

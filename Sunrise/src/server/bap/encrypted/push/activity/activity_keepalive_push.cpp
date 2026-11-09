@@ -75,12 +75,6 @@ void drive_cinematic_hold(Session& session, std::uint64_t now) noexcept {
 }
 
 /**
- * A roster owed only for a released bubble's grant waits this long before it is built again, so
- * a body that cannot carry the grant is not rebuilt on every pump. A roster owed for anything
- * else still carries the grant at once.
- */
-constexpr std::uint64_t kGrantRetryIntervalMs = 250;
-/**
  * Retry cadence for a membership body held while its advertisement is still being allocated.
  * The allocation lands in the next service slice, so this is short. Leaving the keepalive due
  * instead would rebuild and send a whole frame on every pump.
@@ -162,13 +156,18 @@ constexpr std::uint32_t kCurrentRevision = 0;
         grant);
 }
 
-/** Preserves a pending incident's backoff until it succeeds or disappears. */
-void update_incident_retry(
-    Session& session, std::uint64_t now, bool hasPending, bool due, bool transportStaged) noexcept {
-    if (!hasPending || (due && transportStaged)) {
-        session.activityIncidentRetryDueTick = 0;
-    } else if (due) {
-        session.activityIncidentRetryDueTick = now + kIncidentRetryIntervalMs;
+/**
+ * Tests whether a pending placed reset can carry its purge on a roster built now.
+ * The roster refuses an unsolicited body without that purge.
+ * @param session Connection whose roster region and identities are read.
+ * @return True when the purge prepares for the bubble the roster names.
+ */
+[[nodiscard]] bool placed_purge_ready(const Session& session) noexcept {
+    // The region the roster builder resolves, so the purge is prepared for the same bubble.
+    const EffectiveRegion region =
+        selected_effective_region(session, effective_region(session.activity.session).arrival);
+    if (region.index < 0) {
+        return false;
     }
     server::gameplay::squad_entity_retirement::RetirementPlan plan{};
     return server::gameplay::squad_entity_retirement::prepare_retirement(
@@ -211,12 +210,16 @@ bool consume_activity_keepalive(Session& session,
     // delivery debt behind the idle keepalive or another connection's acknowledgement.
     const bool soloPublic = session.activity.role == ActivityClientRole::publicTarget
                             && !core::settings::hosts_session();
+    const bool membershipEnabled =
+        session.activity.role != ActivityClientRole::publicTarget
+        || core::settings::get().server.activation.activityPublicMembership;
     const auto& membershipBinding = session.activity.session;
     const auto membershipRevision =
-        active && !soloPublic ? state::activity::membership::current_revision(membershipBinding)
-                              : state::activity::membership::kAbsentRevision;
+        active && membershipEnabled && !soloPublic
+            ? state::activity::membership::current_revision(membershipBinding)
+            : state::activity::membership::kAbsentRevision;
     const bool membershipOwed =
-        active
+        active && membershipEnabled
         && connection_owes_membership(session, membershipBinding.sessionId, membershipRevision);
     // A body held for an advertisement that is still being allocated is owed but not buildable,
     // and the advertisement owns that wait: it lands in the next service slice with the debt
@@ -239,38 +242,52 @@ bool consume_activity_keepalive(Session& session,
     const bool authorityQueryDue = active
                                    && authority_query::pending(session.activityAuthorityQuery,
                                                                session.activity.bindingGeneration);
-    server::activity::host::AuthState hostState{};
-    const bool hostStateRead =
+    // No roster can be built before the client's patch epoch for this binding arrives.
+    const bool epochSeen =
         active && session.activityPatchEpoch.seen
-        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
-        && server::activity::host::auth_state(session.activity.session, hostState);
-    const bool hostStateDue = hostStateRead && hostState.revision != 0
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration;
+    const bool isPrivate = session.activity.role == ActivityClientRole::privateCurrent;
+    // Readiness is the link's own committed region report, never a local web-service report.
+    const bool regionReady = active && client_region_ready(session, nullptr);
+    // The roster defers an unsolicited body while the private client loads. Its region report is
+    // answered instead, so no standalone roster is due until then.
+    const bool rosterReady = epochSeen && (!isPrivate || regionReady);
+    // While a placed reset is pending, an unsolicited roster leaves only with its purge.
+    const bool placedPending =
+        epochSeen
+        && server::gameplay::squad_entity_retirement::placed_transition_pending(
+            session.activity.session, session.activity.bindingGeneration);
+    const bool placedPurgeReady = rosterReady && placedPending && placed_purge_ready(session);
+    const bool rosterOpen = rosterReady && (!placedPending || placedPurgeReady);
+    server::activity::host::AuthState hostState{};
+    const bool hostKnown = rosterOpen
+                           && server::activity::host::auth_state(session.activity.session,
+                                                                 session.activity.bindingGeneration,
+                                                                 hostState);
+    // This link could not build a body for the current Host revision. Only a new one retries it.
+    const bool hostRefused = hostKnown && hostState.refused;
+    // A committed Activity Host revision the delivered roster lacks.
+    const bool hostStateDue = hostKnown && !hostRefused && hostState.revision != 0
                               && hostState.revision != session.activityHostStateRevision;
-    // A newer retained estate owes this private link a roster: a body its client applies joined
-    // it. The push skips the body when the client already holds it and moves the cursor anyway.
-    const bool estateDue = hostStateRead
-                           && session.activity.role == ActivityClientRole::privateCurrent
+    // A body another link staged that this private client applies itself is in a newer estate.
+    const bool estateDue = hostKnown && !hostRefused && isPrivate
                            && hostState.estateRevision != session.activityEstateRevision;
     server::activity::host::PendingScriptableOverride pendingScriptable{};
     const bool scriptableDue =
-        active && session.activityPatchEpoch.seen
-        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
-        && now >= session.activityRosterDueTick
+        rosterOpen
         && activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
                == 1
         && server::activity::host::pending_scriptable_override_for_activity_client(
             session.activity.session, session.activity.bindingGeneration, pendingScriptable);
+    // An operator incident waits for the arrival report. Its body always fits an empty frame, so a
+    // refused attempt only lost its slot and the next push carries it.
+    const bool incidentClientReady = regionReady;
     server::activity::host::PendingIncident pendingIncident{};
-    const bool hasPendingIncident =
-        active
-        && server::activity::host::pending_incident(session.activity.session, pendingIncident);
-    const bool incidentClientReady = client_region_ready(session, nullptr);
     const bool incidentDue =
         active && incidentClientReady
         && server::activity::host::pending_incident(session.activity.session, pendingIncident);
-    // The arrival report (ws 702 world state 8) is answered by one roster built after it, on each
-    // link whose delivered body still holds the wait bit. That answer raises `entered`. A program
-    // spawn hold keeps the bit set, so the answer is due when the program releases it.
+    // A committed region report is answered by one roster built after it, on each link whose
+    // delivered body still holds the wait bit. A program spawn hold keeps the bit set.
     const bool arrivalDue =
         rosterOpen && !hostRefused && session.activityRosterAwaitClientSync && incidentClientReady
         && !state::activity::membership::program_spawn_hold(session.activity.source.sessionId);
@@ -311,7 +328,12 @@ bool consume_activity_keepalive(Session& session,
             arrivalChanged = true;
             arrivalRegion = arrival.index;
             if (!private_region(session, arrival.index)) {
-                server::gameplay::complete_host_session(session.activity.session, arrival.index);
+                server::gameplay::complete_host_session(
+                    session.activity.session,
+                    arrival.index,
+                    public_region(session.activity.session,
+                                  session.activity.bindingGeneration,
+                                  arrival.index));
             }
             core::log::writef(core::log::Channel::server,
                               core::log::Level::info,
@@ -347,15 +369,12 @@ bool consume_activity_keepalive(Session& session,
             || state::activity::membership::hard_wipe_start_unseen(
                 session.activity.session.sessionId))
         && state::activity::membership::acknowledged(session.activity.session.sessionId);
-    const bool placedRetirementDue =
-        active && session.activityPatchEpoch.seen
-        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
+    const bool retirementReady =
+        rosterOpen && !hostRefused
         && activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
                == 1;
-    bool retirementDue = retirementReady
-                         && server::gameplay::squad_entity_retirement::placed_transition_pending(
-                             session.activity.session, session.activity.bindingGeneration);
-    if (retirementReady && !retirementDue) {
+    bool retirementDue = retirementReady && placedPurgeReady;
+    if (retirementReady && !placedPending) {
         const auto region = effective_region(session.activity.session);
         const auto bubble =
             region.index >= 0
@@ -372,32 +391,24 @@ bool consume_activity_keepalive(Session& session,
         }
     }
     const bool missionAllocationDue =
-        active && session.activityPatchEpoch.seen
-        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
-        && mission_entity_allocation_owed(session, false);
+        rosterOpen && !hostRefused && mission_entity_allocation_owed(session, false);
     // A bubble its holder abdicated is owed to a client still inside it, and that client's link
     // may owe nothing else, so the grant alone schedules the roster that carries it. A sole link
     // renews on its own region reports. The question is the one the roster asks, so a roster that
-    // would refuse the grant is never scheduled for it.
+    // would refuse the grant is never scheduled for it. A refused body waits for a new revision.
     const bool grantDue =
-        active && session.activityPatchEpoch.seen
-        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
-        && now >= session.activityGrantRetryDueTick
+        rosterOpen && !hostRefused
         && activity_link_count_locked(session.activity.session)
                >= state::activity::bubble_authority::kSharedLinkCount
         && owes_shared_grant(session, incidentClientReady);
     if (!active
         || (!keepaliveDue && !regionChanged && !hostStateDue && !estateDue && !scriptableDue
             && !incidentDue && !authorityResetDue && !authorityQueryDue && !hostTeleportDue
-            && !retirementDue && !arrivalDue && !membershipDue && !missionAllocationDue
-            && !grantDue)) {
+            && !retirementDue && !arrivalDue && !membershipDue && !missionAllocationDue && !grantDue
+            && !missionSeedDue)) {
         return false;
     }
     touchesScratch = true;
-    if (grantDue) {
-        // A delivered grant ends the debt, so the tick only spaces out the attempts that fail.
-        session.activityGrantRetryDueTick = now + kGrantRetryIntervalMs;
-    }
 
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;
@@ -406,14 +417,12 @@ bool consume_activity_keepalive(Session& session,
     // Held until the frame reaches the caller. Encoding alone does not spend the region trigger.
     std::int32_t stagedAdvertisedRegion = -1;
     bool stagedAdvertisedPrivate = false;
-    // A standalone roster carries a load burst or one pending Activity Host state revision. An
-    // armed host teleport takes the full path below instead, because it commits a membership
-    // republish.
+    // Only a changed Host value or mission state, retirement or the arrival answer can publish a
+    // standalone roster.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue && !membershipDue) {
-        bool appendedRoster = false;
         if (hostStateDue || estateDue || scriptableDue || retirementDue || arrivalDue
-            || missionAllocationDue || grantDue) {
-            appendedRoster = append_roster_notification(
+            || missionAllocationDue || grantDue || missionSeedDue) {
+            published = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
         }
         const bool appendedIncident =
@@ -473,10 +482,9 @@ bool consume_activity_keepalive(Session& session,
                                  && state::activity::membership::prepare_refresh(
                                      membershipSessionId, kCurrentRevision, kNoBubble, staged)
                                  && staged.hasSnapshot;
-        // Foreign membership is the other client's only player create/destroy source, so it is
-        // always published once owed.
+        // The upstream switch controls public membership, including each owed co-op revision.
         const bool owesMembership =
-            hasSnapshot
+            membershipEnabled && hasSnapshot
             && (soloPublic
                     ? session.activityMembershipSentGeneration != session.activity.bindingGeneration
                     : connection_owes_membership(
@@ -490,7 +498,8 @@ bool consume_activity_keepalive(Session& session,
             published = appended || published;
             SecureZeroMemory(&plan, sizeof plan);
         }
-        if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue || grantDue) {
+        if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue || grantDue
+            || missionSeedDue) {
             published = append_roster_notification(
                             session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                         || published;
@@ -659,7 +668,7 @@ bool consume_activity_keepalive(Session& session,
     const std::uint32_t reportedRevision = refresh.snapshot.revision;
     SecureZeroMemory(&refresh, sizeof refresh);
     if (appendedMembership || hostStateDue || estateDue || scriptableDue || retirementDue
-        || arrivalDue || grantDue) {
+        || arrivalDue || grantDue || missionSeedDue) {
         published = append_roster_notification(
                         session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                     || published;

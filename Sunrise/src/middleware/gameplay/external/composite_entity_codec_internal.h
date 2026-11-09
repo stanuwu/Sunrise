@@ -6,6 +6,8 @@
 #include <cstring>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80804b.h"
+#include "../../content/packages/schema/generated/tag_classes_80804c.h"
 #include "../../encoding/bit_raw.h"
 #include "composite_entity_codec.h"
 
@@ -19,9 +21,11 @@ namespace bits = middleware::encoding::bits;
 inline constexpr std::uint32_t kMirrorIdentity = 0x4345324DU;
 
 /** Compiled damage-component decode plan, from the generated SDK decode plans for this build. */
-inline constexpr std::uint32_t kCombatantDamageComponentPlan = 0x80804BEEU;
+inline constexpr std::uint32_t kCombatantDamageComponentPlan =
+    middleware::content::packages::schema::generated::UnknownDamageComponent::kClass;
 /** Pool-walk schema inside the damage-component plan; each walk carries one pool level. */
-inline constexpr std::uint32_t kCombatantDamagePoolSchema = 0x80804C5CU;
+inline constexpr std::uint32_t kCombatantDamagePoolSchema =
+    middleware::content::packages::schema::generated::C80804c5c::kClass;
 
 /** Private header distinguishes retained mirror bodies from other payload layouts. */
 struct MirrorHeader final {

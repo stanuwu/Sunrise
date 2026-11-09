@@ -201,9 +201,6 @@ namespace account {
 
 [[nodiscard]] bool valid(const AccountState& state) noexcept;
 
-/** Checks settings-authored State before runtime-only profile stack SOIDs are assigned. */
-[[nodiscard]] bool valid_authored(const AccountState& state) noexcept;
-
 /** Validates public character data without requiring another account's private preferences. */
 [[nodiscard]] bool valid_public(const AccountState& state) noexcept;
 
