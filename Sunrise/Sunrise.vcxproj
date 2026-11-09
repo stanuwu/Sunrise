@@ -1159,6 +1159,7 @@
       <ClCompile Include="src\middleware\bap\activity_message\activity_incident_parser.cpp" />
       <ClCompile Include="src\middleware\bap\activity_message\activity_cinematic_incident_codec.cpp" />
       <ClCompile Include="src\middleware\bap\activity_message\activity_player_trigger_incident_codec.cpp" />
+      <ClCompile Include="src\middleware\bap\activity_message\activity_kill_incident_codec.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_entity_slots_encoder.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\wire_schema\activity_communication_route.cpp" />
     <ClCompile Include="src\middleware\bap\activity_message\wire_schema\activity_wire_codec.cpp" />
@@ -2581,6 +2582,7 @@
     <ClInclude Include="src\middleware\bap\activity_message\client_authoritative_data.h" />
     <ClInclude Include="src\middleware\bap\activity_message\cinematic_incident.h" />
     <ClInclude Include="src\middleware\bap\activity_message\player_trigger_incident.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\kill_incident.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_client_keepalive_validator.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_join_request_parser.h" />
     <ClInclude Include="src\middleware\bap\activity_message\activity_client_identity_parser.h" />
