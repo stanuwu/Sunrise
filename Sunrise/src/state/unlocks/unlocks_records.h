@@ -53,12 +53,21 @@ void republish() noexcept;
 void revoke(std::uint16_t recordIndex) noexcept;
 
 /**
- * Redeems the next completed step of a record that scores per step.
+ * Redeems the next earned step of a record that scores per step. A record with a completion flag
+ * sets it once its last step is redeemed.
  * @param recordIndex Native record row.
  * @param definitionHash Authored hash the claim named, checked against the row.
- * @return False when the row is not an interval record or every step is redeemed.
+ * @return False when the row is not an interval record, every step is redeemed, or the next step
+ *         is not earned.
  */
 [[nodiscard]] bool claim_interval(std::uint16_t recordIndex, std::uint32_t definitionHash) noexcept;
+
+/**
+ * Adds one to the progress every step of an interval record reads.
+ * @param definitionHash Authored record definition hash.
+ * @return Completed when a step becomes earned; already held at the last step or once claimed.
+ */
+[[nodiscard]] ObjectiveAdvance advance_interval(std::uint32_t definitionHash) noexcept;
 
 /**
  * Marks one lore chapter collected.

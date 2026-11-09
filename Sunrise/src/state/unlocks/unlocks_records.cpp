@@ -147,6 +147,55 @@ void ensure_cache() noexcept {
     return flagIndex < table.accountFlags.size() && table.accountFlags[flagIndex] == kFlagSet;
 }
 
+/** One interval record's steps and the cumulative progress value every step reads. */
+struct IntervalLadder {
+    std::uint16_t progressValueIndex{};
+    std::array<catalog::Interval, catalog::kIntervalPerRecordCapacity> steps{};
+};
+
+/**
+ * Resolves an interval record's progress value and steps. Every objective row must read one
+ * shared value; a record with no rows reads the first value of its own run.
+ * @return False when the rows read different values, the progress value is the redeemed count,
+ *         or the steps do not rise.
+ */
+[[nodiscard]] bool resolve_ladder(const Table& table,
+                                  const catalog::Definition& record,
+                                  IntervalLadder& ladder) noexcept {
+    ladder = {};
+    if (record.intervalCount == 0 || record.intervalCount > ladder.steps.size()
+        || record.redeemedCountValueIndex >= table.objectiveValues.size()) {
+        return false;
+    }
+    ladder.progressValueIndex = record.objectiveValueIndex;
+    for (std::uint8_t row = 0; row < record.objectiveCount; ++row) {
+        catalog::Objective objective{};
+        if (!catalog::objective(record, row, objective)) {
+            return false;
+        }
+        const std::uint16_t source = objective.sourceValueIndex != catalog::kUnavailableValueIndex
+                                         ? objective.sourceValueIndex
+                                         : objective.valueIndex;
+        if (row != 0 && source != ladder.progressValueIndex) {
+            return false;
+        }
+        ladder.progressValueIndex = source;
+    }
+    if (ladder.progressValueIndex >= table.objectiveValues.size()
+        || ladder.progressValueIndex == record.redeemedCountValueIndex) {
+        return false;
+    }
+    std::int32_t previous = 0;
+    for (std::uint8_t step = 0; step < record.intervalCount; ++step) {
+        if (!catalog::interval(record, step, ladder.steps[step])
+            || ladder.steps[step].completionValue <= previous) {
+            return false;
+        }
+        previous = ladder.steps[step].completionValue;
+    }
+    return true;
+}
+
 /** @return True when every objective slot of the record reads at or above its threshold. */
 [[nodiscard]] bool complete(const Table& table, const catalog::Definition& record) noexcept {
     if (counter_granted_flag(record.completionFlagIndex)) {
@@ -536,6 +585,64 @@ struct FlagOperation {
     return ObjectiveAdvance::completed;
 }
 
+/**
+ * Redeems the next earned step of an interval record and adds its score. A record with a
+ * completion flag sets it once its last step is redeemed.
+ * @param table Live banks; the caller holds the table lock.
+ * @return False when the record is already complete or its next step is not earned.
+ */
+[[nodiscard]] bool claim_interval_locked(Table& table, const catalog::Definition& record) noexcept {
+    const bool flagged = record.completionFlagIndex != catalog::kUnavailableFlagIndex;
+    IntervalLadder ladder{};
+    if ((flagged
+         && (record.completionFlagIndex >= table.accountFlags.size()
+             || flag_set(table, record.completionFlagIndex)))
+        || !resolve_ladder(table, record, ladder)) {
+        return false;
+    }
+    std::int32_t& redeemed = table.objectiveValues[record.redeemedCountValueIndex];
+    if (redeemed < 0 || redeemed >= record.intervalCount) {
+        return false;
+    }
+    const catalog::Interval& step = ladder.steps[static_cast<std::size_t>(redeemed)];
+    if (table.objectiveValues[ladder.progressValueIndex] < step.completionValue) {
+        return false;
+    }
+    add_score(table, static_cast<std::int32_t>(step.score));
+    ++redeemed;
+    if (flagged && redeemed == record.intervalCount) {
+        table.accountFlags[record.completionFlagIndex] = kFlagSet;
+        publish_derived(table);
+    }
+    return true;
+}
+
+/**
+ * Adds one to the progress every step of an interval record reads, up to its last step.
+ * @param table Live banks; the caller holds the table lock.
+ * @return Completed when a step becomes earned, already held at the last step or once claimed.
+ */
+[[nodiscard]] ObjectiveAdvance advance_interval_locked(Table& table,
+                                                       const catalog::Definition& record) noexcept {
+    IntervalLadder ladder{};
+    if (!resolve_ladder(table, record, ladder)) {
+        return ObjectiveAdvance::unavailable;
+    }
+    std::int32_t& progress = table.objectiveValues[ladder.progressValueIndex];
+    const auto steps = std::span(ladder.steps).first(record.intervalCount);
+    if (flag_set(table, record.completionFlagIndex) || progress >= steps.back().completionValue) {
+        return ObjectiveAdvance::alreadyHeld;
+    }
+    if (progress < 0) {
+        return ObjectiveAdvance::unavailable;
+    }
+    ++progress;
+    const bool earned = std::any_of(steps.begin(), steps.end(), [&](const catalog::Interval& step) {
+        return step.completionValue == progress;
+    });
+    return earned ? ObjectiveAdvance::completed : ObjectiveAdvance::advanced;
+}
+
 } // namespace
 
 /** Replaces the authored lore values with the ones the seeded claims imply. */
@@ -600,34 +707,38 @@ void revoke(std::uint16_t recordIndex) noexcept {
     });
 }
 
-/** Redeems the next completed step of a record that scores per step. */
+/** Redeems the next earned step of a record that scores per step. */
 bool claim_interval(std::uint16_t recordIndex, std::uint32_t definitionHash) noexcept {
     RecordOperation operation{recordIndex, definitionHash, false};
     const bool saved = mutate(&operation, [](void* context, Table& table) noexcept {
         auto& request = *static_cast<RecordOperation*>(context);
         catalog::Definition record{};
-        if (!build_data::find_record_definition(request.recordIndex, record)
-            || record.definitionHash != request.definitionHash
-            || record.intervalCount == 0
-            // An interval record scores per step instead of once, so it carries no flag.
-            || record.completionFlagIndex != catalog::kUnavailableFlagIndex
-            || record.redeemedCountValueIndex == catalog::kUnavailableValueIndex
-            || record.redeemedCountValueIndex >= table.objectiveValues.size()) {
-            return;
-        }
-        std::int32_t& redeemed = table.objectiveValues[record.redeemedCountValueIndex];
-        if (redeemed < 0 || redeemed >= record.intervalCount) {
-            return;
-        }
-        catalog::Interval step{};
-        if (!catalog::interval(record, static_cast<std::size_t>(redeemed), step)) {
-            return;
-        }
-        ++redeemed;
-        add_score(table, static_cast<std::int32_t>(step.score));
-        request.result = true;
+        request.result = build_data::find_record_definition(request.recordIndex, record)
+                         && record.definitionHash == request.definitionHash
+                         && claim_interval_locked(table, record);
     });
     return saved && operation.result;
+}
+
+/** Adds one to the progress of the interval record with one definition hash. */
+ObjectiveAdvance advance_interval(std::uint32_t definitionHash) noexcept {
+    struct HashOperation {
+        std::uint32_t definitionHash{};
+        ObjectiveAdvance advance{ObjectiveAdvance::unavailable};
+    } operation{definitionHash, ObjectiveAdvance::unavailable};
+    const bool saved = mutate(&operation, [](void* context, Table& table) noexcept {
+        auto& request = *static_cast<HashOperation*>(context);
+        const std::size_t rows = catalog::count();
+        for (std::size_t row = 0; row < rows; ++row) {
+            catalog::Definition record{};
+            if (catalog::find(static_cast<std::uint16_t>(row), record)
+                && record.definitionHash == request.definitionHash) {
+                request.advance = advance_interval_locked(table, record);
+                return;
+            }
+        }
+    });
+    return saved ? operation.advance : ObjectiveAdvance::unavailable;
 }
 
 /** Marks one lore chapter collected. */

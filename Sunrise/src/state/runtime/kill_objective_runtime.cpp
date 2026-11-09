@@ -1,8 +1,8 @@
 /**
  * Kill objectives: a kill the selected character's player made advances the per-item objective
- * lanes of the held bounties it meets. The victim's race and the killing source's weapon, ability
- * and precision come from the installed combat taxonomy; the destination, slot and damage type
- * come from the incident.
+ * lanes of the held bounties it meets, and the grenade interval Triumph its grenade counts. The
+ * victim's race and the killing source's weapon, ability and precision come from the installed
+ * combat taxonomy; the destination, slot and damage type come from the incident.
  */
 #include <algorithm>
 #include <array>
@@ -15,6 +15,7 @@
 
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
+#include "../unlocks/unlocks_records.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -135,6 +136,71 @@ constexpr auto kSubclassElements = std::to_array<SubclassElement>({
     {0x686A154AU, Element::arc},
     {0xCF88FEA5U, Element::solar},
     {0xE7BC88B0U, Element::voidDamage},
+});
+
+/** An interval Triumph that counts one class's kills with one grenade. */
+struct GrenadeTriumph {
+    std::uint32_t recordHash{};
+    /** Source label the grenade's final blow carries. */
+    std::uint32_t sourceLabel{};
+    /** Class of the saved character the kill is credited to. */
+    CharacterClass characterClass{};
+};
+
+/** Grenade source labels, named by their alias rows in the installed source table. */
+constexpr std::uint32_t kArcBolt = 0x7EFD858CU;
+constexpr std::uint32_t kArcField = 0x342B6EDFU;
+constexpr std::uint32_t kArcFlare = 0xE02BBCCBU;
+constexpr std::uint32_t kArcFlux = 0x4CA1623CU;
+constexpr std::uint32_t kArcProx = 0xADC62A22U;
+constexpr std::uint32_t kArcPulse = 0x24263054U;
+constexpr std::uint32_t kArcWave = 0x03326E96U;
+constexpr std::uint32_t kThermalBolt = 0xC5CC698BU;
+constexpr std::uint32_t kThermalField = 0x3D6AF746U;
+constexpr std::uint32_t kThermalFlare = 0x7EDE3222U;
+constexpr std::uint32_t kThermalFlux = 0x18272D6BU;
+constexpr std::uint32_t kThermalProx = 0xD2180725U;
+constexpr std::uint32_t kThermalPulse = 0xDC06B92DU;
+constexpr std::uint32_t kThermalWave = 0xB8223845U;
+constexpr std::uint32_t kVoidBolt = 0xA2E2A1ECU;
+constexpr std::uint32_t kVoidField = 0x15D586BFU;
+constexpr std::uint32_t kVoidFlare = 0xC1D5D4ABU;
+constexpr std::uint32_t kVoidFlux = 0x70867D9CU;
+constexpr std::uint32_t kVoidProx = 0xD1AB4582U;
+constexpr std::uint32_t kVoidPulse = 0x05D04834U;
+constexpr std::uint32_t kVoidWave = 0x27178AF6U;
+
+// TODO: extract which grenade each Triumph counts; no extractor joins a grenade's talent to the
+// source label its kills carry. Only Tripmine's label is captured; the rest pair by label name.
+/** Every grenade interval Triumph, its grenade's source label and its class. */
+constexpr auto kGrenadeTriumphs = std::to_array<GrenadeTriumph>({
+    {0xB947FBB8U, kVoidFlux, CharacterClass::titan},       // Magnetic
+    {0x4C0E42FCU, kVoidWave, CharacterClass::titan},       // Voidwall
+    {0x65EDDCE8U, kVoidFlare, CharacterClass::titan},      // Suppressor
+    {0x29564F50U, kArcFlare, CharacterClass::titan},       // Flashbang
+    {0x9DD4ED6BU, kArcPulse, CharacterClass::titan},       // Pulse
+    {0x8697AE16U, kArcProx, CharacterClass::titan},        // Lightning
+    {0xAA3ECCB1U, kThermalFlare, CharacterClass::titan},   // Incendiary
+    {0xE5429031U, kThermalWave, CharacterClass::titan},    // Thermite
+    {0x125469F0U, kThermalFlux, CharacterClass::titan},    // Fusion
+    {0x896F7F27U, kVoidPulse, CharacterClass::hunter},     // Vortex
+    {0x172957B5U, kVoidProx, CharacterClass::hunter},      // Spike
+    {0xCAC54B81U, kVoidWave, CharacterClass::hunter},      // Voidwall
+    {0xF4DD42A6U, kArcField, CharacterClass::hunter},      // Skip
+    {0x909BE07DU, kArcFlux, CharacterClass::hunter},       // Flux
+    {0x0860F593U, kArcBolt, CharacterClass::hunter},       // Arcbolt
+    {0x8FBB0303U, kThermalFlare, CharacterClass::hunter},  // Incendiary
+    {0x2FABD375U, kThermalField, CharacterClass::hunter},  // Swarm
+    {0x2FC2310AU, kThermalProx, CharacterClass::hunter},   // Tripmine
+    {0x1467CFBDU, kVoidPulse, CharacterClass::warlock},    // Vortex
+    {0xD1DF7507U, kVoidBolt, CharacterClass::warlock},     // Axion Bolt
+    {0x657D73A7U, kVoidField, CharacterClass::warlock},    // Scatter
+    {0xAF4A1FA0U, kArcBolt, CharacterClass::warlock},      // Arcbolt
+    {0x3D248A0EU, kArcPulse, CharacterClass::warlock},     // Pulse
+    {0xFD42AE16U, kArcWave, CharacterClass::warlock},      // Storm
+    {0xFBCF52E8U, kThermalPulse, CharacterClass::warlock}, // Solar
+    {0x51C1A1FAU, kThermalBolt, CharacterClass::warlock},  // Firebolt
+    {0xFCD528A0U, kThermalFlux, CharacterClass::warlock},  // Fusion
 });
 
 /** A scenario and the bubbles in it a kill may happen in; no scenario places no condition. */
@@ -549,6 +615,29 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
 }
 
 /**
+ * Advances the grenade Triumph that counts the final blow's grenade for the killer's class.
+ * @return True when the Triumph's progress moved.
+ */
+[[nodiscard]] bool advance_grenade_triumph(const KillObservation& kill,
+                                           const KillFacts& facts,
+                                           CharacterClass characterClass) noexcept {
+    if ((facts.sources & kGrenade) == 0) {
+        return false;
+    }
+    const auto found = std::find_if(
+        kGrenadeTriumphs.begin(), kGrenadeTriumphs.end(), [&](const GrenadeTriumph& row) {
+            return row.characterClass == characterClass
+                   && carries(kill.sourceLabels, row.sourceLabel);
+        });
+    if (found == kGrenadeTriumphs.end()) {
+        return false;
+    }
+    const auto advance = unlocks::records::advance_interval(found->recordHash);
+    return advance == unlocks::records::ObjectiveAdvance::advanced
+           || advance == unlocks::records::ObjectiveAdvance::completed;
+}
+
+/**
  * Finds the item lane one objective's progress lives in, and its target.
  * @return False when the objective's progress is not one of the item's own values, or its target
  *         is not a plain count up to its completion value.
@@ -647,18 +736,22 @@ KillProgress advance_kill_objectives(const KillObservation& kill,
         || saved->characters[character].soid != kill.killerKey) {
         return KillProgress::refused;
     }
-    facts.subclassElement = equipped_subclass_element(saved->characters[character]);
-    auto& inventory = saved->characters[character].inventory;
+    CharacterState& killer = saved->characters[character];
+    facts.subclassElement = equipped_subclass_element(killer);
+    auto& inventory = killer.inventory;
     std::size_t advanced = 0;
     for (auto& held : std::span(inventory.values).first(inventory.count)) {
         advanced += advance_item(held, facts, nowSeconds);
     }
+    // The Triumph's banks share this transaction, so a refused account write undoes it too.
+    const bool triumphAdvanced = advance_grenade_triumph(kill, facts, killer.characterClass);
     reason = "no_open_objective";
-    if (advanced == 0) {
+    if (advanced == 0 && !triumphAdvanced) {
         return KillProgress::unchanged;
     }
     reason = "account_write";
-    if (!account::valid(*saved) || !investment::store::write_account(*saved)
+    if ((advanced != 0
+         && (!account::valid(*saved) || !investment::store::write_account(*saved)))
         || !transaction.commit()) {
         return KillProgress::refused;
     }

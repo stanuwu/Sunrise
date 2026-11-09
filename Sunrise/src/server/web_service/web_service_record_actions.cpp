@@ -15,6 +15,7 @@
 #include "../../state/progression/season_pass_reward_catalog.h"
 #include "../../state/runtime/runtime.h"
 #include "../../state/unlocks/unlocks_records.h"
+#include "../../state/unlocks/unlocks_runtime.h"
 #include "internal_actions.h"
 #include "web_service_actions.h"
 
@@ -222,18 +223,33 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
             message, "record_definition", request.recordIndex, records::kUnavailableFlagIndex, 0);
         return;
     }
-    if (definition.completionFlagIndex == records::kUnavailableFlagIndex) {
-        // Interval Triumphs intentionally carry no completion flag. Their repeated redemption
-        // count is projected through the second reserved objective-value slot instead.
+    if (definition.intervalCount != 0
+        || definition.completionFlagIndex == records::kUnavailableFlagIndex) {
+        // An interval Triumph is claimed one step at a time; its redemption count is projected
+        // through the second reserved objective-value slot. A flag, if it has one, follows the
+        // last step, which also pays the record's rewards as a one-step claim does.
+        const bool completesRecord =
+            definition.completionFlagIndex != records::kUnavailableFlagIndex
+            && state::unlocks::objective_value(definition.redeemedCountValueIndex) + 1
+                   == definition.intervalCount;
+        const RecordRewardPreparation reward =
+            completesRecord ? prepare_record_reward(message, request.recordIndex, outcome)
+                            : RecordRewardPreparation::absent;
+        if (reward == RecordRewardPreparation::failed) {
+            return;
+        }
         if (state::unlocks::records::claim_interval(request.recordIndex,
                                                     definition.definitionHash)) {
             outcome.hasRecordClaim = true;
             return;
         }
+        if (reward == RecordRewardPreparation::prepared) {
+            clear_mutation(outcome);
+        }
         report_record_claim(message,
                             "interval_or_flag_unavailable",
                             request.recordIndex,
-                            records::kUnavailableFlagIndex,
+                            definition.completionFlagIndex,
                             definition.scoreValue);
         return;
     }

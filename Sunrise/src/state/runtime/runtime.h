@@ -959,9 +959,9 @@ struct KillObservation {
 
 /** How one kill changed the selected character's held bounties. */
 enum class KillProgress : std::uint8_t {
-    /** At least one objective lane advanced and the save holds it. */
+    /** At least one objective lane or grenade Triumph advanced and the save holds it. */
     advanced,
-    /** The kill counted, but no held bounty has an open objective it meets. */
+    /** The kill counted, but no open bounty objective it meets and no Triumph counts it. */
     unchanged,
     /** The kill is not the selected character's enemy kill, or the save refused the change. */
     refused,
@@ -971,7 +971,7 @@ enum class KillProgress : std::uint8_t {
 
 /**
  * Advances, by one, every open objective lane of the selected character's held bounties that the
- * kill meets, in one save transaction.
+ * kill meets, and the grenade interval Triumph it counts, in one save transaction.
  * @param nowSeconds Server time in Unix seconds; an expired bounty does not advance.
  * @param refusal Receives a static reason when nothing advanced.
  */
