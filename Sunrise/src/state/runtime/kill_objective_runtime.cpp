@@ -137,6 +137,18 @@ constexpr auto kSubclassElements = std::to_array<SubclassElement>({
     {0xE7BC88B0U, Element::voidDamage},
 });
 
+/** A scenario and the bubbles in it a kill may happen in; no scenario places no condition. */
+struct Area {
+    std::uint32_t scenarioTag{};
+    /** Bubble name hashes, one of which must match. The widest objective names three. */
+    std::array<std::uint32_t, 3> bubbles{};
+};
+
+/** Scenarios the area objectives name, by package tag. */
+constexpr std::uint32_t kMarsScenario = 0x80F6AB20U;
+constexpr std::uint32_t kMoonScenario = 0x81503E69U;
+constexpr std::uint32_t kTangledShoreScenario = 0x80FC9645U;
+
 /** Sources one of which must match; a rule naming none places no condition here. */
 struct Alternatives {
     std::array<std::uint32_t, 4> weaponLabels{};
@@ -165,6 +177,8 @@ struct KillRule {
     Alternatives anyOf{};
     /** Element of the subclass the killer has equipped, whatever the final blow's; any for none. */
     Element subclassElement{Element::any};
+    /** Bubbles the kill must happen in; no scenario for anywhere. */
+    Area area{};
 };
 
 /** One row per bounty objective lane; each kill advances a lane by one. */
@@ -320,6 +334,22 @@ constexpr auto kKillRules = std::to_array<KillRule>({
     {.itemHash = 0x8DF57AF4U, .subclassElement = Element::arc},
     {.itemHash = 0x14F1A799U, .subclassElement = Element::solar},
     {.itemHash = 0x5D76391EU, .subclassElement = Element::voidDamage},
+    {.itemHash = 0xC8E05C59U, .destination = kTangledShore, .race = Race::fallen,
+     .area = {kTangledShoreScenario, {0x5FE28198U}}},
+    {.itemHash = 0xC8E05C5AU, .destination = kTangledShore, .race = Race::cabal,
+     .area = {kTangledShoreScenario, {0xD1CF7944U}}},
+    {.itemHash = 0xC8E05C5DU, .destination = kTangledShore, .race = Race::hive,
+     .area = {kTangledShoreScenario, {0x618294B3U}}},
+    {.itemHash = 0xD674EC83U, .destination = kMoon, .race = Race::fallen,
+     .area = {kMoonScenario, {0xC64457D2U}}},
+    {.itemHash = 0xD674EC82U, .destination = kMoon, .race = Race::hive,
+     .area = {kMoonScenario, {0x18E267F9U}}},
+    {.itemHash = 0xD674EC80U, .destination = kMoon, .race = Race::hive,
+     .area = {kMoonScenario, {0xFA122719U}}},
+    {.itemHash = 0xD674EC87U, .destination = kMoon, .race = Race::fallen,
+     .area = {kMoonScenario, {0xEFEF8119U}}},
+    {.itemHash = 0x0337775CU, .destination = kMars,
+     .area = {kMarsScenario, {0x016F2C45U, 0x4AC36E96U, 0x192B0F82U}}},
 });
 
 // --- Kill matching -------------------------------------------------------------------------
@@ -335,6 +365,7 @@ struct KillFacts {
     WeaponSlot slot{WeaponSlot::any};
     Element element{Element::any};
     Element subclassElement{Element::any};
+    std::optional<KillArea> area{};
 };
 
 /** @return The labels in the named group, and the last of them in `member`. */
@@ -478,6 +509,14 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
            || (anyOf.slot != WeaponSlot::any && anyOf.slot == kill.slot);
 }
 
+/** @return True when no area is named, or the kill happened in one of its bubbles. */
+[[nodiscard]] bool area_matches(const Area& area, const std::optional<KillArea>& kill) noexcept {
+    return area.scenarioTag == 0
+           || (kill.has_value() && kill->scenarioTag == area.scenarioTag
+               && std::find(area.bubbles.begin(), area.bubbles.end(), kill->bubbleNameHash)
+                      != area.bubbles.end());
+}
+
 /** @return True when the kill meets every condition the rule names. */
 [[nodiscard]] bool matches(const KillRule& rule, const KillFacts& kill) noexcept {
     return (rule.destination.empty() || rule.destination == kill.destination)
@@ -491,7 +530,7 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
            && (rule.victimClass == 0 || rule.victimClass == kill.victimClass)
            && (rule.subclassElement == Element::any
                || rule.subclassElement == kill.subclassElement)
-           && alternative_matches(rule.anyOf, kill);
+           && area_matches(rule.area, kill.area) && alternative_matches(rule.anyOf, kill);
 }
 
 /** @return The element of the subclass the character has equipped; any when none is known. */
@@ -590,6 +629,7 @@ KillProgress advance_kill_objectives(const KillObservation& kill,
     }
     KillFacts facts{};
     facts.destination = kill.destination;
+    facts.area = kill.area;
     reason = "victim";
     if (!classify_victim(kill, facts)) {
         return KillProgress::refused;

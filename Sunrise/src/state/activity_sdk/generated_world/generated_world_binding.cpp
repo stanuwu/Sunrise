@@ -302,6 +302,37 @@ void retain_cached(std::wstring_view scenarioDirectory,
     return BindStatus::ready;
 }
 
+/** @return The bubble owning an effective region's one state; null for none or several. */
+[[nodiscard]] const catalog::Bubble* owning_bubble(const GeneratedWorldView& view,
+                                                   std::int32_t effectiveRegion) noexcept {
+    const catalog::Snapshot* const snapshot = view.snapshot();
+    if (snapshot == nullptr || effectiveRegion < 0) {
+        return nullptr;
+    }
+    const catalog::State* selected = nullptr;
+    for (const catalog::State& state : snapshot->states) {
+        const std::uint64_t region = static_cast<std::uint64_t>(state.sliceSetIndex) + state.index;
+        if (region != static_cast<std::uint32_t>(effectiveRegion)) {
+            continue;
+        }
+        if (selected != nullptr) {
+            return nullptr;
+        }
+        selected = &state;
+    }
+    if (selected == nullptr || selected->bubbleRow >= snapshot->bubbles.size()) {
+        return nullptr;
+    }
+    const catalog::Bubble& bubble = snapshot->bubbles[selected->bubbleRow];
+    if (bubble.index != selected->bubbleRow || selected->index >= bubble.stateCount
+        || bubble.firstState > snapshot->states.size()
+        || selected->index >= snapshot->states.size() - bubble.firstState
+        || &snapshot->states[bubble.firstState + selected->index] != selected) {
+        return nullptr;
+    }
+    return &bubble;
+}
+
 } // namespace
 
 /** @return The stable log name of one bind status. */
@@ -341,34 +372,18 @@ const char* status_name(BindStatus value) noexcept {
 bool region_is_public(const GeneratedWorldView& view,
                       std::int32_t effectiveRegion,
                       bool& isPublic) noexcept {
-    isPublic = false;
-    const catalog::Snapshot* const snapshot = view.snapshot();
-    if (snapshot == nullptr || effectiveRegion < 0) {
-        return false;
-    }
-    const catalog::State* selected = nullptr;
-    for (const catalog::State& state : snapshot->states) {
-        const std::uint64_t region = static_cast<std::uint64_t>(state.sliceSetIndex) + state.index;
-        if (region != static_cast<std::uint32_t>(effectiveRegion)) {
-            continue;
-        }
-        if (selected != nullptr) {
-            return false;
-        }
-        selected = &state;
-    }
-    if (selected == nullptr || selected->bubbleRow >= snapshot->bubbles.size()) {
-        return false;
-    }
-    const catalog::Bubble& bubble = snapshot->bubbles[selected->bubbleRow];
-    if (bubble.index != selected->bubbleRow || selected->index >= bubble.stateCount
-        || bubble.firstState > snapshot->states.size()
-        || selected->index >= snapshot->states.size() - bubble.firstState
-        || &snapshot->states[bubble.firstState + selected->index] != selected) {
-        return false;
-    }
-    isPublic = bubble.isPublic;
-    return true;
+    const catalog::Bubble* const bubble = owning_bubble(view, effectiveRegion);
+    isPublic = bubble != nullptr && bubble->isPublic;
+    return bubble != nullptr;
+}
+
+/** Reads the name hash of the bubble one effective region belongs to. */
+bool region_bubble_name(const GeneratedWorldView& view,
+                        std::int32_t effectiveRegion,
+                        std::uint32_t& nameHash) noexcept {
+    const catalog::Bubble* const bubble = owning_bubble(view, effectiveRegion);
+    nameHash = bubble != nullptr ? bubble->nameHash : 0;
+    return nameHash != 0;
 }
 
 /** Reads the public flag through the shard, or a mod pack's own state rows. */

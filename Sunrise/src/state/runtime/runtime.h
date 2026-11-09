@@ -923,6 +923,14 @@ enum class PursuitRedemption : std::uint8_t {
                                                            PendingRecordRewardGrant& mutation,
                                                            const char** refusal = nullptr) noexcept;
 
+/** The bubble a kill happened in. A bubble's name is unique only inside its scenario. */
+struct KillArea {
+    /** Package tag of the scenario the activity's generated world binds. */
+    std::uint32_t scenarioTag{};
+    /** Name hash of the bubble the killer's client has instantiated. */
+    std::uint32_t bubbleNameHash{};
+};
+
 /** The facts one kill incident reports, as kill objectives read them. */
 struct KillObservation {
     /** Player key of the killer; a character's player key is its SOID. */
@@ -945,6 +953,8 @@ struct KillObservation {
     std::int8_t damageType{-1};
     /** Package name of the destination the kill happened in. */
     std::string_view destination{};
+    /** Bubble the kill happened in; absent when the region or its generated world does not bind. */
+    std::optional<KillArea> area{};
 };
 
 /** How one kill changed the selected character's held bounties. */
