@@ -38,12 +38,16 @@ public:
                             std::vector<state::build_data::rewards::Instruction>& bank,
                             state::build_data::rewards::Range& range,
                             BankFailure& failure) const noexcept;
-    /** Expands a list of expressions into one program where every expression must hold. */
+    /**
+     * Expands a list of expressions into one program where every expression must hold.
+     * @param rowClass Element class of the list, whose rows each hold one expression.
+     */
     [[nodiscard]] bool read_list(std::span<const std::byte> blob,
                                  std::size_t at,
                                  std::span<state::build_data::rewards::Instruction> output,
                                  std::size_t& count,
-                                 BankFailure& failure) const noexcept;
+                                 BankFailure& failure,
+                                 std::uint32_t rowClass) const noexcept;
     /**
      * Names the value slot an expression reads from the item in context.
      * @param at Offset of the expression field.

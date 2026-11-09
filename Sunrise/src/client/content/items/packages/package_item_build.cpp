@@ -45,7 +45,7 @@ namespace {
            && state::build_data::sobject_definitions_ready()
            && state::build_data::investment_constants_ready()
            && state::build_data::starter_sets_ready() && exotic_catalysts_settled()
-           && pursuit_catalog_settled();
+           && pursuit_catalog_settled() && state::build_data::plug_insertion_rules_ready();
 }
 
 /**
@@ -166,8 +166,10 @@ bool build() noexcept {
             }
             // The same root names the bucket and socket-list tables.
             storage.root = storage.child;
-            // Quest, record, node, season, catalyst, pursuit and material reads share these maps.
+            // Quest, record, node, season, catalyst, pursuit, material and plug-rule reads share
+            // these maps.
             if (!state::build_data::item_definitions_ready()
+                || !state::build_data::plug_insertion_rules_ready()
                 || !state::build_data::material_requirement_sets_ready()
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
@@ -239,8 +241,10 @@ bool build() noexcept {
                         std::span(storage.progressionSteps).first(storage.progressionStepCount));
                 }
             }
-            // Pass rows bind through the reward condition tables, which load before the pools.
-            if (!reward_definitions_settled() || !state::build_data::season_pass_ready()) {
+            // Pass rows and plug insertion rules bind through the reward condition tables, which
+            // load before the pools.
+            if (!reward_definitions_settled() || !state::build_data::season_pass_ready()
+                || !state::build_data::plug_insertion_rules_ready()) {
                 (void)storage.rewardBuild.load(
                     source, storage.scratch, storage.root, storage.slotMaps);
             }

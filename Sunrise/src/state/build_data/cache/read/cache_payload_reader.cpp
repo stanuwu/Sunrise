@@ -143,6 +143,9 @@ void clear(records::MutableDomains output) noexcept {
               unlocks::Instruction{});
     std::fill(output.pursuits.begin(), output.pursuits.end(), pursuits::Definition{});
     std::fill(output.starterSets.begin(), output.starterSets.end(), starter_sets::Definition{});
+    std::fill(output.plugInsertionRules.begin(),
+              output.plugInsertionRules.end(),
+              items::insertion_rules::Rule{});
 }
 
 /** Computes the exact file size for every record array. */
@@ -198,7 +201,9 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(
                counts.objectiveInstructions, sizeof(records::RewardInstructionRecord), size)
            && add_records(counts.pursuits, sizeof(records::PursuitRecord), size)
-           && add_records(counts.starterSets, sizeof(records::StarterSetRecord), size);
+           && add_records(counts.starterSets, sizeof(records::StarterSetRecord), size)
+           && add_records(
+               counts.plugInsertionRules, sizeof(records::PlugInsertionRuleRecord), size);
 }
 
 /** Reads every payload array and checks the decoded domains as one transaction. */
@@ -351,6 +356,9 @@ bool read_payload(HANDLE file,
     valid = valid
             && read_domain<records::StarterSetRecord>(
                 file, output.starterSets.first(counts.starterSets), checksum);
+    valid = valid
+            && read_domain<records::PlugInsertionRuleRecord>(
+                file, output.plugInsertionRules.first(counts.plugInsertionRules), checksum);
 
     if (!valid) {
         return false;
@@ -407,6 +415,7 @@ bool read_payload(HANDLE file,
             output.objectiveInstructions.first(counts.objectiveInstructions),
             output.pursuits.first(counts.pursuits),
             output.starterSets.first(counts.starterSets),
+            output.plugInsertionRules.first(counts.plugInsertionRules),
         });
 }
 

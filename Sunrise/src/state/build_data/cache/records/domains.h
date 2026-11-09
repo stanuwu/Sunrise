@@ -13,6 +13,7 @@
 #include "../../inventory/buckets/definition.h"
 #include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
+#include "../../items/insertion_rules/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
@@ -82,6 +83,7 @@ struct DomainCounts {
     std::size_t objectiveInstructions{};
     std::size_t pursuits{};
     std::size_t starterSets{};
+    std::size_t plugInsertionRules{};
 };
 
 /** Fixed caller storage used while decoding the cache domains. */
@@ -136,6 +138,7 @@ struct MutableDomains {
     std::span<unlocks::Instruction> objectiveInstructions;
     std::span<pursuits::Definition> pursuits;
     std::span<starter_sets::Definition> starterSets;
+    std::span<items::insertion_rules::Rule> plugInsertionRules;
 };
 
 /** Read-only complete views used for the checks and for cache encoding. */
@@ -190,6 +193,7 @@ struct Domains {
     std::span<const unlocks::Instruction> objectiveInstructions;
     std::span<const pursuits::Definition> pursuits;
     std::span<const starter_sets::Definition> starterSets;
+    std::span<const items::insertion_rules::Rule> plugInsertionRules;
 };
 
 } // namespace sunrise::state::build_data::cache::records

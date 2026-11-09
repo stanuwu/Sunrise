@@ -9,6 +9,7 @@
 #include "../inventory/buckets/inventory_bucket_catalog.h"
 #include "../items/catalysts/exotic_catalyst_catalog.h"
 #include "../items/details/item_detail_catalog.h"
+#include "../items/insertion_rules/insertion_rule_catalog.h"
 #include "../items/socket_plugs/socket_plug_catalog.h"
 #include "../material_requirements/material_requirement_catalog.h"
 #include "../nodes/node_catalog.h"
@@ -422,6 +423,7 @@ void clear_catalogs() noexcept {
     vendors::clear();
     constants::clear();
     starter_sets::clear();
+    items::insertion_rules::clear();
 }
 
 } // namespace runtime

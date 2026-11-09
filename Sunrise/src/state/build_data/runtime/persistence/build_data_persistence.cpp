@@ -16,6 +16,7 @@
 #include "../../inventory/buckets/inventory_bucket_catalog.h"
 #include "../../items/catalysts/exotic_catalyst_catalog.h"
 #include "../../items/details/item_detail_catalog.h"
+#include "../../items/insertion_rules/insertion_rule_catalog.h"
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/node_catalog.h"
@@ -108,6 +109,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && objectives::snapshot(scratch.objectiveInstructions, counts.objectiveInstructions)
            && pursuits::snapshot(scratch.pursuits, counts.pursuits)
            && starter_sets::snapshot(scratch.starterSets, counts.starterSets)
+           && items::insertion_rules::snapshot(scratch.plugInsertionRules,
+                                               counts.plugInsertionRules)
            && records::snapshot(scratch.records, counts.records)
            && records::snapshot_objectives(scratch.recordObjectives, counts.recordObjectives)
            && records::snapshot_intervals(scratch.recordIntervals, counts.recordIntervals)
@@ -147,7 +150,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && season_pass_ready() && repeatable_bounties_ready()
-           && starter_sets_ready() && (reward_definitions_ready() || state.rewardsUnsupported)
+           && starter_sets_ready() && plug_insertion_rules_ready()
+           && (reward_definitions_ready() || state.rewardsUnsupported)
            && record_definitions_ready() && node_definitions_ready() && sobject_definitions_ready()
            && scenario_layouts_ready() && spawn_sets_ready() && hash_names_ready()
            && vendor_catalog_ready()
@@ -316,6 +320,8 @@ cache::records::MutableDomains scratch_domains(Context& state, std::size_t named
         ensure_scratch<pursuits::Definition, pursuits::kDefinitionCapacity>(state.pursuitScratch),
         ensure_scratch<starter_sets::Definition, starter_sets::kClassCount>(
             state.starterSetScratch),
+        ensure_scratch<items::insertion_rules::Rule, items::insertion_rules::kRuleCapacity>(
+            state.plugInsertionRuleScratch),
     };
 }
 
@@ -357,6 +363,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.objectiveInstructionScratch);
     release_bank(state.pursuitScratch);
     release_bank(state.starterSetScratch);
+    release_bank(state.plugInsertionRuleScratch);
     release_bank(state.recordScratch);
     release_bank(state.recordObjectiveScratch);
     release_bank(state.recordIntervalScratch);
@@ -480,6 +487,8 @@ cache::records::Domains occupied_domains(Context& state,
         std::span<const pursuits::Definition>{state.pursuitScratch.data(), counts.pursuits},
         std::span<const starter_sets::Definition>{state.starterSetScratch.data(),
                                                   counts.starterSets},
+        std::span<const items::insertion_rules::Rule>{state.plugInsertionRuleScratch.data(),
+                                                      counts.plugInsertionRules},
     };
 }
 

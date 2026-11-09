@@ -69,6 +69,7 @@ namespace {
         header.objectiveInstructionCount,
         header.pursuitCount,
         header.starterSetCount,
+        header.plugInsertionRuleCount,
     };
 }
 

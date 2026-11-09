@@ -208,6 +208,47 @@ bool decode(const StarterSetRecord& record, starter_sets::Definition& value) noe
     return true;
 }
 
+/** Encodes one plug's insertion rules with its padding zeroed. */
+bool encode(const items::insertion_rules::Rule& value, PlugInsertionRuleRecord& record) noexcept {
+    record = {};
+    record.plugDefinitionIndex = value.plugDefinitionIndex;
+    record.requiredFlagIndex = value.requiredFlagIndex;
+    record.conditionCount = value.conditionCount;
+    record.readable = static_cast<std::uint8_t>(value.readable);
+    if (record.conditionCount > record.condition.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < record.condition.size(); ++i) {
+        if (!encode(value.condition[i], record.condition[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** Decodes one plug's insertion rules after checking its padding and unused slots. */
+bool decode(const PlugInsertionRuleRecord& record, items::insertion_rules::Rule& value) noexcept {
+    value = {};
+    if (record.reserved != decltype(record.reserved){} || record.readable > 1
+        || record.conditionCount > record.condition.size()) {
+        return false;
+    }
+    const auto unused = std::span(record.condition).subspan(record.conditionCount);
+    if (!std::all_of(unused.begin(), unused.end(), unused_condition)) {
+        return false;
+    }
+    value.plugDefinitionIndex = record.plugDefinitionIndex;
+    value.requiredFlagIndex = record.requiredFlagIndex;
+    value.conditionCount = record.conditionCount;
+    value.readable = record.readable != 0;
+    for (std::size_t i = 0; i < value.conditionCount; ++i) {
+        if (!decode(record.condition[i], value.condition[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /** Encodes one record objective row with its padding zeroed. */
 bool encode(const build_data::records::Objective& value, RecordObjectiveRecord& record) noexcept {
     record = {value.completionValue,

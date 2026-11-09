@@ -18,6 +18,7 @@
 #include "../../inventory/buckets/definition.h"
 #include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
+#include "../../items/insertion_rules/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
@@ -95,6 +96,7 @@ struct Context {
     std::vector<unlocks::Instruction> objectiveInstructionScratch{};
     std::vector<pursuits::Definition> pursuitScratch{};
     std::vector<starter_sets::Definition> starterSetScratch{};
+    std::vector<items::insertion_rules::Rule> plugInsertionRuleScratch{};
     std::vector<records::Definition> recordScratch{};
     std::vector<records::Objective> recordObjectiveScratch{};
     std::vector<records::Interval> recordIntervalScratch{};

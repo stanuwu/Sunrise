@@ -8,6 +8,7 @@
 #include "../../bounties/bounty_catalog.h"
 #include "../../hash_names/hash_name_catalog.h"
 #include "../../inventory/buckets/inventory_bucket_catalog.h"
+#include "../../items/insertion_rules/insertion_rule_catalog.h"
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/node_catalog.h"
@@ -187,7 +188,8 @@ bool counts_fit(const DomainCounts& counts, MutableDomains domains) noexcept {
            && counts.objectives <= domains.objectives.size()
            && counts.objectiveInstructions <= domains.objectiveInstructions.size()
            && counts.pursuits <= domains.pursuits.size()
-           && counts.starterSets <= domains.starterSets.size();
+           && counts.starterSets <= domains.starterSets.size()
+           && counts.plugInsertionRules <= domains.plugInsertionRules.size();
 }
 
 /** Sorts every filled domain before the checks, so the written file is always the same. */
@@ -279,6 +281,7 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         || !bounties::valid(domains.bounties)
         // An empty table is complete: an installed table with another layout publishes none.
         || !starter_sets::valid(domains.starterSets)
+        || !items::insertion_rules::valid(domains.plugInsertionRules)
         || !build_data::records::valid(domains.records,
                                        domains.recordObjectives,
                                        domains.recordIntervals,
@@ -347,6 +350,11 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
             if (!rewards::valid_socket(reward.sockets[i], domains.items.size())) {
                 return false;
             }
+        }
+    }
+    for (const items::insertion_rules::Rule& rule : domains.plugInsertionRules) {
+        if (rule.plugDefinitionIndex >= domains.items.size()) {
+            return false;
         }
     }
     for (const material_requirements::Definition& definition : domains.materialRequirementSets) {

@@ -350,6 +350,39 @@ enum class OvenAction : std::uint8_t {
                                  std::size_t characterIndex,
                                  OvenBake& bake,
                                  AccountUnlockWrites& writes) noexcept;
+
+/** The flag a Chalice upgrade purchase sets, and the plug its lane shows after it. */
+struct ChaliceUpgrade {
+    AccountUnlockWrites unlockWrites{};
+    build_data::items::Definition lanePlug{};
+};
+
+/** Whether a requested plug is on the Chalice, and whether it buys an upgrade or is refused. */
+enum class ChaliceAction : std::uint8_t {
+    /** Any other item, or a Chalice plug whose checks hold, which lands as selected. */
+    none,
+    upgraded,
+    refused,
+};
+
+/**
+ * Checks a Chalice of Opulence plug before its cost is charged: the plug sets offering it and its
+ * insertion rules must hold over the saved banks, and a rune needs one in its balance. An upgrade
+ * purchase sets its upgrade's flag; its lane shows the bought upgrade when the lane offers it and
+ * otherwise returns to its initial plug.
+ * @param account Account the action began with.
+ * @param chalice Detail of the item the plug was requested on, whose lane accepts the plug.
+ * @param sockets The item's current lanes, native defaults materialized.
+ * @return None for any other item, which leaves the upgrade empty.
+ */
+[[nodiscard]] ChaliceAction
+stage_chalice_plug(const AccountState& account,
+                   std::size_t characterIndex,
+                   const build_data::items::details::Definition& chalice,
+                   const account::inventory::Sockets& sockets,
+                   std::uint8_t socketLane,
+                   const build_data::items::Definition& requested,
+                   ChaliceUpgrade& upgrade) noexcept;
 [[nodiscard]] bool stage_item_state(const AccountState& snapshot,
                                     std::size_t characterIndex,
                                     std::uint64_t targetInstanceSoid,

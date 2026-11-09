@@ -239,6 +239,7 @@
     <ClCompile Include="src\state\runtime\state_account_identity_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_profile_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_oven_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\state_account_chalice_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_socket_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_synthesizer_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_settings_runtime.cpp" />
@@ -794,6 +795,8 @@
     <ClCompile Include="src\state\build_data\items\details\item_detail_catalog.cpp" />
     <ClCompile Include="src\state\build_data\items\socket_plugs\socket_plug_catalog.cpp" />
     <ClCompile Include="src\state\build_data\items\socket_plugs\socket_plug_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\items\insertion_rules\insertion_rule_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\items\insertion_rules\insertion_rule_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_builder.cpp" />
     <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_generated.cpp" />
     <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_catalog.cpp" />
@@ -2398,6 +2401,8 @@
     <ClInclude Include="src\state\build_data\items\details\item_detail_catalog.h" />
     <ClInclude Include="src\state\build_data\items\socket_plugs\definition.h" />
     <ClInclude Include="src\state\build_data\items\socket_plugs\socket_plug_catalog.h" />
+    <ClInclude Include="src\state\build_data\items\insertion_rules\definition.h" />
+    <ClInclude Include="src\state\build_data\items\insertion_rules\insertion_rule_catalog.h" />
     <ClInclude Include="src\state\build_data\items\catalysts\definition.h" />
     <ClInclude Include="src\state\build_data\items\catalysts\exotic_catalyst_builder.h" />
     <ClInclude Include="src\state\build_data\items\catalysts\exotic_catalyst_catalog.h" />

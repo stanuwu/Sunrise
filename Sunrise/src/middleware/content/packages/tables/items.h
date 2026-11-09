@@ -77,6 +77,8 @@ struct Row {
     std::uint16_t enabledMaterialRequirementSetIndex{kUnavailableMaterialRequirementSetIndex};
     /** Value slot a plug's quantity expression reads alone, or -1 when it is anything else. */
     std::int16_t quantityValueSlot{-1};
+    /** Flag slot a plug's insertion rules together require set, or -1 for none or several. */
+    std::int16_t insertionFlagSlot{-1};
     std::uint8_t statCount{};
     std::uint8_t statRows[kStatCapacity]{};
     std::int32_t statValues[kStatCapacity]{};
@@ -124,6 +126,16 @@ void read_appearance(std::span<const std::byte> definition, Row& row) noexcept;
  * @return True when the blob is long enough to carry the fixed fields.
  */
 [[nodiscard]] bool read_definition(std::span<const std::byte> definition, Row& row) noexcept;
+
+/**
+ * Finds the insertion-rule array of a plug's definition. Each row is one unlock expression, and
+ * every row must hold for the plug to be inserted.
+ * @param definition Whole item definition bytes.
+ * @param at Receives the offset of the array descriptor.
+ * @return False for a definition with no plug block.
+ */
+[[nodiscard]] bool find_insertion_rules(std::span<const std::byte> definition,
+                                        std::size_t& at) noexcept;
 
 /** Visitor called for each native item-definition index an ordinary socket list names. */
 using AllowedPlugVisitor = bool (*)(void* context, std::uint32_t itemDefinitionIndex) noexcept;

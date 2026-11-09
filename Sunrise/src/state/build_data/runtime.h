@@ -17,6 +17,7 @@
 #include "inventory/buckets/definition.h"
 #include "items/catalysts/definition.h"
 #include "items/details/definition.h"
+#include "items/insertion_rules/definition.h"
 #include "items/item_catalog.h"
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
@@ -241,6 +242,24 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
 
 /** @return True when one plug definition occurs in any installed ordinary-socket plug pool. */
 [[nodiscard]] bool is_socket_plug_pooled(std::uint16_t plugDefinitionIndex) noexcept;
+
+/** @return True when the plugs' insertion rules are in State. */
+[[nodiscard]] bool plug_insertion_rules_ready() noexcept;
+
+/**
+ * Publishes the insertion rules of every plug that declares any, bound to the saved banks.
+ * @param rules Rows in strictly ascending plug order.
+ * @return True when the rows pass the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool
+publish_plug_insertion_rules(std::span<const items::insertion_rules::Rule> rules) noexcept;
+
+/**
+ * Reads the insertion rules one plug declares.
+ * @return False when the plug declares none.
+ */
+[[nodiscard]] bool find_plug_insertion_rule(std::uint16_t plugDefinitionIndex,
+                                            items::insertion_rules::Rule& rule) noexcept;
 
 /** @return True when the build-scoped exotic catalyst catalog is ready. */
 [[nodiscard]] bool exotic_catalysts_ready() noexcept;

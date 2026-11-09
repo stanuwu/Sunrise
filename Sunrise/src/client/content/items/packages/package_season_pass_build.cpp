@@ -4,6 +4,7 @@
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/schema/generated/tag_classes_80802f.h"
 #include "../../../../middleware/content/packages/tables/field_reader.h"
+#include "../../../../middleware/content/packages/tables/reward_table.h"
 #include "../../../../state/progression/season_pass_reward_catalog.h"
 #include "internal.h"
 #include "package_reward_build.h"
@@ -66,7 +67,8 @@ bool read_season_reward(Storage& storage,
             at + tables::kProgressionRewardConditionsOffset,
             reward.condition,
             conditionCount,
-            failure)) {
+            failure,
+            tables::rewards::ConditionRow::kClass)) {
         return false;
     }
     reward.socketCount = static_cast<std::uint8_t>(socketCount);

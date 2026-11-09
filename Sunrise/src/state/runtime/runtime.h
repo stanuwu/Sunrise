@@ -502,7 +502,8 @@ struct AccountUnlockWrite {
 
 /**
  * Account unlock rows one socket action may write: a debit for each requirement of its cost set,
- * plus the two ingredient balances a burnt bake debits or the discovery flag a recipe sets.
+ * plus the two ingredient balances a burnt bake debits, the discovery flag a recipe sets or the
+ * flag a Chalice upgrade sets.
  */
 inline constexpr std::size_t kSocketUnlockWriteCapacity = 8;
 
@@ -1018,6 +1019,7 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  * authored socket block, then only the requested lane changes; everything else stays byte-stable.
  * A Gambit Prime Synthesizer plug is an exchange: it also pays a Mote or refunds Synths. A Dawning
  * oven's Combine or recipe plug bakes a cookie and returns the oven's lanes to their initial plugs.
+ * A Chalice of Opulence plug must pass its insertion rules, and an upgrade purchase sets its flag.
  * @param targetInstanceSoid Selected-character item-instance key named by the Client.
  * @param socketLane Zero-based ordinary socket lane.
  * @param plugDefinitionIndex Installed plug-definition row selected by the Client.

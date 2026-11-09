@@ -14,6 +14,7 @@
 #include "../../hash_names/definition.h"
 #include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
+#include "../../items/insertion_rules/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
@@ -35,7 +36,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 83;
+inline constexpr std::uint32_t kCacheFormatVersion = 84;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -120,6 +121,7 @@ struct Header {
     std::uint32_t objectiveInstructionCount{};
     std::uint32_t pursuitCount{};
     std::uint32_t starterSetCount{};
+    std::uint32_t plugInsertionRuleCount{};
     gameplay::entity_position_profiles::Fingerprint positionFingerprint{};
     InvestmentConstants constants{};
     std::uint64_t payloadChecksum{};
@@ -369,6 +371,18 @@ struct SeasonPassRewardRecord {
     std::uint8_t conditionCount{};
     /** Must be zero, so the packed reward row always matches. */
     std::array<std::uint8_t, 3> reserved{};
+};
+
+/** Disk form of one plug's bound insertion rules. */
+struct PlugInsertionRuleRecord {
+    std::uint16_t plugDefinitionIndex{};
+    std::uint16_t requiredFlagIndex{items::insertion_rules::kUnavailableFlagIndex};
+    std::array<RewardInstructionRecord, items::insertion_rules::kConditionCapacity> condition{};
+    std::uint8_t conditionCount{};
+    /** 0 or 1. */
+    std::uint8_t readable{};
+    /** Must be zero, so the packed rule row always matches. */
+    std::array<std::uint8_t, 2> reserved{};
 };
 
 /** Disk form of one repeatable bounty and the item-type its pool is keyed by. */
@@ -774,7 +788,7 @@ static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 50 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 51 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)
                      + sizeof(gameplay::entity_position_profiles::Fingerprint));
 static_assert(sizeof(SpawnPointRecord)
@@ -820,6 +834,10 @@ static_assert(sizeof(SeasonPassRewardRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
                      + rewards::kSocketsPerItem * sizeof(RewardSocketOverrideRecord)
                      + season_pass::kConditionCapacity * sizeof(RewardInstructionRecord));
+static_assert(sizeof(PlugInsertionRuleRecord)
+              == 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t)
+                     + items::insertion_rules::kConditionCapacity
+                           * sizeof(RewardInstructionRecord));
 static_assert(sizeof(BountyRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(StarterSetRecord)
               == 2 * sizeof(std::uint8_t) + starter_sets::kItemCapacity * sizeof(std::uint16_t));

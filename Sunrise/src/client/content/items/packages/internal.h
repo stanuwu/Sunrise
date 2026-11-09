@@ -71,6 +71,7 @@ static_assert(kUnmappedSlot
               == state::build_data::items::catalysts::kUnavailableCompletionFlagIndex);
 static_assert(kUnmappedSlot == state::build_data::items::kUnavailableValueIndex);
 static_assert(kUnmappedSlot == state::build_data::items::kUnavailableFlagIndex);
+static_assert(kUnmappedSlot == state::build_data::items::insertion_rules::kUnavailableFlagIndex);
 static_assert(kUnmappedSlot == state::build_data::material_requirements::kUnavailableValueIndex);
 
 /** Bank index per unlock slot, indexed by slot. The first mapping row of a slot wins. */
@@ -132,6 +133,9 @@ struct Storage {
     std::vector<std::byte> plugSetTable{};
     /** Account flag row the plug sets offering each item require set, by item-table index. */
     std::vector<std::uint16_t> plugSetFlagIndices{};
+    /** Insertion rules of the plugs walked so far, in item-table order. */
+    std::vector<state::build_data::items::insertion_rules::Rule> insertionRules{};
+    std::size_t insertionRuleCount{};
     /** Item rows the installed restricted-grant list names, by item-table index. */
     std::vector<bool> restrictedGrants{};
     /** Dense item-indexed catalyst completion expressions for this package pass. */

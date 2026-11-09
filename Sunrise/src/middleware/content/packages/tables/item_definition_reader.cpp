@@ -90,6 +90,13 @@ constexpr std::size_t kLinkedPlugIndexOffset =
 constexpr std::size_t kPlugQuantityExpressionOffset =
     offsetof(generated::PlugBlock, h8941ff52.h1f6a7358);
 static_assert(kPlugQuantityExpressionOffset == 224);
+/** A plug's insertion rules: one expression per row, every one of which must hold. */
+constexpr std::size_t kInsertionRulesOffset =
+    offsetof(generated::PlugBlock, insertionRequirements.insertionRules);
+constexpr std::uint32_t kInsertionRuleClass = generated::C808077e6::kClass;
+constexpr std::size_t kInsertionRuleStride = sizeof(generated::C808077e6);
+constexpr std::size_t kInsertionRuleExpressionOffset =
+    offsetof(generated::C808077e6, unlockExpression);
 /** A roll-set ordinal outside the ladder: none, or the marker for a plug rolled by no set. */
 constexpr std::uint16_t kNoRollSet = 0;
 /** Embedded reusable-list array descriptor inside one ordinary socket entry. */
@@ -313,23 +320,70 @@ constexpr std::size_t kStatEntryRow = offsetof(generated::SItemStatRow, itemStat
 constexpr std::size_t kStatEntryValue = offsetof(generated::SItemStatRow, itemStat.value);
 
 /**
- * Reads the plug block the definition points to: category, roll set, requirement sets and any
- * linked plug. A definition with no plug block keeps the row's absent values.
+ * Locates the plug block a definition points to.
+ * @param block Receives the block's offset in the definition.
+ * @return False for a definition with no plug block.
+ */
+[[nodiscard]] bool find_plug_block(std::span<const std::byte> definition,
+                                   std::size_t& block) noexcept {
+    std::int64_t relative = 0;
+    if (!read(definition, kPlugBlockOffset, relative) || relative == 0) {
+        return false;
+    }
+    const std::int64_t signedBlock = static_cast<std::int64_t>(kPlugBlockOffset) + relative;
+    if (signedBlock < 0) {
+        return false;
+    }
+    block = static_cast<std::size_t>(signedBlock);
+    return true;
+}
+
+/**
+ * Reads the one flag slot a plug's insertion rules together require set.
+ * @param block Offset of the plug block.
+ * @return The slot, or -1 when the rules require none or more than one or do not parse.
+ */
+[[nodiscard]] std::int16_t insertion_flag_slot(std::span<const std::byte> definition,
+                                               std::size_t block) noexcept {
+    Array rules{};
+    if (!read_array(definition,
+                    block + kInsertionRulesOffset,
+                    kInsertionRuleClass,
+                    kInsertionRuleStride,
+                    rules)) {
+        return -1;
+    }
+    std::int16_t required = -1;
+    for (std::uint64_t rule = 0; rule < rules.count; ++rule) {
+        std::int16_t slot = -1;
+        if (!expression_required_flag_slot(definition,
+                                           rules.dataOffset
+                                               + static_cast<std::size_t>(rule)
+                                                     * kInsertionRuleStride,
+                                           kInsertionRuleExpressionOffset,
+                                           slot)
+            || (slot >= 0 && required >= 0 && slot != required)) {
+            return -1;
+        }
+        required = slot >= 0 ? slot : required;
+    }
+    return required;
+}
+
+/**
+ * Reads the plug block the definition points to: category, roll set, requirement sets, the flag
+ * its insertion rules require and any linked plug. A definition with no plug block keeps the
+ * row's absent values.
  * @param definition Whole item definition bytes.
  * @param row Receives the plug fields.
  */
 void read_plug_block(std::span<const std::byte> definition, Row& row) noexcept {
     row.rollSetIndex = kNoRollSet;
     row.linkedPlugIndex = kUnavailablePlug;
-    std::int64_t relative = 0;
-    if (!read(definition, kPlugBlockOffset, relative) || relative == 0) {
+    std::size_t block = 0;
+    if (!find_plug_block(definition, block)) {
         return;
     }
-    const std::int64_t signedBlock = static_cast<std::int64_t>(kPlugBlockOffset) + relative;
-    if (signedBlock < 0) {
-        return;
-    }
-    const auto block = static_cast<std::size_t>(signedBlock);
     (void)read(definition, block + kPlugBlockCategoryOffset, row.plugCategoryHash);
     (void)read(definition, block + kPlugBlockRollSetOffset, row.rollSetIndex);
     (void)read(definition,
@@ -342,6 +396,7 @@ void read_plug_block(std::span<const std::byte> definition, Row& row) noexcept {
     if (expression_lone_value_slot(definition, block, kPlugQuantityExpressionOffset, quantitySlot)) {
         row.quantityValueSlot = quantitySlot;
     }
+    row.insertionFlagSlot = insertion_flag_slot(definition, block);
     Array linked{};
     if (find_array_at(definition, block + kLinkedPlugArrayOffset, linked)
         && linked.elementClass == kLinkedPlugClass) {
@@ -693,6 +748,16 @@ bool visit_plug_set_flags(std::span<const std::byte> plugSetTable,
             visitor(context, itemDefinitionIndex, flagSlot);
         }
     }
+    return true;
+}
+
+/** Finds the insertion-rule array of a plug's definition. */
+bool find_insertion_rules(std::span<const std::byte> definition, std::size_t& at) noexcept {
+    std::size_t block = 0;
+    if (!find_plug_block(definition, block)) {
+        return false;
+    }
+    at = block + kInsertionRulesOffset;
     return true;
 }
 

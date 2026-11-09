@@ -16,6 +16,7 @@
 #include "inventory/buckets/inventory_bucket_catalog.h"
 #include "items/catalysts/exotic_catalyst_catalog.h"
 #include "items/details/item_detail_catalog.h"
+#include "items/insertion_rules/insertion_rule_catalog.h"
 #include "items/socket_plugs/socket_plug_catalog.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "nodes/node_catalog.h"
@@ -162,6 +163,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         || !bounties::replace(domains.bounties)
         // An empty table publishes too, so creation keeps refusing an unknown layout.
         || !starter_sets::replace(domains.starterSets)
+        || !items::insertion_rules::replace(domains.plugInsertionRules)
         || !records::replace(domains.records,
                              domains.recordObjectives,
                              domains.recordIntervals,

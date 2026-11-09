@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808077.h"
 #include "../../../../middleware/content/packages/tables/quest_initialization_reader.h"
 #include "../../../../state/build_data/items/catalysts/exotic_catalyst_builder.h"
 #include "../../../../state/build_data/items/details/item_detail_catalog.h"
@@ -16,6 +17,7 @@ namespace {
 namespace build_details = state::build_data::items::details;
 namespace build_items = state::build_data::items;
 namespace pursuits = state::build_data::pursuits;
+namespace insertion_rules = state::build_data::items::insertion_rules;
 
 /** @return True when one extracted detail can join the currently published numeric domains. */
 [[nodiscard]] bool publishable_detail(const build_details::Definition& detail) noexcept {
@@ -75,6 +77,44 @@ void read_plug_set_flags(Storage& storage) noexcept {
     }
 }
 
+/**
+ * Binds the insertion rules one plug declares. A list that does not read, bind or fit is kept as
+ * an unreadable row, which refuses the plug; a plug with no rules adds no row.
+ * @return False when the rows are full or a bank allocation failed, which retries the walk.
+ */
+[[nodiscard]] bool read_insertion_rules(Storage& storage, const tables::items::Row& item) noexcept {
+    std::size_t at = 0;
+    if (!tables::items::find_insertion_rules(std::span<const std::byte>{storage.definition}, at)) {
+        return true;
+    }
+    insertion_rules::Rule rule{};
+    rule.plugDefinitionIndex = item.definitionIndex;
+    std::size_t count = 0;
+    BankFailure failure = BankFailure::none;
+    rule.readable = storage.rewardBuild.conditions.read_list(
+        std::span<const std::byte>{storage.definition},
+        at,
+        rule.condition,
+        count,
+        failure,
+        generated::C808077e6::kClass);
+    if (failure == BankFailure::storage) {
+        return false;
+    }
+    if (rule.readable && count == 0) {
+        return true;
+    }
+    if (rule.readable) {
+        rule.conditionCount = static_cast<std::uint8_t>(count);
+        rule.requiredFlagIndex = bank_index(storage.slotMaps.accountFlag, item.insertionFlagSlot);
+    }
+    if (storage.insertionRuleCount == storage.insertionRules.size()) {
+        return false;
+    }
+    storage.insertionRules[storage.insertionRuleCount++] = rule;
+    return true;
+}
+
 } // namespace
 
 /** @return True when the catalyst catalog is published or cannot exist on this executable. */
@@ -111,13 +151,16 @@ bool build_item_rows(const reader::Source& source,
     const bool needSocketPlugs = !state::build_data::socket_plug_rules_ready();
     const bool needCatalysts = !exotic_catalysts_settled();
     const bool needBuckets = !state::build_data::inventory_bucket_descriptors_ready();
+    // Insertion rules bind through the reward condition tables, which load before this walk.
+    const bool needInsertionRules = !state::build_data::plug_insertion_rules_ready()
+                                    && storage.rewardBuild.conditions.loaded();
     const bool retainDetails = needDetails || needCatalysts;
     const bool needSocketRows = needSocketPlugs || needCatalysts;
     const bool needDetailRows = needDetails || needSocketRows;
     // Bucket equipment slots are derived from this same complete item walk, so a partial retry
     // must still revisit the table even when definitions and detail domains already published.
     const bool needRows = needDefinitions || needDetailRows || needBuckets || rewardStorageReady
-                          || pursuitStorageReady;
+                          || pursuitStorageReady || needInsertionRules;
     bool published = !needRows;
     if (retainDetails && storage.details.size() != kDetailCapacity) {
         storage.details.assign(kDetailCapacity, build_details::Definition{});
@@ -143,6 +186,11 @@ bool build_item_rows(const reader::Source& source,
     if (needDefinitions) {
         read_plug_set_flags(storage);
     }
+    storage.insertionRuleCount = 0;
+    if (needInsertionRules) {
+        storage.insertionRules.assign(insertion_rules::kRuleCapacity, insertion_rules::Rule{});
+    }
+    bool insertionRulesRead = needInsertionRules;
     std::size_t detailCount = 0;
     // One malformed entry is omitted on its own so the rest of the table still publishes. An
     // entry can fail either at its index row or at the definition the row points to, and neither
@@ -185,6 +233,9 @@ bool build_item_rows(const reader::Source& source,
         }
         if (rewardStorageReady && itemClass == tables::kItemDefinitionClass) {
             storage.rewardBuild.item(item.definitionIndex, item.definitionHash, storage.definition);
+        }
+        if (insertionRulesRead && itemClass == tables::kItemDefinitionClass) {
+            insertionRulesRead = read_insertion_rules(storage, item);
         }
         const std::uint32_t plugCategoryHash =
             corrected_plug_category(item.definitionHash, item.plugCategoryHash);
@@ -301,6 +352,16 @@ bool build_item_rows(const reader::Source& source,
         reason = !detailStorageReady ? "detail_storage"
                  : !requestsFit      ? "detail_capacity"
                                      : "publish";
+    }
+    // A plug whose rules failed to read keeps its unreadable row; only a full or failed walk
+    // leaves the rules for another pass.
+    if (published && needInsertionRules) {
+        published = insertionRulesRead && index == table.count
+                    && state::build_data::publish_plug_insertion_rules(
+                        std::span(storage.insertionRules).first(storage.insertionRuleCount));
+        if (!published) {
+            reason = "insertion_rules";
+        }
     }
     SocketPlugBuild socketPlugBuild;
     const bool socketStorageReady =
@@ -427,7 +488,8 @@ bool build_item_rows(const reader::Source& source,
     return published && state::build_data::item_definitions_ready()
            && state::build_data::configured_item_details_ready()
            && state::build_data::socket_plug_rules_ready() && exotic_catalysts_settled()
-           && state::build_data::ability_buckets_ready();
+           && state::build_data::ability_buckets_ready()
+           && state::build_data::plug_insertion_rules_ready();
 }
 
 } // namespace sunrise::client::content::items::packages

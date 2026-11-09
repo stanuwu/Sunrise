@@ -215,7 +215,15 @@ scale_socket_costs(std::uint16_t socketType,
         return fail("oven_bake");
     }
     const bool bakes = ovenAction == OvenAction::baked;
-    const bool exchanges = exchange == SynthesizerExchange::paid || bakes;
+    // A Chalice plug must pass its checks, and an upgrade purchase sets its flag.
+    ChaliceUpgrade upgrade{};
+    const ChaliceAction chaliceAction = stage_chalice_plug(
+        snapshot, characterIndex, detail, authoredSockets, socketLane, plugDefinition, upgrade);
+    if (chaliceAction == ChaliceAction::refused) {
+        return fail("chalice");
+    }
+    const bool upgrades = chaliceAction == ChaliceAction::upgraded;
+    const bool exchanges = exchange == SynthesizerExchange::paid || bakes || upgrades;
 
     // Ownership matters only for a plug the account draws down, such as a shader stack. An
     // ornament is a permanent unlock, so demanding a stack for one would refuse a held plug.
@@ -230,7 +238,7 @@ scale_socket_costs(std::uint16_t socketType,
 
     AccountState chargedAccount = snapshot;
     build_data::material_requirements::Definition materialSet{};
-    AccountUnlockWrites unlockWrites = bake.unlockWrites;
+    AccountUnlockWrites unlockWrites = bakes ? bake.unlockWrites : upgrade.unlockWrites;
     bool profileChanged = false;
     const std::uint16_t materialSetIndex =
         bakes ? bake.costSetIndex : plugDefinition.insertionMaterialRequirementSetIndex;
@@ -274,8 +282,10 @@ scale_socket_costs(std::uint16_t socketType,
 
     // A rolled socket's apply or re-roll plug is an action: the lane receives a result plug from
     // the roll set. The requested plug still decides the pool check and the material charge.
-    build_data::items::Definition grantedDefinition =
-        bakes ? bake.lanePlug : exchanges ? payout.lanePlug : plugDefinition;
+    build_data::items::Definition grantedDefinition = bakes       ? bake.lanePlug
+                                                      : upgrades  ? upgrade.lanePlug
+                                                      : exchanges ? payout.lanePlug
+                                                                  : plugDefinition;
     if (!exchanges
         && classify_rolled_plug(plugDefinition, targetDefinition, socketLane)
                == RolledPlugAction::roll) {

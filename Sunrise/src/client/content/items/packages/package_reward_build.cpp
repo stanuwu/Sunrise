@@ -515,19 +515,20 @@ bool RewardConditions::read(std::span<const std::byte> blob,
  * @param output Receives the program; it bounds the expanded length.
  * @param count Receives the program length; zero for an empty list.
  * @param failure Receives storage when a bank allocation failed.
+ * @param rowClass Element class of the list; each row is one expression field.
  * @return False for an unreadable, empty or oversized expression.
  */
 bool RewardConditions::read_list(std::span<const std::byte> blob,
                                  std::size_t at,
                                  std::span<domain::Instruction> output,
                                  std::size_t& count,
-                                 BankFailure& failure) const noexcept {
+                                 BankFailure& failure,
+                                 std::uint32_t rowClass) const noexcept {
     count = 0;
     failure = BankFailure::none;
     tables::Array rows{};
     std::vector<domain::Instruction> instructions;
-    if (!tables::read_array(
-            blob, at, layout::ConditionRow::kClass, layout::ConditionRow::kSize, rows)) {
+    if (!tables::read_array(blob, at, rowClass, layout::ConditionRow::kSize, rows)) {
         return false;
     }
     for (std::size_t i = 0; i < rows.count; ++i) {

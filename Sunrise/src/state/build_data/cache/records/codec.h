@@ -105,6 +105,11 @@ namespace sunrise::state::build_data::cache::records {
 [[nodiscard]] bool encode(const starter_sets::Definition& value, StarterSetRecord& record) noexcept;
 [[nodiscard]] bool decode(const StarterSetRecord& record, starter_sets::Definition& value) noexcept;
 
+[[nodiscard]] bool encode(const items::insertion_rules::Rule& value,
+                          PlugInsertionRuleRecord& record) noexcept;
+[[nodiscard]] bool decode(const PlugInsertionRuleRecord& record,
+                          items::insertion_rules::Rule& value) noexcept;
+
 [[nodiscard]] bool encode(const build_data::records::Objective& value,
                           RecordObjectiveRecord& record) noexcept;
 [[nodiscard]] bool decode(const RecordObjectiveRecord& record,

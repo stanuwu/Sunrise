@@ -60,7 +60,8 @@ namespace {
            && domains.objectives.size() <= kMaximumCount
            && domains.objectiveInstructions.size() <= kMaximumCount
            && domains.pursuits.size() <= kMaximumCount
-           && domains.starterSets.size() <= kMaximumCount;
+           && domains.starterSets.size() <= kMaximumCount
+           && domains.plugInsertionRules.size() <= kMaximumCount;
 }
 
 /** @return True when the requested final-name rule is one of the declared values. */
