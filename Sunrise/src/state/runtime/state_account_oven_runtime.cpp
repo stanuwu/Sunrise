@@ -354,4 +354,9 @@ bool prepare_ingredient_credit(std::uint32_t pickupHash,
     return true;
 }
 
+/** Answers from the authored pickup table alone, without reading the balance. */
+bool is_ingredient_pickup(std::uint32_t definitionHash) noexcept {
+    return runtime::detail::find_pickup(definitionHash) != nullptr;
+}
+
 } // namespace sunrise::state

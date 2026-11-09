@@ -257,6 +257,17 @@ enum class RecordRewardKind : std::uint8_t {
     accountUnlock,
 };
 
+/** One account unlock row a transaction writes, and the value its preparation observed. */
+struct AccountUnlockWrite {
+    /** The account flag bank when set, the account value bank otherwise. */
+    bool flag{};
+    std::uint16_t index{};
+    std::int32_t previousValue{};
+    std::int32_t value{};
+
+    bool operator==(const AccountUnlockWrite&) const = default;
+};
+
 /** One requested item inside a prepared record-reward batch; its rows are the batch's rows. */
 struct PreparedRecordReward {
     /** The new instance's identity, or zero for a stack or an instance that found no row. */
@@ -271,6 +282,11 @@ struct PreparedRecordReward {
     /** First quest step a placed character instance starts, and the saved value it observed. */
     build_data::items::QuestInitialization quest{};
     std::int32_t previousQuestValue{};
+    /**
+     * The oven balance a placed ingredient pickup credits. Its observed value follows an earlier
+     * pickup of the same balance in the batch.
+     */
+    std::optional<AccountUnlockWrite> ingredientCredit{};
 };
 
 /** The saved array a granted row belongs to. */
@@ -487,17 +503,6 @@ struct AccountEditChange {
     std::size_t characterIndex{};
     /** A row the account object publishes changed, so that object is refreshed too. */
     bool accountRows{};
-};
-
-/** One account unlock row a transaction writes, and the value its preparation observed. */
-struct AccountUnlockWrite {
-    /** The account flag bank when set, the account value bank otherwise. */
-    bool flag{};
-    std::uint16_t index{};
-    std::int32_t previousValue{};
-    std::int32_t value{};
-
-    bool operator==(const AccountUnlockWrite&) const = default;
 };
 
 /**
@@ -1064,6 +1069,12 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 [[nodiscard]] bool prepare_ingredient_credit(std::uint32_t pickupHash,
                                              std::int32_t quantity,
                                              AccountUnlockWrite& credit) noexcept;
+
+/**
+ * @return True for a Dawning ingredient pickup, which arrives only with the oven balance credit
+ *         prepare_ingredient_credit stages.
+ */
+[[nodiscard]] bool is_ingredient_pickup(std::uint32_t definitionHash) noexcept;
 
 /**
  * Commits a prepared socket selection only while the complete prepare-time character is unchanged.

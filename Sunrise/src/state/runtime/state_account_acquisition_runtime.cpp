@@ -228,7 +228,9 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
     // A vendor row may name an item with no collectible, so the collectible steps are skipped
     // rather than faked. The item is still validated, just by its own hash.
     const bool hasCollectible = collectibleIndex != build_data::collectibles::kNoCollectibleIndex;
-    if (definitionHash == authored_inventory::kNoDefinitionHash || !account::valid(account)
+    // An ingredient pickup arrives only through the reward grant, which credits its balance.
+    if (definitionHash == authored_inventory::kNoDefinitionHash
+        || is_ingredient_pickup(definitionHash) || !account::valid(account)
         || !valid_profile_inventory(account)) {
         return false;
     }

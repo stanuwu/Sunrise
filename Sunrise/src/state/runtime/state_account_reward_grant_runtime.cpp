@@ -7,6 +7,7 @@
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <span>
 
@@ -91,6 +92,11 @@ namespace {
         reward.kind == RecordRewardKind::characterInstance && reward.placedQuantity != 0;
     if (startsQuest ? reward.quest != item.questInitialization
                     : reward.quest.scope != Quest::Scope::none) {
+        return false;
+    }
+    // A placed ingredient pickup always carries its balance credit, and nothing else carries one.
+    if (reward.ingredientCredit.has_value()
+        != (reward.placedQuantity != 0 && is_ingredient_pickup(reward.definitionHash))) {
         return false;
     }
     if (reward.kind == RecordRewardKind::accountUnlock) {
@@ -272,6 +278,34 @@ struct GrantView {
 }
 
 /**
+ * Stages the oven balance a placed ingredient pickup credits, by the quantity that found a row. A
+ * later pickup of the same balance in the batch credits on top of the earlier one.
+ * @param reason Receives a static reason on failure.
+ * @return Not ready when the balance cannot be staged now; deferred when it cannot hold the credit.
+ */
+[[nodiscard]] RewardPreparation prepare_pickup_credit(GrantView view,
+                                                      PreparedRecordReward& prepared,
+                                                      const char*& reason) noexcept {
+    reason = "ingredient_credit";
+    AccountUnlockWrite credit{};
+    if (!prepare_ingredient_credit(prepared.definitionHash, prepared.placedQuantity, credit)) {
+        return RewardPreparation::notReady;
+    }
+    for (const auto& earlier : view.prior) {
+        if (earlier.ingredientCredit && earlier.ingredientCredit->index == credit.index) {
+            credit.previousValue = earlier.ingredientCredit->value;
+        }
+    }
+    if (credit.previousValue
+        > (std::numeric_limits<std::int32_t>::max)() - prepared.placedQuantity) {
+        return RewardPreparation::deferred;
+    }
+    credit.value = credit.previousValue + prepared.placedQuantity;
+    prepared.ingredientCredit = credit;
+    return RewardPreparation::prepared;
+}
+
+/**
  * Prepares one requested row against the working view and the rows before it. The row lands the
  * way the client places it, so a full bucket overflows or drops the remainder rather than refusing.
  * @param reason Receives a static reason when the row is not prepared.
@@ -300,7 +334,12 @@ struct GrantView {
     }
     // Only a character instance can start a quest, so any other destination refuses one.
     const bool quest = item.questInitialization.scope != Quest::Scope::none;
-    if (item.bucketId == build_data::inventory::buckets::kPerkBucketId) {
+    // A perk-bucket item the reward graph gives no acquisition flag, such as an ingredient
+    // pickup, is an inventory row in that FIFO bucket rather than a perk.
+    build_data::rewards::Item source{};
+    const bool flagless = build_data::find_reward_item(item.definitionIndex, source)
+                          && source.acquiredFlag == build_data::rewards::kAbsent;
+    if (item.bucketId == build_data::inventory::buckets::kPerkBucketId && !flagless) {
         reason = "perk_acquisition";
         if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
             || !requested.sockets.empty() || quest) {
@@ -363,6 +402,9 @@ struct GrantView {
     // Only an item that found a row runs its acquisition side effects.
     if (instance) {
         prepared.instanceSoid = view.nextInstanceSoid - 1;
+    }
+    if (is_ingredient_pickup(item.definitionHash)) {
+        return prepare_pickup_credit(view, prepared, reason);
     }
     return quest ? prepare_quest_start(view, item, prepared, reason) : RewardPreparation::prepared;
 }
@@ -545,10 +587,11 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
 } // namespace runtime::detail
 
 /**
- * Applies a prepared grant's flags, quest starts, quest step and progression credit to the saved
- * banks.
+ * Applies a prepared grant's flags, quest starts, quest step, progression credit and ingredient
+ * credits to the saved banks.
  * @param after Receives the selected character's unlocks with the grant applied.
- * @return False when a flag, quest value or progression moved since the grant was prepared.
+ * @return False when a flag, quest value, progression or ingredient balance moved since the grant
+ *         was prepared.
  */
 bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
                             unlocks::Table& after) noexcept {
@@ -607,6 +650,18 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
     }
     if (credits) {
         progression_value(after, progression) = progression.value;
+    }
+    // Pickups of one balance chain, so each observes the value the one before it left.
+    for (const auto& reward : rewards) {
+        const auto& credit = reward.ingredientCredit;
+        if (!credit) {
+            continue;
+        }
+        if (credit->index >= after.objectiveValues.size()
+            || after.objectiveValues[credit->index] != credit->previousValue) {
+            return false;
+        }
+        after.objectiveValues[credit->index] = credit->value;
     }
     return true;
 }
@@ -725,7 +780,7 @@ void report_dropped_rewards(const PendingRecordRewardGrant& mutation) noexcept {
 
 /**
  * Commits the shared reward after-image, its flags, its quest starts and step, its progression
- * credit and its claim together.
+ * and ingredient credits and its claim together.
  * @param mutation Prepared grant, consumed on every exit.
  * @return False when the account or a saved value moved; a record claim is revoked then.
  */
@@ -754,6 +809,11 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
                 && reward.previousQuestValue == build_data::items::kUnsetQuestValue) {
                 ready = investment::store::write_unlock(
                     quest_bank(reward.quest), reward.quest.row, reward.quest.value);
+            }
+            if (ready && reward.ingredientCredit) {
+                ready = investment::store::write_unlock(investment::store::Bank::objectiveValues,
+                                                        reward.ingredientCredit->index,
+                                                        reward.ingredientCredit->value);
             }
         }
         for (const auto& flag : mutation.wrapper_flags()) {

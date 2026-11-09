@@ -58,7 +58,8 @@ struct CompletionPlan {
  * pinnacle marker and the Glimmer and Bright Dust stand-ins sit in the build's only one-row FIFO
  * bucket, and the rank-point markers in the perk bucket. What each one pays is server policy the
  * packages do not hold: the authored tables below pay the ones they name, and any other row naming
- * a stand-in grants nothing.
+ * a stand-in grants nothing. A Dawning ingredient pickup in the perk bucket is no stand-in: the
+ * grant places it and credits the oven balance it fills.
  */
 [[nodiscard]] bool names_stand_in(std::uint16_t itemIndex) noexcept {
     build_data::items::Definition item{};
@@ -72,6 +73,7 @@ struct CompletionPlan {
     }
     build_data::rewards::Item reward{};
     return item.bucketId == inventory_buckets::kPerkBucketId
+           && !is_ingredient_pickup(item.definitionHash)
            && build_data::find_reward_item(itemIndex, reward)
            && reward.acquiredFlag == build_data::rewards::kAbsent;
 }
