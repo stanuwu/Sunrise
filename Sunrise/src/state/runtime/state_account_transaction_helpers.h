@@ -140,6 +140,13 @@ quest_bank(const build_data::items::QuestInitialization& quest) noexcept;
 [[nodiscard]] std::int32_t&
 quest_value(unlocks::Table& table, const build_data::items::QuestInitialization& quest) noexcept;
 /**
+ * @param table One unlock snapshot of the account and the selected character.
+ * @param credit A credit scoped to the account or the character, whose index fits its bank.
+ * @return The progress lane the credited progression holds in that snapshot.
+ */
+[[nodiscard]] std::int32_t& progression_value(unlocks::Table& table,
+                                              const PreparedProgressionCredit& credit) noexcept;
+/**
  * Prepares inventory rows and consumed-wrapper flags against one account view.
  * @param claimedRecordIndex Record already claimed in the banks, or kUnclaimedRecordIndex.
  * @param wrapperFlags Flags of the wrappers a draw consumed, or null for direct rows.

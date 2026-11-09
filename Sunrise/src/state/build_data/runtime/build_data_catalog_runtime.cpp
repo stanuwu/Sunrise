@@ -132,6 +132,13 @@ bool publish_progression_definitions(std::span<const progressions::Definition> d
            && transaction.finish(progressions::replace(definitions, steps), progressions::clear);
 }
 
+/** Finds one progression by its definition hash, once the whole table is in State. */
+bool find_progression_definition_hash(std::uint32_t definitionHash,
+                                      progressions::Definition& definition) noexcept {
+    definition = {};
+    return progression_definitions_ready() && progressions::find(definitionHash, definition);
+}
+
 /** Reads what each rank of one progression costs, in rank order. */
 bool find_progression_steps(std::uint16_t definitionIndex,
                             std::span<progressions::Step> output,

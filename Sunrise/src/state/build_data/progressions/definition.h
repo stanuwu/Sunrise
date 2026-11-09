@@ -41,6 +41,7 @@ struct Definition {
     std::uint16_t stepOffset{};
     std::uint8_t stepCount{};
     Scope scope{Scope::unreplicated};
+    std::uint32_t definitionHash{};
 };
 
 } // namespace sunrise::state::build_data::progressions

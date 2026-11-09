@@ -35,7 +35,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 80;
+inline constexpr std::uint32_t kCacheFormatVersion = 81;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -318,6 +318,7 @@ struct ProgressionRecord {
     std::uint16_t stepOffset{};
     std::uint8_t stepCount{};
     std::uint8_t scope{};
+    std::uint32_t definitionHash{};
 };
 
 /** Disk form of one progression rank step. */
@@ -800,7 +801,8 @@ static_assert(sizeof(RosterGroupRecord)
               == 2 * sizeof(std::uint32_t) + sizeof(std::uint16_t)
                      + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
-static_assert(sizeof(ProgressionRecord) == 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+static_assert(sizeof(ProgressionRecord)
+              == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(ProgressionStepRecord) == sizeof(std::int32_t));
 static_assert(sizeof(SeasonPassRewardRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)

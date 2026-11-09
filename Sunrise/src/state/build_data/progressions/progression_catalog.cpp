@@ -75,6 +75,21 @@ bool steps(std::uint16_t definitionIndex, std::span<Step> output, std::size_t& c
     return true;
 }
 
+/** Finds one progression by its definition hash. */
+bool find(std::uint32_t definitionHash, Definition& output) noexcept {
+    output = {};
+    const std::shared_lock guard(g_lock);
+    const std::span<const Definition> rows = g_definitions.rows();
+    const auto found = std::find_if(rows.begin(), rows.end(), [definitionHash](const auto& row) {
+        return row.definitionHash == definitionHash;
+    });
+    if (found == rows.end()) {
+        return false;
+    }
+    output = *found;
+    return true;
+}
+
 /** Copies the whole flat step bank. */
 bool snapshot_steps(std::span<Step> output, std::size_t& count) noexcept {
     const std::shared_lock guard(g_lock);

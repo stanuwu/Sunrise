@@ -327,6 +327,9 @@ inline constexpr std::size_t kProgressionTableSlot =
 inline constexpr std::uint32_t kProgressionTableClass = schema::generated::ProgressionRow::kClass;
 /** One progression definition is 88 inline bytes. */
 inline constexpr std::size_t kProgressionRowStride = sizeof(schema::generated::ProgressionRow);
+/** A progression definition opens with its definition hash. */
+inline constexpr std::size_t kProgressionHashOffset =
+    offsetof(schema::generated::ProgressionRow, unk0);
 /** A progression definition names the object array holding its record here, in four bytes. */
 inline constexpr std::size_t kProgressionScopeOffset =
     offsetof(schema::generated::ProgressionRow, scope);

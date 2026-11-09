@@ -393,6 +393,15 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
                                 std::span<const progressions::Step> steps) noexcept;
 
 /**
+ * Finds one progression by its definition hash.
+ * @param definitionHash Native progression definition hash.
+ * @param definition Receives the row.
+ * @return True when the table is ready and a row carries the hash.
+ */
+[[nodiscard]] bool find_progression_definition_hash(std::uint32_t definitionHash,
+                                                    progressions::Definition& definition) noexcept;
+
+/**
  * Reads what each rank of one progression costs, in rank order.
  * @param definitionIndex Native progression definition index.
  * @param output Caller-owned fixed row storage.

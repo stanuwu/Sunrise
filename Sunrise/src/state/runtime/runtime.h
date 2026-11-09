@@ -304,6 +304,15 @@ struct PreparedQuestStep {
     std::int32_t previousValue{};
 };
 
+/** A progression a redemption credits, and the value its preparation observed. */
+struct PreparedProgressionCredit {
+    /** Object holding the progression; unreplicated when the grant credits none. */
+    build_data::progressions::Scope scope{build_data::progressions::Scope::unreplicated};
+    std::uint16_t definitionIndex{};
+    std::int32_t previousValue{};
+    std::int32_t value{};
+};
+
 /** Record claim and all of its item rows committed as one transaction. */
 struct PendingRecordRewardGrant {
     CharacterState beforeCharacter{};
@@ -332,6 +341,9 @@ struct PendingRecordRewardGrant {
     /** A held pursuit the grant redeems; it leaves the selected character with the grant. */
     std::uint64_t redeemedInstanceSoid{};
     PreparedQuestStep questStep{};
+    PreparedProgressionCredit progression{};
+    /** Seasonal XP the server grants in the transaction that commits this grant. */
+    std::int32_t seasonalExperience{};
     bool prepared{};
 
     /** @return The flags of the wrappers this grant consumes. */
@@ -810,7 +822,7 @@ enum class PursuitRedemption : std::uint8_t {
 /**
  * Prepares redeeming one completed pursuit the selected character holds: the pursuit leaves
  * inventory, its quest set moves to the next step, and the grant places the next step's item or,
- * at the last step, the reward rows the pursuit shows.
+ * at the last step, what the reward rows the pursuit shows pay: items, rank points and seasonal XP.
  * @param instanceSoid Held pursuit instance.
  * @param definitionHash Definition the Client named, which the instance must carry.
  * @param nowSeconds Server time in Unix seconds, which a bounty's deadline is compared with.

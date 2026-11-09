@@ -377,6 +377,15 @@ std::int32_t& quest_value(unlocks::Table& table, const Quest& quest) noexcept {
                                                 : table.characterObjectValues[quest.row];
 }
 
+/** A credited progression lives in the account or the selected character's progression bank. */
+std::int32_t& progression_value(unlocks::Table& table,
+                                const PreparedProgressionCredit& credit) noexcept {
+    auto& bank = credit.scope == build_data::progressions::Scope::account
+                     ? table.accountProgressions
+                     : table.characterProgressions;
+    return bank[credit.definitionIndex].front();
+}
+
 /** Overrides name socket types, not lanes, so adding an ordinary lane cannot shift a fixed roll. */
 bool apply_reward_sockets(const item_details::Definition& detail,
                           std::span<const build_data::rewards::SocketOverride> overrides,
@@ -536,9 +545,10 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
 } // namespace runtime::detail
 
 /**
- * Applies a prepared grant's flags, quest starts and quest step to the saved banks.
+ * Applies a prepared grant's flags, quest starts, quest step and progression credit to the saved
+ * banks.
  * @param after Receives the selected character's unlocks with the grant applied.
- * @return False when a flag or quest value moved since the grant was prepared.
+ * @return False when a flag, quest value or progression moved since the grant was prepared.
  */
 bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
                             unlocks::Table& after) noexcept {
@@ -564,6 +574,13 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             || quest_value(after, step.next) != step.previousValue)) {
         return false;
     }
+    const PreparedProgressionCredit& progression = mutation.progression;
+    const bool credits = progression.scope != build_data::progressions::Scope::unreplicated;
+    if (credits
+        && (progression.definitionIndex >= after.accountProgressions.size()
+            || progression_value(after, progression) != progression.previousValue)) {
+        return false;
+    }
     const auto wrapperFlags = mutation.wrapper_flags();
     for (std::size_t i = 0; i < wrapperFlags.size(); ++i) {
         const auto& flag = wrapperFlags[i];
@@ -587,6 +604,9 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
     }
     if (step.next.scope != Quest::Scope::none) {
         quest_value(after, step.next) = step.next.value;
+    }
+    if (credits) {
+        progression_value(after, progression) = progression.value;
     }
     return true;
 }
@@ -704,8 +724,8 @@ void report_dropped_rewards(const PendingRecordRewardGrant& mutation) noexcept {
 } // namespace
 
 /**
- * Commits the shared reward after-image, its flags, its quest starts and step, and its claim
- * together.
+ * Commits the shared reward after-image, its flags, its quest starts and step, its progression
+ * credit and its claim together.
  * @param mutation Prepared grant, consumed on every exit.
  * @return False when the account or a saved value moved; a record claim is revoked then.
  */
@@ -746,6 +766,15 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
         const Quest& step = mutation.questStep.next;
         if (ready && step.scope != Quest::Scope::none) {
             ready = investment::store::write_unlock(quest_bank(step), step.row, step.value);
+        }
+        const PreparedProgressionCredit& progression = mutation.progression;
+        if (ready && progression.scope != build_data::progressions::Scope::unreplicated) {
+            ready = investment::store::write_unlock(
+                progression.scope == build_data::progressions::Scope::account
+                    ? investment::store::Bank::accountProgressions
+                    : investment::store::Bank::characterProgressions,
+                progression.definitionIndex,
+                progression.value);
         }
         ready = ready && transaction.commit();
     }
