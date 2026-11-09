@@ -27,6 +27,10 @@ namespace sunrise::state::build_data::cache::records {
                           MaterialRequirementSetRecord& record) noexcept;
 [[nodiscard]] bool decode(const MaterialRequirementSetRecord& record,
                           material_requirements::Definition& value) noexcept;
+[[nodiscard]] bool encode(const material_requirements::CurrencyScalar& value,
+                          CurrencyScalarRecord& record) noexcept;
+[[nodiscard]] bool decode(const CurrencyScalarRecord& record,
+                          material_requirements::CurrencyScalar& value) noexcept;
 
 [[nodiscard]] bool encode(const items::details::Definition& value,
                           ItemDetailRecord& record) noexcept;

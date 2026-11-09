@@ -35,7 +35,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 81;
+inline constexpr std::uint32_t kCacheFormatVersion = 82;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -77,6 +77,7 @@ struct Header {
     std::uint32_t itemCount{};
     std::uint32_t collectibleCount{};
     std::uint32_t materialRequirementSetCount{};
+    std::uint32_t currencyScalarCount{};
     std::uint32_t itemDetailCount{};
     std::uint32_t socketPlugRuleCount{};
     std::uint32_t socketPlugPoolCount{};
@@ -213,6 +214,13 @@ struct MaterialRequirementSetRecord {
     std::uint8_t reserved{};
     std::array<MaterialRequirementRecord, material_requirements::kRequirementCapacity>
         requirements{};
+};
+
+/** Disk form of one socket type's currency scalar. */
+struct CurrencyScalarRecord {
+    std::uint16_t socketType{};
+    std::uint16_t itemDefinitionIndex{material_requirements::kUnavailableItemDefinitionIndex};
+    std::uint32_t multiplier{};
 };
 
 /** Disk form of the supported item fields instance generation uses. */
@@ -762,7 +770,7 @@ static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 49 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 50 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)
                      + sizeof(gameplay::entity_position_profiles::Fingerprint));
 static_assert(sizeof(SpawnPointRecord)
@@ -842,6 +850,7 @@ static_assert(sizeof(MaterialRequirementSetRecord)
               == sizeof(std::uint32_t) + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t)
                      + material_requirements::kRequirementCapacity
                            * sizeof(MaterialRequirementRecord));
+static_assert(sizeof(CurrencyScalarRecord) == 2 * sizeof(std::uint16_t) + sizeof(std::uint32_t));
 static_assert(sizeof(ItemDetailRecord)
               == 7 * sizeof(std::uint16_t) + 8 * sizeof(std::uint8_t) + sizeof(std::int32_t)
                      + sizeof(std::uint32_t)

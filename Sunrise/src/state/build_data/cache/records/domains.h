@@ -39,6 +39,7 @@ struct DomainCounts {
     std::size_t items{};
     std::size_t collectibles{};
     std::size_t materialRequirementSets{};
+    std::size_t currencyScalars{};
     std::size_t itemDetails{};
     std::size_t socketPlugRules{};
     std::size_t socketPlugPools{};
@@ -91,6 +92,7 @@ struct MutableDomains {
     std::span<items::Definition> items;
     std::span<collectibles::Definition> collectibles;
     std::span<material_requirements::Definition> materialRequirementSets;
+    std::span<material_requirements::CurrencyScalar> currencyScalars;
     std::span<items::details::Definition> itemDetails;
     std::span<items::socket_plugs::Rule> socketPlugRules;
     std::span<items::socket_plugs::Pool> socketPlugPools;
@@ -143,6 +145,7 @@ struct Domains {
     std::span<const items::Definition> items;
     std::span<const collectibles::Definition> collectibles;
     std::span<const material_requirements::Definition> materialRequirementSets;
+    std::span<const material_requirements::CurrencyScalar> currencyScalars;
     std::span<const items::details::Definition> itemDetails;
     std::span<const items::socket_plugs::Rule> socketPlugRules;
     std::span<const items::socket_plugs::Pool> socketPlugPools;

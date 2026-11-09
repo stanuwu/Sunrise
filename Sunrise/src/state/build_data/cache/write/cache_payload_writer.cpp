@@ -70,6 +70,7 @@ bool payload_checksum(records::Domains domains, std::uint64_t& checksum) noexcep
            && checksum_domain<records::CollectibleRecord>(domains.collectibles, checksum)
            && checksum_domain<records::MaterialRequirementSetRecord>(
                domains.materialRequirementSets, checksum)
+           && checksum_domain<records::CurrencyScalarRecord>(domains.currencyScalars, checksum)
            && checksum_domain<records::ItemDetailRecord>(domains.itemDetails, checksum)
            && checksum_domain<records::SocketPlugRuleRecord>(domains.socketPlugRules, checksum)
            && checksum_domain<records::SocketPlugPoolRecord>(domains.socketPlugPools, checksum)
@@ -125,6 +126,7 @@ bool write_payload(HANDLE file, records::Domains domains) noexcept {
            && write_domain<records::CollectibleRecord>(file, domains.collectibles)
            && write_domain<records::MaterialRequirementSetRecord>(file,
                                                                   domains.materialRequirementSets)
+           && write_domain<records::CurrencyScalarRecord>(file, domains.currencyScalars)
            && write_domain<records::ItemDetailRecord>(file, domains.itemDetails)
            && write_domain<records::SocketPlugRuleRecord>(file, domains.socketPlugRules)
            && write_domain<records::SocketPlugPoolRecord>(file, domains.socketPlugPools)

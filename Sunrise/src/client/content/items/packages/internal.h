@@ -179,6 +179,10 @@ struct Storage {
     std::array<state::build_data::material_requirements::Definition,
                state::build_data::material_requirements::kDefinitionCapacity>
         materialRequirementRows{};
+    /** Socket-type currency scalars, published with the requirement sets they multiply. */
+    std::array<state::build_data::material_requirements::CurrencyScalar,
+               state::build_data::material_requirements::kCurrencyScalarCapacity>
+        currencyScalarRows{};
     std::array<state::build_data::items::Definition, state::build_data::items::kDefinitionCapacity>
         rows{};
     /** Incident-target rows held until the sobject table is published. */
@@ -531,7 +535,10 @@ void report(std::size_t published, const char* reason) noexcept;
                                    std::size_t& rowCount,
                                    const char*& reason) noexcept;
 
-/** Reads and publishes every native material-requirement set from investment-root slot 96. */
+/**
+ * Reads and publishes every native material-requirement set from investment-root slot 96, with
+ * the currency scalars the socket-type table declares for them.
+ */
 [[nodiscard]] bool build_material_requirements(const reader::Source& source,
                                                Storage& storage,
                                                std::span<const std::byte> root,

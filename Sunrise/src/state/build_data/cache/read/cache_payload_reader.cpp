@@ -74,6 +74,9 @@ void clear(records::MutableDomains output) noexcept {
     std::fill(output.materialRequirementSets.begin(),
               output.materialRequirementSets.end(),
               material_requirements::Definition{});
+    std::fill(output.currencyScalars.begin(),
+              output.currencyScalars.end(),
+              material_requirements::CurrencyScalar{});
     std::fill(output.itemDetails.begin(), output.itemDetails.end(), items::details::Definition{});
     std::fill(
         output.socketPlugRules.begin(), output.socketPlugRules.end(), items::socket_plugs::Rule{});
@@ -150,6 +153,7 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.collectibles, sizeof(records::CollectibleRecord), size)
            && add_records(
                counts.materialRequirementSets, sizeof(records::MaterialRequirementSetRecord), size)
+           && add_records(counts.currencyScalars, sizeof(records::CurrencyScalarRecord), size)
            && add_records(counts.itemDetails, sizeof(records::ItemDetailRecord), size)
            && add_records(counts.socketPlugRules, sizeof(records::SocketPlugRuleRecord), size)
            && add_records(counts.socketPlugPools, sizeof(records::SocketPlugPoolRecord), size)
@@ -218,6 +222,9 @@ bool read_payload(HANDLE file,
         valid
         && read_domain<records::MaterialRequirementSetRecord>(
             file, output.materialRequirementSets.first(counts.materialRequirementSets), checksum);
+    valid = valid
+            && read_domain<records::CurrencyScalarRecord>(
+                file, output.currencyScalars.first(counts.currencyScalars), checksum);
     valid = valid
             && read_domain<records::ItemDetailRecord>(
                 file, output.itemDetails.first(counts.itemDetails), checksum);
@@ -356,6 +363,7 @@ bool read_payload(HANDLE file,
             output.items.first(counts.items),
             output.collectibles.first(counts.collectibles),
             output.materialRequirementSets.first(counts.materialRequirementSets),
+            output.currencyScalars.first(counts.currencyScalars),
             output.itemDetails.first(counts.itemDetails),
             output.socketPlugRules.first(counts.socketPlugRules),
             output.socketPlugPools.first(counts.socketPlugPools),

@@ -96,6 +96,29 @@ void report_socket_plug(std::string_view stage,
     return authored_inventory::valid(sockets);
 }
 
+/**
+ * Multiplies each requirement by the target socket type's authored scalar for its currency.
+ * @return False before the scalars are published or when a scaled quantity overflows.
+ */
+[[nodiscard]] static bool
+scale_socket_costs(std::uint16_t socketType,
+                   build_data::material_requirements::Definition& materialSet) noexcept {
+    for (std::size_t index = 0; index < materialSet.requirementCount; ++index) {
+        auto& requirement = materialSet.requirements[index];
+        std::uint32_t multiplier = 0;
+        if (!build_data::socket_currency_multiplier(
+                socketType, requirement.itemDefinitionIndex, multiplier)) {
+            return false;
+        }
+        const std::uint64_t scaled = std::uint64_t{requirement.quantity} * multiplier;
+        if (scaled > (std::numeric_limits<std::uint32_t>::max)()) {
+            return false;
+        }
+        requirement.quantity = static_cast<std::uint32_t>(scaled);
+    }
+    return true;
+}
+
 /** Stages the canonical socket-only after-image over one already validated account snapshot. */
 [[nodiscard]] bool stage_socket_plug(const AccountState& snapshot,
                                      std::size_t characterIndex,
@@ -181,6 +204,7 @@ void report_socket_plug(std::string_view stage,
     if (materialSetIndex != build_data::items::kUnavailableMaterialRequirementSetIndex
         && (!build_data::find_material_requirement_set(materialSetIndex, materialSet)
             || materialSet.requirementSetIndex != materialSetIndex
+            || !scale_socket_costs(detail.socketTypes[socketLane], materialSet)
             || !apply_action_materials(snapshot, materialSet, chargedAccount, profileChanged))) {
         return fail("materials");
     }

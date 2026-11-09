@@ -20,6 +20,7 @@ namespace {
     return domains.named.size() <= kMaximumCount && domains.items.size() <= kMaximumCount
            && domains.collectibles.size() <= kMaximumCount
            && domains.materialRequirementSets.size() <= kMaximumCount
+           && domains.currencyScalars.size() <= kMaximumCount
            && domains.itemDetails.size() <= kMaximumCount
            && domains.socketPlugRules.size() <= kMaximumCount
            && domains.socketPlugPools.size() <= kMaximumCount

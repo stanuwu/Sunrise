@@ -13,6 +13,7 @@
 #include "../schema/generated/tag_classes_80805a.h"
 #include "../schema/generated/tag_classes_80805b.h"
 #include "../schema/generated/tag_classes_80805c.h"
+#include "../schema/generated/tag_classes_80805d.h"
 #include "../schema/generated/tag_classes_808074.h"
 #include "../schema/generated/tag_classes_808077.h"
 #include "../schema/generated/tag_classes_80807a.h"
@@ -513,6 +514,27 @@ inline constexpr std::size_t kSocketTypeRowStride = sizeof(schema::generated::So
 /** One socket type points to its acquired-state rule array from this row offset. */
 inline constexpr std::size_t kSocketTypeAcquisitionDescriptor =
     offsetof(schema::generated::SocketTypeRow, h0db6e645);
+/**
+ * One socket type's currency scalars: each row multiplies one currency's quantity in the costs
+ * of a plug inserted into that socket type. The shipped rows name Glimmer on shader and
+ * projection sockets and the four Synths on the higher synthesis sockets.
+ */
+inline constexpr std::size_t kSocketTypeCurrencyScalarDescriptor =
+    offsetof(schema::generated::SocketTypeRow, h321354a2);
+inline constexpr std::uint32_t kSocketTypeCurrencyScalarClass =
+    schema::generated::C80805d86::kClass;
+inline constexpr std::size_t kSocketTypeCurrencyScalarStride = sizeof(schema::generated::C80805d86);
+/** A scalar row opens with the currency's item index; the next 16 bits are zero in every row. */
+inline constexpr std::size_t kCurrencyScalarItemIndexOffset =
+    offsetof(schema::generated::C80805d86, gap0);
+inline constexpr std::size_t kCurrencyScalarReservedOffset =
+    kCurrencyScalarItemIndexOffset + sizeof(std::uint16_t);
+/** The multiplier is a float; every shipped value is a whole number of at least one. */
+inline constexpr std::size_t kCurrencyScalarValueOffset =
+    offsetof(schema::generated::C80805d86, unk4);
+static_assert(kCurrencyScalarItemIndexOffset == 0
+              && kCurrencyScalarReservedOffset + sizeof(std::uint16_t)
+                     == kCurrencyScalarValueOffset);
 /** Acquired-state and item-completion arrays carry this postfix expression-row class. */
 inline constexpr std::uint32_t kInvestmentExpressionRowClass =
     schema::generated::InvestmentExpressionRow::kClass;

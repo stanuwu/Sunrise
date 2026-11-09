@@ -146,6 +146,7 @@ bool counts_fit(const DomainCounts& counts, MutableDomains domains) noexcept {
     return counts.named <= domains.named.size() && counts.items <= domains.items.size()
            && counts.collectibles <= domains.collectibles.size()
            && counts.materialRequirementSets <= domains.materialRequirementSets.size()
+           && counts.currencyScalars <= domains.currencyScalars.size()
            && counts.itemDetails <= domains.itemDetails.size()
            && counts.socketPlugRules <= domains.socketPlugRules.size()
            && counts.socketPlugPools <= domains.socketPlugPools.size()
@@ -261,7 +262,7 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
                                    domains.rewardInstructions,
                                    domains.rewardModifiers,
                                    domains.rewardSockets}))
-        || !material_requirements::valid(domains.materialRequirementSets)
+        || !material_requirements::valid(domains.materialRequirementSets, domains.currencyScalars)
         || !strictly_ordered(domains.materialRequirementSets, material_requirement_less)
         || !inventory::buckets::valid(domains.inventoryBuckets)
         || !strictly_ordered(domains.inventoryBuckets, bucket_less)
@@ -355,6 +356,13 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
                 || domains.items[itemIndex].definitionIndex != itemIndex) {
                 return false;
             }
+        }
+    }
+    for (const material_requirements::CurrencyScalar& scalar : domains.currencyScalars) {
+        if (static_cast<std::size_t>(scalar.itemDefinitionIndex) >= domains.items.size()
+            || domains.items[scalar.itemDefinitionIndex].definitionIndex
+                   != scalar.itemDefinitionIndex) {
+            return false;
         }
     }
     for (std::size_t index = 0; index < domains.socketEntryLists.size(); ++index) {

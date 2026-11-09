@@ -146,7 +146,8 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
                                   domains.rewardInstructions,
                                   domains.rewardModifiers,
                                   domains.rewardSockets}))
-        || !pursuitsReplaced || !material_requirements::replace(domains.materialRequirementSets)
+        || !pursuitsReplaced
+        || !material_requirements::replace(domains.materialRequirementSets, domains.currencyScalars)
         || !inventory::buckets::replace(domains.inventoryBuckets)
         || !socket_entry_lists::replace(domains.socketEntryLists)
         // The per-entry tables are what the subclass selection reads. Without them a cache hit

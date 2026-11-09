@@ -213,6 +213,20 @@ bool decode(const MaterialRequirementSetRecord& record,
     return true;
 }
 
+/** Encodes one socket type's currency scalar. */
+bool encode(const material_requirements::CurrencyScalar& value,
+            CurrencyScalarRecord& record) noexcept {
+    record = {value.socketType, value.itemDefinitionIndex, value.multiplier};
+    return true;
+}
+
+/** Decodes one socket type's currency scalar; the domain check validates its order. */
+bool decode(const CurrencyScalarRecord& record,
+            material_requirements::CurrencyScalar& value) noexcept {
+    value = {record.socketType, record.itemDefinitionIndex, record.multiplier};
+    return true;
+}
+
 /** Encodes the optional equipment slot without writing the optional's own storage. */
 bool encode(const items::details::Definition& value, ItemDetailRecord& record) noexcept {
     if (value.instancedDefinitionState != items::details::InstancedDefinitionState::stackable

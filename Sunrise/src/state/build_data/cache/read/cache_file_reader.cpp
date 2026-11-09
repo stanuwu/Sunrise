@@ -26,6 +26,7 @@ namespace {
         header.itemCount,
         header.collectibleCount,
         header.materialRequirementSetCount,
+        header.currencyScalarCount,
         header.itemDetailCount,
         header.socketPlugRuleCount,
         header.socketPlugPoolCount,

@@ -111,6 +111,7 @@ enum class WriteStatus {
         static_cast<std::uint32_t>(domains.items.size()),
         static_cast<std::uint32_t>(domains.collectibles.size()),
         static_cast<std::uint32_t>(domains.materialRequirementSets.size()),
+        static_cast<std::uint32_t>(domains.currencyScalars.size()),
         static_cast<std::uint32_t>(domains.itemDetails.size()),
         static_cast<std::uint32_t>(domains.socketPlugRules.size()),
         static_cast<std::uint32_t>(domains.socketPlugPools.size()),

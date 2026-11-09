@@ -35,11 +35,29 @@ struct Definition {
     std::array<Requirement, kRequirementCapacity> requirements{};
 };
 
+/** The shipped build declares 13 currency scalars on 7 of its 765 socket types; keep headroom. */
+inline constexpr std::size_t kCurrencyScalarCapacity = 64;
+
+/** One socket type's multiplier for one currency's quantity in an inserted plug's costs. */
+struct CurrencyScalar {
+    std::uint16_t socketType{};
+    std::uint16_t itemDefinitionIndex{kUnavailableItemDefinitionIndex};
+    std::uint32_t multiplier{};
+};
+
 void clear() noexcept;
-[[nodiscard]] bool valid(std::span<const Definition> definitions) noexcept;
-[[nodiscard]] bool replace(std::span<const Definition> definitions) noexcept;
+/** Scalars are sorted by socket type, then currency, each pair once. */
+[[nodiscard]] bool valid(std::span<const Definition> definitions,
+                         std::span<const CurrencyScalar> scalars) noexcept;
+[[nodiscard]] bool replace(std::span<const Definition> definitions,
+                           std::span<const CurrencyScalar> scalars) noexcept;
 [[nodiscard]] bool find(std::uint16_t requirementSetIndex, Definition& definition) noexcept;
+/** @return The socket type's multiplier for the currency, or 1 when it names none. */
+[[nodiscard]] std::uint32_t currency_multiplier(std::uint16_t socketType,
+                                                std::uint16_t itemDefinitionIndex) noexcept;
 [[nodiscard]] bool snapshot(std::span<Definition> output, std::size_t& count) noexcept;
+[[nodiscard]] bool snapshot_currency_scalars(std::span<CurrencyScalar> output,
+                                             std::size_t& count) noexcept;
 [[nodiscard]] std::size_t count() noexcept;
 
 } // namespace sunrise::state::build_data::material_requirements

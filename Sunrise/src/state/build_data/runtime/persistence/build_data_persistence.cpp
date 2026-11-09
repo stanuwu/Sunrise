@@ -79,6 +79,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && collectibles::snapshot(scratch.collectibles, counts.collectibles)
            && material_requirements::snapshot(scratch.materialRequirementSets,
                                               counts.materialRequirementSets)
+           && material_requirements::snapshot_currency_scalars(scratch.currencyScalars,
+                                                               counts.currencyScalars)
            && items::details::snapshot(scratch.itemDetails, counts.itemDetails)
            && items::socket_plugs::snapshot(scratch.socketPlugRules,
                                             counts.socketPlugRules,
@@ -177,6 +179,9 @@ cache::records::MutableDomains scratch_domains(Context& state, std::size_t named
     const auto materialRequirementSets = ensure_scratch<material_requirements::Definition,
                                                         material_requirements::kDefinitionCapacity>(
         state.materialRequirementSetScratch);
+    const auto currencyScalars =
+        ensure_scratch<material_requirements::CurrencyScalar,
+                       material_requirements::kCurrencyScalarCapacity>(state.currencyScalarScratch);
     const auto itemDetails =
         ensure_scratch<build_data::items::details::Definition,
                        build_data::items::details::kDefinitionCapacity>(state.itemDetailScratch);
@@ -262,6 +267,7 @@ cache::records::MutableDomains scratch_domains(Context& state, std::size_t named
         items,
         collectibles,
         materialRequirementSets,
+        currencyScalars,
         itemDetails,
         socketPlugRules,
         socketPlugPools,
@@ -327,6 +333,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.itemScratch);
     release_bank(state.collectibleScratch);
     release_bank(state.materialRequirementSetScratch);
+    release_bank(state.currencyScalarScratch);
     release_bank(state.itemDetailScratch);
     release_bank(state.socketPlugRuleScratch);
     release_bank(state.socketPlugPoolScratch);
@@ -407,6 +414,8 @@ cache::records::Domains occupied_domains(Context& state,
                                                               counts.collectibles},
         std::span<const material_requirements::Definition>{
             state.materialRequirementSetScratch.data(), counts.materialRequirementSets},
+        std::span<const material_requirements::CurrencyScalar>{state.currencyScalarScratch.data(),
+                                                               counts.currencyScalars},
         itemDetails,
         socketPlugRules,
         socketPlugPools,

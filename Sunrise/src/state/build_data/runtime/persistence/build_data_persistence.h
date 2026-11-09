@@ -71,6 +71,7 @@ struct Context {
     std::vector<items::Definition> itemScratch{};
     std::vector<collectibles::Definition> collectibleScratch{};
     std::vector<material_requirements::Definition> materialRequirementSetScratch{};
+    std::vector<material_requirements::CurrencyScalar> currencyScalarScratch{};
     std::vector<items::details::Definition> itemDetailScratch{};
     std::vector<items::socket_plugs::Rule> socketPlugRuleScratch{};
     std::vector<items::socket_plugs::Pool> socketPlugPoolScratch{};

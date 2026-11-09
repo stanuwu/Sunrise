@@ -163,14 +163,27 @@ find_collectible_item_definition_index(std::uint16_t collectibleIndex,
 /** @return True when every installed material-requirement set is available by native ordinal. */
 [[nodiscard]] bool material_requirement_sets_ready() noexcept;
 
-/** Publishes the complete dense native material-requirement table. */
+/**
+ * Publishes the complete dense native material-requirement table with the socket-type currency
+ * scalars that multiply it for an inserted plug.
+ */
 [[nodiscard]] bool publish_material_requirement_sets(
-    std::span<const material_requirements::Definition> definitions) noexcept;
+    std::span<const material_requirements::Definition> definitions,
+    std::span<const material_requirements::CurrencyScalar> scalars) noexcept;
 
 /** Resolves one authored material-requirement set without embedding any prices in code. */
 [[nodiscard]] bool
 find_material_requirement_set(std::uint16_t requirementSetIndex,
                               material_requirements::Definition& definition) noexcept;
+
+/**
+ * Resolves what a socket type multiplies one currency's quantity by when a plug is inserted.
+ * @param multiplier Receives the authored scalar, or 1 when the socket type names none.
+ * @return False until the material domain is published.
+ */
+[[nodiscard]] bool socket_currency_multiplier(std::uint16_t socketType,
+                                              std::uint16_t itemDefinitionIndex,
+                                              std::uint32_t& multiplier) noexcept;
 
 /** @return True when a complete configured-detail domain, empty or not, is published. */
 [[nodiscard]] bool configured_item_details_ready() noexcept;
