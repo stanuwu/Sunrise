@@ -2337,6 +2337,7 @@
     <ClInclude Include="src\state\account\account_state.h" />
     <ClInclude Include="src\state\account\inventory\inventory_state.h" />
     <ClInclude Include="src\state\account\inventory\occupied_bucket.h" />
+    <ClInclude Include="src\state\account\inventory\synthesizer_tier.h" />
     <ClInclude Include="src\state\account\settings\settings_state.h" />
     <ClInclude Include="src\state\account\settings\settings_delta.h" />
     <ClInclude Include="src\state\account\settings\key_bindings.h" />

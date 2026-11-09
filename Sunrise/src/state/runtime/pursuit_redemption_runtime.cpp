@@ -13,6 +13,7 @@
 #include <span>
 
 #include "../../core/logging/log.h"
+#include "../account/inventory/synthesizer_tier.h"
 #include "../build_data/runtime.h"
 #include "../build_data/vendors/repeatable_triggers.h"
 #include "../investment/store_internal.h"
@@ -52,6 +53,9 @@ struct CompletionPlan {
     std::int32_t seasonalExperience{};
     /** The character's Gambit Prime helmet tiers after the grant. */
     std::array<GambitPrimeHelmetTier, kGambitPrimeRoleCount> helmetTiers{};
+    /** The held Synthesizer the next tier replaces, or zero. */
+    std::uint64_t replacedSynthesizerSoid{};
+    bool upgradesSynthesizer{};
 };
 
 /**
@@ -176,7 +180,10 @@ enum class GearSource : std::uint8_t {
     scourge,
     crown,
     trials,
-    /** Gambit Prime role weeklies: their role marker pays the next helmet tier. */
+    /**
+     * Gambit Prime role weeklies: their role marker pays the next helmet tier, and their
+     * Synthesizer Upgrade marker the next Synthesizer.
+     */
     gambitPrimeRole,
 };
 
@@ -326,6 +333,9 @@ constexpr std::array<RoleHelmetMarker, kGambitPrimeRoleCount> kRoleHelmets{{
        {3220030414U, 3220030415U, 3220030412U},
        {3660501109U, 3660501108U, 3660501111U}}}},
 }};
+
+/** The Synthesizer Upgrade marker, which replaces the held Synthesizer with the next tier. */
+constexpr std::uint32_t kSynthesizerUpgradeMarkerHash = 596773932U;
 
 /** The Legendary Rune marker. No source of the rune it pays is known, so it pays nothing. */
 constexpr std::uint32_t kLegendaryRuneMarkerHash = 1772646107U;
@@ -918,6 +928,7 @@ enum class PaymentKind : std::uint8_t {
     experience,
     rankPoints,
     roleHelmet,
+    synthesizerUpgrade,
     item,
 };
 
@@ -1148,6 +1159,11 @@ pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcep
         payment.role = static_cast<std::size_t>(helmet - kRoleHelmets.data());
         return rules.gear == GearSource::gambitPrimeRole;
     }
+    reason = "reward_synthesizer_upgrade_source";
+    if (hash == kSynthesizerUpgradeMarkerHash) {
+        payment.kind = PaymentKind::synthesizerUpgrade;
+        return rules.gear == GearSource::gambitPrimeRole && reward.quantity == 1;
+    }
     reason = "reward_gear_source";
     if (is_gear_marker(hash)) {
         std::uint16_t gearIndex = pursuits::kAbsent;
@@ -1242,16 +1258,43 @@ void report_skipped_row(std::uint32_t bountyHash,
 }
 
 /**
+ * Pays the Synthesizer one tier past the one the character holds, which it replaces. A Powerful
+ * Synthesizer stays.
+ * @return False when the character holds no Synthesizer, or more than one, or the next tier is
+ *         not installed.
+ */
+[[nodiscard]] bool next_synthesizer(const CharacterState& character,
+                                    CompletionPlan& plan,
+                                    RowPayment& payment) noexcept {
+    const std::size_t index = authored_inventory::held_synthesizer(character.inventory);
+    if (index == character.inventory.count) {
+        return false;
+    }
+    const authored_inventory::Item& held = character.inventory.values[index];
+    const auto tier =
+        static_cast<std::size_t>(authored_inventory::synthesizer_tier(held.definitionHash));
+    payment = {};
+    if (tier == authored_inventory::kSynthesizerTiers.size()) {
+        return true;
+    }
+    plan.replacedSynthesizerSoid = held.instanceSoid;
+    return held.instanceSoid != 0
+           && pay_item(authored_inventory::kSynthesizerTiers[tier], 1, payment);
+}
+
+/**
  * Resolves the reward rows a pursuit shows into items, seasonal XP and a progression credit. A
  * wrapper draws from its own pool. A row the tables cannot settle is logged and pays nothing.
  * @param bountyHash The pursuit's item hash, which skipped rows are logged with.
  * @param rules The pursuit's cadence and gear source.
+ * @param character The redeeming character, whose held Synthesizer an upgrade replaces.
  * @param context Saved banks and class of the redeeming character; its seed starts the draws.
  * @param banks The same saved banks, which a progression credit reads its progress from.
  * @return False when a row is conditional, draws nothing, or outgrows the grant.
  */
 [[nodiscard]] bool plan_rewards(std::uint32_t bountyHash,
                                 const BountyRules& rules,
+                                const CharacterState& character,
                                 const pursuits::Definition& contract,
                                 const reward_resolution::Context& context,
                                 unlocks::Table& banks,
@@ -1292,6 +1335,20 @@ void report_skipped_row(std::uint32_t bountyHash,
         if (payment.kind == PaymentKind::roleHelmet
             && !next_role_helmet(payment.role, context.characterClass, plan, payment)) {
             return false;
+        }
+        reason = "reward_synthesizer_upgrade";
+        if (payment.kind == PaymentKind::synthesizerUpgrade) {
+            // Repeated upgrade rows describe one upgrade.
+            if (plan.upgradesSynthesizer) {
+                continue;
+            }
+            plan.upgradesSynthesizer = true;
+            if (!next_synthesizer(character, plan, payment)) {
+                return false;
+            }
+            if (payment.kind == PaymentKind::nothing) {
+                continue;
+            }
         }
         reason = nullptr;
         reward_resolution::Result resolved{};
@@ -1477,6 +1534,7 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
                && (!contract.rewardsReadable
                    || !plan_rewards(item.definitionHash,
                                     bounty_rules(item, contract.lifetimeSeconds),
+                                    character,
                                     contract,
                                     context,
                                     *banks,
@@ -1494,7 +1552,8 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
                              {},
                              nowSeconds,
                              mutation,
-                             &reason);
+                             &reason,
+                             plan.replacedSynthesizerSoid);
     if (grant != RewardPreparation::prepared) {
         return grant == RewardPreparation::notReady ? PursuitRedemption::notReady
                                                     : PursuitRedemption::refused;

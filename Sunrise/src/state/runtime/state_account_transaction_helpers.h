@@ -156,6 +156,7 @@ quest_value(unlocks::Table& table, const build_data::items::QuestInitialization&
  * @param price A vendor row's cost entries, spent before the rows are placed; empty for none.
  * @param nowSeconds Server time in Unix seconds; a granted bounty's lifetime runs from it.
  * @param refusal Receives a static reason when the result is not prepared.
+ * @param replacedInstanceSoid Held item a row replaces, removed with the redeemed one, or zero.
  * @return Deferred only when State may still change the answer; unresolvable is final.
  */
 [[nodiscard]] RewardPreparation
@@ -166,7 +167,8 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                      std::span<const build_data::vendors::SaleCost> price,
                      std::int64_t nowSeconds,
                      PendingRecordRewardGrant& mutation,
-                     const char** refusal) noexcept;
+                     const char** refusal,
+                     std::uint64_t replacedInstanceSoid = 0) noexcept;
 /**
  * Replaces the socket lanes a reward names; other lanes keep their initial plugs.
  * @param sockets Receives the authored socket block; unchanged on failure.

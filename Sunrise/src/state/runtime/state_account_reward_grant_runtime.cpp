@@ -553,7 +553,8 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                      std::span<const build_data::vendors::SaleCost> price,
                      std::int64_t nowSeconds,
                      PendingRecordRewardGrant& mutation,
-                     const char** refusal) noexcept {
+                     const char** refusal,
+                     std::uint64_t replacedInstanceSoid) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     reason = "reward_count";
@@ -600,6 +601,12 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         return RewardPreparation::deferred;
     }
     mutation.redeemedInstanceSoid = redeemedInstanceSoid;
+    // A replaced item leaves the same way; its release publishes with the new rows.
+    reason = "replaced_instance";
+    if (replacedInstanceSoid != 0
+        && !remove_redeemed(working.characters[characterIndex], replacedInstanceSoid)) {
+        return RewardPreparation::deferred;
+    }
     // A vendor row's price leaves in the after-image its rows land in.
     reason = "sale_price";
     if (!price.empty()) {
