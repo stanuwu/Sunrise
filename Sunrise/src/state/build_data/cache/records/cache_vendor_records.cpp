@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <span>
+
 #include "codec.h"
 
 namespace sunrise::state::build_data::cache::records {
@@ -93,15 +96,36 @@ bool encode(const vendors::SaleRow& value, VendorSaleRowRecord& record) noexcept
         record.costs[cost].itemIndex = value.costs[cost].itemIndex;
         record.costs[cost].quantity = value.costs[cost].quantity;
     }
+    record.availabilityCount = value.availabilityCount;
+    record.availabilityUnreadable = static_cast<std::uint8_t>(value.availabilityUnreadable);
+    if (record.availabilityCount > record.availability.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < record.availability.size(); ++i) {
+        if (!encode(value.availability[i], record.availability[i])) {
+            return false;
+        }
+    }
     return true;
 }
 
 /** Decodes one vendor sale row. */
 bool decode(const VendorSaleRowRecord& record, vendors::SaleRow& value) noexcept {
     value = {};
-    if (record.reserved != decltype(record.reserved){} || record.costCount > record.costs.size()
-        || record.priceState > static_cast<std::uint8_t>(vendors::PriceState::unreadable)) {
+    if (record.costCount > record.costs.size()
+        || record.priceState > static_cast<std::uint8_t>(vendors::PriceState::unreadable)
+        || record.availabilityCount > record.availability.size()
+        || record.availabilityUnreadable > 1) {
         return false;
+    }
+    const auto unused = std::span(record.availability).subspan(record.availabilityCount);
+    if (!std::all_of(unused.begin(), unused.end(), unused_condition)) {
+        return false;
+    }
+    for (std::size_t i = 0; i < record.availabilityCount; ++i) {
+        if (!decode(record.availability[i], value.availability[i])) {
+            return false;
+        }
     }
     for (std::size_t cost = 0; cost < record.costs.size(); ++cost) {
         const VendorSaleCostRecord& stored = record.costs[cost];
@@ -121,6 +145,8 @@ bool decode(const VendorSaleRowRecord& record, vendors::SaleRow& value) noexcept
     value.categoryIndex = record.categoryIndex;
     value.costCount = record.costCount;
     value.priceState = static_cast<vendors::PriceState>(record.priceState);
+    value.availabilityCount = record.availabilityCount;
+    value.availabilityUnreadable = record.availabilityUnreadable != 0;
     return true;
 }
 

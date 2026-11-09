@@ -191,6 +191,8 @@ namespace sunrise::state::build_data::cache::records {
                           RewardInstructionRecord& record) noexcept;
 [[nodiscard]] bool decode(const RewardInstructionRecord& record,
                           rewards::Instruction& value) noexcept;
+/** @return True when a condition slot past its row's count holds a default instruction. */
+[[nodiscard]] bool unused_condition(const RewardInstructionRecord& record) noexcept;
 [[nodiscard]] bool encode(const rewards::Modifier& value, RewardModifierRecord& record) noexcept;
 [[nodiscard]] bool decode(const RewardModifierRecord& record, rewards::Modifier& value) noexcept;
 [[nodiscard]] bool encode(const rewards::SocketOverride& value,

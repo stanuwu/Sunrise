@@ -11,6 +11,7 @@
 #include "../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/build_data/vendors/definition.h"
+#include "../items/packages/package_reward_build.h"
 #include "layout.h"
 #include "vendor_build.h"
 
@@ -21,6 +22,7 @@ namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
 namespace domain = state::build_data::vendors;
 namespace generated = middleware::content::packages::schema::generated;
+namespace reward_build = items::packages;
 
 /** Every extracted row, kept off the caller stack. */
 struct Storage {
@@ -39,6 +41,10 @@ struct Storage {
     std::size_t conditionalRows{};
     /** Sale rows whose cost array did not read, kept but never charged. */
     std::size_t unreadableRows{};
+    /** Sale rows with availability conditions. */
+    std::size_t gatedRows{};
+    /** Sale rows whose conditions did not read, bind or fit, kept but never sold. */
+    std::size_t unreadableGates{};
     /** Definitions whose transfer array did not read, kept with no transfer rules. */
     std::size_t unreadableTransfers{};
 
@@ -52,6 +58,8 @@ struct Storage {
         transferRuleCount = 0;
         conditionalRows = 0;
         unreadableRows = 0;
+        gatedRows = 0;
+        unreadableGates = 0;
         unreadableTransfers = 0;
     }
 };
@@ -158,6 +166,43 @@ read_sale_cost(std::span<const std::byte> blob, std::size_t at, domain::SaleRow&
 }
 
 /**
+ * Binds one sale row's availability conditions. A list that does not read, bind or fit is kept as
+ * an unreadable row, which refuses the purchase.
+ * @param conditions Loaded condition tables the expressions bind through.
+ * @param blob Whole definition blob.
+ * @param at Sale row offset inside the blob.
+ * @param value Receives the bound conditions.
+ * @param storage Pass storage counting gated and unreadable rows.
+ * @return False only when the reader's storage failed, which a later pass retries.
+ */
+[[nodiscard]] bool read_availability(const reward_build::RewardConditions& conditions,
+                                     std::span<const std::byte> blob,
+                                     std::size_t at,
+                                     domain::SaleRow& value,
+                                     Storage& storage) noexcept {
+    std::size_t count = 0;
+    reward_build::BankFailure failure = reward_build::BankFailure::none;
+    const bool readable = conditions.read_list(blob,
+                                               at + kSaleAvailabilityDescriptor,
+                                               value.availability,
+                                               count,
+                                               failure,
+                                               kSaleAvailabilityRowClass);
+    if (failure == reward_build::BankFailure::storage) {
+        return false;
+    }
+    value.availabilityUnreadable = !readable;
+    value.availabilityCount = readable ? static_cast<std::uint8_t>(count) : 0;
+    if (!readable) {
+        value.availability = {};
+        ++storage.unreadableGates;
+    } else if (count != 0) {
+        ++storage.gatedRows;
+    }
+    return true;
+}
+
+/**
  * Reads the whole installed vendor index.
  * @param source Package directory and borrowed block keys.
  * @param scratch Lock-owned block storage.
@@ -193,12 +238,14 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
  * Reads every sale row of one definition into the flat bank.
  * A row whose cost array does not read costs that row its price, never the vendor: a purchase
  * names the row by ordinal, so the row stays in place and refuses to be bought.
+ * @param conditions Loaded condition tables the availability expressions bind through.
  * @param blob Whole definition blob.
  * @param definition Definition whose sale array was already resolved.
  * @param storage Pass storage receiving the rows.
  * @return True when every row is inside the blob and the bank holds them all.
  */
-[[nodiscard]] bool read_sale_rows(std::span<const std::byte> blob,
+[[nodiscard]] bool read_sale_rows(const reward_build::RewardConditions& conditions,
+                                  std::span<const std::byte> blob,
                                   const domain::Definition& definition,
                                   Storage& storage) noexcept {
     if (definition.saleCount > domain::kSaleRowCapacity - storage.saleRowCount) {
@@ -223,6 +270,9 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
                               row);
         } else if (value.priceState == domain::PriceState::conditional) {
             ++storage.conditionalRows;
+        }
+        if (!read_availability(conditions, blob, at, value, storage)) {
+            return false;
         }
     }
     storage.saleRowCount += definition.saleCount;
@@ -289,13 +339,15 @@ static_assert(sizeof(domain::TransferRule) == generated::C8080785f::kSize);
 
 /**
  * Reads one vendor definition and every row array it owns.
+ * @param conditions Loaded condition tables the availability expressions bind through.
  * @param source Package directory and borrowed block keys.
  * @param scratch Lock-owned block storage.
  * @param entry Index row naming the definition.
  * @param storage Pass storage receiving the definition and its rows.
  * @return True when the definition blob reads and every array ends inside it.
  */
-[[nodiscard]] bool read_definition(const reader::Source& source,
+[[nodiscard]] bool read_definition(const reward_build::RewardConditions& conditions,
+                                   const reader::Source& source,
                                    reader::Scratch& scratch,
                                    const domain::IndexEntry& entry,
                                    Storage& storage) noexcept {
@@ -350,7 +402,7 @@ static_assert(sizeof(domain::TransferRule) == generated::C8080785f::kSize);
     }
     if (!read(blob, kResetIntervalOffset, definition.resetIntervalRaw)
         || !read(blob, kResetPhaseOffset, definition.resetPhaseRaw)
-        || !read_sale_rows(blob, definition, storage)
+        || !read_sale_rows(conditions, blob, definition, storage)
         || !read_installed_rows(blob, definition, storage)) {
         storage.saleRowCount = saleRowsBefore;
         storage.installedRowCount = installedRowsBefore;
@@ -373,14 +425,16 @@ void report(const Storage& storage, std::size_t skipped, const char* result) noe
     const int written = std::snprintf(line.data(),
                                       line.size(),
                                       "ev=build_data stage=vendors index=%zu definitions=%zu "
-                                      "sale=%zu conditional=%zu unreadable=%zu installed=%zu "
-                                      "transfers=%zu unreadable_transfers=%zu skipped=%zu "
-                                      "result=%s",
+                                      "sale=%zu conditional=%zu unreadable=%zu gated=%zu "
+                                      "unreadable_gates=%zu installed=%zu transfers=%zu "
+                                      "unreadable_transfers=%zu skipped=%zu result=%s",
                                       storage.indexCount,
                                       storage.definitionCount,
                                       storage.saleRowCount,
                                       storage.conditionalRows,
                                       storage.unreadableRows,
+                                      storage.gatedRows,
+                                      storage.unreadableGates,
                                       storage.installedRowCount,
                                       storage.transferRuleCount,
                                       storage.unreadableTransfers,
@@ -398,7 +452,9 @@ void report(const Storage& storage, std::size_t skipped, const char* result) noe
 } // namespace
 
 /** Extracts and publishes the vendor catalog from the installed packages. */
-bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
+bool build(const reader::Source& source,
+           reader::Scratch& scratch,
+           const items::packages::RewardConditions& conditions) noexcept {
     if (state::build_data::vendor_catalog_ready()) {
         return true;
     }
@@ -413,7 +469,7 @@ bool build(const reader::Source& source, reader::Scratch& scratch) noexcept {
     std::size_t skipped = 0;
     for (std::size_t row = 0; row < storage.indexCount; ++row) {
         const domain::IndexEntry entry = storage.index[row];
-        if (read_definition(source, scratch, entry, storage)) {
+        if (read_definition(conditions, source, scratch, entry, storage)) {
             continue;
         }
         ++skipped;

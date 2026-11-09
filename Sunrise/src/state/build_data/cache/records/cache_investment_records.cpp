@@ -8,14 +8,6 @@ namespace {
 /** Cache padding fields are always written as zero. */
 constexpr unsigned int kReservedFieldValue = 0;
 
-/** A condition slot past a pass row's count holds what a default instruction encodes to. */
-bool unused_condition(const RewardInstructionRecord& record) noexcept {
-    const rewards::Instruction unused{};
-    return record.opcode == static_cast<std::uint8_t>(unused.opcode)
-           && record.bank == static_cast<std::uint8_t>(unused.bank)
-           && record.reserved == kReservedFieldValue && record.operand == unused.operand;
-}
-
 /** A socket slot past a pass row's count holds what a default override encodes to. */
 bool unused_socket(const RewardSocketOverrideRecord& record) noexcept {
     const rewards::SocketOverride unused{};
@@ -25,6 +17,14 @@ bool unused_socket(const RewardSocketOverrideRecord& record) noexcept {
 }
 
 } // namespace
+
+/** A condition slot past a row's count holds what a default instruction encodes to. */
+bool unused_condition(const RewardInstructionRecord& record) noexcept {
+    const rewards::Instruction unused{};
+    return record.opcode == static_cast<std::uint8_t>(unused.opcode)
+           && record.bank == static_cast<std::uint8_t>(unused.bank)
+           && record.reserved == kReservedFieldValue && record.operand == unused.operand;
+}
 
 /** Flattens the 12 buckets into 3 parallel arrays with no per-bucket padding. */
 bool encode(const abilities::Definition& value, AbilityBucketRecord& record) noexcept {

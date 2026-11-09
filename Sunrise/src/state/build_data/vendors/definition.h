@@ -6,6 +6,7 @@
 #include <span>
 
 #include "../../../middleware/content/packages/schema/generated/tag_classes_808078.h"
+#include "../../unlocks/unlocks_expression.h"
 
 namespace sunrise::state::build_data::vendors {
 
@@ -145,6 +146,13 @@ enum class PriceState : std::uint8_t {
     unreadable,
 };
 
+/**
+ * Instructions one sale row's availability conditions expand to, joined by AND. The Store's
+ * ownership gate expands to two. A longer list is kept as an unreadable row, which refuses the
+ * purchase; the vendor log line counts those rows. 8 bytes each, so 1 MiB across a full bank.
+ */
+inline constexpr std::size_t kAvailabilityCapacity = 8;
+
 /** One sale row of one vendor definition. */
 struct SaleRow {
     /** The row's vendor category. The catalog bounds it by the category count. */
@@ -159,6 +167,12 @@ struct SaleRow {
     std::uint8_t costCount{};
     /** Whether `costs` is the price. Only a plain row is charged. */
     PriceState priceState{PriceState::plain};
+    /** Conditions that must all hold for the row to be bought, bound to the saved banks. */
+    std::array<unlocks::Instruction, kAvailabilityCapacity> availability{};
+    /** Entries of `availability` in use. Zero when the row is always available. */
+    std::uint8_t availabilityCount{};
+    /** True when the conditions did not read, bind or fit, which refuses the row. */
+    bool availabilityUnreadable{};
 };
 
 /** @return The static cost entries of one sale row; the catalog bounds the count on install. */

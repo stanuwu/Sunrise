@@ -43,6 +43,13 @@ inline constexpr std::size_t kSaleCostSecondProgramDescriptor =
     offsetof(generated::SVendorCost, hDff8ca81);
 /** Cost entry trailing word, which every expression-free entry carries as `kPlainCostWord`. */
 inline constexpr std::size_t kSaleCostWordOffset = offsetof(generated::SVendorCost, scale);
+/**
+ * Sale row availability conditions, every one of which must hold for a purchase. A Store row that
+ * sells an item once carries one condition here: its acquired flag is not set.
+ */
+inline constexpr std::size_t kSaleAvailabilityDescriptor = offsetof(generated::SVendorSale, array8);
+/** Element class of the availability list; each row is one expression field. */
+inline constexpr std::uint32_t kSaleAvailabilityRowClass = generated::RewardCondition::kClass;
 /** Sale row main item-definition index. */
 inline constexpr std::size_t kSaleItemIndexOffset = offsetof(generated::SVendorSale, saleItemIndex);
 /** Sale row vendor category index. */

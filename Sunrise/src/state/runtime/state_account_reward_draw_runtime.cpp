@@ -539,6 +539,39 @@ bool vendor_reward_item(std::uint16_t itemIndex) noexcept {
            && (bucket.policyFlags & kRewardLanePolicy) == kRewardLanePolicy;
 }
 
+/** Reads the saved state only for a row that declares conditions. */
+bool vendor_row_available(const build_data::vendors::SaleRow& row,
+                          bool& available,
+                          const char** refusal) noexcept {
+    available = false;
+    const char* reason = "availability_unreadable";
+    const auto fail = [&reason, refusal]() noexcept {
+        if (refusal != nullptr) {
+            *refusal = reason;
+        }
+        return false;
+    };
+    if (row.availabilityUnreadable || row.availabilityCount > row.availability.size()) {
+        return fail();
+    }
+    if (row.availabilityCount == 0) {
+        available = true;
+        return true;
+    }
+    const std::lock_guard lock(investment::store::g_mutex);
+    DrawState state{};
+    if (read_draw_state(state, reason) != RewardPreparation::prepared) {
+        return fail();
+    }
+    // An eligibility check draws nothing, so it takes no seed.
+    constexpr std::uint64_t kNoSeed = 0;
+    const reward_resolution::Context context{
+        state.flags, state.account.characters[state.character].characterClass, kNoSeed, &reason};
+    return reward_resolution::eligible(
+               std::span(row.availability).first(row.availabilityCount), context, available)
+           || fail();
+}
+
 /** Grants one of the row's item, as every vendor grant does. */
 RewardPreparation prepare_vendor_reward(std::uint16_t itemIndex,
                                         std::span<const build_data::vendors::SaleCost> price,

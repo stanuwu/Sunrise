@@ -743,6 +743,13 @@ void settle_vendor_row(const middleware::web_service::Message& message,
                         itemDefinitionIndex);
         return;
     }
+    // A row is sold only while its availability conditions hold for the selected character.
+    bool available = false;
+    const char* unavailable = "unavailable";
+    if (!state::vendor_row_available(row, available, &unavailable) || !available) {
+        report_purchase(opcode, "fail", unavailable, vendorIndex, rowIndex, itemDefinitionIndex);
+        return;
+    }
     const std::span<const vendor_domain::SaleCost> declared = vendor_domain::cost_entries(row);
     std::array<vendor_domain::SaleCost, vendor_domain::kSaleCostCapacity> charged{};
     if (!reprice_restricted_costs(declared, charged)) {

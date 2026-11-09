@@ -37,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 89;
+inline constexpr std::uint32_t kCacheFormatVersion = 90;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -653,11 +653,13 @@ struct VendorSaleRowRecord {
     std::array<VendorSaleCostRecord, vendors::kSaleCostCapacity> costs{};
     std::uint16_t itemIndex{};
     std::uint16_t secondaryItemIndex{};
+    std::array<RewardInstructionRecord, vendors::kAvailabilityCapacity> availability{};
     std::uint8_t costCount{};
     /** `vendors::PriceState`, stored as its underlying value. */
     std::uint8_t priceState{};
-    /** Must be zero, so the packed sale row always matches. */
-    std::array<std::uint8_t, 2> reserved{};
+    std::uint8_t availabilityCount{};
+    /** 0 or 1. */
+    std::uint8_t availabilityUnreadable{};
 };
 
 /** Disk form of one vendor category row. */
@@ -837,7 +839,9 @@ static_assert(sizeof(VendorDefinitionRecord)
 static_assert(sizeof(VendorSaleCostRecord) == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorSaleRowRecord)
               == sizeof(std::int32_t) + vendors::kSaleCostCapacity * sizeof(VendorSaleCostRecord)
-                     + 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t));
+                     + 2 * sizeof(std::uint16_t)
+                     + vendors::kAvailabilityCapacity * sizeof(RewardInstructionRecord)
+                     + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorInstalledRowRecord) == sizeof(std::uint32_t));
 static_assert(sizeof(VendorTransferRuleRecord) == 2 * sizeof(std::uint8_t));
 static_assert(sizeof(HashNameRecord)

@@ -86,7 +86,7 @@ Table<TransferRule, kTransferRuleCapacity> g_transferRules;
  * @param definition Owning definition.
  * @param saleRows Complete flat sale bank.
  * @return True when every row names a category of this definition, or none at all, and its cost
- *         entries fit their state: an unreadable row has none.
+ *         entries and availability conditions fit their state: an unreadable list has none.
  */
 [[nodiscard]] bool canonical_sale_rows(const Definition& definition,
                                        std::span<const SaleRow> saleRows) noexcept {
@@ -100,7 +100,9 @@ Table<TransferRule, kTransferRuleCapacity> g_transferRules;
             value.costCount <= value.costs.size()
             && (value.priceState == PriceState::plain || value.priceState == PriceState::conditional
                 || (value.priceState == PriceState::unreadable && value.costCount == 0));
-        if (!selects || !priced) {
+        const bool gated = value.availabilityCount <= value.availability.size()
+                           && (!value.availabilityUnreadable || value.availabilityCount == 0);
+        if (!selects || !priced || !gated) {
             return false;
         }
     }

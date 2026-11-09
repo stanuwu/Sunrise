@@ -869,6 +869,18 @@ prepare_item_acquisition(std::uint16_t collectibleIndex,
  */
 [[nodiscard]] bool vendor_reward_item(std::uint16_t itemIndex) noexcept;
 /**
+ * Evaluates one sale row's availability conditions against the selected character's saved
+ * unlocks. A row with none is always available.
+ * @param row The resolved sale row.
+ * @param available Receives whether the row may be bought.
+ * @param refusal Receives a static reason when the conditions cannot be evaluated.
+ * @return False when the conditions did not read, the saved state did not, or they did not
+ *         evaluate.
+ */
+[[nodiscard]] bool vendor_row_available(const build_data::vendors::SaleRow& row,
+                                        bool& available,
+                                        const char** refusal = nullptr) noexcept;
+/**
  * Spends a vendor row's price and resolves one of its item for the selected character, in one
  * after-image.
  * @param price The row's cost entries.

@@ -120,7 +120,8 @@ bool build() noexcept {
         return false;
     }
     // The destination layouts and the spawn sets share this pass's directory, keys, and block
-    // storage. Both are independent of the item table, so a failure here leaves it alone.
+    // storage. Both are independent of the item table, so a failure here leaves it alone. The
+    // vendor catalog binds its availability conditions through the root below.
     {
         const reader::Source packageSource{directory.chars.data(), &keys};
         // Process-local launcher data is extracted even when persistent build data was loaded.
@@ -129,13 +130,12 @@ bool build() noexcept {
         (void)content::scenarios::build(packageSource, storage.scratch);
         (void)content::spawn_sets::build(packageSource, storage.scratch);
         (void)content::hash_names::build(packageSource, storage.scratch);
-        (void)content::vendors::build(packageSource, storage.scratch);
         if (ready()) {
             SecureZeroMemory(&keys, sizeof keys);
             return true;
         }
     }
-    if (root_domains_ready()) {
+    if (root_domains_ready() && state::build_data::vendor_catalog_ready()) {
         SecureZeroMemory(&keys, sizeof keys);
         return ready();
     }
@@ -168,9 +168,10 @@ bool build() noexcept {
             }
             // The same root names the bucket and socket-list tables.
             storage.root = storage.child;
-            // Quest, record, node, season, catalyst, pursuit, material and plug-rule reads share
-            // these maps.
+            // Quest, record, node, season, catalyst, pursuit, material, plug-rule and vendor reads
+            // share these maps.
             if (!state::build_data::item_definitions_ready()
+                || !state::build_data::vendor_catalog_ready()
                 || !state::build_data::plug_insertion_rules_ready()
                 || !state::build_data::material_requirement_sets_ready()
                 || !state::build_data::record_definitions_ready()
@@ -189,6 +190,18 @@ bool build() noexcept {
                                        storage.scratch,
                                        std::span<const std::byte>{storage.root},
                                        storage.slotMaps);
+            }
+            // Sale rows bind their availability through the condition tables. A refused reward
+            // graph still publishes the catalog: a row whose conditions cannot bind is not sold.
+            if (!state::build_data::vendor_catalog_ready()) {
+                RewardConditions conditions;
+                if (conditions.load(source,
+                                    storage.scratch,
+                                    std::span<const std::byte>{storage.root},
+                                    storage.slotMaps)
+                    || state::build_data::reward_definitions_unsupported()) {
+                    (void)content::vendors::build(source, storage.scratch, conditions);
+                }
             }
             // Item rows read the flags the plug sets gate their members on.
             if (!state::build_data::socket_plug_rules_ready()
