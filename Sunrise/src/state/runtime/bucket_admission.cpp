@@ -872,26 +872,31 @@ struct ClaimSource {
 } // namespace
 
 /** Places what fits in the item's own bucket, then its recovery bucket, and drops the rest. */
-bool place_arrival(AccountState& working,
-                   std::size_t characterIndex,
-                   const Arrival& arrival,
-                   std::uint64_t& nextInstanceSoid,
-                   PlacedRows& rows,
-                   ArrivalOutcome& outcome,
-                   const char*& reason) noexcept {
+RewardPreparation place_arrival(AccountState& working,
+                                std::size_t characterIndex,
+                                const Arrival& arrival,
+                                std::uint64_t& nextInstanceSoid,
+                                PlacedRows& rows,
+                                ArrivalOutcome& outcome,
+                                const char*& reason) noexcept {
     outcome = {};
     reason = "arrival";
+    if (characterIndex >= working.characterCount) {
+        return RewardPreparation::deferred;
+    }
+    // With the destination array checked by the caller, every later refusal depends on the rows
+    // the account holds.
     inventory_buckets::Descriptor own{};
-    if (characterIndex >= working.characterCount || arrival.quantity <= 0
-        || (instanced(arrival.detail) && arrival.quantity != 1)
+    if (arrival.quantity <= 0
+        || (instanced(arrival.detail) ? arrival.quantity != 1 : arrival.detail.maxStackSize <= 0)
         || !build_data::find_inventory_bucket_descriptor(arrival.item.bucketId, own)) {
-        return false;
+        return RewardPreparation::unresolvable;
     }
     // The client refuses a restricted item outright: neither its bucket nor its recovery gets any.
     if (arrival.item.grantRestricted) {
         outcome.dropped = arrival.quantity;
         reason = nullptr;
-        return true;
+        return RewardPreparation::prepared;
     }
     std::int32_t remaining = arrival.quantity;
     EvictionChain chain;
@@ -923,12 +928,12 @@ bool place_arrival(AccountState& working,
     inventory_buckets::Descriptor recovery{};
     if (!admit(own)
         || (remaining != 0 && find_recovery_bucket(arrival.item, recovery) && !admit(recovery))) {
-        return false;
+        return RewardPreparation::deferred;
     }
     outcome.placed = arrival.quantity - remaining;
     outcome.dropped = remaining;
     reason = nullptr;
-    return true;
+    return RewardPreparation::prepared;
 }
 
 /** Validates and moves one claim in the client's order: debit the source, then insert. */

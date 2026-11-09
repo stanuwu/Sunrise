@@ -514,29 +514,10 @@ bool stage_record_reward_grant(const SessionState& before,
         return false;
     }
     SessionState retained = before;
-    std::array<std::uint64_t, state::kRecordRewardGrantCapacity> released{};
-    std::size_t releasedCount = 0;
-    const auto& priorItems = pending.beforeCharacter.inventory;
-    const auto& nextItems = pending.afterCharacter.inventory;
-    if (!valid(before) || priorItems.count > priorItems.values.size()
-        || nextItems.count > nextItems.values.size()) {
-        return false;
-    }
-    for (std::size_t index = 0; index < priorItems.count; ++index) {
-        const auto& prior = priorItems.values[index];
-        const auto remains = [&](const auto& item) {
-            return item.instanceSoid == prior.instanceSoid;
-        };
-        if (std::any_of(nextItems.values.begin(),
-                        nextItems.values.begin() + static_cast<std::ptrdiff_t>(nextItems.count),
-                        remains)) {
-            continue;
-        }
-        if (releasedCount == released.size()
-            || !release_item_resident(retained, prior.instanceSoid)) {
+    for (const std::uint64_t soid : std::span(residents.released).first(residents.releasedCount)) {
+        if (!release_item_resident(retained, soid)) {
             return false;
         }
-        released[releasedCount++] = prior.instanceSoid;
     }
     if (!stage_record_reward_grant(retained,
                                    pending.accountSoid,
@@ -545,8 +526,8 @@ bool stage_record_reward_grant(const SessionState& before,
                                    grant)) {
         return false;
     }
-    grant.releasedResidents = released;
-    grant.releasedResidentCount = releasedCount;
+    grant.releasedResidents = residents.released;
+    grant.releasedResidentCount = residents.releasedCount;
     return true;
 }
 

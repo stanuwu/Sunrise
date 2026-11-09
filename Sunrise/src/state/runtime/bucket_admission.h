@@ -60,15 +60,16 @@ struct ArrivalOutcome {
  * @param rows Receives every row the arrival created, grew or moved.
  * @param outcome Receives the placed and dropped quantities.
  * @param reason Receives a static label when placement cannot proceed.
- * @return False when the arrival or the account cannot be placed; a dropped remainder is not one.
+ * @return Unresolvable when the item's own data cannot be placed; deferred when the account
+ *         refuses it now. A dropped remainder is still prepared.
  */
-[[nodiscard]] bool place_arrival(AccountState& working,
-                                 std::size_t characterIndex,
-                                 const Arrival& arrival,
-                                 std::uint64_t& nextInstanceSoid,
-                                 PlacedRows& rows,
-                                 ArrivalOutcome& outcome,
-                                 const char*& reason) noexcept;
+[[nodiscard]] RewardPreparation place_arrival(AccountState& working,
+                                              std::size_t characterIndex,
+                                              const Arrival& arrival,
+                                              std::uint64_t& nextInstanceSoid,
+                                              PlacedRows& rows,
+                                              ArrivalOutcome& outcome,
+                                              const char*& reason) noexcept;
 
 /**
  * Moves one claim from the item's recovery bucket back to its authored bucket once the client's

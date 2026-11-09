@@ -327,12 +327,16 @@ struct PendingPostmasterClaim {
 struct GrantedResidents {
     std::array<std::uint64_t, kRecordRewardGrantCapacity> soids{};
     std::size_t count{};
+    /** Held or equipped character instances a FIFO eviction discarded. */
+    std::array<std::uint64_t, kRecordRewardGrantCapacity> released{};
+    std::size_t releasedCount{};
 };
 
 /**
  * Lists the new character instances, then the new profile action-source rows, each in after-image
- * order. A row an eviction moved keeps its identity and is not new.
- * @return False when the grant adds more residents than one batch can carry.
+ * order, and the character instances the grant removed. A row an eviction moved, equipped or not,
+ * keeps its identity and is neither.
+ * @return False when the grant adds or removes more residents than one batch can carry.
  */
 [[nodiscard]] bool granted_residents(const PendingRecordRewardGrant& mutation,
                                      GrantedResidents& output) noexcept;

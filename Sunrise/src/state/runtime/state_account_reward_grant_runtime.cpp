@@ -327,14 +327,15 @@ struct GrantView {
         }
     }
     ArrivalOutcome outcome{};
-    if (!place_arrival(view.working,
-                       view.characterIndex,
-                       arrival,
-                       view.nextInstanceSoid,
-                       view.placed,
-                       outcome,
-                       reason)) {
-        return RewardPreparation::deferred;
+    const auto placement = place_arrival(view.working,
+                                         view.characterIndex,
+                                         arrival,
+                                         view.nextInstanceSoid,
+                                         view.placed,
+                                         outcome,
+                                         reason);
+    if (placement != RewardPreparation::prepared) {
+        return placement;
     }
     prepared.placedQuantity = outcome.placed;
     if (outcome.placed == 0) {
@@ -571,22 +572,45 @@ bool newly_collected(const PendingRecordRewardGrant& mutation,
 bool granted_residents(const PendingRecordRewardGrant& mutation,
                        GrantedResidents& output) noexcept {
     output = {};
-    const auto append = [&](std::uint64_t soid) noexcept {
-        if (output.count == output.soids.size()) {
+    const auto add = [](auto& soids, std::size_t& count, std::uint64_t soid) noexcept {
+        if (count == soids.size()) {
             return false;
         }
-        output.soids[output.count++] = soid;
+        soids[count++] = soid;
         return true;
     };
-    const auto& before = mutation.beforeCharacter.inventory;
-    const auto& after = mutation.afterCharacter.inventory;
-    for (std::size_t index = 0; index < after.count; ++index) {
-        const std::uint64_t soid = after.values[index].instanceSoid;
-        const auto held = std::span(before.values).first(before.count);
-        if (std::none_of(held.begin(),
-                         held.end(),
-                         [&](const auto& item) noexcept { return item.instanceSoid == soid; })
-            && !append(soid)) {
+    const CharacterState& before = mutation.beforeCharacter;
+    const CharacterState& after = mutation.afterCharacter;
+    if (before.inventory.count > before.inventory.values.size()
+        || after.inventory.count > after.inventory.values.size()) {
+        return false;
+    }
+    // A FIFO bucket counts its equipped rows, so an eviction can move or discard one.
+    const auto holds = [](const CharacterState& character, std::uint64_t soid) noexcept {
+        const auto held = std::span(character.inventory.values).first(character.inventory.count);
+        const auto& slots = character.equipment.slots;
+        return std::any_of(held.begin(),
+                           held.end(),
+                           [&](const auto& item) noexcept { return item.instanceSoid == soid; })
+               || std::any_of(slots.begin(), slots.end(), [&](const auto& item) noexcept {
+                      return item && item->instanceSoid == soid;
+                  });
+    };
+    for (std::size_t index = 0; index < after.inventory.count; ++index) {
+        const std::uint64_t soid = after.inventory.values[index].instanceSoid;
+        if (!holds(before, soid) && !add(output.soids, output.count, soid)) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < before.inventory.count; ++index) {
+        const std::uint64_t soid = before.inventory.values[index].instanceSoid;
+        if (!holds(after, soid) && !add(output.released, output.releasedCount, soid)) {
+            return false;
+        }
+    }
+    for (const auto& equipped : before.equipment.slots) {
+        if (equipped && !holds(after, equipped->instanceSoid)
+            && !add(output.released, output.releasedCount, equipped->instanceSoid)) {
             return false;
         }
     }
@@ -598,7 +622,7 @@ bool granted_residents(const PendingRecordRewardGrant& mutation,
             && std::none_of(priorProfile.begin(),
                             priorProfile.end(),
                             [&](const auto& item) noexcept { return item.instanceSoid == soid; })
-            && !append(soid)) {
+            && !add(output.soids, output.count, soid)) {
             return false;
         }
     }
