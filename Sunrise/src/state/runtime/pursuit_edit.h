@@ -20,7 +20,7 @@ struct PursuitIdentity {
 /**
  * Replaces the saved row an objective's progress reads, provided it still holds the value the
  * editor read. An objective whose progress is not one saved flag or value row is refused, and so
- * is a bounty, because this server does not save its expiry.
+ * is a bounty, because the edit does not read the deadline its held instance carries.
  * @param identity The held pursuit, on the selected character.
  * @param ordinal Objective position in the held pursuit's installed contract.
  * @param objectiveHash Definition hash the editor read at that position.

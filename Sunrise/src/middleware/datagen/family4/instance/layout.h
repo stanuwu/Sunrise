@@ -23,7 +23,7 @@ inline constexpr std::size_t kRandomRollByteCount = 8;
 inline constexpr std::size_t kCreationEntryCapacity = 6;
 /** Each creation entry carries 4 biased definition-index words. */
 inline constexpr std::size_t kCreationDefinitionCount = 4;
-/** 8 signed lanes form the unresolved instance-record tail. */
+/** The record ends in 8 signed per-item values, read under the tail definition index. */
 inline constexpr std::size_t kTailValueCount = 8;
 using datagen::kEmptyDefinitionIndex;
 /** The definition-hash type uses the engine no-definition sentinel. */

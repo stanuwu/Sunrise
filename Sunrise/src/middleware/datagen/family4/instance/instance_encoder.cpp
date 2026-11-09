@@ -140,6 +140,10 @@ bool encode(const ResolvedInstance& input, std::span<std::byte> output) noexcept
     object.ordinarySockets.gateMask = layout::kAllSocketBits;
     object.roll.progress = layout::kInitialInstanceProgress;
     object.roll.socketEntryListIndex = input.socketEntryListIndex;
+    if (input.tailValues.has_value()) {
+        object.tailDefinitionIndex = input.baseDefinitionIndex;
+        object.tailValues = *input.tailValues;
+    }
 
     if (input.ordinarySockets.state == OrdinarySocketBlockState::present) {
         // Both permit masks are filled. The plug walk reads the definition's declared plugs as

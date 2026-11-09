@@ -136,7 +136,8 @@ struct HeldPursuit {
         || held.contract.objectiveCount > pursuits::kObjectiveCapacity) {
         return false;
     }
-    // No bounty deadline is saved, so an expired bounty looks live and no bounty is edited.
+    // The edit does not read a bounty's deadline, so an expired one would look live and none is
+    // edited.
     reason = "expiry_not_saved";
     return held.contract.lifetimeSeconds <= 0;
 }

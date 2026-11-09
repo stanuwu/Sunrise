@@ -716,6 +716,7 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
  * @param definitionHash Installed item definition requested by the Client.
  * @param price A vendor sale row's cost entries, spent in place of the collectible's material
  *        set; absent for a Collections pull, which pays with the collectible's materials.
+ * @param nowSeconds Server time in Unix seconds; a bounty's lifetime runs from it.
  * @param mutation Gets a checked after-image without changing account State.
  * @return True when the item and every existing loadout row resolve with one free native row.
  */
@@ -723,6 +724,7 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
 prepare_item_acquisition(std::uint16_t collectibleIndex,
                          std::uint32_t definitionHash,
                          std::optional<std::span<const build_data::vendors::SaleCost>> price,
+                         std::int64_t nowSeconds,
                          PendingItemAcquisition& mutation) noexcept;
 
 /** Atomically commits one prepared reward grant and its durable Season claim. */

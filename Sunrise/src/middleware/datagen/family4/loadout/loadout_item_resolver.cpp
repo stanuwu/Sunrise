@@ -21,6 +21,8 @@ namespace build_socket_lists = state::build_data::socket_entry_lists;
 /** Native instanced inventory rows always carry exactly one item. */
 constexpr std::int32_t kInstancedQuantity = 1;
 
+static_assert(authored_inventory::kItemObjectiveLaneCount == instance::layout::kTailValueCount);
+
 /**
  * Finds the installed item index for one authored plug hash.
  * @param definitionHash Authored plug definition hash.
@@ -197,6 +199,7 @@ bool resolve_item(const authored_inventory::Item& authored,
     candidate.item.instance.socketEntryListIndex = socketList.definitionIndex;
     candidate.item.instance.socketEntryCount = socketList.entryCount;
     candidate.item.instance.socketEntryContentsResolved = true;
+    candidate.item.instance.tailValues = authored.objectives;
     resolve_socket_states(socketList,
                           authored,
                           character.characterClass,

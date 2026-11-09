@@ -68,6 +68,8 @@ struct ResolvedInstance {
     std::array<SocketEntryState, layout::kSocketEntryStateCapacity> socketEntryStates{};
     /** Selector lane per semantic ability bucket, empty for an item with no selection. */
     std::array<SocketSelector, layout::kSelectorCapacity> socketSelectors{};
+    /** Per-item values published under the base definition; absent leaves the tail empty. */
+    std::optional<std::array<std::int32_t, layout::kTailValueCount>> tailValues;
 };
 
 /**

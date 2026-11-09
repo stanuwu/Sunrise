@@ -162,15 +162,18 @@ apply_reward_sockets(const build_data::items::details::Definition& detail,
  * @param definitionHash Item definition to grant.
  * @param profileChanged Whether the charge changed profile inventory.
  * @param source Grant identity and material requirements for commit checks.
+ * @param objectives Per-instance values the new item starts with, if any.
  * @param mutation Receives a pending grant; use only on success.
  * @return False when the item, inventory, mapping, or saved quest state is invalid.
  */
-[[nodiscard]] bool finalize_item_acquisition(const AccountState& account,
-                                             const AccountState& chargedAccount,
-                                             std::uint32_t definitionHash,
-                                             bool profileChanged,
-                                             const GrantSource& source,
-                                             PendingItemAcquisition& mutation) noexcept;
+[[nodiscard]] bool
+finalize_item_acquisition(const AccountState& account,
+                          const AccountState& chargedAccount,
+                          std::uint32_t definitionHash,
+                          bool profileChanged,
+                          const GrantSource& source,
+                          const std::optional<account::inventory::ItemObjectives>& objectives,
+                          PendingItemAcquisition& mutation) noexcept;
 /**
  * Stages the common profile-stack insertion path.
  * @param chargedAccount Account after any material cost, or account itself when nothing is charged.

@@ -40,10 +40,24 @@ constexpr const char* kParkedPlacementColumn =
     "ALTER TABLE parked_items ADD COLUMN placement INTEGER NOT NULL DEFAULT 0 "
     "CHECK (placement IN (0, 1));";
 
+/**
+ * Version 7 saves each item's per-instance values, 4 little-endian bytes per lane; an item
+ * without a row publishes none. A new save and the migration both run these statements.
+ */
+constexpr const char* kItemObjectivesTable =
+    "CREATE TABLE item_objectives ("
+    "instance_soid INTEGER PRIMARY KEY REFERENCES items(instance_soid) ON DELETE CASCADE,"
+    "lanes BLOB NOT NULL CHECK (length(lanes) = 32)"
+    ") STRICT;";
+constexpr const char* kParkedObjectivesColumn =
+    "ALTER TABLE parked_items ADD COLUMN objectives BLOB "
+    "CHECK (objectives IS NULL OR length(objectives) = 32);";
+static_assert(sizeof(ObjectiveBlob) == 32);
+
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 6;
+constexpr int kSchemaVersion = 7;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
 
@@ -271,6 +285,7 @@ bool open(std::string_view path,
         ready = transaction.ready() && !schema.empty() && !defaults.empty()
                 && !characterStarter.empty() && execute(schemaText.c_str())
                 && execute(kParkedItemsTable) && execute(kParkedPlacementColumn)
+                && execute(kItemObjectivesTable) && execute(kParkedObjectivesColumn)
                 && execute(starterText.c_str()) && execute(defaultText.c_str())
                 && !settingsSchema.empty() && !settingsDefaults.empty()
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
@@ -336,6 +351,15 @@ bool open(std::string_view path,
     }
     if (ready && version == 5) {
         ready = migrate_placement_storage();
+        if (ready) {
+            version = 6;
+        }
+    }
+    if (ready && version == 6) {
+        Transaction transaction;
+        ready = transaction.ready() && execute(kItemObjectivesTable)
+                && execute(kParkedObjectivesColumn) && execute("PRAGMA user_version=7")
+                && transaction.commit();
     }
     if (!ready) {
         shutdown();

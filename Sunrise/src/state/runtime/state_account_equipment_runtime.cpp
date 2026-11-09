@@ -285,7 +285,8 @@ finalize_equipment_transition(const AccountState& account,
            && left.grenadeAbilityEntry == right.grenadeAbilityEntry
            && left.superAbilityEntry == right.superAbilityEntry
            && left.meleeAbilityEntry == right.meleeAbilityEntry
-           && left.classAbilityEntry == right.classAbilityEntry;
+           && left.classAbilityEntry == right.classAbilityEntry
+           && left.objectives == right.objectives;
 }
 
 /** Records one checked native item-state transition. */

@@ -61,8 +61,8 @@ inline constexpr std::size_t kProfileActionSourceCapacity = 100;
 inline constexpr std::uint64_t kFirstProfileItemInstanceSoid = 0x5000000000000001ULL;
 /**
  * Unequipped instances can occupy every character row not reserved for equipped items. An account
- * is then 194,112 bytes; the deepest server-thread chain of account copies, a roster notification,
- * peaks at 2.3 MiB of the thread's 4 MiB stack.
+ * is then 236,112 bytes; the deepest server-thread chain of account copies, a roster notification,
+ * peaks at about 2.8 MiB of the thread's 4 MiB stack.
  */
 inline constexpr std::size_t kCharacterItemCapacity =
     build_data::inventory::buckets::kCharacterSlotCapacity - kEquipmentSlotCount;
@@ -140,6 +140,8 @@ struct Item {
     /** The client has dismissed this item's new-item marker. */
     bool seen{};
     ItemPlacement placement{ItemPlacement::authored};
+    /** Absent until the instance has pursuit values to publish; an absent tail publishes none. */
+    std::optional<ItemObjectives> objectives;
 };
 
 /** Ordered unequipped items placed into their native character-inventory bucket ranges. */

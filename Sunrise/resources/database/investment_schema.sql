@@ -1,7 +1,8 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 6;
--- open() also creates parked_items; the version 5 upgrade runs the same statement and
--- version 6 adds its placement column.
+PRAGMA user_version = 7;
+-- open() also creates parked_items and item_objectives. The version 5 upgrade creates
+-- parked_items with the same statement, version 6 adds its placement column, and version 7
+-- creates item_objectives and adds parked_items' objectives column.
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),

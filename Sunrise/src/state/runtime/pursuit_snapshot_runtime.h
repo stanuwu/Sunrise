@@ -30,7 +30,7 @@ struct HeldPursuitStatus {
     std::uint32_t definitionHash{};
     std::int32_t mutationSerial{};
     std::uint32_t flags{};
-    /** A positive lifetime marks a bounty, whose deadline this server does not save. */
+    /** A positive lifetime marks a bounty. */
     std::int32_t lifetimeSeconds{};
     PursuitCompletionStatus completion{};
 };

@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
 #include "../../middleware/web_service/messages/opcode1820.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
 #include "../../middleware/web_service/messages/opcode904/opcode904_codec.h"
@@ -447,8 +448,11 @@ bool grant_item_definition(
                                 0);
         return false;
     }
-    if (!state::prepare_item_acquisition(
-            collectibleIndex, definition.definitionHash, price, *mutation)) {
+    if (!state::prepare_item_acquisition(collectibleIndex,
+                                         definition.definitionHash,
+                                         price,
+                                         core::runtime::server_clock_seconds(),
+                                         *mutation)) {
         clear_mutation(outcome);
         report_item_acquisition(
             message, "state", collectibleIndex, itemDefinitionIndex, definition.definitionHash, 0);

@@ -74,15 +74,18 @@ using Quest = build_data::items::QuestInitialization;
  * @param definitionHash Item definition to grant.
  * @param profileChanged Whether the charge changed profile inventory.
  * @param source Grant identity and material requirements for commit checks.
+ * @param objectives Per-instance values the new item starts with, if any.
  * @param mutation Receives a pending grant; use only on success.
  * @return False when the item, inventory, mapping, or saved quest state is invalid.
  */
-[[nodiscard]] bool finalize_item_acquisition(const AccountState& account,
-                                             const AccountState& chargedAccount,
-                                             std::uint32_t definitionHash,
-                                             bool profileChanged,
-                                             const GrantSource& source,
-                                             PendingItemAcquisition& mutation) noexcept {
+[[nodiscard]] bool
+finalize_item_acquisition(const AccountState& account,
+                          const AccountState& chargedAccount,
+                          std::uint32_t definitionHash,
+                          bool profileChanged,
+                          const GrantSource& source,
+                          const std::optional<authored_inventory::ItemObjectives>& objectives,
+                          PendingItemAcquisition& mutation) noexcept {
     const std::size_t characterIndex = selected_character_index(account);
     if (characterIndex >= account.characterCount) {
         return false;
@@ -109,6 +112,7 @@ using Quest = build_data::items::QuestInitialization;
     acquired.quantity = 1;
     acquired.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
     acquired.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
+    acquired.objectives = objectives;
     after.inventory.values[inventoryIndex] = acquired;
     ++after.inventory.count;
 
@@ -162,6 +166,30 @@ using Quest = build_data::items::QuestInitialization;
 
 namespace {
 
+/**
+ * A bounty starts with its deadline. Other items, and a bounty whose contract is not read, start
+ * with no per-instance values.
+ * @return False when the deadline does not fit its signed lane.
+ */
+[[nodiscard]] bool
+acquired_objectives(std::uint16_t definitionIndex,
+                    std::int64_t nowSeconds,
+                    std::optional<authored_inventory::ItemObjectives>& objectives) noexcept {
+    objectives.reset();
+    build_data::pursuits::Definition contract{};
+    if (!build_data::find_pursuit_definition(definitionIndex, contract)
+        || contract.lifetimeSeconds <= 0) {
+        return true;
+    }
+    const std::int64_t deadline = nowSeconds + contract.lifetimeSeconds;
+    if (deadline > (std::numeric_limits<std::int32_t>::max)()) {
+        return false;
+    }
+    objectives.emplace();
+    (*objectives)[authored_inventory::kItemExpiryLane] = static_cast<std::int32_t>(deadline);
+    return true;
+}
+
 /** A vendor row pays its own price; a Collections pull pays the collectible's materials. */
 [[nodiscard]] bool
 charge_acquisition(const AccountState& account,
@@ -183,12 +211,14 @@ charge_acquisition(const AccountState& account,
  * @param collectibleIndex Collections row, or kNoCollectibleIndex for an item-only grant.
  * @param definitionHash Item definition to grant.
  * @param price A vendor row's cost, spent in place of the collectible's materials; or absent.
+ * @param nowSeconds Server time in Unix seconds; a bounty's lifetime runs from it.
  * @param mutation Receives a pending grant; prepared is set only on success.
  * @return False when identity, costs, capacity, or saved state prevent the grant.
  */
 bool prepare_item_acquisition(std::uint16_t collectibleIndex,
                               std::uint32_t definitionHash,
                               std::optional<std::span<const build_data::vendors::SaleCost>> price,
+                              std::int64_t nowSeconds,
                               PendingItemAcquisition& mutation) noexcept {
     const std::lock_guard lock(investment::store::g_mutex);
     mutation = {};
@@ -216,6 +246,10 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
         return false;
     }
 
+    std::optional<authored_inventory::ItemObjectives> objectives;
+    if (!acquired_objectives(grantedDefinition.definitionIndex, nowSeconds, objectives)) {
+        return false;
+    }
     AccountState chargedAccount = account;
     bool profileChanged = false;
     if (!charge_acquisition(account,
@@ -235,6 +269,7 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
         {.materialRequirementSetHash = collectible.materialRequirementSetHash,
          .collectibleIndex = collectibleIndex,
          .materialRequirementCount = collectible.materialRequirementCount},
+        objectives,
         mutation);
 }
 

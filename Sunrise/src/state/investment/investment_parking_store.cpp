@@ -1,3 +1,5 @@
+#include <bit>
+
 #include "store_internal.h"
 
 namespace sunrise::state::investment::store {
@@ -36,15 +38,20 @@ void decode_plugs(const PlugBlob& blob, account::inventory::Sockets& sockets) no
 
 } // namespace
 
-/** Keeps every field the account list would have written, plugs included. */
+/** Keeps every field the account list would have written, plugs and objectives included. */
 bool park(const ParkedRow& row) noexcept {
     const std::lock_guard lock(g_mutex);
     const account::inventory::Item& item = row.item;
+    std::optional<ObjectiveBlob> objectives;
+    if (item.objectives) {
+        objectives = std::bit_cast<ObjectiveBlob>(*item.objectives);
+    }
     Statement insert(
         "INSERT INTO parked_items(kind,character_slot,location,position,instance_soid,"
         "definition_hash,level,quantity,mutation_serial,flags,socket_policy,plug_count,"
         "plugs,movement_ability,grenade_ability,super_ability,melee_ability,"
-        "class_ability,seen,placement) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        "class_ability,seen,placement,objectives) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     return insert.write(row.kind,
                         row.characterSlot,
                         row.location,
@@ -64,7 +71,8 @@ bool park(const ParkedRow& row) noexcept {
                         item.meleeAbilityEntry,
                         item.classAbilityEntry,
                         item.seen,
-                        item.placement);
+                        item.placement,
+                        objectives);
 }
 
 /** Reads every parked row, oldest first, so returns keep the order the rows left in. */
@@ -75,11 +83,12 @@ bool read_parked(std::vector<ParkedRow>& output) noexcept {
         "SELECT id,kind,character_slot,location,position,instance_soid,definition_hash,"
         "level,quantity,mutation_serial,flags,socket_policy,plug_count,plugs,"
         "movement_ability,grenade_ability,super_ability,melee_ability,class_ability,seen,"
-        "placement FROM parked_items ORDER BY id");
+        "placement,objectives FROM parked_items ORDER BY id");
     int result = rows.step();
     while (result == SQLITE_ROW) {
         ParkedRow row;
         PlugBlob plugs{};
+        std::optional<ObjectiveBlob> objectives;
         account::inventory::Item& item = row.item;
         if (!rows.columns(row.id,
                           row.kind,
@@ -101,11 +110,15 @@ bool read_parked(std::vector<ParkedRow>& output) noexcept {
                           item.meleeAbilityEntry,
                           item.classAbilityEntry,
                           item.seen,
-                          item.placement)) {
+                          item.placement,
+                          objectives)) {
             output.clear();
             return false;
         }
         decode_plugs(plugs, item.sockets);
+        if (objectives) {
+            item.objectives = std::bit_cast<account::inventory::ItemObjectives>(*objectives);
+        }
         output.push_back(row);
         result = rows.step();
     }
