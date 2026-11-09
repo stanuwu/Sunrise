@@ -49,6 +49,7 @@ bool Parser::gameplay_settings(gameplay::Settings& output) noexcept {
     bool hasAdvertised = false;
     bool hasTransport = false;
     bool hasPort = false;
+    bool hasRelayPort = false;
     bool hasReserve = false;
     bool hasJoinGrant = false;
     bool hasHoldLaunchCinematic = false;
@@ -91,6 +92,14 @@ bool Parser::gameplay_settings(gameplay::Settings& output) noexcept {
             }
             candidate.port = static_cast<std::uint16_t>(value);
             hasPort = true;
+        } else if (key == "relay_port") {
+            std::uint64_t value = 0;
+            if (hasRelayPort || !unsigned_integer(value)
+                || value > (std::numeric_limits<std::uint16_t>::max)()) {
+                return false;
+            }
+            candidate.relayPort = static_cast<std::uint16_t>(value);
+            hasRelayPort = true;
         } else if (key == "server_reserve_count") {
             std::uint64_t value = 0;
             if (hasReserve || !unsigned_integer(value)

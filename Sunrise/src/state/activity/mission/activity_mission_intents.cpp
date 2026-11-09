@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <span>
 
 #include "../../runtime/storage/internal.h"
 #include "internal.h"
@@ -37,15 +38,25 @@ namespace {
            && left.value == right.value && left.sourceGeneration >= right.sourceGeneration;
 }
 
-/** Only a newer owner with the exact desired channel can replace report eligibility. */
+/**
+ * Only a newer owner with the exact desired channel can replace report eligibility, and only once
+ * the link that owns the request is gone, as when its client reattaches. While the owner is live,
+ * every other link that receives the same body only observes the device; when the device's bubble
+ * changes holder, the new holder's admitted report takes the request (`observe_device_report`).
+ */
 [[nodiscard]] const DevicePublication*
 matching_device_publication(const MissionState& state,
                             const DeviceRequestReport& request,
                             const DevicePublicationBoundary& boundary,
                             std::span<const DevicePublication> publications) noexcept {
+    const auto live = std::span(boundary.liveGenerations)
+                          .first((std::min)(static_cast<std::size_t>(boundary.liveGenerationCount),
+                                            boundary.liveGenerations.size()));
     if (request.attemptGeneration != boundary.attemptGeneration
         || request.sourceGeneration >= boundary.sourceGeneration
-        || request.channel >= kDeviceChannelCount) {
+        || request.channel >= kDeviceChannelCount
+        || (request.sourceGeneration != 0
+            && std::find(live.begin(), live.end(), request.sourceGeneration) != live.end())) {
         return nullptr;
     }
     for (const auto& publication : publications) {
@@ -441,13 +452,16 @@ Status renew_device_publications(const SessionBinding& binding,
 }
 
 /**
- * Joins only fresh accepted deltas to a staged device request from the same attempt.
+ * Joins only fresh accepted deltas to a staged device request from the same attempt. The link that
+ * simulates the device reports for it, so an admitted report from another link takes over a
+ * request that is not yet applied: that link's client now holds the device's bubble. Its own
+ * reports start the join again; the previous owner's partial channels do not count.
  * @param binding Exact activity owning the report.
  * @param program Current mission program identity.
  * @param report Accepted sparse channel values with their intake owners.
  * @param appliedRequests Receives each request first satisfied by this report.
  * @param output Receives the current durable mission state on success.
- * @return Ready when the report was admitted or ignored without changing its owner.
+ * @return Ready when the report joined or took over its requests, or was ignored.
  */
 Status observe_device_report(const SessionBinding& binding,
                              const ProgramKey& program,
@@ -485,13 +499,22 @@ Status observe_device_report(const SessionBinding& binding,
             for (auto& request : candidate.deviceRequests) {
                 if (request.applied || request.sourceGeneration == 0
                     || request.attemptGeneration != report.attemptGeneration
-                    || request.sourceGeneration != report.sourceGeneration
                     || request.objectTag != report.objectTag
                     || request.registryKey != report.registryKey
                     || request.slotIndex != report.slotIndex
-                    || report.inputSequence <= request.inputSequenceAtStage
-                    || report.clientMessageSequence <= request.clientMessageSequenceAtStage
                     || request.channel >= report.channels.size()) {
+                    continue;
+                }
+                if (request.sourceGeneration != report.sourceGeneration) {
+                    if (!report.admitted || report.sourceGeneration == 0) {
+                        continue;
+                    }
+                    request.sourceGeneration = report.sourceGeneration;
+                    request.reported = {};
+                    changed = true;
+                }
+                if (report.inputSequence <= request.inputSequenceAtStage
+                    || report.clientMessageSequence <= request.clientMessageSequenceAtStage) {
                     continue;
                 }
                 const auto before = request.reported;

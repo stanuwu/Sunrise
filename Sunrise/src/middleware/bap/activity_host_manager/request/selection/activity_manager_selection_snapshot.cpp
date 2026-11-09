@@ -35,7 +35,9 @@ constexpr std::uint64_t kTokenCapacity = 568;
 
 /** Decodes the second copy of the descriptor, which rides inside protobuf field two. */
 bool parse_field_two(std::span<const std::byte> input,
-                     ActivityManagerSelection& selection) noexcept {
+                     ActivityManagerSelection& selection,
+                     StartupReservations& reservations) noexcept {
+    reservations = {};
     Reader reader(input);
     const std::size_t streamBits = input.size() * encoding::kBitsPerByte;
     std::uint64_t tokenCount = 0;
@@ -58,6 +60,8 @@ bool parse_field_two(std::span<const std::byte> input,
                     parsed.descriptorBits,
                     parsed.descriptorBitLength);
     selection = parsed;
+    // The descriptor remains usable even when the optional startup tail is absent or malformed.
+    static_cast<void>(read_startup_reservations(reader, reservations));
     return true;
 }
 

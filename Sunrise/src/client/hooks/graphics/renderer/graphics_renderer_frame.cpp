@@ -13,6 +13,7 @@
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../../../core/ui/scaling/dpi/ui_dpi_scaling.h"
 #include "../../../../core/ui/theme/sunrise_ui_theme.h"
+#include "../../../../steam/interfaces/invitations.h"
 #include "../../../ui/activity/authored_placement_marker.h"
 #include "../../../ui/activity/authored_spatial_overlay.h"
 #include "../../../ui/mission_launch/mission_launch_art.h"
@@ -92,6 +93,49 @@ void transition_input_visibility_locked(bool visible) noexcept {
     g_captureReleaseWindow = g_resources.window;
 }
 
+/** The platform presents a decision; only the callback pump can deliver an accepted join. */
+bool draw_invitation(const steam::interfaces::methods::PendingInvitation& invitation) noexcept {
+    if (invitation.id == 0) {
+        return false;
+    }
+    // Horizontally centred and anchored above the middle of the work area, so the dialog does
+    // not sit over the crosshair, at a fixed width in device-independent pixels.
+    constexpr float kHorizontalAnchor = 0.5F;
+    constexpr float kVerticalAnchor = 0.3F;
+    // UI layout budget for the wrapped invitation sentence and both action buttons.
+    constexpr float kDialogWidth = 390.0F;
+    const auto* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos({viewport->WorkPos.x + viewport->WorkSize.x * kHorizontalAnchor,
+                             viewport->WorkPos.y + viewport->WorkSize.y * kVerticalAnchor},
+                            ImGuiCond_Always,
+                            {kHorizontalAnchor, 0.0F});
+    ImGui::SetNextWindowSize({core::ui::scaling::dpi::pixels(kDialogWidth), 0.0F},
+                             ImGuiCond_Always);
+    constexpr auto flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize
+                           | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings
+                           | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoNav;
+    if (ImGui::Begin("Fireteam invitation | Sunrise", nullptr, flags)) {
+        ImGui::TextWrapped("%s invited you to their fireteam.",
+                           invitation.inviterName[0] != '\0' ? invitation.inviterName.data()
+                                                             : "A friend");
+        ImGui::Spacing();
+        const auto id = invitation.id;
+        ImGui::PushID(static_cast<int>(id >> 32));
+        ImGui::PushID(static_cast<int>(id & 0xFFFFFFFFULL));
+        if (ImGui::Button("Decline")) {
+            (void)steam::interfaces::methods::decide_invitation(id, false);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Accept")) {
+            (void)steam::interfaces::methods::decide_invitation(id, true);
+        }
+        ImGui::PopID();
+        ImGui::PopID();
+    }
+    ImGui::End();
+    return true;
+}
+
 /**
  * Draws Dear ImGui data, then puts back every output-merger target that was set before.
  * @param drawData Completed frame draw data.
@@ -138,7 +182,9 @@ void render_frame_locked() noexcept {
         }
     }
     const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
-    transition_input_visibility_locked(visibility.visible);
+    steam::interfaces::methods::PendingInvitation invitation{};
+    const bool invitationVisible = steam::interfaces::methods::pending_invitation(invitation);
+    transition_input_visibility_locked(visibility.visible || invitationVisible);
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
@@ -150,6 +196,7 @@ void render_frame_locked() noexcept {
     const bool surfaceDrawn = core::ui::layout::render(visibility.visible);
     const bool busyDrawn = core::ui::busy::draw();
     const bool noticeDrawn = core::ui::notice::draw();
+    const bool invitationDrawn = draw_invitation(invitation);
     sunrise::client::ui::activity::authored_placement_marker::RenderSet markerSource{};
     sunrise::client::hooks::teleport::CameraPose markerCamera{};
     const bool markerSourceReady =
@@ -167,7 +214,7 @@ void render_frame_locked() noexcept {
                              && sunrise::client::ui::activity::authored_placement_marker::draw(
                                  markerSource, markerCamera, !spatialMarkerDrawn);
     if (!hudDrawn && !surfaceDrawn && !busyDrawn && !noticeDrawn && !spatialMarkerDrawn
-        && !markerDrawn) {
+        && !markerDrawn && !invitationDrawn) {
         // A frame nobody claimed still drains backend state, and sends no draw data.
         ImGui::EndFrame();
         return;
@@ -185,8 +232,11 @@ bool handle_window_message(HWND window, UINT message, WPARAM word, LPARAM value)
     }
 
     const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
-    transition_input_visibility_locked(visibility.visible);
-    if (!visibility.visible) {
+    steam::interfaces::methods::PendingInvitation invitation{};
+    const bool inputVisible =
+        visibility.visible || steam::interfaces::methods::pending_invitation(invitation);
+    transition_input_visibility_locked(inputVisible);
+    if (!inputVisible) {
         // Hidden input stays with the game and never enters Dear ImGui's event queue.
         ReleaseSRWLockExclusive(&g_rendererLock);
         return false;

@@ -85,7 +85,11 @@ bool resolve(std::uint16_t request, ServiceRoute& route) noexcept {
         route = {ResponseMode::reply, Response::echo, BodyCodec::empty};
         return true;
     case Request::registerRelayClient:
-        route = {ResponseMode::reply, Response::registerRelayClient, BodyCodec::empty};
+        route = {
+            ResponseMode::reply, Response::registerRelayClient, BodyCodec::registerRelayClient};
+        return true;
+    case Request::initiateRelayConnection:
+        route = {ResponseMode::uncorrelatedPush, {}, BodyCodec::initiateRelayConnection};
         return true;
     case Request::signSteamCertificate:
         route = {ResponseMode::reply, Response::signSteamCertificate, BodyCodec::steamCertificate};

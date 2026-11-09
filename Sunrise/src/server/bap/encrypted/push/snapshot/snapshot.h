@@ -51,6 +51,18 @@ prepare_initial(Scratch& scratch,
                 Prepared& prepared) noexcept;
 
 /**
+ * Folds the family-two member fields the projected public profile does not carry.
+ * The account's seat and its established fireteam both change without the owner's profile
+ * moving, so the poll that refreshes a roster row cannot see them through the profile
+ * generation alone.
+ * @param scratch Account scratch owned by the caller under the BAP session lock.
+ * @param familyRootSoid Account root the subscription names.
+ * @return A value that changes only when the served member record would change.
+ */
+[[nodiscard]] std::uint32_t social_roster_revision(Scratch& scratch,
+                                                   std::uint64_t familyRootSoid) noexcept;
+
+/**
  * Rebuilds the active account family at the peer's next version.
  * @param accountSelectionCleared The peer's account object names no character since its
  *        opcode 505; the character object stays resident.

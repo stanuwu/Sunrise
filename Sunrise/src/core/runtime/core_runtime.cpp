@@ -18,10 +18,12 @@
 #include "../../middleware/content/packages/reader/overlay.h"
 #include "../../middleware/runtime/middleware_runtime.h"
 #include "../../server/runtime/server_runtime.h"
+#include "../../state/account/account_platform.h"
 #include "../../state/activity_sdk/generated_world/catalog_manifest.h"
 #include "../../state/activity_sdk/runtime.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/content_manifest/content_manifest_state_runtime.h"
+#include "../../state/coop/compatibility.h"
 #include "../../state/entitlements/entitlement_runtime.h"
 #include "../../state/investment/store.h"
 #include "../../state/mods/mods_runtime.h"
@@ -54,7 +56,9 @@ constexpr std::wstring_view kInstalledPackagesDirectory = L"packages";
     if (!state::investment::store::initialize(module)) {
         return false;
     }
-    return state::investment::store::validate();
+    return state::investment::store::bind_identity(
+               state::account::platform::declared_account_soid(settings::get().steam.user.steamId))
+           && state::investment::store::validate();
 }
 
 /**
@@ -323,13 +327,17 @@ bool initialize(void* module) noexcept {
             stage = "investment_store";
         } else if (!initialize_cheat_session()) {
             stage = "cheat_session";
+        } else if (settings::multiplayer() && !state::coop::compatibility::initialize(module)) {
+            // Co-op peers compare this record, so it is built before the server can answer one.
+            stage = "coop_compatibility";
         } else if (!state::initialize(module, settings::get().initialActivityDefaults)) {
             stage = "state";
         } else if (!middleware::initialize()) {
             stage = "middleware";
         } else if (!server::initialize()) {
             stage = "server";
-        } else if (!client::initialize(module)) {
+        } else if (settings::activates_client_hooks(settings::role())
+                   && !client::initialize(module)) {
             stage = "client";
         }
     }
@@ -340,7 +348,9 @@ bool initialize(void* module) noexcept {
         // A logging-stage failure has no sinks left to carry it, and reports nothing.
         log::write_elapsed(log::Channel::core, "ev=initialize phase=complete", startedTick, "fail");
         // Reverse every stage because the failing expression may have completed earlier stages.
-        (void)client::shutdown();
+        if (settings::activates_client_hooks(settings::role())) {
+            (void)client::shutdown();
+        }
         server::shutdown();
         middleware::shutdown();
         state::shutdown();
@@ -369,7 +379,7 @@ bool shutdown() noexcept {
     if (!g_initialized.load(std::memory_order_acquire)) {
         return true;
     }
-    if (!client::shutdown()) {
+    if (settings::activates_client_hooks(settings::role()) && !client::shutdown()) {
         // Server and State must remain valid while any Client hook is attached.
         return false;
     }

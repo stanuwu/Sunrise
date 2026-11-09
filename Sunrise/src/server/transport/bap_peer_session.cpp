@@ -32,8 +32,15 @@ bool offer(Peer& peer, client::network::BapEvent event, std::span<const std::byt
         return false;
     }
     client::network::BapResponse response{};
-    const client::network::BapRequest request{event, peer.connectionId, frame, peer.output};
-    if (!bap::consume(request, response) || response.size == 0) {
+    const client::network::BapRequest request{
+        event, peer.connectionId, frame, peer.output, peer.remoteAddress};
+    const bool handled = bap::consume(request, response);
+    if (response.closeConnection) {
+        return false;
+    }
+    peer.authenticated = response.authenticated;
+    peer.inputDeferred = response.deferFrame;
+    if (!handled || response.size == 0) {
         return true;
     }
     if (response.size > peer.output.size()) {
@@ -41,6 +48,7 @@ bool offer(Peer& peer, client::network::BapEvent event, std::span<const std::byt
     }
     peer.outputOffset = 0;
     peer.outputSize = response.size;
+    peer.outputProgressTick = peer.serviceTick;
     return true;
 }
 
@@ -75,7 +83,11 @@ bool drain_stream(Peer& peer) noexcept {
     if (!offer(peer, client::network::BapEvent::frame, pending.first(total))) {
         return false;
     }
+    if (peer.inputDeferred) {
+        return true;
+    }
     peer.streamSize -= total;
+    peer.inputStartedTick = peer.serviceTick;
     if (peer.streamSize != 0) {
         std::memmove(peer.stream.data(), peer.stream.data() + total, peer.streamSize);
     }
@@ -89,6 +101,7 @@ bool advance_output(Peer& peer, std::size_t sent) noexcept {
         return false;
     }
     peer.outputOffset += sent;
+    peer.outputProgressTick = peer.serviceTick;
     if (peer.outputOffset == peer.outputSize) {
         peer.outputOffset = 0;
         peer.outputSize = 0;
@@ -108,6 +121,8 @@ void close_peer(Peer& peer) noexcept {
     closesocket(peer.socket);
     peer.socket = INVALID_SOCKET;
     peer.connectionId = 0;
+    peer.inputDeferred = false;
+    peer.authenticated = false;
     peer.streamSize = 0;
     peer.outputOffset = 0;
     peer.outputSize = 0;

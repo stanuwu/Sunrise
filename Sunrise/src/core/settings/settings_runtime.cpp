@@ -12,12 +12,31 @@
 #include "../filesystem/path.h"
 #include "../filesystem/temporary_sibling.h"
 #include "../logging/log.h"
+#include "../network_lan.h"
 #include "parser.h"
 #include "settings.h"
 #include "settings_upgrade.h"
+#include "steam/platform_identity.h"
 
 namespace sunrise::core::settings {
 namespace {
+
+/** @return True when every address co-op binds, advertises or dials is on the local network. */
+[[nodiscard]] bool lan_only(const Settings& parsed, Role role) noexcept {
+    using network_lan::lan_address;
+    using network_lan::lan_bind;
+    if (!parsed.multiplayerEnabled) {
+        return true;
+    }
+    const auto& gameplay = parsed.server.gameplay;
+    if (role == Role::host
+        && (!lan_bind(parsed.server.bapBind) || !lan_bind(gameplay.bindAddress)
+            || !lan_address(gameplay.advertisedAddress)
+            || !lan_address(gameplay.transportAddress))) {
+        return false;
+    }
+    return !parsed.server.upstream.enabled || lan_address(parsed.server.upstream.address);
+}
 
 /** The JSON settings file is the only file stored directly in the owned folder. */
 constexpr std::wstring_view kSettingsFileSuffix = L"\\settings.json";
@@ -47,7 +66,7 @@ Settings g_settings = defaults();
 
 /**
  * Reports a settings version that differs from this build.
- * @param fileVersion Version read from the file, or zero when the key was missing.
+ * @param fileVersion Parsed version, defaulting to kSettingsVersion when the key was missing.
  */
 void report_version(std::uint32_t fileVersion) noexcept {
     if (fileVersion == kSettingsVersion) {
@@ -151,6 +170,7 @@ void report_upgrade(std::uint32_t fileVersion) noexcept {
 
 /** Loads the settings file from the owned folder, or creates the default one. */
 bool initialize(void* module) noexcept {
+    shutdown();
     path::Buffer configPath;
     if (!path::artifact_directory(module, configPath)
         || !path::append(configPath, kSettingsFileSuffix)) {
@@ -213,19 +233,22 @@ bool initialize(void* module) noexcept {
     }
     std::string_view document = without_byte_order_mark(std::string_view(buffer->data(), read));
     std::uint32_t version = 0;
-    if (!parser::Parser(document).parse_version(version)) {
+    bool compact = false;
+    if (!parser::Parser(document).parse_version(version, &compact)) {
         return fail("version");
     }
+    // The compact document has no schema history, so only a versioned or full file is replaced.
+    const bool outdated = version < kSettingsVersion && (version != 0 || !compact);
     // Holds the upgraded text; `document` points into it after an upgrade.
     std::string upgraded;
-    if (version < kSettingsVersion && upgrade::to_current(document, version, upgraded)) {
+    if (outdated && upgrade::to_current(document, version, upgraded)) {
         if (!path::replace_file(std::wstring_view(configPath.chars.data(), configPath.length),
                                 upgraded)) {
             return fail("write_upgrade");
         }
         report_upgrade(version);
         document = upgraded;
-    } else if (version < kSettingsVersion) {
+    } else if (outdated) {
         if (!DeleteFileW(configPath.chars.data())) {
             return fail("delete_old");
         }
@@ -234,10 +257,70 @@ bool initialize(void* module) noexcept {
         }
     }
     Settings parsed;
-    if (!parse(document, parsed)) {
-        return fail("parse");
+    ParseFailure parseFailure{};
+    if (!parse(document, parsed, &parseFailure)) {
+        return fail(parseFailure == ParseFailure::multiplayerOptInRequired
+                        ? "multiplayer_opt_in_required"
+                        : "parse");
     }
     report_version(parsed.version);
+    Role selectedRole = parsed.hasConfiguredRole ? parsed.configuredRole : Role::embedded;
+    if (parsed.compactClient || parsed.compactHost) {
+        selectedRole = parsed.compactHost ? Role::host : Role::client;
+        if (!parsed.steam.user.hasConfiguredSteamId
+            && !steam::platform_identity::load_or_create(parsed.steam.user.steamId)) {
+            return fail("identity_cache");
+        }
+        parsed.version = kSettingsVersion;
+        parsed.configuredRole = selectedRole;
+        parsed.client.externalServer.enabled = false;
+        if (parsed.compactHost) {
+            parsed.server.bapBind = {0, 0, 0, 0};
+            parsed.server.bapPort = parsed.client.serverEndpoint.bapPort;
+            parsed.server.gameplay.bindAddress = {0, 0, 0, 0};
+            parsed.server.gameplay.advertisedAddress = parsed.client.serverEndpoint.address;
+            parsed.server.gameplay.transportAddress = parsed.client.serverEndpoint.address;
+        } else {
+            parsed.server.upstream.enabled = true;
+            parsed.server.upstream.host = parsed.client.serverEndpoint.host;
+            parsed.server.upstream.address = parsed.client.serverEndpoint.address;
+            parsed.server.upstream.bapPort = parsed.client.serverEndpoint.bapPort;
+            parsed.server.bapPort = 0;
+        }
+    }
+    if (selectedRole == Role::client && !parsed.client.externalServer.enabled) {
+        if (!parsed.server.upstream.enabled) {
+            parsed.server.upstream.enabled = true;
+            parsed.server.upstream.host = parsed.client.serverEndpoint.host;
+            parsed.server.upstream.address = parsed.client.serverEndpoint.address;
+            parsed.server.upstream.bapPort = parsed.client.serverEndpoint.bapPort;
+        }
+        parsed.server.bapPort = 0;
+    }
+    if (selectedRole == Role::host && parsed.server.upstream.enabled) {
+        return fail("host_upstream");
+    }
+    if (selectedRole == Role::host) {
+        if (parsed.client.externalServer.enabled) {
+            return fail("host_external");
+        }
+        if (parsed.server.bapPort == 0
+            || (parsed.server.bapBind != std::array<unsigned char, 4>{0, 0, 0, 0}
+                && parsed.server.bapBind != std::array<unsigned char, 4>{127, 0, 0, 1})) {
+            return fail("host_local_listener");
+        }
+        if (parsed.server.gameplay.topology != server::gameplay::Topology::embedded) {
+            return fail("host_gameplay");
+        }
+    }
+    if (!lan_only(parsed, selectedRole)) {
+        return fail("lan_only");
+    }
+    for (std::size_t i = 0; i < parsed.server.upstream.host.size(); ++i) {
+        parsed.server.upstream.hostWide[i] = static_cast<wchar_t>(parsed.server.upstream.host[i]);
+    }
+    // Publish the role only after every configuration and identity check succeeds.
+    static_cast<void>(configure_role(selectedRole, true));
     g_settings = parsed;
     return true;
 }
@@ -245,6 +328,7 @@ bool initialize(void* module) noexcept {
 /** Resets active settings to the fixed defaults. */
 void shutdown() noexcept {
     g_settings = defaults();
+    (void)configure_role(Role::embedded, false);
 }
 
 /** @return Active read-only Core settings. */

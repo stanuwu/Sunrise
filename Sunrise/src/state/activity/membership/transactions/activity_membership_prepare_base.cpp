@@ -1,4 +1,5 @@
 #include "../../transactions/internal.h"
+#include "../member_directory_builder.h"
 #include "internal.h"
 
 namespace sunrise::state::activity::membership::transactions {
@@ -17,7 +18,27 @@ const SessionRecord* prepare_base(const ActivityState& state,
         || record.recordRevision == kInvalidRevision) {
         return nullptr;
     }
+    const auto context = member_context();
+    mutation.memberRow = record.sharedMembers
+                             ? member_row(record,
+                                          context.sessionId == sessionId ? context.memberKey : 0,
+                                          primarySoid)
+                             : 0;
+    if (!member_state(record, mutation.memberRow)) {
+        return nullptr;
+    }
+    // The joined-row check above also makes the identity lookup succeed for a shared row.
+    const auto* identity =
+        record.sharedMembers ? member_identity(record, mutation.memberRow) : nullptr;
+    if (record.sharedMembers && identity == nullptr) {
+        return nullptr;
+    }
+    mutation.expectedMemberKey = identity != nullptr ? identity->memberKey : record.memberKey;
     mutation.sessionId = sessionId;
+    mutation.peerSnapshot = record.peerReservations;
+    if (identity != nullptr) {
+        mutation.memberDirectory = member_directory(record, *identity);
+    }
     mutation.expectedStateRevision = state.stateRevision;
     mutation.expectedRecordRevision = record.recordRevision;
     mutation.expectedPrimarySoid = primarySoid;

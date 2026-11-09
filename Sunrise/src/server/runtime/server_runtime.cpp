@@ -10,6 +10,7 @@
 
 #include "../../client/network/consumer.h"
 #include "../../core/logging/log.h"
+#include "../../core/settings/settings.h"
 #include "../../core/threading/srw_lock.h"
 #include "../activity/host_runtime.h"
 #include "../activity/mission/mission_script_runtime.h"
@@ -54,6 +55,14 @@ void stop_service() noexcept {
     }
 }
 
+bool gameplayStarted{};
+void stop_gameplay() noexcept {
+    if (!gameplayStarted) {
+        return;
+    }
+    gameplayStarted = false;
+    gameplay::shutdown();
+}
 } // namespace
 
 /** Registers Server consumers with the Client networking boundary. */
@@ -74,18 +83,32 @@ bool initialize() noexcept {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=transport stage=listen result=fail");
+            if (core::settings::hosts_session() || core::settings::get().server.upstream.enabled) {
+                client::network::unregister_bap_consumer(&bap::consume);
+                client::network::unregister_http_consumer(&http::consume);
+                activity::mission::shutdown();
+                return false;
+            }
         }
         // The gameplay endpoint must bind before any descriptor advertises it.
-        if (!gameplay::initialize()) {
+        gameplayStarted = !core::settings::get().server.upstream.enabled && gameplay::initialize();
+        if (!core::settings::get().server.upstream.enabled && !gameplayStarted) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=gameplay stage=init result=fail");
+            if (core::settings::hosts_session()) {
+                transport::shutdown();
+                client::network::unregister_bap_consumer(&bap::consume);
+                client::network::unregister_http_consumer(&http::consume);
+                activity::mission::shutdown();
+                return false;
+            }
         }
         if (ui::runtime::initialize()) {
             g_serverInitialized = true;
             return true;
         }
-        gameplay::shutdown();
+        stop_gameplay();
         transport::shutdown();
         client::network::unregister_bap_consumer(&bap::consume);
     }
@@ -130,7 +153,7 @@ constexpr std::int64_t kTickMicroseconds = 10'000;
 // One timing report per window.
 constexpr std::uint64_t kWindowMilliseconds = 2'000;
 
-enum class Stage : std::uint8_t { transport, host, mission, gameplay, count };
+enum class Stage : std::uint8_t { bap, transport, host, mission, gameplay, count };
 
 /** Worst times of one report window. Only the server thread touches it. */
 struct Window final {
@@ -158,10 +181,11 @@ void report_window(std::uint64_t now) noexcept {
         std::snprintf(line.data(),
                       line.size(),
                       "ev=core stage=service result=window slices=%llu over_tick=%llu max_us=%lld "
-                      "transport_us=%lld host_us=%lld mission_us=%lld gameplay_us=%lld",
+                      "bap_us=%lld transport_us=%lld host_us=%lld mission_us=%lld gameplay_us=%lld",
                       static_cast<unsigned long long>(g_window.slices),
                       static_cast<unsigned long long>(g_window.overTick),
                       static_cast<long long>(g_window.worstSlice),
+                      static_cast<long long>(stage[static_cast<std::size_t>(Stage::bap)]),
                       static_cast<long long>(stage[static_cast<std::size_t>(Stage::transport)]),
                       static_cast<long long>(stage[static_cast<std::size_t>(Stage::host)]),
                       static_cast<long long>(stage[static_cast<std::size_t>(Stage::mission)]),
@@ -206,6 +230,7 @@ template <typename Run> std::int64_t timed_stage(Stage id, const char* name, Run
 /** Runs one bounded server service slice. @param now Monotonic tick count. */
 void service(std::uint64_t now) noexcept {
     std::int64_t slice = 0;
+    slice += timed_stage(Stage::bap, "bap", [now] { bap::service(now); });
     slice += timed_stage(Stage::transport, "transport", [now] { transport::service(now); });
     slice += timed_stage(Stage::host, "host", [now] { activity::host::service(now); });
     slice += timed_stage(Stage::mission, "mission", [now] {
@@ -213,7 +238,11 @@ void service(std::uint64_t now) noexcept {
         studio::service(now);
         activity::mission::service(now);
     });
-    slice += timed_stage(Stage::gameplay, "gameplay", [now] { gameplay::service(now); });
+    slice += timed_stage(Stage::gameplay, "gameplay", [now] {
+        if (gameplayStarted) {
+            gameplay::service(now);
+        }
+    });
     ++g_window.slices;
     g_window.overTick += slice > kTickMicroseconds ? 1U : 0U;
     g_window.worstSlice = (std::max)(g_window.worstSlice, slice);
@@ -227,7 +256,7 @@ void shutdown() noexcept {
     g_serviceStartFailed = false;
     stop_service();
     ui::runtime::shutdown();
-    gameplay::shutdown();
+    stop_gameplay();
     transport::shutdown();
     client::network::unregister_bap_consumer(&bap::consume);
     client::network::unregister_http_consumer(&http::consume);

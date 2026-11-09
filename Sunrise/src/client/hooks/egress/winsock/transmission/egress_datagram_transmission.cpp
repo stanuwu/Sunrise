@@ -5,6 +5,7 @@
 #include "../../policy/egress_policy_logging.h"
 #include "../../policy/policy.h"
 #include "../discovery/egress_discovery_responder.h"
+#include "../single_port.h"
 #include "replacements.h"
 
 namespace sunrise::client::hooks::egress::winsock::transmission {
@@ -30,7 +31,7 @@ constexpr int kConnectedDestinationLength = 0;
                                        sockaddr*& forwardedDestination,
                                        int& forwardedLength) noexcept {
     if (destination != nullptr) {
-        if (!policy::redirect_ipv4(destination, destinationLength, redirected)) {
+        if (!policy::redirect_ipv4(destination, destinationLength, redirected, socket)) {
             return false;
         }
         forwardedDestination = reinterpret_cast<sockaddr*>(&redirected);
@@ -91,6 +92,9 @@ int WSAAPI send_bytes_to(SOCKET socket,
                          int flags,
                          const sockaddr* destination,
                          int destinationLength) noexcept {
+    if (single_port::enabled(socket)) {
+        return single_port::send(socket, buffer, length, flags, destination, destinationLength);
+    }
     const auto call = original<decltype(&::sendto)>(HookSlot::sendTo);
     if (buffer != nullptr && length >= 0) {
         const discovery::Result discoveryResult =
@@ -132,6 +136,10 @@ int WSAAPI send_buffers_to(SOCKET socket,
                            int destinationLength,
                            LPWSAOVERLAPPED overlapped,
                            LPWSAOVERLAPPED_COMPLETION_ROUTINE completion) noexcept {
+    if (single_port::enabled(socket)) {
+        clear_bytes(bytesSent);
+        return single_port::unsupported();
+    }
     const auto call = original<decltype(&::WSASendTo)>(HookSlot::wsaSendTo);
     const auto sendTo = original<decltype(&::sendto)>(HookSlot::sendTo);
     const discovery::Result discoveryResult = handle_buffer_discovery(socket,

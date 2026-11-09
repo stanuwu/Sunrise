@@ -4,12 +4,19 @@
 #include <cstdint>
 
 #include "../definition.h"
+#include "member_directory.h"
+
+namespace sunrise::state::activity::entity_slots {
+struct PendingMutation;
+}
 
 namespace sunrise::state::activity::membership {
 
 /** Snapshot and revision guards for one deferred membership operation. */
 struct PendingMutation final {
     Snapshot snapshot{};
+    reservations::Roster peerSnapshot{};
+    MemberDirectory memberDirectory{};
     /** A second copy, so a changed identity plan is caught before commit. */
     Identity identityGuard{};
     /** Sparse client-state input, kept whether or not a delivery snapshot exists. */
@@ -20,6 +27,8 @@ struct PendingMutation final {
     std::uint64_t expectedStateRevision{};
     std::uint64_t expectedRecordRevision{};
     std::uint64_t expectedPrimarySoid{};
+    std::uint64_t expectedMemberKey{};
+    std::size_t memberRow{entity_slots::kMemberLeaseRowCount};
     std::uint64_t refreshRequestGuard{};
     std::uint32_t requestedRevision{};
     std::uint32_t acknowledgement{};
@@ -41,6 +50,10 @@ struct PendingMutation final {
     bool movesTransitionToken{};
     bool prepared{};
 };
+
+/** Exact membership after-image of a validated native join and its deferred lease transaction. */
+[[nodiscard]] bool prepare_join_snapshot(const entity_slots::PendingMutation& join,
+                                         PendingMutation& mutation) noexcept;
 
 /**
  * Prepares one exact identity for a joined activity session.
@@ -86,6 +99,9 @@ struct PendingMutation final {
  */
 [[nodiscard]] bool acknowledged(std::uint64_t sessionId) noexcept;
 
+/** Current recipient's publishable revision, or zero for an absent/replaced binding. */
+[[nodiscard]] std::uint32_t current_revision(const SessionBinding& binding) noexcept;
+
 /**
  * Arms or clears the host-named region the client teleports to.
  * The client reads these fields out of the message-12 region-block tail and starts a type-7
@@ -99,26 +115,11 @@ struct PendingMutation final {
                                      std::int32_t sliceSetIndex,
                                      std::uint32_t spawnSetHash) noexcept;
 
-/**
- * Arms one native hard wipe on an exact session generation. Arming the same request key again
- * is accepted; another key is refused while a wipe or a host teleport is active.
- * @param requestKey Script request that owns the wipe. @param region Region the party is in.
- * @param spawnSetHash Authored spawn set the party respawns at.
- */
-[[nodiscard]] bool arm_hard_wipe(const SessionBinding& binding,
-                                 std::uint64_t requestKey,
-                                 std::int32_t region,
-                                 std::uint32_t spawnSetHash) noexcept;
-
 /** @return True while an armed wipe's spawn block still has to reach the client. */
 [[nodiscard]] bool hard_wipe_needs_publish(std::uint64_t sessionId) noexcept;
 
 /** @return True while the client has not yet mirrored an armed wipe's start block. */
 [[nodiscard]] bool hard_wipe_start_unseen(std::uint64_t sessionId) noexcept;
-
-/** Releases the wipe the request key armed, so the client's wait is answered. */
-[[nodiscard]] bool release_hard_wipe(const SessionBinding& binding,
-                                     std::uint64_t requestKey) noexcept;
 
 /** @return The spawn set the armed wipe named for this region, or zero. */
 [[nodiscard]] std::uint32_t checkpoint_spawn_hash(std::uint64_t sessionId,
@@ -197,17 +198,7 @@ struct ClientPlacement final {
     std::int32_t bubble{kMinimumRefreshBubble};
     /** Membership revision the refresh that named the bubble had applied. */
     std::uint32_t bubbleRevision{kAbsentRevision};
-    /** The client's last character write-back reported the in-world state. */
-    bool clientInWorld{};
 };
-
-/**
- * Records the world state the client's character write-back (ws 702) reports.
- * The field at objB `+12068` reads 8 in the world and 1 through a load, so the value decides
- * entry, not the send's timing. The region is a separate report, read where entry is tested.
- * @param inWorld True when the field carries the in-world value.
- */
-void note_client_writeback(bool inWorld) noexcept;
 
 /**
  * Reads the client's region legs and current bubble together.

@@ -74,6 +74,12 @@ enum class UtilsSlot : std::size_t {
 /** Slots used from SteamFriends017. */
 enum class FriendsSlot : std::size_t {
     personaName = 0,
+    friendCount = 3,
+    friendByIndex = 4,
+    friendRelationship = 5,
+    friendPersonaState = 6,
+    friendPersonaName = 7,
+    friendGamePlayed = 8,
     setRichPresence = 43,
     clearRichPresence = 44,
     friendRichPresence = 45,
@@ -105,6 +111,7 @@ enum class UserStatsSlot : std::size_t {
 enum class MatchmakingSlot : std::size_t {
     createLobby = 13,
     joinLobby = 14,
+    leaveLobby = 15,
     sendLobbyChat = 26,
     lobbyChatEntry = 27,
 };
@@ -235,6 +242,12 @@ void bind_common_methods() noexcept {
     bind(g_utilsMethods, UtilsSlot::filterText, &methods::filter_text);
 
     bind(g_friendsMethods, FriendsSlot::personaName, &methods::persona_name);
+    bind(g_friendsMethods, FriendsSlot::friendCount, &methods::friend_count);
+    bind(g_friendsMethods, FriendsSlot::friendByIndex, &methods::friend_by_index);
+    bind(g_friendsMethods, FriendsSlot::friendRelationship, &methods::friend_relationship);
+    bind(g_friendsMethods, FriendsSlot::friendPersonaState, &methods::friend_persona_state);
+    bind(g_friendsMethods, FriendsSlot::friendPersonaName, &methods::friend_persona_name);
+    bind(g_friendsMethods, FriendsSlot::friendGamePlayed, &methods::friend_game_played);
     bind(g_friendsMethods, FriendsSlot::setRichPresence, &methods::set_rich_presence);
     bind(g_friendsMethods, FriendsSlot::clearRichPresence, &methods::clear_rich_presence);
     bind(g_friendsMethods, FriendsSlot::friendRichPresence, &methods::friend_rich_presence);
@@ -265,6 +278,7 @@ void bind_common_methods() noexcept {
 void bind_networking_methods() noexcept {
     bind(g_matchmakingMethods, MatchmakingSlot::createLobby, &methods::create_lobby);
     bind(g_matchmakingMethods, MatchmakingSlot::joinLobby, &methods::join_lobby);
+    bind(g_matchmakingMethods, MatchmakingSlot::leaveLobby, &methods::leave_lobby);
     bind(g_matchmakingMethods, MatchmakingSlot::sendLobbyChat, &methods::send_lobby_chat);
     bind(g_matchmakingMethods, MatchmakingSlot::lobbyChatEntry, &methods::get_lobby_chat_entry);
 

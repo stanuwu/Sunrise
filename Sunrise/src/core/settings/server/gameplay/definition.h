@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../../network_capacity.h"
+
 namespace sunrise::core::settings::server::gameplay {
 
 /** Process that owns the gameplay UDP endpoint for this run. */
@@ -24,16 +26,18 @@ inline constexpr std::uint16_t kPortAlignment = 2;
  * Host ports the embedded endpoint binds, stepping by the alignment from the configured
  * port. The client keys each channel on the host port it dialled, one port per host row.
  */
-inline constexpr std::size_t kHostPortCount = 16;
+inline constexpr std::size_t kHostPortCount = network_capacity::kHostPorts;
 /** Even, and clear of the discovery ports with the whole pool span. */
 inline constexpr std::uint16_t kDefaultPort = 30976;
+/** Relay starts immediately after the default host-port pool. */
+inline constexpr std::uint16_t kDefaultRelayPort = kDefaultPort + kHostPortCount * kPortAlignment;
 /** Discovery owns 3074 and 3075. Bound ports are even, so only 3074 can collide. */
 inline constexpr std::uint16_t kDiscoveryPort = 3074;
 /** One carrier, the live wave, and removal headroom fit in this many reserved slots. */
 inline constexpr std::uint16_t kDefaultServerReserve = 256;
 /** A smaller reserve cannot hold one carrier plus its removal and quarantine headroom. */
 inline constexpr std::uint16_t kMinimumServerReserve = 8;
-/** The client keeps at least this many lease bits after the reserve is subtracted. */
+/** Aggregate client pool minimum; each member must also retain the native join minimum. */
 inline constexpr std::uint16_t kClientLeaseMinimum = 4096;
 /**
  * Entity slots the join hands the client before it asks for any.
@@ -59,6 +63,8 @@ struct Settings {
     std::array<unsigned char, kAddressOctets> transportAddress{127, 0, 0, 1};
     /** Even UDP port, shared by all three addresses because the egress hook keeps the port. */
     std::uint16_t port{kDefaultPort};
+    /** Preferred relay UDP port; collisions with host/discovery ports advance by two. */
+    std::uint16_t relayPort{kDefaultRelayPort};
     /** Entity indices held back from the client lease for server-authored entities. */
     std::uint16_t serverReserveCount{kDefaultServerReserve};
     /** Entity indices the join grants. The rest stay free for the client to request. */
@@ -77,6 +83,9 @@ struct Settings {
  * @return True when the topology, port, and reserve can be bound and advertised together.
  */
 [[nodiscard]] bool valid(const Settings& settings) noexcept;
+
+/** Dedicated relay port, or zero when disabled or no noncolliding port fits. */
+[[nodiscard]] std::uint16_t effective_relay_port(const Settings& settings) noexcept;
 
 /**
  * Reports the slots actually held back from the client lease.

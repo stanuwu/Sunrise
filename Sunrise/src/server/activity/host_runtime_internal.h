@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "host_runtime.h"
@@ -181,6 +182,21 @@ struct SceneSenseTrace final {
 struct SquadSenseRecord final {
     SenseObservationKey key{};
     middleware::bap::activity_message::squad_sense::State state{};
+    std::uint64_t sourceGeneration{};
+    /** Mission attempt the state was reported in; a checkpoint restart re-places every squad. */
+    std::uint64_t attemptGeneration{};
+    /** Instance-wide merge order, so a holder change replays the newest simulating report. */
+    std::uint64_t mergeSequence{};
+    /**
+     * Bubbles the source held when it last merged a valid state. Only while it held the squad's
+     * bubble did it simulate the squad; otherwise the state is its replica's view.
+     */
+    std::uint64_t heldBubbles{};
+    /**
+     * The source withdrew its state. Its last valid state stays only as the baseline the link that
+     * takes over the squad's bubble is reconciled to; it is never replayed to its own source.
+     */
+    bool withdrawn{};
 };
 
 /** Mutable per-instance storage kept behind the runtime lock. */
@@ -188,7 +204,7 @@ struct Instance final {
     InstanceSnapshot view{};
     SenseObservationSnapshot senseObservations{};
     std::vector<SquadSenseRecord> squadSense{};
-    std::uint64_t squadSenseSourceGeneration{};
+    std::uint64_t squadSenseSequence{};
     SceneSenseTrace sceneSenseTrace{};
     std::array<ScriptableGuard, kScriptableGuardCapacity> scriptableGuards{};
     /** Latest delivered body for every full ClientRef, re-emitted by every later msg-5 body. */
@@ -203,15 +219,19 @@ struct Instance final {
     bool occupied{};
 };
 
-/** Clears one instance member by member; a whole-value assignment puts 1 MiB on the stack. */
+/** Clears generation-owned data while retaining vector storage and avoiding a whole-record
+ * temporary. */
 inline void clear_instance(Instance& instance) noexcept {
     instance.view = {};
-    instance.senseObservations = {};
-    std::vector<SquadSenseRecord>{}.swap(instance.squadSense);
-    instance.squadSenseSourceGeneration = 0;
-    instance.sceneSenseTrace = {};
+    std::destroy_at(&instance.senseObservations);
+    std::construct_at(&instance.senseObservations);
+    // Inactive records reuse this capacity without allocating on the game service path.
+    instance.squadSense.clear();
+    instance.squadSenseSequence = 0;
+    std::destroy_at(&instance.sceneSenseTrace);
+    std::construct_at(&instance.sceneSenseTrace);
     instance.scriptableGuards.fill({});
-    std::vector<PendingScriptableOverride>{}.swap(instance.scriptableAuthEstate);
+    instance.scriptableAuthEstate.clear();
     instance.pendingScriptable = {};
     instance.pendingScriptableTail.fill({});
     instance.pendingScriptableTailCount = 0;
@@ -222,7 +242,8 @@ inline void clear_instance(Instance& instance) noexcept {
 }
 
 extern SRWLOCK g_lock;
-extern std::array<Instance, kInstanceCapacity> g_instances;
+/** Lifetime-owned records, reused for inactive generations before allocating a new slot. */
+extern std::array<std::unique_ptr<Instance>, kInstanceCapacity> g_instances;
 /** Ordered reducer work grows with real input and fails only when allocation fails. */
 extern std::vector<PendingInput> g_pending;
 extern std::size_t g_pendingRead;
@@ -396,5 +417,11 @@ valid_state_local_group(const ScriptableTarget& target,
 void cancel_pending(Instance& instance,
                     const state::activity::SessionBinding& binding,
                     std::uint64_t expectedRevision) noexcept;
+
+/**
+ * Merges one link's complete squad Sense deltas into that link's recovery records, without
+ * discarding fields a later report omits.
+ */
+void retain_squad_sense(Instance& instance, const SenseInput& input) noexcept;
 
 } // namespace sunrise::server::activity::host::detail

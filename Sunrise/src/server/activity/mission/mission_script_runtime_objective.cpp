@@ -108,7 +108,8 @@ void push_objective_edges(RuntimeInstance& instance,
         const host::SenseObservation& observation = sense.observations[index];
         if (observation.key.slotType != format::kObjectiveSlotType
             || observation.key.senseSchema != format::kObjectiveSenseSchema
-            || observation.firstValue + observation.valueCount > sense.valueCount) {
+            || observation.firstValue + observation.valueCount > sense.valueCount
+            || !admitted_report(instance, observation.key, sense.sourceGeneration)) {
             continue;
         }
         const std::span<const sense_values::DecodedValue> body(
@@ -123,6 +124,7 @@ void push_objective_edges(RuntimeInstance& instance,
         if (watched == nullptr) {
             continue;
         }
+        claim_row(*watched, sense.sourceGeneration, false);
         const bool first = !watched->used;
         watched->used = true;
         for (std::uint8_t block = 0; block < counters.blocks; ++block) {
@@ -136,7 +138,7 @@ void push_objective_edges(RuntimeInstance& instance,
                 if (first || value <= previous) {
                     continue;
                 }
-                host::Event event = sense_edge_event(instance, observation);
+                host::Event event = shared_edge_event(instance, observation);
                 event.objectiveOrdinal = block;
                 event.objectiveTaskOrdinal = static_cast<std::uint8_t>(task);
                 event.objectiveTaskCount = value;

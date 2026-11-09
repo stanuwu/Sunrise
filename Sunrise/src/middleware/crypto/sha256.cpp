@@ -68,6 +68,38 @@ bool hash(std::span<const std::byte> input, Digest& output) noexcept {
     return digest(input, {}, output);
 }
 
+Stream::Stream() noexcept {
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    BCRYPT_HASH_HANDLE handle = nullptr;
+    ok_ = succeeded(BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0))
+          && succeeded(BCryptCreateHash(algorithm, &handle, nullptr, 0, nullptr, 0, 0));
+    algorithm_ = algorithm;
+    handle_ = handle;
+}
+
+Stream::~Stream() noexcept {
+    if (handle_ != nullptr) {
+        BCryptDestroyHash(static_cast<BCRYPT_HASH_HANDLE>(handle_));
+    }
+    if (algorithm_ != nullptr) {
+        BCryptCloseAlgorithmProvider(static_cast<BCRYPT_ALG_HANDLE>(algorithm_), 0);
+    }
+}
+
+void Stream::add(std::span<const std::byte> part) noexcept {
+    ok_ = ok_ && sha256::add(static_cast<BCRYPT_HASH_HANDLE>(handle_), part);
+}
+
+bool Stream::finish(Digest& output) noexcept {
+    const bool done = ok_
+                      && succeeded(BCryptFinishHash(static_cast<BCRYPT_HASH_HANDLE>(handle_),
+                                                    reinterpret_cast<PUCHAR>(output.data()),
+                                                    static_cast<ULONG>(output.size()),
+                                                    0));
+    ok_ = false;
+    return done;
+}
+
 /** Hashes two buffers as one concatenated message. */
 bool hash_pair(std::span<const std::byte> first,
                std::span<const std::byte> second,

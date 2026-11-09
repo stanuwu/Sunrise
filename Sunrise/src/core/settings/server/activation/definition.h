@@ -25,8 +25,11 @@ struct Settings {
      * fast-travel freeze; it is not a fix and comes out once the question is settled.
      */
     bool preventOwnerlessChannelClose{false};
-    /** Enables server Activity Host mission scripts. Off leaves compiled host policy in control. */
-    bool missionScripting{false};
+    /**
+     * Enables server Activity Host mission scripts, as the bundled settings do. A compact
+     * multiplayer document takes this default. Off leaves compiled host policy in control.
+     */
+    bool missionScripting{true};
 };
 
 } // namespace sunrise::core::settings::server::activation

@@ -36,8 +36,6 @@ constexpr std::uint32_t kByteMask = 0xFF;
 constexpr std::uint8_t kGroupSize = 16;
 /** Groups the 25 parameters fall into, and the width of the presence field that names them. */
 constexpr std::uint8_t kGroupCount = 2;
-/** Only the low 25 bits of either mask name a parameter. */
-constexpr std::uint64_t kParameterMaskBits = 0x1FFFFFF;
 /** A request-body width of zero means that parameter has no known request codec. */
 constexpr std::uint16_t kNoRequestCodec = 0;
 

@@ -199,7 +199,7 @@ enum class PassResolution { claim, replay };
     reward_resolution::Result expected{};
     if (!mutation.prepared || mutation.sourceDefinitionHash != reward.itemHash
         || !resolve_pass(
-            reward, account_snapshot(), mutation.seed, expected, PassResolution::replay)
+            reward, bound_account_snapshot(), mutation.seed, expected, PassResolution::replay)
         || expected.count != grant->rewardCount
         || expected.wrapperFlags.count() != grant->wrapperFlagCount) {
         return false;
@@ -278,8 +278,12 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
     mutation.seed = seed;
     reward_resolution::Result resolved{};
     reason = "reward_condition";
-    if (!resolve_pass(
-            reward, account_snapshot(), mutation.seed, resolved, PassResolution::claim, &reason)) {
+    if (!resolve_pass(reward,
+                      bound_account_snapshot(),
+                      mutation.seed,
+                      resolved,
+                      PassResolution::claim,
+                      &reason)) {
         return false;
     }
     reason = "reward_placement";
@@ -356,7 +360,7 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
         return catalog_refusal(reason);
     }
     reason = "selected_character";
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     const auto character = selected_character_index(account);
     unlocks::Table flags{};
     if (character >= account.characterCount

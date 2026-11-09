@@ -10,6 +10,7 @@
 namespace sunrise::middleware::bap::activity_message::host_control {
 
 /** Exact Activity Message IDs for this host-to-client codec group. */
+inline constexpr std::uint32_t kClaimAuthorityMessageType = 24;
 inline constexpr std::uint32_t kPurgeAuthorityMessageType = 25;
 inline constexpr std::uint32_t kResetAuthorityMaskMessageType = 28;
 inline constexpr std::uint32_t kQueryAuthorityMaskMessageType = 30;

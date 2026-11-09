@@ -18,7 +18,7 @@ int WSAAPI connect_socket(SOCKET socket, const sockaddr* name, int nameLength) n
     const auto call = original<decltype(&::connect)>(HookSlot::connect);
     policy::log_send_target(policy::SocketOperation::connect, name, nameLength, 0);
     sockaddr_in redirected{};
-    const bool targetsRedirect = policy::redirect_ipv4(name, nameLength, redirected);
+    const bool targetsRedirect = policy::redirect_ipv4(name, nameLength, redirected, socket);
     if (call == nullptr
         || !policy::allow_socket_call(policy::SocketOperation::connect, targetsRedirect, true)) {
         return policy::deny_socket_call();
@@ -39,7 +39,7 @@ int WSAAPI connect_socket_ex(SOCKET socket,
     const auto call = original<decltype(&::WSAConnect)>(HookSlot::wsaConnect);
     policy::log_send_target(policy::SocketOperation::connect, name, nameLength, 0);
     sockaddr_in redirected{};
-    const bool targetsRedirect = policy::redirect_ipv4(name, nameLength, redirected);
+    const bool targetsRedirect = policy::redirect_ipv4(name, nameLength, redirected, socket);
     if (call == nullptr
         || !policy::allow_socket_call(policy::SocketOperation::connect, targetsRedirect, true)) {
         return policy::deny_socket_call();
@@ -126,7 +126,8 @@ BOOL PASCAL connect_by_list(SOCKET socket,
     const bool targetsRedirect = hasSingleAddress
                                  && policy::redirect_ipv4(addresses->Address[0].lpSockaddr,
                                                           addresses->Address[0].iSockaddrLength,
-                                                          redirectedAddress);
+                                                          redirectedAddress,
+                                                          socket);
     if (call == nullptr
         || !policy::allow_socket_call(policy::SocketOperation::connect, targetsRedirect, true)) {
         (void)policy::deny_socket_call();
@@ -158,7 +159,7 @@ SOCKET WSAAPI join_leaf(SOCKET socket,
                         DWORD flags) noexcept {
     const auto call = original<decltype(&::WSAJoinLeaf)>(HookSlot::wsaJoinLeaf);
     sockaddr_in redirected{};
-    const bool targetsRedirect = policy::redirect_ipv4(name, nameLength, redirected);
+    const bool targetsRedirect = policy::redirect_ipv4(name, nameLength, redirected, socket);
     if (call == nullptr
         || !policy::allow_socket_call(policy::SocketOperation::connect, targetsRedirect, true)) {
         (void)policy::deny_socket_call();

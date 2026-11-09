@@ -8,12 +8,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string_view>
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/crypto/random_bytes.h"
 #include "../../../../../middleware/encoding/byte_order.h"
+#include "../../../../../state/account/account_context.h"
 #include "../../../../../state/activity/destination/activity_destination_snapshot.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/build_data/runtime.h"
@@ -231,7 +233,7 @@ void grant_random_world_loot(std::span<const std::uint32_t> weapons,
         || titanArmour.size() != warlockArmour.size()) {
         return;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     std::span<const std::uint32_t> armour;
     for (std::size_t index = 0; index < account.characterCount; ++index) {
         if (!account.characters[index].selected) {
@@ -304,13 +306,13 @@ void grant_random_moon_loot() noexcept {
 
 /**
  * Identifies a Jade Rabbit interaction by its generic target, statue ordinal, and Moon package.
- * @param incident Accepted incident whose extra targets carry the statue.
+ * @param incident Reported interaction whose extra targets carry the statue.
  * @param primaryFound True when the primary target resolved to a definition.
  * @param primary Definition of the primary target.
  * @param packageName Package the instantiated region reports.
  * @return True when this incident reports one of the nine statues.
  */
-[[nodiscard]] bool is_moon_rabbit(const message::incident::Incident& incident,
+[[nodiscard]] bool is_moon_rabbit(const reward_mail::Event& incident,
                                   bool primaryFound,
                                   const state::build_data::sobjects::Definition& primary,
                                   std::string_view packageName) noexcept {
@@ -388,15 +390,10 @@ void grant_random_moon_loot() noexcept {
 } // namespace
 
 /**
- * Applies the state change one accepted collectible report implies.
- * @param incident Outer-valid incident whose targets name the reported object.
+ * Applies the state change one reported interaction implies to the bound account.
+ * @param incident The interaction and the destination it happened in.
  */
-static void stage_incident_grants(const message::incident::Incident& incident) noexcept {
-    // Preserve the common-header size gate before acting on the incident.
-    if (incident.payloadLength < 13) {
-        return;
-    }
-
+static void stage_incident_grants(const reward_mail::Event& incident) noexcept {
     // Target index, name hash and lane every Corrupted Egg carries.
     constexpr std::uint32_t kCorruptedEggTarget = 693U;
     constexpr std::uint32_t kCorruptedEggNameHash = 0x179A5E15U;
@@ -446,21 +443,12 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
         return;
     }
 
-    // An incident can arrive on the private activity while its object belongs to the public
-    // region, so the grant follows the instantiated region, not the delivering session.
-    const std::uint64_t destinationSession =
-        state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
-    state::activity::destination::DestinationSelection destination{};
-    static_cast<void>(state::activity::destination::snapshot(destinationSession, destination));
-    const std::size_t packageLength = (std::min)(
-        static_cast<std::size_t>(destination.packageNameLength), destination.packageName.size());
-    const std::string_view packageName(
-        reinterpret_cast<const char*>(destination.packageName.data()), packageLength);
+    const std::string_view packageName(incident.package.data(), incident.packageLength);
 
     core::log::writef(core::log::Channel::server,
                       core::log::Level::debug,
                       "ev=activity stage=incident_grant target=%u extra=%u lore=%u type=%d "
-                      "lane=0x%08X egg=%u destination=0x%016llX package=%.*s",
+                      "lane=0x%08X egg=%u package=%.*s",
                       incident.primaryTarget,
                       incident.extraTargetCount,
                       static_cast<unsigned>(lore),
@@ -468,7 +456,6 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
                                    : state::build_data::sobjects::kAbsentTypeCode,
                       primaryFound ? primary.lane4 : 0U,
                       static_cast<unsigned>(isCorruptedEgg),
-                      static_cast<unsigned long long>(destinationSession),
                       static_cast<int>(packageName.size()),
                       packageName.data());
 
@@ -493,18 +480,55 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
     }
 }
 
-/** Commits collectible progress and every reward earned by the same report together. */
-void apply_incident_grants(const message::incident::Incident& incident) noexcept {
+/** Commits collectible progress and every reward one event earns, together. */
+static void commit_incident_grants(const reward_mail::Event& event) noexcept {
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
         return;
     }
-    stage_incident_grants(incident);
+    stage_incident_grants(event);
     if (!transaction.commit()) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::error,
                          "ev=incident_grant result=fail reason=store");
     }
+}
+
+void apply_incident_grants(const message::incident::Incident& incident) noexcept {
+    // Preserve the common-header size gate before acting on the incident.
+    constexpr std::uint32_t kCommonHeaderSize = 13;
+    if (incident.payloadLength < kCommonHeaderSize
+        || incident.extraTargetCount > message::incident::kExtraTargetMaximum) {
+        return;
+    }
+    reward_mail::Event event{};
+    event.primaryTarget = incident.primaryTarget;
+    std::copy_n(incident.extraTargets, incident.extraTargetCount, event.extraTargets.begin());
+    event.extraTargetCount = incident.extraTargetCount;
+    event.payloadLength = incident.payloadLength;
+    // An incident can arrive on the private activity while its object belongs to the public
+    // region, so the grant follows the instantiated region, not the delivering session.
+    const std::uint64_t destinationSession =
+        state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
+    state::activity::destination::DestinationSelection destination{};
+    static_cast<void>(state::activity::destination::snapshot(destinationSession, destination));
+    event.packageLength = static_cast<std::uint8_t>((std::min)(
+        static_cast<std::size_t>(destination.packageNameLength), destination.packageName.size()));
+    std::memcpy(event.package.data(), destination.packageName.data(), event.packageLength);
+    if (state::local_account_access()) {
+        commit_incident_grants(event);
+        return;
+    }
+    // A guest's report earns its own reward, rolled and saved by the guest's own install.
+    const std::uint64_t owner = state::account_primary_soid(state::bound_account());
+    if (owner != 0) {
+        reward_mail::post(owner, event);
+    }
+}
+
+void apply_reward_event(const reward_mail::Event& event) noexcept {
+    const state::ScopedAccount local(state::kLocalAccount);
+    commit_incident_grants(event);
 }
 
 } // namespace sunrise::server::bap::encrypted::activity_message::receipts

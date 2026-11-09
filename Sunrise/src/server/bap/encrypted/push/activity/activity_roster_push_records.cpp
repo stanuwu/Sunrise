@@ -22,6 +22,12 @@ struct BodyRecord final {
     bool valid{};
 };
 
+/** Revision delivered to this exact connection, independently of member acknowledgement. */
+struct MembershipCursor final {
+    std::uint64_t sessionId{};
+    std::uint32_t revision{};
+};
+
 /** What the last deferral line named, so one held item is reported once and not every pump. */
 struct DeferralRecord final {
     std::uint64_t bindingGeneration{};
@@ -35,6 +41,8 @@ struct ConnectionRecord final {
     BodyRecord rosterStaged{};
     BodyRecord membershipSent{};
     BodyRecord membershipStaged{};
+    MembershipCursor membershipSentCursor{};
+    MembershipCursor membershipStagedCursor{};
     DeferralRecord deferred{};
 };
 
@@ -43,7 +51,9 @@ std::array<ConnectionRecord, kSessionCount> g_connectionRecords{};
 
 /** @return This connection's record, or null for an out-of-range connection id. */
 [[nodiscard]] ConnectionRecord* connection_record(const Session& session) noexcept {
-    return session.id < g_connectionRecords.size() ? &g_connectionRecords[session.id] : nullptr;
+    return session.id != 0 && session.id <= g_connectionRecords.size()
+               ? &g_connectionRecords[session.id - 1]
+               : nullptr;
 }
 
 /** @return True when the record holds this exact body for this exact binding. */
@@ -192,10 +202,13 @@ bool repeats_delivered_membership_body(const Session& session,
 
 /** Keeps one staged membership body until its frame outcome is known. */
 void stage_membership_body_record(const Session& session,
-                                  std::span<const std::byte> body) noexcept {
+                                  std::span<const std::byte> body,
+                                  std::uint64_t sessionId,
+                                  std::uint32_t revision) noexcept {
     ConnectionRecord* const record = connection_record(session);
     if (record != nullptr) {
         fill_record(record->membershipStaged, session.activity.bindingGeneration, body);
+        record->membershipStagedCursor = {sessionId, revision};
     }
 }
 
@@ -211,12 +224,31 @@ void discard_membership_body_record(const Session& session) noexcept {
 void commit_membership_body_record(const Session& session) noexcept {
     ConnectionRecord* const record = connection_record(session);
     if (record != nullptr) {
+        // The cursor moves on the same rule as the body record: a body the client never received
+        // was never delivered down this link, so it stays owed.
+        if (record->membershipStaged.valid
+            && record->membershipStaged.bindingGeneration == session.activity.bindingGeneration) {
+            record->membershipSentCursor = record->membershipStagedCursor;
+        }
         promote_record(
             record->membershipStaged, record->membershipSent, session.activity.bindingGeneration);
     }
 }
 
-/** Adopts the join burst's staged membership body under the connection's new generation. */
+bool connection_owes_membership(const Session& session,
+                                std::uint64_t sessionId,
+                                std::uint32_t revision) noexcept {
+    if (sessionId == state::activity::kAbsentSessionId
+        || revision == state::activity::membership::kAbsentRevision) {
+        return false;
+    }
+    const ConnectionRecord* const record = connection_record(session);
+    return record == nullptr || !record->membershipSent.valid
+           || record->membershipSent.bindingGeneration != session.activity.bindingGeneration
+           || record->membershipSentCursor.sessionId != sessionId
+           || record->membershipSentCursor.revision != revision;
+}
+
 void adopt_join_membership_record(const Session& session) noexcept {
     ConnectionRecord* const record = connection_record(session);
     if (record == nullptr || !record->membershipStaged.valid) {
@@ -224,6 +256,7 @@ void adopt_join_membership_record(const Session& session) noexcept {
     }
     // The body was staged before the join commit reserved this generation.
     record->membershipStaged.bindingGeneration = session.activity.bindingGeneration;
+    record->membershipSentCursor = record->membershipStagedCursor;
     promote_record(
         record->membershipStaged, record->membershipSent, session.activity.bindingGeneration);
 }

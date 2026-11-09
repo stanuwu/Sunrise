@@ -12,6 +12,7 @@ namespace {
 [[nodiscard]] std::array<void*, kGameSlots.size()> game_replacements() noexcept {
     return {
         platform::transport_kind_entry_point(),
+        platform::transport_kind_session_entry_point(),
         http::execute_request_entry_point(),
         bubble_authority::decoder_entry_point(),
         bubble_authority::content_untracked_entry_point(),
@@ -34,9 +35,10 @@ GameSpecs game_specs() noexcept {
     const targets::game::network::Targets& resolved = targets::game::network::get();
     return {
         hooking::detour::Spec{resolved.transportKind, replacements[0]},
-        hooking::detour::Spec{resolved.httpExecuteRequest, replacements[1]},
-        hooking::detour::Spec{resolved.bubbleAuthorityDecoder, replacements[2]},
-        hooking::detour::Spec{resolved.contentUntrackedGetter, replacements[3]},
+        hooking::detour::Spec{resolved.transportKindSession, replacements[1]},
+        hooking::detour::Spec{resolved.httpExecuteRequest, replacements[2]},
+        hooking::detour::Spec{resolved.bubbleAuthorityDecoder, replacements[3]},
+        hooking::detour::Spec{resolved.contentUntrackedGetter, replacements[4]},
     };
 }
 

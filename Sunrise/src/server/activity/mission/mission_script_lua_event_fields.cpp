@@ -458,10 +458,57 @@ constexpr EventBinding kDevice[]{
     {"reset", nullptr, &boolean_field<&E::deviceReset>},
     {"applied_request", &device_applied_request},
 };
+/** Pushes one channel-2 pool level, or nil unless an entity that reports it dealt the damage. */
+template <std::size_t Pool> void entity_pool_level(lua_State* state, const E& event) {
+    if (event.damageFromEntity && event.damageEntityPools.present[Pool]) {
+        lua_pushinteger(state, event.damageEntityPools.levels[Pool]);
+    } else {
+        lua_pushnil(state);
+    }
+}
+/** Pushes one integer of the damaging entity's lifetime, or nil when no entity dealt it. */
+void entity_lifetime_integer(lua_State* state, const E& event, lua_Integer value) {
+    if (event.damageFromEntity) {
+        lua_pushinteger(state, value);
+    } else {
+        lua_pushnil(state);
+    }
+}
 constexpr EventBinding kDamage[]{
     {"health", nullptr, &number_field<&E::damageHealth>},
     {"shield", nullptr, &number_field<&E::damageShield>},
     {"revision", nullptr, &integer_field<&E::damageRevision>},
+    {"from_entity", nullptr, &boolean_field<&E::damageFromEntity>},
+    {"health_level",
+     nullptr,
+     &entity_pool_level<state::gameplay::entity_identity::kHealthPoolIndex>},
+    {"shield_level",
+     nullptr,
+     &entity_pool_level<state::gameplay::entity_identity::kShieldPoolIndex>},
+    {"entity_slot",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         entity_lifetime_integer(state, event, event.damageEntityLifetime.token.slot);
+     }},
+    {"entity_incarnation",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         entity_lifetime_integer(state, event, event.damageEntityLifetime.token.incarnation);
+     }},
+    {"allocation_sequence",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         entity_lifetime_integer(state, event, event.damageEntityLifetime.allocationSequence);
+     }},
+    {"allocation_domain",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         if (event.damageFromEntity) {
+             push_u64_string(state, event.damageEntityLifetime.allocationDomain);
+         } else {
+             lua_pushnil(state);
+         }
+     }},
 };
 // Sense ordinal 1 backs interaction_open; its meaning is assumed.
 constexpr EventBinding kObject[]{

@@ -16,9 +16,9 @@ inline constexpr std::int32_t kUnknownRegion = -1;
  * Twice the host directory one membership body can carry, so replacing the whole advertised set
  * always finds free rows while the previous set is still retained.
  */
-inline constexpr std::size_t kHostSessionCapacity = 16;
+inline constexpr std::size_t kHostSessionCapacity = core::network_capacity::kHostPorts;
 
-/** Immutable identity of one source-bound activity-host row generation. */
+/** Immutable identity of one activity-host generation and its original destination source. */
 struct HostSessionBinding {
     state::activity::SessionBinding source{};
     state::activity::SessionBinding target{};
@@ -52,18 +52,26 @@ struct HostSessionRow {
 };
 
 /**
- * Claims or finds one host row bound to an exact source activity generation and region.
+ * Claims or finds one region host. Private rows use the exact source activity generation;
+ * authored public rows reuse compatible destination content across private launches.
  * An unknown region never claims a row. A conflicting referenced row is never replaced.
  * @param groupSessionId Group session carried by the matching join descriptor.
  * @param source Exact source activity. A public region's target runs its free-roam activity.
  * @param regionIndex Concrete advertised region.
  * @param output Cleared, then receives the pending or ready row generation.
+ * @param publicRegion True only when the installed destination authors this region as public.
  * @return Current state of the requested row.
  */
 [[nodiscard]] HostSessionState request_host_session(std::uint64_t groupSessionId,
                                                     const state::activity::SessionBinding& source,
                                                     std::int32_t regionIndex,
-                                                    HostSessionBinding& output) noexcept;
+                                                    HostSessionBinding& output,
+                                                    bool publicRegion = false) noexcept;
+
+/** Copies live sources that advertised this public host; each join still validates its identity. */
+void host_session_sources(std::uint64_t generation,
+                          std::span<state::activity::SessionBinding> output,
+                          std::size_t& count) noexcept;
 
 /** Copies a ready row by its exact group-session key. */
 [[nodiscard]] bool host_session_for_group(std::uint64_t groupSessionId,
@@ -73,7 +81,7 @@ struct HostSessionRow {
 [[nodiscard]] bool host_session_for_activity(std::uint64_t hostSessionId,
                                              HostSessionBinding& output) noexcept;
 
-/** Copies a ready row by its exact source generation and active region. */
+/** Copies a ready row for its original source or a live source sharing the public region. */
 [[nodiscard]] bool host_session_for_source_region(const state::activity::SessionBinding& source,
                                                   std::int32_t regionIndex,
                                                   HostSessionBinding& output) noexcept;
@@ -99,7 +107,12 @@ void snapshot_host_sessions(std::span<HostSessionRow> output, std::size_t& count
  */
 void allocate_claimed_host_sessions() noexcept;
 
-/** Returns every retained binding and allocated target to State, then clears the table. */
+/**
+ * Detaches every current and retired row, then returns their retains and allocated targets
+ * to State. Uses fixed release storage shared with deferred cleanup; the release lock
+ * serializes resets. State calls occur outside the host-table lock and must not reenter
+ * cleanup.
+ */
 void reset_host_sessions() noexcept;
 
 } // namespace sunrise::server::gameplay::group

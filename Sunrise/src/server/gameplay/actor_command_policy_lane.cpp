@@ -288,8 +288,9 @@ stage_damage_report(const SessionRow& session,
     // A session learns its binding only from a policy; without one the packet's source names it.
     report.policyBinding = session.policyActive && session.bindingRetained;
     report.binding = session.binding;
-    report.generation =
-        report.policyBinding ? session.activityClientGeneration : origin.activityClientGeneration;
+    // The sending link, even under a policy: the mission admits a level only from the link that
+    // simulates its target, and a replica copy on any other link is refused there.
+    report.generation = origin.activityClientGeneration;
     return report;
 }
 
