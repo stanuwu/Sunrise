@@ -8,7 +8,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <span>
 
 #include "../../core/logging/log.h"
@@ -508,6 +510,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                      std::uint16_t claimedRecordIndex,
                      const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
                      std::uint64_t redeemedInstanceSoid,
+                     std::span<const build_data::vendors::SaleCost> price,
                      PendingRecordRewardGrant& mutation,
                      const char** refusal) noexcept {
     const char* unused = nullptr;
@@ -556,6 +559,19 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         return RewardPreparation::deferred;
     }
     mutation.redeemedInstanceSoid = redeemedInstanceSoid;
+    // A vendor row's price leaves in the after-image its rows land in.
+    reason = "sale_price";
+    if (!price.empty()) {
+        const std::unique_ptr<AccountState> charged(new (std::nothrow) AccountState{});
+        bool changed = false;
+        if (!charged) {
+            return RewardPreparation::notReady;
+        }
+        if (!apply_sale_price(working, price, *charged, changed)) {
+            return RewardPreparation::deferred;
+        }
+        working = *charged;
+    }
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         const GrantView view{working,
                              characterIndex,
@@ -748,7 +764,7 @@ RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward
                                               std::uint16_t claimedRecordIndex,
                                               PendingRecordRewardGrant& mutation,
                                               const char** refusal) noexcept {
-    return prepare_reward_grant(rewards, claimedRecordIndex, nullptr, 0, mutation, refusal);
+    return prepare_reward_grant(rewards, claimedRecordIndex, nullptr, 0, {}, mutation, refusal);
 }
 
 /** Builds the full account after-image while a record reward remains current. */

@@ -11,6 +11,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../core/runtime/server_clock.h"
+#include "../../middleware/crypto/random_bytes.h"
 #include "../../middleware/web_service/messages/opcode1820.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
 #include "../../middleware/web_service/messages/opcode904/opcode904_codec.h"
@@ -641,6 +642,32 @@ constexpr std::uint32_t kAbsentNameHash = 0x811C9DC5U;
 }
 
 /**
+ * Grants a vendor row's item through the reward graph, spending the row's price in the same grant.
+ * The seed is drawn in this layer.
+ * @param price The row's cost entries.
+ * @param outcome Receives the prepared reward grant.
+ * @param reason Receives a static reason when nothing is prepared.
+ * @return True when the grant is prepared.
+ */
+[[nodiscard]] bool
+prepare_vendor_reward_grant(std::uint16_t itemDefinitionIndex,
+                            std::span<const state::build_data::vendors::SaleCost> price,
+                            Outcome& outcome,
+                            const char*& reason) noexcept {
+    auto* grant = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+    std::uint64_t seed = 0;
+    reason = grant == nullptr ? "storage" : "random_source";
+    if (grant != nullptr
+        && middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))
+        && state::prepare_vendor_reward(itemDefinitionIndex, price, seed, *grant, &reason)
+               == state::RewardPreparation::prepared) {
+        return true;
+    }
+    clear_mutation(outcome);
+    return false;
+}
+
+/**
  * Settles one resolved vendor row, in the order a row's behaviours are tried.
  * A row is a bounty roll, an exchange or a grant. The row does not say which, so each is tried in
  * turn and the first that claims the row owns it. Both vendor opcodes end here.
@@ -719,6 +746,17 @@ void settle_vendor_row(const middleware::web_service::Message& message,
         return;
     case Substitution::none:
         break;
+    }
+    // A row whose item lands in the lane Dawning deliveries use resolves through the reward graph
+    // and lands under that lane's FIFO policy; the acquisition below would add an instance instead.
+    if (state::vendor_reward_item(granted)) {
+        const char* reason = nullptr;
+        const bool prepared = prepare_vendor_reward_grant(granted, price, outcome, reason);
+        if (reason == nullptr) {
+            reason = prepared ? "reward_graph" : "vendor_reward";
+        }
+        report_purchase(opcode, prepared ? "ok" : "fail", reason, vendorIndex, rowIndex, granted);
+        return;
     }
     std::uint16_t collectibleIndex = state::build_data::collectibles::kNoCollectibleIndex;
     const bool collected = find_collectible_for_item(granted, collectibleIndex);

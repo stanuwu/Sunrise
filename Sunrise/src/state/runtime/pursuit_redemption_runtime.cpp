@@ -690,6 +690,7 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
                              kUnclaimedRecordIndex,
                              &plan.wrapperFlags,
                              instanceSoid,
+                             {},
                              mutation,
                              &reason);
     if (grant != RewardPreparation::prepared) {

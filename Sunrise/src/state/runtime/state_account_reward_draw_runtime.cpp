@@ -29,13 +29,16 @@ namespace {
 /**
  * Turns one resolved draw into inventory rows and consumed-wrapper flags.
  * @param resolved Grants and wrapper flags of one draw.
+ * @param price A vendor row's cost entries the grant spends; empty for none.
  * @param mutation Receives the prepared grant.
  * @param refusal Receives a static reason when the result is not prepared.
  * @return Unresolvable when the draw outgrew the grant rows.
  */
-[[nodiscard]] RewardPreparation prepare_resolved_reward(const reward_resolution::Result& resolved,
-                                                        PendingRecordRewardGrant& mutation,
-                                                        const char** refusal) noexcept {
+[[nodiscard]] RewardPreparation
+prepare_resolved_reward(const reward_resolution::Result& resolved,
+                        std::span<const build_data::vendors::SaleCost> price,
+                        PendingRecordRewardGrant& mutation,
+                        const char** refusal) noexcept {
     std::array<DirectRecordReward, kRecordRewardGrantCapacity> rows{};
     if (resolved.count > rows.size()) {
         return RewardPreparation::unresolvable;
@@ -51,6 +54,7 @@ namespace {
                                 kUnclaimedRecordIndex,
                                 &resolved.wrapperFlags,
                                 0,
+                                price,
                                 mutation,
                                 refusal);
 }
@@ -249,7 +253,8 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
         return false;
     }
     reason = "reward_placement";
-    if (prepare_resolved_reward(resolved, mutation.grant, &reason) != RewardPreparation::prepared) {
+    if (prepare_resolved_reward(resolved, {}, mutation.grant, &reason)
+        != RewardPreparation::prepared) {
         return false;
     }
     reason = nullptr;
@@ -333,19 +338,25 @@ bool catalogs_settled() noexcept {
                || build_data::reward_definitions_unsupported());
 }
 
+namespace {
+
 /**
- * Resolves an installed item or wrapper for the selected character.
+ * Resolves an installed item or wrapper for the selected character, spending a vendor row's price
+ * in the same after-image.
  * A draw that leaves nothing to grant or outgrows a bound is final: a new seed is not a retry.
+ * @param price A vendor row's cost entries; empty for none.
  * @param seed Caller-drawn entropy for any wrapper draws.
  * @param refusal Receives a static reason on failure.
  * @return Not ready while a catalog is unpublished or a saved read fails; deferred while State
- *         has no selected character or room; unresolvable is final.
+ *         has no selected character, room or price; unresolvable is final.
  */
-RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
-                                      std::uint32_t quantity,
-                                      std::uint64_t seed,
-                                      PendingRecordRewardGrant& mutation,
-                                      const char** refusal) noexcept {
+[[nodiscard]] RewardPreparation
+resolve_item_reward(std::uint16_t itemIndex,
+                    std::uint32_t quantity,
+                    std::span<const build_data::vendors::SaleCost> price,
+                    std::uint64_t seed,
+                    PendingRecordRewardGrant& mutation,
+                    const char** refusal) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     mutation = {};
@@ -389,7 +400,39 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
         return catalog_refusal(reason);
     }
     reason = "reward_placement";
-    return prepare_resolved_reward(resolved, mutation, &reason);
+    return prepare_resolved_reward(resolved, price, mutation, &reason);
+}
+
+} // namespace
+
+/** Resolves an item granted without a price. */
+RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
+                                      std::uint32_t quantity,
+                                      std::uint64_t seed,
+                                      PendingRecordRewardGrant& mutation,
+                                      const char** refusal) noexcept {
+    return resolve_item_reward(itemIndex, quantity, {}, seed, mutation, refusal);
+}
+
+/** Matches the lane by its policy bits; the shipped build sets both only on the perk bucket. */
+bool vendor_reward_item(std::uint16_t itemIndex) noexcept {
+    constexpr std::uint8_t kRewardLanePolicy =
+        inventory_buckets::kFifo | inventory_buckets::kNoTransferOnEviction;
+    build_data::items::Definition item{};
+    inventory_buckets::Descriptor bucket{};
+    return build_data::find_item_definition_index(itemIndex, item)
+           && build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
+           && bucket.arraySelector == inventory_buckets::ArraySelector::character
+           && (bucket.policyFlags & kRewardLanePolicy) == kRewardLanePolicy;
+}
+
+/** A sale row names no quantity, so it grants one of its item, as every vendor grant does. */
+RewardPreparation prepare_vendor_reward(std::uint16_t itemIndex,
+                                        std::span<const build_data::vendors::SaleCost> price,
+                                        std::uint64_t seed,
+                                        PendingRecordRewardGrant& mutation,
+                                        const char** refusal) noexcept {
+    return resolve_item_reward(itemIndex, 1, price, seed, mutation, refusal);
 }
 
 /**
