@@ -133,9 +133,17 @@ struct GrantSource {
 [[nodiscard]] investment::store::Bank
 quest_bank(const build_data::items::QuestInitialization& quest) noexcept;
 /**
+ * @param table One unlock snapshot of the account and the selected character.
+ * @param quest A nonempty plan whose row fits its bank.
+ * @return The saved value the plan's row holds in that snapshot.
+ */
+[[nodiscard]] std::int32_t&
+quest_value(unlocks::Table& table, const build_data::items::QuestInitialization& quest) noexcept;
+/**
  * Prepares inventory rows and consumed-wrapper flags against one account view.
  * @param claimedRecordIndex Record already claimed in the banks, or kUnclaimedRecordIndex.
  * @param wrapperFlags Flags of the wrappers a draw consumed, or null for direct rows.
+ * @param redeemedInstanceSoid Held pursuit removed before the rows are placed, or zero.
  * @param refusal Receives a static reason when the result is not prepared.
  * @return Deferred only when State may still change the answer; unresolvable is final.
  */
@@ -143,6 +151,7 @@ quest_bank(const build_data::items::QuestInitialization& quest) noexcept;
 prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                      std::uint16_t claimedRecordIndex,
                      const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
+                     std::uint64_t redeemedInstanceSoid,
                      PendingRecordRewardGrant& mutation,
                      const char** refusal) noexcept;
 /**

@@ -64,7 +64,8 @@ bool prepare_record_reward_grant(
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
     if (!mutation.prepared
-        || (mutation.rewardCount == 0 && mutation.wrapperFlagCount == 0 && mutation.rowCount == 0)
+        || (mutation.rewardCount == 0 && mutation.wrapperFlagCount == 0 && mutation.rowCount == 0
+            && mutation.redeemedInstanceSoid == 0)
         || mutation.rewardCount > mutation.rewards.size() || !queuez::valid(before)
         || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()

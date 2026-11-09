@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 
 #include "../build_data/pursuits/definition.h"
 
@@ -19,6 +20,8 @@ struct PursuitObjectiveStatus {
     bool complete{};
     /** An optional objective of a contract that requires only its other objectives. */
     bool skipped{};
+    /** Progress is one of the held item's per-item values rather than a saved bank row. */
+    bool itemHeld{};
     std::int32_t value{};
     std::int32_t target{};
 };
@@ -39,9 +42,12 @@ struct PursuitCompletionStatus {
  * instance.
  * @param definition Installed pursuit contract.
  * @param context Saved banks and class of the character holding the pursuit.
+ * @param itemValues The held instance's per-item values in record order. Empty leaves every
+ *        item-held objective unknown.
  */
 [[nodiscard]] PursuitCompletionStatus
 inspect_pursuit_completion(const build_data::pursuits::Definition& definition,
-                           const reward_resolution::Context& context) noexcept;
+                           const reward_resolution::Context& context,
+                           std::span<const std::int32_t> itemValues = {}) noexcept;
 
 } // namespace sunrise::state

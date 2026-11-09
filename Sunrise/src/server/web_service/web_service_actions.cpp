@@ -2,9 +2,12 @@
 
 #include <array>
 #include <cstdio>
+#include <span>
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
+#include "../../middleware/crypto/random_bytes.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
 #include "../../middleware/web_service/messages/opcode402.h"
 #include "../../middleware/web_service/messages/opcode403.h"
@@ -338,7 +341,47 @@ void report_item_dismantle(const middleware::web_service::Message& message,
     write_warning(line, count);
 }
 
-/** Prepares the exact fixed-width opcode-402 removal of an instance or one unit of a stack. */
+/**
+ * Redeems a completed pursuit through the shared reward grant. The seed is drawn in this layer.
+ * @return False when the pursuit is not redeemed, so the request removes it as an ordinary item.
+ */
+[[nodiscard]] bool redeem_pursuit(const middleware::web_service::Message& message,
+                                  std::uint64_t instanceSoid,
+                                  const state::build_data::items::Definition& definition,
+                                  Outcome& outcome) noexcept {
+    auto* grant = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+    std::uint64_t seed = 0;
+    const char* reason = grant == nullptr ? "storage" : "random_source";
+    auto result = state::PursuitRedemption::refused;
+    if (grant != nullptr
+        && middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
+        result = state::prepare_pursuit_redemption(instanceSoid,
+                                                   definition.definitionHash,
+                                                   core::runtime::server_clock_seconds(),
+                                                   seed,
+                                                   *grant,
+                                                   &reason);
+    }
+    if (result == state::PursuitRedemption::prepared) {
+        return true;
+    }
+    clear_mutation(outcome);
+    if (result == state::PursuitRedemption::notRedeemable) {
+        return false;
+    }
+    report_item_dismantle(message,
+                          reason != nullptr ? reason : "pursuit_redemption",
+                          instanceSoid,
+                          definition.definitionIndex,
+                          definition.definitionHash,
+                          middleware::web_service::messages::opcode402::kSingleQuantity);
+    return true;
+}
+
+/**
+ * Prepares the exact fixed-width opcode-402 removal of an instance or one unit of a stack. A
+ * completed pursuit is redeemed instead.
+ */
 void dismantle_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     middleware::web_service::messages::opcode402::Request request{};
     if (!middleware::web_service::messages::opcode402::parse_request(message, request)) {
@@ -356,6 +399,11 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
     if (!state::build_data::find_item_definition_index(definitionIndex, definition)) {
         report_item_dismantle(
             message, "definition", instanceSoid, definitionIndex, 0, kSingleQuantity);
+        return;
+    }
+    state::build_data::pursuits::Definition contract{};
+    if (instanceSoid != 0 && state::build_data::find_pursuit_definition(definitionIndex, contract)
+        && redeem_pursuit(message, instanceSoid, definition, outcome)) {
         return;
     }
     auto* mutation = emplace_mutation<state::PendingItemDismantle>(outcome);

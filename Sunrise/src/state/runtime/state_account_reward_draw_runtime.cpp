@@ -50,6 +50,7 @@ namespace {
     return prepare_reward_grant(std::span(rows).first(resolved.count),
                                 kUnclaimedRecordIndex,
                                 &resolved.wrapperFlags,
+                                0,
                                 mutation,
                                 refusal);
 }

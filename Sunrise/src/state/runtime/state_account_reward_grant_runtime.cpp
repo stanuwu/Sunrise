@@ -45,10 +45,29 @@ namespace {
                : RecordRewardKind::characterStack;
 }
 
-/** @return The saved value a prepared quest start reads in one unlock snapshot. */
-[[nodiscard]] std::int32_t& quest_value(unlocks::Table& table, const Quest& quest) noexcept {
-    return quest.scope == Quest::Scope::account ? table.objectiveValues[quest.row]
-                                                : table.characterObjectValues[quest.row];
+/** @return True when the character holds the instance unequipped. */
+[[nodiscard]] bool holds_unequipped(const CharacterState& character, std::uint64_t soid) noexcept {
+    const auto held = std::span(character.inventory.values).first(character.inventory.count);
+    return std::any_of(
+        held.begin(), held.end(), [soid](const auto& item) { return item.instanceSoid == soid; });
+}
+
+/**
+ * Removes a redeemed pursuit's row. The rows after it keep their serials, which also order the
+ * client's bucket cells.
+ * @return False when the character does not hold the instance unequipped.
+ */
+[[nodiscard]] bool remove_redeemed(CharacterState& character, std::uint64_t soid) noexcept {
+    auto& inventory = character.inventory;
+    const auto held = std::span(inventory.values).first(inventory.count);
+    const auto found = std::find_if(
+        held.begin(), held.end(), [soid](const auto& item) { return item.instanceSoid == soid; });
+    if (found == held.end()) {
+        return false;
+    }
+    std::move(found + 1, held.end(), found);
+    inventory.values[--inventory.count] = {};
+    return true;
 }
 
 /**
@@ -104,7 +123,8 @@ namespace {
 [[nodiscard]] bool materialize_record_reward(const PendingRecordRewardGrant& mutation,
                                              AccountState& account) noexcept {
     if (!mutation.prepared
-        || (mutation.rewardCount == 0 && mutation.wrapperFlagCount == 0 && mutation.rowCount == 0)
+        || (mutation.rewardCount == 0 && mutation.wrapperFlagCount == 0 && mutation.rowCount == 0
+            && mutation.redeemedInstanceSoid == 0)
         || mutation.rewardCount > mutation.rewards.size()
         || mutation.rowCount > mutation.rows.size()
         || change_ring_refusal(std::span(mutation.rows).first(mutation.rowCount)) != nullptr
@@ -115,7 +135,10 @@ namespace {
         || !same_profile_inventory(
             account, mutation.beforeProfileItems, mutation.beforeProfileItemCount)
         || !mutation.beforeCharacter.selected
-        || mutation.beforeCharacter.soid != mutation.characterSoid) {
+        || mutation.beforeCharacter.soid != mutation.characterSoid
+        || (mutation.redeemedInstanceSoid != 0
+            && (!holds_unequipped(mutation.beforeCharacter, mutation.redeemedInstanceSoid)
+                || holds_unequipped(mutation.afterCharacter, mutation.redeemedInstanceSoid)))) {
         return false;
     }
 
@@ -348,6 +371,12 @@ struct GrantView {
 
 namespace runtime::detail {
 
+/** A quest value lives in the account or the selected character's objective values. */
+std::int32_t& quest_value(unlocks::Table& table, const Quest& quest) noexcept {
+    return quest.scope == Quest::Scope::account ? table.objectiveValues[quest.row]
+                                                : table.characterObjectValues[quest.row];
+}
+
 /** Overrides name socket types, not lanes, so adding an ordinary lane cannot shift a fixed roll. */
 bool apply_reward_sockets(const item_details::Definition& detail,
                           std::span<const build_data::rewards::SocketOverride> overrides,
@@ -427,13 +456,15 @@ RewardPreparation
 prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                      std::uint16_t claimedRecordIndex,
                      const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
+                     std::uint64_t redeemedInstanceSoid,
                      PendingRecordRewardGrant& mutation,
                      const char** refusal) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     reason = "reward_count";
     mutation = {};
-    if ((rewards.empty() && (wrapperFlags == nullptr || wrapperFlags->none()))
+    if ((rewards.empty() && (wrapperFlags == nullptr || wrapperFlags->none())
+         && redeemedInstanceSoid == 0)
         || rewards.size() > mutation.rewards.size()) {
         return RewardPreparation::unresolvable;
     }
@@ -467,6 +498,13 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         return RewardPreparation::deferred;
     }
     record_grant_before(working, characterIndex, mutation);
+    // The pursuit leaves before the rows are placed, so its row is free for them.
+    reason = "redeemed_instance";
+    if (redeemedInstanceSoid != 0
+        && !remove_redeemed(working.characters[characterIndex], redeemedInstanceSoid)) {
+        return RewardPreparation::deferred;
+    }
+    mutation.redeemedInstanceSoid = redeemedInstanceSoid;
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         const GrantView view{working,
                              characterIndex,
@@ -498,7 +536,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
 } // namespace runtime::detail
 
 /**
- * Applies a prepared grant's flags and quest starts to the saved banks.
+ * Applies a prepared grant's flags, quest starts and quest step to the saved banks.
  * @param after Receives the selected character's unlocks with the grant applied.
  * @return False when a flag or quest value moved since the grant was prepared.
  */
@@ -520,6 +558,12 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             return false;
         }
     }
+    const PreparedQuestStep& step = mutation.questStep;
+    if (step.next.scope != Quest::Scope::none
+        && (!build_data::items::valid_bank_row(step.next.scope, step.next.row)
+            || quest_value(after, step.next) != step.previousValue)) {
+        return false;
+    }
     const auto wrapperFlags = mutation.wrapper_flags();
     for (std::size_t i = 0; i < wrapperFlags.size(); ++i) {
         const auto& flag = wrapperFlags[i];
@@ -540,6 +584,9 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             auto& value = quest_value(after, reward.quest);
             value = build_data::items::initialized_value(reward.quest, value);
         }
+    }
+    if (step.next.scope != Quest::Scope::none) {
+        quest_value(after, step.next) = step.next.value;
     }
     return true;
 }
@@ -626,7 +673,7 @@ RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward
                                               std::uint16_t claimedRecordIndex,
                                               PendingRecordRewardGrant& mutation,
                                               const char** refusal) noexcept {
-    return prepare_reward_grant(rewards, claimedRecordIndex, nullptr, mutation, refusal);
+    return prepare_reward_grant(rewards, claimedRecordIndex, nullptr, 0, mutation, refusal);
 }
 
 /** Builds the full account after-image while a record reward remains current. */
@@ -657,7 +704,8 @@ void report_dropped_rewards(const PendingRecordRewardGrant& mutation) noexcept {
 } // namespace
 
 /**
- * Commits the shared reward after-image, its flags, its quest starts and its claim together.
+ * Commits the shared reward after-image, its flags, its quest starts and step, and its claim
+ * together.
  * @param mutation Prepared grant, consumed on every exit.
  * @return False when the account or a saved value moved; a record claim is revoked then.
  */
@@ -694,6 +742,10 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
             }
             ready = investment::store::write_unlock(
                 investment::store::Bank::accountFlags, flag.index, unlocks::kFlagSet);
+        }
+        const Quest& step = mutation.questStep.next;
+        if (ready && step.scope != Quest::Scope::none) {
+            ready = investment::store::write_unlock(quest_bank(step), step.row, step.value);
         }
         ready = ready && transaction.commit();
     }

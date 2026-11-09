@@ -130,6 +130,8 @@ struct ObjectiveTable {
         ++report.unreadable;
         return RowRead::read;
     }
+    row.itemValueSlot =
+        conditions.item_value_slot(blob, at + tables::kObjectiveSourceExpressionField);
     return append_program(table, row.expression);
 }
 

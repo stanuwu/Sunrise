@@ -310,8 +310,15 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
     }
     for (const pursuits::Definition& contract : domains.pursuits) {
         if (contract.definitionIndex >= domains.items.size()
-            || domains.items[contract.definitionIndex].definitionHash != contract.definitionHash) {
+            || domains.items[contract.definitionIndex].definitionHash != contract.definitionHash
+            || (contract.questStep.successorIndex != pursuits::kAbsent
+                && contract.questStep.successorIndex >= domains.items.size())) {
             return false;
+        }
+        for (std::size_t row = 0; row < contract.rewardCount; ++row) {
+            if (contract.rewards[row].itemIndex >= domains.items.size()) {
+                return false;
+            }
         }
     }
     // Reward rows are dense by item index, so each must name its item or be unavailable.

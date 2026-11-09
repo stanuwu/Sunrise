@@ -5,6 +5,7 @@
 #include <span>
 
 #include "../../../../state/build_data/items/quest_initialization.h"
+#include "../../../../state/build_data/pursuits/definition.h"
 
 namespace sunrise::middleware::content::packages::tables::items {
 
@@ -33,5 +34,22 @@ read_quest_initialization(std::span<const std::byte> definition,
                           std::span<const std::byte> parent,
                           std::size_t itemCount,
                           std::span<const std::byte> valueMap) noexcept;
+
+/**
+ * Members must name distinct items and step values, since the saved value selects the step.
+ * @param definition Pursuit item.
+ * @param itemIndex Pursuit's item-table index.
+ * @param parent Set-owner bytes selected by quest_parent; may be definition itself.
+ * @param itemCount Exclusive bound for item-table indices.
+ * @param valueMap Blob containing all four unlock value maps.
+ * @return The item's step and the member after it; no membership when no set names the item or
+ *         the item is its set's only member; unsupported for any other set.
+ */
+[[nodiscard]] state::build_data::pursuits::QuestStep
+read_quest_step(std::span<const std::byte> definition,
+                std::uint16_t itemIndex,
+                std::span<const std::byte> parent,
+                std::size_t itemCount,
+                std::span<const std::byte> valueMap) noexcept;
 
 } // namespace sunrise::middleware::content::packages::tables::items

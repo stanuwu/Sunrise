@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <span>
+
 #include "../../../core/logging/log.h"
 #include "../objectives/objective_catalog.h"
 #include "../runtime.h"
@@ -12,6 +15,22 @@ namespace {
     items::Definition item{};
     return find_item_definition_index(row.definitionIndex, item)
            && item.definitionHash == row.definitionHash;
+}
+
+/** Its reward rows and the quest step after it must name installed items. */
+[[nodiscard]] bool references_installed_items(const pursuits::Definition& row) noexcept {
+    items::Definition item{};
+    if (row.rewardCount > row.rewards.size()) {
+        return false;
+    }
+    const auto rewards = std::span(row.rewards).first(row.rewardCount);
+    return std::all_of(rewards.begin(),
+                       rewards.end(),
+                       [&item](const pursuits::RewardPreview& reward) {
+                           return find_item_definition_index(reward.itemIndex, item);
+                       })
+           && (row.questStep.successorIndex == pursuits::kAbsent
+               || find_item_definition_index(row.questStep.successorIndex, item));
 }
 
 /** Drops both tables when the first cache write after settling fails. */
@@ -43,7 +62,7 @@ bool valid_pursuit_definitions(std::span<const pursuits::Definition> rows) noexc
         return false;
     }
     for (std::size_t index = 0; index < rows.size(); ++index) {
-        if (!names_installed_item(rows[index])) {
+        if (!names_installed_item(rows[index]) || !references_installed_items(rows[index])) {
             core::log::writef(core::log::Channel::state,
                               core::log::Level::warn,
                               "ev=pursuit_definitions result=rejected item=%u row=%zu total=%zu",

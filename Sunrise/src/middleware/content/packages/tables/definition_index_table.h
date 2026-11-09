@@ -527,6 +527,11 @@ inline constexpr std::uint32_t kItemObjectiveBlockClass =
 /** A 16-bit item-table index, not a definition hash. */
 inline constexpr std::size_t kObjectiveParentItemOffset =
     offsetof(schema::generated::ItemObjectiveBlock, parentItemIndex);
+/** Unlock block offset, relative to the field; zero means absent. */
+inline constexpr std::size_t kItemUnlockBlockOffset =
+    offsetof(schema::generated::ItemDefinition, unlockItemBlock);
+/** This block's first array names the flags supplied by item presence. */
+inline constexpr std::uint32_t kItemUnlockBlockClass = schema::generated::ItemUnlockBlock::kClass;
 /** Objective array entries are 16-bit table indices. */
 inline constexpr std::size_t kObjectiveArrayDescriptor =
     offsetof(schema::generated::ItemObjectiveBlock, objectives);

@@ -44,6 +44,14 @@ public:
                                  std::span<state::build_data::rewards::Instruction> output,
                                  std::size_t& count,
                                  BankFailure& failure) const noexcept;
+    /**
+     * Names the value slot an expression reads from the item in context.
+     * @param at Offset of the expression field.
+     * @return The slot when the expression is one read of an item-held value, otherwise
+     *         objectives::kNoItemValueSlot.
+     */
+    [[nodiscard]] std::uint16_t item_value_slot(std::span<const std::byte> blob,
+                                                std::size_t at) const noexcept;
 
 private:
     [[nodiscard]] bool append_expression(std::span<const std::byte> blob,

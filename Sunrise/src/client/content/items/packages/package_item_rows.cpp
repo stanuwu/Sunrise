@@ -13,6 +13,7 @@ namespace {
 
 namespace build_details = state::build_data::items::details;
 namespace build_items = state::build_data::items;
+namespace pursuits = state::build_data::pursuits;
 
 /** @return True when one extracted detail can join the currently published numeric domains. */
 [[nodiscard]] bool publishable_detail(const build_details::Definition& detail) noexcept {
@@ -137,34 +138,41 @@ bool build_item_rows(const reader::Source& source,
             }
             continue;
         }
-        if (pursuitStorageReady && itemClass != tables::kItemDefinitionClass) {
-            storage.pursuitBuild.unread(item.definitionIndex);
-        } else if (pursuitStorageReady && !storage.pursuitBuild.item(item)) {
-            storage.pursuitBuild.read_failed(item.definitionIndex);
-        }
         if (rewardStorageReady && itemClass == tables::kItemDefinitionClass) {
             storage.rewardBuild.item(item.definitionIndex, item.definitionHash, storage.definition);
         }
         const std::uint32_t plugCategoryHash =
             corrected_plug_category(item.definitionHash, item.plugCategoryHash);
         build_items::QuestInitialization quest{};
+        pursuits::QuestStep questStep{};
+        bool questOwnerRead = true;
         const auto parentIndex = tables::items::quest_parent(storage.definition);
-        if (needDefinitions && itemClass == tables::kItemDefinitionClass
+        if ((needDefinitions || pursuitStorageReady) && itemClass == tables::kItemDefinitionClass
             && parentIndex < table.count) {
             std::span<const std::byte> parent = storage.definition;
             tables::IndexRow parentRow{};
             std::uint32_t parentClass = itemClass;
-            const bool parentReady = parentIndex == item.definitionIndex
-                                     || (tables::index_row(container, table, parentIndex, parentRow)
-                                         && reader::read_tag(source,
+            const bool parentIndexed =
+                parentIndex == item.definitionIndex
+                || tables::index_row(container, table, parentIndex, parentRow);
+            const bool parentReady = parentIndexed
+                                     && (parentIndex == item.definitionIndex
+                                         || reader::read_tag(source,
                                                              storage.scratch,
                                                              parentRow.targetTag,
                                                              storage.questParentDefinition,
                                                              parentClass));
+            // Like an item's own row, an owner the catalog read before is retried after a failed
+            // read; one it lacks leaves the set unsupported.
+            state::build_data::items::Definition cataloged{};
+            questOwnerRead =
+                parentReady || !parentIndexed
+                || !state::build_data::find_item_definition_index(parentIndex, cataloged);
             if (parentIndex != item.definitionIndex) {
                 parent = storage.questParentDefinition;
             }
-            if (parentReady && parentClass == tables::kItemDefinitionClass) {
+            const bool parentUsable = parentReady && parentClass == tables::kItemDefinitionClass;
+            if (needDefinitions && parentUsable) {
                 quest =
                     tables::items::read_quest_initialization(storage.definition,
                                                              item.definitionIndex,
@@ -172,6 +180,23 @@ bool build_item_rows(const reader::Source& source,
                                                              static_cast<std::size_t>(table.count),
                                                              storage.questValueMap);
             }
+            if (pursuitStorageReady && parentUsable) {
+                questStep = tables::items::read_quest_step(storage.definition,
+                                                           item.definitionIndex,
+                                                           parent,
+                                                           static_cast<std::size_t>(table.count),
+                                                           storage.questValueMap);
+            } else if (pursuitStorageReady) {
+                questStep.membership = pursuits::QuestMembership::unsupported;
+            }
+        } else if (parentIndex != tables::items::kUnavailableQuestParent) {
+            questStep.membership = pursuits::QuestMembership::unsupported;
+        }
+        if (pursuitStorageReady && itemClass != tables::kItemDefinitionClass) {
+            storage.pursuitBuild.unread(item.definitionIndex);
+        } else if (pursuitStorageReady
+                   && (!questOwnerRead || !storage.pursuitBuild.item(item, questStep))) {
+            storage.pursuitBuild.read_failed(item.definitionIndex);
         }
         storage.rows[rowCount++] =
             state::build_data::items::Definition{item.definitionHash,

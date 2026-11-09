@@ -297,6 +297,13 @@ inline constexpr std::size_t kRewardWrapperFlagCapacity = build_data::rewards::k
 /** A reward grant that claims no record carries this instead of a record row. */
 inline constexpr std::uint16_t kUnclaimedRecordIndex = 0xFFFFU;
 
+/** A quest set's saved step a redemption moves on, and the value its preparation observed. */
+struct PreparedQuestStep {
+    /** The next member's step value and its saved row; scope none when no step moves. */
+    build_data::items::QuestInitialization next{};
+    std::int32_t previousValue{};
+};
+
 /** Record claim and all of its item rows committed as one transaction. */
 struct PendingRecordRewardGrant {
     CharacterState beforeCharacter{};
@@ -322,6 +329,9 @@ struct PendingRecordRewardGrant {
     std::size_t rewardCount{};
     /** The rows are existing items a vendor moved, not acquisitions. */
     bool vendorTransfer{};
+    /** A held pursuit the grant redeems; it leaves the selected character with the grant. */
+    std::uint64_t redeemedInstanceSoid{};
+    PreparedQuestStep questStep{};
     bool prepared{};
 
     /** @return The flags of the wrappers this grant consumes. */
@@ -782,6 +792,38 @@ prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
 /** Builds the full account after-image while a record reward remains current. */
 [[nodiscard]] bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
                                                AccountState& after) noexcept;
+
+/** How preparing one pursuit redemption ended. */
+enum class PursuitRedemption : std::uint8_t {
+    prepared,
+    /**
+     * The pursuit is incomplete or expired, or is a quest step whose progress is not held by the
+     * item; it is not redeemed, and the request is an ordinary removal.
+     */
+    notRedeemable,
+    /** A catalog is unpublished, or a saved read or allocation failed, so nothing was decided. */
+    notReady,
+    /** The redemption cannot be judged or prepared; nothing may remove the pursuit. */
+    refused,
+};
+
+/**
+ * Prepares redeeming one completed pursuit the selected character holds: the pursuit leaves
+ * inventory, its quest set moves to the next step, and the grant places the next step's item or,
+ * at the last step, the reward rows the pursuit shows.
+ * @param instanceSoid Held pursuit instance.
+ * @param definitionHash Definition the Client named, which the instance must carry.
+ * @param nowSeconds Server time in Unix seconds, which a bounty's deadline is compared with.
+ * @param seed Caller-drawn entropy for any wrapper a reward row names.
+ * @param mutation Receives the prepared grant.
+ * @param refusal Receives a static reason when the result is not prepared.
+ */
+[[nodiscard]] PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
+                                                           std::uint32_t definitionHash,
+                                                           std::int64_t nowSeconds,
+                                                           std::uint64_t seed,
+                                                           PendingRecordRewardGrant& mutation,
+                                                           const char** refusal = nullptr) noexcept;
 
 /** Reserves the selected character's next mutation serial for a transient inventory update. */
 [[nodiscard]] bool

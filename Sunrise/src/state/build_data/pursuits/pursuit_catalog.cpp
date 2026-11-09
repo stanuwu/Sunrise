@@ -30,10 +30,56 @@ std::uint64_t g_revision{};
                unused.begin(), unused.end(), [](std::uint16_t index) { return index == 0; });
 }
 
-/** Checks one contract's own fields. The caller checks its item identity. */
+/** Mapped value slots fit the instance record, and the slots after them stay zero. */
+[[nodiscard]] bool valid_item_values(const Definition& row) noexcept {
+    if (row.itemValueSlotCount > row.itemValueSlots.size()) {
+        return false;
+    }
+    const auto unused = std::span(row.itemValueSlots).subspan(row.itemValueSlotCount);
+    return std::all_of(
+        unused.begin(), unused.end(), [](std::uint16_t slot) { return slot == 0; });
+}
+
+/** Declared rows name an item with a nonnegative amount; an unreadable block declares none. */
+[[nodiscard]] bool valid_rewards(const Definition& row) noexcept {
+    if (row.rewardCount > row.rewards.size() || (!row.rewardsReadable && row.rewardCount != 0)) {
+        return false;
+    }
+    const auto declared = std::span(row.rewards).first(row.rewardCount);
+    const auto unused = std::span(row.rewards).subspan(row.rewardCount);
+    return std::all_of(declared.begin(),
+                       declared.end(),
+                       [](const RewardPreview& reward) {
+                           return reward.itemIndex != kAbsent && reward.quantity >= 0;
+                       })
+           && std::all_of(unused.begin(), unused.end(), [](const RewardPreview& reward) {
+                  return reward.itemIndex == kAbsent && reward.quantity == 0
+                         && reward.conditionIndex == kAbsent;
+              });
+}
+
+/**
+ * Only a supported step names a saved row. Its values are never the unset step, and only the last
+ * member has no successor.
+ */
+[[nodiscard]] bool valid_quest_step(const QuestStep& step) noexcept {
+    using Scope = items::QuestInitialization::Scope;
+    if (step.membership != QuestMembership::step) {
+        return step.scope == Scope::none && step.row == 0 && step.value == 0
+               && step.successorIndex == kAbsent && step.successorValue == 0;
+    }
+    return items::valid_bank_row(step.scope, step.row) && step.value != items::kUnsetQuestValue
+           && (step.successorIndex == kAbsent
+                   ? step.successorValue == 0
+                   : step.successorValue != items::kUnsetQuestValue
+                         && step.successorValue != step.value);
+}
+
+/** Checks one contract's own fields. The caller checks its item identity and item references. */
 [[nodiscard]] bool valid_contract(const Definition& row, std::size_t objectiveCount) noexcept {
     return row.definitionIndex != kAbsent && row.lifetimeSeconds >= 0
-           && valid_objectives(row, objectiveCount);
+           && valid_objectives(row, objectiveCount) && valid_item_values(row)
+           && valid_rewards(row) && valid_quest_step(row.questStep);
 }
 
 } // namespace

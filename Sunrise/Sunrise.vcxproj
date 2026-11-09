@@ -119,6 +119,7 @@
     <ClCompile Include="src\state\runtime\pursuit_snapshot_runtime.cpp" />
     <ClCompile Include="src\state\runtime\saved_selection_runtime.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_edit.cpp" />
+    <ClCompile Include="src\state\runtime\pursuit_redemption_runtime.cpp" />
     <ClCompile Include="src\state\runtime\season_pass_snapshot_runtime.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_link.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_world_reader.cpp" />

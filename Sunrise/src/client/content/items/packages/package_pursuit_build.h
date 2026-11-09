@@ -17,8 +17,12 @@ class PursuitBuild {
 public:
     /** Starts a new walk, discarding what an earlier one collected. */
     void begin() noexcept;
-    /** Collects one item's contract, returning false when it could not be stored. */
-    [[nodiscard]] bool item(const middleware::content::packages::tables::items::Row& row) noexcept;
+    /**
+     * Collects one item's contract, returning false when it could not be stored.
+     * @param questStep The item's place in its quest set.
+     */
+    [[nodiscard]] bool item(const middleware::content::packages::tables::items::Row& row,
+                            const state::build_data::pursuits::QuestStep& questStep) noexcept;
     /** Counts an item the installed data leaves unreadable. That item gets no contract. */
     void unread(std::uint16_t index) noexcept;
     /**

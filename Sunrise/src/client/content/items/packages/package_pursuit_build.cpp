@@ -1,6 +1,7 @@
 #include "package_pursuit_build.h"
 
 #include <algorithm>
+#include <span>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/runtime.h"
@@ -10,6 +11,36 @@ namespace sunrise::client::content::items::packages {
 namespace {
 
 namespace pursuits = state::build_data::pursuits;
+
+/** @return True when the published item catalog holds the row. */
+[[nodiscard]] bool cataloged(std::uint16_t index) noexcept {
+    state::build_data::items::Definition item{};
+    return state::build_data::find_item_definition_index(index, item);
+}
+
+/**
+ * Drops what names an item the catalog left out: the contract's reward rows become unknown, and
+ * its quest set unsupported.
+ * @return True when the contract named such an item.
+ */
+[[nodiscard]] bool drop_uncataloged_references(pursuits::Definition& row) noexcept {
+    const auto rewards = std::span(row.rewards).first(row.rewardCount);
+    const bool rewardsMissing =
+        std::any_of(rewards.begin(), rewards.end(), [](const pursuits::RewardPreview& reward) {
+            return !cataloged(reward.itemIndex);
+        });
+    const bool successorMissing = row.questStep.successorIndex != pursuits::kAbsent
+                                  && !cataloged(row.questStep.successorIndex);
+    if (rewardsMissing) {
+        row.rewardsReadable = false;
+        row.rewards = {};
+        row.rewardCount = 0;
+    }
+    if (successorMissing) {
+        row.questStep = {pursuits::QuestMembership::unsupported};
+    }
+    return rewardsMissing || successorMissing;
+}
 
 } // namespace
 
@@ -38,7 +69,8 @@ void PursuitBuild::begin() noexcept {
     firstReadFailure_ = pursuits::kAbsent;
 }
 
-bool PursuitBuild::item(const tables::items::Row& row) noexcept {
+bool PursuitBuild::item(const tables::items::Row& row,
+                        const pursuits::QuestStep& questStep) noexcept {
     // Only pursuits declare completion metadata. An unreadable metadata block still gets a
     // contract, marked unreadable.
     if (!row.hasCompletionMetadata && row.objectiveMetadataValid) {
@@ -55,6 +87,13 @@ bool PursuitBuild::item(const tables::items::Row& row) noexcept {
             output.requireNonOptionalCompletion = row.requireNonOptionalCompletion;
             std::copy_n(row.objectiveIndices, row.objectiveCount, output.objectives.begin());
             output.objectiveCount = row.objectiveCount;
+            std::copy_n(
+                row.itemValueSlots, row.itemValueSlotCount, output.itemValueSlots.begin());
+            output.itemValueSlotCount = row.itemValueSlotCount;
+            output.rewardsReadable = row.rewardPreviewsValid;
+            std::copy_n(row.rewardPreviews, row.rewardPreviewCount, output.rewards.begin());
+            output.rewardCount = row.rewardPreviewCount;
+            output.questStep = questStep;
         }
         rows_.push_back(output);
         return true;
@@ -99,6 +138,10 @@ void PursuitBuild::publish() noexcept {
         state::build_data::items::Definition item{};
         return !state::build_data::find_item_definition_index(row.definitionIndex, item);
     });
+    std::size_t unresolved = 0;
+    for (pursuits::Definition& row : rows_) {
+        unresolved += static_cast<std::size_t>(drop_uncataloged_references(row));
+    }
     const bool valid = state::build_data::valid_pursuit_definitions(rows_);
     // The cache write can still fail, and a failed publish repeats the item walk on a later pass.
     const bool published = valid && state::build_data::publish_pursuit_definitions(rows_);
@@ -113,14 +156,15 @@ void PursuitBuild::publish() noexcept {
         return;
     }
     core::log::writef(core::log::Channel::client,
-                      unreadCount_ == 0 && pruned == 0 ? core::log::Level::info
-                                                       : core::log::Level::warn,
+                      unreadCount_ == 0 && pruned == 0 && unresolved == 0 ? core::log::Level::info
+                                                                          : core::log::Level::warn,
                       "ev=pkg stage=pursuits result=ready rows=%zu unread=%zu first_unread=%u "
-                      "pruned=%zu",
+                      "pruned=%zu unresolved=%zu",
                       rowCount,
                       unreadCount_,
                       static_cast<unsigned>(firstUnread_),
-                      pruned);
+                      pruned,
+                      unresolved);
 }
 
 } // namespace sunrise::client::content::items::packages

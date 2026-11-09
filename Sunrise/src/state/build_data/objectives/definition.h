@@ -17,6 +17,8 @@ inline constexpr std::size_t kDefinitionCapacity = 16384;
  * 64,964 target adjustment. The bank leaves room above that.
  */
 inline constexpr std::size_t kInstructionCapacity = 131072;
+/** All bits set marks an objective whose progress the held item does not carry. */
+inline constexpr std::uint16_t kNoItemValueSlot = 0xFFFF;
 /** One stored objective row, whose two programs are ranges of the instruction bank. */
 struct Row {
     std::uint32_t definitionHash{};
@@ -31,6 +33,8 @@ struct Row {
     /** False when the installed progress expression could not be bound. */
     bool readable{};
     rewards::Range expression{};
+    /** Value slot the client reads from the held item instead of a bank, or kNoItemValueSlot. */
+    std::uint16_t itemValueSlot{kNoItemValueSlot};
 };
 
 /** The dense objective table and the instruction bank its rows name. */
@@ -53,6 +57,8 @@ struct Definition {
     /** False when the installed progress expression could not be bound. */
     bool readable{};
     std::vector<unlocks::Instruction> expression;
+    /** Value slot the client reads from the held item instead of a bank, or kNoItemValueSlot. */
+    std::uint16_t itemValueSlot{kNoItemValueSlot};
 };
 
 } // namespace sunrise::state::build_data::objectives

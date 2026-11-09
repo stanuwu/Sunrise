@@ -7,6 +7,7 @@
 #include "../schema/generated/tag_classes_80802e.h"
 #include "../schema/generated/tag_classes_808030.h"
 #include "../schema/generated/tag_classes_808077.h"
+#include "../schema/generated/tag_classes_808078.h"
 #include "../schema/generated/tag_classes_80807b.h"
 #include "../schema/generated/tag_classes_80807c.h"
 #include "../schema/generated/tag_classes_80809f.h"
@@ -111,6 +112,30 @@ static_assert(kRequireAllObjectivesOffset == 0x17);
 constexpr std::size_t kLifetimeExpressionField =
     offsetof(generated::ItemDefinition, inventoryItemBlock)
     + offsetof(generated::C808077f5, h34f70b23);
+/**
+ * The value block is unnamed in the schema: a 32-bit row count, then six fixed rows of a 32-bit
+ * item index, a signed quantity and a 32-bit shared expression row. Rows past the count hold an
+ * absent item and expression row and a zero quantity.
+ */
+constexpr std::size_t kValueBlockOffset = offsetof(generated::ItemDefinition, valueItemBlock);
+constexpr std::uint32_t kValueBlockClass = generated::C80807875::kClass;
+constexpr std::size_t kValueRowCountOffset = offsetof(generated::C80807875, gap0);
+constexpr std::size_t kValueRowsOffset = kValueRowCountOffset + sizeof(std::uint32_t);
+constexpr std::size_t kValueRowStride = 3 * sizeof(std::uint32_t);
+constexpr std::size_t kValueRowQuantityOffset = sizeof(std::uint32_t);
+constexpr std::size_t kValueRowConditionOffset = 2 * sizeof(std::uint32_t);
+static_assert(kValueRowsOffset
+                  + state::build_data::pursuits::kRewardPreviewCapacity * kValueRowStride
+              == sizeof(generated::C80807875));
+/**
+ * The unlock block's third array lists the value slots an instance record carries. The client
+ * reads an item-held value by finding its slot here: the slot's position is the per-item value it
+ * reads. Each row opens with that signed 16-bit slot; the rest of the row is unnamed in gap0.
+ */
+constexpr std::size_t kItemValueSlotDescriptor = offsetof(generated::ItemUnlockBlock, hDf67f700);
+constexpr std::uint32_t kItemValueSlotClass = generated::C808077ae::kClass;
+constexpr std::size_t kItemValueSlotStride = sizeof(generated::C808077ae);
+constexpr std::size_t kItemValueSlotOffset = offsetof(generated::C808077ae, gap0);
 
 /**
  * Reads the socket entry list index a definition declares.
@@ -395,6 +420,81 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
     return true;
 }
 
+/**
+ * Reads the reward rows a pursuit shows. A pursuit without a value block shows none.
+ * @return False when the block or one of its rows is malformed.
+ */
+[[nodiscard]] bool read_reward_previews(std::span<const std::byte> definition, Row& row) noexcept {
+    constexpr std::uint32_t kAbsentReference = state::build_data::pursuits::kAbsent;
+    std::size_t block = 0;
+    bool present = false;
+    std::uint32_t count = 0;
+    if (!class_block(definition, kValueBlockOffset, kValueBlockClass, block, present)) {
+        return false;
+    }
+    if (!present) {
+        return true;
+    }
+    if (!read(definition, block + kValueRowCountOffset, count)
+        || count > state::build_data::pursuits::kRewardPreviewCapacity) {
+        return false;
+    }
+    for (std::size_t index = 0; index < state::build_data::pursuits::kRewardPreviewCapacity;
+         ++index) {
+        const std::size_t at = block + kValueRowsOffset + index * kValueRowStride;
+        std::uint32_t item = 0;
+        std::uint32_t condition = 0;
+        std::int32_t quantity = 0;
+        if (!read(definition, at, item) || !read(definition, at + kValueRowQuantityOffset, quantity)
+            || !read(definition, at + kValueRowConditionOffset, condition)
+            || item > kAbsentReference || condition > kAbsentReference || quantity < 0) {
+            return false;
+        }
+        const bool declared = index < count;
+        if (declared ? item == kAbsentReference
+                     : item != kAbsentReference || condition != kAbsentReference || quantity != 0) {
+            return false;
+        }
+        if (declared) {
+            row.rewardPreviews[index] = {static_cast<std::uint16_t>(item),
+                                         quantity,
+                                         static_cast<std::uint16_t>(condition)};
+        }
+    }
+    row.rewardPreviewCount = static_cast<std::uint8_t>(count);
+    return true;
+}
+
+/**
+ * Reads the value slots a pursuit's instance record carries. A list that cannot be read, or that
+ * outgrows the record, maps none, which leaves every item-held objective of the pursuit unknown.
+ */
+void read_item_value_slots(std::span<const std::byte> definition, Row& row) noexcept {
+    std::size_t block = 0;
+    bool present = false;
+    Array slots{};
+    if (!class_block(definition, kItemUnlockBlockOffset, kItemUnlockBlockClass, block, present)
+        || !present
+        || !read_array(definition,
+                       block + kItemValueSlotDescriptor,
+                       kItemValueSlotClass,
+                       kItemValueSlotStride,
+                       slots)
+        || slots.count > state::build_data::pursuits::kItemValueCapacity) {
+        return;
+    }
+    for (std::size_t index = 0; index < slots.count; ++index) {
+        const std::size_t at = slots.dataOffset + index * kItemValueSlotStride;
+        std::int16_t slot = 0;
+        if (!read(definition, at + kItemValueSlotOffset, slot) || slot < 0) {
+            std::fill(std::begin(row.itemValueSlots), std::end(row.itemValueSlots), 0);
+            return;
+        }
+        row.itemValueSlots[index] = static_cast<std::uint16_t>(slot);
+    }
+    row.itemValueSlotCount = static_cast<std::uint8_t>(slots.count);
+}
+
 /** Reads a pursuit's objective block, completion controls and lifetime. */
 [[nodiscard]] bool read_pursuit_metadata(std::span<const std::byte> definition, Row& row) noexcept {
     // Other definitions reuse this field for other block types, equipment among them.
@@ -430,6 +530,13 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
         }
     }
     row.objectiveCount = static_cast<std::uint8_t>(objectives.count);
+    read_item_value_slots(definition, row);
+    row.rewardPreviewsValid = read_reward_previews(definition, row);
+    if (!row.rewardPreviewsValid) {
+        std::fill(std::begin(row.rewardPreviews),
+                  std::end(row.rewardPreviews),
+                  state::build_data::pursuits::RewardPreview{});
+    }
     return read_lifetime(definition, row);
 }
 

@@ -561,6 +561,45 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
     return true;
 }
 
+/**
+ * Names the value slot an expression reads from the item in context.
+ * @param at Offset of the expression field.
+ * @return The slot when the expression is one read of an item-held value, otherwise
+ *         objectives::kNoItemValueSlot.
+ */
+std::uint16_t RewardConditions::item_value_slot(std::span<const std::byte> blob,
+                                                std::size_t at) const noexcept {
+    constexpr std::uint16_t kNone = state::build_data::objectives::kNoItemValueSlot;
+    tables::Array rows{};
+    std::uint32_t native = 0;
+    std::uint32_t slot = 0;
+    std::uint8_t kind = 0;
+    std::uint8_t flags = 0;
+    if (!loaded_
+        || !tables::read_array(blob,
+                               at,
+                               tables::kInvestmentExpressionRowClass,
+                               tables::kUnlockInstructionStride,
+                               rows)
+        || rows.count != 1
+        || !tables::read(blob, rows.dataOffset + tables::kUnlockInstructionOpcodeOffset, native)
+        || native != tables::kUnlockReadValueOpcode
+        || !tables::read(blob, rows.dataOffset + tables::kUnlockInstructionOperandOffset, slot)
+        || slot >= valueRows_.count || slot >= kNone) {
+        return kNone;
+    }
+    const std::span<const std::byte> bindings{values_};
+    const std::size_t binding = valueRows_.dataOffset + slot * layout::SlotRow::kSize;
+    if (!tables::read(bindings, binding + layout::SlotRow::kValueKind, kind)
+        || !tables::read(bindings, binding + layout::SlotRow::kValueFlags, flags)
+        || kind != layout::SlotRow::kItemValueKind
+        || (flags | layout::SlotRow::kItemValueIgnoredFlag)
+               != layout::SlotRow::kItemValueIgnoredFlag) {
+        return kNone;
+    }
+    return static_cast<std::uint16_t>(slot);
+}
+
 /** Reads a socket override array; false when unreadable or wider than the output. */
 bool read_reward_sockets(std::span<const std::byte> blob,
                          std::size_t at,

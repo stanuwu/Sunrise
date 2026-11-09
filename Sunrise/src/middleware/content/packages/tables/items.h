@@ -96,6 +96,14 @@ struct Row {
     std::uint16_t objectiveIndices[state::build_data::pursuits::kObjectiveCapacity]{};
     /** Positive for a bounty, which expires this many seconds after it is acquired. */
     std::int32_t lifetimeSeconds{};
+    /** A pursuit's per-item value slots in record order; none when its list cannot be read. */
+    std::uint8_t itemValueSlotCount{};
+    std::uint16_t itemValueSlots[state::build_data::pursuits::kItemValueCapacity]{};
+    /** A pursuit's value block is optional: an unreadable one leaves its rows unknown. */
+    bool rewardPreviewsValid{true};
+    std::uint8_t rewardPreviewCount{};
+    state::build_data::pursuits::RewardPreview
+        rewardPreviews[state::build_data::pursuits::kRewardPreviewCapacity]{};
 };
 
 /**

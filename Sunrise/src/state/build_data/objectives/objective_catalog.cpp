@@ -15,13 +15,17 @@ core::threading::SrwLock g_lock;
 Table<Row, kDefinitionCapacity> g_rows;
 Table<unlocks::Instruction, kInstructionCapacity> g_instructions;
 
-/** A readable row has a progress program, and an unreadable adjustment leaves its range empty. */
+/**
+ * A readable row has a progress program, an unreadable adjustment leaves its range empty, and only
+ * a readable program can name an item-held value.
+ */
 [[nodiscard]] bool
 valid_row(const Row& row, std::size_t index, std::span<const unlocks::Instruction> bank) noexcept {
     return row.definitionIndex == index && rewards::fits(row.expression, bank)
            && rewards::fits(row.targetAdjustment, bank)
            && row.readable == (row.expression.count != 0)
-           && (row.adjustmentReadable || row.targetAdjustment.count == 0);
+           && (row.adjustmentReadable || row.targetAdjustment.count == 0)
+           && (row.readable || row.itemValueSlot == kNoItemValueSlot);
 }
 
 /** Copies one stored program out of the bank. The copy may throw on allocation. */
@@ -91,6 +95,7 @@ bool find(std::uint16_t index, Definition& output) noexcept {
     output.countsDown = row.countsDown;
     output.adjustmentReadable = row.adjustmentReadable;
     output.readable = row.readable;
+    output.itemValueSlot = row.itemValueSlot;
     return true;
 }
 
