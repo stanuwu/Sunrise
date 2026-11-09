@@ -10,6 +10,7 @@
 #include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode1821.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
+#include "../../middleware/web_service/messages/opcode2002.h"
 #include "../../middleware/web_service/messages/opcode205.h"
 #include "../../middleware/web_service/messages/opcode206.h"
 #include "../../middleware/web_service/messages/opcode2400.h"
@@ -53,7 +54,7 @@ constexpr std::int32_t kRefusedStatus = middleware::web_service::kRefusedStatusC
  * Kept sorted; the lookup below is a binary search.
  */
 constexpr auto kResidentDependentOpcodes =
-    std::to_array<std::uint16_t>({402, 403, 404, 406, 504, 903, 1801, 1820, 1901, 2400});
+    std::to_array<std::uint16_t>({402, 403, 404, 406, 504, 903, 1801, 1820, 1901, 2002, 2400});
 
 /** One refusal line carries both request indices, the clock presence, and the clock verdict. */
 constexpr std::size_t kPurchaseLineCapacity = 128;
@@ -450,6 +451,8 @@ bool consume(std::span<const std::byte> request,
         acquire_quest(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode405::kOpcode) {
         claim_postmaster_item(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode2002::kOpcode) {
+        open_stored_wrapper(message, outcome);
     } else {
         dispatched = false;
     }

@@ -1,5 +1,6 @@
 /**
- * Reward draws: Season pass claims and installed item rewards resolved through the reward graph.
+ * Reward draws: Season pass claims, installed item rewards and opened stored wrappers resolved
+ * through the reward graph.
  * A draw becomes inventory rows through the shared record-grant preparation.
  */
 #include <algorithm>
@@ -30,6 +31,7 @@ namespace {
  * Turns one resolved draw into inventory rows and consumed-wrapper flags.
  * @param resolved Grants and wrapper flags of one draw.
  * @param price A vendor row's cost entries the grant spends; empty for none.
+ * @param openedInstanceSoid Held wrapper the draw opened, removed in the same grant; zero for none.
  * @param mutation Receives the prepared grant.
  * @param refusal Receives a static reason when the result is not prepared.
  * @return Unresolvable when the draw outgrew the grant rows.
@@ -37,6 +39,7 @@ namespace {
 [[nodiscard]] RewardPreparation
 prepare_resolved_reward(const reward_resolution::Result& resolved,
                         std::span<const build_data::vendors::SaleCost> price,
+                        std::uint64_t openedInstanceSoid,
                         PendingRecordRewardGrant& mutation,
                         const char** refusal) noexcept {
     std::array<DirectRecordReward, kRecordRewardGrantCapacity> rows{};
@@ -53,7 +56,7 @@ prepare_resolved_reward(const reward_resolution::Result& resolved,
     return prepare_reward_grant(std::span(rows).first(resolved.count),
                                 kUnclaimedRecordIndex,
                                 &resolved.wrapperFlags,
-                                0,
+                                openedInstanceSoid,
                                 price,
                                 mutation,
                                 refusal);
@@ -253,7 +256,7 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
         return false;
     }
     reason = "reward_placement";
-    if (prepare_resolved_reward(resolved, {}, mutation.grant, &reason)
+    if (prepare_resolved_reward(resolved, {}, 0, mutation.grant, &reason)
         != RewardPreparation::prepared) {
         return false;
     }
@@ -340,6 +343,52 @@ bool catalogs_settled() noexcept {
 
 namespace {
 
+/** The saved state one draw runs against. */
+struct DrawState {
+    AccountState account{};
+    std::size_t character{};
+    unlocks::Table flags{};
+};
+
+/**
+ * Checks the catalogs a draw reads. A refused reward graph decides every draw; an unpublished one
+ * decides nothing yet.
+ * @return Prepared when both catalogs are published.
+ */
+[[nodiscard]] RewardPreparation draw_catalogs(const char*& reason) noexcept {
+    reason = "reward_definitions";
+    if (build_data::reward_definitions_unsupported()) {
+        return RewardPreparation::unresolvable;
+    }
+    reason = "not_ready";
+    if (!build_data::item_definitions_ready() || !build_data::reward_definitions_ready()) {
+        return RewardPreparation::notReady;
+    }
+    return RewardPreparation::prepared;
+}
+
+/**
+ * Reads the account and the selected character's unlocks a draw runs against. Call under the
+ * store lock.
+ * @return Prepared when both read; deferred while State has no selected character.
+ */
+[[nodiscard]] RewardPreparation read_draw_state(DrawState& state, const char*& reason) noexcept {
+    reason = "account_read";
+    if (!investment::store::read_account(state.account)) {
+        return RewardPreparation::notReady;
+    }
+    reason = "selected_character";
+    state.character = selected_character_index(state.account);
+    if (state.character >= state.account.characterCount) {
+        return RewardPreparation::deferred;
+    }
+    reason = "unlock_read";
+    if (!investment::store::read_unlocks(state.flags, static_cast<int>(state.character))) {
+        return RewardPreparation::notReady;
+    }
+    return RewardPreparation::prepared;
+}
+
 /**
  * Resolves an installed item or wrapper for the selected character, spending a vendor row's price
  * in the same after-image.
@@ -360,14 +409,9 @@ resolve_item_reward(std::uint16_t itemIndex,
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     mutation = {};
-    // A refused reward graph decides every grant; an unpublished one decides nothing yet.
-    reason = "reward_definitions";
-    if (build_data::reward_definitions_unsupported()) {
-        return RewardPreparation::unresolvable;
-    }
-    reason = "not_ready";
-    if (!build_data::item_definitions_ready() || !build_data::reward_definitions_ready()) {
-        return RewardPreparation::notReady;
+    const auto catalogs = draw_catalogs(reason);
+    if (catalogs != RewardPreparation::prepared) {
+        return catalogs;
     }
     reason = "item_definition";
     const std::lock_guard lock(investment::store::g_mutex);
@@ -375,24 +419,14 @@ resolve_item_reward(std::uint16_t itemIndex,
     if (!build_data::find_item_definition_index(itemIndex, item)) {
         return catalog_refusal(reason);
     }
-    reason = "account_read";
-    AccountState account{};
-    if (!investment::store::read_account(account)) {
-        return RewardPreparation::notReady;
-    }
-    reason = "selected_character";
-    const auto character = selected_character_index(account);
-    if (character >= account.characterCount) {
-        return RewardPreparation::deferred;
-    }
-    reason = "unlock_read";
-    unlocks::Table flags{};
-    if (!investment::store::read_unlocks(flags, static_cast<int>(character))) {
-        return RewardPreparation::notReady;
+    DrawState state{};
+    const auto read = read_draw_state(state, reason);
+    if (read != RewardPreparation::prepared) {
+        return read;
     }
     reward_resolution::Result resolved{};
     const auto resolution = reward_resolution::resolve(
-        {flags, account.characters[character].characterClass, seed, &reason},
+        {state.flags, state.account.characters[state.character].characterClass, seed, &reason},
         itemIndex,
         quantity,
         resolved);
@@ -400,10 +434,68 @@ resolve_item_reward(std::uint16_t itemIndex,
         return catalog_refusal(reason);
     }
     reason = "reward_placement";
-    return prepare_resolved_reward(resolved, price, mutation, &reason);
+    return prepare_resolved_reward(resolved, price, 0, mutation, &reason);
+}
+
+/**
+ * Finds the held row a wrapper opening consumes: one unlocked unit in its own bucket.
+ * @return Null when the selected character holds no such row.
+ */
+[[nodiscard]] const authored_inventory::Item* held_wrapper(const CharacterState& character,
+                                                           std::uint64_t instanceSoid) noexcept {
+    const auto held = std::span(character.inventory.values).first(character.inventory.count);
+    const auto found = std::find_if(held.begin(), held.end(), [instanceSoid](const auto& item) {
+        return item.instanceSoid == instanceSoid;
+    });
+    if (instanceSoid == 0 || found == held.end() || found->quantity != 1
+        || found->placement != authored_inventory::ItemPlacement::authored
+        || (found->flags & authored_inventory::kLockedItemFlag) != 0) {
+        return nullptr;
+    }
+    return &*found;
 }
 
 } // namespace
+
+/** The held wrapper leaves in the grant that places its draws, so they publish together. */
+RewardPreparation prepare_wrapper_opening(std::uint64_t instanceSoid,
+                                          std::uint64_t seed,
+                                          PendingRecordRewardGrant& mutation,
+                                          const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    mutation = {};
+    const auto catalogs = draw_catalogs(reason);
+    if (catalogs != RewardPreparation::prepared) {
+        return catalogs;
+    }
+    const std::lock_guard lock(investment::store::g_mutex);
+    DrawState state{};
+    const auto read = read_draw_state(state, reason);
+    if (read != RewardPreparation::prepared) {
+        return read;
+    }
+    reason = "held_wrapper";
+    const auto* source = held_wrapper(state.account.characters[state.character], instanceSoid);
+    if (source == nullptr) {
+        return RewardPreparation::deferred;
+    }
+    reason = "item_definition";
+    build_data::items::Definition item{};
+    if (!build_data::find_item_definition_hash(source->definitionHash, item)) {
+        return catalog_refusal(reason);
+    }
+    reward_resolution::Result resolved{};
+    const auto resolution = reward_resolution::open(
+        {state.flags, state.account.characters[state.character].characterClass, seed, &reason},
+        item.definitionIndex,
+        resolved);
+    if (resolution != reward_resolution::Resolution::resolved) {
+        return catalog_refusal(reason);
+    }
+    reason = "reward_placement";
+    return prepare_resolved_reward(resolved, {}, instanceSoid, mutation, &reason);
+}
 
 /** Resolves an item granted without a price. */
 RewardPreparation prepare_item_reward(std::uint16_t itemIndex,

@@ -552,7 +552,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         return RewardPreparation::deferred;
     }
     record_grant_before(working, characterIndex, mutation);
-    // The pursuit leaves before the rows are placed, so its row is free for them.
+    // The redeemed item leaves before the rows are placed, so its row is free for them.
     reason = "redeemed_instance";
     if (redeemedInstanceSoid != 0
         && !remove_redeemed(working.characters[characterIndex], redeemedInstanceSoid)) {

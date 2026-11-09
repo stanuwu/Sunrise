@@ -193,10 +193,10 @@ void submit_committed_authority_reset(Session& session,
 }
 
 /**
- * A redemption removes a held row like a dismantle does, which moves the rows pinned for an
- * earlier acquisition's presentation.
+ * A redemption or an opened wrapper removes a held row like a dismantle does, which moves the rows
+ * pinned for an earlier acquisition's presentation.
  */
-[[nodiscard]] bool redeems_pursuit(const ServiceOutcome& outcome) noexcept {
+[[nodiscard]] bool consumes_held_item(const ServiceOutcome& outcome) noexcept {
     const auto* grant = transaction_if<RecordRewardGrantTransaction>(outcome);
     return grant != nullptr && grant->pending != nullptr
            && grant->pending->redeemedInstanceSoid != 0;
@@ -365,7 +365,7 @@ bool consume(Session& session,
             std::span(session.acquisitionPresentationRows)
                 .first(session.acquisitionPresentationRowCount);
         const bool preserveAcquisitionPresentation =
-            now < session.acquisitionPresentationUntilTick && !redeems_pursuit(outcome);
+            now < session.acquisitionPresentationUntilTick && !consumes_held_item(outcome);
         handled = queuez::stage_service_outcome(scratch,
                                                 session.queuez,
                                                 outcome,
@@ -426,7 +426,7 @@ bool consume(Session& session,
     const bool invalidatesAcquisitionPresentation =
         outcome.hasChangeCharacter || outcome.hasSelectCharacter || outcome.hasArtifactReset
         || transaction_if<ItemDismantleTransaction>(outcome) != nullptr
-        || redeems_pursuit(outcome);
+        || consumes_held_item(outcome);
     const bool hasPrecommittedAccountAction =
         outcome.hasRecordClaim || outcome.hasSelectCharacter || outcome.hasArtifactReset;
     // Commit consumes pending payloads, so retain the connection fields first.

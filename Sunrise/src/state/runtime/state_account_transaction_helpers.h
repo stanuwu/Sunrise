@@ -150,7 +150,8 @@ quest_value(unlocks::Table& table, const build_data::items::QuestInitialization&
  * Prepares inventory rows and consumed-wrapper flags against one account view.
  * @param claimedRecordIndex Record already claimed in the banks, or kUnclaimedRecordIndex.
  * @param wrapperFlags Flags of the wrappers a draw consumed, or null for direct rows.
- * @param redeemedInstanceSoid Held pursuit removed before the rows are placed, or zero.
+ * @param redeemedInstanceSoid Held pursuit or opened wrapper removed before the rows are placed, or
+ *        zero.
  * @param price A vendor row's cost entries, spent before the rows are placed; empty for none.
  * @param refusal Receives a static reason when the result is not prepared.
  * @return Deferred only when State may still change the answer; unresolvable is final.

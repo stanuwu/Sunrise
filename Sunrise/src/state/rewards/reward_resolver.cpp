@@ -464,9 +464,13 @@ struct Resolver {
     }
 };
 
+/** Acquiring an item grants it whole; opening draws a held stored wrapper's contents. */
+enum class Plan : std::uint8_t { acquire, open };
+
 /**
  * Resolves one item against the published graph: a stored item grants itself, and an automatic
- * wrapper opens into its draws and its own acquisition flag.
+ * wrapper opens into its draws and its own acquisition flag. Opening a stored wrapper draws the
+ * same way; its flag was set when it was acquired.
  * @param result Receives the grants; cleared and left empty on failure.
  * @param failure Receives ineligible, exceeded or refused when the resolution fails.
  * @return False when nothing could be granted.
@@ -475,6 +479,7 @@ bool resolve_item(definitions::View data,
                   const Context& context,
                   std::uint16_t itemIndex,
                   std::uint32_t quantity,
+                  Plan plan,
                   Result& result,
                   Resolution& failure) noexcept {
     result = {};
@@ -485,10 +490,14 @@ bool resolve_item(definitions::View data,
     if (item.definitionHash == 0) {
         return refuse(context, "item_unavailable");
     }
+    const bool wrapper = item.poolIndex != definitions::kAbsent;
+    const bool automatic = wrapper && (item.flags & definitions::kOpenOnAcquisition) != 0;
+    if (plan == Plan::open && (!wrapper || automatic)) {
+        return refuse(context, "stored_wrapper");
+    }
     Result staged{};
     // Stored engrams retain their wrapper until an opening transaction.
-    if (item.poolIndex == definitions::kAbsent
-        || (item.flags & definitions::kOpenOnAcquisition) == 0) {
+    if (plan == Plan::acquire && !automatic) {
         staged.grants[0].itemIndex = itemIndex;
         staged.grants[0].quantity = static_cast<std::int32_t>(quantity);
         staged.count = 1;
@@ -519,7 +528,7 @@ bool resolve_item(definitions::View data,
                 excludedByUnlocks && !leafDrawn ? Resolution::ineligible : Resolution::refused;
             return refuse(context, "empty_reward");
         }
-        if (!resolver.acquire_flag(item, true)) {
+        if (automatic && !resolver.acquire_flag(item, true)) {
             return false;
         }
     }
@@ -528,6 +537,43 @@ bool resolve_item(definitions::View data,
         *context.refusal = nullptr;
     }
     return true;
+}
+
+/**
+ * Plans one item under the reward catalog's read lock.
+ * @return Resolved, or why not; refused also covers an unpublished graph.
+ */
+Resolution plan_item(const Context& context,
+                     std::uint16_t itemIndex,
+                     std::uint32_t quantity,
+                     Plan plan,
+                     Result& result) noexcept {
+    struct Request {
+        const Context& context;
+        std::uint16_t item;
+        std::uint32_t quantity;
+        Plan plan;
+        Result& result;
+        Resolution failure;
+    } request{context, itemIndex, quantity, plan, result, Resolution::refused};
+    result = {};
+    if (context.refusal != nullptr) {
+        *context.refusal = "reward_item";
+    }
+    if (build_data::read_reward_definitions(
+            &request, [](void* raw, definitions::View data) noexcept {
+                auto& value = *static_cast<Request*>(raw);
+                return resolve_item(data,
+                                    value.context,
+                                    value.item,
+                                    value.quantity,
+                                    value.plan,
+                                    value.result,
+                                    value.failure);
+            })) {
+        return Resolution::resolved;
+    }
+    return request.failure;
 }
 
 } // namespace
@@ -555,26 +601,12 @@ Resolution resolve(const Context& context,
                    std::uint16_t itemIndex,
                    std::uint32_t quantity,
                    Result& result) noexcept {
-    struct Request {
-        const Context& context;
-        std::uint16_t item;
-        std::uint32_t quantity;
-        Result& result;
-        Resolution failure;
-    } request{context, itemIndex, quantity, result, Resolution::refused};
-    result = {};
-    if (context.refusal != nullptr) {
-        *context.refusal = "reward_item";
-    }
-    if (build_data::read_reward_definitions(
-            &request, [](void* raw, definitions::View data) noexcept {
-                auto& value = *static_cast<Request*>(raw);
-                return resolve_item(
-                    data, value.context, value.item, value.quantity, value.result, value.failure);
-            })) {
-        return Resolution::resolved;
-    }
-    return request.failure;
+    return plan_item(context, itemIndex, quantity, Plan::acquire, result);
+}
+
+/** Draws once, as an automatic wrapper does when it is acquired. */
+Resolution open(const Context& context, std::uint16_t itemIndex, Result& result) noexcept {
+    return plan_item(context, itemIndex, 1, Plan::open, result);
 }
 
 } // namespace sunrise::state::reward_resolution

@@ -9,6 +9,7 @@
 #include "../../core/runtime/server_clock.h"
 #include "../../middleware/crypto/random_bytes.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
+#include "../../middleware/web_service/messages/opcode2002.h"
 #include "../../middleware/web_service/messages/opcode402.h"
 #include "../../middleware/web_service/messages/opcode403.h"
 #include "../../middleware/web_service/messages/opcode406.h"
@@ -449,6 +450,33 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
                               kSingleQuantity);
         return;
     }
+}
+
+/** Opens one held engram through the shared reward grant. The seed is drawn in this layer. */
+void open_stored_wrapper(const middleware::web_service::Message& message,
+                         Outcome& outcome) noexcept {
+    namespace opcode2002 = middleware::web_service::messages::opcode2002;
+    opcode2002::Request request{};
+    const char* reason = "payload_bits";
+    if (opcode2002::parse_request(message, request)) {
+        auto* grant = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+        std::uint64_t seed = 0;
+        reason = grant == nullptr ? "storage" : "random_source";
+        if (grant != nullptr
+            && middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))
+            && state::prepare_wrapper_opening(request.instanceSoid, seed, *grant, &reason)
+                   == state::RewardPreparation::prepared) {
+            return;
+        }
+        clear_mutation(outcome);
+    }
+    std::array<char, core::log::kLineCapacity> line{};
+    const int count = std::snprintf(line.data(),
+                                    line.size(),
+                                    "ev=ws2002 stage=prepare result=fail reason=%s instance=0x%llX",
+                                    reason != nullptr ? reason : "wrapper_opening",
+                                    static_cast<unsigned long long>(request.instanceSoid));
+    write_warning(line, count);
 }
 
 } // namespace sunrise::server::web_service

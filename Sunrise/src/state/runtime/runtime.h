@@ -356,7 +356,7 @@ struct PendingRecordRewardGrant {
     std::size_t rewardCount{};
     /** The rows are existing items a vendor moved, not acquisitions. */
     bool vendorTransfer{};
-    /** A held pursuit the grant redeems; it leaves the selected character with the grant. */
+    /** A held pursuit or wrapper the grant consumes; it leaves the selected character with it. */
     std::uint64_t redeemedInstanceSoid{};
     PreparedQuestStep questStep{};
     PreparedProgressionCredit progression{};
@@ -832,6 +832,19 @@ prepare_vendor_reward(std::uint16_t itemIndex,
                       std::uint64_t seed,
                       PendingRecordRewardGrant& mutation,
                       const char** refusal = nullptr) noexcept;
+/**
+ * Opens a stored wrapper the selected character holds, such as an engram: the held unit leaves and
+ * its draws land in one after-image.
+ * @param instanceSoid The held wrapper instance.
+ * @param seed Caller-drawn entropy for the draws.
+ * @param refusal Receives a static reason on failure.
+ * @return Deferred when the character holds no such unit or has no room; unresolvable when the
+ *         item is not a stored wrapper or its draw is refused.
+ */
+[[nodiscard]] RewardPreparation prepare_wrapper_opening(std::uint64_t instanceSoid,
+                                                        std::uint64_t seed,
+                                                        PendingRecordRewardGrant& mutation,
+                                                        const char** refusal = nullptr) noexcept;
 /**
  * Prepares an eligible native pass row without writing its claim or acquisition flags.
  * @param seed Caller-drawn entropy; the commit replays the same draw from it.

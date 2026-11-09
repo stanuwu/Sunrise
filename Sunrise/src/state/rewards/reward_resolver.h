@@ -52,4 +52,9 @@ enum class Resolution : std::uint8_t { resolved, ineligible, exceeded, refused }
                                  std::uint32_t quantity,
                                  Result& result) noexcept;
 
+/** Plans opening one held stored wrapper without changing State; refuses any other item. */
+[[nodiscard]] Resolution open(const Context& context,
+                              std::uint16_t itemIndex,
+                              Result& result) noexcept;
+
 } // namespace sunrise::state::reward_resolution
