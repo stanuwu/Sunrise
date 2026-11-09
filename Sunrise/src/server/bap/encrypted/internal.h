@@ -795,6 +795,21 @@ append_artifact_item_refresh_notification(Scratch& scratch,
                                           std::size_t& written) noexcept;
 
 /**
+ * Appends one held item's resident and the selected character's object after an edit changed the
+ * item's own values, with the account object too when the edit changed its rows.
+ */
+[[nodiscard]] bool append_item_values_refresh_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t instanceSoid,
+    bool accountRows,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept;
+
+/**
  * Appends the same-character Family-0 appearance upsert paired with one equipment swap.
  * The update owns its nonce advance only after the complete notification fits.
  */

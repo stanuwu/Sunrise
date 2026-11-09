@@ -542,6 +542,11 @@ struct AccountEditChange {
     std::size_t characterIndex{};
     /** A row the account object publishes changed, so that object is refreshed too. */
     bool accountRows{};
+    /**
+     * The held item whose own values the edit changed, or zero. Those values travel in the item's
+     * resident, which is then sent ahead of the character object.
+     */
+    std::uint64_t itemInstanceSoid{};
 };
 
 /**

@@ -28,7 +28,8 @@ using state::QuantityEdit;
 
 /**
  * Encodes a refresh of the objects a State edit changed, read from the caller's uncommitted
- * savepoint. That is the selected character, plus the account when the edit changed its rows.
+ * savepoint. That is the selected character, plus the account when the edit changed its rows,
+ * and ahead of them the held item whose own values the edit changed.
  * @param reason Receives inventory_stage or inventory_encode on failure.
  */
 [[nodiscard]] bool stage_changed_objects(const state::AccountEditChange& changed,
@@ -44,7 +45,17 @@ using state::QuantityEdit;
     frame.sendNonce = session.sendNonce;
     const auto presentationRows = active_acquisition_presentation_rows(session);
     const bool encoded =
-        changed.accountRows
+        changed.itemInstanceSoid != 0
+            ? push::append_item_values_refresh_notification(scratch,
+                                                            update,
+                                                            changed.itemInstanceSoid,
+                                                            changed.accountRows,
+                                                            presentationRows,
+                                                            session.sessionKey,
+                                                            frame.sendNonce,
+                                                            scratch.framed,
+                                                            frame.size)
+        : changed.accountRows
             ? push::append_account_refresh_notification(scratch,
                                                         update,
                                                         presentationRows,

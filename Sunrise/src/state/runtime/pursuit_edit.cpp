@@ -261,6 +261,7 @@ struct ProgressRow {
             item.mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
         }
         held.itemValuesChanged = true;
+        change.itemInstanceSoid = item.instanceSoid;
         return true;
     }
     reason = "transaction";

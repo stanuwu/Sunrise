@@ -240,6 +240,20 @@ prepare_item_state(Scratch& scratch,
                                                  Prepared& prepared) noexcept;
 
 /**
+ * Builds one held item's resident and the selected character's object behind it, after an edit
+ * changed the item's own values. The values travel in the resident and the row's new serial in
+ * the character object.
+ * @param accountRows The edit also changed a row the account object publishes, which then follows.
+ */
+[[nodiscard]] bool prepare_item_values_refresh(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t instanceSoid,
+    bool accountRows,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    Prepared& prepared) noexcept;
+
+/**
  * Builds the Family-4 item-instance upsert for one prepared ordinary-socket selection.
  * The character object is unchanged because item identity, placement and mutation generation are
  * preserved; the socket block lives entirely in the resident instance object.

@@ -618,4 +618,109 @@ bool prepare_artifact_item_refresh(Scratch& scratch,
     return true;
 }
 
+bool prepare_item_values_refresh(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t instanceSoid,
+    bool accountRows,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    Prepared& prepared) noexcept {
+    const Reservation reservation = reserve_prior(scratch, prepared);
+    const state::AccountState account = state::account_snapshot();
+    const std::optional<std::size_t> selectedIndex = find_character_index(account);
+    Resolved selected{};
+    std::uint32_t accountDefinitionId = 0;
+    if (instanceSoid == 0 || !state::account::valid(account) || !selectedIndex.has_value()
+        || !resolve(account, *selectedIndex, selected)
+        || !middleware::datagen::object_id(
+            kAccountFamilyType, middleware::datagen::kAccountSlot, accountDefinitionId)
+        || account.primarySoid != update.after.family4RootSoid
+        || selected.characterObjectId != update.characterDefinitionId
+        || update.characterSoid != account.characters[*selectedIndex].soid) {
+        return report_failure("item_values_refresh_selection");
+    }
+    family4_datagen::loadout::ResolvedInstances changed{};
+    for (const auto& item : selected.loadout.items) {
+        if (item.instance.instanceSoid != instanceSoid) {
+            continue;
+        }
+        if (changed.itemCount != 0) {
+            return report_failure("item_values_refresh_duplicate");
+        }
+        changed.items[changed.itemCount++] = {item.equipmentSlot, item.instance};
+    }
+    if (changed.itemCount != 1) {
+        return report_failure("item_values_refresh_missing");
+    }
+    const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
+    const std::size_t required =
+        (std::max)({family4_datagen::instance::layout::kObjectSize,
+                    family4_datagen::character::layout::kObjectSize,
+                    accountRows ? family4_datagen::account::layout::kObjectSize : 0});
+    if (required > rawStorage.size()) {
+        return report_failure("item_values_refresh_storage");
+    }
+    Prepared staged{};
+    staged.rawClearSize =
+        (std::max)(reservation.rawClearSize, reservation.rawWriteOffset + required);
+    std::size_t itemCursor = 0;
+    std::size_t compressedExtent = reservation.compressedWriteOffset;
+    if (!append_items(scratch,
+                      rawStorage,
+                      selected.itemInstanceObjectId,
+                      changed,
+                      0,
+                      staged,
+                      itemCursor,
+                      compressedExtent)
+        || itemCursor != 1) {
+        clear_after(scratch, reservation);
+        return report_failure("item_values_refresh_item");
+    }
+    // The character object follows its item: it carries the row's new serial.
+    std::size_t objectCount = itemCursor;
+    const auto characterBytes = rawStorage.first(family4_datagen::character::layout::kObjectSize);
+    if (!family4_datagen::character::encode(account.characters[*selectedIndex],
+                                            selected.loadout,
+                                            selected.lightEvaluation,
+                                            characterBytes)
+        || !apply_acquisition_presentation(
+            characterBytes, selected.loadout, acquisitionPresentationRows)
+        || !append_object(scratch,
+                          characterBytes,
+                          update.characterDefinitionId,
+                          update.characterSoid,
+                          staged.objects[objectCount],
+                          compressedExtent)) {
+        clear_after(scratch, reservation);
+        return report_failure("item_values_refresh_character");
+    }
+    ++objectCount;
+    if (accountRows) {
+        const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
+        if (!family4_datagen::account::encode(account, accountBytes)
+            || !append_object(scratch,
+                              accountBytes,
+                              accountDefinitionId,
+                              account.primarySoid,
+                              staged.objects[objectCount],
+                              compressedExtent)) {
+            clear_after(scratch, reservation);
+            return report_failure("item_values_refresh_account");
+        }
+        ++objectCount;
+    }
+    staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
+    staged.family = middleware::queuez::Family{kAccountFamilyType,
+                                               update.after.family4RootSoid,
+                                               update.after.family4Version,
+                                               0,
+                                               std::span(staged.objects).first(objectCount)};
+    if (!commit(staged, prepared)) {
+        clear_after(scratch, reservation);
+        return report_failure("item_values_refresh_commit");
+    }
+    return true;
+}
+
 } // namespace sunrise::server::bap::encrypted::push::snapshot

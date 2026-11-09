@@ -126,6 +126,23 @@ bool append_artifact_item_refresh_notification(
            && queuez_frame::append_prepared(scratch, prepared, key, nonce, response, written);
 }
 
+/** Appends an edited item's resident with its character, and the account when its rows changed. */
+bool append_item_values_refresh_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t instanceSoid,
+    bool accountRows,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept {
+    snapshot::Prepared prepared{};
+    return snapshot::prepare_item_values_refresh(
+               scratch, update, instanceSoid, accountRows, acquisitionPresentationRows, prepared)
+           && queuez_frame::append_prepared(scratch, prepared, key, nonce, response, written);
+}
+
 /** Appends one socket item upsert and its charged account balances when required. */
 bool append_socket_plug_notification(Scratch& scratch,
                                      const queuez::SocketPlug& socketPlug,
