@@ -90,6 +90,27 @@ struct CompletionPlan {
               });
 }
 
+/** Completing a pursuit sets each completion value it names to this. */
+constexpr std::int32_t kCompletionValueSet = 1;
+
+/**
+ * Plans setting one completion value, observing what the saved banks hold.
+ * @return False when the contract names a value that maps to no saved row.
+ */
+[[nodiscard]] bool plan_completion_value(const pursuits::CompletionValue& value,
+                                         unlocks::Table& banks,
+                                         PreparedQuestStep& write) noexcept {
+    if (!value.declared) {
+        return true;
+    }
+    if (value.scope == Quest::Scope::none) {
+        return false;
+    }
+    write.next = {kCompletionValueSet, value.row, value.scope};
+    write.previousValue = quest_value(banks, write.next);
+    return true;
+}
+
 /**
  * A bounty's deadline is its first per-item value, so an objective read from that value would
  * count the deadline as progress.
@@ -672,6 +693,19 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     if (!status.objectivesComplete) {
         return PursuitRedemption::notRedeemable;
     }
+    PreparedQuestStep completionValue{};
+    PreparedQuestStep completionContextValue{};
+    reason = "completion_value";
+    if (!plan_completion_value(contract.completionValue, *banks, completionValue)
+        || !plan_completion_value(contract.completionContextValue,
+                                  *banks,
+                                  completionContextValue)) {
+        return PursuitRedemption::refused;
+    }
+    reason = "completed";
+    if (completionValue.previousValue != 0) {
+        return PursuitRedemption::notRedeemable;
+    }
 
     CompletionPlan plan{};
     reason = "quest_step";
@@ -689,11 +723,12 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
         return PursuitRedemption::refused;
     }
 
+    // A pursuit naming a completion value keeps its item; the value records that it completed.
     const RewardPreparation grant =
         prepare_reward_grant(std::span(plan.rows).first(plan.rowCount),
                              kUnclaimedRecordIndex,
                              &plan.wrapperFlags,
-                             instanceSoid,
+                             contract.completionValue.declared ? 0 : instanceSoid,
                              {},
                              nowSeconds,
                              mutation,
@@ -708,6 +743,8 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
         && mutation.rewards[0].placedQuantity == 0) {
         return PursuitRedemption::refused;
     }
+    mutation.completionValue = completionValue;
+    mutation.completionContextValue = completionContextValue;
     mutation.questStep = plan.questStep;
     mutation.progression = plan.progression;
     mutation.seasonalExperience = plan.seasonalExperience;

@@ -657,8 +657,8 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
 } // namespace runtime::detail
 
 /**
- * Applies a prepared grant's flags, quest starts, quest step, progression credit, ingredient
- * credits and chooser readiness to the saved banks.
+ * Applies a prepared grant's flags, quest starts, completion values, quest step, progression
+ * credit, ingredient credits and chooser readiness to the saved banks.
  * @param after Receives the selected character's unlocks with the grant applied.
  * @return False when a flag, quest value, progression, ingredient balance or chooser row moved
  *         since the grant was prepared.
@@ -681,11 +681,12 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             return false;
         }
     }
-    const PreparedQuestStep& step = mutation.questStep;
-    if (step.next.scope != Quest::Scope::none
-        && (!build_data::items::valid_bank_row(step.next.scope, step.next.row)
-            || quest_value(after, step.next) != step.previousValue)) {
-        return false;
+    for (const PreparedQuestStep* move : mutation.saved_value_moves()) {
+        if (move->next.scope != Quest::Scope::none
+            && (!build_data::items::valid_bank_row(move->next.scope, move->next.row)
+                || quest_value(after, move->next) != move->previousValue)) {
+            return false;
+        }
     }
     const PreparedProgressionCredit& progression = mutation.progression;
     const bool credits = progression.scope != build_data::progressions::Scope::unreplicated;
@@ -715,8 +716,10 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             value = build_data::items::initialized_value(reward.quest, value);
         }
     }
-    if (step.next.scope != Quest::Scope::none) {
-        quest_value(after, step.next) = step.next.value;
+    for (const PreparedQuestStep* move : mutation.saved_value_moves()) {
+        if (move->next.scope != Quest::Scope::none) {
+            quest_value(after, move->next) = move->next.value;
+        }
     }
     if (credits) {
         progression_value(after, progression) = progression.value;
@@ -873,8 +876,8 @@ void report_dropped_rewards(const PendingRecordRewardGrant& mutation) noexcept {
 } // namespace
 
 /**
- * Commits the shared reward after-image, its flags, its quest starts and step, its progression
- * and ingredient credits, its chooser readiness and its claim together.
+ * Commits the shared reward after-image, its flags, its quest starts, completion values and step,
+ * its progression and ingredient credits, its chooser readiness and its claim together.
  * @param mutation Prepared grant, consumed on every exit.
  * @return False when the account or a saved value moved; a record claim is revoked then.
  */
@@ -922,9 +925,11 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
             ready = investment::store::write_unlock(
                 investment::store::Bank::accountFlags, flag.index, unlocks::kFlagSet);
         }
-        const Quest& step = mutation.questStep.next;
-        if (ready && step.scope != Quest::Scope::none) {
-            ready = investment::store::write_unlock(quest_bank(step), step.row, step.value);
+        for (const PreparedQuestStep* move : mutation.saved_value_moves()) {
+            const Quest& value = move->next;
+            if (ready && value.scope != Quest::Scope::none) {
+                ready = investment::store::write_unlock(quest_bank(value), value.row, value.value);
+            }
         }
         const PreparedProgressionCredit& progression = mutation.progression;
         if (ready && progression.scope != build_data::progressions::Scope::unreplicated) {

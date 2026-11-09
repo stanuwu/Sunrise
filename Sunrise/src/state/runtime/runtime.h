@@ -318,9 +318,12 @@ inline constexpr std::size_t kRewardWrapperFlagCapacity = build_data::rewards::k
 /** A reward grant that claims no record carries this instead of a record row. */
 inline constexpr std::uint16_t kUnclaimedRecordIndex = 0xFFFFU;
 
-/** A quest set's saved step a redemption moves on, and the value its preparation observed. */
+/**
+ * A saved value a redemption moves on, such as its quest set's step, and the value its
+ * preparation observed.
+ */
 struct PreparedQuestStep {
-    /** The next member's step value and its saved row; scope none when no step moves. */
+    /** The value it moves to and its saved row; scope none when nothing moves. */
     build_data::items::QuestInitialization next{};
     std::int32_t previousValue{};
 };
@@ -361,6 +364,9 @@ struct PendingRecordRewardGrant {
     bool vendorTransfer{};
     /** A held pursuit or wrapper the grant consumes; it leaves the selected character with it. */
     std::uint64_t redeemedInstanceSoid{};
+    /** The completion and completion-context values a redemption sets, before its quest step. */
+    PreparedQuestStep completionValue{};
+    PreparedQuestStep completionContextValue{};
     PreparedQuestStep questStep{};
     PreparedProgressionCredit progression{};
     /** Seasonal XP the server grants in the transaction that commits this grant. */
@@ -370,6 +376,10 @@ struct PendingRecordRewardGrant {
     /** @return The flags of the wrappers this grant consumes. */
     [[nodiscard]] std::span<const PreparedRewardFlag> wrapper_flags() const noexcept {
         return std::span<const PreparedRewardFlag>(wrapperFlags).first(wrapperFlagCount);
+    }
+    /** @return The saved values this grant moves on, in write order; a later one wins a row. */
+    [[nodiscard]] std::array<const PreparedQuestStep*, 3> saved_value_moves() const noexcept {
+        return {&completionValue, &completionContextValue, &questStep};
     }
 };
 
@@ -922,9 +932,11 @@ enum class PursuitRedemption : std::uint8_t {
 };
 
 /**
- * Prepares redeeming one completed pursuit the selected character holds: the pursuit leaves
- * inventory, its quest set moves to the next step, and the grant places the next step's item or,
- * at the last step, what the reward rows the pursuit shows pay: items, rank points and seasonal XP.
+ * Prepares redeeming one completed pursuit the selected character holds: its completion values are
+ * set to one, the pursuit leaves inventory unless it names a completion value, its quest set moves
+ * to the next step, and the grant places the next step's item or, at the last step, what the
+ * reward rows the pursuit shows pay: items, rank points and seasonal XP. A pursuit whose
+ * completion value is already set is not redeemed again.
  * @param instanceSoid Held pursuit instance.
  * @param definitionHash Definition the Client named, which the instance must carry.
  * @param nowSeconds Server time in Unix seconds, which a bounty's deadline is compared with.
