@@ -549,6 +549,8 @@ struct Session {
     bool socialRosterRepushArmed{};
     /** Social registration this link owns. Zero until a sync request registers it. */
     std::uint64_t socialSerial{};
+    /** This link is a guest's own Sunrise link, keyed by the co-op handshake. */
+    bool sunriseLink{};
     /** Publication stamp this link has already been told about, for feed and notice alike. */
     state::social::Stamp socialSentStamp{};
     /** Set by encrypted processing only after one account mutation commits and is copied out. */

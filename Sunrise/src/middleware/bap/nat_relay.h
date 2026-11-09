@@ -5,8 +5,6 @@
 #include <cstdint>
 #include <span>
 
-#include "nat_punch_intro.h"
-
 namespace sunrise::middleware::bap::nat_relay {
 
 /** Native relay-handle marker: RVA 0xB5E580 requires signed word -2 at handle +0x12. */
@@ -15,8 +13,8 @@ inline constexpr std::uint16_t kRelayAddressFamily = 0xFFFE;
 /** Native connection insertion (RVA 0x17C08F0) scans 0x3E slots before refusing admission. */
 inline constexpr std::size_t kClientRelayConnectionCapacity = 62;
 
-/** Same secure-address extent the intro record targets; the relay body carries one too. */
-inline constexpr std::size_t kAddressSize = nat_punch::kAddressSize;
+/** One secure address: the extent the native copy loop measures and the reader compares over. */
+inline constexpr std::size_t kAddressSize = 0x56;
 
 /** One peer's secure address, carried opaque; `make_endpoint_address` builds a synthetic one. */
 using SecureAddress = std::array<std::byte, kAddressSize>;

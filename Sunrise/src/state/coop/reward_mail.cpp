@@ -106,10 +106,4 @@ void pop(std::uint64_t primarySoid) noexcept {
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-void reset() noexcept {
-    AcquireSRWLockExclusive(&g_lock);
-    g_queues.clear();
-    ReleaseSRWLockExclusive(&g_lock);
-}
-
 } // namespace sunrise::state::coop::reward_mail

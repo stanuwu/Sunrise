@@ -7,46 +7,56 @@
 namespace sunrise::server::bap::coop_admission {
 namespace {
 
-/** One admitted account and the address it passed from. */
+/** One admitted account, the address it reported from and its sign-on keys. */
 struct Entry final {
     std::uint64_t primarySoid{};
     std::uint32_t address{};
+    state::SignOnState keys{};
 };
 
-/** One row per enrollable player; a re-admission replaces its own row. */
+/** One row per enrollable player; a new report replaces its own row. */
 std::array<Entry, core::network_capacity::kPlayers> g_entries{};
 
 } // namespace
 
-bool admit(std::uint64_t primarySoid, std::uint32_t address) noexcept {
+bool admit(std::uint64_t primarySoid,
+           std::uint32_t address,
+           const state::SignOnState& keys) noexcept {
+    if (primarySoid == 0) {
+        return false;
+    }
     Entry* free = nullptr;
     for (Entry& entry : g_entries) {
         if (entry.primarySoid == primarySoid) {
-            entry.address = address;
-            return true;
+            free = &entry;
+            break;
         }
         if (free == nullptr && entry.primarySoid == 0) {
             free = &entry;
         }
     }
-    if (free == nullptr || primarySoid == 0) {
+    if (free == nullptr) {
         return false;
     }
-    *free = {primarySoid, address};
+    free->primarySoid = primarySoid;
+    free->address = address;
+    free->keys.encryptionKey = keys.encryptionKey;
+    free->keys.authenticationKey = keys.authenticationKey;
     return true;
 }
 
-bool admitted(std::uint64_t primarySoid, std::uint32_t address) noexcept {
+bool keys(std::uint64_t primarySoid, std::uint32_t address, state::SignOnState& output) noexcept {
     for (const Entry& entry : g_entries) {
         if (entry.primarySoid != 0 && entry.primarySoid == primarySoid) {
-            return entry.address == address;
+            if (entry.address != address) {
+                return false;
+            }
+            output.encryptionKey = entry.keys.encryptionKey;
+            output.authenticationKey = entry.keys.authenticationKey;
+            return true;
         }
     }
     return false;
-}
-
-void reset() noexcept {
-    g_entries = {};
 }
 
 } // namespace sunrise::server::bap::coop_admission

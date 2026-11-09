@@ -42,7 +42,5 @@ void post(std::uint64_t primarySoid, const Event& event) noexcept;
 [[nodiscard]] bool front(std::uint64_t primarySoid, Event& output) noexcept;
 /** Drops the oldest event queued for `primarySoid`, once its frame reached the transport. */
 void pop(std::uint64_t primarySoid) noexcept;
-/** Drops every queued event. */
-void reset() noexcept;
 
 } // namespace sunrise::state::coop::reward_mail

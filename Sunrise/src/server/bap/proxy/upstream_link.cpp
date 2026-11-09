@@ -14,7 +14,7 @@
 #include "../../../middleware/encoding/byte_order.h"
 #include "../../../state/account/account_context.h"
 #include "../../../state/account/account_token.h"
-#include "../../../state/account/shared_channel_material.h"
+#include "../../../state/coop/channel_key.h"
 #include "../../../state/coop/compatibility.h"
 #include "../../../state/coop/reward_mail.h"
 #include "../../../state/runtime/runtime.h"
@@ -110,7 +110,8 @@ bool send_hello(UpstreamLink& link) noexcept {
     constexpr std::size_t kFieldStart = kVersionStart + 2;
     constexpr std::size_t kBodySize = kFieldStart + compatibility::kHelloFieldSize;
     const compatibility::Record* local = compatibility::local();
-    if (local == nullptr) {
+    if (local == nullptr || !link.handshakeKey.generate()
+        || !link.handshakeKey.public_key(link.handshakePublic)) {
         return false;
     }
     std::array<std::byte, kBodySize> body{};
@@ -121,7 +122,9 @@ bool send_hello(UpstreamLink& link) noexcept {
     body[kVersionStart] = std::byte{0x10};
     body[kVersionStart + 1] = std::byte{1};
     if (!compatibility::encode_hello_field(
-            *local, std::span(body).subspan<kFieldStart, compatibility::kHelloFieldSize>())) {
+            *local,
+            link.handshakePublic,
+            std::span(body).subspan<kFieldStart, compatibility::kHelloFieldSize>())) {
         return false;
     }
     // Room for that body behind the six-byte request header, and again behind the outer header.
@@ -255,6 +258,58 @@ bool refused_by_host(std::span<const std::byte> body) noexcept {
     return true;
 }
 
+bool send_request(UpstreamLink& link,
+                  std::uint16_t service,
+                  std::uint32_t taskId,
+                  std::span<const std::byte> body,
+                  bool plaintext) noexcept;
+
+/** Stops dialing after a wrong join code and says so once. */
+void refuse_join_code() noexcept {
+    namespace compatibility = state::coop::compatibility;
+    if (g_refused.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    const compatibility::Record empty{};
+    std::array<char, 256> text{};
+    const std::size_t length =
+        compatibility::describe(compatibility::Mismatch::joinCode, empty, empty, text);
+    core::log::write(core::log::Channel::server,
+                     core::log::Level::error,
+                     "ev=coop stage=join result=refused mismatch=join_code");
+    core::ui::notice::raise({text.data(), length});
+}
+
+/**
+ * Derives this link's keys from the host's accepting reply.
+ * @return False when the reply is not an accept, or the host proved other keys.
+ */
+[[nodiscard]] bool accept_keys(UpstreamLink& link,
+                               std::span<const std::byte> body,
+                               state::BapState& material) noexcept {
+    namespace channel_key = state::coop::channel_key;
+    const auto* local = state::coop::compatibility::local();
+    channel_key::PublicKey hostPublic{};
+    channel_key::Confirm confirm{}, expected{};
+    if (local == nullptr || !channel_key::decode_accept(body, hostPublic, confirm)
+        || !channel_key::derive(link.handshakeKey,
+                                hostPublic,
+                                local->joinSecret,
+                                link.handshakePublic,
+                                hostPublic,
+                                material,
+                                expected)) {
+        return false;
+    }
+    link.handshakeKey.reset();
+    // A host with another join code derives other keys, so its tag differs.
+    if (confirm != expected) {
+        refuse_join_code();
+        return false;
+    }
+    return true;
+}
+
 bool receive_hello(UpstreamLink& link,
                    const middleware::bap::OuterFrame& outer,
                    std::uint64_t now) noexcept {
@@ -269,10 +324,9 @@ bool receive_hello(UpstreamLink& link,
         fail(link, "incompatible");
         return false;
     }
-    if (!parsed
-        || !middleware::secure_channel::decode_server_hello(
-            state::account::shared_channel_material(), response.body, material)) {
-        fail(link, "hello");
+    if (!parsed || !accept_keys(link, response.body, material)) {
+        SecureZeroMemory(&material, sizeof material);
+        fail(link, g_refused.load(std::memory_order_acquire) ? "join_code" : "hello");
         return false;
     }
     link.sessionKey = material.sessionKey;
@@ -284,6 +338,16 @@ bool receive_hello(UpstreamLink& link,
     link.established = true;
     link.lastActivityTick = now;
     report(link, "ready", "hello_verified");
+    // The host wraps this install's native links with these keys, so it learns them only here.
+    std::array<std::byte, state::coop::channel_key::kMaterialSize> keys{};
+    state::coop::channel_key::encode_material(state::sign_on(), keys);
+    const bool reported = send_request(
+        link, state::coop::channel_key::kMaterialService, link.nextOriginatedTaskId++, keys, false);
+    SecureZeroMemory(keys.data(), keys.size());
+    if (!reported) {
+        fail(link, "key_report");
+        return false;
+    }
     return true;
 }
 
@@ -350,6 +414,7 @@ bool queue(UpstreamLink& link,
 
 void reset(UpstreamLink& link) noexcept {
     close_socket(link);
+    link.handshakeKey.reset();
     link.stage = LinkStage::idle;
     link.established = false;
     link.receiveBlocked = false;

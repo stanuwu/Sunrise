@@ -126,7 +126,6 @@
     <ClCompile Include="src\server\bap\nat_relay_service.cpp" />
     <ClCompile Include="src\server\gameplay\relay\nat_relay_registry.cpp" />
     <ClCompile Include="src\middleware\bap\nat_relay.cpp" />
-    <ClCompile Include="src\middleware\bap\nat_punch_intro.cpp" />
     <ClCompile Include="src\state\gameplay\external\entity_object_types.cpp" />
     <ClCompile Include="src\state\investment\investment_account_store.cpp" />
     <ClCompile Include="src\state\investment\investment_database.cpp" />
@@ -190,6 +189,8 @@
     <ClCompile Include="src\core\settings\settings_runtime.cpp" />
     <ClCompile Include="src\core\settings\role.cpp" />
     <ClCompile Include="src\state\coop\compatibility.cpp" />
+    <ClCompile Include="src\state\coop\channel_key.cpp" />
+    <ClCompile Include="src\middleware\crypto\ecdh_p256.cpp" />
     <ClCompile Include="src\state\coop\reward_mail.cpp" />
     <ClCompile Include="src\server\bap\coop_admission.cpp" />
     <ClCompile Include="src\core\settings\settings_upgrade.cpp" />
@@ -1449,7 +1450,6 @@
     <ClInclude Include="src\server\bap\account_enrollment.h" />
     <ClInclude Include="src\server\gameplay\relay\nat_relay_registry.h" />
     <ClInclude Include="src\middleware\bap\nat_relay.h" />
-    <ClInclude Include="src\middleware\bap\nat_punch_intro.h" />
     <ClInclude Include="src\middleware\content\packages\tables\field_reader.h" />
     <ClInclude Include="src\client\content\items\packages\package_reward_build.h" />
     <ClInclude Include="src\state\rewards\reward_resolver.h" />
@@ -2381,7 +2381,6 @@
     <ClInclude Include="src\server\bap\proxy\upstream_link.h" />
     <ClInclude Include="src\server\bap\encrypted\account_projection_route.h" />
     <ClInclude Include="src\server\bap\bap_session_nonce.h" />
-    <ClInclude Include="src\state\account\shared_channel_material.h" />
     <ClInclude Include="src\middleware\profile\public_profile_codec.h" />
     <ClInclude Include="src\middleware\datagen\inspection\inspection_encoder.h" />
     <ClInclude Include="src\client\hooks\account_registration\account_registration.h" />
@@ -3219,6 +3218,8 @@
     <ClInclude Include="src\core\network_capacity.h" />
     <ClInclude Include="src\core\network_lan.h" />
     <ClInclude Include="src\state\coop\compatibility.h" />
+    <ClInclude Include="src\state\coop\channel_key.h" />
+    <ClInclude Include="src\middleware\crypto\ecdh_p256.h" />
     <ClInclude Include="src\state\coop\reward_mail.h" />
     <ClInclude Include="src\server\bap\coop_admission.h" />
     <ClInclude Include="src\state\activity_sdk\actor_sequences.h" />

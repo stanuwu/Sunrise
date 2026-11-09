@@ -13,6 +13,7 @@
 #include "../../../state/account/public_profiles.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
 #include "../../../state/activity/fireteam.h"
+#include "../../../state/coop/channel_key.h"
 #include "../../../state/runtime/runtime.h"
 #include "../../../state/social/social_feed.h"
 #include "../../activity/host_runtime.h"
@@ -261,6 +262,10 @@ bool consume(Session& session,
     }
     if (frame.serviceId == state::social::feed::kSyncRequest) {
         return consume_social_feed(session, scratch, frame, response, written);
+    }
+    if (frame.serviceId == state::coop::channel_key::kMaterialService) {
+        written = 0;
+        return consume_channel_material(session, frame);
     }
     ServiceRoute route;
     const bool routed = routing::resolve(frame.serviceId, route);

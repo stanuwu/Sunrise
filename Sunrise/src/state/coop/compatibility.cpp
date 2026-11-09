@@ -26,14 +26,16 @@ constexpr std::array<char, 4> kSummaryMagic{'S', 'R', 'C', 'P'};
 constexpr std::array<char, 4> kRefusalMagic{'S', 'R', 'C', 'R'};
 /** Raised whenever either wire form changes; peers with another value never match. */
 constexpr std::uint8_t kWireVersion = 1;
-/** Separates the join code's hash from any other use of the same text. */
-constexpr std::string_view kJoinCodeDomain = "sunrise-coop-join:";
+/** Separates the join code's key hash from any other use of the same text. */
+constexpr std::string_view kJoinCodeDomain = "sunrise-coop-join-key:";
 /** Field 15, length-delimited: a tag no native hello carries. */
 constexpr std::byte kHelloFieldTag{0x7A};
 /** Low seven bits of a varint byte, and the bit that says another byte follows. */
 constexpr unsigned kVarintBits = 7;
 constexpr unsigned kVarintMore = 0x80;
-static_assert(kSummarySize >= kVarintMore && kSummarySize < kVarintMore * kVarintMore);
+/** Bytes the hello field's length counts: the summary and the public key. */
+constexpr std::size_t kHelloFieldBody = kSummarySize + kPublicKeySize;
+static_assert(kHelloFieldBody >= kVarintMore && kHelloFieldBody < kVarintMore * kVarintMore);
 /** Bytes read from a file per hash step. */
 constexpr std::size_t kReadChunk = 1024 * 1024;
 
@@ -43,7 +45,6 @@ struct SummaryWire final {
     std::uint8_t version;
     Digest build;
     Digest content;
-    Digest joinCode;
     std::uint8_t cheats;
     std::uint8_t modCount;
     Digest modList;
@@ -126,8 +127,8 @@ void add_u64(sha256::Stream& stream, std::uint64_t value) noexcept {
         if (name == L"." || name == L"..") {
             continue;
         }
-        const std::wstring child = relative.empty() ? std::wstring(name)
-                                                    : relative + L"\\" + std::wstring(name);
+        const std::wstring child =
+            relative.empty() ? std::wstring(name) : relative + L"\\" + std::wstring(name);
         if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
             ok = list_files(root, child, output);
         } else {
@@ -231,8 +232,9 @@ bool collect_mods(void* context, const mods::View& view) noexcept {
         const Mod& mod = record.mods[index];
         add_u64(stream, mod.id.view().size());
         stream.add(std::as_bytes(std::span(mod.id.view())));
-        add_u64(stream, (std::uint64_t{mod.version.major} << 32U)
-                            | (std::uint64_t{mod.version.minor} << 16U) | mod.version.patch);
+        add_u64(stream,
+                (std::uint64_t{mod.version.major} << 32U)
+                    | (std::uint64_t{mod.version.minor} << 16U) | mod.version.patch);
         stream.add(mod.files);
     }
     return stream.finish(record.modList);
@@ -268,7 +270,6 @@ void write_summary(const Record& record, std::byte* output) noexcept {
     wire.version = kWireVersion;
     wire.build = record.build;
     wire.content = record.content;
-    wire.joinCode = record.joinCode;
     wire.cheats = record.cheats ? 1U : 0U;
     wire.modCount = static_cast<std::uint8_t>(record.modCount);
     wire.modList = record.modList;
@@ -363,7 +364,7 @@ bool initialize(void* module) noexcept {
         const std::string_view code(settings.joinCode.data(), settings.joinCodeLength);
         if (!sha256::hash_pair(std::as_bytes(std::span(kJoinCodeDomain)),
                                std::as_bytes(std::span(code)),
-                               record.joinCode)) {
+                               record.joinSecret)) {
             return false;
         }
     }
@@ -386,7 +387,9 @@ const Record* local() noexcept {
     return g_published.load(std::memory_order_acquire);
 }
 
-bool encode_summary(const Record& record, std::span<std::byte> output, std::size_t& written) noexcept {
+bool encode_summary(const Record& record,
+                    std::span<std::byte> output,
+                    std::size_t& written) noexcept {
     written = 0;
     if (output.size() < sizeof(SummaryWire)) {
         return false;
@@ -409,7 +412,6 @@ bool decode_summary(std::span<const std::byte> input, Record& output) noexcept {
     }
     output.build = wire.build;
     output.content = wire.content;
-    output.joinCode = wire.joinCode;
     output.cheats = wire.cheats != 0;
     output.modCount = wire.modCount;
     output.modList = wire.modList;
@@ -480,36 +482,41 @@ bool decode_refusal(std::span<const std::byte> input, Mismatch& mismatch, Record
 }
 
 bool encode_hello_field(const Record& record,
+                        std::span<const std::byte, kPublicKeySize> publicKey,
                         std::span<std::byte, kHelloFieldSize> output) noexcept {
     output[0] = kHelloFieldTag;
-    output[1] = static_cast<std::byte>((kSummarySize & (kVarintMore - 1)) | kVarintMore);
-    output[2] = static_cast<std::byte>(kSummarySize >> kVarintBits);
+    output[1] = static_cast<std::byte>((kHelloFieldBody & (kVarintMore - 1)) | kVarintMore);
+    output[2] = static_cast<std::byte>(kHelloFieldBody >> kVarintBits);
     std::size_t written = 0;
-    return encode_summary(record, output.subspan<3>(), written) && written == kSummarySize;
+    if (!encode_summary(record, output.subspan<3, kSummarySize>(), written)
+        || written != kSummarySize) {
+        return false;
+    }
+    std::memcpy(output.data() + 3 + kSummarySize, publicKey.data(), kPublicKeySize);
+    return true;
 }
 
 bool find_hello_field(std::span<const std::byte> tail,
-                      std::span<const std::byte>& summary) noexcept {
+                      std::span<const std::byte>& summary,
+                      std::span<const std::byte>& publicKey) noexcept {
     summary = {};
+    publicKey = {};
     if (tail.size() != kHelloFieldSize || tail[0] != kHelloFieldTag) {
         return false;
     }
-    const std::size_t length =
-        (std::to_integer<std::size_t>(tail[1]) & (kVarintMore - 1))
-        | (std::to_integer<std::size_t>(tail[2]) << kVarintBits);
-    if ((std::to_integer<unsigned>(tail[1]) & kVarintMore) == 0 || length != kSummarySize) {
+    const std::size_t length = (std::to_integer<std::size_t>(tail[1]) & (kVarintMore - 1))
+                               | (std::to_integer<std::size_t>(tail[2]) << kVarintBits);
+    if ((std::to_integer<unsigned>(tail[1]) & kVarintMore) == 0 || length != kHelloFieldBody) {
         return false;
     }
-    summary = tail.subspan(3);
+    summary = tail.subspan(3, kSummarySize);
+    publicKey = tail.subspan(3 + kSummarySize, kPublicKeySize);
     return true;
 }
 
 Mismatch compare(const Record& guest, const Record& host) noexcept {
     if (guest.build != host.build) {
         return Mismatch::build;
-    }
-    if (guest.joinCode != host.joinCode) {
-        return Mismatch::joinCode;
     }
     if (guest.cheats != host.cheats) {
         return Mismatch::cheats;
@@ -538,8 +545,10 @@ const char* mismatch_name(Mismatch mismatch) noexcept {
     return "unknown";
 }
 
-std::size_t
-describe(Mismatch mismatch, const Record& local, const Record& host, std::span<char> output) noexcept {
+std::size_t describe(Mismatch mismatch,
+                     const Record& local,
+                     const Record& host,
+                     std::span<char> output) noexcept {
     if (output.empty()) {
         return 0;
     }

@@ -26,8 +26,8 @@ struct Record final {
     Digest build{};
     /** The client content catalog, installed packages and mod packages together. */
     Digest content{};
-    /** The join code, hashed; all zero bytes when none is set. */
-    Digest joinCode{};
+    /** Secret hash of the join code, mixed into the link keys; never sent. Zero when unset. */
+    Digest joinSecret{};
     /** A cheat mod is loaded or the cheat tools are on. */
     bool cheats{};
     /** Loaded mods sorted by id. Empty in a decoded summary, which carries only `modList`. */
@@ -48,7 +48,7 @@ enum class Mismatch : std::uint8_t {
 };
 
 /** Bytes of one encoded summary. */
-inline constexpr std::size_t kSummarySize = 4 + 1 + 3 * 32 + 1 + 1 + 32;
+inline constexpr std::size_t kSummarySize = 4 + 1 + 2 * 32 + 1 + 1 + 32;
 /** Bytes one encoded refusal can take, with every mod listed. */
 inline constexpr std::size_t kRefusalCapacity =
     4 + 1 + 1 + kSummarySize + mods::kModCapacity * (1 + mods::kIdMaximumLength + 6 + 32);
@@ -78,17 +78,21 @@ encode_summary(const Record& record, std::span<std::byte> output, std::size_t& w
 [[nodiscard]] bool
 decode_refusal(std::span<const std::byte> input, Mismatch& mismatch, Record& host) noexcept;
 
-/** Bytes of the server-hello field that carries a summary: tag, two-byte varint length, summary. */
-inline constexpr std::size_t kHelloFieldSize = 1 + 2 + kSummarySize;
+/** A handshake public key: P-256 X then Y. */
+inline constexpr std::size_t kPublicKeySize = 64;
+/** Bytes of the server-hello field a guest adds: tag, two-byte length, summary, public key. */
+inline constexpr std::size_t kHelloFieldSize = 1 + 2 + kSummarySize + kPublicKeySize;
 /** Writes the hello field a guest appends after the hello's protocol version. */
 [[nodiscard]] bool encode_hello_field(const Record& record,
+                                      std::span<const std::byte, kPublicKeySize> publicKey,
                                       std::span<std::byte, kHelloFieldSize> output) noexcept;
 /**
- * Finds the summary in the bytes that follow a hello's protocol version.
+ * Finds the summary and the guest's public key in the bytes after a hello's protocol version.
  * @return False for a native hello, which carries no such field.
  */
 [[nodiscard]] bool find_hello_field(std::span<const std::byte> tail,
-                                    std::span<const std::byte>& summary) noexcept;
+                                    std::span<const std::byte>& summary,
+                                    std::span<const std::byte>& publicKey) noexcept;
 
 /** @return The first check `guest` fails against `host`. */
 [[nodiscard]] Mismatch compare(const Record& guest, const Record& host) noexcept;
@@ -98,7 +102,9 @@ inline constexpr std::size_t kHelloFieldSize = 1 + 2 + kSummarySize;
  * Writes one line a player can act on, naming the first difference.
  * @return Characters written, without a terminator.
  */
-std::size_t
-describe(Mismatch mismatch, const Record& local, const Record& host, std::span<char> output) noexcept;
+std::size_t describe(Mismatch mismatch,
+                     const Record& local,
+                     const Record& host,
+                     std::span<char> output) noexcept;
 
 } // namespace sunrise::state::coop::compatibility

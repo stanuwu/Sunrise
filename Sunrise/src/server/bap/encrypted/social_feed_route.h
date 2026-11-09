@@ -40,5 +40,12 @@ void reset_host_social() noexcept;
                                        std::span<std::byte> response,
                                        std::size_t& written,
                                        bool& touchesScratch) noexcept;
+/**
+ * Admits a guest from the sign-on keys its Sunrise link reports. The report arriving decrypted
+ * proves the join code. It owes no reply.
+ * @return False when the link is not a Sunrise link or the report is malformed.
+ */
+[[nodiscard]] bool consume_channel_material(Session& session,
+                                            const middleware::bap::RequestFrame& request) noexcept;
 } // namespace encrypted
 } // namespace sunrise::server::bap

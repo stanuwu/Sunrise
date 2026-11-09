@@ -8,6 +8,7 @@
 
 #include "../../../client/network/consumer.h"
 #include "../../../middleware/bap/frame.h"
+#include "../../../middleware/crypto/ecdh_p256.h"
 #include "../../../middleware/secure_channel/runtime.h"
 #include "../../../state/runtime/state.h"
 
@@ -83,6 +84,9 @@ struct UpstreamLink {
      * `kOriginatedTaskIdBase`; queue admission still refuses any live correlation collision.
      */
     std::uint32_t nextOriginatedTaskId{kOriginatedTaskIdBase};
+    /** This link's handshake pair, held from the hello until its reply derives the keys. */
+    middleware::crypto::ecdh_p256::KeyPair handshakeKey;
+    std::array<std::byte, middleware::crypto::ecdh_p256::kPublicKeySize> handshakePublic{};
     std::array<std::byte, state::kAesKeySize> sessionKey{};
     std::array<std::byte, state::kBapNonceSize> sendNonce{};
     std::array<std::byte, state::kBapNonceSize> receiveNonce{};

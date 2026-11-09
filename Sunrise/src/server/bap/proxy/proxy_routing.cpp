@@ -9,6 +9,7 @@
 #include "../../../middleware/web_service/messages/opcode206.h"
 #include "../../../middleware/web_service/web_service_envelope.h"
 #include "../../../state/account/account_platform.h"
+#include "../../../state/coop/channel_key.h"
 #include "../../../state/coop/reward_mail.h"
 #include "../../../state/runtime/runtime.h"
 #include "../../../state/social/social_feed.h"
@@ -28,7 +29,8 @@ Plane classify(std::uint16_t service, std::span<const std::byte> body) noexcept 
     if (service == state::social::feed::kSyncRequest
         || service == state::social::feed::kFeedResponse
         || service == state::social::feed::kPublicationNotice
-        || service == state::coop::reward_mail::kService) {
+        || service == state::coop::reward_mail::kService
+        || service == state::coop::channel_key::kMaterialService) {
         return Plane::local;
     }
     using middleware::bap::RequestService;

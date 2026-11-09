@@ -5,10 +5,12 @@
 #include "../../../core/settings/settings.h"
 #include "../../../middleware/secure_channel/runtime.h"
 #include "../../../state/account/public_profiles.h"
+#include "../../../state/coop/channel_key.h"
 #include "../../../state/coop/reward_mail.h"
 #include "../../../state/network/peer_routes.h"
 #include "../../../state/social/steam_roster.h"
 #include "../activity_transport_publication.h"
+#include "../coop_admission.h"
 #include "internal.h"
 
 namespace sunrise::server::bap::encrypted {
@@ -270,6 +272,29 @@ bool consume_social_notice(Session& session,
     clear_prefix(scratch.plaintext, payloadSize + middleware::secure_channel::kFrameTagSize);
     return encoded;
 }
+bool consume_channel_material(Session& session,
+                              const middleware::bap::RequestFrame& request) noexcept {
+    namespace channel_key = state::coop::channel_key;
+    if (!core::settings::hosts_session() || !session.authenticated || !session.sunriseLink
+        || request.frameType != middleware::bap::FrameType::encrypted
+        || request.serviceId != channel_key::kMaterialService) {
+        return false;
+    }
+    state::SignOnState keys{};
+    const bool admitted =
+        channel_key::decode_material(request.body, keys)
+        && coop_admission::admit(
+            state::account_primary_soid(session.accountHandle), session.remoteAddress, keys);
+    SecureZeroMemory(&keys, sizeof keys);
+    core::log::writef(core::log::Channel::server,
+                      admitted ? core::log::Level::info : core::log::Level::warn,
+                      "ev=coop stage=admit result=%s conn=%u from=0x%08X",
+                      admitted ? "ok" : "fail",
+                      session.id,
+                      session.remoteAddress);
+    return admitted;
+}
+
 bool consume_reward_mail(Session& session,
                          Scratch& scratch,
                          std::span<std::byte> response,

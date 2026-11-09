@@ -2,18 +2,23 @@
 
 #include <cstdint>
 
+#include "../../state/runtime/state.h"
+
 namespace sunrise::server::bap::coop_admission {
 
-// A guest's own Sunrise link passes the compatibility check; its native links then come only from
-// the same address. Callers hold the BAP lock.
+// A guest is admitted when its key report arrives over its encrypted Sunrise link, which proves
+// the join code. Its native links then come only from the same address, and the host wraps their
+// session keys with the reported keys. Callers hold the BAP lock.
 
-/** Records that `primarySoid` passed the check from `address`. @return False when full. */
-[[nodiscard]] bool admit(std::uint64_t primarySoid, std::uint32_t address) noexcept;
+/** Records one guest's sign-on keys and the address it reported them from. */
+[[nodiscard]] bool
+admit(std::uint64_t primarySoid, std::uint32_t address, const state::SignOnState& keys) noexcept;
 
-/** @return True when `primarySoid` passed the check from `address`, host byte order. */
-[[nodiscard]] bool admitted(std::uint64_t primarySoid, std::uint32_t address) noexcept;
-
-/** Forgets every admission. */
-void reset() noexcept;
+/**
+ * Copies the sign-on keys of a guest admitted from `address`, host byte order.
+ * @return False when the guest was never admitted, or from another address.
+ */
+[[nodiscard]] bool
+keys(std::uint64_t primarySoid, std::uint32_t address, state::SignOnState& output) noexcept;
 
 } // namespace sunrise::server::bap::coop_admission

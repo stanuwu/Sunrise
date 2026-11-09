@@ -17,7 +17,6 @@
 #include "../../core/settings/settings.h"
 #include "../account/account_token.h"
 #include "../account/public_profiles.h"
-#include "../account/shared_channel_material.h"
 #include "../activity/defaults/activity_defaults_validation.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
@@ -288,14 +287,11 @@ bool initialize(void* module,
         return false;
     }
     initialized->signOn.relayAddress = kLoopbackAddress;
-    if (core::settings::role() != core::settings::Role::embedded
+    // A guest's token names its account to the host. Its sign-on keys stay random; the host
+    // learns them over the guest's encrypted link.
+    if (core::settings::role() == core::settings::Role::client
         || core::settings::get().server.upstream.enabled) {
-        const auto bridge = account::shared_channel_material();
-        initialized->signOn.encryptionKey = bridge.encryptionKey;
-        initialized->signOn.authenticationKey = bridge.authenticationKey;
-        if (core::settings::role() != core::settings::Role::host) {
-            account::signon_token(runtimeAccount->primarySoid, initialized->signOn.sessionToken);
-        }
+        account::signon_token(runtimeAccount->primarySoid, initialized->signOn.sessionToken);
     }
     // The published relay port is the one the listener binds, so both move with one setting.
     initialized->signOn.relayPort = core::settings::get().server.bapPort;
