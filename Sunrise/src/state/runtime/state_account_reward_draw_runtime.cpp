@@ -278,8 +278,12 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
     mutation.seed = seed;
     reward_resolution::Result resolved{};
     reason = "reward_condition";
-    if (!resolve_pass(
-            reward, bound_account_snapshot(), mutation.seed, resolved, PassResolution::claim, &reason)) {
+    if (!resolve_pass(reward,
+                      bound_account_snapshot(),
+                      mutation.seed,
+                      resolved,
+                      PassResolution::claim,
+                      &reason)) {
         return false;
     }
     reason = "reward_placement";

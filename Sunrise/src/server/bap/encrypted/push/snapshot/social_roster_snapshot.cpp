@@ -197,9 +197,8 @@ bool prepare_social_roster(Scratch& scratch,
     // read that would fail and count as a store failure.
     const std::uint32_t storedScore =
         state::local_account_access() ? state::unlocks::records::score() : 0U;
-    member.triumphScore = static_cast<std::int32_t>(
-        (std::min)(storedScore,
-                   static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())));
+    member.triumphScore = static_cast<std::int32_t>((std::min)(
+        storedScore, static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())));
 
     Prepared staged{};
     std::size_t objectCount = 0;

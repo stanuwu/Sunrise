@@ -11,8 +11,8 @@
 #include <bit>
 
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
-#include "../../../diagnostics/test_input/test_input.h"
 #include "../../../../steam/interfaces/invitations.h"
+#include "../../../diagnostics/test_input/test_input.h"
 #include "input.h"
 
 namespace sunrise::client::hooks::graphics::input {
