@@ -52,6 +52,15 @@ struct QuestStep {
     std::int32_t successorValue{};
 };
 
+/** A value completing the pursuit sets to one, and the saved row it maps to. */
+struct CompletionValue {
+    /** The contract names the value. */
+    bool declared{};
+    /** Saved bank and row; scope none when the named value maps to no saved row. */
+    items::QuestInitialization::Scope scope{};
+    std::uint16_t row{};
+};
+
 /** The installed contract of one pursuit item: its objectives and how they combine. */
 struct Definition {
     std::uint16_t definitionIndex{kAbsent};
@@ -61,6 +70,12 @@ struct Definition {
     std::int32_t lifetimeSeconds{};
     bool requireAllObjectives{};
     bool requireNonOptionalCompletion{};
+    /** Completed objectives never complete the pursuit. */
+    bool suppressCompletion{};
+    /** The pursuit completes as soon as its objectives do, without a request from the client. */
+    bool automaticCompletion{};
+    CompletionValue completionValue{};
+    CompletionValue completionContextValue{};
     /** Objective-table indices. Slots past objectiveCount stay zero. */
     std::array<std::uint16_t, kObjectiveCapacity> objectives{};
     std::uint8_t objectiveCount{};

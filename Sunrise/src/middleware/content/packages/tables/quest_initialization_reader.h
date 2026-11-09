@@ -13,6 +13,20 @@ namespace sunrise::middleware::content::packages::tables::items {
 inline constexpr std::uint16_t kUnavailableQuestParent = 0xFFFFU;
 
 /**
+ * A slot must match once across all maps, including maps with no supported save bank.
+ * @param valueMap Blob containing all four unlock value maps.
+ * @param slot Value slot to map.
+ * @param row Receives the saved bank row; use only on success.
+ * @param scope Receives the bank that row belongs to; use only on success.
+ * @return False when the slot matches no row, several rows, or a map with no saved bank.
+ */
+[[nodiscard]] bool
+map_value_slot(std::span<const std::byte> valueMap,
+               std::uint16_t slot,
+               std::uint16_t& row,
+               state::build_data::items::QuestInitialization::Scope& scope) noexcept;
+
+/**
  * Only an objective-bearing pursuit can name a quest-set owner.
  * @param definition Item definition bytes, including its nested blocks.
  * @return The owner's item-table index, or kUnavailableQuestParent on rejection.

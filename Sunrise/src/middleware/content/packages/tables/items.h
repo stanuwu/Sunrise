@@ -15,6 +15,8 @@ inline constexpr std::size_t kSocketCapacity = 12;
 inline constexpr std::uint16_t kUnavailablePlug = 0xFFFF;
 /** All bits set marks an item definition with no insertion or enable requirement set. */
 inline constexpr std::uint16_t kUnavailableMaterialRequirementSetIndex = 0xFFFFU;
+/** All bits set marks a completion value the objective block does not name. */
+inline constexpr std::uint16_t kUnavailableValueSlot = 0xFFFFU;
 
 /** Declared stat contributions one definition carries. Shipped rows stay far below this. */
 inline constexpr std::size_t kStatCapacity = 64;
@@ -96,6 +98,13 @@ struct Row {
     bool hasCompletionMetadata{};
     bool requireAllObjectives{};
     bool requireNonOptionalCompletion{};
+    /** Completed objectives never complete the pursuit. */
+    bool suppressCompletion{};
+    /** The pursuit completes as soon as its objectives do, without a request from the client. */
+    bool automaticCompletion{};
+    /** Value slots completion sets to one: the completion and completion-context values. */
+    std::uint16_t completionValueSlot{kUnavailableValueSlot};
+    std::uint16_t completionContextValueSlot{kUnavailableValueSlot};
     std::uint8_t objectiveCount{};
     std::uint16_t objectiveIndices[state::build_data::pursuits::kObjectiveCapacity]{};
     /** Positive for a bounty, which expires this many seconds after it is acquired. */

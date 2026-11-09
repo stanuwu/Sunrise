@@ -75,11 +75,22 @@ std::uint64_t g_revision{};
                          && step.successorValue != step.value);
 }
 
+/** Only a declared value names a saved row, and that row fits its bank. */
+[[nodiscard]] bool valid_completion_value(const CompletionValue& value) noexcept {
+    using Scope = items::QuestInitialization::Scope;
+    if (!value.declared || value.scope == Scope::none) {
+        return value.scope == Scope::none && value.row == 0;
+    }
+    return items::valid_bank_row(value.scope, value.row);
+}
+
 /** Checks one contract's own fields. The caller checks its item identity and item references. */
 [[nodiscard]] bool valid_contract(const Definition& row, std::size_t objectiveCount) noexcept {
     return row.definitionIndex != kAbsent && row.lifetimeSeconds >= 0
            && valid_objectives(row, objectiveCount) && valid_item_values(row)
-           && valid_rewards(row) && valid_quest_step(row.questStep);
+           && valid_rewards(row) && valid_quest_step(row.questStep)
+           && valid_completion_value(row.completionValue)
+           && valid_completion_value(row.completionContextValue);
 }
 
 } // namespace

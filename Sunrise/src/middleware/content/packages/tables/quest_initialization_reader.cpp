@@ -149,18 +149,20 @@ read_quest_set(std::span<const std::byte> parent, std::size_t itemCount, QuestSe
            && item < itemCount;
 }
 
+} // namespace
+
 /**
  * A slot must match once across all maps, including maps with no supported save bank.
  * @param valueMap Blob containing all four unlock value maps.
- * @param slot Value slot the set names.
+ * @param slot Value slot to map.
  * @param row Receives the saved bank row; use only on success.
  * @param scope Receives the bank that row belongs to; use only on success.
  * @return False when the slot matches no row, several rows, or a map with no saved bank.
  */
-[[nodiscard]] bool map_quest_slot(std::span<const std::byte> valueMap,
-                                  std::uint16_t slot,
-                                  std::uint16_t& row,
-                                  Quest::Scope& scope) noexcept {
+bool map_value_slot(std::span<const std::byte> valueMap,
+                    std::uint16_t slot,
+                    std::uint16_t& row,
+                    Quest::Scope& scope) noexcept {
     std::size_t matches = 0;
     for (const std::size_t descriptor : {kAccountValueMapDescriptor,
                                          kCharacterValueMapDescriptor,
@@ -197,8 +199,6 @@ read_quest_set(std::span<const std::byte> parent, std::size_t itemCount, QuestSe
     }
     return matches == 1;
 }
-
-} // namespace
 
 /**
  * Only an objective-bearing pursuit can name a quest-set owner.
@@ -297,7 +297,7 @@ Quest read_quest_initialization(std::span<const std::byte> definition,
             return {}; // The first value must identify only one step.
         }
     }
-    if (matches != 1 || !map_quest_slot(valueMap, set.valueSlot, quest.row, quest.scope)) {
+    if (matches != 1 || !map_value_slot(valueMap, set.valueSlot, quest.row, quest.scope)) {
         return {};
     }
     return (!separateRoot || quest.scope == Quest::Scope::character)
@@ -364,7 +364,7 @@ QuestStep read_quest_step(std::span<const std::byte> definition,
     }
     // A zero step would read as a quest never started.
     if (set.mode != kSupportedQuestSetMode || set.valueSlot >= kUnlockSlotLimit
-        || !map_quest_slot(valueMap, set.valueSlot, step.row, step.scope)
+        || !map_value_slot(valueMap, set.valueSlot, step.row, step.scope)
         || !state::build_data::items::valid_bank_row(step.scope, step.row)
         || step.value == state::build_data::items::kUnsetQuestValue
         || (step.successorIndex != state::build_data::pursuits::kAbsent

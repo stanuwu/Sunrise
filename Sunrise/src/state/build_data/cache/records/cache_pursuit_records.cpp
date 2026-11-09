@@ -11,6 +11,26 @@ namespace {
     return stored <= 1;
 }
 
+/** Encodes one completion value and the saved row it maps to. */
+[[nodiscard]] PursuitCompletionValueRecord
+encode_completion_value(const pursuits::CompletionValue& value) noexcept {
+    return {static_cast<std::uint8_t>(value.declared),
+            static_cast<std::uint8_t>(value.scope),
+            value.row};
+}
+
+/** Decodes one completion value; the catalog validator checks its saved row. */
+[[nodiscard]] bool decode_completion_value(const PursuitCompletionValueRecord& record,
+                                           pursuits::CompletionValue& value) noexcept {
+    if (!decode_flag(record.declared, value.declared)
+        || record.scope > static_cast<std::uint8_t>(items::QuestInitialization::Scope::character)) {
+        return false;
+    }
+    value.scope = static_cast<items::QuestInitialization::Scope>(record.scope);
+    value.row = record.row;
+    return true;
+}
+
 } // namespace
 
 /** Encodes one objective row and the bank ranges of its programs. */
@@ -47,7 +67,10 @@ bool decode(const ObjectiveRecord& record, objectives::Row& value) noexcept {
     return true;
 }
 
-/** Encodes one pursuit contract with its objectives, item values, reward rows and quest step. */
+/**
+ * Encodes one pursuit contract with its objectives, item values, reward rows, quest step and
+ * completion controls.
+ */
 bool encode(const pursuits::Definition& value, PursuitRecord& record) noexcept {
     record = {};
     record.definitionHash = value.definitionHash;
@@ -73,6 +96,10 @@ bool encode(const pursuits::Definition& value, PursuitRecord& record) noexcept {
     record.questValue = value.questStep.value;
     record.questSuccessorIndex = value.questStep.successorIndex;
     record.questSuccessorValue = value.questStep.successorValue;
+    record.suppressCompletion = static_cast<std::uint8_t>(value.suppressCompletion);
+    record.automaticCompletion = static_cast<std::uint8_t>(value.automaticCompletion);
+    record.completionValue = encode_completion_value(value.completionValue);
+    record.completionContextValue = encode_completion_value(value.completionContextValue);
     return true;
 }
 
@@ -84,6 +111,10 @@ bool decode(const PursuitRecord& record, pursuits::Definition& value) noexcept {
         || !decode_flag(record.requireAllObjectives, value.requireAllObjectives)
         || !decode_flag(record.requireNonOptionalCompletion, value.requireNonOptionalCompletion)
         || !decode_flag(record.rewardsReadable, value.rewardsReadable)
+        || !decode_flag(record.suppressCompletion, value.suppressCompletion)
+        || !decode_flag(record.automaticCompletion, value.automaticCompletion)
+        || !decode_completion_value(record.completionValue, value.completionValue)
+        || !decode_completion_value(record.completionContextValue, value.completionContextValue)
         || record.questMembership
                > static_cast<std::uint8_t>(pursuits::QuestMembership::unsupported)
         || record.questScope

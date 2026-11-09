@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "../../../../middleware/content/packages/tables/items.h"
@@ -20,9 +21,11 @@ public:
     /**
      * Collects one item's contract, returning false when it could not be stored.
      * @param questStep The item's place in its quest set.
+     * @param valueMap Blob containing all four unlock value maps, which map its completion values.
      */
     [[nodiscard]] bool item(const middleware::content::packages::tables::items::Row& row,
-                            const state::build_data::pursuits::QuestStep& questStep) noexcept;
+                            const state::build_data::pursuits::QuestStep& questStep,
+                            std::span<const std::byte> valueMap) noexcept;
     /** Counts an item the installed data leaves unreadable. That item gets no contract. */
     void unread(std::uint16_t index) noexcept;
     /**

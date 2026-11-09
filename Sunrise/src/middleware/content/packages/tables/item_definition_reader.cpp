@@ -118,13 +118,24 @@ constexpr std::size_t kPlugMemberConditionOffset = offsetof(generated::PlugSetMe
 /** Native arrays use 16-bit definition indices even though their serialized field is 32-bit. */
 constexpr std::uint64_t kMaximumPlugMemberCount = 65535;
 /**
- * The schema leaves the objective block's completion flags unnamed in gap10: the all-objectives
- * byte at block offset 0x17 and the required-objectives byte after it.
+ * The schema leaves the objective block's completion fields unnamed in gap10: the 16-bit
+ * completion-context value slot at block offset 0x14, the suppress byte at 0x16, the
+ * all-objectives byte at 0x17, the required-objectives byte, the automatic byte, and the 16-bit
+ * completion value slot that ends the gap.
  */
+constexpr std::size_t kCompletionContextValueOffset =
+    offsetof(generated::ItemObjectiveBlock, gap10) + 4;
+constexpr std::size_t kSuppressCompletionOffset =
+    kCompletionContextValueOffset + sizeof(std::uint16_t);
 constexpr std::size_t kRequireAllObjectivesOffset =
     offsetof(generated::ItemObjectiveBlock, gap10) + 7;
 constexpr std::size_t kRequireNonOptionalCompletionOffset = kRequireAllObjectivesOffset + 1;
+constexpr std::size_t kAutomaticCompletionOffset = kRequireNonOptionalCompletionOffset + 1;
+constexpr std::size_t kCompletionValueOffset = kAutomaticCompletionOffset + 1;
 static_assert(kRequireAllObjectivesOffset == 0x17);
+static_assert(kSuppressCompletionOffset + 1 == kRequireAllObjectivesOffset);
+static_assert(kCompletionValueOffset + sizeof(std::uint16_t)
+              == offsetof(generated::ItemObjectiveBlock, parentItemIndex));
 /** A bounty declares its lifetime as a one-row expression array in its inventory block. */
 constexpr std::size_t kLifetimeExpressionField =
     offsetof(generated::ItemDefinition, inventoryItemBlock)
@@ -451,14 +462,20 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
     row.statCount = static_cast<std::uint8_t>(count);
 }
 
-/** Reads the completion controls of one objective block. */
+/** Reads the completion controls and completion value slots of one objective block. */
 [[nodiscard]] bool read_completion_metadata(std::span<const std::byte> definition,
                                             std::size_t block,
                                             Row& row) noexcept {
-    if (!read_boolean(definition, block + kRequireAllObjectivesOffset, row.requireAllObjectives)
+    if (!read_boolean(definition, block + kSuppressCompletionOffset, row.suppressCompletion)
+        || !read_boolean(definition, block + kRequireAllObjectivesOffset, row.requireAllObjectives)
         || !read_boolean(definition,
                          block + kRequireNonOptionalCompletionOffset,
-                         row.requireNonOptionalCompletion)) {
+                         row.requireNonOptionalCompletion)
+        || !read_boolean(definition, block + kAutomaticCompletionOffset, row.automaticCompletion)
+        || !read(definition, block + kCompletionValueOffset, row.completionValueSlot)
+        || !read(definition,
+                 block + kCompletionContextValueOffset,
+                 row.completionContextValueSlot)) {
         return false;
     }
     row.hasCompletionMetadata = true;

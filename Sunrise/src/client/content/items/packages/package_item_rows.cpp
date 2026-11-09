@@ -291,7 +291,8 @@ bool build_item_rows(const reader::Source& source,
         if (pursuitStorageReady && itemClass != tables::kItemDefinitionClass) {
             storage.pursuitBuild.unread(item.definitionIndex);
         } else if (pursuitStorageReady
-                   && (!questOwnerRead || !storage.pursuitBuild.item(item, questStep))) {
+                   && (!questOwnerRead
+                       || !storage.pursuitBuild.item(item, questStep, storage.questValueMap))) {
             storage.pursuitBuild.read_failed(item.definitionIndex);
         }
         storage.rows[rowCount++] =

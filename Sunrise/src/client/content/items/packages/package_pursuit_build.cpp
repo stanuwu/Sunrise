@@ -4,6 +4,7 @@
 #include <span>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/content/packages/tables/quest_initialization_reader.h"
 #include "../../../../state/build_data/runtime.h"
 #include "internal.h"
 
@@ -42,6 +43,18 @@ namespace pursuits = state::build_data::pursuits;
     return rewardsMissing || successorMissing;
 }
 
+/** Maps a completion value slot to its saved row. A slot no saved map holds keeps scope none. */
+[[nodiscard]] pursuits::CompletionValue
+completion_value(std::uint16_t slot, std::span<const std::byte> valueMap) noexcept {
+    pursuits::CompletionValue value{};
+    value.declared = slot != tables::items::kUnavailableValueSlot;
+    if (value.declared && !tables::items::map_value_slot(valueMap, slot, value.row, value.scope)) {
+        value.scope = {};
+        value.row = 0;
+    }
+    return value;
+}
+
 } // namespace
 
 void settle_pursuits_unsupported(const char* reason) noexcept {
@@ -70,7 +83,8 @@ void PursuitBuild::begin() noexcept {
 }
 
 bool PursuitBuild::item(const tables::items::Row& row,
-                        const pursuits::QuestStep& questStep) noexcept {
+                        const pursuits::QuestStep& questStep,
+                        std::span<const std::byte> valueMap) noexcept {
     // Only pursuits declare completion metadata. An unreadable metadata block still gets a
     // contract, marked unreadable.
     if (!row.hasCompletionMetadata && row.objectiveMetadataValid) {
@@ -85,6 +99,11 @@ bool PursuitBuild::item(const tables::items::Row& row,
         if (output.readable) {
             output.requireAllObjectives = row.requireAllObjectives;
             output.requireNonOptionalCompletion = row.requireNonOptionalCompletion;
+            output.suppressCompletion = row.suppressCompletion;
+            output.automaticCompletion = row.automaticCompletion;
+            output.completionValue = completion_value(row.completionValueSlot, valueMap);
+            output.completionContextValue =
+                completion_value(row.completionContextValueSlot, valueMap);
             std::copy_n(row.objectiveIndices, row.objectiveCount, output.objectives.begin());
             output.objectiveCount = row.objectiveCount;
             std::copy_n(

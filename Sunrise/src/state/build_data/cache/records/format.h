@@ -37,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 85;
+inline constexpr std::uint32_t kCacheFormatVersion = 86;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -748,6 +748,13 @@ struct PursuitRewardRecord {
     std::uint16_t conditionIndex{pursuits::kAbsent};
 };
 
+/** Disk form of one value completing a pursuit sets. */
+struct PursuitCompletionValueRecord {
+    std::uint8_t declared{};
+    std::uint8_t scope{};
+    std::uint16_t row{};
+};
+
 /**
  * Disk form of one pursuit contract. Objective and item-value slots past their counts are zero,
  * and reward rows past rewardCount keep their defaults.
@@ -772,6 +779,10 @@ struct PursuitRecord {
     std::int32_t questValue{};
     std::uint16_t questSuccessorIndex{pursuits::kAbsent};
     std::int32_t questSuccessorValue{};
+    std::uint8_t suppressCompletion{};
+    std::uint8_t automaticCompletion{};
+    PursuitCompletionValueRecord completionValue{};
+    PursuitCompletionValueRecord completionContextValue{};
 };
 
 #pragma pack(pop)
@@ -795,11 +806,14 @@ static_assert(sizeof(ObjectiveRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t)
                      + 2 * sizeof(RewardRangeRecord));
 static_assert(sizeof(PursuitRewardRecord) == sizeof(std::int32_t) + 2 * sizeof(std::uint16_t));
+static_assert(sizeof(PursuitCompletionValueRecord)
+              == 2 * sizeof(std::uint8_t) + sizeof(std::uint16_t));
 static_assert(sizeof(PursuitRecord)
-              == 4 * sizeof(std::uint32_t) + 3 * sizeof(std::uint16_t) + 9 * sizeof(std::uint8_t)
+              == 4 * sizeof(std::uint32_t) + 3 * sizeof(std::uint16_t) + 11 * sizeof(std::uint8_t)
                      + (pursuits::kObjectiveCapacity + pursuits::kItemValueCapacity)
                            * sizeof(std::uint16_t)
-                     + pursuits::kRewardPreviewCapacity * sizeof(PursuitRewardRecord));
+                     + pursuits::kRewardPreviewCapacity * sizeof(PursuitRewardRecord)
+                     + 2 * sizeof(PursuitCompletionValueRecord));
 
 static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
