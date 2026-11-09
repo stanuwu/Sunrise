@@ -467,6 +467,10 @@ stage_chalice_plug(const AccountState& account,
                                        std::uint32_t definitionHash,
                                        std::int32_t heldQuantity,
                                        PendingItemDismantle& mutation) noexcept;
+[[nodiscard]] bool stage_profile_resident_discard(const AccountState& account,
+                                                  std::size_t characterIndex,
+                                                  std::uint64_t instanceSoid,
+                                                  PendingItemDismantle& mutation) noexcept;
 [[nodiscard]] bool same_dismantle_transition(const PendingItemDismantle& left,
                                              const PendingItemDismantle& right) noexcept;
 [[nodiscard]] bool materialize_item_dismantle(const AccountState& current,

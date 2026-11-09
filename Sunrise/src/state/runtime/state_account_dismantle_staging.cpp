@@ -677,6 +677,56 @@ apply_dismantle_rewards(const AccountState& before,
     return true;
 }
 
+/**
+ * Builds the one canonical removal of an instanced profile row, such as a held gift, for an exact
+ * account snapshot. Only a single-unit row is removed, and it credits no dismantle materials.
+ */
+[[nodiscard]] bool stage_profile_resident_discard(const AccountState& account,
+                                                  std::size_t characterIndex,
+                                                  std::uint64_t instanceSoid,
+                                                  PendingItemDismantle& mutation) noexcept {
+    mutation = {};
+    if (instanceSoid == 0 || !account::valid(account) || characterIndex >= account.characterCount
+        || !account.characters[characterIndex].selected) {
+        return false;
+    }
+    const auto rows = std::span(account.profileItems).first(account.profileItemCount);
+    const auto names = [instanceSoid](const auto& item) noexcept {
+        return item.instanceSoid == instanceSoid;
+    };
+    const auto row = std::find_if(rows.begin(), rows.end(), names);
+    if (row == rows.end() || row->quantity != 1) {
+        return false;
+    }
+    const auto index = static_cast<std::size_t>(row - rows.begin());
+    AccountState candidate = account;
+    if (!erase_profile_row(candidate, index)) {
+        return false;
+    }
+    const CharacterState& character = account.characters[characterIndex];
+    mutation.beforeCharacter = character;
+    mutation.afterCharacter = character;
+    mutation.beforeProfileItems = account.profileItems;
+    mutation.afterProfileItems = candidate.profileItems;
+    mutation.dismantledItem.instanceSoid = instanceSoid;
+    mutation.dismantledItem.definitionHash = row->definitionHash;
+    mutation.dismantledItem.quantity = row->quantity;
+    mutation.dismantledItem.mutationSerial = row->mutationSerial;
+    mutation.accountSoid = account.primarySoid;
+    mutation.characterSoid = character.soid;
+    mutation.dismantledInstanceSoid = instanceSoid;
+    mutation.characterIndex = characterIndex;
+    mutation.expectedInventoryCount = character.inventory.count;
+    mutation.expectedProfileItemCount = account.profileItemCount;
+    mutation.afterProfileItemCount = candidate.profileItemCount;
+    mutation.inventoryIndex = index;
+    mutation.profileChanged = true;
+    mutation.profileResident = true;
+    mutation.paysRewards = false;
+    mutation.prepared = true;
+    return true;
+}
+
 /** @return True when both descriptions name the same credited profile mutation. */
 [[nodiscard]] bool same_dismantle_reward(const DismantleReward& left,
                                          const DismantleReward& right) noexcept {
@@ -699,7 +749,7 @@ apply_dismantle_rewards(const AccountState& before,
         || left.movedInventoryItemCount != right.movedInventoryItemCount
         || left.rewardCount != right.rewardCount || left.inventoryRow != right.inventoryRow
         || left.equipmentSlot != right.equipmentSlot || left.profileChanged != right.profileChanged
-        || left.paysRewards != right.paysRewards
+        || left.profileResident != right.profileResident || left.paysRewards != right.paysRewards
         || !same_stationary_item(left.dismantledItem, right.dismantledItem)
         || !same_character(left.beforeCharacter, right.beforeCharacter)
         || !same_character(left.afterCharacter, right.afterCharacter)
@@ -742,6 +792,19 @@ apply_dismantle_rewards(const AccountState& before,
         after.profileItems = mutation.afterProfileItems;
         after.profileItemCount = mutation.afterProfileItemCount;
         return account::valid(after) && valid_profile_inventory(after);
+    }
+    if (mutation.profileResident) {
+        PendingItemDismantle canonical{};
+        if (!stage_profile_resident_discard(
+                current, mutation.characterIndex, mutation.dismantledInstanceSoid, canonical)
+            || !same_dismantle_transition(canonical, mutation)) {
+            return false;
+        }
+        after = current;
+        after.profileItems = mutation.afterProfileItems;
+        after.profileItemCount = mutation.afterProfileItemCount;
+        return account::valid(after) && valid_profile_inventory(after)
+               && !identity_uses_soid(after, mutation.dismantledInstanceSoid);
     }
     if (!mutation.prepared || mutation.accountSoid == 0 || mutation.characterSoid == 0
         || mutation.dismantledItem.instanceSoid != mutation.dismantledInstanceSoid

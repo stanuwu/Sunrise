@@ -633,8 +633,10 @@ bool prepare_item_dismantle(Scratch& scratch,
         return report_failure("dismantle_reservation");
     }
 
-    // A stack releases no resident and credits nothing, whichever list held it.
+    // A stack releases no resident and credits nothing, whichever list held it. A profile resident
+    // releases its instance and credits nothing either.
     const bool releasesInstance = mutation.dismantledInstanceSoid != 0;
+    const bool creditsPayout = releasesInstance && !mutation.profileResident;
     state::AccountState account{};
     if (!mutation.prepared || mutation.characterSoid == 0
         || mutation.dismantledItem.instanceSoid != mutation.dismantledInstanceSoid
@@ -643,8 +645,8 @@ bool prepare_item_dismantle(Scratch& scratch,
         || mutation.dismantledInstanceSoid != dismantle.dismantledInstanceSoid
         || mutation.profileChanged != dismantle.updatesAccount
         || mutation.rewardCount > state::kDismantleRewardCapacity
-        || (releasesInstance ? mutation.profileChanged != (mutation.rewardCount != 0)
-                             : mutation.rewardCount != 0)
+        || (creditsPayout ? mutation.profileChanged != (mutation.rewardCount != 0)
+                          : mutation.rewardCount != 0)
         || dismantle.accountDefinitionId == 0 || dismantle.characterDefinitionId == 0
         || dismantle.itemInstanceDefinitionId == 0
         || !state::preview_item_dismantle(mutation, account)

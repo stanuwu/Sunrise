@@ -124,12 +124,41 @@ struct ExpectedItem {
     return true;
 }
 
+/**
+ * Prepares the removal of one instanced profile row, which no character inventory holds, without
+ * changing account State.
+ */
+[[nodiscard]] bool prepare_profile_resident_discard(std::uint64_t instanceSoid,
+                                                    PendingItemDismantle& mutation) noexcept {
+    mutation = {};
+    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
+                                                           AccountState(account_snapshot()));
+    const std::size_t characterIndex =
+        snapshot ? selected_character_index(*snapshot) : std::size_t{};
+    const bool staged =
+        snapshot && account::valid(*snapshot) && characterIndex < snapshot->characterCount
+        && stage_profile_resident_discard(*snapshot, characterIndex, instanceSoid, mutation);
+    report_dismantle("prepare_profile_resident",
+                     staged ? "ok" : "fail",
+                     staged ? "ready" : "not_held",
+                     mutation.dismantledItem.definitionHash,
+                     mutation.characterSoid,
+                     instanceSoid,
+                     mutation.inventoryIndex,
+                     0,
+                     0,
+                     0,
+                     0);
+    return staged;
+}
+
 } // namespace
 
-/** Prepares one selected-character unequipped item removal without changing account State. */
+/** Prepares one unequipped item removal, from the selected character or the profile. */
 bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mutation) noexcept {
     const char* reason = nullptr;
-    return prepare_selected_item_dismantle(instanceSoid, true, nullptr, mutation, reason);
+    return prepare_selected_item_dismantle(instanceSoid, true, nullptr, mutation, reason)
+           || prepare_profile_resident_discard(instanceSoid, mutation);
 }
 
 /** Prepares a held stack's discard without changing account State. */

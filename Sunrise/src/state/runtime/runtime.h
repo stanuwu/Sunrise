@@ -493,8 +493,10 @@ struct PendingItemDismantle {
     std::size_t rewardCount{};
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};
-    /** A payout was credited, or the discarded stack is a profile row. */
+    /** A payout was credited, or the discarded stack or instance is a profile row. */
     bool profileChanged{};
+    /** The removed instance was a profile row, so no character row changed. */
+    bool profileResident{};
     /** False for an editor removal or a stack, which credit no dismantle materials. */
     bool paysRewards{true};
     bool prepared{};
