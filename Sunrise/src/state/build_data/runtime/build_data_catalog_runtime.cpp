@@ -4,6 +4,7 @@
 #include "../abilities/ability_bucket_catalog.h"
 #include "../bounties/bounty_catalog.h"
 #include "../collectibles/collectible_catalog.h"
+#include "../combat/combat_catalog.h"
 #include "../constants/investment_constant_catalog.h"
 #include "../hash_names/hash_name_catalog.h"
 #include "../inventory/buckets/inventory_bucket_catalog.h"
@@ -424,6 +425,7 @@ void clear_catalogs() noexcept {
     constants::clear();
     starter_sets::clear();
     items::insertion_rules::clear();
+    combat::clear();
 }
 
 } // namespace runtime

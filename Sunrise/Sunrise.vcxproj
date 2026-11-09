@@ -105,6 +105,7 @@
     <ClCompile Include="src\state\runtime\postmaster_runtime.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_reward_records.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_reward_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_combat_build.cpp" />
     <ClCompile Include="src\state\rewards\reward_resolver.cpp" />
     <ClCompile Include="src\state\build_data\rewards\reward_catalog.cpp" />
     <ClCompile Include="src\state\build_data\rewards\reward_build_data_runtime.cpp" />
@@ -120,6 +121,7 @@
     <ClCompile Include="src\state\runtime\saved_selection_runtime.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_edit.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_redemption_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\kill_objective_runtime.cpp" />
     <ClCompile Include="src\state\runtime\season_pass_snapshot_runtime.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_link.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_world_reader.cpp" />
@@ -798,6 +800,8 @@
     <ClCompile Include="src\state\build_data\items\socket_plugs\socket_plug_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\items\insertion_rules\insertion_rule_catalog.cpp" />
     <ClCompile Include="src\state\build_data\items\insertion_rules\insertion_rule_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\combat\combat_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\combat\combat_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_builder.cpp" />
     <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_generated.cpp" />
     <ClCompile Include="src\state\build_data\items\catalysts\exotic_catalyst_catalog.cpp" />
@@ -1346,6 +1350,7 @@
     <ClCompile Include="src\middleware\bap\activity_message\activity_sense_roster_delta.cpp" />
     <ClCompile Include="src\server\bap\encrypted\activity_message\receipts\activity_message_receipts.cpp" />
     <ClCompile Include="src\server\bap\encrypted\activity_message\receipts\activity_incident_grants.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\activity_message\receipts\activity_kill_progress.cpp" />
     <ClCompile Include="src\state\activity\receipts\activity_receipts.cpp" />
     <ClCompile Include="src\core\settings\server\activation\activation_settings_parser.cpp" />
     <ClCompile Include="src\middleware\gameplay\group\migration_messages.cpp" />
@@ -2406,6 +2411,8 @@
     <ClInclude Include="src\state\build_data\items\socket_plugs\socket_plug_catalog.h" />
     <ClInclude Include="src\state\build_data\items\insertion_rules\definition.h" />
     <ClInclude Include="src\state\build_data\items\insertion_rules\insertion_rule_catalog.h" />
+    <ClInclude Include="src\state\build_data\combat\definition.h" />
+    <ClInclude Include="src\state\build_data\combat\combat_catalog.h" />
     <ClInclude Include="src\state\build_data\items\catalysts\definition.h" />
     <ClInclude Include="src\state\build_data\items\catalysts\exotic_catalyst_builder.h" />
     <ClInclude Include="src\state\build_data\items\catalysts\exotic_catalyst_catalog.h" />
@@ -2974,6 +2981,7 @@
     <ClInclude Include="src\middleware\bap\activity_message\sense_update_body.h" />
     <ClInclude Include="src\server\bap\encrypted\activity_message\receipts\activity_message_receipts.h" />
     <ClInclude Include="src\server\bap\encrypted\activity_message\receipts\activity_incident_grants.h" />
+    <ClInclude Include="src\server\bap\encrypted\activity_message\receipts\activity_kill_progress.h" />
     <ClInclude Include="src\state\activity\receipts\definition.h" />
     <ClInclude Include="src\state\activity\receipts\activity_receipts.h" />
     <ClInclude Include="src\core\settings\server\activation\definition.h" />

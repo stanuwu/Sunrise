@@ -155,6 +155,8 @@ enum class WriteStatus {
         static_cast<std::uint32_t>(domains.pursuits.size()),
         static_cast<std::uint32_t>(domains.starterSets.size()),
         static_cast<std::uint32_t>(domains.plugInsertionRules.size()),
+        static_cast<std::uint32_t>(domains.enemyRaces.size()),
+        static_cast<std::uint32_t>(domains.labelGroups.size()),
         domains.positionFingerprint,
         domains.constants,
         checksum,

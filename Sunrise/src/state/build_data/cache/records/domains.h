@@ -9,6 +9,7 @@
 #include "../../abilities/definition.h"
 #include "../../bounties/definition.h"
 #include "../../collectibles/collectible_catalog.h"
+#include "../../combat/definition.h"
 #include "../../hash_names/definition.h"
 #include "../../inventory/buckets/definition.h"
 #include "../../items/catalysts/definition.h"
@@ -84,6 +85,8 @@ struct DomainCounts {
     std::size_t pursuits{};
     std::size_t starterSets{};
     std::size_t plugInsertionRules{};
+    std::size_t enemyRaces{};
+    std::size_t labelGroups{};
 };
 
 /** Fixed caller storage used while decoding the cache domains. */
@@ -139,6 +142,8 @@ struct MutableDomains {
     std::span<pursuits::Definition> pursuits;
     std::span<starter_sets::Definition> starterSets;
     std::span<items::insertion_rules::Rule> plugInsertionRules;
+    std::span<combat::EnemyRace> enemyRaces;
+    std::span<combat::LabelGroup> labelGroups;
 };
 
 /** Read-only complete views used for the checks and for cache encoding. */
@@ -194,6 +199,8 @@ struct Domains {
     std::span<const pursuits::Definition> pursuits;
     std::span<const starter_sets::Definition> starterSets;
     std::span<const items::insertion_rules::Rule> plugInsertionRules;
+    std::span<const combat::EnemyRace> enemyRaces;
+    std::span<const combat::LabelGroup> labelGroups;
 };
 
 } // namespace sunrise::state::build_data::cache::records

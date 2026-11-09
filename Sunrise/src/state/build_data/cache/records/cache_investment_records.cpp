@@ -416,4 +416,34 @@ bool decode(const SObjectDefinitionRecord& record, sobjects::Definition& value) 
     return true;
 }
 
+/** Encodes one actor class race with its padding zeroed. */
+bool encode(const combat::EnemyRace& value, EnemyRaceRecord& record) noexcept {
+    record = {};
+    record.classHash = value.classHash;
+    record.race = value.race;
+    return true;
+}
+
+/** Decodes one actor class race after checking its padding. */
+bool decode(const EnemyRaceRecord& record, combat::EnemyRace& value) noexcept {
+    value = {};
+    if (record.reserved != decltype(record.reserved){}) {
+        return false;
+    }
+    value = {record.classHash, record.race};
+    return true;
+}
+
+/** Encodes one combat label group membership. */
+bool encode(const combat::LabelGroup& value, LabelGroupRecord& record) noexcept {
+    record = {value.groupHash, value.labelHash};
+    return true;
+}
+
+/** Decodes one combat label group membership. */
+bool decode(const LabelGroupRecord& record, combat::LabelGroup& value) noexcept {
+    value = {record.groupHash, record.labelHash};
+    return true;
+}
+
 } // namespace sunrise::state::build_data::cache::records

@@ -70,6 +70,8 @@ namespace {
         header.pursuitCount,
         header.starterSetCount,
         header.plugInsertionRuleCount,
+        header.enemyRaceCount,
+        header.labelGroupCount,
     };
 }
 

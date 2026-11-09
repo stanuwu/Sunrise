@@ -32,6 +32,7 @@
 #include "../../../../activity/mission/mission_script_actor_path_sense.h"
 #include "../../../../activity/mission/mission_script_squad_sense.h"
 #include "activity_incident_grants.h"
+#include "activity_kill_progress.h"
 
 namespace sunrise::server::bap::encrypted::activity_message::receipts {
 namespace {
@@ -513,6 +514,7 @@ static Framed frame_incident_impl(const message::Request& request,
         *output = parsed;
     }
     apply_incident_grants(parsed);
+    apply_kill_progress(parsed);
     report(core::log::Level::debug,
            "ev=activity stage=incident result=accepted target=%u extra=%u selector=%u "
            "optional=%u payload=%u",

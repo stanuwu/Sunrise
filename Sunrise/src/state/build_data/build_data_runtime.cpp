@@ -11,6 +11,7 @@
 #include "bounties/bounty_catalog.h"
 #include "cache/internal.h"
 #include "collectibles/collectible_catalog.h"
+#include "combat/combat_catalog.h"
 #include "constants/investment_constant_catalog.h"
 #include "hash_names/hash_name_catalog.h"
 #include "inventory/buckets/inventory_bucket_catalog.h"
@@ -164,6 +165,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         // An empty table publishes too, so creation keeps refusing an unknown layout.
         || !starter_sets::replace(domains.starterSets)
         || !items::insertion_rules::replace(domains.plugInsertionRules)
+        || !combat::replace(domains.enemyRaces, domains.labelGroups)
         || !records::replace(domains.records,
                              domains.recordObjectives,
                              domains.recordIntervals,

@@ -109,6 +109,10 @@ namespace sunrise::state::build_data::cache::records {
                           PlugInsertionRuleRecord& record) noexcept;
 [[nodiscard]] bool decode(const PlugInsertionRuleRecord& record,
                           items::insertion_rules::Rule& value) noexcept;
+[[nodiscard]] bool encode(const combat::EnemyRace& value, EnemyRaceRecord& record) noexcept;
+[[nodiscard]] bool decode(const EnemyRaceRecord& record, combat::EnemyRace& value) noexcept;
+[[nodiscard]] bool encode(const combat::LabelGroup& value, LabelGroupRecord& record) noexcept;
+[[nodiscard]] bool decode(const LabelGroupRecord& record, combat::LabelGroup& value) noexcept;
 
 [[nodiscard]] bool encode(const build_data::records::Objective& value,
                           RecordObjectiveRecord& record) noexcept;

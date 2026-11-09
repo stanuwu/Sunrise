@@ -6,6 +6,7 @@
 
 #include "../../abilities/ability_bucket_catalog.h"
 #include "../../bounties/bounty_catalog.h"
+#include "../../combat/combat_catalog.h"
 #include "../../hash_names/hash_name_catalog.h"
 #include "../../inventory/buckets/inventory_bucket_catalog.h"
 #include "../../items/insertion_rules/insertion_rule_catalog.h"
@@ -189,7 +190,9 @@ bool counts_fit(const DomainCounts& counts, MutableDomains domains) noexcept {
            && counts.objectiveInstructions <= domains.objectiveInstructions.size()
            && counts.pursuits <= domains.pursuits.size()
            && counts.starterSets <= domains.starterSets.size()
-           && counts.plugInsertionRules <= domains.plugInsertionRules.size();
+           && counts.plugInsertionRules <= domains.plugInsertionRules.size()
+           && counts.enemyRaces <= domains.enemyRaces.size()
+           && counts.labelGroups <= domains.labelGroups.size();
 }
 
 /** Sorts every filled domain before the checks, so the written file is always the same. */
@@ -282,6 +285,7 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         // An empty table is complete: an installed table with another layout publishes none.
         || !starter_sets::valid(domains.starterSets)
         || !items::insertion_rules::valid(domains.plugInsertionRules)
+        || !combat::valid(domains.enemyRaces) || !combat::valid(domains.labelGroups)
         || !build_data::records::valid(domains.records,
                                        domains.recordObjectives,
                                        domains.recordIntervals,

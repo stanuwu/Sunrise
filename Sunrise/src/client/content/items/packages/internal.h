@@ -286,6 +286,19 @@ read_investment_constants(const reader::Source& source,
                           state::build_data::constants::InvestmentConstants& output) noexcept;
 
 /**
+ * Reads and publishes the race of every actor class and the members of every combat label group.
+ * @param source Package source.
+ * @param scratch Reader scratch.
+ * @param root Investment root bytes.
+ * @param blob Scratch storage for each table blob.
+ * @return False when a table does not read or the publish fails, so a later slice retries it.
+ */
+[[nodiscard]] bool build_combat_taxonomy(const reader::Source& source,
+                                         reader::Scratch& scratch,
+                                         std::span<const std::byte> root,
+                                         std::vector<std::byte>& blob) noexcept;
+
+/**
  * Reads and publishes the new-character table: per class, the items a new character gets.
  * @param source Package source.
  * @param scratch Reader scratch.

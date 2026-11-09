@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 
 #include "../build_data/items/quest_initialization.h"
 #include "../build_data/records/definition.h"
@@ -911,6 +912,52 @@ enum class PursuitRedemption : std::uint8_t {
                                                            std::uint64_t seed,
                                                            PendingRecordRewardGrant& mutation,
                                                            const char** refusal = nullptr) noexcept;
+
+/** The facts one kill incident reports, as kill objectives read them. */
+struct KillObservation {
+    /** Player key of the killer; a character's player key is its SOID. */
+    std::uint64_t killerKey{};
+    /** Zero unless the victim was a player. */
+    std::uint64_t victimKey{};
+    /** Name hash of the victim's actor class. */
+    std::uint32_t victimClassHash{};
+    /** The victim record's combatant flag. */
+    bool victimCombatant{};
+    /** Combat labels of the killing source, the killing actor and the victim. */
+    std::span<const std::uint32_t> sourceLabels{};
+    std::span<const std::uint32_t> actorLabels{};
+    std::span<const std::uint32_t> victimLabels{};
+    /** Equipment slot of the killing source; absent when the incident omits it. */
+    std::optional<std::int8_t> equipmentSlot{};
+    /** Ability selector of the killing source; -1 names no ability. */
+    std::optional<std::int8_t> abilitySelector{};
+    /** Damage type of the final blow; -1 when the incident names none. */
+    std::int8_t damageType{-1};
+    /** Package name of the destination the kill happened in. */
+    std::string_view destination{};
+};
+
+/** How one kill changed the selected character's held bounties. */
+enum class KillProgress : std::uint8_t {
+    /** At least one objective lane advanced and the save holds it. */
+    advanced,
+    /** The kill counted, but no held bounty has an open objective it meets. */
+    unchanged,
+    /** The kill is not the selected character's enemy kill, or the save refused the change. */
+    refused,
+    /** A catalog is unpublished, or a saved read or allocation failed, so nothing was decided. */
+    notReady,
+};
+
+/**
+ * Advances, by one, every open objective lane of the selected character's held bounties that the
+ * kill meets, in one save transaction.
+ * @param nowSeconds Server time in Unix seconds; an expired bounty does not advance.
+ * @param refusal Receives a static reason when nothing advanced.
+ */
+[[nodiscard]] KillProgress advance_kill_objectives(const KillObservation& kill,
+                                                   std::int64_t nowSeconds,
+                                                   const char** refusal = nullptr) noexcept;
 
 /** Reserves the selected character's next mutation serial for a transient inventory update. */
 [[nodiscard]] bool

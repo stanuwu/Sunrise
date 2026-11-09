@@ -61,7 +61,9 @@ namespace {
            && domains.objectiveInstructions.size() <= kMaximumCount
            && domains.pursuits.size() <= kMaximumCount
            && domains.starterSets.size() <= kMaximumCount
-           && domains.plugInsertionRules.size() <= kMaximumCount;
+           && domains.plugInsertionRules.size() <= kMaximumCount
+           && domains.enemyRaces.size() <= kMaximumCount
+           && domains.labelGroups.size() <= kMaximumCount;
 }
 
 /** @return True when the requested final-name rule is one of the declared values. */

@@ -11,6 +11,7 @@
 #include "../../cache/internal.h"
 #include "../../cache/records/validation.h"
 #include "../../collectibles/collectible_catalog.h"
+#include "../../combat/combat_catalog.h"
 #include "../../constants/investment_constant_catalog.h"
 #include "../../hash_names/hash_name_catalog.h"
 #include "../../inventory/buckets/inventory_bucket_catalog.h"
@@ -111,6 +112,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && starter_sets::snapshot(scratch.starterSets, counts.starterSets)
            && items::insertion_rules::snapshot(scratch.plugInsertionRules,
                                                counts.plugInsertionRules)
+           && combat::snapshot(scratch.enemyRaces, counts.enemyRaces)
+           && combat::snapshot(scratch.labelGroups, counts.labelGroups)
            && records::snapshot(scratch.records, counts.records)
            && records::snapshot_objectives(scratch.recordObjectives, counts.recordObjectives)
            && records::snapshot_intervals(scratch.recordIntervals, counts.recordIntervals)
@@ -150,7 +153,7 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && season_pass_ready() && repeatable_bounties_ready()
-           && starter_sets_ready() && plug_insertion_rules_ready()
+           && starter_sets_ready() && plug_insertion_rules_ready() && combat_taxonomy_ready()
            && (reward_definitions_ready() || state.rewardsUnsupported)
            && record_definitions_ready() && node_definitions_ready() && sobject_definitions_ready()
            && scenario_layouts_ready() && spawn_sets_ready() && hash_names_ready()
@@ -322,6 +325,8 @@ cache::records::MutableDomains scratch_domains(Context& state, std::size_t named
             state.starterSetScratch),
         ensure_scratch<items::insertion_rules::Rule, items::insertion_rules::kRuleCapacity>(
             state.plugInsertionRuleScratch),
+        ensure_scratch<combat::EnemyRace, combat::kEnemyRaceCapacity>(state.enemyRaceScratch),
+        ensure_scratch<combat::LabelGroup, combat::kLabelGroupCapacity>(state.labelGroupScratch),
     };
 }
 
@@ -364,6 +369,8 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.pursuitScratch);
     release_bank(state.starterSetScratch);
     release_bank(state.plugInsertionRuleScratch);
+    release_bank(state.enemyRaceScratch);
+    release_bank(state.labelGroupScratch);
     release_bank(state.recordScratch);
     release_bank(state.recordObjectiveScratch);
     release_bank(state.recordIntervalScratch);
@@ -489,6 +496,8 @@ cache::records::Domains occupied_domains(Context& state,
                                                   counts.starterSets},
         std::span<const items::insertion_rules::Rule>{state.plugInsertionRuleScratch.data(),
                                                       counts.plugInsertionRules},
+        std::span<const combat::EnemyRace>{state.enemyRaceScratch.data(), counts.enemyRaces},
+        std::span<const combat::LabelGroup>{state.labelGroupScratch.data(), counts.labelGroups},
     };
 }
 

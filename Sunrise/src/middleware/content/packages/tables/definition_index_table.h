@@ -505,6 +505,20 @@ inline constexpr std::size_t kRestrictedGrantTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, unk3b8));
 // Unnamed in the generated root; the shipped slot 59 tag is a C8080787a list naming one item.
 static_assert(kRestrictedGrantTableSlot == 59);
+/** The investment root holds the actor class race table at this slot. */
+inline constexpr std::size_t kEnemyRaceTableSlot =
+    root_slot(offsetof(schema::generated::InvestmentRoot, unk1a8));
+// Unnamed in the generated root; the shipped slot 26 tag is a C80807bbb table of 66 class rows.
+static_assert(kEnemyRaceTableSlot == 26);
+/** Element class of the actor class race rows. */
+inline constexpr std::uint32_t kEnemyRaceRowClass = schema::generated::C80807bc0::kClass;
+/** The race table holds its rows in this array. */
+inline constexpr std::size_t kEnemyRaceArrayDescriptor =
+    offsetof(schema::generated::C80807bbb, table);
+/** A row holds the class name hash, then the race ordinal in a word the schema leaves unnamed. */
+inline constexpr std::size_t kEnemyRaceClassOffset = offsetof(schema::generated::C80807bc0, unk0);
+inline constexpr std::size_t kEnemyRaceOrdinalOffset = offsetof(schema::generated::C80807bc0, gap4);
+inline constexpr std::size_t kEnemyRaceRowStride = sizeof(schema::generated::C80807bc0);
 /** Element class of the restricted-grant rows. */
 inline constexpr std::uint32_t kRestrictedGrantElementClass = schema::generated::C8080787c::kClass;
 /** The list tag holds its rows in this array. */

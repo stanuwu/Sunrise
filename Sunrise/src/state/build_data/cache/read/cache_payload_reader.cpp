@@ -146,6 +146,8 @@ void clear(records::MutableDomains output) noexcept {
     std::fill(output.plugInsertionRules.begin(),
               output.plugInsertionRules.end(),
               items::insertion_rules::Rule{});
+    std::fill(output.enemyRaces.begin(), output.enemyRaces.end(), combat::EnemyRace{});
+    std::fill(output.labelGroups.begin(), output.labelGroups.end(), combat::LabelGroup{});
 }
 
 /** Computes the exact file size for every record array. */
@@ -203,7 +205,9 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.pursuits, sizeof(records::PursuitRecord), size)
            && add_records(counts.starterSets, sizeof(records::StarterSetRecord), size)
            && add_records(
-               counts.plugInsertionRules, sizeof(records::PlugInsertionRuleRecord), size);
+               counts.plugInsertionRules, sizeof(records::PlugInsertionRuleRecord), size)
+           && add_records(counts.enemyRaces, sizeof(records::EnemyRaceRecord), size)
+           && add_records(counts.labelGroups, sizeof(records::LabelGroupRecord), size);
 }
 
 /** Reads every payload array and checks the decoded domains as one transaction. */
@@ -359,6 +363,12 @@ bool read_payload(HANDLE file,
     valid = valid
             && read_domain<records::PlugInsertionRuleRecord>(
                 file, output.plugInsertionRules.first(counts.plugInsertionRules), checksum);
+    valid = valid
+            && read_domain<records::EnemyRaceRecord>(
+                file, output.enemyRaces.first(counts.enemyRaces), checksum);
+    valid = valid
+            && read_domain<records::LabelGroupRecord>(
+                file, output.labelGroups.first(counts.labelGroups), checksum);
 
     if (!valid) {
         return false;
@@ -416,6 +426,8 @@ bool read_payload(HANDLE file,
             output.pursuits.first(counts.pursuits),
             output.starterSets.first(counts.starterSets),
             output.plugInsertionRules.first(counts.plugInsertionRules),
+            output.enemyRaces.first(counts.enemyRaces),
+            output.labelGroups.first(counts.labelGroups),
         });
 }
 

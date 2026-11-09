@@ -45,7 +45,8 @@ namespace {
            && state::build_data::sobject_definitions_ready()
            && state::build_data::investment_constants_ready()
            && state::build_data::starter_sets_ready() && exotic_catalysts_settled()
-           && pursuit_catalog_settled() && state::build_data::plug_insertion_rules_ready();
+           && pursuit_catalog_settled() && state::build_data::plug_insertion_rules_ready()
+           && state::build_data::combat_taxonomy_ready();
 }
 
 /**
@@ -288,6 +289,12 @@ bool build() noexcept {
                                               extracted)) {
                     (void)state::build_data::publish_investment_constants(extracted);
                 }
+            }
+            if (!state::build_data::combat_taxonomy_ready()) {
+                (void)build_combat_taxonomy(source,
+                                            storage.scratch,
+                                            std::span<const std::byte>{storage.root},
+                                            storage.child);
             }
             if (!state::build_data::starter_sets_ready()) {
                 (void)build_starter_sets(source,

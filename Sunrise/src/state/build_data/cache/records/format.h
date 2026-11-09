@@ -9,6 +9,7 @@
 #include "../../../gameplay/external/entity_position_profiles.h"
 #include "../../abilities/definition.h"
 #include "../../collectibles/collectible_catalog.h"
+#include "../../combat/definition.h"
 #include "../../constants/definition.h"
 #include "../../definition.h"
 #include "../../hash_names/definition.h"
@@ -36,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 84;
+inline constexpr std::uint32_t kCacheFormatVersion = 85;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -122,6 +123,8 @@ struct Header {
     std::uint32_t pursuitCount{};
     std::uint32_t starterSetCount{};
     std::uint32_t plugInsertionRuleCount{};
+    std::uint32_t enemyRaceCount{};
+    std::uint32_t labelGroupCount{};
     gameplay::entity_position_profiles::Fingerprint positionFingerprint{};
     InvestmentConstants constants{};
     std::uint64_t payloadChecksum{};
@@ -383,6 +386,20 @@ struct PlugInsertionRuleRecord {
     std::uint8_t readable{};
     /** Must be zero, so the packed rule row always matches. */
     std::array<std::uint8_t, 2> reserved{};
+};
+
+/** Disk form of one actor class's race. */
+struct EnemyRaceRecord {
+    std::uint32_t classHash{};
+    std::uint8_t race{};
+    /** Must be zero, so the packed race row always matches. */
+    std::array<std::uint8_t, 3> reserved{};
+};
+
+/** Disk form of one combat label's membership in one group. */
+struct LabelGroupRecord {
+    std::uint32_t groupHash{};
+    std::uint32_t labelHash{};
 };
 
 /** Disk form of one repeatable bounty and the item-type its pool is keyed by. */
@@ -788,7 +805,7 @@ static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 51 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 53 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)
                      + sizeof(gameplay::entity_position_profiles::Fingerprint));
 static_assert(sizeof(SpawnPointRecord)
@@ -834,6 +851,8 @@ static_assert(sizeof(SeasonPassRewardRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
                      + rewards::kSocketsPerItem * sizeof(RewardSocketOverrideRecord)
                      + season_pass::kConditionCapacity * sizeof(RewardInstructionRecord));
+static_assert(sizeof(EnemyRaceRecord) == sizeof(std::uint32_t) + 4 * sizeof(std::uint8_t));
+static_assert(sizeof(LabelGroupRecord) == 2 * sizeof(std::uint32_t));
 static_assert(sizeof(PlugInsertionRuleRecord)
               == 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t)
                      + items::insertion_rules::kConditionCapacity

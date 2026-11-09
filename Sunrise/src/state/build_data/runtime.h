@@ -11,6 +11,7 @@
 #include "abilities/definition.h"
 #include "bounties/definition.h"
 #include "collectibles/collectible_catalog.h"
+#include "combat/definition.h"
 #include "constants/definition.h"
 #include "definition.h"
 #include "hash_names/definition.h"
@@ -242,6 +243,28 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
 
 /** @return True when one plug definition occurs in any installed ordinary-socket plug pool. */
 [[nodiscard]] bool is_socket_plug_pooled(std::uint16_t plugDefinitionIndex) noexcept;
+
+/** @return True when the actor class races and combat label groups are in State. */
+[[nodiscard]] bool combat_taxonomy_ready() noexcept;
+
+/**
+ * Publishes the race of every installed actor class and every combat label group membership.
+ * @param races Rows in strictly ascending class order.
+ * @param groups Rows in strictly ascending group, then label, order.
+ * @return True when the rows pass the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool publish_combat_taxonomy(std::span<const combat::EnemyRace> races,
+                                           std::span<const combat::LabelGroup> groups) noexcept;
+
+/**
+ * Reads the race of one actor class, the class a kill incident names its victim by.
+ * @param race Receives the ordinal of the installed race enumeration.
+ * @return False when the race table does not name the class.
+ */
+[[nodiscard]] bool find_enemy_race(std::uint32_t classHash, std::uint8_t& race) noexcept;
+
+/** @return True when the installed label table puts the label in the named group. */
+[[nodiscard]] bool label_in_group(std::uint32_t groupHash, std::uint32_t labelHash) noexcept;
 
 /** @return True when the plugs' insertion rules are in State. */
 [[nodiscard]] bool plug_insertion_rules_ready() noexcept;

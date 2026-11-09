@@ -12,6 +12,7 @@
 #include "../../bounties/definition.h"
 #include "../../cache/records/domains.h"
 #include "../../collectibles/collectible_catalog.h"
+#include "../../combat/definition.h"
 #include "../../constants/definition.h"
 #include "../../definition.h"
 #include "../../hash_names/definition.h"
@@ -97,6 +98,8 @@ struct Context {
     std::vector<pursuits::Definition> pursuitScratch{};
     std::vector<starter_sets::Definition> starterSetScratch{};
     std::vector<items::insertion_rules::Rule> plugInsertionRuleScratch{};
+    std::vector<combat::EnemyRace> enemyRaceScratch{};
+    std::vector<combat::LabelGroup> labelGroupScratch{};
     std::vector<records::Definition> recordScratch{};
     std::vector<records::Objective> recordObjectiveScratch{};
     std::vector<records::Interval> recordIntervalScratch{};

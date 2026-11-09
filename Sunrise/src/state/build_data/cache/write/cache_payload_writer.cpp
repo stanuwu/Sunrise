@@ -118,7 +118,9 @@ bool payload_checksum(records::Domains domains, std::uint64_t& checksum) noexcep
            && checksum_domain<records::PursuitRecord>(domains.pursuits, checksum)
            && checksum_domain<records::StarterSetRecord>(domains.starterSets, checksum)
            && checksum_domain<records::PlugInsertionRuleRecord>(domains.plugInsertionRules,
-                                                                checksum);
+                                                                checksum)
+           && checksum_domain<records::EnemyRaceRecord>(domains.enemyRaces, checksum)
+           && checksum_domain<records::LabelGroupRecord>(domains.labelGroups, checksum);
 }
 
 /** Writes every array in the same order used by the payload checksum. */
@@ -171,7 +173,9 @@ bool write_payload(HANDLE file, records::Domains domains) noexcept {
            && write_domain<records::RewardInstructionRecord>(file, domains.objectiveInstructions)
            && write_domain<records::PursuitRecord>(file, domains.pursuits)
            && write_domain<records::StarterSetRecord>(file, domains.starterSets)
-           && write_domain<records::PlugInsertionRuleRecord>(file, domains.plugInsertionRules);
+           && write_domain<records::PlugInsertionRuleRecord>(file, domains.plugInsertionRules)
+           && write_domain<records::EnemyRaceRecord>(file, domains.enemyRaces)
+           && write_domain<records::LabelGroupRecord>(file, domains.labelGroups);
 }
 
 } // namespace sunrise::state::build_data::cache::writer
