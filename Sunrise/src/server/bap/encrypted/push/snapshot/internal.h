@@ -21,6 +21,14 @@ namespace sunrise::server::bap::encrypted::push::snapshot {
                                            Prepared& prepared) noexcept;
 
 /** Builds the family-six fireteam snapshot naming this account's fireteam directory key. */
+/**
+ * Resolves the selected character's equipped emblem to a native definition index.
+ * @param index Receives the native definition index; unchanged when no emblem resolves.
+ * @param definitionHash Receives the equipped emblem hash; unchanged when no emblem resolves.
+ */
+void read_selected_emblem(const state::AccountState& account,
+                          std::uint16_t& index,
+                          std::uint32_t& definitionHash) noexcept;
 [[nodiscard]] bool prepare_fireteam(Scratch& scratch,
                                     const middleware::queuez::Subscription& subscription,
                                     const Reservation& reservation,

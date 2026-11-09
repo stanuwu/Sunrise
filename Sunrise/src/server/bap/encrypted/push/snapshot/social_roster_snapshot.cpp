@@ -38,33 +38,6 @@ constexpr std::size_t kReportCapacity = 224;
  */
 constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFFU;
 
-/**
- * Resolves the selected character's equipped emblem to a native definition index.
- * The client reads this object as the account's emblem, so it must track the live loadout.
- * @param account Account snapshot, already read under the lock by the caller.
- * @param index Receives the native definition index; unchanged when no emblem resolves.
- * @param definitionHash Receives the equipped emblem hash; unchanged when no emblem resolves.
- */
-void read_selected_emblem(const state::AccountState& account,
-                          std::uint16_t& index,
-                          std::uint32_t& definitionHash) noexcept {
-    for (const state::CharacterState& character : account.characters) {
-        if (!character.selected) {
-            continue;
-        }
-        const auto& slot =
-            character.equipment
-                .slots[static_cast<std::size_t>(state::account::inventory::EquipmentSlot::emblem)];
-        state::build_data::items::Definition definition{};
-        if (slot.has_value()
-            && state::build_data::items::find_hash(slot->definitionHash, definition)) {
-            index = definition.definitionIndex;
-            definitionHash = slot->definitionHash;
-        }
-        return;
-    }
-}
-
 /** Zero is the record's own fill, so an unresolved fireteam writes nothing. */
 constexpr std::uint32_t kNoGroupKey = 0;
 /** All-one bits are the native no-group value and must not be minted from a fold. */
@@ -112,14 +85,25 @@ void resolve_member_facts(const state::AccountState& account,
                           std::uint64_t characterSoid,
                           MemberFacts& facts) noexcept {
     facts = {};
+    const auto representative = state::activity::fireteam::representative(account.primarySoid);
     if (account.presence.native.hasGroup
         && account.presence.native.characterSoid == characterSoid) {
         facts.groupKey = account.presence.native.groupKey;
         facts.memberCount = account.presence.native.memberCount;
-    } else if (const auto representative =
-                   state::activity::fireteam::representative(account.primarySoid);
-               representative != 0) {
+    } else if (representative != 0) {
         facts.groupKey = folded_group_key(representative);
+    }
+    // Membership is the server's own fireteam, so its count wins over the client's last upload.
+    if (representative != 0) {
+        std::int8_t members = 1;
+        for (state::AccountHandle handle = 0; handle < state::account_count(); ++handle) {
+            const auto soid = state::account_primary_soid(handle);
+            if (soid != 0 && soid != account.primarySoid
+                && state::activity::fireteam::connected(account.primarySoid, soid)) {
+                ++members;
+            }
+        }
+        facts.memberCount = members;
     }
     state::activity::destination::DestinationSelection seat{};
     const auto seatSession =
@@ -132,6 +116,33 @@ void resolve_member_facts(const state::AccountState& account,
 }
 
 } // namespace
+
+/**
+ * Resolves the selected character's equipped emblem to a native definition index.
+ * The client reads this object as the account's emblem, so it must track the live loadout.
+ * @param account Account snapshot, already read under the lock by the caller.
+ * @param index Receives the native definition index; unchanged when no emblem resolves.
+ * @param definitionHash Receives the equipped emblem hash; unchanged when no emblem resolves.
+ */
+void read_selected_emblem(const state::AccountState& account,
+                          std::uint16_t& index,
+                          std::uint32_t& definitionHash) noexcept {
+    for (const state::CharacterState& character : account.characters) {
+        if (!character.selected) {
+            continue;
+        }
+        const auto& slot =
+            character.equipment
+                .slots[static_cast<std::size_t>(state::account::inventory::EquipmentSlot::emblem)];
+        state::build_data::items::Definition definition{};
+        if (slot.has_value()
+            && state::build_data::items::find_hash(slot->definitionHash, definition)) {
+            index = definition.definitionIndex;
+            definitionHash = slot->definitionHash;
+        }
+        return;
+    }
+}
 
 /** Builds the family-two snapshot carrying the social roster directory and member record. */
 bool prepare_social_roster(Scratch& scratch,

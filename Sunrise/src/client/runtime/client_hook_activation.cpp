@@ -33,7 +33,6 @@
 #include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/instance_mutex/instance_mutex_release.h"
 #include "../hooks/machine_id/machine_id_override.h"
-#include "../hooks/network/presence_publication.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_path/package_path_redirect.h"
@@ -172,8 +171,7 @@ void clear_game_targets() noexcept {
     if (core::settings::multiplayer()) {
         const auto rollbackAdapters = []() noexcept {
             // Each uninstall retains its native ownership when an in-flight call prevents removal.
-            bool removed = hooks::presence_publication::uninstall();
-            removed = hooks::instance_mutex::uninstall() && removed;
+            bool removed = hooks::instance_mutex::uninstall();
             removed = hooks::machine_id::uninstall() && removed;
             removed = hooks::account_registration::uninstall() && removed;
             if (!removed) {
@@ -197,13 +195,6 @@ void clear_game_targets() noexcept {
         // A second game on one PC needs its own machine id, so only that setup frees the guard.
         if (core::settings::get().client.machineId != 0) {
             (void)hooks::instance_mutex::install();
-        }
-        if (!hooks::presence_publication::install()) {
-            core::log::write(core::log::Channel::client,
-                             core::log::Level::error,
-                             "ev=activate stage=presence_publication result=fail");
-            rollbackAdapters();
-            return false;
         }
     }
     core::log::write(core::log::Channel::client,

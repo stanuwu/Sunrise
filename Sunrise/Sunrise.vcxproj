@@ -192,7 +192,6 @@
     <ClCompile Include="src\state\coop\compatibility.cpp" />
     <ClCompile Include="src\state\coop\reward_mail.cpp" />
     <ClCompile Include="src\server\bap\coop_admission.cpp" />
-    <ClCompile Include="src\client\hooks\network\presence_publication.cpp" />
     <ClCompile Include="src\core\settings\settings_upgrade.cpp" />
     <ClCompile Include="src\core\settings\client\client_settings_parser.cpp" />
     <ClCompile Include="src\core\settings\client\client_ui_settings_parser.cpp" />
@@ -2162,7 +2161,6 @@
     <ClInclude Include="src\core\json\reader.h" />
     <ClInclude Include="src\core\settings\role.h" />
     <ClInclude Include="src\core\network_service_socket.h" />
-    <ClInclude Include="src\client\hooks\network\presence_publication.h" />
     <ClInclude Include="src\core\settings\parser.h" />
     <ClInclude Include="src\core\settings\client\definition.h" />
     <ClInclude Include="src\core\settings\server\definition.h" />

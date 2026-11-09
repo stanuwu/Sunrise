@@ -21,7 +21,6 @@
 #include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/instance_mutex/instance_mutex_release.h"
 #include "../hooks/machine_id/machine_id_override.h"
-#include "../hooks/network/presence_publication.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_path/package_path_redirect.h"
@@ -78,13 +77,6 @@ bool shutdown() noexcept {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
                          "ev=shutdown stage=world_objects result=fail");
-        ReleaseSRWLockExclusive(&runtime::g_lock);
-        return false;
-    }
-    if (!hooks::presence_publication::uninstall()) {
-        core::log::write(core::log::Channel::client,
-                         core::log::Level::error,
-                         "ev=shutdown stage=presence_publication result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }

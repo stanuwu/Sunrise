@@ -12,10 +12,7 @@ struct NativePublication {
     NativePresence presence{};
 };
 
-/**
- * Relays the requested account's native roster record without projecting membership or UI
- * state.
- */
+/** Copies the requested account's published native roster record, tail included. */
 [[nodiscard]] bool project_fireteam(std::uint64_t accountSoid,
                                     std::span<const NativePublication> publications,
                                     std::array<std::byte, kNativeFireteamSize>& output) noexcept;

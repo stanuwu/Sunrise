@@ -21,8 +21,8 @@ bool project_fireteam(std::uint64_t accountSoid,
     if (!owner || !owner->presence.published || !owner->presence.hasFireteam) {
         return false;
     }
-    // WS702 and the family-six descriptor embed the same native 808079BE record. Membership,
-    // row ordering, occupancy and account tier belong to that record's publisher.
+    // WS702 and the family-six descriptor embed the same native 808079BE record. Its tail is the
+    // publisher's live state; the caller replaces its member records from the server's fireteam.
     output = owner->presence.fireteam;
     return true;
 }

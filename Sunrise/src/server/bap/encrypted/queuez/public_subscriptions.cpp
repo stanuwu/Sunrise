@@ -53,7 +53,11 @@ std::uint32_t generation(Scratch& scratch, const Subscription& subscription) noe
         return own;
     }
     if (subscription.family == datagen::kFireteamFamily) {
-        return profiles::public_generation();
+        // The descriptor's records follow the server's fireteam, so a membership change refreshes
+        // it.
+        const auto mixed = profiles::public_generation()
+                           ^ static_cast<std::uint32_t>(state::activity::fireteam::revision());
+        return mixed != 0 ? mixed : 1U;
     }
     if (subscription.family == datagen::kSocialRosterFamily) {
         // The roster row also carries the served account's seat and fireteam, and neither of
