@@ -335,6 +335,10 @@ struct PreparedProgressionCredit {
     std::uint16_t definitionIndex{};
     std::int32_t previousValue{};
     std::int32_t value{};
+    /** The reward marker whose pickup presents the credit. */
+    std::uint32_t markerHash{};
+    /** Serial reserved for the pickup row, or -1 when the credit moved nothing. */
+    std::int32_t presentationSerial{-1};
 };
 
 /** Record claim and all of its item rows committed as one transaction. */

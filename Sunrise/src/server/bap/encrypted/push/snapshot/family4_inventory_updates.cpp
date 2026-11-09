@@ -213,6 +213,67 @@ bool prepare_profile_item_acquisition(Scratch& scratch,
     return true;
 }
 
+/** Writes the gain into the item's first empty row and names that row in the change ring. */
+bool append_transient_reward_presentation(std::span<std::byte> characterBytes,
+                                          std::uint32_t itemHash,
+                                          std::int32_t amount,
+                                          std::int32_t mutationSerial) noexcept {
+    namespace character_layout = family4_datagen::character::layout;
+    namespace items = state::build_data::items;
+    namespace buckets = state::build_data::inventory::buckets;
+    // One new-item flag byte covers 8 inventory rows; an occupied row carries watermark 1.
+    constexpr std::size_t kBitsPerFlagByte = 8;
+    constexpr std::int32_t kOccupiedRowWatermark = 1;
+    constexpr std::uint16_t kEmptyDefinitionIndex = (std::numeric_limits<std::uint16_t>::max)();
+    items::Definition item{};
+    items::details::Definition detail{};
+    buckets::Descriptor bucket{};
+    if (characterBytes.size() < character_layout::kObjectSize || amount <= 0 || mutationSerial < 0
+        || !state::build_data::find_item_definition_hash(itemHash, item)
+        || !state::build_data::find_configured_item_detail(item.definitionIndex, detail)
+        || detail.definitionIndex != item.definitionIndex || detail.definitionHash != itemHash
+        || detail.bucketId != item.bucketId || detail.maxStackSize < 1
+        || detail.instancedDefinitionState != items::details::InstancedDefinitionState::stackable
+        || detail.equipmentSlot.has_value()
+        || !state::build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
+        || bucket.arraySelector != buckets::ArraySelector::character || bucket.slotCount == 0
+        || bucket.firstSlot >= character_layout::kInventoryCapacity
+        || bucket.slotCount > character_layout::kInventoryCapacity - bucket.firstSlot) {
+        return false;
+    }
+    auto& object = *reinterpret_cast<character_layout::Object*>(characterBytes.data());
+    auto& ring = object.inventoryChanges;
+    const std::size_t sequence = ring.nextSequence;
+    if (sequence != ring.writeSlot || sequence >= ring.records.size()
+        || !kChangeRecordIsZero(ring.records[sequence])) {
+        return false;
+    }
+    const auto rows = std::span(object.inventoryItems).subspan(bucket.firstSlot, bucket.slotCount);
+    const auto row = std::find_if(rows.begin(), rows.end(), [](const auto& entry) noexcept {
+        return entry.definitionIndex == kEmptyDefinitionIndex;
+    });
+    if (row == rows.end()) {
+        return false;
+    }
+    const auto rowIndex = static_cast<std::size_t>(&*row - object.inventoryItems.data());
+    *row = {};
+    row->definitionIndex = item.definitionIndex;
+    // The transient row carries the gain; the account object carries the total.
+    row->quantity = amount;
+    row->mutationSerial = mutationSerial;
+    object.newItemFlags[rowIndex / kBitsPerFlagByte] |= std::byte{1U}
+                                                        << (rowIndex % kBitsPerFlagByte);
+    object.instanceProgressWatermarks[rowIndex] = kOccupiedRowWatermark;
+    auto& change = ring.records[sequence];
+    change.sequence = static_cast<std::uint16_t>(sequence);
+    change.mutationSerial = mutationSerial;
+    change.kind = kChangeKind;
+    change.flags = kChangeFlags;
+    ring.writeSlot = static_cast<std::uint16_t>(sequence + 1);
+    ring.nextSequence = ring.writeSlot;
+    return true;
+}
+
 /** Builds the native XP pickup signal without making its one-slot reward item persistent. */
 bool prepare_seasonal_experience_presentation(
     Scratch& scratch,
@@ -223,13 +284,6 @@ bool prepare_seasonal_experience_presentation(
     Prepared& prepared) noexcept {
     // Seasonal XP is presented as this stackable item definition.
     constexpr std::uint32_t kExperienceItemHash = 2211488305U;
-    // One new-item flag byte covers 8 inventory rows; an occupied row carries watermark 1.
-    constexpr std::size_t kBitsPerFlagByte = 8;
-    constexpr std::int32_t kOccupiedRowWatermark = 1;
-    // The change ring holds one entry, so the next write slot and sequence are both 1.
-    constexpr std::uint16_t kChangeSequence = 0;
-    constexpr std::uint16_t kChangeNextWriteSlot = 1;
-    constexpr std::uint16_t kChangeNextSequence = 1;
 
     if (amount <= 0 || mutationSerial < 0 || !queuez::valid(before) || !before.family4Active
         || before.family4RootSoid == 0 || before.family4ResidentCount == 0
@@ -288,10 +342,7 @@ bool prepare_seasonal_experience_presentation(
 
     namespace character_layout = middleware::datagen::family4::character::layout;
     auto& characterObject = *reinterpret_cast<character_layout::Object*>(characterBytes.data());
-    const std::size_t rowIndex = bucket.firstSlot;
-    auto& row = characterObject.inventoryItems[rowIndex];
-    if (row.definitionIndex != (std::numeric_limits<std::uint16_t>::max)()
-        || characterObject.inventoryChanges.writeSlot != 0
+    if (characterObject.inventoryChanges.writeSlot != 0
         || characterObject.inventoryChanges.nextSequence != 0
         || !std::all_of(characterObject.inventoryChanges.records.cbegin(),
                         characterObject.inventoryChanges.records.cend(),
@@ -300,21 +351,9 @@ bool prepare_seasonal_experience_presentation(
         return report_failure("season_xp_character_state");
     }
 
-    row.definitionIndex = item.definitionIndex;
-    // The virtual item carries the gain; the account object carries cumulative XP.
-    row.quantity = amount;
-    row.mutationSerial = mutationSerial;
-    characterObject.newItemFlags[rowIndex / kBitsPerFlagByte] |= std::byte{1U}
-                                                                 << (rowIndex % kBitsPerFlagByte);
-    characterObject.instanceProgressWatermarks[rowIndex] = kOccupiedRowWatermark;
-    characterObject.inventoryChanges.writeSlot = kChangeNextWriteSlot;
-    characterObject.inventoryChanges.nextSequence = kChangeNextSequence;
-    auto& change = characterObject.inventoryChanges.records.front();
-    change.sequence = kChangeSequence;
-    change.mutationSerial = mutationSerial;
-    change.kind = kChangeKind;
-    change.flags = kChangeFlags;
-    if (!apply_acquisition_presentation(
+    if (!append_transient_reward_presentation(
+            characterBytes, kExperienceItemHash, amount, mutationSerial)
+        || !apply_acquisition_presentation(
             characterBytes, selected.loadout, acquisitionPresentationRows)) {
         clear_after(scratch, reservation);
         return report_failure("season_xp_presentation");
