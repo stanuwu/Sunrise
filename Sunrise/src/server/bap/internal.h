@@ -492,6 +492,15 @@ struct Session {
     bool accountResyncArmed{};
     /** Set when State refused every saved world reward, or none was saved, under the gate. */
     bool worldRewardsAwaitChange{};
+    /** A finished automatic pursuit sweep stays current until saved state or contracts change. */
+    std::uint64_t pursuitInvestmentRevision{};
+    std::uint64_t pursuitDefinitionsRevision{};
+    /** Selected character's inventory row the next sweep resumes at. */
+    std::size_t pursuitCompletionCursor{};
+    /** Family-4 version a refused automatic publication was reported under. */
+    std::int32_t pursuitPublicationVersion{};
+    bool pursuitCompletionScanned{};
+    bool pursuitPublicationFailureReported{};
     /**
      * Tick count after which the owed ability-icon refresh may go out. A subclass selection
      * invalidates the published ability buckets and the rebuild runs off the Client

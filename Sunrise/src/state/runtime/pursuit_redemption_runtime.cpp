@@ -637,6 +637,10 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     if ((source->flags & authored_inventory::kLockedItemFlag) != 0) {
         return PursuitRedemption::refused;
     }
+    reason = "suppressed";
+    if (contract.suppressCompletion) {
+        return PursuitRedemption::notRedeemable;
+    }
     static constexpr authored_inventory::ItemObjectives kUnsetItemValues{};
     const authored_inventory::ItemObjectives& itemValues =
         source->objectives.has_value() ? *source->objectives : kUnsetItemValues;

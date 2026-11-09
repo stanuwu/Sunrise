@@ -121,6 +121,7 @@
     <ClCompile Include="src\state\runtime\saved_selection_runtime.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_edit.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_redemption_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\pursuit_automatic_completion_runtime.cpp" />
     <ClCompile Include="src\state\runtime\kill_objective_runtime.cpp" />
     <ClCompile Include="src\state\runtime\season_pass_snapshot_runtime.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_link.cpp" />
@@ -1070,6 +1071,7 @@
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_deferred_push.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_investment_push.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_item_grant_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\pursuit_completion_push.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_family_repush.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_outcome_staging.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_update_frame.cpp" />
@@ -3024,6 +3026,7 @@
     <ClInclude Include="src\server\bap\encrypted\queuez\queuez_reward_staging.h" />
     <ClInclude Include="src\server\bap\encrypted\queuez\queuez_investment_push.h" />
     <ClInclude Include="src\server\bap\encrypted\queuez\queuez_item_grant_push.h" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\pursuit_completion_push.h" />
     <ClInclude Include="src\server\gameplay\entity_identities.h" />
     <ClInclude Include="src\server\gameplay\squad_entity_retirement.h" />
     <ClInclude Include="src\server\transport\bap_frame_batch.h" />

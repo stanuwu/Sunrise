@@ -12,6 +12,7 @@
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
+#include "pursuit_completion_push.h"
 #include "queuez_family_repush.h"
 #include "queuez_investment_push.h"
 #include "queuez_item_grant_push.h"
@@ -547,6 +548,9 @@ bool consume_deferred(Session& session,
     // A failed resync blocks every incremental that could depend on its missing objects.
     if (session.accountResyncArmed) {
         return false;
+    }
+    if (consume_pursuit_completion(session, scratch, response, written, touchesScratch)) {
+        return true;
     }
     if (consume_world_rewards(session, scratch, response, written, touchesScratch)) {
         return true;

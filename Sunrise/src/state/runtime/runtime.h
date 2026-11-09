@@ -911,8 +911,8 @@ prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
 enum class PursuitRedemption : std::uint8_t {
     prepared,
     /**
-     * The pursuit is incomplete or expired, or is a quest step whose progress is not held by the
-     * item; it is not redeemed, and the request is an ordinary removal.
+     * The pursuit is incomplete, expired or suppressed, or is a quest step whose progress is not
+     * held by the item; it is not redeemed, and the request is an ordinary removal.
      */
     notRedeemable,
     /** A catalog is unpublished, or a saved read or allocation failed, so nothing was decided. */
@@ -938,6 +938,24 @@ enum class PursuitRedemption : std::uint8_t {
                                                            std::uint64_t seed,
                                                            PendingRecordRewardGrant& mutation,
                                                            const char** refusal = nullptr) noexcept;
+
+/**
+ * Prepares redeeming the next held pursuit whose contract completes automatically, judging each
+ * one as a redemption request would.
+ * @param nowSeconds Server time in Unix seconds, which a bounty's deadline is compared with.
+ * @param seed Caller-drawn entropy for any wrapper a reward row names.
+ * @param cursor Selected character's inventory row the scan starts at; moves past each row read.
+ * @param mutation Receives the prepared grant.
+ * @param refusal Receives a static reason when no candidate could be judged.
+ * @return Prepared for the first candidate that redeems. Otherwise notReady when any candidate
+ *         could not be judged, refused when any was refused, and notRedeemable when none redeems.
+ */
+[[nodiscard]] PursuitRedemption
+prepare_next_automatic_pursuit(std::int64_t nowSeconds,
+                               std::uint64_t seed,
+                               std::size_t& cursor,
+                               PendingRecordRewardGrant& mutation,
+                               const char** refusal = nullptr) noexcept;
 
 /** The bubble a kill happened in. A bubble's name is unique only inside its scenario. */
 struct KillArea {
