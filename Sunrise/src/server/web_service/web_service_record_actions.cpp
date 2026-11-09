@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
 #include "../../middleware/crypto/random_bytes.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode1821.h"
@@ -106,7 +107,11 @@ prepare_record_reward(const middleware::web_service::Message& message,
     }
     const char* reason = nullptr;
     if (state::prepare_record_reward_grant(
-            std::span(rewards).first(rewardCount), recordIndex, *grant, &reason)
+            std::span(rewards).first(rewardCount),
+            recordIndex,
+            core::runtime::server_clock_seconds(),
+            *grant,
+            &reason)
         != state::RewardPreparation::prepared) {
         clear_mutation(outcome);
         report_record_reward(message,
@@ -129,7 +134,8 @@ bool prepare_season_pass_claim(std::uint16_t rewardIndex,
         return false;
     }
     reason = nullptr;
-    if (!state::prepare_season_pass_reward(rewardIndex, seed, claim, &reason)) {
+    if (!state::prepare_season_pass_reward(
+            rewardIndex, seed, core::runtime::server_clock_seconds(), claim, &reason)) {
         reason = reason != nullptr ? reason : "reward_preparation";
         return false;
     }

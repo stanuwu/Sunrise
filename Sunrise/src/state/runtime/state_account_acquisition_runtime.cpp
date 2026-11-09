@@ -162,19 +162,10 @@ finalize_item_acquisition(const AccountState& account,
     return true;
 }
 
-} // namespace runtime::detail
-
-namespace {
-
-/**
- * A bounty starts with its deadline. Other items, and a bounty whose contract is not read, start
- * with no per-instance values.
- * @return False when the deadline does not fit its signed lane.
- */
-[[nodiscard]] bool
-acquired_objectives(std::uint16_t definitionIndex,
-                    std::int64_t nowSeconds,
-                    std::optional<authored_inventory::ItemObjectives>& objectives) noexcept {
+/** The deadline is the acquisition time plus the contract's lifetime. */
+bool acquired_objectives(std::uint16_t definitionIndex,
+                         std::int64_t nowSeconds,
+                         std::optional<authored_inventory::ItemObjectives>& objectives) noexcept {
     objectives.reset();
     build_data::pursuits::Definition contract{};
     if (!build_data::find_pursuit_definition(definitionIndex, contract)
@@ -189,6 +180,10 @@ acquired_objectives(std::uint16_t definitionIndex,
     (*objectives)[authored_inventory::kItemExpiryLane] = static_cast<std::int32_t>(deadline);
     return true;
 }
+
+} // namespace runtime::detail
+
+namespace {
 
 /** A vendor row pays its own price; a Collections pull pays the collectible's materials. */
 [[nodiscard]] bool

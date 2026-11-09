@@ -691,6 +691,7 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
                              &plan.wrapperFlags,
                              instanceSoid,
                              {},
+                             nowSeconds,
                              mutation,
                              &reason);
     if (grant != RewardPreparation::prepared) {

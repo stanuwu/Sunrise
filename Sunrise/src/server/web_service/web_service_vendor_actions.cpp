@@ -660,7 +660,12 @@ prepare_vendor_reward_grant(std::uint16_t itemDefinitionIndex,
     reason = grant == nullptr ? "storage" : "random_source";
     if (grant != nullptr
         && middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))
-        && state::prepare_vendor_reward(itemDefinitionIndex, price, seed, *grant, &reason)
+        && state::prepare_vendor_reward(itemDefinitionIndex,
+                                        price,
+                                        seed,
+                                        core::runtime::server_clock_seconds(),
+                                        *grant,
+                                        &reason)
                == state::RewardPreparation::prepared) {
         return true;
     }

@@ -808,11 +808,13 @@ prepare_item_acquisition(std::uint16_t collectibleIndex,
 /**
  * Resolves an installed item or wrapper for the selected character.
  * @param seed Caller-drawn entropy for any wrapper draws.
+ * @param nowSeconds Server time in Unix seconds; a granted bounty's lifetime runs from it.
  * @param refusal Receives a static reason on failure.
  */
 [[nodiscard]] RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
                                                     std::uint32_t quantity,
                                                     std::uint64_t seed,
+                                                    std::int64_t nowSeconds,
                                                     PendingRecordRewardGrant& mutation,
                                                     const char** refusal = nullptr) noexcept;
 /**
@@ -827,12 +829,14 @@ prepare_item_acquisition(std::uint16_t collectibleIndex,
  * after-image.
  * @param price The row's cost entries.
  * @param seed Caller-drawn entropy for any wrapper draws.
+ * @param nowSeconds Server time in Unix seconds; a granted bounty's lifetime runs from it.
  * @param refusal Receives a static reason on failure.
  */
 [[nodiscard]] RewardPreparation
 prepare_vendor_reward(std::uint16_t itemIndex,
                       std::span<const build_data::vendors::SaleCost> price,
                       std::uint64_t seed,
+                      std::int64_t nowSeconds,
                       PendingRecordRewardGrant& mutation,
                       const char** refusal = nullptr) noexcept;
 /**
@@ -840,21 +844,25 @@ prepare_vendor_reward(std::uint16_t itemIndex,
  * its draws land in one after-image.
  * @param instanceSoid The held wrapper instance.
  * @param seed Caller-drawn entropy for the draws.
+ * @param nowSeconds Server time in Unix seconds; a granted bounty's lifetime runs from it.
  * @param refusal Receives a static reason on failure.
  * @return Deferred when the character holds no such unit or has no room; unresolvable when the
  *         item is not a stored wrapper or its draw is refused.
  */
 [[nodiscard]] RewardPreparation prepare_wrapper_opening(std::uint64_t instanceSoid,
                                                         std::uint64_t seed,
+                                                        std::int64_t nowSeconds,
                                                         PendingRecordRewardGrant& mutation,
                                                         const char** refusal = nullptr) noexcept;
 /**
  * Prepares an eligible native pass row without writing its claim or acquisition flags.
  * @param seed Caller-drawn entropy; the commit replays the same draw from it.
+ * @param nowSeconds Server time in Unix seconds; a granted bounty's lifetime runs from it.
  * @param refusal Receives a static reason on failure.
  */
 [[nodiscard]] bool prepare_season_pass_reward(std::uint16_t rewardIndex,
                                               std::uint64_t seed,
+                                              std::int64_t nowSeconds,
                                               PendingSeasonPassReward& mutation,
                                               const char** refusal = nullptr) noexcept;
 /** Applies a prepared grant's acquisition flags to the saved banks; false if one moved. */
@@ -868,12 +876,14 @@ prepare_vendor_reward(std::uint16_t itemIndex,
  * Prepares all direct reward rows over one shared account after-image.
  * @param rewards Item rows the record grants.
  * @param claimedRecordIndex Record already claimed in the banks, or kUnclaimedRecordIndex.
+ * @param nowSeconds Server time in Unix seconds; a granted bounty's lifetime runs from it.
  * @param mutation Receives the prepared grant.
  * @return Prepared when every row fits the account after-image.
  */
 [[nodiscard]] RewardPreparation
 prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                             std::uint16_t claimedRecordIndex,
+                            std::int64_t nowSeconds,
                             PendingRecordRewardGrant& mutation,
                             const char** refusal = nullptr) noexcept;
 

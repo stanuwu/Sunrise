@@ -5,6 +5,7 @@
 #include <new>
 #include <span>
 
+#include "../../../../core/runtime/server_clock.h"
 #include "../../../../middleware/crypto/random_bytes.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/runtime/runtime.h"
@@ -56,6 +57,7 @@ ItemGrantStage stage_item_grant(const ItemGrant& grant,
     const auto preparation = state::prepare_item_reward(grant.itemDefinitionIndex,
                                                         static_cast<std::uint32_t>(grant.quantity),
                                                         seed,
+                                                        core::runtime::server_clock_seconds(),
                                                         *pending,
                                                         &reason);
     if (preparation == state::RewardPreparation::unresolvable) {

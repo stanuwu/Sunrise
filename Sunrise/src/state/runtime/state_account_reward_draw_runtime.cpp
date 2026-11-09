@@ -32,6 +32,7 @@ namespace {
  * @param resolved Grants and wrapper flags of one draw.
  * @param price A vendor row's cost entries the grant spends; empty for none.
  * @param openedInstanceSoid Held wrapper the draw opened, removed in the same grant; zero for none.
+ * @param nowSeconds Server time in Unix seconds; a granted bounty's lifetime runs from it.
  * @param mutation Receives the prepared grant.
  * @param refusal Receives a static reason when the result is not prepared.
  * @return Unresolvable when the draw outgrew the grant rows.
@@ -40,6 +41,7 @@ namespace {
 prepare_resolved_reward(const reward_resolution::Result& resolved,
                         std::span<const build_data::vendors::SaleCost> price,
                         std::uint64_t openedInstanceSoid,
+                        std::int64_t nowSeconds,
                         PendingRecordRewardGrant& mutation,
                         const char** refusal) noexcept {
     std::array<DirectRecordReward, kRecordRewardGrantCapacity> rows{};
@@ -58,6 +60,7 @@ prepare_resolved_reward(const reward_resolution::Result& resolved,
                                 &resolved.wrapperFlags,
                                 openedInstanceSoid,
                                 price,
+                                nowSeconds,
                                 mutation,
                                 refusal);
 }
@@ -225,6 +228,7 @@ bool uses_reward_definition(const build_data::items::Definition& item) noexcept 
  */
 bool prepare_season_pass_reward(std::uint16_t rewardIndex,
                                 std::uint64_t seed,
+                                std::int64_t nowSeconds,
                                 PendingSeasonPassReward& mutation,
                                 const char** refusal) noexcept {
     const char* unused = nullptr;
@@ -256,7 +260,7 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
         return false;
     }
     reason = "reward_placement";
-    if (prepare_resolved_reward(resolved, {}, 0, mutation.grant, &reason)
+    if (prepare_resolved_reward(resolved, {}, 0, nowSeconds, mutation.grant, &reason)
         != RewardPreparation::prepared) {
         return false;
     }
@@ -404,6 +408,7 @@ resolve_item_reward(std::uint16_t itemIndex,
                     std::uint32_t quantity,
                     std::span<const build_data::vendors::SaleCost> price,
                     std::uint64_t seed,
+                    std::int64_t nowSeconds,
                     PendingRecordRewardGrant& mutation,
                     const char** refusal) noexcept {
     const char* unused = nullptr;
@@ -434,7 +439,7 @@ resolve_item_reward(std::uint16_t itemIndex,
         return catalog_refusal(reason);
     }
     reason = "reward_placement";
-    return prepare_resolved_reward(resolved, price, 0, mutation, &reason);
+    return prepare_resolved_reward(resolved, price, 0, nowSeconds, mutation, &reason);
 }
 
 /**
@@ -460,6 +465,7 @@ resolve_item_reward(std::uint16_t itemIndex,
 /** The held wrapper leaves in the grant that places its draws, so they publish together. */
 RewardPreparation prepare_wrapper_opening(std::uint64_t instanceSoid,
                                           std::uint64_t seed,
+                                          std::int64_t nowSeconds,
                                           PendingRecordRewardGrant& mutation,
                                           const char** refusal) noexcept {
     const char* unused = nullptr;
@@ -494,16 +500,17 @@ RewardPreparation prepare_wrapper_opening(std::uint64_t instanceSoid,
         return catalog_refusal(reason);
     }
     reason = "reward_placement";
-    return prepare_resolved_reward(resolved, {}, instanceSoid, mutation, &reason);
+    return prepare_resolved_reward(resolved, {}, instanceSoid, nowSeconds, mutation, &reason);
 }
 
 /** Resolves an item granted without a price. */
 RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
                                       std::uint32_t quantity,
                                       std::uint64_t seed,
+                                      std::int64_t nowSeconds,
                                       PendingRecordRewardGrant& mutation,
                                       const char** refusal) noexcept {
-    return resolve_item_reward(itemIndex, quantity, {}, seed, mutation, refusal);
+    return resolve_item_reward(itemIndex, quantity, {}, seed, nowSeconds, mutation, refusal);
 }
 
 /**
@@ -536,9 +543,10 @@ bool vendor_reward_item(std::uint16_t itemIndex) noexcept {
 RewardPreparation prepare_vendor_reward(std::uint16_t itemIndex,
                                         std::span<const build_data::vendors::SaleCost> price,
                                         std::uint64_t seed,
+                                        std::int64_t nowSeconds,
                                         PendingRecordRewardGrant& mutation,
                                         const char** refusal) noexcept {
-    return resolve_item_reward(itemIndex, 1, price, seed, mutation, refusal);
+    return resolve_item_reward(itemIndex, 1, price, seed, nowSeconds, mutation, refusal);
 }
 
 /**

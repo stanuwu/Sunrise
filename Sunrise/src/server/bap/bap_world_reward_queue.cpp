@@ -5,6 +5,7 @@
 #include <span>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
 #include "../../middleware/crypto/random_bytes.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/investment/store_internal.h"
@@ -60,6 +61,7 @@ WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noe
         preparation = state::prepare_item_reward(request.itemDefinitionIndex,
                                                  static_cast<std::uint32_t>(request.quantity),
                                                  seed,
+                                                 core::runtime::server_clock_seconds(),
                                                  *grant,
                                                  &reason);
     }

@@ -464,7 +464,11 @@ void open_stored_wrapper(const middleware::web_service::Message& message,
         reason = grant == nullptr ? "storage" : "random_source";
         if (grant != nullptr
             && middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))
-            && state::prepare_wrapper_opening(request.instanceSoid, seed, *grant, &reason)
+            && state::prepare_wrapper_opening(request.instanceSoid,
+                                              seed,
+                                              core::runtime::server_clock_seconds(),
+                                              *grant,
+                                              &reason)
                    == state::RewardPreparation::prepared) {
             return;
         }

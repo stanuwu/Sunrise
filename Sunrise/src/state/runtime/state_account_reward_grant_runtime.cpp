@@ -248,6 +248,8 @@ struct GrantView {
     /** Lowest identity a new instance may take; placement advances it past each one used. */
     std::uint64_t& nextInstanceSoid;
     PlacedRows& placed;
+    /** Server time in Unix seconds; a granted bounty's lifetime runs from it. */
+    std::int64_t nowSeconds{};
 };
 
 /**
@@ -387,6 +389,10 @@ struct GrantView {
         if (!apply_reward_sockets(detail, requested.sockets, arrival.instance.sockets, &reason)) {
             return RewardPreparation::unresolvable;
         }
+        reason = "bounty_deadline";
+        if (!acquired_objectives(item.definitionIndex, view.nowSeconds, arrival.instance.objectives)) {
+            return RewardPreparation::unresolvable;
+        }
     }
     const auto placement = place_arrival(view.working,
                                          view.characterIndex,
@@ -511,6 +517,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                      const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
                      std::uint64_t redeemedInstanceSoid,
                      std::span<const build_data::vendors::SaleCost> price,
+                     std::int64_t nowSeconds,
                      PendingRecordRewardGrant& mutation,
                      const char** refusal) noexcept {
     const char* unused = nullptr;
@@ -577,7 +584,8 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                              characterIndex,
                              std::span(mutation.rewards).first(index),
                              nextInstanceSoid,
-                             placed};
+                             placed,
+                             nowSeconds};
         PreparedRecordReward prepared{};
         const auto row = prepare_reward_row(view, rewards[index], prepared, reason);
         if (row != RewardPreparation::prepared) {
@@ -762,9 +770,11 @@ bool granted_residents(const PendingRecordRewardGrant& mutation,
 /** Prepares every direct reward over one cumulative account view. */
 RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                                               std::uint16_t claimedRecordIndex,
+                                              std::int64_t nowSeconds,
                                               PendingRecordRewardGrant& mutation,
                                               const char** refusal) noexcept {
-    return prepare_reward_grant(rewards, claimedRecordIndex, nullptr, 0, {}, mutation, refusal);
+    return prepare_reward_grant(
+        rewards, claimedRecordIndex, nullptr, 0, {}, nowSeconds, mutation, refusal);
 }
 
 /** Builds the full account after-image while a record reward remains current. */

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -153,6 +154,7 @@ quest_value(unlocks::Table& table, const build_data::items::QuestInitialization&
  * @param redeemedInstanceSoid Held pursuit or opened wrapper removed before the rows are placed, or
  *        zero.
  * @param price A vendor row's cost entries, spent before the rows are placed; empty for none.
+ * @param nowSeconds Server time in Unix seconds; a granted bounty's lifetime runs from it.
  * @param refusal Receives a static reason when the result is not prepared.
  * @return Deferred only when State may still change the answer; unresolvable is final.
  */
@@ -162,6 +164,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                      const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
                      std::uint64_t redeemedInstanceSoid,
                      std::span<const build_data::vendors::SaleCost> price,
+                     std::int64_t nowSeconds,
                      PendingRecordRewardGrant& mutation,
                      const char** refusal) noexcept;
 /**
@@ -174,6 +177,16 @@ apply_reward_sockets(const build_data::items::details::Definition& detail,
                      std::span<const build_data::rewards::SocketOverride> overrides,
                      account::inventory::Sockets& sockets,
                      const char** refusal = nullptr) noexcept;
+/**
+ * A bounty starts with its deadline, however it is acquired. Other items, and a bounty whose
+ * contract is not read, start with no per-instance values.
+ * @param nowSeconds Server time in Unix seconds; the bounty's lifetime runs from it.
+ * @return False when the deadline does not fit its signed lane.
+ */
+[[nodiscard]] bool
+acquired_objectives(std::uint16_t definitionIndex,
+                    std::int64_t nowSeconds,
+                    std::optional<account::inventory::ItemObjectives>& objectives) noexcept;
 /**
  * Hold investment::store::g_mutex while capturing inventory and quest state together.
  * @param account State before any acquisition charge.
