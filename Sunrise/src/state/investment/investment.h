@@ -9,6 +9,12 @@ namespace sunrise::state {
 /** The native family-5 lists hold 100 rows each. The 7-bit wire count is not the limit. */
 inline constexpr std::size_t kUnlockOverrideCapacity = 100;
 
+/**
+ * A flag override of this value reads as false; zero is no override. The client keeps a flag it
+ * evaluated after the override that set it is removed, so a flag is cleared with this value.
+ */
+inline constexpr std::uint8_t kFlagOverrideFalse = 1;
+
 /** One logical unlock-flag value stored by slot. */
 struct UnlockFlagOverride {
     std::uint16_t slot{};

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <bit>
+#include <bitset>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -11,6 +12,7 @@
 #include <string>
 #include <type_traits>
 
+#include "../unlocks/definition.h"
 #include "store.h"
 
 namespace sunrise::state::investment::store {
@@ -37,6 +39,10 @@ struct Session {
     std::uint64_t signInSeconds{};
     /** Counts committed writes and selection changes; a refused grant waits for it to move. */
     std::uint64_t revision{};
+    /** Presence flags the last Family-5 snapshot set. */
+    std::bitset<unlocks::kUnlockFlagCapacity> presenceFlagsSet{};
+    /** Presence flags any Family-5 snapshot of this process has set. */
+    std::bitset<unlocks::kUnlockFlagCapacity> presenceFlagsPublished{};
 };
 extern Session g_session;
 

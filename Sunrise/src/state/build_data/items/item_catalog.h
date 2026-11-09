@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -22,6 +23,8 @@ inline constexpr std::uint32_t kNoStackUniqueLabel = 0x811C9DC5U;
 inline constexpr std::uint16_t kUnavailableValueIndex = 0xFFFFU;
 /** All bits set mark an item that names no account flag row. */
 inline constexpr std::uint16_t kUnavailableFlagIndex = 0xFFFFU;
+/** The shipped build lists at most 8 presence flags on one item. */
+inline constexpr std::size_t kPresenceFlagCapacity = 8;
 
 /** One installed-build item identity, used to look up authored definition hashes. */
 struct Definition {
@@ -62,6 +65,9 @@ struct Definition {
      * discovery; unavailable when the sets require none or disagree.
      */
     std::uint16_t plugSetFlagIndex{kUnavailableFlagIndex};
+    /** Unlock flag slots the item supplies while it is held, in the order it lists them. */
+    std::array<std::uint16_t, kPresenceFlagCapacity> presenceFlags{};
+    std::uint8_t presenceFlagCount{};
 };
 
 /**

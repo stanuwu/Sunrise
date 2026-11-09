@@ -1,10 +1,12 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 
+#include "../../../../state/build_data/items/item_catalog.h"
 #include "../../../../state/build_data/pursuits/definition.h"
 
 namespace sunrise::middleware::content::packages::tables::items {
@@ -117,6 +119,9 @@ struct Row {
     std::uint8_t rewardPreviewCount{};
     state::build_data::pursuits::RewardPreview
         rewardPreviews[state::build_data::pursuits::kRewardPreviewCapacity]{};
+    /** Unlock flag slots the item supplies while held; none when the list cannot be read. */
+    std::uint8_t presenceFlagCount{};
+    std::array<std::uint16_t, state::build_data::items::kPresenceFlagCapacity> presenceFlags{};
 };
 
 /**

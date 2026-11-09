@@ -558,6 +558,8 @@ void arm_acquisition_presentation_hold(Session& session) noexcept;
 
 /** Schedules this peer's Family-5 artifact refresh, then its delayed Family-4 character copy. */
 void arm_artifact_refresh(Session& session) noexcept;
+/** Schedules this peer's Family-5 refresh alone, for overrides held items supply. */
+void arm_family5_refresh(Session& session) noexcept;
 
 /** Queues one character item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;

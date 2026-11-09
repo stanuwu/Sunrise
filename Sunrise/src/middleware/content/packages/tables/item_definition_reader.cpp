@@ -10,6 +10,7 @@
 #include "../schema/generated/tag_classes_808078.h"
 #include "../schema/generated/tag_classes_80807b.h"
 #include "../schema/generated/tag_classes_80807c.h"
+#include "../schema/generated/tag_classes_80807d.h"
 #include "../schema/generated/tag_classes_80809f.h"
 #include "definition_index_table.h"
 #include "internal.h"
@@ -164,6 +165,11 @@ constexpr std::size_t kItemValueSlotDescriptor = offsetof(generated::ItemUnlockB
 constexpr std::uint32_t kItemValueSlotClass = generated::C808077ae::kClass;
 constexpr std::size_t kItemValueSlotStride = sizeof(generated::C808077ae);
 constexpr std::size_t kItemValueSlotOffset = offsetof(generated::C808077ae, gap0);
+/** The unlock block's first array lists the flags the item supplies while it is held. */
+constexpr std::size_t kPresenceFlagDescriptor = offsetof(generated::ItemUnlockBlock, presenceFlags);
+constexpr std::uint32_t kPresenceFlagClass = generated::ItemPresenceFlag::kClass;
+constexpr std::size_t kPresenceFlagStride = sizeof(generated::ItemPresenceFlag);
+constexpr std::size_t kPresenceFlagSlotOffset = offsetof(generated::ItemPresenceFlag, unlockSlot);
 
 /**
  * Reads the socket entry list index a definition declares.
@@ -581,6 +587,35 @@ void read_item_value_slots(std::span<const std::byte> definition, Row& row) noex
     row.itemValueSlotCount = static_cast<std::uint8_t>(slots.count);
 }
 
+/**
+ * Reads the flags an item supplies while it is held. A list that cannot be read, or that outgrows
+ * the row, supplies none.
+ */
+void read_presence_flags(std::span<const std::byte> definition, Row& row) noexcept {
+    std::size_t block = 0;
+    bool present = false;
+    Array flags{};
+    if (!class_block(definition, kItemUnlockBlockOffset, kItemUnlockBlockClass, block, present)
+        || !present
+        || !read_array(definition,
+                       block + kPresenceFlagDescriptor,
+                       kPresenceFlagClass,
+                       kPresenceFlagStride,
+                       flags)
+        || flags.count > row.presenceFlags.size()) {
+        return;
+    }
+    for (std::size_t index = 0; index < flags.count; ++index) {
+        if (!read(definition,
+                  flags.dataOffset + index * kPresenceFlagStride + kPresenceFlagSlotOffset,
+                  row.presenceFlags[index])) {
+            row.presenceFlags = {};
+            return;
+        }
+    }
+    row.presenceFlagCount = static_cast<std::uint8_t>(flags.count);
+}
+
 /** Reads a pursuit's objective block, completion controls and lifetime. */
 [[nodiscard]] bool read_pursuit_metadata(std::span<const std::byte> definition, Row& row) noexcept {
     // Other definitions reuse this field for other block types, equipment among them.
@@ -664,6 +699,7 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
     read_appearance(definition, row);
     read_socket_entry_list(definition, row);
     read_equipment_slot(definition, row.equipmentSlot, row.rawEquipmentSlot);
+    read_presence_flags(definition, row);
     row.objectiveMetadataValid = read_pursuit_metadata(definition, row);
     read_sockets(definition, row);
     return true;

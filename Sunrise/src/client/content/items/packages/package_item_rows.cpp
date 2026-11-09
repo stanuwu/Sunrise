@@ -313,7 +313,9 @@ bool build_item_rows(const reader::Source& source,
                                                  storage.restrictedGrants[item.definitionIndex],
                                                  bank_index(storage.slotMaps.accountValue,
                                                             item.quantityValueSlot),
-                                                 storage.plugSetFlagIndices[item.definitionIndex]};
+                                                 storage.plugSetFlagIndices[item.definitionIndex],
+                                                 item.presenceFlags,
+                                                 item.presenceFlagCount};
         if (needSocketRows) {
             storage.specialPlugCategories[item.definitionIndex] =
                 special_plug_category(plugCategoryHash);

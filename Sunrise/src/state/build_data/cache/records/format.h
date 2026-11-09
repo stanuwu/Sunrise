@@ -37,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 88;
+inline constexpr std::uint32_t kCacheFormatVersion = 89;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -186,6 +186,8 @@ struct ItemRecord {
     std::uint8_t grantRestricted{};
     std::uint16_t quantityValueIndex{items::kUnavailableValueIndex};
     std::uint16_t plugSetFlagIndex{items::kUnavailableFlagIndex};
+    std::uint8_t presenceFlagCount{};
+    std::array<std::uint16_t, items::kPresenceFlagCapacity> presenceFlags{};
 };
 
 /** Disk form of one material charged by a native Collections acquisition. */
@@ -898,7 +900,9 @@ static_assert(sizeof(NamedRecord)
               == content::kDefinitionNameCapacity + 2 * sizeof(std::uint16_t)
                      + 2 * sizeof(std::uint32_t));
 static_assert(sizeof(ItemRecord)
-              == 4 * sizeof(std::uint32_t) + 8 * sizeof(std::uint16_t) + 7 * sizeof(std::uint8_t));
+              == 4 * sizeof(std::uint32_t)
+                     + (8 + items::kPresenceFlagCapacity) * sizeof(std::uint16_t)
+                     + 8 * sizeof(std::uint8_t));
 static_assert(sizeof(MaterialRequirementRecord)
               == sizeof(std::uint32_t) + 3 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(CollectibleRecord)

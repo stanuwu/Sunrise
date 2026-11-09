@@ -1311,6 +1311,12 @@ struct ProfileExchangePayout {
  */
 [[nodiscard]] bool investment_snapshot(InvestmentState& output) noexcept;
 
+/**
+ * Says whether Family-5 owes a snapshot: the items the profile holds supply other presence flags
+ * than the last snapshot set.
+ */
+[[nodiscard]] bool presence_flags_pending() noexcept;
+
 /** Seasonal artifact item definition, whose equipped row carries the Power bonus stat. */
 inline constexpr std::uint32_t kSeasonalArtifactItemHash = 0x613A3DA6U;
 

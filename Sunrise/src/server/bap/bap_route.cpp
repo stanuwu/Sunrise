@@ -382,6 +382,11 @@ void arm_acquisition_presentation_hold(Session& session) noexcept {
         (std::max)(session.acquisitionPresentationUntilTick, now + kAcquisitionPresentationHoldMs);
 }
 
+/** Schedules this peer's Family-5 refresh alone. */
+void arm_family5_refresh(Session& session) noexcept {
+    session.artifactRefreshArmed = true;
+}
+
 /** Schedules this peer's Family-5 artifact refresh, then its delayed Family-4 character copy. */
 void arm_artifact_refresh(Session& session) noexcept {
     session.artifactRefreshArmed = true;

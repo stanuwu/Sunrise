@@ -552,6 +552,9 @@ bool consume(Session& session,
                 // Artifact overrides live in Family 5, so they need their own refresh. A record
                 // claim does not: its Family-4 replacement rearms the client rebuild.
                 bap::arm_artifact_refresh(session);
+            } else if (mutatesAccount && state::presence_flags_pending()) {
+                // The flags a held item supplies also live in Family 5.
+                bap::arm_family5_refresh(session);
             }
             if (outcome.hasArtifactReset) {
                 session.artifactResetRefresh = outcome.artifactReset;
