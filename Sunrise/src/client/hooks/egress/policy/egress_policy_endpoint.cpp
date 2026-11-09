@@ -1,6 +1,7 @@
 #include <array>
 #include <cstring>
 
+#include "../../../../core/network_lan.h"
 #include "../../../../core/network_service_socket.h"
 #include "../../../../core/settings/settings.h"
 #include "../../../../state/network/peer_routes.h"
@@ -22,10 +23,11 @@ bool datagram(SOCKET socket) noexcept {
            && ::getsockopt(socket, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&type), &size) == 0
            && type == SOCK_DGRAM;
 }
+/** A peer route comes from the host, so it is honoured only for a local-network address. */
 bool peer_target(const sockaddr_in& endpoint, bool udp) noexcept {
-    return udp && core::settings::multiplayer()
-           && state::network::peer_routes::allows(
-               {ntohl(endpoint.sin_addr.s_addr), ntohs(endpoint.sin_port)});
+    const std::uint32_t address = ntohl(endpoint.sin_addr.s_addr);
+    return udp && core::settings::multiplayer() && core::network_lan::lan_address(address)
+           && state::network::peer_routes::allows({address, ntohs(endpoint.sin_port)});
 }
 bool local_account_peer(const sockaddr_in& endpoint, SOCKET socket, bool udp) noexcept {
     if (udp || !core::settings::multiplayer()

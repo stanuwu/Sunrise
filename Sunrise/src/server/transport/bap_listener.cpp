@@ -7,6 +7,7 @@
 #include <mstcpip.h>
 
 #include "../../core/logging/log.h"
+#include "../../core/network_lan.h"
 #include "../../core/network_service_socket.h"
 #include "../../core/settings/settings.h"
 #include "../../state/runtime/runtime.h"
@@ -48,6 +49,14 @@ void accept_peer(Listener& listener, std::size_t slot, std::uint64_t now) noexce
     const SOCKET accepted =
         accept(listener.acceptor, reinterpret_cast<sockaddr*>(&remote), &remoteSize);
     if (accepted == INVALID_SOCKET) {
+        return;
+    }
+    if (!core::network_lan::lan_address(ntohl(remote.sin_addr.s_addr))) {
+        closesocket(accepted);
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::warn,
+                          "ev=transport stage=accept result=refused reason=not_lan from=0x%08X",
+                          static_cast<unsigned>(ntohl(remote.sin_addr.s_addr)));
         return;
     }
     // Match the transport's 30-second stalled-work limit before probing an idle connection.
