@@ -9,6 +9,7 @@
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
+#include "../../../../state/account/inventory/synthesizer_tier.h"
 #include "../../../../state/build_data/activities/activity_catalog.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../activity/activity_catalog_build.h"
@@ -287,6 +288,18 @@ bool build() noexcept {
                                               std::span<const std::byte>{storage.root},
                                               storage.child,
                                               extracted)) {
+                    // An unbound row leaves the Synthesizer tier unpublished, not the constants.
+                    if (!read_character_value_row(
+                            source,
+                            storage.scratch,
+                            std::span<const std::byte>{storage.root},
+                            storage.child,
+                            state::account::inventory::kSynthesizerTierValueHash,
+                            extracted.synthesizerTierValueRow)) {
+                        core::log::write(core::log::Channel::client,
+                                         core::log::Level::warn,
+                                         "ev=pkg stage=synthesizer_tier_row result=unbound");
+                    }
                     (void)state::build_data::publish_investment_constants(extracted);
                 }
             }

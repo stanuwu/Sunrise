@@ -247,7 +247,10 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
     if (!gameplay::entity_object_types::validate(domains.objectTypes)
         || !gameplay::entity_position_profiles::validate(domains.positionProfiles)
         || domains.constants.extracted != 1U
-        || domains.constants.weaponPowerStatRow >= constants::kStatRowCount || domains.named.empty()
+        || domains.constants.weaponPowerStatRow >= constants::kStatRowCount
+        || (domains.constants.synthesizerTierValueRow != constants::kUnboundValueRow
+            && domains.constants.synthesizerTierValueRow >= constants::kCharacterValueRowCount)
+        || domains.named.empty()
         || domains.items.empty() || domains.collectibles.empty()
         || domains.materialRequirementSets.empty() || domains.socketPlugRules.empty()
         || domains.socketPlugPools.empty() || domains.inventoryBuckets.empty()

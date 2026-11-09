@@ -37,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 87;
+inline constexpr std::uint32_t kCacheFormatVersion = 88;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -65,6 +65,8 @@ struct InvestmentConstants {
     std::array<std::uint8_t, constants::kCharacterStatRowCount> characterStatRows{};
     /** One when the constants blob was read, zero when the domain has never been extracted. */
     std::uint8_t extracted{};
+    /** Row of each character's value block that holds the Synthesizer tier, or unbound. */
+    std::uint16_t synthesizerTierValueRow{constants::kUnboundValueRow};
 };
 
 /** Fixed header preceding every record array. */
@@ -818,7 +820,8 @@ static_assert(sizeof(PursuitRecord)
 
 static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
-              == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
+              == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t)
+                     + sizeof(std::uint16_t));
 static_assert(sizeof(Header)
               == kCacheMagic.size() + 53 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)

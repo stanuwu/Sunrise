@@ -138,6 +138,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         domains.constants.lightStatRow,
         domains.constants.weaponPowerStatRow,
         domains.constants.characterStatRows,
+        domains.constants.synthesizerTierValueRow,
     };
     if (!constants::replace(cachedConstants) || !content::replace(domains.named) || !content::seal()
         || !items::replace(domains.items) || !collectibles::replace(domains.collectibles)

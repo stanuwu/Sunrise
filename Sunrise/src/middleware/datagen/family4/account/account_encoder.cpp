@@ -6,6 +6,7 @@
 #include <limits>
 #include <span>
 
+#include "../../../../state/account/inventory/synthesizer_tier.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../../definitions.h"
@@ -23,6 +24,26 @@ constexpr std::uint64_t kSuppressedPublicityDeadline =
 constexpr std::byte kSeenMessageByte{0xFF};
 /** A native inventory bucket id is 1 byte, so this covers every bucket. */
 constexpr std::size_t kBucketIdentityCapacity = 256;
+
+static_assert(layout::kCharacterValueCapacity
+              == state::build_data::constants::kCharacterValueRowCount);
+
+/** Publishes each character's Synthesizer tier, read from the Synthesizer it holds. */
+void publish_synthesizer_tiers(const state::AccountState& state, layout::Object& object) noexcept {
+    state::build_data::constants::InvestmentConstants constants{};
+    if (!state::build_data::find_investment_constants(constants)
+        || constants.synthesizerTierValueRow == state::build_data::constants::kUnboundValueRow) {
+        return;
+    }
+    for (std::size_t index = 0; index < state.characterCount; ++index) {
+        const auto& items = state.characters[index].inventory;
+        const std::size_t held = state::account::inventory::held_synthesizer(items);
+        object.characterUnlocks[index].values[constants.synthesizerTierValueRow] =
+            held == items.count
+                ? state::account::inventory::kNoSynthesizerTier
+                : state::account::inventory::synthesizer_tier(items.values[held].definitionHash);
+    }
+}
 
 /** Places one profile item in the next free row of its inventory bucket. */
 [[nodiscard]] bool place_profile_item(const state::account::inventory::ProfileItem& item,
@@ -113,6 +134,7 @@ bool encode(const state::AccountState& state,
         }
         object.characterUnlocks[index].flags = character.characterFlags;
     }
+    publish_synthesizer_tiers(state, object);
     object.publicityExpiries.fill(kSuppressedPublicityDeadline);
     object.seenMessages.fill(kSeenMessageByte);
     for (inventory::layout::Entry& item : object.profileItems) {

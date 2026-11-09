@@ -55,6 +55,18 @@ constexpr const char* kParkedObjectivesColumn =
 static_assert(sizeof(ObjectiveBlob) == 32);
 
 /**
+ * Version 9 drops the Family-5 override that forced every character's Synthesizer tier to
+ * Powerful, so the account object's per-character tier shows, and closes the gap it leaves.
+ */
+constexpr const char* kSynthesizerTierOverrideRemoval =
+    "CREATE TEMP TABLE family5_kept AS SELECT kind,position,slot,value FROM family5 "
+    "WHERE kind<>1 OR slot<>5159;"
+    "DELETE FROM family5;"
+    "INSERT INTO family5 SELECT kind,ROW_NUMBER() OVER (PARTITION BY kind ORDER BY position)-1,"
+    "slot,value FROM family5_kept;"
+    "DROP TABLE family5_kept;";
+
+/**
  * Version 8 saves each character's Gambit Prime helmet tier per role. A new save and the
  * migration both run this statement.
  */
@@ -70,7 +82,7 @@ constexpr const char* kCharacterHelmetTiersTable =
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 8;
+constexpr int kSchemaVersion = 9;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
 
@@ -382,6 +394,14 @@ bool open(std::string_view path,
         Transaction transaction;
         ready = transaction.ready() && execute(kCharacterHelmetTiersTable)
                 && execute("PRAGMA user_version=8") && transaction.commit();
+        if (ready) {
+            version = 8;
+        }
+    }
+    if (ready && version == 8) {
+        Transaction transaction;
+        ready = transaction.ready() && execute(kSynthesizerTierOverrideRemoval)
+                && execute("PRAGMA user_version=9") && transaction.commit();
     }
     if (!ready) {
         shutdown();

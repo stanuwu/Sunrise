@@ -73,6 +73,7 @@ static_assert(kUnmappedSlot == state::build_data::items::kUnavailableValueIndex)
 static_assert(kUnmappedSlot == state::build_data::items::kUnavailableFlagIndex);
 static_assert(kUnmappedSlot == state::build_data::items::insertion_rules::kUnavailableFlagIndex);
 static_assert(kUnmappedSlot == state::build_data::material_requirements::kUnavailableValueIndex);
+static_assert(kUnmappedSlot == state::build_data::constants::kUnboundValueRow);
 
 /** Bank index per unlock slot, indexed by slot. The first mapping row of a slot wins. */
 using SlotMap = std::array<std::uint16_t, kSlotSpace>;
@@ -284,6 +285,21 @@ read_investment_constants(const reader::Source& source,
                           std::span<const std::byte> root,
                           std::vector<std::byte>& blob,
                           state::build_data::constants::InvestmentConstants& output) noexcept;
+
+/**
+ * Finds the row of each character's value block in the account object that holds one unlock
+ * value: the value table names the value's slot by hash, and the fourth value map names the row
+ * by slot.
+ * @param blob Scratch storage for the value table and the value maps.
+ * @param row Receives the row, or the unbound row on failure.
+ * @return False when a table does not read or no row holds the value.
+ */
+[[nodiscard]] bool read_character_value_row(const reader::Source& source,
+                                            reader::Scratch& scratch,
+                                            std::span<const std::byte> root,
+                                            std::vector<std::byte>& blob,
+                                            std::uint32_t valueHash,
+                                            std::uint16_t& row) noexcept;
 
 /**
  * Reads and publishes the race of every actor class and the members of every combat label group.

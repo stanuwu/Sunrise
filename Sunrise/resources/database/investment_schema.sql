@@ -1,5 +1,5 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 8;
+PRAGMA user_version = 9;
 -- open() also creates parked_items and item_objectives. The version 5 upgrade creates
 -- parked_items with the same statement, version 6 adds its placement column, and version 7
 -- creates item_objectives and adds parked_items' objectives column.

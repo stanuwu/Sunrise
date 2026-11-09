@@ -226,6 +226,12 @@ inline constexpr std::size_t kCharacterFlagMapDescriptor =
 /** Array descriptor of the character object's value mapping table, sized to that bank. */
 inline constexpr std::size_t kCharacterValueMapDescriptor =
     offsetof(schema::generated::C80807c80, h1c76a86c);
+/**
+ * Array descriptor of the fourth value mapping table. Its rows are the values every character's
+ * block in the account object holds; the shipped build maps 33.
+ */
+inline constexpr std::size_t kCharacterBlockValueMapDescriptor =
+    offsetof(schema::generated::C80807c80, hD4a626c1);
 /** Investment root slot of the unlock flag mapping tables. */
 inline constexpr std::size_t kUnlockFlagMapTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, slot111UnlockFlagMaps));

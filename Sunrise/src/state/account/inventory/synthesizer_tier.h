@@ -22,6 +22,12 @@ inline constexpr std::array<std::uint32_t, 3> kSynthesizerTiers{
     1160544511U, // Powerful
 };
 
+/**
+ * The unlock value the client reads a character's Synthesizer tier from. Its row in each
+ * character's value block of the account object is read from the value maps.
+ */
+inline constexpr std::uint32_t kSynthesizerTierValueHash = 2279449926U;
+
 /** The tier of anything that is not a Synthesizer, and of a character holding none. */
 inline constexpr std::int32_t kNoSynthesizerTier = 0;
 

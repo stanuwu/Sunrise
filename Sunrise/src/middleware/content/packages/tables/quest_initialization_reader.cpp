@@ -59,8 +59,8 @@ constexpr std::uint8_t kSeparateQuestRootBucketId = 37;
 
 /** The third map has no supported save bank; a matching slot makes initialization unsafe. */
 constexpr std::size_t kThirdValueMapDescriptor = offsetof(generated::C80807c80, h201ada27);
-/** The fourth map is also checked for duplicate slots but has no supported save bank. */
-constexpr std::size_t kFourthValueMapDescriptor = offsetof(generated::C80807c80, hD4a626c1);
+/** The fourth map is also checked for duplicate slots but has no supported quest bank. */
+constexpr std::size_t kFourthValueMapDescriptor = kCharacterBlockValueMapDescriptor;
 /** A matching map row is supported only when its final 16 bits are zero. */
 constexpr std::size_t kValueMapReservedOffset = offsetof(generated::UnlockValueMapRow, reserved);
 /** The all-one 16-bit row is reserved and cannot name saved state. */
