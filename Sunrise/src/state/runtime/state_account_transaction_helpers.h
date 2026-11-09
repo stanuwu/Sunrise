@@ -171,12 +171,6 @@ apply_reward_sockets(const build_data::items::details::Definition& detail,
                                              bool profileChanged,
                                              const GrantSource& source,
                                              PendingItemAcquisition& mutation) noexcept;
-struct BucketAdmission;
-/** Counts a profile bucket using installed item definitions for prepare and commit. */
-[[nodiscard]] bool profile_bucket_admission(std::span<const account::inventory::ProfileItem> items,
-                                            std::uint8_t bucketId,
-                                            BucketAdmission& occupancy) noexcept;
-
 /**
  * Stages the common profile-stack insertion path.
  * @param chargedAccount Account after any material cost, or account itself when nothing is charged.

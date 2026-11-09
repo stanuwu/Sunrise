@@ -20,6 +20,7 @@ void claim_postmaster_item(const middleware::web_service::Message& message,
         return;
     }
     auto* mutation = emplace_mutation<state::PendingPostmasterClaim>(outcome);
+    const char* reason = "storage";
     const bool prepared =
         mutation
         && state::prepare_postmaster_claim(static_cast<std::uint16_t>(request.vendorIndex),
@@ -27,15 +28,17 @@ void claim_postmaster_item(const middleware::web_service::Message& message,
                                            request.instanceSoid,
                                            static_cast<std::uint16_t>(request.definitionIndex),
                                            request.quantity,
-                                           *mutation);
+                                           *mutation,
+                                           reason);
     if (prepared) {
         return;
     }
     clear_mutation(outcome);
     core::log::writef(core::log::Channel::server,
                       core::log::Level::warn,
-                      "ev=ws405 stage=prepare result=refused vendor=%d bucket=%d item=%d "
-                      "instance=0x%llX quantity=%d",
+                      "ev=ws405 stage=prepare result=refused reason=%s vendor=%d bucket=%d "
+                      "item=%d instance=0x%llX quantity=%d",
+                      reason,
                       request.vendorIndex,
                       request.sourceBucket,
                       request.definitionIndex,

@@ -314,11 +314,7 @@ struct PendingRecordRewardGrant {
 /** A Postmaster claim: the rows it debits and returns, kept private until its update fits. */
 struct PendingPostmasterClaim {
     PendingRecordRewardGrant grant{};
-    /** The claimed instance, or zero for a stack. */
-    std::uint64_t instanceSoid{};
-    std::int32_t quantity{};
     std::uint16_t vendorIndex{};
-    std::uint16_t definitionIndex{};
     std::uint8_t sourceBucket{};
     bool prepared{};
 };
@@ -638,6 +634,7 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
  * @param definitionIndex Definition row the Client named, checked against the claimed rows.
  * @param quantity Requested quantity; 1 for an instance.
  * @param mutation Gets the checked after-image without changing account State.
+ * @param reason Receives the static refusal label.
  * @return True when the rule accepts the bucket and the authored bucket has room.
  */
 [[nodiscard]] bool prepare_postmaster_claim(std::uint16_t vendorIndex,
@@ -645,7 +642,8 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
                                             std::uint64_t instanceSoid,
                                             std::uint16_t definitionIndex,
                                             std::int32_t quantity,
-                                            PendingPostmasterClaim& mutation) noexcept;
+                                            PendingPostmasterClaim& mutation,
+                                            const char*& reason) noexcept;
 /** Rechecks the claim under the transaction lock and commits it; always consumes the mutation. */
 [[nodiscard]] bool commit_postmaster_claim(PendingPostmasterClaim& mutation) noexcept;
 

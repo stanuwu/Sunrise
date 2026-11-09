@@ -3,7 +3,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <span>
 
 #include "../account/account_state.h"
@@ -12,22 +11,6 @@
 #include "runtime.h"
 
 namespace sunrise::state::runtime::detail {
-
-/** Counts occupied rows and remembers the oldest replaceable row in their owning array. */
-struct BucketAdmission {
-    std::size_t count{};
-    std::size_t oldest{(std::numeric_limits<std::size_t>::max)()};
-    std::int32_t serial{(std::numeric_limits<std::int32_t>::max)()};
-
-    /** Counts one replaceable row and keeps the lowest mutation serial as the oldest. */
-    void include(std::size_t index, std::int32_t mutationSerial) noexcept {
-        ++count;
-        if (oldest == (std::numeric_limits<std::size_t>::max)() || mutationSerial < serial) {
-            oldest = index;
-            serial = mutationSerial;
-        }
-    }
-};
 
 /** Rows one batch touched, keeping the newest each change ring can announce. */
 struct PlacedRows {
@@ -44,12 +27,6 @@ struct Arrival {
     account::inventory::Item instance{};
 };
 
-/** How much of one arrival found a row; the client drops the rest without a record. */
-struct ArrivalOutcome {
-    std::int32_t placed{};
-    std::int32_t dropped{};
-};
-
 /**
  * Places one arrival the way the client's grant does: what fits in the item's own bucket, then the
  * remainder in its recovery bucket, then nothing for the rest. A full FIFO bucket evicts its oldest
@@ -58,7 +35,7 @@ struct ArrivalOutcome {
  * @param characterIndex Selected character.
  * @param nextInstanceSoid Lowest identity a new instance may take; advanced past each one used.
  * @param rows Receives every row the arrival created, grew or moved.
- * @param outcome Receives the placed and dropped quantities.
+ * @param placed Receives the quantity that found a row; the client drops the rest unrecorded.
  * @param reason Receives a static label when placement cannot proceed.
  * @return Unresolvable when the item's own data cannot be placed; deferred when the account
  *         refuses it now. A dropped remainder is still prepared.
@@ -68,14 +45,14 @@ struct ArrivalOutcome {
                                               const Arrival& arrival,
                                               std::uint64_t& nextInstanceSoid,
                                               PlacedRows& rows,
-                                              ArrivalOutcome& outcome,
+                                              std::int32_t& placed,
                                               const char*& reason) noexcept;
 
 /**
  * Moves one claim from the item's recovery bucket back to its authored bucket once the client's
  * claim validation passes: presence is the quantity all its rows there hold. The source is then
  * debited from its last row, and the destination merges, fills empty rows and evicts under its own
- * policy, in the order of the client's own helpers; the retail server's executor is unobserved.
+ * policy, in the order of the client's own helpers.
  * @param sourceBucket The bucket the claim names; it must be the item's recovery bucket.
  * @param instanceSoid The claimed instance, or zero for a stack.
  * @param reason Receives the static refusal label.

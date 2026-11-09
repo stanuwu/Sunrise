@@ -149,23 +149,22 @@ bool build_item_rows(const reader::Source& source,
                                                              storage.questValueMap);
             }
         }
-        storage.rows[rowCount++] = state::build_data::items::Definition{
-            item.definitionHash,
-            item.definitionIndex,
-            item.bucketId,
-            item.insertionMaterialRequirementSetIndex,
-            item.enabledMaterialRequirementSetIndex,
-            item.tier,
-            plugCategoryHash,
-            item.rollSetIndex,
-            item.linkedPlugIndex,
-            quest,
-            item.recoveryBucketId,
-            item.quietAcquisition,
-            item.toastlessAcquisition,
-            item.stackUniqueLabel,
-            item.definitionIndex < storage.restrictedGrants.size()
-                && storage.restrictedGrants[item.definitionIndex]};
+        storage.rows[rowCount++] =
+            state::build_data::items::Definition{item.definitionHash,
+                                                 item.definitionIndex,
+                                                 item.bucketId,
+                                                 item.insertionMaterialRequirementSetIndex,
+                                                 item.enabledMaterialRequirementSetIndex,
+                                                 item.tier,
+                                                 plugCategoryHash,
+                                                 item.rollSetIndex,
+                                                 item.linkedPlugIndex,
+                                                 quest,
+                                                 item.recoveryBucketId,
+                                                 item.quietAcquisition,
+                                                 item.toastlessAcquisition,
+                                                 item.stackUniqueLabel,
+                                                 storage.restrictedGrants[item.definitionIndex]};
         if (needSocketRows) {
             storage.specialPlugCategories[item.definitionIndex] =
                 special_plug_category(plugCategoryHash);

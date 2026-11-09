@@ -139,7 +139,7 @@ static_assert(account::inventory::kCharacterStackCapacity == 333);
 
 /**
  * Widens saved row bounds to the character ABI, adds item, stack and parked-row placement, and
- * drops the world reward kind, which every reward now ignores because one path places them all.
+ * drops the world reward kind: one grant path places every reward.
  */
 static bool migrate_placement_storage() noexcept {
     // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and

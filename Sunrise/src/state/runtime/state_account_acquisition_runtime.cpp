@@ -25,8 +25,12 @@ namespace runtime::detail {
 
 using Quest = build_data::items::QuestInitialization;
 
-/** Account-scoped plans save to the account bank, the rest to the selected character's. */
-investment::store::Bank quest_bank(const Quest& quest) noexcept {
+/**
+ * The plan must already be valid and nonempty before selecting a save bank.
+ * @param quest First-step plan with account or character scope.
+ * @return The persistent value bank for that scope.
+ */
+[[nodiscard]] investment::store::Bank quest_bank(const Quest& quest) noexcept {
     return quest.scope == Quest::Scope::account ? investment::store::Bank::objectiveValues
                                                 : investment::store::Bank::characterObjectValues;
 }
@@ -85,7 +89,7 @@ investment::store::Bank quest_bank(const Quest& quest) noexcept {
     }
 
     const CharacterState& before = account.characters[characterIndex];
-    if (before.inventory.count > before.inventory.values.size()
+    if (before.inventory.count >= before.inventory.values.size()
         || before.nextInventorySerial
                >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
         return false;
@@ -97,6 +101,7 @@ investment::store::Bank quest_bank(const Quest& quest) noexcept {
     }
 
     CharacterState after = before;
+    const std::size_t inventoryIndex = after.inventory.count;
     authored_inventory::Item acquired{};
     acquired.instanceSoid = instanceSoid;
     acquired.definitionHash = definitionHash;
@@ -104,11 +109,8 @@ investment::store::Bank quest_bank(const Quest& quest) noexcept {
     acquired.quantity = 1;
     acquired.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
     acquired.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
-    if (after.inventory.count >= after.inventory.values.size()) {
-        return false;
-    }
-    const std::size_t inventoryIndex = after.inventory.count++;
     after.inventory.values[inventoryIndex] = acquired;
+    ++after.inventory.count;
 
     AccountState candidate = chargedAccount;
     candidate.characters[characterIndex] = after;
@@ -265,18 +267,8 @@ bool reserve_selected_character_inventory_serial(std::int32_t& mutationSerial) n
 
 namespace runtime::detail {
 
-/** An acquisition appends exactly one row. */
-[[nodiscard]] static bool
-valid_acquisition_placement(const PendingItemAcquisition& mutation) noexcept {
-    const auto& before = mutation.beforeCharacter.inventory;
-    const auto& after = mutation.afterCharacter.inventory;
-    return before.count == mutation.expectedInventoryCount && before.count <= before.values.size()
-           && after.count <= after.values.size() && mutation.inventoryIndex + 1 == after.count
-           && after.count == before.count + 1;
-}
-
 /**
- * Checks that a prepared insertion still agrees with its Collections row or direct grant.
+ * Checks that a prepared insertion still agrees with its Collections row.
  * @return False when the mutation's shape, its cost fields, or its item no longer hold.
  */
 [[nodiscard]] static bool
@@ -284,7 +276,11 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
     if (!mutation.prepared || mutation.characterSoid == 0 || mutation.acquiredInstanceSoid == 0
         || mutation.accountSoid == 0
         || mutation.acquiredDefinitionHash == authored_inventory::kNoDefinitionHash
-        || mutation.characterIndex >= kCharacterCapacity || !valid_acquisition_placement(mutation)
+        || mutation.characterIndex >= kCharacterCapacity
+        || mutation.expectedInventoryCount >= authored_inventory::kCharacterItemCapacity
+        || mutation.inventoryIndex != mutation.expectedInventoryCount
+        || mutation.afterCharacter.inventory.count != mutation.expectedInventoryCount + 1U
+        || mutation.inventoryIndex >= mutation.afterCharacter.inventory.count
         || mutation.afterCharacter.inventory.values[mutation.inventoryIndex].instanceSoid
                != mutation.acquiredInstanceSoid
         || mutation.afterCharacter.inventory.values[mutation.inventoryIndex].definitionHash
@@ -334,19 +330,6 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
             current, mutation.beforeProfileItems, mutation.expectedProfileItemCount)
         || !next_item_instance_soid(current, nextSoid)
         || nextSoid != mutation.acquiredInstanceSoid) {
-        return false;
-    }
-
-    auto placed = mutation.afterCharacter.inventory.values[mutation.inventoryIndex];
-    placed.placement = authored_inventory::ItemPlacement::authored;
-    CharacterState canonical = current.characters[mutation.characterIndex];
-    if (canonical.inventory.count != mutation.inventoryIndex
-        || canonical.nextInventorySerial != static_cast<std::uint32_t>(placed.mutationSerial)) {
-        return false;
-    }
-    canonical.inventory.values[canonical.inventory.count++] = placed;
-    ++canonical.nextInventorySerial;
-    if (!same_character(canonical, mutation.afterCharacter)) {
         return false;
     }
 

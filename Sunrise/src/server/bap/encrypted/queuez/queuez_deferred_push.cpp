@@ -527,7 +527,6 @@ bool consume_deferred(Session& session,
     }
     WorldRewardRequest reward{};
     if (session.queuez.family4Active && bap::current_world_reward(reward)) {
-        // Every saved kind is placed by the same grant path, overflow included.
         if (consume_world_record_reward(
                 reward, session, scratch, response, written, touchesScratch)) {
             return true;

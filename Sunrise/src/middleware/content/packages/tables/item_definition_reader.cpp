@@ -26,20 +26,27 @@ constexpr std::size_t kInstancedOffset =
     offsetof(generated::ItemDefinition, inventoryItemBlock.instanced);
 /** Item tier: 1 common through 5 exotic, and 0 for rows outside the ladder such as currencies. */
 constexpr std::size_t kTierOffset = offsetof(generated::ItemDefinition, inventoryItemBlock.tier);
-/** The manifest's stack-unique label, as the FNV-1 hash of its string. */
+/**
+ * The manifest's stack-unique label, as the FNV-1 hash of its string. Unnamed in the generated
+ * layout; 12,922 of the 15,470 shipped items hold the empty string's hash here.
+ */
 constexpr std::size_t kStackUniqueLabelOffset =
     offsetof(generated::ItemDefinition, inventoryItemBlock.unk0);
-/** The manifest's recovery bucket as a runtime bucket id, or all bits set when it has none. */
+/**
+ * The manifest's recovery bucket as a runtime bucket id, or all bits set when it has none. The
+ * unnamed byte after the bucket; shipped items name the 21-row FIFO bucket 34, 28, 37 or none.
+ */
 constexpr std::size_t kRecoveryBucketOffset =
     offsetof(generated::ItemDefinition, inventoryItemBlock.gap9);
 /**
  * The second and third bytes after the instanced predicate hold 0 or 1. The client's change-record
  * writer turns them into the policy bits that skip the acquisition toast and count, or only the
- * toast.
+ * toast. Unnamed in the generated layout; 680 shipped items set the first and 2 the second.
  */
 constexpr std::size_t kQuietAcquisitionOffset =
     offsetof(generated::ItemDefinition, inventoryItemBlock.gapC) + 1;
 constexpr std::size_t kToastlessAcquisitionOffset = kQuietAcquisitionOffset + 1;
+// Pins the offsets the unnamed fields above were measured at against a regenerated layout.
 static_assert(kStackUniqueLabelOffset == 176 && kRecoveryBucketOffset == 185
               && kQuietAcquisitionOffset == 189);
 /** The equipment block is self-relative from this offset, zero when absent. */

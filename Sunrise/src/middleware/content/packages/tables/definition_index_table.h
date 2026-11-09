@@ -492,6 +492,7 @@ inline constexpr std::size_t kPlugSetTableSlot =
 /** The investment root holds the items ordinary grants refuse at this slot. */
 inline constexpr std::size_t kRestrictedGrantTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, unk3b8));
+// Unnamed in the generated root; the shipped slot 59 tag is a C8080787a list naming one item.
 static_assert(kRestrictedGrantTableSlot == 59);
 /** Element class of the restricted-grant rows. */
 inline constexpr std::uint32_t kRestrictedGrantElementClass = schema::generated::C8080787c::kClass;
@@ -585,7 +586,11 @@ inline constexpr std::size_t kBucketSlotCountOffset =
     offsetof(schema::generated::G80807c6290, slotCount);
 inline constexpr std::size_t kBucketArraySelectorOffset =
     offsetof(schema::generated::G80807c6290, arraySelector);
-/** Acquisition policies in the two bytes after the inventory-array selector. */
+/**
+ * Acquisition policies in the two bytes after the inventory-array selector, unnamed in the
+ * generated layout. Shipped rows hold only 0 or 1: six buckets set the first, among them the
+ * 21-row recovery bucket most items name, and the five-row bucket 37 alone sets the second.
+ */
 inline constexpr std::size_t kBucketFifoOffset = kBucketArraySelectorOffset + 1;
 inline constexpr std::size_t kBucketNoTransferOnEvictionOffset = kBucketArraySelectorOffset + 2;
 

@@ -11,7 +11,6 @@
 
 #include "../../core/logging/log.h"
 #include "../build_data/runtime.h"
-#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -61,23 +60,6 @@ same_profile_inventory(const AccountState& account,
     for (std::size_t index = 0; index < left.size(); ++index) {
         if (!same_profile_item(left[index], right[index])) {
             return false;
-        }
-    }
-    return true;
-}
-
-/** Counts this bucket's saved profile rows and selects its oldest mutation identity. */
-[[nodiscard]] bool profile_bucket_admission(std::span<const authored_inventory::ProfileItem> items,
-                                            std::uint8_t bucketId,
-                                            BucketAdmission& occupancy) noexcept {
-    occupancy = {};
-    for (std::size_t index = 0; index < items.size(); ++index) {
-        build_data::items::Definition definition{};
-        if (!build_data::find_item_definition_hash(items[index].definitionHash, definition)) {
-            return false;
-        }
-        if (definition.bucketId == bucketId) {
-            occupancy.include(index, items[index].mutationSerial);
         }
     }
     return true;
@@ -442,12 +424,6 @@ apply_action_materials(const AccountState& before,
         changed);
 }
 
-/** Distinguishes a merge from an appended stack. */
-[[nodiscard]] static bool
-valid_profile_row_change(const PendingProfileItemAcquisition& mutation) noexcept {
-    return mutation.appended ? mutation.previousQuantity == 0 : mutation.previousQuantity > 0;
-}
-
 /** @return True when a pending profile acquisition carries canonical dense before/after images. */
 [[nodiscard]] bool
 valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noexcept {
@@ -513,13 +489,20 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
         || mutation.expectedItemCount > authored_inventory::kProfileItemCapacity
         || mutation.afterItemCount > authored_inventory::kProfileItemCapacity
         || mutation.profileIndex >= mutation.afterItemCount || mutation.previousQuantity < 0
-        || !valid_profile_row_change(mutation)
         || mutation.acquiredQuantity <= mutation.previousQuantity
         || mutation.acquiredQuantity - mutation.previousQuantity != 1
         || mutation.previousMutationSerial < 0
         || mutation.acquiredMutationSerial <= mutation.previousMutationSerial) {
         return false;
     }
+    if (mutation.appended) {
+        if (mutation.afterItemCount == 0 || mutation.previousQuantity != 0) {
+            return false;
+        }
+    } else if (mutation.previousQuantity == 0) {
+        return false;
+    }
+
     bool foundBeforeTarget = mutation.appended;
     for (std::size_t index = 0; index < mutation.beforeItems.size(); ++index) {
         const authored_inventory::ProfileItem& before = mutation.beforeItems[index];

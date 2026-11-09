@@ -20,8 +20,7 @@ enum class WorldRewardSettlement : std::uint8_t { granted, retired, kept };
 
 /**
  * Grants and retires one earned reward in one transaction, or retires one State rules out.
- * A quest item starts its quest through the acquisition path; any other item resolves through
- * its reward row.
+ * The item resolves through its reward row, which also starts a placed quest item's quest.
  * @param request Oldest saved reward of the selected character.
  * @return Granted, retired as ungrantable, or kept for a later attempt.
  */
@@ -30,7 +29,6 @@ WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noe
     if (!transaction.ready()) {
         return WorldRewardSettlement::kept;
     }
-    // Every saved kind is placed by the same grant path, overflow included.
     const std::unique_ptr<state::PendingRecordRewardGrant> grant(
         new (std::nothrow) state::PendingRecordRewardGrant);
     std::uint64_t seed = 0;

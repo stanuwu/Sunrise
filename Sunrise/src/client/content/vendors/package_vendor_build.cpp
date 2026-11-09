@@ -254,6 +254,8 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
     return true;
 }
 
+// The generated rule class is two unnamed bytes, read in the manifest's accepted-item order:
+// the accepted source bucket, then its destination.
 static_assert(sizeof(domain::TransferRule) == generated::C8080785f::kSize);
 
 /**

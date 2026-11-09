@@ -323,19 +323,17 @@ struct GrantView {
             return RewardPreparation::unresolvable;
         }
     }
-    ArrivalOutcome outcome{};
     const auto placement = place_arrival(view.working,
                                          view.characterIndex,
                                          arrival,
                                          view.nextInstanceSoid,
                                          view.placed,
-                                         outcome,
+                                         prepared.placedQuantity,
                                          reason);
     if (placement != RewardPreparation::prepared) {
         return placement;
     }
-    prepared.placedQuantity = outcome.placed;
-    if (outcome.placed == 0) {
+    if (prepared.placedQuantity == 0) {
         return RewardPreparation::prepared;
     }
     // Only an item that found a row runs its acquisition side effects.
@@ -642,8 +640,8 @@ void report_dropped_rewards(const PendingRecordRewardGrant& mutation) noexcept {
         if (reward.placedQuantity < reward.quantity) {
             core::log::writef(core::log::Channel::state,
                               core::log::Level::warn,
-                              "ev=reward_grant stage=commit result=dropped item=%u requested=%d "
-                              "placed=%d",
+                              "ev=reward_grant stage=commit result=dropped hash=0x%08X "
+                              "requested=%d placed=%d",
                               static_cast<unsigned>(reward.definitionHash),
                               static_cast<int>(reward.quantity),
                               static_cast<int>(reward.placedQuantity));

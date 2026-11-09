@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <bitset>
+#include <limits>
+#include <span>
 
 #include "../../middleware/datagen/family4/account/layout.h"
 #include "../../middleware/datagen/family4/character/layout.h"
@@ -15,6 +17,22 @@ namespace inventory_buckets = build_data::inventory::buckets;
 namespace item_details = build_data::items::details;
 
 namespace {
+
+/** Counts occupied rows and remembers the oldest replaceable row in their owning array. */
+struct BucketAdmission {
+    std::size_t count{};
+    std::size_t oldest{(std::numeric_limits<std::size_t>::max)()};
+    std::int32_t serial{(std::numeric_limits<std::int32_t>::max)()};
+
+    /** Counts one replaceable row and keeps the lowest mutation serial as the oldest. */
+    void include(std::size_t index, std::int32_t mutationSerial) noexcept {
+        ++count;
+        if (oldest == (std::numeric_limits<std::size_t>::max)() || mutationSerial < serial) {
+            oldest = index;
+            serial = mutationSerial;
+        }
+    }
+};
 
 /**
  * Buckets an eviction chain is still freeing a row in. The client inserts an evicted row's copy
@@ -30,6 +48,23 @@ constexpr std::size_t kEquippedRowBase =
     kStackRowBase + authored_inventory::kCharacterStackCapacity;
 constexpr std::size_t kCharacterRowCount =
     kEquippedRowBase + authored_inventory::kEquipmentSlotCount;
+
+/** Counts this bucket's saved profile rows and selects its oldest mutation identity. */
+[[nodiscard]] bool profile_bucket_admission(std::span<const authored_inventory::ProfileItem> items,
+                                            std::uint8_t bucketId,
+                                            BucketAdmission& occupancy) noexcept {
+    occupancy = {};
+    for (std::size_t index = 0; index < items.size(); ++index) {
+        build_data::items::Definition definition{};
+        if (!build_data::find_item_definition_hash(items[index].definitionHash, definition)) {
+            return false;
+        }
+        if (definition.bucketId == bucketId) {
+            occupancy.include(index, items[index].mutationSerial);
+        }
+    }
+    return true;
+}
 
 /** Finds the bucket a saved row occupies from its item and placement. */
 [[nodiscard]] bool occupied_bucket(std::uint32_t definitionHash,
@@ -877,9 +912,9 @@ RewardPreparation place_arrival(AccountState& working,
                                 const Arrival& arrival,
                                 std::uint64_t& nextInstanceSoid,
                                 PlacedRows& rows,
-                                ArrivalOutcome& outcome,
+                                std::int32_t& placed,
                                 const char*& reason) noexcept {
-    outcome = {};
+    placed = 0;
     reason = "arrival";
     if (characterIndex >= working.characterCount) {
         return RewardPreparation::deferred;
@@ -894,7 +929,6 @@ RewardPreparation place_arrival(AccountState& working,
     }
     // The client refuses a restricted item outright: neither its bucket nor its recovery gets any.
     if (arrival.item.grantRestricted) {
-        outcome.dropped = arrival.quantity;
         reason = nullptr;
         return RewardPreparation::prepared;
     }
@@ -930,8 +964,7 @@ RewardPreparation place_arrival(AccountState& working,
         || (remaining != 0 && find_recovery_bucket(arrival.item, recovery) && !admit(recovery))) {
         return RewardPreparation::deferred;
     }
-    outcome.placed = arrival.quantity - remaining;
-    outcome.dropped = remaining;
+    placed = arrival.quantity - remaining;
     reason = nullptr;
     return RewardPreparation::prepared;
 }
