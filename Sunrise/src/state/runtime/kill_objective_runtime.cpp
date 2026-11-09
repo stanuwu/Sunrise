@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <new>
 #include <span>
@@ -741,7 +742,18 @@ KillProgress advance_kill_objectives(const KillObservation& kill,
     auto& inventory = killer.inventory;
     std::size_t advanced = 0;
     for (auto& held : std::span(inventory.values).first(inventory.count)) {
-        advanced += advance_item(held, facts, nowSeconds);
+        const std::size_t lanes = advance_item(held, facts, nowSeconds);
+        if (lanes == 0) {
+            continue;
+        }
+        // A new serial is what tells the client the copy changed, as for any other item mutation.
+        reason = "serial";
+        if (killer.nextInventorySerial
+            >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+            return KillProgress::refused;
+        }
+        held.mutationSerial = static_cast<std::int32_t>(killer.nextInventorySerial++);
+        advanced += lanes;
     }
     // The Triumph's banks share this transaction, so a refused account write undoes it too.
     const bool triumphAdvanced = advance_grenade_triumph(kill, facts, killer.characterClass);
