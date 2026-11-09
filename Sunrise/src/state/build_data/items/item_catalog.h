@@ -53,6 +53,14 @@ struct Definition {
     bool grantRestricted{};
 };
 
+/**
+ * Says whether the item sits in the native pursuit bucket, as held quest steps and bounties do.
+ * The vendor gate's pursuit test is a separate rule that reads the item's detail shape.
+ */
+[[nodiscard]] constexpr bool pursuit_bucket_item(const Definition& definition) noexcept {
+    return definition.bucketId == kPursuitBucketId;
+}
+
 /** Roll-set ordinals outside the rolled ladder. */
 inline constexpr std::uint16_t kNoRollSet = 0;
 inline constexpr std::uint16_t kForeignRollSet = 0xFFFFU;

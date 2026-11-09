@@ -395,6 +395,20 @@ process(const ServiceRoute& route,
 
         std::span<const state::account::inventory::PresentedItemRow> presentation = {}) noexcept;
 
+/**
+ * Emplaces an opcode-2400 claim transaction and stages its Queuez after-image.
+ * @param claim Prepared claim, which the caller then moves into the returned transaction.
+ * @return The staged transaction, or null with nothing left in the outcome.
+ */
+
+[[nodiscard]] SeasonPassRewardTransaction*
+
+stage_season_pass_reward(const queuez::SessionState& queuezState,
+
+                         const state::PendingSeasonPassReward& claim,
+
+                         ServiceOutcome& outcome) noexcept;
+
 } // namespace body
 
 /** Owns server-initiated encrypted frames appended after correlated replies. */
@@ -645,6 +659,46 @@ append_select_character_notification(Scratch& scratch,
     const queuez::EquipmentSwap& update,
 
     const state::PendingItemState& mutation,
+
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+
+    std::span<const std::byte, state::kAesKeySize> key,
+
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+
+    std::span<std::byte> response,
+
+    std::size_t& written) noexcept;
+
+/** Appends the selected character's current object as one upsert above the peer version. */
+
+[[nodiscard]] bool append_selected_character_refresh_notification(
+
+    Scratch& scratch,
+
+    const queuez::EquipmentSwap& update,
+
+    std::uint64_t accountSoid,
+
+    std::size_t characterIndex,
+
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+
+    std::span<const std::byte, state::kAesKeySize> key,
+
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+
+    std::span<std::byte> response,
+
+    std::size_t& written) noexcept;
+
+/** Appends the current account and selected-character objects as one upsert. */
+
+[[nodiscard]] bool append_account_refresh_notification(
+
+    Scratch& scratch,
+
+    const queuez::EquipmentSwap& update,
 
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
 

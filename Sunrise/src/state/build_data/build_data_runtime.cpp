@@ -19,7 +19,9 @@
 #include "items/socket_plugs/socket_plug_catalog.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "nodes/node_catalog.h"
+#include "objectives/objective_catalog.h"
 #include "progressions/progression_catalog.h"
+#include "pursuits/pursuit_catalog.h"
 #include "records/record_catalog.h"
 #include "rewards/reward_catalog.h"
 #include "runtime.h"
@@ -49,6 +51,10 @@ std::uint64_t g_contentHash{};
 
 void bind_content(std::uint64_t contentHash) noexcept {
     g_contentHash = contentHash;
+}
+
+std::uint64_t content_hash() noexcept {
+    return g_contentHash;
 }
 
 /** Loads one full cache, or leaves every domain ready for first-boot extraction. */
@@ -115,6 +121,14 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     const bool catalystCatalogAvailable = !domains.exoticCatalysts.empty();
     const bool catalystsReplaced =
         !catalystCatalogAvailable || items::catalysts::replace(domains.exoticCatalysts);
+    // A cache with no objective table records a build whose pursuit catalog is unsupported.
+    bool pursuitsReplaced = true;
+    if (domains.objectives.empty()) {
+        pursuits::settle_unsupported();
+    } else {
+        pursuitsReplaced = objectives::replace({domains.objectives, domains.objectiveInstructions})
+                           && pursuits::replace(domains.pursuits, domains.objectives.size());
+    }
     // A checked cache with no reward pools records a refused reward graph.
     const bool rewardsCached = !domains.rewardPools.empty();
     const constants::InvestmentConstants cachedConstants{
@@ -132,7 +146,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
                                   domains.rewardInstructions,
                                   domains.rewardModifiers,
                                   domains.rewardSockets}))
-        || !material_requirements::replace(domains.materialRequirementSets)
+        || !pursuitsReplaced || !material_requirements::replace(domains.materialRequirementSets)
         || !inventory::buckets::replace(domains.inventoryBuckets)
         || !socket_entry_lists::replace(domains.socketEntryLists)
         // The per-entry tables are what the subclass selection reads. Without them a cache hit

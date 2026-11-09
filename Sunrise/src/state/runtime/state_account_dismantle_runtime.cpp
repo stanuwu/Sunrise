@@ -3,6 +3,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <new>
+#include <string_view>
 
 #include "../investment/store_internal.h"
 #include "runtime.h"
@@ -13,30 +16,100 @@ namespace sunrise::state {
 
 using namespace runtime::detail;
 
-/** Prepares one selected-character unequipped item removal without changing account State. */
-bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mutation) noexcept {
+namespace {
+
+/**
+ * The instance an editor read. Its removal is refused once the character, hash, serial or
+ * quantity no longer matches.
+ */
+struct ExpectedItem {
+    std::uint64_t characterSoid{};
+    std::uint32_t definitionHash{};
+    std::int32_t mutationSerial{};
+    std::int32_t quantity{};
+};
+
+/**
+ * Checks that the selected character still holds the expected instance, unequipped. Staging
+ * would also refuse an equipped row, but this check reports the specific reason.
+ * @param reason Receives the refusal label on failure.
+ */
+[[nodiscard]] bool holds_expected_item(const CharacterState& character,
+                                       std::uint64_t instanceSoid,
+                                       const ExpectedItem& expected,
+                                       const char*& reason) noexcept {
+    reason = "character_changed";
+    if (character.soid != expected.characterSoid) {
+        return false;
+    }
+    CharacterItemLocation location{};
+    reason = "inventory_row";
+    if (instanceSoid == 0 || !find_character_item_location(character, instanceSoid, location)) {
+        return false;
+    }
+    reason = "equipped";
+    if (location.equipped) {
+        return false;
+    }
+    reason = "inventory_row";
+    const account::inventory::Item* item = character_item_at(character, location);
+    return item != nullptr && item->definitionHash == expected.definitionHash
+           && item->mutationSerial == expected.mutationSerial
+           && item->quantity == expected.quantity;
+}
+
+/**
+ * Prepares one selected-character unequipped item removal without changing account State.
+ * @param paysRewards False stages an editor removal, which credits no dismantle materials.
+ * @param expected The instance the caller read, or null to accept whatever the instance holds.
+ * @param reason Receives the refusal label on failure.
+ */
+[[nodiscard]] bool prepare_selected_item_dismantle(std::uint64_t instanceSoid,
+                                                   bool paysRewards,
+                                                   const ExpectedItem* expected,
+                                                   PendingItemDismantle& mutation,
+                                                   const char*& reason) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
-    if (instanceSoid == 0 || !account::valid(account)) {
-        report_dismantle("prepare", "fail", "input", 0, 0, instanceSoid, 0, 0, 0, 0, 0);
+    const std::string_view stage = paysRewards ? "prepare" : "prepare_removal";
+    const auto fail = [&](const char* label) noexcept {
+        reason = label;
+        report_dismantle(stage,
+                         "fail",
+                         label,
+                         expected != nullptr ? expected->definitionHash : 0,
+                         expected != nullptr ? expected->characterSoid : 0,
+                         instanceSoid,
+                         0,
+                         0,
+                         0,
+                         0,
+                         0);
         return false;
+    };
+    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
+                                                           AccountState(account_snapshot()));
+    if (!snapshot) {
+        return fail("allocation");
     }
-
-    std::size_t characterIndex = account.characterCount;
-    for (std::size_t index = 0; index < account.characterCount; ++index) {
-        if (account.characters[index].selected) {
-            characterIndex = index;
-            break;
-        }
+    const AccountState& account = *snapshot;
+    if (!account::valid(account)) {
+        return fail("account_state");
     }
-    if (characterIndex >= account.characterCount
-        || !stage_item_dismantle(account, characterIndex, instanceSoid, mutation)) {
-        report_dismantle(
-            "prepare", "fail", "ownership_or_resolve", 0, 0, instanceSoid, 0, 0, 0, 0, 0);
-        return false;
+    const std::size_t characterIndex = selected_character_index(account);
+    if (characterIndex >= account.characterCount) {
+        return fail("character_changed");
     }
-
-    report_dismantle("prepare",
+    if (expected != nullptr
+        && !holds_expected_item(
+            account.characters[characterIndex], instanceSoid, *expected, reason)) {
+        return fail(reason);
+    }
+    // Staging applies the in-game dismantle rules, so a locked item or a row the loadout cannot
+    // place is refused here too.
+    if (!stage_item_dismantle(account, characterIndex, instanceSoid, paysRewards, mutation)) {
+        return fail("unsupported_removal");
+    }
+    report_dismantle(stage,
                      "ok",
                      "ready",
                      mutation.dismantledItem.definitionHash,
@@ -47,7 +120,30 @@ bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mu
                      mutation.equipmentSlot,
                      mutation.movedInventoryItemCount,
                      mutation.afterCharacter.nextInventorySerial);
+    reason = nullptr;
     return true;
+}
+
+} // namespace
+
+/** Prepares one selected-character unequipped item removal without changing account State. */
+bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mutation) noexcept {
+    const char* reason = nullptr;
+    return prepare_selected_item_dismantle(instanceSoid, true, nullptr, mutation, reason);
+}
+
+/** Prepares the removal of one exact unequipped instance, crediting no dismantle materials. */
+bool prepare_item_removal(std::uint64_t characterSoid,
+                          std::uint64_t instanceSoid,
+                          std::uint32_t definitionHash,
+                          std::int32_t mutationSerial,
+                          std::int32_t quantity,
+                          PendingItemDismantle& mutation,
+                          const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    const ExpectedItem expected{characterSoid, definitionHash, mutationSerial, quantity};
+    return prepare_selected_item_dismantle(instanceSoid, false, &expected, mutation, reason);
 }
 
 /** Produces the exact character-and-profile after-image while the captured views remain current. */

@@ -134,6 +134,11 @@ void clear(records::MutableDomains output) noexcept {
         output.rewardInstructions.begin(), output.rewardInstructions.end(), rewards::Instruction{});
     std::fill(output.rewardModifiers.begin(), output.rewardModifiers.end(), rewards::Modifier{});
     std::fill(output.rewardSockets.begin(), output.rewardSockets.end(), rewards::SocketOverride{});
+    std::fill(output.objectives.begin(), output.objectives.end(), objectives::Row{});
+    std::fill(output.objectiveInstructions.begin(),
+              output.objectiveInstructions.end(),
+              unlocks::Instruction{});
+    std::fill(output.pursuits.begin(), output.pursuits.end(), pursuits::Definition{});
     std::fill(output.starterSets.begin(), output.starterSets.end(), starter_sets::Definition{});
 }
 
@@ -185,6 +190,10 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.rewardInstructions, sizeof(records::RewardInstructionRecord), size)
            && add_records(counts.rewardModifiers, sizeof(records::RewardModifierRecord), size)
            && add_records(counts.rewardSockets, sizeof(records::RewardSocketOverrideRecord), size)
+           && add_records(counts.objectives, sizeof(records::ObjectiveRecord), size)
+           && add_records(
+               counts.objectiveInstructions, sizeof(records::RewardInstructionRecord), size)
+           && add_records(counts.pursuits, sizeof(records::PursuitRecord), size)
            && add_records(counts.starterSets, sizeof(records::StarterSetRecord), size);
 }
 
@@ -324,6 +333,15 @@ bool read_payload(HANDLE file,
             && read_domain<records::RewardSocketOverrideRecord>(
                 file, output.rewardSockets.first(counts.rewardSockets), checksum);
     valid = valid
+            && read_domain<records::ObjectiveRecord>(
+                file, output.objectives.first(counts.objectives), checksum);
+    valid = valid
+            && read_domain<records::RewardInstructionRecord>(
+                file, output.objectiveInstructions.first(counts.objectiveInstructions), checksum);
+    valid = valid
+            && read_domain<records::PursuitRecord>(
+                file, output.pursuits.first(counts.pursuits), checksum);
+    valid = valid
             && read_domain<records::StarterSetRecord>(
                 file, output.starterSets.first(counts.starterSets), checksum);
 
@@ -377,6 +395,9 @@ bool read_payload(HANDLE file,
             output.rewardInstructions.first(counts.rewardInstructions),
             output.rewardModifiers.first(counts.rewardModifiers),
             output.rewardSockets.first(counts.rewardSockets),
+            output.objectives.first(counts.objectives),
+            output.objectiveInstructions.first(counts.objectiveInstructions),
+            output.pursuits.first(counts.pursuits),
             output.starterSets.first(counts.starterSets),
         });
 }

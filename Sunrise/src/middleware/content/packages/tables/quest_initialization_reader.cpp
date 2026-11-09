@@ -2,9 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <limits>
 
-#include "../reader/layout.h"
 #include "../schema/generated/tag_classes_808077.h"
 #include "../schema/generated/tag_classes_80807b.h"
 #include "../schema/generated/tag_classes_80807c.h"
@@ -20,25 +18,10 @@ using Quest = state::build_data::items::QuestInitialization;
 
 /** Policy: shorter item blobs stay outside the supported quest layout. */
 constexpr std::size_t kMinimumQuestDefinitionSize = sizeof(generated::ItemDefinition);
-/** A serialized block's 32-bit class ID sits immediately before its payload. */
-constexpr std::size_t kBlockClassPrefixSize = reader::layout::kClassWordSize;
 /** Policy: every quest block keeps at least the smallest quest block's fixed part. */
 constexpr std::size_t kMinimumQuestBlockSize = (std::min)({sizeof(generated::ItemObjectiveBlock),
                                                            sizeof(generated::QuestSetBlock),
                                                            sizeof(generated::ItemUnlockBlock)});
-
-/** Signed 64-bit offset to the objective block, relative to the field. */
-constexpr std::size_t kItemObjectiveBlockOffset =
-    offsetof(generated::ItemDefinition, objectiveItemBlock);
-/** This block holds objective indices and the item index that owns the quest set. */
-constexpr std::uint32_t kItemObjectiveBlockClass = generated::ItemObjectiveBlock::kClass;
-/** A 16-bit item-table index, not a definition hash. */
-constexpr std::size_t kObjectiveParentItemOffset =
-    offsetof(generated::ItemObjectiveBlock, parentItemIndex);
-/** Objective array entries are 16-bit table indices. */
-constexpr std::size_t kObjectiveArrayDescriptor =
-    offsetof(generated::ItemObjectiveBlock, objectives);
-constexpr std::size_t kObjectiveReferenceStride = sizeof(generated::ObjectiveReferenceArray);
 
 /** Quest-set block offset, relative to the field. */
 constexpr std::size_t kItemQuestSetBlockOffset = offsetof(generated::ItemDefinition, setItemBlock);
@@ -98,22 +81,9 @@ constexpr std::uint16_t kUnavailableValueMapRow = 0xFFFFU;
                          std::size_t field,
                          std::uint32_t expectedClass,
                          std::size_t& offset) noexcept {
-    std::int64_t relative = 0;
-    if (!read(bytes, field, relative) || relative == 0
-        || relative
-               > (std::numeric_limits<std::int64_t>::max)() - static_cast<std::int64_t>(field)) {
-        return false;
-    }
-    const auto target = relative + static_cast<std::int64_t>(field);
-    if (target < static_cast<std::int64_t>(kBlockClassPrefixSize)
-        || static_cast<std::uint64_t>(target) > bytes.size()
-        || bytes.size() - static_cast<std::size_t>(target) < kMinimumQuestBlockSize) {
-        return false;
-    }
-    offset = static_cast<std::size_t>(target);
-    std::uint32_t actualClass = 0;
-    return reader::layout::class_word_before(bytes, offset, actualClass)
-           && actualClass == expectedClass;
+    bool present = false;
+    return class_block(bytes, field, expectedClass, offset, present) && present
+           && bytes.size() - offset >= kMinimumQuestBlockSize;
 }
 
 /**

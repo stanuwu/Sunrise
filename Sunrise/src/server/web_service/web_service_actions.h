@@ -40,6 +40,15 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
 void claim_season_pass_reward(const middleware::web_service::Message& message,
                               Outcome& outcome) noexcept;
 
+/**
+ * Draws the seed, prepares the grant and stages the claim flag of one pass row, as an
+ * opcode-2400 claim does once its request is decoded. Call inside an investment transaction.
+ * @param reason Receives a static label on failure.
+ */
+[[nodiscard]] bool prepare_season_pass_claim(std::uint16_t rewardIndex,
+                                             state::PendingSeasonPassReward& claim,
+                                             const char*& reason) noexcept;
+
 /** Decodes and applies one opcode-1821 earned-title selection. */
 void equip_title(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 

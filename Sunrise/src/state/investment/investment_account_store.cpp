@@ -131,6 +131,40 @@ AccountState account() noexcept {
     return output;
 }
 
+/** Reads only the keys and classes, in slot order, and overlays the session selection. */
+bool read_account_identity(AccountIdentity& output) noexcept {
+    output = {};
+    Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
+    }
+    Statement account("SELECT soid FROM account WHERE id=1");
+    if (account.step() != SQLITE_ROW || !account.columns(output.primarySoid)
+        || account.step() != SQLITE_DONE) {
+        output = {};
+        return false;
+    }
+    Statement rows("SELECT slot,soid,class FROM characters ORDER BY slot");
+    int result = rows.step();
+    while (result == SQLITE_ROW) {
+        std::size_t slot = 0;
+        CharacterIdentity character;
+        if (!rows.columns(slot, character.soid, character.characterClass)
+            || slot != output.characterCount || slot >= output.characters.size()) {
+            output = {};
+            return false;
+        }
+        character.selected = g_session.selected[slot];
+        output.characters[output.characterCount++] = character;
+        result = rows.step();
+    }
+    if (result != SQLITE_DONE || !transaction.commit()) {
+        output = {};
+        return false;
+    }
+    return true;
+}
+
 /** The session overlay changes only after every durable account row commits. */
 bool write_account(const AccountState& value) noexcept {
     if (!account::valid(value)) {

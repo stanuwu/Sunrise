@@ -16,6 +16,14 @@ namespace authored_inventory = account::inventory;
 namespace inventory_buckets = build_data::inventory::buckets;
 namespace item_details = build_data::items::details;
 
+/** Saved profile rows record no placement, so only a character bucket can hold a recovered row. */
+bool find_recovery_bucket(const build_data::items::Definition& item,
+                          inventory_buckets::Descriptor& recovery) noexcept {
+    return authored_inventory::find_occupied_bucket(
+               item, authored_inventory::ItemPlacement::recovery, recovery)
+           && recovery.arraySelector == inventory_buckets::ArraySelector::character;
+}
+
 namespace {
 
 /** Counts occupied rows and remembers the oldest replaceable row in their owning array. */
@@ -41,13 +49,6 @@ struct BucketAdmission {
  * victim is discarded instead.
  */
 using EvictionChain = std::bitset<inventory_buckets::kDescriptorCapacity>;
-
-/** One index space over a character's held instances, stacks and equipped rows, in that order. */
-constexpr std::size_t kStackRowBase = authored_inventory::kCharacterItemCapacity;
-constexpr std::size_t kEquippedRowBase =
-    kStackRowBase + authored_inventory::kCharacterStackCapacity;
-constexpr std::size_t kCharacterRowCount =
-    kEquippedRowBase + authored_inventory::kEquipmentSlotCount;
 
 /** Counts this bucket's saved profile rows and selects its oldest mutation identity. */
 [[nodiscard]] bool profile_bucket_admission(std::span<const authored_inventory::ProfileItem> items,
@@ -76,17 +77,6 @@ constexpr std::size_t kCharacterRowCount =
     }
     bucketId = authored_inventory::occupied_bucket_id(definition, placement);
     return true;
-}
-
-/**
- * Finds the recovery bucket an item names when a saved row can occupy it. Saved profile rows record
- * no placement, so only a character bucket can hold a recovered row.
- */
-[[nodiscard]] bool find_recovery_bucket(const build_data::items::Definition& item,
-                                        inventory_buckets::Descriptor& recovery) noexcept {
-    return authored_inventory::find_occupied_bucket(
-               item, authored_inventory::ItemPlacement::recovery, recovery)
-           && recovery.arraySelector == inventory_buckets::ArraySelector::character;
 }
 
 [[nodiscard]] bool instanced(const item_details::Definition& detail) noexcept {
@@ -127,30 +117,6 @@ static_assert(
     kRecordRewardGrantCapacity
     >= middleware::datagen::family4::character::layout::kInventoryChangeRecordCapacity
            + middleware::datagen::family4::account::layout::kProfileInventoryChangeRecordCapacity);
-
-[[nodiscard]] bool next_character_serial(CharacterState& character,
-                                         std::int32_t& mutationSerial) noexcept {
-    if (character.nextInventorySerial
-        >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
-        return false;
-    }
-    mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
-    return true;
-}
-
-/** Profile rows take the serial after the greatest one the profile holds. */
-[[nodiscard]] bool next_profile_serial(const AccountState& account,
-                                       std::int32_t& mutationSerial) noexcept {
-    std::int32_t greatest = 0;
-    for (std::size_t index = 0; index < account.profileItemCount; ++index) {
-        greatest = (std::max)(greatest, account.profileItems[index].mutationSerial);
-    }
-    if (greatest == (std::numeric_limits<std::int32_t>::max)()) {
-        return false;
-    }
-    mutationSerial = greatest + 1;
-    return true;
-}
 
 /**
  * Counts one bucket's character rows and picks its oldest. As in the client, an equipped row is
@@ -200,31 +166,6 @@ static_assert(
             return false;
         }
     }
-    return true;
-}
-
-/** Removes one held instance, stack or equipped row named by its character row index. */
-[[nodiscard]] bool erase_character_row(CharacterState& character, std::size_t row) noexcept {
-    const auto erase = [](auto& held, std::size_t index) noexcept {
-        if (index >= held.count || held.count > held.values.size()) {
-            return false;
-        }
-        std::move(held.values.begin() + static_cast<std::ptrdiff_t>(index) + 1,
-                  held.values.begin() + static_cast<std::ptrdiff_t>(held.count),
-                  held.values.begin() + static_cast<std::ptrdiff_t>(index));
-        held.values[--held.count] = {};
-        return true;
-    };
-    if (row < kStackRowBase) {
-        return erase(character.inventory, row);
-    }
-    if (row < kEquippedRowBase) {
-        return erase(character.stacks, row - kStackRowBase);
-    }
-    if (row >= kCharacterRowCount || !character.equipment.slots[row - kEquippedRowBase]) {
-        return false;
-    }
-    character.equipment.slots[row - kEquippedRowBase].reset();
     return true;
 }
 
@@ -596,12 +537,7 @@ template <typename Visit>
     if (working.profileItems[occupancy.oldest].instanceSoid != 0) {
         return false;
     }
-    auto& items = working.profileItems;
-    std::move(items.begin() + static_cast<std::ptrdiff_t>(occupancy.oldest) + 1,
-              items.begin() + static_cast<std::ptrdiff_t>(working.profileItemCount),
-              items.begin() + static_cast<std::ptrdiff_t>(occupancy.oldest));
-    items[--working.profileItemCount] = {};
-    return true;
+    return erase_profile_row(working, occupancy.oldest);
 }
 
 /** Makes one free row in a bucket, evicting under FIFO policy; an ordinary bucket refuses. */
@@ -905,6 +841,68 @@ struct ClaimSource {
 }
 
 } // namespace
+
+/** The serial is also the row's age, so the counter only moves forward. */
+bool next_character_serial(CharacterState& character, std::int32_t& mutationSerial) noexcept {
+    if (character.nextInventorySerial
+        >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+        return false;
+    }
+    mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
+    return true;
+}
+
+/** Profile rows take the serial after the greatest one the profile holds. */
+bool next_profile_serial(const AccountState& account, std::int32_t& mutationSerial) noexcept {
+    std::int32_t greatest = 0;
+    for (std::size_t index = 0; index < account.profileItemCount; ++index) {
+        greatest = (std::max)(greatest, account.profileItems[index].mutationSerial);
+    }
+    if (greatest == (std::numeric_limits<std::int32_t>::max)()) {
+        return false;
+    }
+    mutationSerial = greatest + 1;
+    return true;
+}
+
+/** Removes one held instance, stack or equipped row named by its character row index. */
+bool erase_character_row(CharacterState& character, std::size_t row) noexcept {
+    const auto erase = [](auto& held, std::size_t index) noexcept {
+        if (index >= held.count || held.count > held.values.size()) {
+            return false;
+        }
+        std::move(held.values.begin() + static_cast<std::ptrdiff_t>(index) + 1,
+                  held.values.begin() + static_cast<std::ptrdiff_t>(held.count),
+                  held.values.begin() + static_cast<std::ptrdiff_t>(index));
+        held.values[--held.count] = {};
+        return true;
+    };
+    if (row < kStackRowBase) {
+        return erase(character.inventory, row);
+    }
+    if (row < kEquippedRowBase) {
+        return erase(character.stacks, row - kStackRowBase);
+    }
+    if (row >= kCharacterRowCount || !character.equipment.slots[row - kEquippedRowBase]) {
+        return false;
+    }
+    character.equipment.slots[row - kEquippedRowBase].reset();
+    return true;
+}
+
+/** Later rows move up one, so the profile stays dense. */
+bool erase_profile_row(AccountState& account, std::size_t index) noexcept {
+    if (index >= account.profileItemCount
+        || account.profileItemCount > account.profileItems.size()) {
+        return false;
+    }
+    auto& items = account.profileItems;
+    std::move(items.begin() + static_cast<std::ptrdiff_t>(index) + 1,
+              items.begin() + static_cast<std::ptrdiff_t>(account.profileItemCount),
+              items.begin() + static_cast<std::ptrdiff_t>(index));
+    items[--account.profileItemCount] = {};
+    return true;
+}
 
 /** Places what fits in the item's own bucket, then its recovery bucket, and drops the rest. */
 RewardPreparation place_arrival(AccountState& working,

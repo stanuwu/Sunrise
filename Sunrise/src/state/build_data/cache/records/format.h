@@ -18,7 +18,9 @@
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/definition.h"
+#include "../../objectives/definition.h"
 #include "../../progressions/definition.h"
+#include "../../pursuits/definition.h"
 #include "../../records/definition.h"
 #include "../../rewards/definition.h"
 #include "../../scenarios/definition.h"
@@ -33,7 +35,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 78;
+inline constexpr std::uint32_t kCacheFormatVersion = 79;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -113,6 +115,9 @@ struct Header {
     std::uint32_t rewardInstructionCount{};
     std::uint32_t rewardModifierCount{};
     std::uint32_t rewardSocketCount{};
+    std::uint32_t objectiveCount{};
+    std::uint32_t objectiveInstructionCount{};
+    std::uint32_t pursuitCount{};
     std::uint32_t starterSetCount{};
     gameplay::entity_position_profiles::Fingerprint positionFingerprint{};
     InvestmentConstants constants{};
@@ -678,6 +683,31 @@ struct RewardModifierRecord {
     float value{};
 };
 
+/** Disk form of one objective row. Both programs are ranges of the objective instruction bank. */
+struct ObjectiveRecord {
+    std::uint32_t definitionHash{};
+    std::int32_t completionValue{};
+    std::uint16_t definitionIndex{};
+    std::uint8_t optional{};
+    std::uint8_t countsDown{};
+    std::uint8_t adjustmentReadable{};
+    std::uint8_t readable{};
+    RewardRangeRecord targetAdjustment{};
+    RewardRangeRecord expression{};
+};
+
+/** Disk form of one pursuit contract. Objective slots past objectiveCount are zero. */
+struct PursuitRecord {
+    std::uint32_t definitionHash{};
+    std::int32_t lifetimeSeconds{};
+    std::uint16_t definitionIndex{};
+    std::uint8_t readable{};
+    std::uint8_t requireAllObjectives{};
+    std::uint8_t requireNonOptionalCompletion{};
+    std::uint8_t objectiveCount{};
+    std::array<std::uint16_t, pursuits::kObjectiveCapacity> objectives{};
+};
+
 #pragma pack(pop)
 
 static_assert(sizeof(RewardSelectionRecord) == 2 * sizeof(std::uint32_t));
@@ -695,12 +725,18 @@ static_assert(sizeof(RewardSocketOverrideRecord)
               == 4 * sizeof(std::uint16_t) + sizeof(std::uint32_t));
 static_assert(sizeof(RewardInstructionRecord)
               == 2 * sizeof(std::uint8_t) + sizeof(std::uint16_t) + sizeof(std::uint32_t));
+static_assert(sizeof(ObjectiveRecord)
+              == 2 * sizeof(std::uint32_t) + sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t)
+                     + 2 * sizeof(RewardRangeRecord));
+static_assert(sizeof(PursuitRecord)
+              == 2 * sizeof(std::uint32_t) + sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t)
+                     + pursuits::kObjectiveCapacity * sizeof(std::uint16_t));
 
 static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 46 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 49 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)
                      + sizeof(gameplay::entity_position_profiles::Fingerprint));
 static_assert(sizeof(SpawnPointRecord)

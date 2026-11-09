@@ -43,6 +43,7 @@ void shutdown() noexcept;
 [[nodiscard]] bool use_session_copy() noexcept;
 [[nodiscard]] bool read_account(AccountState& output) noexcept;
 [[nodiscard]] AccountState account() noexcept;
+[[nodiscard]] bool read_account_identity(AccountIdentity& output) noexcept;
 [[nodiscard]] bool write_account(const AccountState& value) noexcept;
 [[nodiscard]] bool read_settings(account::settings::AccountSettings& output) noexcept;
 [[nodiscard]] bool write_settings(const account::settings::AccountSettings& value) noexcept;

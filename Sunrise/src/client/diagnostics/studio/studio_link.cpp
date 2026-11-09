@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include "../../../core/settings/settings.h"
+#include "../../../middleware/studio/studio_mapping.h"
 #include "../../hooks/bootflow/bootflow_hook_lifecycle.h"
 #include "../../hooks/teleport/runtime.h"
 #include "../../player/player_position.h"
@@ -26,16 +27,16 @@ bool g_accepting{};
 
 /** Closes both mapping resources while the caller owns g_lock. */
 void disconnect() noexcept {
-    close_editor_view(g_mapping, g_view);
+    middleware::studio::close_editor_view(g_mapping, g_view);
 }
 
 /** @return True when an editor has created a compatible mapping for this process. */
 [[nodiscard]] bool connect() noexcept {
-    g_view = open_editor_view<SharedSnapshot>(kMappingFormat, g_mapping);
+    g_view = middleware::studio::open_editor_view<SharedSnapshot>(kMappingFormat, g_mapping);
     if (g_view == nullptr) {
         return false;
     }
-    if (!editor_header_ok(*g_view, kMagic, kVersion, sizeof(SharedSnapshot))) {
+    if (!middleware::studio::editor_header_ok(*g_view, kMagic, kVersion, sizeof(SharedSnapshot))) {
         disconnect();
         return false;
     }
@@ -118,7 +119,7 @@ void poll() noexcept {
         (void)connect();
     }
     if (g_view != nullptr) {
-        if (!editor_alive(g_view->heartbeat, now, kHeartbeatTimeout)) {
+        if (!middleware::studio::editor_alive(g_view->heartbeat, now, kHeartbeatTimeout)) {
             // The sub-links are polled only from here, so they close with the core view.
             disconnect();
             drop_world_link();

@@ -11,7 +11,9 @@
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/node_catalog.h"
+#include "../../objectives/objective_catalog.h"
 #include "../../progressions/progression_catalog.h"
+#include "../../pursuits/pursuit_catalog.h"
 #include "../../records/record_catalog.h"
 #include "../../rewards/reward_catalog.h"
 #include "../../scenarios/scenario_catalog.h"
@@ -181,6 +183,9 @@ bool counts_fit(const DomainCounts& counts, MutableDomains domains) noexcept {
            && counts.rewardInstructions <= domains.rewardInstructions.size()
            && counts.rewardModifiers <= domains.rewardModifiers.size()
            && counts.rewardSockets <= domains.rewardSockets.size()
+           && counts.objectives <= domains.objectives.size()
+           && counts.objectiveInstructions <= domains.objectiveInstructions.size()
+           && counts.pursuits <= domains.pursuits.size()
            && counts.starterSets <= domains.starterSets.size();
 }
 
@@ -295,8 +300,19 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
                                   domains.vendorSaleRows,
                                   domains.vendorInstalledRows,
                                   domains.vendorTransferRules))
-        || !hash_names::valid(domains.hashNames)) {
+        || !hash_names::valid(domains.hashNames)
+        // An empty objective table marks an unsupported catalog, with no bank and no contracts.
+        || (domains.objectives.empty()
+                ? !(domains.objectiveInstructions.empty() && domains.pursuits.empty())
+                : !objectives::valid({domains.objectives, domains.objectiveInstructions}))
+        || !pursuits::valid(domains.pursuits, domains.objectives.size())) {
         return false;
+    }
+    for (const pursuits::Definition& contract : domains.pursuits) {
+        if (contract.definitionIndex >= domains.items.size()
+            || domains.items[contract.definitionIndex].definitionHash != contract.definitionHash) {
+            return false;
+        }
     }
     // Reward rows are dense by item index, so each must name its item or be unavailable.
     const bool rewardsCached = !domains.rewardItems.empty();

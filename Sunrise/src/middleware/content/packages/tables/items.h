@@ -5,6 +5,8 @@
 #include <optional>
 #include <span>
 
+#include "../../../../state/build_data/pursuits/definition.h"
+
 namespace sunrise::middleware::content::packages::tables::items {
 
 /** Ordinary socket lanes an item definition can declare. */
@@ -84,6 +86,16 @@ struct Row {
     std::uint16_t sandboxPerks[kSandboxPerkCapacity]{};
     std::uint8_t renderOverrideCount{};
     RenderOverride renderOverrides[kRenderOverrideCapacity]{};
+    /** Pursuit metadata is optional: an unreadable block leaves the identity row usable. */
+    bool objectiveMetadataValid{true};
+    /** A present objective block declares these completion controls, even without objectives. */
+    bool hasCompletionMetadata{};
+    bool requireAllObjectives{};
+    bool requireNonOptionalCompletion{};
+    std::uint8_t objectiveCount{};
+    std::uint16_t objectiveIndices[state::build_data::pursuits::kObjectiveCapacity]{};
+    /** Positive for a bounty, which expires this many seconds after it is acquired. */
+    std::int32_t lifetimeSeconds{};
 };
 
 /**

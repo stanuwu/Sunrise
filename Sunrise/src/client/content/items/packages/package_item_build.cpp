@@ -19,6 +19,7 @@
 #include "../../vendors/vendor_build.h"
 #include "build.h"
 #include "internal.h"
+#include "package_objective_build.h"
 #include "package_reward_build.h"
 #include "package_socket_plug_build.h"
 
@@ -43,7 +44,8 @@ namespace {
            && state::build_data::node_definitions_ready()
            && state::build_data::sobject_definitions_ready()
            && state::build_data::investment_constants_ready()
-           && state::build_data::starter_sets_ready() && exotic_catalysts_settled();
+           && state::build_data::starter_sets_ready() && exotic_catalysts_settled()
+           && pursuit_catalog_settled();
 }
 
 /**
@@ -164,17 +166,24 @@ bool build() noexcept {
             }
             // The same root names the bucket and socket-list tables.
             storage.root = storage.child;
-            // Quest, record, node, season and catalyst reads share these unlock maps.
+            // Quest, record, node, season, catalyst and pursuit reads share these unlock maps.
             if (!state::build_data::item_definitions_ready()
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
                 || !state::build_data::season_pass_ready() || !reward_definitions_settled()
-                || !exotic_catalysts_settled()) {
+                || !exotic_catalysts_settled() || !pursuit_catalog_settled()) {
                 reason = "unlock_maps";
                 if (!read_unlock_slot_maps(
                         source, storage, std::span<const std::byte>{storage.root})) {
                     continue;
                 }
+            }
+            // The objective table settles or retries on its own, so it never holds up the others.
+            if (!pursuit_catalog_settled()) {
+                (void)build_objectives(source,
+                                       storage.scratch,
+                                       std::span<const std::byte>{storage.root},
+                                       storage.slotMaps);
             }
             if (!state::build_data::socket_plug_rules_ready()) {
                 std::uint32_t plugSetTag = 0;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 
+#include "../../../middleware/studio/studio_mapping.h"
 #include "../../hooks/bootflow/bootflow_hook_lifecycle.h"
 #include "../../hooks/world_objects/internal.h"
 #include "studio_pose_link.h"
@@ -43,7 +44,7 @@ std::array<std::uint32_t, wire::kPlacementCapacity> g_parents{}, g_publishedPare
 
 /** Discard unfinished work when its editor mapping disappears. */
 void disconnect_world() noexcept {
-    close_editor_view(g_mapping, g_view);
+    middleware::studio::close_editor_view(g_mapping, g_view);
     g_scanning = false;
     g_scanPosition = 0;
     g_publishedCount = 0;
@@ -56,7 +57,8 @@ void disconnect_world() noexcept {
 
 /** The editor creates the mapping; the client only opens a compatible existing one. */
 [[nodiscard]] bool connect_world() noexcept {
-    g_view = open_editor_view<wire::SharedWorld>(wire::kMappingFormat, g_mapping);
+    g_view =
+        middleware::studio::open_editor_view<wire::SharedWorld>(wire::kMappingFormat, g_mapping);
     if (g_view == nullptr) {
         return false;
     }
@@ -64,7 +66,8 @@ void disconnect_world() noexcept {
     if (g_view->control.magic == wire::kMagic) {
         g_view->control.clientVersion = wire::kVersion;
     }
-    if (!editor_header_ok(g_view->control, wire::kMagic, wire::kVersion, wire::kMappingBytes)) {
+    if (!middleware::studio::editor_header_ok(
+            g_view->control, wire::kMagic, wire::kVersion, wire::kMappingBytes)) {
         disconnect_world();
         return false;
     }
@@ -268,7 +271,7 @@ void poll_world_link() noexcept {
     if (g_view == nullptr) {
         return;
     }
-    if (!editor_alive(g_view->control.heartbeat, now, kHeartbeatTimeout)) {
+    if (!middleware::studio::editor_alive(g_view->control.heartbeat, now, kHeartbeatTimeout)) {
         disconnect_world();
         return;
     }

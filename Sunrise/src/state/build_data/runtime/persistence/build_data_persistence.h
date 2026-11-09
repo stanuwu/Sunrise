@@ -22,7 +22,9 @@
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/definition.h"
+#include "../../objectives/definition.h"
 #include "../../progressions/definition.h"
+#include "../../pursuits/definition.h"
 #include "../../records/definition.h"
 #include "../../scenarios/definition.h"
 #include "../../season_pass/definition.h"
@@ -88,6 +90,9 @@ struct Context {
     std::vector<rewards::Instruction> rewardInstructionScratch{};
     std::vector<rewards::Modifier> rewardModifierScratch{};
     std::vector<rewards::SocketOverride> rewardSocketScratch{};
+    std::vector<objectives::Row> objectiveScratch{};
+    std::vector<unlocks::Instruction> objectiveInstructionScratch{};
+    std::vector<pursuits::Definition> pursuitScratch{};
     std::vector<starter_sets::Definition> starterSetScratch{};
     std::vector<records::Definition> recordScratch{};
     std::vector<records::Objective> recordObjectiveScratch{};

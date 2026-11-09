@@ -115,4 +115,14 @@ struct Inputs {
 [[nodiscard]] bool
 evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& result) noexcept;
 
+/**
+ * Evaluates one numeric expression program, such as an objective's progress source.
+ * @param program Instructions in evaluation order.
+ * @param inputs Flag and value readers.
+ * @param result Receives the final value, and is cleared on any refusal.
+ * @return True only when the whole program evaluated to one value.
+ */
+[[nodiscard]] bool
+evaluate(std::span<const Instruction> program, const Inputs& inputs, std::int32_t& result) noexcept;
+
 } // namespace sunrise::state::unlocks

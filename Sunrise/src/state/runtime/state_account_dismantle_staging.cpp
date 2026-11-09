@@ -447,10 +447,12 @@ apply_dismantle_rewards(const AccountState& before,
  *
  * Surviving authored entries keep their mutation generation unless installed row placement moves
  * them. Generation capacity is checked for every move before any survivor is changed.
+ * @param paysRewards False stages an editor removal, which credits no dismantle materials.
  */
 [[nodiscard]] bool stage_item_dismantle(const AccountState& account,
                                         std::size_t characterIndex,
                                         std::uint64_t instanceSoid,
+                                        bool paysRewards,
                                         PendingItemDismantle& mutation) noexcept {
     mutation = {};
     if (instanceSoid == 0 || !account::valid(account) || characterIndex >= account.characterCount
@@ -561,20 +563,22 @@ apply_dismantle_rewards(const AccountState& before,
         return false;
     }
 
-    AccountState rewarded{};
     std::array<DismantleReward, kDismantleRewardCapacity> rewards{};
     std::size_t rewardCount = 0;
-    if (!apply_dismantle_rewards(candidate,
-                                 dismantledItem,
-                                 dismantledDefinition,
-                                 dismantledDetail,
-                                 dismantledSlot,
-                                 rewarded,
-                                 rewards,
-                                 rewardCount)) {
-        return false;
+    if (paysRewards) {
+        AccountState rewarded{};
+        if (!apply_dismantle_rewards(candidate,
+                                     dismantledItem,
+                                     dismantledDefinition,
+                                     dismantledDetail,
+                                     dismantledSlot,
+                                     rewarded,
+                                     rewards,
+                                     rewardCount)) {
+            return false;
+        }
+        candidate = rewarded;
     }
-    candidate = rewarded;
 
     mutation.beforeCharacter = before;
     mutation.afterCharacter = after;
@@ -595,6 +599,7 @@ apply_dismantle_rewards(const AccountState& before,
     mutation.inventoryRow = dismantledRow;
     mutation.equipmentSlot = dismantledSlot;
     mutation.profileChanged = rewardCount != 0;
+    mutation.paysRewards = paysRewards;
     mutation.prepared = true;
     return true;
 }
@@ -621,6 +626,7 @@ apply_dismantle_rewards(const AccountState& before,
         || left.movedInventoryItemCount != right.movedInventoryItemCount
         || left.rewardCount != right.rewardCount || left.inventoryRow != right.inventoryRow
         || left.equipmentSlot != right.equipmentSlot || left.profileChanged != right.profileChanged
+        || left.paysRewards != right.paysRewards
         || !same_stationary_item(left.dismantledItem, right.dismantledItem)
         || !same_character(left.beforeCharacter, right.beforeCharacter)
         || !same_character(left.afterCharacter, right.afterCharacter)
@@ -703,8 +709,11 @@ apply_dismantle_rewards(const AccountState& before,
     }
 
     PendingItemDismantle canonical{};
-    if (!stage_item_dismantle(
-            current, mutation.characterIndex, mutation.dismantledInstanceSoid, canonical)
+    if (!stage_item_dismantle(current,
+                              mutation.characterIndex,
+                              mutation.dismantledInstanceSoid,
+                              mutation.paysRewards,
+                              canonical)
         || !same_dismantle_transition(canonical, mutation)) {
         return false;
     }

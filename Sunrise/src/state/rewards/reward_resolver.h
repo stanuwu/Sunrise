@@ -38,6 +38,11 @@ struct Context {
                             const Context& context,
                             bool& result) noexcept;
 
+/** Evaluates a bound numeric expression against the same saved banks as reward conditions. */
+[[nodiscard]] bool evaluate(std::span<const build_data::rewards::Instruction> program,
+                            const Context& context,
+                            std::int32_t& value) noexcept;
+
 /** Ineligible: the saved unlocks left nothing to draw. Exceeded: this draw outgrew a bound. */
 enum class Resolution : std::uint8_t { resolved, ineligible, exceeded, refused };
 

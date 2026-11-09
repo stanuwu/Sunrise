@@ -28,9 +28,6 @@
 namespace sunrise::server::bap::encrypted {
 namespace {
 
-/** Delay before the Family-4 copy of an artifact change, so its Family-5 refresh lands first. */
-constexpr std::uint64_t kArtifactFamily4RefreshDelayMs = 100;
-
 /** Traces one decoded service frame and the reply it produced. */
 void report_service_traffic(const middleware::bap::RequestFrame& frame,
                             const ServiceRoute& route,
@@ -542,10 +539,7 @@ bool consume(Session& session,
             if (artifactPurchase || outcome.hasArtifactReset) {
                 // Artifact overrides live in Family 5, so they need their own refresh. A record
                 // claim does not: its Family-4 replacement rearms the client rebuild.
-                session.artifactRefreshArmed = true;
-                session.artifactFamily4RefreshDueTick =
-                    GetTickCount64() + kArtifactFamily4RefreshDelayMs;
-                session.artifactFamily4RefreshArmed = true;
+                bap::arm_artifact_refresh(session);
             }
             if (outcome.hasArtifactReset) {
                 session.artifactResetRefresh = outcome.artifactReset;

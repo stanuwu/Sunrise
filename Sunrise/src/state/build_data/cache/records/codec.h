@@ -185,4 +185,9 @@ namespace sunrise::state::build_data::cache::records {
 [[nodiscard]] bool decode(const RewardSocketOverrideRecord& record,
                           rewards::SocketOverride& value) noexcept;
 
+[[nodiscard]] bool encode(const objectives::Row& value, ObjectiveRecord& record) noexcept;
+[[nodiscard]] bool decode(const ObjectiveRecord& record, objectives::Row& value) noexcept;
+[[nodiscard]] bool encode(const pursuits::Definition& value, PursuitRecord& record) noexcept;
+[[nodiscard]] bool decode(const PursuitRecord& record, pursuits::Definition& value) noexcept;
+
 } // namespace sunrise::state::build_data::cache::records

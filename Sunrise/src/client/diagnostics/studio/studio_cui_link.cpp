@@ -7,6 +7,7 @@
 #include <cstring>
 #include <span>
 
+#include "../../../middleware/studio/studio_mapping.h"
 #include "studio_cui_protocol.h"
 #include "studio_cui_reader.h"
 #include "studio_protocol.h"
@@ -80,7 +81,7 @@ read_request(volatile std::int32_t& request, Target& target, const Fill& fill) n
 
 /** Forgets what was published, so the next editor connection gets every section again. */
 void disconnect() noexcept {
-    close_editor_view(g_mapping, g_view);
+    middleware::studio::close_editor_view(g_mapping, g_view);
     g_screensPublished = false;
     g_treePublished = false;
     g_detailAnswered = 0;
@@ -88,7 +89,7 @@ void disconnect() noexcept {
 
 /** @return True only when an editor created the matching CUI protocol. */
 [[nodiscard]] bool connect() noexcept {
-    g_view = open_editor_view<wire::SharedCui>(wire::kMappingFormat, g_mapping);
+    g_view = middleware::studio::open_editor_view<wire::SharedCui>(wire::kMappingFormat, g_mapping);
     if (g_view == nullptr) {
         return false;
     }
@@ -96,7 +97,8 @@ void disconnect() noexcept {
     if (g_view->control.magic == wire::kMagic) {
         g_view->control.clientVersion = wire::kVersion;
     }
-    if (!editor_header_ok(g_view->control, wire::kMagic, wire::kVersion, wire::kMappingBytes)) {
+    if (!middleware::studio::editor_header_ok(
+            g_view->control, wire::kMagic, wire::kVersion, wire::kMappingBytes)) {
         disconnect();
         return false;
     }
@@ -240,7 +242,7 @@ void serve_widget(std::uint64_t now) noexcept {
     auto& control = g_view->control;
     control.gamePid = GetCurrentProcessId();
     control.bridgeFlags = cui_manager_ready() ? wire::managerReady : 0U;
-    if (!editor_alive(control.heartbeat, now, kHeartbeatTimeout)) {
+    if (!middleware::studio::editor_alive(control.heartbeat, now, kHeartbeatTimeout)) {
         disconnect();
         return false;
     }

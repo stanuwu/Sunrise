@@ -6,6 +6,8 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <new>
 #include <span>
 
 #include "../../core/logging/log.h"
@@ -53,6 +55,12 @@ constexpr std::uint16_t kArtifactColumnRows = 5;
 constexpr std::uint16_t kArtifactFirstColumnRow = 6;
 
 using SaleRows = std::array<build_data::ArtifactSaleRow, build_data::kArtifactSaleRowCapacity>;
+
+/** An ownership mask holds one bit per artifact sale row. */
+constexpr std::size_t kArtifactMaskRows = std::numeric_limits<std::uint32_t>::digits;
+// An unavailable flag index lies past the character bank, so the bounds check skips it.
+static_assert(unlocks::kCharacterObjectFlagCapacity
+              <= build_data::collectibles::kUnavailableFlagIndex);
 
 [[nodiscard]] std::uint16_t column_tier(std::uint16_t saleIndex) noexcept {
     if (saleIndex < kArtifactFirstColumnRow) {
@@ -148,17 +156,48 @@ upsert_value(Family5State& family, std::uint16_t slot, std::int32_t value) noexc
     return mask;
 }
 
-/** @return One bit per owned artifact sale row, read from the character acquired-flag bank. */
-[[nodiscard]] std::uint32_t artifact_mask(const SaleRows& rows, std::size_t count) noexcept {
+/** @return One bit per artifact sale row the character's acquired-flag bank marks owned. */
+[[nodiscard]] std::uint32_t character_bank_artifact_mask(const unlocks::Table& banks,
+                                                         const SaleRows& rows,
+                                                         std::size_t count) noexcept {
     std::uint32_t mask = 0;
-    for (std::size_t row = 0; row < count && row < 32; ++row) {
-        const std::uint16_t mapped = rows[row].characterFlagIndex;
-        if (mapped != build_data::collectibles::kUnavailableFlagIndex
-            && unlocks::character_object_flag_set(mapped)) {
+    for (std::size_t row = 0; row < count && row < kArtifactMaskRows; ++row) {
+        const std::uint16_t flag = rows[row].characterFlagIndex;
+        if (flag < banks.characterObjectFlags.size()
+            && banks.characterObjectFlags[flag] == unlocks::kFlagSet) {
             mask |= 1U << row;
         }
     }
     return mask;
+}
+
+/** @return One bit per owned artifact sale row, read from the selected character's bank. */
+[[nodiscard]] std::uint32_t artifact_mask(const SaleRows& rows, std::size_t count) noexcept {
+    const std::unique_ptr<unlocks::Table> banks(new (std::nothrow) unlocks::Table{});
+    return banks && investment::store::read_unlocks(*banks)
+               ? character_bank_artifact_mask(*banks, rows, count)
+               : 0U;
+}
+
+/**
+ * Hands every character's unlock banks to visit in slot order, reusing one heap copy.
+ * @param visit Takes the slot and its banks, and returns false to stop the walk.
+ * @return False when the bank copy cannot be allocated, the account or a bank cannot be read, or
+ * a visit returns false.
+ */
+template <typename Visit> [[nodiscard]] bool visit_character_banks(Visit visit) noexcept {
+    AccountIdentity account{};
+    const std::unique_ptr<unlocks::Table> banks(new (std::nothrow) unlocks::Table{});
+    if (!banks || !investment::store::read_account_identity(account)) {
+        return false;
+    }
+    for (std::size_t slot = 0; slot < account.characterCount; ++slot) {
+        if (!investment::store::read_unlocks(*banks, static_cast<int>(slot))
+            || !visit(static_cast<int>(slot), *banks)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /**
@@ -195,6 +234,35 @@ void strip_artifact_flags_locked(Family5State& family,
         used = static_cast<std::uint16_t>(used + ((mask & (1U << bit)) != 0 ? 1 : 0));
     }
     return used;
+}
+
+/**
+ * Reads the largest artifact points-used count across every character bank. Ownership is read
+ * through the artifact sale rows, so this waits for the catalogs those rows resolve through. Rows
+ * the published catalogs still cannot resolve are refused, since no retry changes them.
+ * @param most Receives the largest count.
+ * @param reason Receives the refusal label on failure.
+ * @return False when the rows are unusable, or the account or a character bank cannot be read.
+ */
+[[nodiscard]] bool most_artifact_points_used_locked(std::uint16_t& most,
+                                                    const char*& reason) noexcept {
+    most = 0;
+    reason = "not_ready";
+    if (!build_data::vendor_catalog_ready() || !build_data::item_definitions_ready()
+        || !build_data::collectible_definitions_ready()) {
+        return false;
+    }
+    reason = "artifact_unsupported";
+    SaleRows rows{};
+    std::size_t count = 0;
+    if (!sale_rows(rows, count)) {
+        return false;
+    }
+    reason = "transaction";
+    return visit_character_banks([&](int /*slot*/, const unlocks::Table& banks) noexcept {
+        most = (std::max)(most, points_used(character_bank_artifact_mask(banks, rows, count)));
+        return true;
+    });
 }
 
 /** Character-bank write of an artifact publish; the family-5 overrides carry only the counters. */
@@ -350,6 +418,54 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
                                                    : experience - kMaximumPassExperience);
 }
 
+/**
+ * Publishes a new XP total with its artifact values and commits the caller's transaction.
+ * @param rankReached True when the total reaches a higher rank, the only XP change that can earn
+ *        a perk.
+ */
+[[nodiscard]] bool publish_experience_total(investment::store::Transaction& transaction,
+                                            std::int32_t total,
+                                            bool rankReached) noexcept {
+    Family5State family;
+    if (!investment::store::read_family5(family)) {
+        return false;
+    }
+    SaleRows rows{};
+    std::size_t count = 0;
+    const std::uint32_t mask = sale_rows(rows, count) ? artifact_mask(rows, count) : 0U;
+    // The caller publishes the whole account image after the commit, so it needs no report.
+    bool earnedRidesTheImage = false;
+    return publish_experience_lanes(total) && publish_artifact_locked(family, mask, total)
+           && investment::store::write_family5(family)
+           && (!rankReached || walk_earned_perks(earnedRidesTheImage)) && transaction.commit();
+}
+
+/**
+ * Finds a native pass row that still grants the expected item and that the player claims. A row
+ * the earned-perk walk grants is refused, because that walk owns its claim flag.
+ */
+[[nodiscard]] bool find_claimable_reward(std::uint16_t rewardIndex,
+                                         std::uint32_t itemHash,
+                                         build_data::season_pass::Reward& reward,
+                                         const char*& reason) noexcept {
+    // The automatic-row check reads the item and reward catalogs.
+    reason = "not_ready";
+    if (!build_data::season_pass_ready() || !build_data::reward_definitions_ready()
+        || !build_data::item_definitions_ready()) {
+        return false;
+    }
+    reason = "reward_index";
+    if (!build_data::find_season_pass_reward(rewardIndex, reward)) {
+        return false;
+    }
+    reason = "reward_hash";
+    if (reward.itemHash != itemHash) {
+        return false;
+    }
+    reason = "automatic_reward";
+    return !pass::automatic_row(reward);
+}
+
 } // namespace
 
 /** Packages share the perk bucket; only rewards without a pool grant the flag directly. */
@@ -366,6 +482,12 @@ progression::season_pass::progress_flag(const build_data::season_pass::Reward& r
         return acquisition.acquiredFlag;
     }
     return build_data::rewards::kAbsent;
+}
+
+/** A row with a direct perk flag is granted by the earned-perk walk, never claimed. */
+bool progression::season_pass::automatic_row(
+    const build_data::season_pass::Reward& reward) noexcept {
+    return progress_flag(reward) != build_data::rewards::kAbsent;
 }
 
 /** @return Seasonal XP published in the account progression bank. */
@@ -391,25 +513,18 @@ bool seed_seasonal_progression(bool& perksEarned) noexcept {
     }
     // An authored family-5 row still seeds ownership. The publish moves it to the character bank.
     const std::uint32_t authoredMask = authored_artifact_mask_locked(family, rows, count);
-    if (authoredMask != 0) {
-        const AccountState account = investment::store::account();
-        for (std::size_t character = 0; character < account.characterCount; ++character) {
-            unlocks::Table banks;
-            if (!investment::store::read_unlocks(banks, static_cast<int>(character))) {
-                investment::store::g_mutex.unlock();
-                return false;
-            }
-            for (std::size_t row = 0; row < count && row < 32; ++row) {
-                const auto flag = rows[row].characterFlagIndex;
-                if ((authoredMask & (1U << row)) != 0 && flag < banks.characterObjectFlags.size()) {
-                    banks.characterObjectFlags[flag] = unlocks::kFlagSet;
-                }
-            }
-            if (!investment::store::write_unlocks(banks, static_cast<int>(character))) {
-                investment::store::g_mutex.unlock();
-                return false;
+    const auto seedOwnership = [&](int slot, unlocks::Table& banks) noexcept {
+        for (std::size_t row = 0; row < count && row < kArtifactMaskRows; ++row) {
+            const auto flag = rows[row].characterFlagIndex;
+            if ((authoredMask & (1U << row)) != 0 && flag < banks.characterObjectFlags.size()) {
+                banks.characterObjectFlags[flag] = unlocks::kFlagSet;
             }
         }
+        return investment::store::write_unlocks(banks, slot);
+    };
+    if (authoredMask != 0 && !visit_character_banks(seedOwnership)) {
+        investment::store::g_mutex.unlock();
+        return false;
     }
     const std::uint32_t mask = artifact_mask(rows, count);
     // A pick changes which class and character flags the perk conditions read.
@@ -473,21 +588,60 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
         return false;
     }
     const auto total = previous + amount;
-    // A new rank is the only XP change that can earn a perk.
-    const bool rankChanged = seasonal_rank_for(previous) != seasonal_rank_for(total);
+    return publish_experience_total(
+        transaction, total, seasonal_rank_for(previous) != seasonal_rank_for(total));
+}
 
-    Family5State family;
-    if (!investment::store::read_family5(family)) {
+/** Refuses a decrease below the artifact points any character has spent. */
+bool replace_seasonal_experience(std::int32_t expected,
+                                 std::int32_t replacement,
+                                 const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    if (!check_seasonal_experience(replacement, &reason)) {
         return false;
     }
-    SaleRows rows{};
-    std::size_t count = 0;
-    const std::uint32_t mask = sale_rows(rows, count) ? artifact_mask(rows, count) : 0U;
-    // The caller publishes the whole account image after every grant, so it needs no report.
-    bool earnedRidesTheImage = false;
-    return publish_experience_lanes(total) && publish_artifact_locked(family, mask, total)
-           && investment::store::write_family5(family)
-           && (!rankChanged || walk_earned_perks(earnedRidesTheImage)) && transaction.commit();
+    reason = "transaction";
+    investment::store::Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
+    }
+    reason = "experience_changed";
+    const std::int32_t previous = seasonal_experience();
+    if (previous != expected) {
+        return false;
+    }
+    // Only a decrease can fall below the artifact points a character has spent.
+    std::uint16_t spent = 0;
+    if (replacement < previous && !most_artifact_points_used_locked(spent, reason)) {
+        return false;
+    }
+    // Selecting the character that spent the most would otherwise publish more points spent than
+    // the new total earns.
+    reason = "experience_spent";
+    if (spent > artifact_points_earned_for(replacement)) {
+        return false;
+    }
+    reason = "transaction";
+    const bool rankReached =
+        replacement > previous && seasonal_rank_for(previous) != seasonal_rank_for(replacement);
+    if (!publish_experience_total(transaction, replacement, rankReached)) {
+        return false;
+    }
+    reason = nullptr;
+    return true;
+}
+
+/** An XP total counts earned XP, so it is never negative. */
+bool check_seasonal_experience(std::int32_t replacement, const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    reason = "experience_range";
+    if (replacement < 0) {
+        return false;
+    }
+    reason = nullptr;
+    return true;
 }
 
 /** @return True when this Season pass reward row is already claimed. */
@@ -516,6 +670,48 @@ void revoke_season_pass_reward(std::uint16_t rewardIndex) noexcept {
         && reward.claimFlagIndex != build_data::season_pass::kUnavailableFlagIndex) {
         (void)unlocks::set_account_flag(reward.claimFlagIndex, unlocks::kFlagClear);
     }
+}
+
+/** Clears one claimed row's claim flag while the row still names the expected item. */
+bool reset_season_pass_reward(std::uint16_t rewardIndex,
+                              std::uint32_t itemHash,
+                              const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    build_data::season_pass::Reward reward{};
+    if (!find_claimable_reward(rewardIndex, itemHash, reward, reason)) {
+        return false;
+    }
+    reason = "transaction";
+    investment::store::Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
+    }
+    reason = "not_claimed";
+    if (!season_pass_reward_claimed(rewardIndex)) {
+        return false;
+    }
+    revoke_season_pass_reward(rewardIndex);
+    reason = "transaction";
+    if (season_pass_reward_claimed(rewardIndex) || !transaction.commit()) {
+        return false;
+    }
+    reason = nullptr;
+    return true;
+}
+
+/** Reads only installed catalogs. */
+bool check_season_pass_reward(std::uint16_t rewardIndex,
+                              std::uint32_t itemHash,
+                              const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    build_data::season_pass::Reward reward{};
+    if (!find_claimable_reward(rewardIndex, itemHash, reward, reason)) {
+        return false;
+    }
+    reason = nullptr;
+    return true;
 }
 
 /** @return Purchased artifact sale rows, one bit per row. */

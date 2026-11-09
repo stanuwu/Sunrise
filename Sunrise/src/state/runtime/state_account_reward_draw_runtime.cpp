@@ -6,12 +6,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <span>
 
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "../rewards/reward_resolver.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -185,6 +187,20 @@ enum class PassResolution { claim, replay };
     return true;
 }
 
+/**
+ * True for wrappers and direct account perks. Both grant through their reward definition and
+ * bypass quest initialization.
+ */
+bool uses_reward_definition(const build_data::items::Definition& item) noexcept {
+    build_data::rewards::Item reward{};
+    if (!build_data::find_reward_item(item.definitionIndex, reward)) {
+        return false;
+    }
+    return reward.poolIndex != build_data::rewards::kAbsent
+           || (item.bucketId == inventory_buckets::kPerkBucketId
+               && reward.acquiredFlag != build_data::rewards::kAbsent);
+}
+
 } // namespace
 
 /**
@@ -234,6 +250,71 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
     mutation.rewardIndex = rewardIndex;
     mutation.prepared = true;
     return true;
+}
+
+/** Every item the reward path can place takes it; nothing else is grantable. */
+bool item_grantable(std::uint16_t itemIndex) noexcept {
+    build_data::items::Definition item{};
+    if (!build_data::find_item_definition_index(itemIndex, item)) {
+        return false;
+    }
+    if (uses_reward_definition(item)) {
+        return true;
+    }
+    item_details::Definition detail{};
+    inventory_buckets::Descriptor bucket{};
+    if (!build_data::find_configured_item_detail(itemIndex, detail)
+        || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
+        return false;
+    }
+    const bool profileStack =
+        bucket.arraySelector == inventory_buckets::ArraySelector::profile
+        && detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable;
+    return profileStack || bucket.arraySelector == inventory_buckets::ArraySelector::character;
+}
+
+/** One instance, draw or perk, or up to one full stack of a stackable item. */
+std::int32_t item_grant_step(std::uint16_t itemIndex, std::int32_t remaining) noexcept {
+    build_data::items::Definition item{};
+    item_details::Definition detail{};
+    if (remaining <= 1 || !build_data::find_item_definition_index(itemIndex, item)
+        || uses_reward_definition(item)
+        || !build_data::find_configured_item_detail(itemIndex, detail)
+        || detail.instancedDefinitionState != item_details::InstancedDefinitionState::stackable
+        || detail.maxStackSize <= 0) {
+        return (std::min)(remaining, 1);
+    }
+    return (std::min)(remaining, detail.maxStackSize);
+}
+
+/** One step in every row of the item's own bucket and of its overflow bucket. */
+std::int32_t item_grant_capacity(std::uint16_t itemIndex) noexcept {
+    constexpr std::int32_t kLargestGrant = (std::numeric_limits<std::int32_t>::max)();
+    build_data::items::Definition item{};
+    if (!build_data::find_item_definition_index(itemIndex, item)) {
+        return 0;
+    }
+    // A wrapper draws on every step, and each draw lands wherever its pool sends it.
+    build_data::rewards::Item reward{};
+    if (build_data::find_reward_item(itemIndex, reward)
+        && reward.poolIndex != build_data::rewards::kAbsent) {
+        return kLargestGrant;
+    }
+    // An account perk is one acquisition flag.
+    if (uses_reward_definition(item)) {
+        return 1;
+    }
+    inventory_buckets::Descriptor own{};
+    if (!build_data::find_inventory_bucket_descriptor(item.bucketId, own)) {
+        return 0;
+    }
+    std::int64_t rows = own.slotCount;
+    inventory_buckets::Descriptor recovery{};
+    if (find_recovery_bucket(item, recovery) && recovery.bucketId != own.bucketId) {
+        rows += recovery.slotCount;
+    }
+    const std::int64_t capacity = rows * item_grant_step(itemIndex, kLargestGrant);
+    return static_cast<std::int32_t>((std::min)(capacity, std::int64_t{kLargestGrant}));
 }
 
 /**

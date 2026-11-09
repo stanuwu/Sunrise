@@ -2,12 +2,9 @@
 
 #include <algorithm>
 #include <limits>
-#include <memory>
-#include <new>
 #include <span>
 
 #include "../../../../core/logging/log.h"
-#include "../../../../middleware/crypto/random_bytes.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/account/account_state.h"
 #include "../../../../state/activity/destination/definition.h"
@@ -16,14 +13,15 @@
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
 #include "queuez_family_repush.h"
+#include "queuez_investment_push.h"
+#include "queuez_item_grant_push.h"
 #include "queuez_state_validation.h"
 #include "state/investment/store_internal.h"
 
 namespace sunrise::server::bap::encrypted {
-namespace {
 
 /** @return The peer's retained row overlay, or empty once its presentation hold has passed. */
-[[nodiscard]] std::span<const queuez::AcquisitionPresentationRow>
+std::span<const queuez::AcquisitionPresentationRow>
 active_acquisition_presentation_rows(const Session& session) noexcept {
     if (GetTickCount64() >= session.acquisitionPresentationUntilTick
         || session.acquisitionPresentationRowCount > session.acquisitionPresentationRows.size()) {
@@ -32,6 +30,8 @@ active_acquisition_presentation_rows(const Session& session) noexcept {
     return std::span(session.acquisitionPresentationRows)
         .first(session.acquisitionPresentationRowCount);
 }
+
+namespace {
 
 /** Drops the visual XP notification and republishes the account, which already holds the XP. */
 void drop_seasonal_experience_presentation(Session& session) noexcept {
@@ -57,84 +57,48 @@ selected_character(const state::AccountState& account) noexcept {
     return nullptr;
 }
 
-/**
- * Publishes and commits one world reward resolved through its installed reward definition.
- * @return True only when the grant committed and its update was framed into the response.
- */
-[[nodiscard]] bool consume_world_record_reward(const WorldRewardRequest& request,
-                                               Session& session,
-                                               Scratch& scratch,
-                                               std::span<std::byte> response,
-                                               std::size_t& written,
-                                               bool& touchesScratch) noexcept {
-    const auto fail = [&](const char* reason) noexcept {
-        report_reward_refusal("world_publish", request.itemDefinitionIndex, reason);
-        return false;
-    };
-    // A draw is not retained, so it waits for a buffer its whole frame is sure to fit.
-    if (response.size() < scratch.framed.size()) {
-        return false;
-    }
-    const std::unique_ptr<state::PendingRecordRewardGrant> pending(
-        new (std::nothrow) state::PendingRecordRewardGrant);
-    if (!pending) {
-        return fail("reward_allocation");
-    }
-    std::uint64_t seed = 0;
-    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
-        return fail("random_source");
-    }
-    const char* reason = "transaction";
+/** Log stage of every refused world-reward publication. */
+constexpr const char* kWorldRewardStage = "world_publish";
+
+/** Grants and publishes the oldest world reward, retiring one that State can never grant. */
+[[nodiscard]] bool consume_world_reward(const WorldRewardRequest& request,
+                                        Session& session,
+                                        Scratch& scratch,
+                                        std::span<std::byte> response,
+                                        std::size_t& written,
+                                        bool& touchesScratch) noexcept {
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
-        return fail(reason);
+        report_reward_refusal(kWorldRewardStage, request.itemDefinitionIndex, "transaction");
+        return false;
     }
-    const auto preparation =
-        state::prepare_item_reward(request.itemDefinitionIndex,
-                                   static_cast<std::uint32_t>(request.quantity),
-                                   seed,
-                                   *pending,
-                                   &reason);
-    if (preparation == state::RewardPreparation::unresolvable) {
+    StagedItemGrant staged{};
+    const char* reason = nullptr;
+    const ItemGrantStage stage = stage_item_grant({request.itemDefinitionIndex, request.quantity},
+                                                  session,
+                                                  scratch,
+                                                  response,
+                                                  touchesScratch,
+                                                  staged,
+                                                  reason);
+    if (stage == ItemGrantStage::unresolvable) {
         (void)bap::retire_world_reward(transaction, request, reason);
         return false;
     }
-    if (preparation != state::RewardPreparation::prepared) {
-        return fail(reason);
-    }
-    queuez::RecordRewardGrant update{};
-    touchesScratch = true;
-    std::size_t framedSize = 0;
-    const bool staged = queuez::stage_record_reward_grant(session.queuez, *pending, update);
-    const bool encoded =
-        staged
-        && push::append_record_reward_notification(scratch,
-                                                   session.queuez,
-                                                   update,
-                                                   *pending,
-                                                   active_acquisition_presentation_rows(session),
-                                                   session.sessionKey,
-                                                   session.sendNonce,
-                                                   scratch.framed,
-                                                   framedSize)
-        && framedSize != 0;
-    if (!state::commit_record_reward(*pending)) {
-        return fail("inventory_commit");
+    if (stage != ItemGrantStage::committed) {
+        if (reason != nullptr) {
+            report_reward_refusal(kWorldRewardStage, request.itemDefinitionIndex, reason);
+        }
+        return false;
     }
     if (!bap::complete_world_reward(request.id) || !transaction.commit()) {
-        return fail("queue_commit");
+        report_reward_refusal(kWorldRewardStage, request.itemDefinitionIndex, "queue_commit");
+        return false;
     }
-    // No buffer fixes a failed stage or encode, so the grant commits and the row retires.
-    if (!encoded) {
-        bap::arm_account_resync_everywhere();
-        return fail(!staged ? "inventory_stage" : "inventory_encode");
+    if (!publish_item_grant(staged, session, scratch, response, written)) {
+        report_reward_refusal(kWorldRewardStage, request.itemDefinitionIndex, staged.unpublished);
+        return false;
     }
-    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
-    written = framedSize;
-    middleware::secure_channel::advance_nonce(session.sendNonce);
-    session.queuez = update.after;
-    bap::arm_account_resync_elsewhere(session);
-    bap::arm_acquisition_presentation_hold(session);
     return true;
 }
 
@@ -527,8 +491,7 @@ bool consume_deferred(Session& session,
     }
     WorldRewardRequest reward{};
     if (session.queuez.family4Active && bap::current_world_reward(reward)) {
-        if (consume_world_record_reward(
-                reward, session, scratch, response, written, touchesScratch)) {
+        if (consume_world_reward(reward, session, scratch, response, written, touchesScratch)) {
             return true;
         }
         if (session.accountResyncArmed) {
@@ -538,6 +501,14 @@ bool consume_deferred(Session& session,
     if (consume_seasonal_experience_presentation(
             session, scratch, response, written, touchesScratch)) {
         return true;
+    }
+    // Editor operations wait for any queued XP toast, so no stale gain shows after an XP edit.
+    if (consume_investment_operation(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    // A grant committed without a frame armed a resync, which must be sent before any increment.
+    if (session.accountResyncArmed) {
+        return false;
     }
     if (consume_ability_refresh(session, scratch, response, written, touchesScratch)) {
         return true;

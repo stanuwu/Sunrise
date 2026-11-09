@@ -53,6 +53,37 @@ bool append_item_state_notification(
            && queuez_frame::append_prepared(scratch, prepared, key, nonce, response, written);
 }
 
+/** Appends the selected character's current object as one increment above the peer version. */
+bool append_selected_character_refresh_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t accountSoid,
+    std::size_t characterIndex,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept {
+    snapshot::Prepared prepared{};
+    return snapshot::prepare_selected_character_refresh(
+               scratch, update, accountSoid, characterIndex, acquisitionPresentationRows, prepared)
+           && queuez_frame::append_prepared(scratch, prepared, key, nonce, response, written);
+}
+
+/** Appends the current account and selected character as one increment above the peer version. */
+bool append_account_refresh_notification(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response,
+    std::size_t& written) noexcept {
+    snapshot::Prepared prepared{};
+    return snapshot::prepare_account_refresh(scratch, update, acquisitionPresentationRows, prepared)
+           && queuez_frame::append_prepared(scratch, prepared, key, nonce, response, written);
+}
+
 /** Appends one opcode-901 selected-character artifact ownership upsert. */
 bool append_artifact_purchase_notification(
     Scratch& scratch,

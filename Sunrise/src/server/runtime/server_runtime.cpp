@@ -17,6 +17,7 @@
 #include "../gameplay/gameplay_runtime.h"
 #include "../http/server_http.h"
 #include "../studio/studio_command_link.h"
+#include "../studio/studio_investment_link.h"
 #include "../transport/bap_listener.h"
 #include "../ui/runtime/server_ui_module_runtime.h"
 
@@ -211,6 +212,7 @@ void service(std::uint64_t now) noexcept {
     slice += timed_stage(Stage::mission, "mission", [now] {
         // Cancel disconnected requests before a mission can publish its reload.
         studio::service(now);
+        studio::service_investment(now);
         activity::mission::service(now);
     });
     slice += timed_stage(Stage::gameplay, "gameplay", [now] { gameplay::service(now); });
@@ -232,6 +234,7 @@ void shutdown() noexcept {
     client::network::unregister_bap_consumer(&bap::consume);
     client::network::unregister_http_consumer(&http::consume);
     bap::shutdown();
+    studio::shutdown_investment();
     studio::shutdown();
     activity::mission::shutdown();
     activity::host::reset();

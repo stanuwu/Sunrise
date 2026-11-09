@@ -24,6 +24,7 @@
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/build_data/season_pass/definition.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "package_pursuit_build.h"
 #include "package_reward_build.h"
 
 namespace sunrise::client::content::items::packages {
@@ -88,6 +89,8 @@ struct Storage {
     SlotMaps slotMaps{};
     /** Reward pools, wrappers and condition tables read alongside the item walk. */
     RewardBuild rewardBuild{};
+    /** Pursuit completion contracts, collected during the same item walk. */
+    PursuitBuild pursuitBuild{};
     /** Node rows held until the value slot and owned records are resolved. */
     std::array<state::build_data::nodes::Definition, state::build_data::nodes::kDefinitionCapacity>
         nodeRows{};
@@ -211,6 +214,9 @@ struct Storage {
 
 /** @return True when the reward graph is published or can never be. */
 [[nodiscard]] bool reward_definitions_settled() noexcept;
+
+/** @return True when the pursuit contracts are published or can never be. */
+[[nodiscard]] bool pursuit_catalog_settled() noexcept;
 
 /** Adds one native definition index to the deduplicated request set. */
 void request(std::uint16_t definitionIndex, DetailRequests& requested) noexcept;

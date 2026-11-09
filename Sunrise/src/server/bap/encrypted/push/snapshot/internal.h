@@ -190,11 +190,30 @@ prepare_item_state(Scratch& scratch,
                    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
                    Prepared& prepared) noexcept;
 
+/**
+ * Builds the selected character's current object as one upsert above the peer version.
+ * @param characterIndex The selected character's slot in the account.
+ */
+[[nodiscard]] bool prepare_selected_character_refresh(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t accountSoid,
+    std::size_t characterIndex,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    Prepared& prepared) noexcept;
+
 /** Builds the selected-character upsert for one uncommitted artifact purchase. */
 [[nodiscard]] bool prepare_artifact_purchase(
     Scratch& scratch,
     const queuez::EquipmentSwap& update,
     const state::PendingArtifactPurchase& mutation,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    Prepared& prepared) noexcept;
+
+/** Builds only the current account and selected-character objects as one upsert. */
+[[nodiscard]] bool prepare_account_refresh(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
     Prepared& prepared) noexcept;
 

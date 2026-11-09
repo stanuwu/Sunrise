@@ -15,4 +15,7 @@ inline constexpr std::uint16_t kHudProgressionDefinitionIndex = 41;
  * package. */
 [[nodiscard]] std::uint16_t progress_flag(const build_data::season_pass::Reward& reward) noexcept;
 
+/** @return True for a row the earned-perk walk grants, so the player never claims it. */
+[[nodiscard]] bool automatic_row(const build_data::season_pass::Reward& reward) noexcept;
+
 } // namespace sunrise::state::progression::season_pass

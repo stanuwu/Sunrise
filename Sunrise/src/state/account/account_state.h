@@ -194,11 +194,34 @@ struct AccountState {
     account::settings::AccountSettings settings;
 };
 
+/** One character's key, class and selection, read without the rest of its saved state. */
+struct CharacterIdentity {
+    std::uint64_t soid{};
+    CharacterClass characterClass{CharacterClass::titan};
+    bool selected{};
+};
+
+/** The account key and its characters' identities, read without inventory or settings. */
+struct AccountIdentity {
+    std::uint64_t primarySoid{};
+    std::array<CharacterIdentity, kCharacterCapacity> characters{};
+    std::size_t characterCount{};
+};
+
 namespace account {
 
 [[nodiscard]] bool valid(const AccountState& state) noexcept;
 
 [[nodiscard]] std::uint64_t selected_character_soid(const AccountState& state) noexcept;
+
+/** @return The selected character's nonzero SOID, or zero when none is selected. */
+[[nodiscard]] std::uint64_t selected_character_soid(const AccountIdentity& identity) noexcept;
+
+/** @return The selected character, or null when none is selected. */
+[[nodiscard]] const CharacterState* selected_character(const AccountState& state) noexcept;
+
+/** @return The selected character's identity, or null when none is selected. */
+[[nodiscard]] const CharacterIdentity* selected_character(const AccountIdentity& identity) noexcept;
 
 /**
  * Reports the character the family-zero banner pair names.

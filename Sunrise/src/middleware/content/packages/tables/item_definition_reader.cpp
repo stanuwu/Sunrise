@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstddef>
 
+#include "../../../../state/build_data/items/quest_initialization.h"
 #include "../reader/typed_array.h"
 #include "../schema/generated/tag_classes_80802d.h"
 #include "../schema/generated/tag_classes_80802e.h"
@@ -98,6 +99,18 @@ constexpr std::size_t kPlugMemberStride = sizeof(generated::PlugSetMember);
 constexpr std::size_t kPlugMemberIndexOffset = offsetof(generated::PlugSetMember, plugItemIndex);
 /** Native arrays use 16-bit definition indices even though their serialized field is 32-bit. */
 constexpr std::uint64_t kMaximumPlugMemberCount = 65535;
+/**
+ * The schema leaves the objective block's completion flags unnamed in gap10: the all-objectives
+ * byte at block offset 0x17 and the required-objectives byte after it.
+ */
+constexpr std::size_t kRequireAllObjectivesOffset =
+    offsetof(generated::ItemObjectiveBlock, gap10) + 7;
+constexpr std::size_t kRequireNonOptionalCompletionOffset = kRequireAllObjectivesOffset + 1;
+static_assert(kRequireAllObjectivesOffset == 0x17);
+/** A bounty declares its lifetime as a one-row expression array in its inventory block. */
+constexpr std::size_t kLifetimeExpressionField =
+    offsetof(generated::ItemDefinition, inventoryItemBlock)
+    + offsetof(generated::C808077f5, h34f70b23);
 
 /**
  * Reads the socket entry list index a definition declares.
@@ -344,6 +357,82 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
     row.statCount = static_cast<std::uint8_t>(count);
 }
 
+/** Reads the completion controls of one objective block. */
+[[nodiscard]] bool read_completion_metadata(std::span<const std::byte> definition,
+                                            std::size_t block,
+                                            Row& row) noexcept {
+    if (!read_boolean(definition, block + kRequireAllObjectivesOffset, row.requireAllObjectives)
+        || !read_boolean(definition,
+                         block + kRequireNonOptionalCompletionOffset,
+                         row.requireNonOptionalCompletion)) {
+        return false;
+    }
+    row.hasCompletionMetadata = true;
+    return true;
+}
+
+/**
+ * A bounty's lifetime expression is one literal row whose operand is the lifetime in seconds. Only
+ * a literal states the lifetime, so any other expression leaves the block unreadable.
+ */
+[[nodiscard]] bool read_lifetime(std::span<const std::byte> definition, Row& row) noexcept {
+    Array lifetime{};
+    if (!find_optional_array_at(definition, kLifetimeExpressionField, lifetime)) {
+        return false;
+    }
+    if (lifetime.count == 0) {
+        return true;
+    }
+    std::uint32_t opcode = 0;
+    std::int32_t seconds = 0;
+    if (lifetime.count != 1 || lifetime.elementClass != kInvestmentExpressionRowClass
+        || !read(definition, lifetime.dataOffset, opcode) || opcode != kUnlockLiteralOpcode
+        || !read(definition, lifetime.dataOffset + kUnlockInstructionOperandOffset, seconds)
+        || seconds < 0) {
+        return false;
+    }
+    row.lifetimeSeconds = seconds;
+    return true;
+}
+
+/** Reads a pursuit's objective block, completion controls and lifetime. */
+[[nodiscard]] bool read_pursuit_metadata(std::span<const std::byte> definition, Row& row) noexcept {
+    // Other definitions reuse this field for other block types, equipment among them.
+    if (row.bucketId != state::build_data::items::kPursuitBucketId || row.equipmentSlot.has_value()
+        || row.maxStackSize > 1) {
+        return true;
+    }
+    std::size_t block = 0;
+    bool present = false;
+    if (!class_block(
+            definition, kItemObjectiveBlockOffset, kItemObjectiveBlockClass, block, present)) {
+        return false;
+    }
+    if (!present) {
+        return true;
+    }
+    Array objectives{};
+    if (!read_completion_metadata(definition, block, row)
+        || !find_optional_array_at(definition, block, objectives)) {
+        return false;
+    }
+    // An empty objective list may carry no array header. Its lifetime is read all the same.
+    if (objectives.count != 0
+        && (objectives.elementClass != kObjectiveReferenceArrayClass
+            || objectives.count > state::build_data::pursuits::kObjectiveCapacity)) {
+        return false;
+    }
+    for (std::size_t i = 0; i < objectives.count; ++i) {
+        if (!read(definition,
+                  objectives.dataOffset + i * kObjectiveReferenceStride,
+                  row.objectiveIndices[i])) {
+            return false;
+        }
+    }
+    row.objectiveCount = static_cast<std::uint8_t>(objectives.count);
+    return read_lifetime(definition, row);
+}
+
 } // namespace
 
 /** Reads the fixed fields of one item definition blob. */
@@ -382,6 +471,7 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
     read_appearance(definition, row);
     read_socket_entry_list(definition, row);
     read_equipment_slot(definition, row.equipmentSlot, row.rawEquipmentSlot);
+    row.objectiveMetadataValid = read_pursuit_metadata(definition, row);
     read_sockets(definition, row);
     return true;
 }

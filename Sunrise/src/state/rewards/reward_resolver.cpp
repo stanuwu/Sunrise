@@ -87,20 +87,14 @@ bool read_value(const void* raw,
 }
 
 /**
- * Evaluates one bound condition program.
- * An empty program is unconditional; external identities are not in the saved banks.
- * @param result Receives whether the condition holds.
+ * Evaluates one bound program to its final value; external identities are not in the saved banks.
  * @param acquiredFlags Flags this draw acquired so far, or null outside a draw.
  * @return False for a malformed program or an external read; the refusal names which.
  */
-bool condition(std::span<const definitions::Instruction> program,
-               const Context& context,
-               bool& result,
-               const AcquiredFlags* acquiredFlags = nullptr) noexcept {
-    result = program.empty();
-    if (program.empty()) {
-        return true;
-    }
+bool evaluate_program(std::span<const definitions::Instruction> program,
+                      const Context& context,
+                      std::int32_t& result,
+                      const AcquiredFlags* acquiredFlags = nullptr) noexcept {
     for (const auto& instruction : program) {
         if (!unlocks::valid(instruction)) {
             return refuse(context, "condition_shape");
@@ -114,6 +108,27 @@ bool condition(std::span<const definitions::Instruction> program,
     const ConditionInputs conditionInputs{context, acquiredFlags};
     const unlocks::Inputs inputs{read_flag, read_value, &conditionInputs};
     return unlocks::evaluate(program, inputs, result) || refuse(context, "condition_shape");
+}
+
+/**
+ * Evaluates one bound condition program. An empty program is unconditional, and any other holds
+ * when it evaluates to nonzero.
+ * @param result Receives whether the condition holds.
+ */
+bool condition(std::span<const definitions::Instruction> program,
+               const Context& context,
+               bool& result,
+               const AcquiredFlags* acquiredFlags = nullptr) noexcept {
+    result = program.empty();
+    if (result) {
+        return true;
+    }
+    std::int32_t value = 0;
+    if (!evaluate_program(program, context, value, acquiredFlags)) {
+        return false;
+    }
+    result = value != 0;
+    return true;
 }
 
 /** Evaluates the condition one bank range names; a range outside the bank is refused. */
@@ -521,6 +536,14 @@ bool eligible(std::span<const definitions::Instruction> instructions,
               const Context& context,
               bool& result) noexcept {
     return condition(instructions, context, result);
+}
+
+/** Shares the condition evaluator's checks, so an external read refuses the program. */
+bool evaluate(std::span<const definitions::Instruction> program,
+              const Context& context,
+              std::int32_t& value) noexcept {
+    value = 0;
+    return evaluate_program(program, context, value);
 }
 
 /**

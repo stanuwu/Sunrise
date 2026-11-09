@@ -21,7 +21,9 @@
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "nodes/definition.h"
+#include "objectives/definition.h"
 #include "progressions/definition.h"
+#include "pursuits/definition.h"
 #include "records/definition.h"
 #include "rewards/definition.h"
 #include "scenarios/definition.h"
@@ -47,6 +49,9 @@ void invalidate_cache() noexcept;
  * @param contentHash Leading bytes of the combined installed and mod fingerprint.
  */
 void bind_content(std::uint64_t contentHash) noexcept;
+
+/** @return The content hash bound at boot, or zero when the host has no content manifest. */
+[[nodiscard]] std::uint64_t content_hash() noexcept;
 
 /**
  * Loads the one build-data cache next to the module, when there is one.
@@ -458,6 +463,69 @@ void settle_reward_definitions_unsupported() noexcept;
  */
 [[nodiscard]] bool read_reward_definitions(void* context,
                                            bool (*consume)(void*, rewards::View) noexcept) noexcept;
+
+/** @return True when the objective table read from the installed packages is in State. */
+[[nodiscard]] bool objective_definitions_ready() noexcept;
+
+/** Checks an objective table against the rules publish_objective_definitions applies. */
+[[nodiscard]] bool valid_objective_definitions(objectives::View definitions) noexcept;
+
+/**
+ * Publishes the whole objective table, which the cache keeps with the pursuit contracts.
+ * @param definitions Dense rows in native objective-index order and their instruction bank.
+ * @return True when the table passes the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool publish_objective_definitions(objectives::View definitions) noexcept;
+
+/**
+ * Reads one objective row.
+ * @param index Native objective-table index.
+ * @param output Receives a copy of the row and its programs.
+ * @return True when the table holds that row.
+ */
+[[nodiscard]] bool find_objective_definition(std::uint16_t index,
+                                             objectives::Definition& output) noexcept;
+
+/** @return True when the pursuit contracts are in State. */
+[[nodiscard]] bool pursuit_definitions_ready() noexcept;
+
+/**
+ * @return True once the installed data has settled that neither the objective table nor any
+ *         contract can be read. A cache records that settlement as an empty objective table.
+ */
+[[nodiscard]] bool pursuit_catalog_unsupported() noexcept;
+
+/** @return A generation that changes after every publication, settlement or clear. */
+[[nodiscard]] std::uint64_t pursuit_definitions_revision() noexcept;
+
+/**
+ * Checks contracts against the published item and objective tables, as
+ * publish_pursuit_definitions does. Returns false while either table is unpublished.
+ */
+[[nodiscard]] bool valid_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept;
+
+/**
+ * Publishes every pursuit contract.
+ * Requires the item and objective tables, which every contract is checked against.
+ * @param rows Contracts in ascending item-index order.
+ * @return True when every contract passes the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool publish_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept;
+
+/**
+ * Records that the installed data supports no pursuit catalog, and withdraws the objective table
+ * that only pursuit contracts read.
+ */
+void settle_pursuit_catalog_unsupported() noexcept;
+
+/**
+ * Reads one pursuit contract.
+ * @param index Native item-definition index.
+ * @param output Receives a copy of the contract.
+ * @return True when the item has a published contract.
+ */
+[[nodiscard]] bool find_pursuit_definition(std::uint16_t index,
+                                           pursuits::Definition& output) noexcept;
 
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;

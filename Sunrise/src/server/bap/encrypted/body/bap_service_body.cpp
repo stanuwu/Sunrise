@@ -56,6 +56,21 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
 
 } // namespace
 
+/** A client claim and an editor claim stage the same after-image. */
+SeasonPassRewardTransaction* stage_season_pass_reward(const queuez::SessionState& queuezState,
+                                                      const state::PendingSeasonPassReward& claim,
+                                                      ServiceOutcome& outcome) noexcept {
+    auto* transaction = emplace_transaction<SeasonPassRewardTransaction>(outcome);
+    if (transaction == nullptr) {
+        return nullptr;
+    }
+    if (!queuez::stage_record_reward_grant(queuezState, claim.grant, transaction->update)) {
+        clear_transaction(outcome);
+        return nullptr;
+    }
+    return transaction;
+}
+
 /**
  * Processes the body for one authenticated service route.
  * @param route Service route data found earlier.
@@ -612,25 +627,15 @@ bool process(const ServiceRoute& route,
                 web_service::take_mutation<state::PendingRecordRewardGrant>(webOutcome);
         }
         if (seasonPassReward != nullptr) {
-            auto* transaction = emplace_transaction<SeasonPassRewardTransaction>(outcome);
+            auto* transaction = stage_season_pass_reward(queuezState, *seasonPassReward, outcome);
             if (transaction == nullptr) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
                                  "ev=ws2400 stage=reward_preflight result=fail");
                 return refuse_web_action(message, output, written);
             }
-            const bool staged = queuez::stage_record_reward_grant(
-                queuezState, seasonPassReward->grant, transaction->update);
-            const auto stagedVersion = transaction->update.after.family4Version;
-            if (!staged) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::warn,
-                                 "ev=ws2400 stage=reward_preflight result=fail");
-                clear_transaction(outcome);
-                return refuse_web_action(message, output, written);
-            }
             middleware::web_service::StatusResponse status{};
-            status.value = stagedVersion;
+            status.value = transaction->update.after.family4Version;
             if (!middleware::web_service::encode_response(
                     message,
                     middleware::web_service::ResponseShape::statusPair,

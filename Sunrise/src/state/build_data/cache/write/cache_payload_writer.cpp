@@ -111,6 +111,10 @@ bool payload_checksum(records::Domains domains, std::uint64_t& checksum) noexcep
                                                                 checksum)
            && checksum_domain<records::RewardModifierRecord>(domains.rewardModifiers, checksum)
            && checksum_domain<records::RewardSocketOverrideRecord>(domains.rewardSockets, checksum)
+           && checksum_domain<records::ObjectiveRecord>(domains.objectives, checksum)
+           && checksum_domain<records::RewardInstructionRecord>(domains.objectiveInstructions,
+                                                                checksum)
+           && checksum_domain<records::PursuitRecord>(domains.pursuits, checksum)
            && checksum_domain<records::StarterSetRecord>(domains.starterSets, checksum);
 }
 
@@ -159,6 +163,9 @@ bool write_payload(HANDLE file, records::Domains domains) noexcept {
            && write_domain<records::RewardInstructionRecord>(file, domains.rewardInstructions)
            && write_domain<records::RewardModifierRecord>(file, domains.rewardModifiers)
            && write_domain<records::RewardSocketOverrideRecord>(file, domains.rewardSockets)
+           && write_domain<records::ObjectiveRecord>(file, domains.objectives)
+           && write_domain<records::RewardInstructionRecord>(file, domains.objectiveInstructions)
+           && write_domain<records::PursuitRecord>(file, domains.pursuits)
            && write_domain<records::StarterSetRecord>(file, domains.starterSets);
 }
 

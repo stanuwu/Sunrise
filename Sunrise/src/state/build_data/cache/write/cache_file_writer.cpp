@@ -56,6 +56,9 @@ namespace {
            && domains.rewardInstructions.size() <= kMaximumCount
            && domains.rewardModifiers.size() <= kMaximumCount
            && domains.rewardSockets.size() <= kMaximumCount
+           && domains.objectives.size() <= kMaximumCount
+           && domains.objectiveInstructions.size() <= kMaximumCount
+           && domains.pursuits.size() <= kMaximumCount
            && domains.starterSets.size() <= kMaximumCount;
 }
 

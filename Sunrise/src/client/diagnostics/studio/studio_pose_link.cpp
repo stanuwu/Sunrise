@@ -10,6 +10,7 @@
 #include <span>
 #include <string_view>
 
+#include "../../../middleware/studio/studio_mapping.h"
 #include "../../executable/image.h"
 #include "../../hooking/detour.h"
 #include "../../hooks/world_objects/internal.h"
@@ -95,12 +96,13 @@ void disconnect() noexcept {
     g_capturing.store(false, std::memory_order_release);
     g_pending = false;
     g_published = false;
-    close_editor_view(g_mapping, g_view);
+    middleware::studio::close_editor_view(g_mapping, g_view);
 }
 
 /** @return True only when an editor created the matching pose protocol. */
 [[nodiscard]] bool connect() noexcept {
-    g_view = open_editor_view<wire::SharedPose>(wire::kMappingFormat, g_mapping);
+    g_view =
+        middleware::studio::open_editor_view<wire::SharedPose>(wire::kMappingFormat, g_mapping);
     if (g_view == nullptr) {
         return false;
     }
@@ -108,7 +110,7 @@ void disconnect() noexcept {
     if (g_view->control.magic == wire::kMagic) {
         g_view->control.clientVersion = wire::kVersion;
     }
-    if (!editor_header_ok(
+    if (!middleware::studio::editor_header_ok(
             g_view->control, wire::kMagic, wire::kVersion, sizeof(wire::SharedPose))) {
         disconnect();
         return false;
@@ -380,7 +382,7 @@ void poll_pose_link() noexcept {
     }
     auto& control = g_view->control;
     control.bridgeReady = g_enabled.load(std::memory_order_acquire) ? 1 : 0;
-    if (!editor_alive(control.heartbeat, now, kHeartbeatTimeout)) {
+    if (!middleware::studio::editor_alive(control.heartbeat, now, kHeartbeatTimeout)) {
         disconnect();
         return;
     }

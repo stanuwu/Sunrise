@@ -9,9 +9,9 @@
 #include <cstdio>
 #include <string_view>
 
-#include "../../client/diagnostics/studio/studio_protocol.h"
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
+#include "../../middleware/studio/studio_mapping.h"
 #include "../../state/build_data/runtime/build_data_invalidation.h"
 #include "../../state/mods/mods_runtime.h"
 #include "../activity/mission/mission_script_runtime.h"
@@ -24,7 +24,6 @@ namespace {
 
 namespace wire = command_wire;
 namespace mission = activity::mission;
-namespace editor = client::diagnostics::studio;
 
 HANDLE g_mapping{};
 wire::SharedCommand* g_view{};
@@ -41,7 +40,7 @@ bool g_tagRequest{};
 /** The bridge lock keeps a requester check from reading an unmapped view. */
 std::uint64_t detach() noexcept {
     const auto ticket = g_ticket;
-    editor::close_editor_view(g_mapping, g_view);
+    middleware::studio::close_editor_view(g_mapping, g_view);
     g_servingRequest = 0;
     g_ticket = 0;
     g_editorPid = 0;
@@ -52,8 +51,9 @@ std::uint64_t detach() noexcept {
 
 /** Version 2 keeps the version 1 layout, so an editor of either version is served. */
 [[nodiscard]] bool header_ok(const wire::SharedCommand& view) noexcept {
-    return editor::editor_header_ok(view, wire::kMagic, wire::kVersion, wire::kMappingBytes)
-           || editor::editor_header_ok(
+    return middleware::studio::editor_header_ok(
+               view, wire::kMagic, wire::kVersion, wire::kMappingBytes)
+           || middleware::studio::editor_header_ok(
                view, wire::kMagic, wire::kOldestVersion, wire::kMappingBytes);
 }
 
@@ -64,7 +64,8 @@ void disconnect() noexcept {
 
 /** @return True only when an editor created a mapping of this exact protocol. */
 [[nodiscard]] bool connect() noexcept {
-    g_view = editor::open_editor_view<wire::SharedCommand>(wire::kMappingFormat, g_mapping);
+    g_view =
+        middleware::studio::open_editor_view<wire::SharedCommand>(wire::kMappingFormat, g_mapping);
     if (g_view == nullptr) {
         return false;
     }
@@ -136,17 +137,17 @@ bool requester_present(std::uint64_t ticket) noexcept {
         && core::settings::get().studioAttach) {
         const auto request = static_cast<std::uint32_t>(
             InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&g_view->request), 0, 0));
-        present =
-            header_ok(*g_view) && g_view->editorPid == g_editorPid
-            && g_view->kind == wire::Kind::reloadMod && g_view->modId == g_requestedMod
-            && request == g_servingRequest
-            && editor::editor_alive(g_view->heartbeat, GetTickCount64(), wire::kHeartbeatTimeoutMs)
-            && static_cast<std::uint32_t>(InterlockedCompareExchange(
-                   reinterpret_cast<volatile LONG*>(&g_view->response), 0, 0))
-                   != request
-            && static_cast<std::uint32_t>(InterlockedCompareExchange(
-                   reinterpret_cast<volatile LONG*>(&g_view->request), 0, 0))
-                   == request;
+        present = header_ok(*g_view) && g_view->editorPid == g_editorPid
+                  && g_view->kind == wire::Kind::reloadMod && g_view->modId == g_requestedMod
+                  && request == g_servingRequest
+                  && middleware::studio::editor_alive(
+                      g_view->heartbeat, GetTickCount64(), wire::kHeartbeatTimeoutMs)
+                  && static_cast<std::uint32_t>(InterlockedCompareExchange(
+                         reinterpret_cast<volatile LONG*>(&g_view->response), 0, 0))
+                         != request
+                  && static_cast<std::uint32_t>(InterlockedCompareExchange(
+                         reinterpret_cast<volatile LONG*>(&g_view->request), 0, 0))
+                         == request;
     }
     ReleaseSRWLockShared(&g_linkLock);
     return present;
@@ -237,7 +238,7 @@ void service_locked(std::uint64_t now) noexcept {
     if (g_view == nullptr) {
         return;
     }
-    if (!editor::editor_alive(g_view->heartbeat, now, wire::kHeartbeatTimeoutMs)) {
+    if (!middleware::studio::editor_alive(g_view->heartbeat, now, wire::kHeartbeatTimeoutMs)) {
         disconnect();
         return;
     }

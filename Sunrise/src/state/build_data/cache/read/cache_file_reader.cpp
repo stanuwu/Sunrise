@@ -64,6 +64,9 @@ namespace {
         header.rewardInstructionCount,
         header.rewardModifierCount,
         header.rewardSocketCount,
+        header.objectiveCount,
+        header.objectiveInstructionCount,
+        header.pursuitCount,
         header.starterSetCount,
     };
 }

@@ -12,7 +12,9 @@
 #include "../items/socket_plugs/socket_plug_catalog.h"
 #include "../material_requirements/material_requirement_catalog.h"
 #include "../nodes/node_catalog.h"
+#include "../objectives/objective_catalog.h"
 #include "../progressions/progression_catalog.h"
+#include "../pursuits/pursuit_catalog.h"
 #include "../records/record_catalog.h"
 #include "../rewards/reward_catalog.h"
 #include "../runtime.h"
@@ -401,6 +403,8 @@ void clear_catalogs() noexcept {
     progressions::clear();
     season_pass::clear();
     rewards::clear();
+    pursuits::clear();
+    objectives::clear();
     bounties::clear();
     records::clear();
     nodes::clear();

@@ -518,15 +518,42 @@ inline constexpr std::uint32_t kObjectiveReferenceArrayClass =
     schema::generated::ObjectiveReferenceArray::kClass;
 /** Class word of an item's plug block; on a catalyst it follows the one-row objective array. */
 inline constexpr std::uint32_t kPlugBlockClass = schema::generated::PlugBlock::kClass;
+/** Signed 64-bit offset to an item's objective block, relative to the field. */
+inline constexpr std::size_t kItemObjectiveBlockOffset =
+    offsetof(schema::generated::ItemDefinition, objectiveItemBlock);
+/** This block holds objective indices, completion flags and the item that owns the quest set. */
+inline constexpr std::uint32_t kItemObjectiveBlockClass =
+    schema::generated::ItemObjectiveBlock::kClass;
+/** A 16-bit item-table index, not a definition hash. */
+inline constexpr std::size_t kObjectiveParentItemOffset =
+    offsetof(schema::generated::ItemObjectiveBlock, parentItemIndex);
+/** Objective array entries are 16-bit table indices. */
+inline constexpr std::size_t kObjectiveArrayDescriptor =
+    offsetof(schema::generated::ItemObjectiveBlock, objectives);
+inline constexpr std::size_t kObjectiveReferenceStride =
+    sizeof(schema::generated::ObjectiveReferenceArray);
 /** The investment root holds the dense objective definition table at this slot. */
 inline constexpr std::size_t kObjectiveTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, slot58Objectives));
 /** Installed objective table and row layout. */
 inline constexpr std::uint32_t kObjectiveTableClass = schema::generated::ObjectiveTable::kClass;
 inline constexpr std::uint32_t kObjectiveRowClass = schema::generated::ObjectiveRow::kClass;
+/** The objective table holds its rows in this array. */
+inline constexpr std::size_t kObjectiveRowArrayDescriptor =
+    offsetof(schema::generated::ObjectiveTable, table);
 inline constexpr std::size_t kObjectiveRowStride = sizeof(schema::generated::ObjectiveRow);
 inline constexpr std::size_t kObjectiveCompletionValueOffset =
     offsetof(schema::generated::ObjectiveRow, completionValue);
+/** An objective row's optional and counts-down flags, the two words before its completion value. */
+inline constexpr std::size_t kObjectiveOptionalOffset =
+    offsetof(schema::generated::ObjectiveRow, gap28);
+inline constexpr std::size_t kObjectiveCountsDownOffset =
+    kObjectiveOptionalOffset + sizeof(std::uint32_t);
+static_assert(kObjectiveCountsDownOffset + sizeof(std::uint32_t)
+              == kObjectiveCompletionValueOffset);
+/** Expression whose value the native evaluator subtracts from an objective's completion value. */
+inline constexpr std::size_t kObjectiveTargetAdjustmentField =
+    offsetof(schema::generated::ObjectiveRow, hA32e809c);
 /** The investment root holds the socket entry list table at this slot. */
 inline constexpr std::size_t kSocketEntryListTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, slot97SocketEntryLists));

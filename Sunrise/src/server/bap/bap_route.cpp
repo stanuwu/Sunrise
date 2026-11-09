@@ -42,6 +42,9 @@ std::atomic<InvestmentSliceConsumer> g_investmentSliceConsumer{};
 /** Lifetime of the native item-acquisition flyout, which the hold must outlast. */
 constexpr std::uint64_t kAcquisitionPresentationHoldMs = 8'000;
 
+/** Delay before the Family-4 copy of an artifact change, so its Family-5 refresh lands first. */
+constexpr std::uint64_t kArtifactFamily4RefreshDelayMs = 100;
+
 /** Arms every other active peer after one shared-account transaction is published. */
 void publish_account_mutation(Session& origin) noexcept {
     origin.accountMutationPublished = false;
@@ -379,6 +382,13 @@ void arm_acquisition_presentation_hold(Session& session) noexcept {
         (std::max)(session.acquisitionPresentationUntilTick, now + kAcquisitionPresentationHoldMs);
 }
 
+/** Schedules this peer's Family-5 artifact refresh, then its delayed Family-4 character copy. */
+void arm_artifact_refresh(Session& session) noexcept {
+    session.artifactRefreshArmed = true;
+    session.artifactFamily4RefreshDueTick = GetTickCount64() + kArtifactFamily4RefreshDelayMs;
+    session.artifactFamily4RefreshArmed = true;
+}
+
 /**
  * Grants seasonal XP and queues its HUD notification on the first peer that can show it.
  * @param amount Positive XP to grant.
@@ -679,6 +689,7 @@ bool session_channel(std::uint32_t connectionId,
 void shutdown() noexcept {
     const std::lock_guard lock(g_lock);
     drain_world_rewards();
+    release_investment_operations_locked();
     for (auto& session : g_sessions) {
         if (session.id != 0
             && session.matchmakingContext.generation != state::matchmaking::kInvalidGeneration) {

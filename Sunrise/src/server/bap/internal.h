@@ -23,6 +23,7 @@
 #include "activity_authority_query_owner.h"
 #include "activity_authority_reset_owner.h"
 #include "encrypted/queuez/definition.h"
+#include "investment_operations.h"
 #include "runtime.h"
 
 namespace sunrise::state::investment::store {
@@ -535,6 +536,9 @@ void arm_account_resync_everywhere() noexcept;
 /** Holds this peer's full Family-4 refreshes until its acquisition flyout has finished. */
 void arm_acquisition_presentation_hold(Session& session) noexcept;
 
+/** Schedules this peer's Family-5 artifact refresh, then its delayed Family-4 character copy. */
+void arm_artifact_refresh(Session& session) noexcept;
+
 /** Queues one character item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;
 
@@ -558,6 +562,58 @@ void settle_world_reward() noexcept;
 
 /** Queues one transient XP item update so the native HUD presents a seasonal XP gain. */
 [[nodiscard]] bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept;
+
+/** One change to an editor operation's receipt. */
+struct InvestmentTransition {
+    InvestmentReceiptState state{};
+    InvestmentWait wait{};
+    /** Static label, required for a refusal and for a committed operation left unpublished. */
+    const char* reason{""};
+    /** Quantity one grant step published. A grant still queued leaves the rest to later polls. */
+    std::uint32_t grantedQuantity{};
+};
+
+/** @return A refusal carrying one static label. */
+[[nodiscard]] inline InvestmentTransition refused_transition(const char* reason) noexcept {
+    return {.state = InvestmentReceiptState::refused, .reason = reason};
+}
+
+/** @return A deferral waiting on one condition. */
+[[nodiscard]] inline InvestmentTransition deferred_transition(InvestmentWait wait) noexcept {
+    return {.state = InvestmentReceiptState::deferred, .wait = wait};
+}
+
+/**
+ * @param reason State's label. A null label refuses as `transaction`.
+ * @return A catalog wait for `not_ready`, otherwise a refusal carrying the label.
+ */
+[[nodiscard]] InvestmentTransition state_refusal_transition(const char* reason) noexcept;
+
+/**
+ * Checks an operation against the live account, the catalogs and its kind's rules, without
+ * drawing.
+ * @return Queued when it may run now, deferred while a catalog loads, or refused with a label.
+ */
+[[nodiscard]] InvestmentTransition
+check_investment_operation(const InvestmentOperation& operation) noexcept;
+
+/**
+ * Copies the oldest pending operation submitted against one account. A grant's quantity is
+ * reduced by what its earlier steps already published. Caller owns the session lock.
+ * @return False when that account has no pending operation.
+ */
+[[nodiscard]] bool next_investment_operation_locked(std::uint64_t accountSoid,
+                                                    InvestmentOperation& operation) noexcept;
+
+/**
+ * Applies a transition to a pending receipt, accumulating a grant's steps. A finished receipt is
+ * left unchanged. Caller owns the session lock.
+ */
+void record_investment_transition_locked(std::uint64_t operationId,
+                                         const InvestmentTransition& transition) noexcept;
+
+/** Forgets every retained operation and receipt. Caller owns the session lock. */
+void release_investment_operations_locked() noexcept;
 
 /**
  * Finds one unambiguous registry identity in a committed connection-local roster map.
@@ -621,6 +677,10 @@ namespace encrypted {
                                     std::span<std::byte> response,
                                     std::size_t& written,
                                     bool& touchesScratch) noexcept;
+
+/** @return The peer's retained acquisition rows, or empty once its presentation hold expires. */
+[[nodiscard]] std::span<const queuez::AcquisitionPresentationRow>
+active_acquisition_presentation_rows(const Session& session) noexcept;
 
 } // namespace encrypted
 
