@@ -6,9 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <mutex>
-#include <new>
 #include <span>
 
 #include "../build_data/runtime.h"
@@ -270,13 +268,7 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
         return catalog_refusal(reason);
     }
     reason = "selected_character";
-    // A whole account is large, so its snapshot is owned on the heap like the claim path's.
-    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
-                                                           AccountState(account_snapshot()));
-    if (!snapshot) {
-        return RewardPreparation::deferred;
-    }
-    const AccountState& account = *snapshot;
+    const AccountState account = account_snapshot();
     const auto character = selected_character_index(account);
     unlocks::Table flags{};
     if (character >= account.characterCount

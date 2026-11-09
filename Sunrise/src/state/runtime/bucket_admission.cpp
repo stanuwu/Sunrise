@@ -1038,27 +1038,31 @@ bool row_present(const AccountState& account,
     return std::any_of(held.begin(), held.end(), matches);
 }
 
-/** Copies the batch's images and keeps the rows still present after it. */
-void record_grant_images(const AccountState& before,
-                         const AccountState& after,
+/** Copies the before-image of the character and profile rows a batch can change. */
+void record_grant_before(const AccountState& before,
                          std::size_t characterIndex,
-                         const PlacedRows& placed,
                          PendingRecordRewardGrant& mutation) noexcept {
-    // A row a later change or eviction in the batch replaced is not announced.
-    mutation.rowCount = 0;
-    for (std::size_t index = 0; index < placed.count; ++index) {
-        if (row_present(after, characterIndex, placed.values[index])) {
-            mutation.rows[mutation.rowCount++] = placed.values[index];
-        }
-    }
     mutation.beforeCharacter = before.characters[characterIndex];
-    mutation.afterCharacter = after.characters[characterIndex];
     mutation.beforeProfileItems = before.profileItems;
-    mutation.afterProfileItems = after.profileItems;
     mutation.accountSoid = before.primarySoid;
     mutation.characterSoid = before.characters[characterIndex].soid;
     mutation.characterIndex = characterIndex;
     mutation.beforeProfileItemCount = before.profileItemCount;
+}
+
+/** Copies the batch's after-image and keeps the rows still present in it. */
+void record_grant_after(const AccountState& after,
+                        const PlacedRows& placed,
+                        PendingRecordRewardGrant& mutation) noexcept {
+    // A row a later change or eviction in the batch replaced is not announced.
+    mutation.rowCount = 0;
+    for (std::size_t index = 0; index < placed.count; ++index) {
+        if (row_present(after, mutation.characterIndex, placed.values[index])) {
+            mutation.rows[mutation.rowCount++] = placed.values[index];
+        }
+    }
+    mutation.afterCharacter = after.characters[mutation.characterIndex];
+    mutation.afterProfileItems = after.profileItems;
     mutation.afterProfileItemCount = after.profileItemCount;
     mutation.prepared = true;
 }

@@ -7,8 +7,7 @@
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
-#include <new>
+#include <mutex>
 #include <span>
 
 #include "../../core/logging/log.h"
@@ -98,36 +97,34 @@ namespace {
 
 /**
  * Rebuilds the account after-image for one prepared reward set and rejects any drift.
- * @param current Live account the mutation was prepared against.
- * @param after Receives the after-image; its content is unusable on failure.
+ * @param account Holds the live account the mutation was prepared against, and receives the
+ *        after-image in place; its content is unusable on failure.
  * @return False when the account moved or a reward row breaks its own item rules.
  */
-[[nodiscard]] bool materialize_record_reward(const AccountState& current,
-                                             const PendingRecordRewardGrant& mutation,
-                                             AccountState& after) noexcept {
+[[nodiscard]] bool materialize_record_reward(const PendingRecordRewardGrant& mutation,
+                                             AccountState& account) noexcept {
     if (!mutation.prepared
         || (mutation.rewardCount == 0 && mutation.wrapperFlagCount == 0 && mutation.rowCount == 0)
         || mutation.rewardCount > mutation.rewards.size()
         || mutation.rowCount > mutation.rows.size()
         || change_ring_refusal(std::span(mutation.rows).first(mutation.rowCount)) != nullptr
         || mutation.accountSoid == 0 || mutation.characterSoid == 0
-        || mutation.characterIndex >= current.characterCount
-        || current.primarySoid != mutation.accountSoid
-        || !same_character(current.characters[mutation.characterIndex], mutation.beforeCharacter)
+        || mutation.characterIndex >= account.characterCount
+        || account.primarySoid != mutation.accountSoid
+        || !same_character(account.characters[mutation.characterIndex], mutation.beforeCharacter)
         || !same_profile_inventory(
-            current, mutation.beforeProfileItems, mutation.beforeProfileItemCount)
+            account, mutation.beforeProfileItems, mutation.beforeProfileItemCount)
         || !mutation.beforeCharacter.selected
         || mutation.beforeCharacter.soid != mutation.characterSoid) {
         return false;
     }
 
-    after = current;
-    after.characters[mutation.characterIndex] = mutation.afterCharacter;
-    after.profileItems = mutation.afterProfileItems;
-    after.profileItemCount = mutation.afterProfileItemCount;
+    account.characters[mutation.characterIndex] = mutation.afterCharacter;
+    account.profileItems = mutation.afterProfileItems;
+    account.profileItemCount = mutation.afterProfileItemCount;
     family4_loadout::ResolvedLoadout loadout{};
-    if (!account::valid(after) || !valid_profile_inventory(after)
-        || !family4_loadout::resolve(after, mutation.characterIndex, loadout)) {
+    if (!account::valid(account) || !valid_profile_inventory(account)
+        || !family4_loadout::resolve(account, mutation.characterIndex, loadout)) {
         return false;
     }
     for (std::size_t index = 0; index < mutation.rewardCount; ++index) {
@@ -144,7 +141,7 @@ namespace {
                 return false;
             }
         }
-        if (!row_present(after, mutation.characterIndex, row)) {
+        if (!row_present(account, mutation.characterIndex, row)) {
             return false;
         }
     }
@@ -449,32 +446,24 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         return RewardPreparation::deferred;
     }
     reason = "account_state";
-    // Both whole-account images are owned on the heap like the claim path's.
-    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
-                                                           AccountState(account_snapshot()));
-    const std::unique_ptr<AccountState> image(new (std::nothrow) AccountState{});
-    if (!snapshot || !image) {
-        return RewardPreparation::deferred;
-    }
-    const AccountState& account = *snapshot;
-    const std::size_t characterIndex = selected_character_index(account);
-    if (!account::valid(account) || !valid_profile_inventory(account)
-        || characterIndex >= account.characterCount) {
+    AccountState working = account_snapshot();
+    const std::size_t characterIndex = selected_character_index(working);
+    if (!account::valid(working) || !valid_profile_inventory(working)
+        || characterIndex >= working.characterCount) {
         return RewardPreparation::deferred;
     }
     const auto flags = prepare_wrapper_flags(wrapperFlags, mutation, reason);
     if (flags != RewardPreparation::prepared) {
         return flags;
     }
-    AccountState& working = *image;
-    working = account;
     // Identities stay above the pre-eviction inventory, so a discarded resident is never reused.
     std::uint64_t nextInstanceSoid = 0;
     PlacedRows placed;
     reason = "instance_capacity";
-    if (!next_item_instance_soid(account, nextInstanceSoid)) {
+    if (!next_item_instance_soid(working, nextInstanceSoid)) {
         return RewardPreparation::deferred;
     }
+    record_grant_before(working, characterIndex, mutation);
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         const GrantView view{working,
                              characterIndex,
@@ -496,7 +485,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         || !family4_loadout::resolve(working, characterIndex, loadout)) {
         return RewardPreparation::deferred;
     }
-    record_grant_images(account, working, characterIndex, placed, mutation);
+    record_grant_after(working, placed, mutation);
     mutation.claimedRecordIndex = claimedRecordIndex;
     mutation.rewardCount = rewards.size();
     reason = nullptr;
@@ -640,8 +629,8 @@ RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward
 /** Builds the full account after-image while a record reward remains current. */
 bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
                                  AccountState& after) noexcept {
-    after = {};
-    return materialize_record_reward(account_snapshot(), mutation, after);
+    const std::lock_guard lock(investment::store::g_mutex);
+    return investment::store::read_account(after) && materialize_record_reward(mutation, after);
 }
 
 namespace {
@@ -679,8 +668,8 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
         investment::store::Transaction transaction;
         AccountState after{};
         unlocks::Table flags{};
-        ready = transaction.ready()
-                && materialize_record_reward(investment::store::account(), mutation, after)
+        ready = transaction.ready() && investment::store::read_account(after)
+                && materialize_record_reward(mutation, after)
                 && preview_reward_unlocks(mutation, flags)
                 && investment::store::write_account(after);
         for (std::size_t i = 0; ready && i < mutation.rewardCount; ++i) {

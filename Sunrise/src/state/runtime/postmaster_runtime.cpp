@@ -1,5 +1,4 @@
-#include <memory>
-#include <new>
+#include <mutex>
 
 #include "../../core/logging/log.h"
 #include "../build_data/runtime.h"
@@ -45,35 +44,29 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
                               std::uint16_t definitionIndex,
                               std::int32_t quantity,
                               PendingPostmasterClaim& mutation) noexcept {
-    std::destroy_at(&mutation);
-    std::construct_at(&mutation);
+    mutation = {};
     const std::lock_guard lock(investment::store::g_mutex);
-    const std::unique_ptr<AccountState> before(new (std::nothrow) AccountState{});
-    const std::unique_ptr<AccountState> working(new (std::nothrow) AccountState{});
-    if (!before || !working) {
-        return false;
-    }
     // Only a rule returning the source to each item's authored bucket is a Postmaster claim.
     if (!accepted_claim_rule(vendorIndex, sourceBucket)) {
         report_claim_refusal("claim_rule", vendorIndex, sourceBucket, definitionIndex, quantity);
         return false;
     }
-    *before = account_snapshot();
-    const std::size_t characterIndex = selected_character_index(*before);
+    AccountState working = account_snapshot();
+    const std::size_t characterIndex = selected_character_index(working);
     build_data::items::Definition item{};
     item_details::Definition detail{};
-    if (!account::valid(*before) || !valid_profile_inventory(*before)
-        || characterIndex >= before->characterCount
+    if (!account::valid(working) || !valid_profile_inventory(working)
+        || characterIndex >= working.characterCount
         || !build_data::find_item_definition_index(definitionIndex, item)
         || !build_data::find_configured_item_detail(definitionIndex, detail)
         || detail.definitionIndex != item.definitionIndex) {
         return false;
     }
-    *working = *before;
+    record_grant_before(working, characterIndex, mutation.grant);
     PlacedRows placed;
     const char* reason = nullptr;
     family4_loadout::ResolvedLoadout loadout{};
-    const bool moved = place_claim(*working,
+    const bool moved = place_claim(working,
                                    characterIndex,
                                    sourceBucket,
                                    item,
@@ -82,8 +75,8 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
                                    quantity,
                                    placed,
                                    reason);
-    if (!moved || !account::valid(*working) || !valid_profile_inventory(*working)
-        || !family4_loadout::resolve(*working, characterIndex, loadout)) {
+    if (!moved || !account::valid(working) || !valid_profile_inventory(working)
+        || !family4_loadout::resolve(working, characterIndex, loadout)) {
         report_claim_refusal(moved ? "claim_after_image" : reason,
                              vendorIndex,
                              sourceBucket,
@@ -91,7 +84,7 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
                              quantity);
         return false;
     }
-    record_grant_images(*before, *working, characterIndex, placed, mutation.grant);
+    record_grant_after(working, placed, mutation.grant);
     mutation.grant.vendorTransfer = true;
     mutation.instanceSoid = instanceSoid;
     mutation.quantity = quantity;

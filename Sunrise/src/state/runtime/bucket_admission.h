@@ -103,11 +103,17 @@ struct ArrivalOutcome {
                                std::size_t characterIndex,
                                const GrantedRow& row) noexcept;
 
-/** Stores a placed batch's before and after images and the rows still present after it. */
-void record_grant_images(const AccountState& before,
-                         const AccountState& after,
+/**
+ * Stores the selected character and profile rows a batch is placed against, so the batch needs
+ * only one whole working account.
+ */
+void record_grant_before(const AccountState& before,
                          std::size_t characterIndex,
-                         const PlacedRows& placed,
                          PendingRecordRewardGrant& mutation) noexcept;
+
+/** Stores a placed batch's after-image and the rows still present in it. */
+void record_grant_after(const AccountState& after,
+                        const PlacedRows& placed,
+                        PendingRecordRewardGrant& mutation) noexcept;
 
 } // namespace sunrise::state::runtime::detail
