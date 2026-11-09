@@ -315,7 +315,8 @@ bool build_item_rows(const reader::Source& source,
                                                             item.quantityValueSlot),
                                                  storage.plugSetFlagIndices[item.definitionIndex],
                                                  item.presenceFlags,
-                                                 item.presenceFlagCount};
+                                                 item.presenceFlagCount,
+                                                 item.consumesWholeStack};
         if (needSocketRows) {
             storage.specialPlugCategories[item.definitionIndex] =
                 special_plug_category(plugCategoryHash);

@@ -607,8 +607,9 @@ apply_dismantle_rewards(const AccountState& before,
 }
 
 /**
- * Builds the one canonical one-unit stack discard for an exact account snapshot. A surviving row
- * keeps its serial, which holds its grid cell.
+ * Builds the one canonical stack discard for an exact account snapshot: the whole row when the
+ * item's action consumes the entire stack, otherwise one unit. A surviving row keeps its serial,
+ * which holds its grid cell.
  */
 [[nodiscard]] bool stage_stack_discard(const AccountState& account,
                                        std::size_t characterIndex,
@@ -620,6 +621,11 @@ apply_dismantle_rewards(const AccountState& before,
         || !account.characters[characterIndex].selected) {
         return false;
     }
+    build_data::items::Definition item{};
+    if (!build_data::find_item_definition_hash(definitionHash, item)) {
+        return false;
+    }
+    const bool removesRow = heldQuantity == 1 || item.consumesWholeStack;
     const auto holds = [definitionHash, heldQuantity](const auto& row) noexcept {
         return row.definitionHash == definitionHash && row.quantity == heldQuantity;
     };
@@ -641,12 +647,12 @@ apply_dismantle_rewards(const AccountState& before,
             return false;
         }
         index = static_cast<std::size_t>(row - rows.begin());
-        if (heldQuantity > 1) {
+        if (!removesRow) {
             --candidate.profileItems[index].quantity;
         } else if (!erase_profile_row(candidate, index)) {
             return false;
         }
-    } else if (heldQuantity > 1) {
+    } else if (!removesRow) {
         --after.stacks.values[index].quantity;
     } else if (!erase_character_row(after, kStackRowBase + index)) {
         return false;

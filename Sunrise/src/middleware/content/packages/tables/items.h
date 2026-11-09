@@ -57,6 +57,8 @@ struct Row {
     bool quietAcquisition{};
     /** Acquisition records carry the policy bit that skips only the toast. */
     bool toastlessAcquisition{};
+    /** The item's action removes the whole stack rather than one unit. */
+    bool consumesWholeStack{};
     /** FNV-1 hash of the stack-unique label string; the empty string's hash means none. */
     std::uint32_t stackUniqueLabel{};
     std::optional<std::int8_t> equipmentSlot{};

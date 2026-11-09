@@ -382,7 +382,7 @@ void report_item_dismantle(const middleware::web_service::Message& message,
 }
 
 /**
- * Prepares the exact fixed-width opcode-402 removal of an instance or one unit of a stack. A
+ * Prepares the exact fixed-width opcode-402 removal of an instance or of a stack's discard. A
  * completed pursuit is redeemed instead.
  */
 void dismantle_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {

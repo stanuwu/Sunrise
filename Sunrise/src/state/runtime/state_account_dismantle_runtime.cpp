@@ -132,7 +132,7 @@ bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mu
     return prepare_selected_item_dismantle(instanceSoid, true, nullptr, mutation, reason);
 }
 
-/** Prepares one unit off a held stack without changing account State. */
+/** Prepares a held stack's discard without changing account State. */
 bool prepare_stack_discard(std::uint32_t definitionHash,
                            std::int32_t heldQuantity,
                            PendingItemDismantle& mutation) noexcept {

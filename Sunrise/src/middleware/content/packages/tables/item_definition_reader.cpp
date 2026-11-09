@@ -8,6 +8,7 @@
 #include "../schema/generated/tag_classes_808030.h"
 #include "../schema/generated/tag_classes_808077.h"
 #include "../schema/generated/tag_classes_808078.h"
+#include "../schema/generated/tag_classes_80807a.h"
 #include "../schema/generated/tag_classes_80807b.h"
 #include "../schema/generated/tag_classes_80807c.h"
 #include "../schema/generated/tag_classes_80807d.h"
@@ -72,6 +73,16 @@ constexpr std::int32_t kEquipmentSlotCount = 20;
 constexpr std::size_t kSocketTypeOffset = offsetof(generated::ItemOrdinarySocketEntry, socketType);
 constexpr std::size_t kSocketPlugOffset =
     offsetof(generated::ItemOrdinarySocketEntry, initialPlugItem);
+/** The action block is self-relative from this offset; every shipped item has one. */
+constexpr std::size_t kActionBlockOffset = offsetof(generated::ItemDefinition, actionItemBlock);
+constexpr std::uint32_t kActionBlockClass = generated::C80807ad8::kClass;
+/**
+ * Unnamed action flag bytes that hold 0 or 1: delete-on-action, then consume-entire-stack.
+ * Measured against the installed items: the second is set on all 117 stacks whose Discard removes
+ * the whole stack and on none of the 94 whose Discard removes one unit; 373 items set it.
+ */
+constexpr std::size_t kActionDeletesOffset = offsetof(generated::C80807ad8, gap70);
+constexpr std::size_t kActionConsumesStackOffset = kActionDeletesOffset + 1;
 /** Fixed fields end after the acquisition presentation bytes; every installed item reaches it. */
 constexpr std::size_t kFixedFieldEnd = kToastlessAcquisitionOffset + 1;
 /** The plug block is self-relative from this offset, zero when absent. */
@@ -694,6 +705,14 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
     row.instanced = instanced != 0;
     row.quietAcquisition = quietAcquisition != 0;
     row.toastlessAcquisition = toastlessAcquisition != 0;
+    // An action block that does not read leaves the item removed one unit at a time.
+    std::size_t action = 0;
+    bool hasAction = false;
+    std::uint8_t consumesWholeStack = 0;
+    if (class_block(definition, kActionBlockOffset, kActionBlockClass, action, hasAction)
+        && hasAction && read(definition, action + kActionConsumesStackOffset, consumesWholeStack)) {
+        row.consumesWholeStack = consumesWholeStack == 1;
+    }
     read_plug_block(definition, row);
     read_stats(definition, row);
     read_appearance(definition, row);

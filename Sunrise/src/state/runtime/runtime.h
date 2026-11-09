@@ -464,7 +464,7 @@ struct DismantleReward {
 inline constexpr std::size_t kDismantleRewardCapacity = kDismantleRewardPolicyCapacity;
 
 /**
- * Prepared selected-character inventory removal, or one unit off a held stack, kept private until
+ * Prepared selected-character inventory removal, or a held stack's discard, kept private until
  * its reply and push fit.
  */
 struct PendingItemDismantle {
@@ -1128,7 +1128,8 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
                                           PendingItemDismantle& mutation) noexcept;
 
 /**
- * Prepares the removal of one unit from a stack the selected character or the profile holds.
+ * Prepares the discard of a stack the selected character or the profile holds: the whole stack
+ * when the item's action consumes it entire, otherwise one unit.
  * A stack has no instance, so its row is the first that holds exactly the quantity the Client
  * shows, searching the character's stacks before the profile. The last unit removes the row.
  * Nothing is credited.

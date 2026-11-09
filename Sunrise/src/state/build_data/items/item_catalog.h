@@ -68,6 +68,8 @@ struct Definition {
     /** Unlock flag slots the item supplies while it is held, in the order it lists them. */
     std::array<std::uint16_t, kPresenceFlagCapacity> presenceFlags{};
     std::uint8_t presenceFlagCount{};
+    /** The item's action removes the whole stack rather than one unit. */
+    bool consumesWholeStack{};
 };
 
 /**
