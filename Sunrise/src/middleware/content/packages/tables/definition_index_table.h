@@ -521,9 +521,11 @@ inline constexpr std::size_t kEnemyRaceOrdinalOffset = offsetof(schema::generate
 inline constexpr std::size_t kEnemyRaceRowStride = sizeof(schema::generated::C80807bc0);
 /** Element class of the restricted-grant rows. */
 inline constexpr std::uint32_t kRestrictedGrantElementClass = schema::generated::C8080787c::kClass;
-/** The list tag holds its rows in this array. */
+/** The list tag opens with the 8-byte tag header that C8080787a's generated layout leaves out. */
+inline constexpr std::size_t kRestrictedGrantTagHeader = 8;
+/** The list tag holds its rows in this array, after the header. */
 inline constexpr std::size_t kRestrictedGrantArrayDescriptor =
-    offsetof(schema::generated::C8080787a, trackedItems);
+    kRestrictedGrantTagHeader + offsetof(schema::generated::C8080787a, trackedItems);
 /** Each row holds the item-table index first; nothing the client reads follows it. */
 inline constexpr std::size_t kRestrictedGrantStride = sizeof(schema::generated::C8080787c);
 /** The investment root holds the dense ordinary socket-type table at this slot. */
