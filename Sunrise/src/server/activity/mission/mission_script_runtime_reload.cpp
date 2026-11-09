@@ -459,6 +459,7 @@ void reopen_targets(std::uint64_t ticket, std::uint64_t now) noexcept {
         instance->identity = target.identity;
         instance->programKey = target.program;
         instance->programStatus = ProgramStatus::loaded;
+        note_owner_readiness();
         instance->missionReattached = true;
         instance->startPending = false;
         if (target.expected.state.faulted) {

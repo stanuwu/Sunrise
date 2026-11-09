@@ -12,6 +12,7 @@
 #include "../../../state/activity_sdk/scene_triggers.h"
 #include "../../gameplay/squad_entity_retirement.h"
 #include "../activity_sdk_mission_runtime.h"
+#include "mission_script_region.h"
 #include "mission_script_runtime_internal.h"
 #include "mission_script_runtime_objective.h"
 #include "mission_script_slot_index.h"
@@ -131,6 +132,19 @@ template <typename Key>
     return spare;
 }
 
+/** @return True when one sensed object has a complete authored occurrence in one region. */
+[[nodiscard]] bool sensed_in_region(const state::build_data::scriptables::Snapshot& world,
+                                    const host::SenseObservationKey& key,
+                                    std::int32_t region) noexcept {
+    return std::any_of(world.objects.begin(),
+                       world.objects.end(),
+                       [&](const state::build_data::scriptables::Object& object) noexcept {
+                           return object.registryKey == key.registryKey
+                                  && object.objectTag == key.objectTag && object.complete
+                                  && occurrence_in_region(world, object, region);
+                       });
+}
+
 /**
  * Raises one triggerState event for a report its tracker does not drop. The event only informs;
  * entered and exited follow the level alone.
@@ -200,13 +214,17 @@ host::Event shared_edge_event(const RuntimeInstance& instance,
  * first time only records its level, because a first observation is not an entry.
  */
 void push_trigger_edges(RuntimeInstance& instance,
-                        const host::SenseObservationSnapshot& sense) noexcept {
+                        const host::SenseObservationSnapshot& sense,
+                        std::int32_t region) noexcept {
     namespace trigger = trigger_observation;
+    const state::build_data::scriptables::Snapshot* const world = instance.worldView.snapshot();
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
         if (observation.key.slotType != format::kOccupancySlotType
             || observation.valueCount < trigger::kValueCount
-            || observation.firstValue + trigger::kValueCount > sense.valueCount) {
+            || observation.firstValue + trigger::kValueCount > sense.valueCount
+            || (region != kAnyRegion
+                && (world == nullptr || !sensed_in_region(*world, observation.key, region)))) {
             continue;
         }
         const std::span<const sense_values::DecodedValue> body(

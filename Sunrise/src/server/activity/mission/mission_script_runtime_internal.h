@@ -539,11 +539,20 @@ void refresh_mission_members(RuntimeInstance& instance) noexcept;
 void observe_player_life(RuntimeInstance& instance,
                          const host::SenseObservationSnapshot& sense) noexcept;
 
-/** Raises one triggerState per report, and one edge per watched volume whose occupancy changed. */
+/**
+ * Raises one triggerState per report, and one edge per watched volume whose occupancy changed.
+ * @param region Region the volume must lie in, or kAnyRegion.
+ */
 void push_trigger_edges(RuntimeInstance& instance,
-                        const host::SenseObservationSnapshot& sense) noexcept;
-/** Raises one dedicated type-31 edge from a decoded player-trigger msg-19 payload. */
-void push_player_trigger(RuntimeInstance& instance, const host::Event& incident) noexcept;
+                        const host::SenseObservationSnapshot& sense,
+                        std::int32_t region) noexcept;
+/**
+ * Raises one dedicated type-31 edge from a decoded player-trigger msg-19 payload.
+ * @param region Region the volume must lie in, or kAnyRegion.
+ */
+void push_player_trigger(RuntimeInstance& instance,
+                         const host::Event& incident,
+                         std::int32_t region) noexcept;
 /** Raises one exact Type-6 start/finish edge from a decoded cinematic msg-19 payload. */
 void push_cinematic(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Raises one event per named actor whose movement or delivery level changed. */
@@ -666,6 +675,8 @@ void push_session_roster_edges(RuntimeInstance& instance) noexcept;
 
 // The runtime unit owns these. The delivery state machine calls into them.
 
+/** Lets parked public reports try their owner again; called when an owner may be ready. */
+void note_owner_readiness() noexcept;
 /** Retires every queued mission event that belongs to one binding. */
 void clear_pending_events(const state::activity::SessionBinding& binding) noexcept;
 /** Copies one committed authoritative snapshot into the runtime's exact compare baseline. */
@@ -798,6 +809,8 @@ extern std::array<RuntimeInstance, host::kInstanceCapacity> g_instances;
 /** @return The open slot for one exact binding, or null. */
 [[nodiscard]] RuntimeInstance*
 find_instance(const state::activity::SessionBinding& binding) noexcept;
+/** True when one instance's link, SDK view and world view still match what it bound. */
+[[nodiscard]] bool still_exact(const RuntimeInstance& instance) noexcept;
 /** @return One unused slot, or null when every slot is open. */
 [[nodiscard]] RuntimeInstance* free_instance() noexcept;
 /** Frees one slot; its queued events are retired unless the caller keeps them for a reattach. */

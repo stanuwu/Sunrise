@@ -34,4 +34,7 @@ namespace sunrise::server::bap::encrypted::activity_message {
     return process(binding, unavailable, requestBody, plan, hasTransaction);
 }
 
+/** Tests whether a retained link binding still names its exact State and host generations. */
+[[nodiscard]] bool binding_is_current(const ActivityClientBinding& binding) noexcept;
+
 } // namespace sunrise::server::bap::encrypted::activity_message
