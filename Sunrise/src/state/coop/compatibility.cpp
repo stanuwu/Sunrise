@@ -492,7 +492,8 @@ bool encode_hello_field(const Record& record,
         || written != kSummarySize) {
         return false;
     }
-    std::memcpy(output.data() + 3 + kSummarySize, publicKey.data(), kPublicKeySize);
+    const auto key = output.subspan<3 + kSummarySize, kPublicKeySize>();
+    std::copy(publicKey.begin(), publicKey.end(), key.begin());
     return true;
 }
 
