@@ -234,7 +234,7 @@ publish_item_removal(const QuantityEdit& edit,
                                       pending.accountSoid,
                                       pending.characterSoid,
                                       pending.dismantledInstanceSoid,
-                                      pending.profileChanged,
+                                      pending.updates_account(),
                                       removal->update)) {
         return refused_transition("inventory_stage");
     }

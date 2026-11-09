@@ -78,8 +78,9 @@ constexpr std::size_t kActionBlockOffset = offsetof(generated::ItemDefinition, a
 constexpr std::uint32_t kActionBlockClass = generated::C80807ad8::kClass;
 /**
  * Unnamed action flag bytes that hold 0 or 1: delete-on-action, then consume-entire-stack.
- * Measured against the installed items: the second is set on all 117 stacks whose Discard removes
- * the whole stack and on none of the 94 whose Discard removes one unit; 373 items set it.
+ * Measured against the installed items: the first is set on all 211 Discard stacks and all 1,397
+ * Unlock items, 12,574 in all; the second on all 117 stacks whose Discard removes the whole stack
+ * and on none of the 94 whose Discard removes one unit, 373 in all.
  */
 constexpr std::size_t kActionDeletesOffset = offsetof(generated::C80807ad8, gap70);
 constexpr std::size_t kActionConsumesStackOffset = kActionDeletesOffset + 1;
@@ -705,12 +706,15 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
     row.instanced = instanced != 0;
     row.quietAcquisition = quietAcquisition != 0;
     row.toastlessAcquisition = toastlessAcquisition != 0;
-    // An action block that does not read leaves the item removed one unit at a time.
+    // An action block that does not read leaves the item removed one unit at a time, unrecorded.
     std::size_t action = 0;
     bool hasAction = false;
+    std::uint8_t deletesOnAction = 0;
     std::uint8_t consumesWholeStack = 0;
     if (class_block(definition, kActionBlockOffset, kActionBlockClass, action, hasAction)
-        && hasAction && read(definition, action + kActionConsumesStackOffset, consumesWholeStack)) {
+        && hasAction && read(definition, action + kActionDeletesOffset, deletesOnAction)
+        && read(definition, action + kActionConsumesStackOffset, consumesWholeStack)) {
+        row.deletesOnAction = deletesOnAction == 1;
         row.consumesWholeStack = consumesWholeStack == 1;
     }
     read_plug_block(definition, row);

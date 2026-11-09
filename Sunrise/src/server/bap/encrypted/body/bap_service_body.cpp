@@ -626,7 +626,7 @@ bool process(const ServiceRoute& route,
                                                  itemDismantle->accountSoid,
                                                  itemDismantle->characterSoid,
                                                  itemDismantle->dismantledInstanceSoid,
-                                                 itemDismantle->profileChanged,
+                                                 itemDismantle->updates_account(),
                                                  transaction->update)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,

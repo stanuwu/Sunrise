@@ -643,7 +643,7 @@ bool prepare_item_dismantle(Scratch& scratch,
         || mutation.accountSoid != dismantle.accountSoid
         || mutation.characterSoid != dismantle.characterSoid
         || mutation.dismantledInstanceSoid != dismantle.dismantledInstanceSoid
-        || mutation.profileChanged != dismantle.updatesAccount
+        || mutation.updates_account() != dismantle.updatesAccount
         || mutation.rewardCount > state::kDismantleRewardCapacity
         || (creditsPayout ? mutation.profileChanged != (mutation.rewardCount != 0)
                           : mutation.rewardCount != 0)
@@ -715,7 +715,10 @@ bool prepare_item_dismantle(Scratch& scratch,
             return report_failure("dismantle_account_storage");
         }
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes)) {
+        // The account object carries any acquisition flag the dismantle sets.
+        state::unlocks::Table unlocks{};
+        if (!state::preview_dismantle_unlocks(mutation, unlocks)
+            || !family4_datagen::account::encode(account, accountBytes, unlocks)) {
             clear_after(scratch, reservation);
             return report_failure("dismantle_account_encode");
         }

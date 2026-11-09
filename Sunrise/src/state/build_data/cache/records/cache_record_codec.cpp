@@ -78,6 +78,7 @@ bool encode(const items::Definition& value, ItemRecord& record) noexcept {
         value.presenceFlagCount,
         value.presenceFlags,
         static_cast<std::uint8_t>(value.consumesWholeStack),
+        static_cast<std::uint8_t>(value.deletesOnAction),
     };
     return items::valid(value.questInitialization);
 }
@@ -110,11 +111,12 @@ bool decode(const ItemRecord& record, items::Definition& value) noexcept {
              record.plugSetFlagIndex,
              record.presenceFlags,
              record.presenceFlagCount,
-             record.consumesWholeStack != 0};
+             record.consumesWholeStack != 0,
+             record.deletesOnAction != 0};
     return items::valid(value.questInitialization) && record.quietAcquisition <= 1
            && record.toastlessAcquisition <= 1 && record.grantRestricted <= 1
            && record.presenceFlagCount <= items::kPresenceFlagCapacity
-           && record.consumesWholeStack <= 1;
+           && record.consumesWholeStack <= 1 && record.deletesOnAction <= 1;
 }
 
 /** Encodes one collectible ordinal and its optional item link. */

@@ -497,6 +497,17 @@ struct PendingItemDismantle {
     bool profileChanged{};
     /** The removed instance was a profile row, so no character row changed. */
     bool profileResident{};
+    /**
+     * The consumed item's acquisition flag and the value preparation read. Every held copy was
+     * acquired, so consuming one through its delete-on-action records that when the flag is clear.
+     */
+    PreparedRewardFlag acquiredFlag{};
+    bool setsAcquiredFlag{};
+
+    /** @return True when the dismantle changes the account object. */
+    [[nodiscard]] bool updates_account() const noexcept {
+        return profileChanged || setsAcquiredFlag;
+    }
     /** False for an editor removal or a stack, which credit no dismantle materials. */
     bool paysRewards{true};
     bool prepared{};
@@ -1187,6 +1198,14 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 /** Builds the exact account after-image while a prepared dismantle remains current. */
 [[nodiscard]] bool preview_item_dismantle(const PendingItemDismantle& mutation,
                                           AccountState& after) noexcept;
+
+/**
+ * Builds the account unlocks a prepared dismantle publishes, with any acquisition flag it sets.
+ * @param after Receives the selected character's saved banks after the dismantle.
+ * @return False when the banks do not read or the flag changed since preparation.
+ */
+[[nodiscard]] bool preview_dismantle_unlocks(const PendingItemDismantle& mutation,
+                                             unlocks::Table& after) noexcept;
 
 /**
  * Commits a prepared inventory removal only while the complete prepare-time character view is

@@ -125,6 +125,49 @@ struct ExpectedItem {
 }
 
 /**
+ * Captures the consumed item's acquisition flag when its action deletes it and the flag is clear.
+ * @return False when the saved flag does not read.
+ */
+[[nodiscard]] bool prepare_acquired_flag(PendingItemDismantle& mutation) noexcept {
+    mutation.acquiredFlag = {};
+    mutation.setsAcquiredFlag = false;
+    build_data::items::Definition item{};
+    build_data::rewards::Item reward{};
+    if (!build_data::find_item_definition_hash(mutation.dismantledItem.definitionHash, item)
+        || !item.deletesOnAction || !build_data::find_reward_item(item.definitionIndex, reward)
+        || reward.definitionHash != item.definitionHash
+        || reward.acquiredFlag == build_data::rewards::kAbsent) {
+        return true;
+    }
+    std::int32_t before = 0;
+    if (!investment::store::read_unlock(
+            investment::store::Bank::accountFlags, reward.acquiredFlag, before)
+        || before < 0 || before > unlocks::kFlagSet) {
+        return false;
+    }
+    mutation.acquiredFlag = {reward.acquiredFlag, static_cast<std::uint8_t>(before)};
+    mutation.setsAcquiredFlag = before != unlocks::kFlagSet;
+    return true;
+}
+
+/**
+ * Sets the prepared acquisition flag while it still holds the value preparation read. Call under
+ * the store lock, inside the transaction that writes the dismantle.
+ */
+[[nodiscard]] bool write_acquired_flag(const PendingItemDismantle& mutation) noexcept {
+    if (!mutation.setsAcquiredFlag) {
+        return true;
+    }
+    std::int32_t current = 0;
+    return investment::store::read_unlock(
+               investment::store::Bank::accountFlags, mutation.acquiredFlag.index, current)
+           && current == mutation.acquiredFlag.previousValue
+           && investment::store::write_unlock(investment::store::Bank::accountFlags,
+                                              mutation.acquiredFlag.index,
+                                              unlocks::kFlagSet);
+}
+
+/**
  * Prepares the removal of one instanced profile row, which no character inventory holds, without
  * changing account State.
  */
@@ -157,8 +200,13 @@ struct ExpectedItem {
 /** Prepares one unequipped item removal, from the selected character or the profile. */
 bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mutation) noexcept {
     const char* reason = nullptr;
-    return prepare_selected_item_dismantle(instanceSoid, true, nullptr, mutation, reason)
-           || prepare_profile_resident_discard(instanceSoid, mutation);
+    if ((prepare_selected_item_dismantle(instanceSoid, true, nullptr, mutation, reason)
+         || prepare_profile_resident_discard(instanceSoid, mutation))
+        && prepare_acquired_flag(mutation)) {
+        return true;
+    }
+    mutation = {};
+    return false;
 }
 
 /** Prepares a held stack's discard without changing account State. */
@@ -198,6 +246,11 @@ bool prepare_stack_discard(std::uint32_t definitionHash,
         report("fail", "stack_not_held");
         return false;
     }
+    if (!prepare_acquired_flag(mutation)) {
+        report("fail", "acquired_flag");
+        mutation = {};
+        return false;
+    }
     report("ok", "ready");
     return true;
 }
@@ -232,6 +285,24 @@ bool preview_item_dismantle(const PendingItemDismantle& mutation, AccountState& 
                      mutation.movedInventoryItemCount,
                      mutation.afterCharacter.nextInventorySerial);
     return ready;
+}
+
+/** Reads the selected character's banks and applies the flag the dismantle sets. */
+bool preview_dismantle_unlocks(const PendingItemDismantle& mutation,
+                               unlocks::Table& after) noexcept {
+    if (!investment::store::read_unlocks(after, static_cast<int>(mutation.characterIndex))) {
+        return false;
+    }
+    if (!mutation.setsAcquiredFlag) {
+        return true;
+    }
+    const std::uint16_t index = mutation.acquiredFlag.index;
+    if (index >= after.accountFlags.size()
+        || after.accountFlags[index] != mutation.acquiredFlag.previousValue) {
+        return false;
+    }
+    after.accountFlags[index] = unlocks::kFlagSet;
+    return true;
 }
 
 /** Commits one prepared dismantle only while its complete account views are unchanged. */
@@ -270,7 +341,10 @@ bool commit_item_dismantle(PendingItemDismantle& mutation) noexcept {
     const bool ready =
         materialize_item_dismantle(investment::store::account(), prepared, candidate);
     if (ready) {
-        if (!investment::store::write_account(candidate)) {
+        // The inventory and the acquisition flag commit together or not at all.
+        investment::store::Transaction transaction;
+        if (!transaction.ready() || !investment::store::write_account(candidate)
+            || !write_acquired_flag(prepared) || !transaction.commit()) {
             investment::store::g_mutex.unlock();
             return false;
         }

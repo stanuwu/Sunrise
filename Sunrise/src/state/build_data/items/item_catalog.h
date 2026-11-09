@@ -70,6 +70,8 @@ struct Definition {
     std::uint8_t presenceFlagCount{};
     /** The item's action removes the whole stack rather than one unit. */
     bool consumesWholeStack{};
+    /** The item's action deletes the copy it acts on. */
+    bool deletesOnAction{};
 };
 
 /**
