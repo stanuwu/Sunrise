@@ -286,6 +286,42 @@ bool remove_character_rows(std::size_t slot) noexcept {
     return transaction.commit();
 }
 
+/** Reads the saved account's Store sync revision; an account that never synced reads zero. */
+bool read_store_sync_revision(std::uint32_t& revision) noexcept {
+    revision = 0;
+    Transaction transaction;
+    Statement row("SELECT revision FROM eververse_wallet_sync "
+                  "WHERE account_soid=(SELECT soid FROM account WHERE id=1)");
+    if (!transaction.ready()) {
+        return false;
+    }
+    const int result = row.step();
+    if (result == SQLITE_ROW
+        && (!row.column(0, revision) || revision == 0 || row.step() != SQLITE_DONE)) {
+        return false;
+    }
+    return (result == SQLITE_ROW || result == SQLITE_DONE) && transaction.commit();
+}
+
+/** Advances the saved account's Store sync revision by one. */
+bool advance_store_sync_revision(std::uint32_t& revision) noexcept {
+    revision = 0;
+    Transaction transaction;
+    std::uint32_t before = 0;
+    if (!transaction.ready() || !read_store_sync_revision(before)
+        || before == (std::numeric_limits<std::uint32_t>::max)()) {
+        return false;
+    }
+    Statement row("INSERT INTO eververse_wallet_sync(account_soid,revision) "
+                  "SELECT soid,? FROM account WHERE id=1 "
+                  "ON CONFLICT(account_soid) DO UPDATE SET revision=excluded.revision");
+    if (!row.write(before + 1U) || !transaction.commit()) {
+        return false;
+    }
+    revision = before + 1U;
+    return true;
+}
+
 /** A sign-in timestamp belongs only to the current connection lifetime. */
 void set_sign_in_time(std::uint64_t seconds) noexcept {
     const std::lock_guard lock(g_mutex);

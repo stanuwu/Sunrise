@@ -1,8 +1,10 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 9;
--- open() also creates parked_items and item_objectives. The version 5 upgrade creates
--- parked_items with the same statement, version 6 adds its placement column, and version 7
--- creates item_objectives and adds parked_items' objectives column.
+PRAGMA user_version = 10;
+-- open() also creates parked_items, item_objectives, character_helmet_tiers and
+-- eververse_wallet_sync. The version 5 upgrade creates parked_items with the same statement,
+-- version 6 adds its placement column, version 7 creates item_objectives and adds parked_items'
+-- objectives column, version 8 creates character_helmet_tiers and version 10 creates
+-- eververse_wallet_sync.
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),

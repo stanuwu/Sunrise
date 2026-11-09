@@ -79,10 +79,20 @@ constexpr const char* kCharacterHelmetTiersTable =
     "sentry INTEGER NOT NULL CHECK (sentry BETWEEN 0 AND 3)"
     ") STRICT;";
 
+/**
+ * Version 10 saves the Store wallet sync generation, which outlives every account row rewrite.
+ * A new save and the migration both run this statement.
+ */
+constexpr const char* kWalletSyncTable =
+    "CREATE TABLE eververse_wallet_sync ("
+    "account_soid INTEGER PRIMARY KEY CHECK (account_soid <> 0),"
+    "revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 4294967295)"
+    ") STRICT, WITHOUT ROWID;";
+
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 9;
+constexpr int kSchemaVersion = 10;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
 
@@ -312,7 +322,7 @@ bool open(std::string_view path,
                 && execute(kParkedItemsTable) && execute(kParkedPlacementColumn)
                 && execute(kItemObjectivesTable) && execute(kParkedObjectivesColumn)
                 && execute(kCharacterHelmetTiersTable) && execute(starterText.c_str())
-                && execute(defaultText.c_str())
+                && execute(kWalletSyncTable) && execute(defaultText.c_str())
                 && !settingsSchema.empty() && !settingsDefaults.empty()
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
                 && transaction.commit();
@@ -402,6 +412,14 @@ bool open(std::string_view path,
         Transaction transaction;
         ready = transaction.ready() && execute(kSynthesizerTierOverrideRemoval)
                 && execute("PRAGMA user_version=9") && transaction.commit();
+        if (ready) {
+            version = 9;
+        }
+    }
+    if (ready && version == 9) {
+        Transaction transaction;
+        ready = transaction.ready() && execute(kWalletSyncTable)
+                && execute("PRAGMA user_version=10") && transaction.commit();
     }
     if (!ready) {
         shutdown();

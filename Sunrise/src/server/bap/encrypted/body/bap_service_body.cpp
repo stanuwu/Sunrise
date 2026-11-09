@@ -12,6 +12,7 @@
 #include "../../../../middleware/bap/family_unsubscription.h"
 #include "../../../../middleware/bap/user_message/user_message_response.h"
 #include "../../../../middleware/encoding/byte_order.h"
+#include "../../../../middleware/web_service/messages/opcode104.h"
 #include "../../../../middleware/web_service/messages/opcode505/opcode505_codec.h"
 #include "../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../state/runtime/runtime.h"
@@ -52,6 +53,46 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
     return g_translatedIdentity.compare_exchange_strong(
                claimed, identity, std::memory_order_relaxed)
            || claimed == identity;
+}
+
+/**
+ * Answers one opcode-104 Store wallet sync with the revision that publishes its new generation.
+ * @return False only when the reply does not encode; a refused sync answers with a refusal.
+ */
+[[nodiscard]] bool synchronize_store(const middleware::web_service::Message& message,
+                                     const queuez::SessionState& queuezState,
+                                     std::span<std::byte> output,
+                                     std::size_t& written,
+                                     ServiceOutcome& outcome) noexcept {
+    namespace opcode104 = middleware::web_service::messages::opcode104;
+    opcode104::Request request{};
+    if (!opcode104::parse_request(message, request)
+        || queuezState.family4Version == (std::numeric_limits<std::int32_t>::max)()
+        || !state::synchronize_store_wallet(outcome.storeSyncRevision)) {
+        core::log::write(
+            core::log::Channel::server, core::log::Level::warn, "ev=store_sync result=refused");
+        return refuse_web_action(message, output, written);
+    }
+    middleware::web_service::StatusResponse status{};
+    status.value = queuezState.family4Active ? queuezState.family4Version + 1
+                                             : middleware::web_service::kNoFamily4Publication;
+    if (!middleware::web_service::encode_response(message,
+                                                  middleware::web_service::ResponseShape::statusPairWithBool,
+                                                  status,
+                                                  output,
+                                                  written)) {
+        return false;
+    }
+    outcome.hasStoreSync = true;
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=store_sync stage=prepared source=ws104 first=%u second=%u revision=%u "
+                      "family4_version=%d",
+                      request.first ? 1U : 0U,
+                      request.second ? 1U : 0U,
+                      outcome.storeSyncRevision,
+                      status.value);
+    return true;
 }
 
 } // namespace
@@ -97,6 +138,16 @@ bool process(const ServiceRoute& route,
     switch (route.bodyCodec) {
     case BodyCodec::empty:
         written = 0;
+        // Service 22 answers the purchased-offers refresh. Its empty reply alone does not end the
+        // client's pending Store sync, so a new account generation is published with it.
+        if (route.response == middleware::bap::ResponseService::purchasedOffers) {
+            outcome.hasStoreSync = state::synchronize_store_wallet(outcome.storeSyncRevision);
+            if (!outcome.hasStoreSync) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=store_sync result=refused source=purchased_offers");
+            }
+        }
         return true;
     case BodyCodec::accountTranslationResponse: {
         const state::AccountState account = state::account_snapshot();
@@ -204,8 +255,11 @@ bool process(const ServiceRoute& route,
         return middleware::bap::user_message::encode_minimal_response(output, written);
     case BodyCodec::webService: {
         middleware::web_service::Message message;
-        if (middleware::web_service::parse_request(requestBody, message)
-            && message.opcode == middleware::web_service::messages::opcode505::kOpcode) {
+        const bool parsed = middleware::web_service::parse_request(requestBody, message);
+        if (parsed && message.opcode == middleware::web_service::messages::opcode104::kOpcode) {
+            return synchronize_store(message, queuezState, output, written, outcome);
+        }
+        if (parsed && message.opcode == middleware::web_service::messages::opcode505::kOpcode) {
             auto* changeCharacter = emplace_transaction<queuez::ChangeCharacter>(outcome);
             if (!middleware::web_service::messages::opcode505::parse_request(message)
                 || changeCharacter == nullptr

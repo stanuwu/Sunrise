@@ -164,6 +164,11 @@ struct ServiceOutcome {
 
     bool hasArtifactReset{};
 
+    /** A Store wallet sync committed a new generation, which the account object publishes. */
+    bool hasStoreSync{};
+
+    std::uint32_t storeSyncRevision{};
+
     state::ArtifactResetResult artifactReset{};
 
     middleware::queuez::Subscription subscription{};

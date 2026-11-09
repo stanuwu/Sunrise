@@ -672,4 +672,14 @@ bool ensure_character_subclasses() noexcept {
     return true;
 }
 
+/** Advances the saved Store wallet sync generation. */
+bool synchronize_store_wallet(std::uint32_t& revision) noexcept {
+    return investment::store::advance_store_sync_revision(revision);
+}
+
+/** Reads the saved Store wallet sync generation. */
+bool read_store_wallet_sync(std::uint32_t& revision) noexcept {
+    return investment::store::read_store_sync_revision(revision);
+}
+
 } // namespace sunrise::state

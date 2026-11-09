@@ -8,6 +8,7 @@
 
 #include "../../../../state/account/inventory/synthesizer_tier.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/runtime/runtime.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../../definitions.h"
 #include "../progression/progression_bank_keys.h"
@@ -156,6 +157,14 @@ bool encode(const state::AccountState& state,
         }
     }
     object.profileItemCount = static_cast<std::uint32_t>(state.profileItemCount);
+
+    // A committed wallet sync advances this generation; ordinary inventory updates keep it.
+    if (!state::read_store_wallet_sync(object.storeSyncRevision)) {
+        return false;
+    }
+    if (object.storeSyncRevision != 0) {
+        object.storeSyncState = layout::kStoreSyncStateSynced;
+    }
 
     // Publish only after every fallible conversion succeeds.
     std::fill(output.begin(), output.end(), std::byte{});

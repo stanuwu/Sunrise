@@ -709,6 +709,20 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
 [[nodiscard]] bool complete_profile_setup() noexcept;
 
 /**
+ * Advances the Store wallet sync generation the account object publishes. The request's platform
+ * receipts are not purchase authority, so nothing is granted, charged or read from a wallet.
+ * Composes with the caller's investment transaction.
+ * @param revision Receives the new generation; zero on failure.
+ */
+[[nodiscard]] bool synchronize_store_wallet(std::uint32_t& revision) noexcept;
+
+/**
+ * Reads the committed Store wallet sync generation.
+ * @param revision Receives the generation, or zero when the account never synced.
+ */
+[[nodiscard]] bool read_store_wallet_sync(std::uint32_t& revision) noexcept;
+
+/**
  * Moves the selection to one authored character.
  * The Client names its pick only in the select-character request, so this is where a player's
  * choice enters State.

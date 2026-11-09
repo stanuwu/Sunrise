@@ -406,7 +406,8 @@ bool consume(Session& session,
     }
     const bool artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome) != nullptr;
     const bool mutatesAccount =
-        outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasArtifactReset
+        outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasStoreSync
+        || outcome.hasArtifactReset
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
         || transaction_if<PostmasterClaimTransaction>(outcome) != nullptr
         || transaction_if<SubclassSelectionTransaction>(outcome) != nullptr
@@ -427,8 +428,8 @@ bool consume(Session& session,
         outcome.hasChangeCharacter || outcome.hasSelectCharacter || outcome.hasArtifactReset
         || transaction_if<ItemDismantleTransaction>(outcome) != nullptr
         || consumes_held_item(outcome);
-    const bool hasPrecommittedAccountAction =
-        outcome.hasRecordClaim || outcome.hasSelectCharacter || outcome.hasArtifactReset;
+    const bool hasPrecommittedAccountAction = outcome.hasRecordClaim || outcome.hasSelectCharacter
+                                              || outcome.hasStoreSync || outcome.hasArtifactReset;
     // Commit consumes pending payloads, so retain the connection fields first.
     const ConnectionFields connection = connection_fields(outcome);
     if (handled && processesBody) {
@@ -450,6 +451,13 @@ bool consume(Session& session,
                 frame.serviceId, "commit", fits ? commitReason : "frame_capacity");
         }
         if (handled) {
+            if (outcome.hasStoreSync) {
+                core::log::writef(core::log::Channel::server,
+                                  core::log::Level::info,
+                                  "ev=store_sync stage=committed revision=%u service=%u",
+                                  outcome.storeSyncRevision,
+                                  static_cast<unsigned>(frame.serviceId));
+            }
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
             written = framedSize;
             entityLease.release();

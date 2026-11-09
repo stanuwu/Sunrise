@@ -222,6 +222,7 @@
     <ClCompile Include="src\middleware\web_service\messages\opcode903_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode1901_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode2002_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode104_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode402_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode403_codec.cpp" />
     <ClCompile Include="src\middleware\web_service\messages\opcode702_codec.cpp" />
@@ -2950,6 +2951,7 @@
     <ClInclude Include="src\middleware\web_service\messages\opcode901\opcode901_codec.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode801.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode1820.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode104.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode402.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode403.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode702.h" />
