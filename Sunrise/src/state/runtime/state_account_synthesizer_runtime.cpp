@@ -1,5 +1,6 @@
 /** Gambit Prime Synthesizer exchanges: a synthesis plug pays a Mote, a recycle plug its Synths. */
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -164,6 +165,15 @@ constexpr std::array<MoteOutput, 12> kSynthesizerMoteOutputs{{
 }
 
 } // namespace
+
+/** @return True when the item is one of the Synthesizer's Motes. */
+bool synthesizer_mote(std::uint32_t definitionHash) noexcept {
+    return std::any_of(kSynthesizerMoteOutputs.begin(),
+                       kSynthesizerMoteOutputs.end(),
+                       [definitionHash](const MoteOutput& output) {
+                           return output.moteHash == definitionHash;
+                       });
+}
 
 /** Stages what a Synthesizer exchange pays and the initial plug its lane returns to. */
 SynthesizerExchange stage_synthesizer_payout(const AccountState& account,

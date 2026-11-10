@@ -179,6 +179,8 @@ apply_reward_sockets(const build_data::items::details::Definition& detail,
                      std::span<const build_data::rewards::SocketOverride> overrides,
                      account::inventory::Sockets& sockets,
                      const char** refusal = nullptr) noexcept;
+/** @return True when the item is one of the Synthesizer's Motes. */
+[[nodiscard]] bool synthesizer_mote(std::uint32_t definitionHash) noexcept;
 /**
  * A bounty starts with its deadline, however it is acquired. Other items, and a bounty whose
  * contract is not read, start with no per-instance values.

@@ -376,12 +376,15 @@ namespace {
 
 using FlagSet = std::bitset<unlocks::kUnlockFlagCapacity>;
 
-/** @return The presence flags the items the profile holds supply. */
+/**
+ * @return The presence flags the Synthesizer Motes the profile holds supply. Other held items list
+ *         flags too, but Family-5 has room for a Synthesizer's worth, not for every held item's.
+ */
 [[nodiscard]] FlagSet held_presence_flags(const AccountState& account) noexcept {
     FlagSet flags{};
     for (const auto& item : std::span(account.profileItems).first(account.profileItemCount)) {
         build_data::items::Definition definition{};
-        if (item.quantity <= 0
+        if (item.quantity <= 0 || !runtime::detail::synthesizer_mote(item.definitionHash)
             || !build_data::find_item_definition_hash(item.definitionHash, definition)) {
             continue;
         }
