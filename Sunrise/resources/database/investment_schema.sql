@@ -1,5 +1,5 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 10;
+PRAGMA user_version = 11;
 -- open() also creates parked_items, item_objectives, character_helmet_tiers and
 -- eververse_wallet_sync. The version 5 upgrade creates parked_items with the same statement,
 -- version 6 adds its placement column, version 7 creates item_objectives and adds parked_items'
@@ -67,7 +67,8 @@ CREATE TABLE profile_items (
     definition_hash INTEGER NOT NULL,
     quantity INTEGER NOT NULL CHECK (quantity > 0),
     mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
-    seen INTEGER NOT NULL CHECK(seen IN(0,1))
+    seen INTEGER NOT NULL CHECK(seen IN(0,1)),
+    slot INTEGER NOT NULL CHECK (slot >= -1)
 ) STRICT;
 
 CREATE TABLE character_stacks (

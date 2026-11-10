@@ -118,22 +118,31 @@ bool read_objectives(AccountState& output) noexcept {
     return result == SQLITE_DONE;
 }
 
-/** Profile rows preserve stable instance identities and mutation serials. */
+/** A profile row with no saved slot stores this. */
+constexpr int kUnassignedSavedSlot = -1;
+
+/** Profile rows preserve stable instance identities, mutation serials and slots. */
 bool read_profile(AccountState& output) noexcept {
     Statement rows("SELECT * FROM profile_items ORDER BY position");
     int result = rows.step();
     while (result == SQLITE_ROW) {
         std::size_t position = 0;
+        int slot = 0;
         account::inventory::ProfileItem item;
         if (!rows.columns(position,
                           item.instanceSoid,
                           item.definitionHash,
                           item.quantity,
                           item.mutationSerial,
-                          item.seen)
-            || position != output.profileItemCount || position >= output.profileItems.size()) {
+                          item.seen,
+                          slot)
+            || position != output.profileItemCount || position >= output.profileItems.size()
+            || slot < kUnassignedSavedSlot
+            || slot >= static_cast<int>(account::inventory::kUnassignedProfileSlot)) {
             return false;
         }
+        item.slot = slot == kUnassignedSavedSlot ? account::inventory::kUnassignedProfileSlot
+                                                 : static_cast<std::uint16_t>(slot);
         output.profileItems[output.profileItemCount++] = item;
         result = rows.step();
     }
@@ -252,7 +261,7 @@ bool write_inventory(const AccountState& value) noexcept {
             }
         }
     }
-    Statement profile("INSERT INTO profile_items VALUES (?,?,?,?,?,?)");
+    Statement profile("INSERT INTO profile_items VALUES (?,?,?,?,?,?,?)");
     for (std::size_t position = 0; position < value.profileItemCount; ++position) {
         const auto& item = value.profileItems[position];
         if (!profile.write(position,
@@ -260,7 +269,10 @@ bool write_inventory(const AccountState& value) noexcept {
                            item.definitionHash,
                            item.quantity,
                            item.mutationSerial,
-                           item.seen)) {
+                           item.seen,
+                           item.slot == account::inventory::kUnassignedProfileSlot
+                               ? kUnassignedSavedSlot
+                               : static_cast<int>(item.slot))) {
             return false;
         }
     }
