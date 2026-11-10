@@ -14,8 +14,6 @@
 namespace sunrise::state {
 namespace {
 
-namespace pursuits = build_data::pursuits;
-
 using SavedState = SavedSelection<AccountState>;
 
 /** Copies the selected character's saved view, or returns why it could not be copied. */
@@ -36,9 +34,11 @@ using SavedState = SavedSelection<AccountState>;
 
 /**
  * Evaluates one inventory resident when it is a pursuit.
+ * @param heldItems The character's held items, which a largest-value objective reads across.
  * @return False when the resident is not in the pursuit bucket.
  */
 [[nodiscard]] bool read_held_pursuit(const account::inventory::Item& item,
+                                     std::span<const account::inventory::Item> heldItems,
                                      const reward_resolution::Context& context,
                                      HeldPursuitStatus& held) {
     build_data::items::Definition definition{};
@@ -50,7 +50,7 @@ using SavedState = SavedSelection<AccountState>;
     held.definitionHash = item.definitionHash;
     held.mutationSerial = item.mutationSerial;
     held.flags = item.flags;
-    pursuits::Definition contract{};
+    build_data::pursuits::Definition contract{};
     if (!build_data::find_pursuit_definition(definition.definitionIndex, contract)
         || contract.definitionHash != item.definitionHash) {
         return true;
@@ -58,7 +58,7 @@ using SavedState = SavedSelection<AccountState>;
     held.lifetimeSeconds = contract.lifetimeSeconds;
     const account::inventory::ItemObjectives values =
         item.objectives.value_or(account::inventory::ItemObjectives{});
-    held.completion = inspect_pursuit_completion(contract, context, values);
+    held.completion = inspect_pursuit_completion(contract, context, values, heldItems);
     return true;
 }
 
@@ -84,13 +84,14 @@ PursuitSnapshotRefusal read_pursuit_snapshot(PursuitSnapshot& output) noexcept {
     }
     const CharacterState& character = saved->account.characters[saved->slot];
     const reward_resolution::Context context = saved->context();
+    const auto heldItems = std::span(character.inventory.values).first(character.inventory.count);
     try {
         PursuitSnapshot snapshot{};
         snapshot.accountSoid = saved->account.primarySoid;
         snapshot.characterSoid = character.soid;
-        for (std::size_t i = 0; i < character.inventory.count; ++i) {
+        for (const account::inventory::Item& item : heldItems) {
             HeldPursuitStatus held{};
-            if (read_held_pursuit(character.inventory.values[i], context, held)) {
+            if (read_held_pursuit(item, heldItems, context, held)) {
                 snapshot.held.push_back(held);
             }
         }

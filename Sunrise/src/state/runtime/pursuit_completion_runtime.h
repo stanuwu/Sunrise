@@ -45,12 +45,12 @@ struct PursuitCompletionStatus {
  * @param context Saved banks and class of the character holding the pursuit.
  * @param itemValues The held instance's per-item values in record order.
  * @param heldItems The character's held items, which an objective reading its slot's largest value
- *        across held instances also reads. Empty reads the held instance alone.
+ *        across held instances also reads.
  */
 [[nodiscard]] PursuitCompletionStatus
 inspect_pursuit_completion(const build_data::pursuits::Definition& definition,
                            const reward_resolution::Context& context,
                            std::span<const std::int32_t> itemValues,
-                           std::span<const account::inventory::Item> heldItems = {}) noexcept;
+                           std::span<const account::inventory::Item> heldItems) noexcept;
 
 } // namespace sunrise::state

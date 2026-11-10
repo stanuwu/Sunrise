@@ -292,7 +292,7 @@ struct PreparedRecordReward {
     std::optional<AccountUnlockWrite> chooserReadiness{};
 };
 
-/** The saved array a granted row belongs to. */
+/** The saved array a granted or edited row belongs to. */
 enum class GrantedRowArray : std::uint8_t { profile, characterItem, characterStack };
 
 /**
@@ -511,15 +511,13 @@ struct PendingItemDismantle {
     bool prepared{};
 };
 
-/**
- * Which saved list a quantity edit names. It must be the list of the bucket the row occupies,
- * which for a recovered row is its item's recovery bucket.
- */
-enum class EditScope : std::uint8_t { profile, characterItem, characterStack };
-
 /** One row the caller read and the quantity that replaces it. */
 struct QuantityEdit {
-    EditScope scope{};
+    /**
+     * The saved array the edit names. It must be the array of the bucket the row occupies, which
+     * for a recovered row is its item's recovery bucket.
+     */
+    GrantedRowArray scope{};
     /** Character expected to be selected. A profile edit is published with this character too. */
     std::uint64_t characterSoid{};
     /** Zero for plain profile rows and character stacks. */
@@ -552,7 +550,7 @@ struct AccountEditChange {
  * plus the two ingredient balances a burnt bake debits, the discovery flag a recipe sets or the
  * flag a Chalice upgrade sets.
  */
-inline constexpr std::size_t kSocketUnlockWriteCapacity = 8;
+inline constexpr std::size_t kSocketUnlockWriteCapacity = 8; // 6 cost rows plus 2 burnt debits
 
 /** The account unlock rows one socket action writes, each once, in the order first written. */
 struct AccountUnlockWrites {
@@ -612,6 +610,11 @@ struct PendingSocketPlug {
     bool profileChanged{};
     bool targetEquipped{};
     bool prepared{};
+
+    /** @return True when a character row took a new serial, so the character object changes. */
+    [[nodiscard]] bool updates_character() const noexcept {
+        return beforeCharacter.nextInventorySerial != afterCharacter.nextInventorySerial;
+    }
 };
 
 /** Prepared accumulated item-state change for one selected-character item instance. */
@@ -1238,10 +1241,8 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  * Prepares one exact opcode-903 ordinary-socket selection on a selected-character item.
  * The target may be equipped or unequipped. Native defaults are materialized into a complete
  * authored socket block, then only the requested lane changes; everything else stays byte-stable.
- * A Gambit Prime Synthesizer plug is an exchange: it also pays a Mote or refunds Synths. A Dawning
- * oven's Combine or recipe plug bakes a cookie, advances the Dawning bounties the bake counts and
- * returns the oven's lanes to their initial plugs.
- * A Chalice of Opulence plug must pass its insertion rules, and an upgrade purchase sets its flag.
+ * A crafting container's plug can be an exchange, which also changes other lanes, profile rows,
+ * account unlock rows and held bounties; the mutation carries them all.
  * @param targetInstanceSoid Selected-character item-instance key named by the Client.
  * @param socketLane Zero-based ordinary socket lane.
  * @param plugDefinitionIndex Installed plug-definition row selected by the Client.
@@ -1277,39 +1278,6 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 [[nodiscard]] bool preview_socket_plug(const PendingSocketPlug& mutation,
                                        AccountState& after,
                                        unlocks::Table& afterUnlocks) noexcept;
-
-/**
- * Prepares crediting one Dawning ingredient pickup to the oven balance its ingredient plug counts.
- * The caller previews the write over its unlock after-image and writes it in its own transaction,
- * after checking that the row still holds the observed value.
- * @param pickupHash Ingredient pickup item the Client acquired.
- * @param quantity Positive units to credit.
- * @param credit Receives the account value row, the value it holds and the credited value.
- * @return False for any other item, an unmapped balance or an overflowing credit.
- */
-[[nodiscard]] bool prepare_ingredient_credit(std::uint32_t pickupHash,
-                                             std::int32_t quantity,
-                                             AccountUnlockWrite& credit) noexcept;
-
-/**
- * @return True for a Dawning ingredient pickup, which arrives only with the oven balance credit
- *         prepare_ingredient_credit stages.
- */
-[[nodiscard]] bool is_ingredient_pickup(std::uint32_t definitionHash) noexcept;
-
-/**
- * Prepares opening a newly acquired oven's ingredient chooser. The chooser reads the Dawning Begins
- * tutorial's quest row, which a tutorial never started and with no item held is set to ready.
- * The caller previews and writes it as prepare_ingredient_credit's caller does.
- * @param account Account the oven lands in.
- * @param readiness Receives the quest row write, or stays empty when the row keeps its value.
- * @return False when the quest row does not resolve or cannot be read.
- */
-[[nodiscard]] bool prepare_chooser_readiness(const AccountState& account,
-                                             std::optional<AccountUnlockWrite>& readiness) noexcept;
-
-/** @return True for the Dawning oven, whose acquisition stages prepare_chooser_readiness. */
-[[nodiscard]] bool is_dawning_oven(std::uint32_t definitionHash) noexcept;
 
 /**
  * Commits a prepared socket selection only while the complete prepare-time character is unchanged.

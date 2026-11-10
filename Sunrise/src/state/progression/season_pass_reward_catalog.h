@@ -8,7 +8,7 @@ namespace sunrise::state::progression::season_pass {
 
 /** Account progression used by the installed Season of Arrivals pass. */
 inline constexpr std::uint16_t kProgressionDefinitionIndex = 40;
-/** Repeating progression that takes the XP earned past the Arrivals progression's last rank. */
+/** Repeating HUD bar paired with the Arrivals progression; it takes the XP past the last rank. */
 inline constexpr std::uint16_t kHudProgressionDefinitionIndex = 41;
 
 /** Acquisition flag of a direct perk reward, or build_data::rewards::kAbsent for an item or

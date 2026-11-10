@@ -27,17 +27,11 @@ static_assert(unlocks::kAccountFlagCapacity <= build_data::rewards::kAbsent);
 /** Saved values one pass evaluation reads, copied under one store lock. */
 struct SavedPass {
     SavedSelection<AccountIdentity> view{};
-    /** False while no character is selected. The banks then carry only the shared account rows. */
+    /** False while no character is selected. Only the banks' shared account rows are then read. */
     bool selected{};
     std::int32_t experience{};
     std::uint16_t rank{};
 };
-
-/** Automatic rows and acquisition flags are read from the item and reward catalogs too. */
-[[nodiscard]] bool catalogs_ready() noexcept {
-    return build_data::season_pass_ready() && build_data::reward_definitions_ready()
-           && build_data::item_definitions_ready();
-}
 
 /** Copies XP, the account banks and the selected character's banks together. */
 [[nodiscard]] bool read_saved_pass(SavedPass& saved, const char*& reason) noexcept {
@@ -48,7 +42,7 @@ struct SavedPass {
         saved.selected = true;
         break;
     case SavedSelectionRead::unselected:
-        // The account banks are shared, so any slot reads them while no character is selected.
+        // Every slot's read carries the shared account rows; slot 0's character rows go unread.
         if (!investment::store::read_unlocks(saved.view.banks, 0)) {
             return false;
         }
@@ -104,8 +98,9 @@ bool read_season_pass_snapshot(SeasonPassSnapshot& output, const char** refusal)
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     output = {};
+    // Automatic rows and acquisition flags are read from the item and reward catalogs too.
     reason = build_data::reward_definitions_unsupported() ? "rewards_unsupported" : "not_ready";
-    if (!catalogs_ready()) {
+    if (!season_perks_walkable()) {
         return false;
     }
     reason = "allocation";

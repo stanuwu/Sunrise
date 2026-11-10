@@ -66,10 +66,10 @@ PursuitRedemption prepare_next_automatic_pursuit(std::int64_t nowSeconds,
         }
         core::log::writef(core::log::Channel::state,
                           core::log::Level::info,
-                          "ev=pursuit_completion item=%u instance=%llu result=%u reason=%s",
+                          "ev=pursuit_completion item=%u instance=%llu result=%s reason=%s",
                           static_cast<unsigned>(item.definitionIndex),
                           static_cast<unsigned long long>(source.instanceSoid),
-                          static_cast<unsigned>(prepared),
+                          prepared == PursuitRedemption::notReady ? "not_ready" : "refused",
                           reason != nullptr ? reason : "unavailable");
     }
     reason = result == PursuitRedemption::notReady ? notReadyReason : nullptr;

@@ -9,7 +9,7 @@
 namespace sunrise::state {
 namespace {
 
-namespace objectives = build_data::objectives;
+namespace objective_data = build_data::objectives;
 
 /**
  * Reads the per-item value a slot names from one instance's values.
@@ -65,17 +65,17 @@ namespace objectives = build_data::objectives;
  * program evaluated against the saved banks.
  * @return False when the value cannot be read.
  */
-[[nodiscard]] bool read_progress(const objectives::Definition& objective,
+[[nodiscard]] bool read_progress(const objective_data::Definition& objective,
                                  const build_data::pursuits::Definition& definition,
                                  std::span<const std::int32_t> itemValues,
                                  std::span<const account::inventory::Item> heldItems,
                                  const reward_resolution::Context& context,
                                  std::int32_t& value) noexcept {
-    if (objective.itemValueSlot == objectives::kNoItemValueSlot) {
+    if (objective.itemValueSlot == objective_data::kNoItemValueSlot) {
         return reward_resolution::evaluate(objective.expression, context, value);
     }
     const bool found = read_item_value(objective.itemValueSlot, definition, itemValues, value);
-    if (objective.itemValueMode != objectives::ItemValueMode::maximum) {
+    if (objective.itemValueMode != objective_data::ItemValueMode::maximum) {
         return found;
     }
     return read_held_maximum(objective.itemValueSlot, heldItems, found, value);
@@ -83,7 +83,7 @@ namespace objectives = build_data::objectives;
 
 /** Evaluates one objective's progress and adjusted target with its installed comparison. */
 [[nodiscard]] PursuitObjectiveStatus
-inspect_pursuit_objective(const objectives::Definition& objective,
+inspect_pursuit_objective(const objective_data::Definition& objective,
                           const build_data::pursuits::Definition& definition,
                           std::span<const std::int32_t> itemValues,
                           std::span<const account::inventory::Item> heldItems,
@@ -91,7 +91,7 @@ inspect_pursuit_objective(const objectives::Definition& objective,
     PursuitObjectiveStatus status{};
     status.hash = objective.definitionHash;
     status.target = objective.completionValue;
-    status.itemHeld = objective.itemValueSlot != objectives::kNoItemValueSlot;
+    status.itemHeld = objective.itemValueSlot != objective_data::kNoItemValueSlot;
     std::int32_t adjustment = 0;
     if (!objective.readable || !objective.adjustmentReadable
         || (!objective.targetAdjustment.empty()
@@ -128,7 +128,7 @@ inspect_pursuit_completion(const build_data::pursuits::Definition& definition,
     std::size_t unknown = 0;
     for (std::size_t i = 0; i < definition.objectiveCount; ++i) {
         PursuitObjectiveStatus& result = status.objectives[i];
-        objectives::Definition objective{};
+        objective_data::Definition objective{};
         if (!build_data::find_objective_definition(definition.objectives[i], objective)) {
             ++unknown;
             continue;

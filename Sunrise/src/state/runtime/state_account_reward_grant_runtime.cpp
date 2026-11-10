@@ -15,8 +15,6 @@
 #include <span>
 
 #include "../../core/logging/log.h"
-#include "../../middleware/datagen/family4/account/layout.h"
-#include "../../middleware/datagen/family4/character/layout.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
@@ -128,6 +126,18 @@ namespace {
                : reward.instanceSoid == 0;
 }
 
+/** @return True when the grant moves a saved value, credits a progression or pays seasonal XP. */
+[[nodiscard]] bool carries_saved_effects(const PendingRecordRewardGrant& mutation) noexcept {
+    const auto moves = mutation.saved_value_moves();
+    return std::any_of(moves.begin(),
+                       moves.end(),
+                       [](const PreparedQuestStep* move) noexcept {
+                           return move->next.scope != Quest::Scope::none;
+                       })
+           || mutation.progression.scope != build_data::progressions::Scope::unreplicated
+           || mutation.seasonalExperience != 0;
+}
+
 /**
  * Rebuilds the account after-image for one prepared reward set and rejects any drift.
  * @param account Holds the live account the mutation was prepared against, and receives the
@@ -138,7 +148,7 @@ namespace {
                                              AccountState& account) noexcept {
     if (!mutation.prepared
         || (mutation.rewardCount == 0 && mutation.wrapperFlagCount == 0 && mutation.rowCount == 0
-            && mutation.redeemedInstanceSoid == 0)
+            && mutation.redeemedInstanceSoid == 0 && !carries_saved_effects(mutation))
         || mutation.rewardCount > mutation.rewards.size()
         || mutation.rowCount > mutation.rows.size()
         || change_ring_refusal(std::span(mutation.rows).first(mutation.rowCount)) != nullptr
@@ -418,7 +428,8 @@ struct GrantView {
             return RewardPreparation::unresolvable;
         }
         reason = "bounty_deadline";
-        if (!acquired_objectives(item.definitionIndex, view.nowSeconds, arrival.instance.objectives)) {
+        if (!acquired_objectives(
+                item.definitionIndex, view.nowSeconds, arrival.instance.objectives)) {
             return RewardPreparation::unresolvable;
         }
     }
@@ -545,22 +556,17 @@ bool apply_reward_sockets(const item_details::Definition& detail,
 }
 
 /** Rows and flags read one account view, so the grant is one consistent after-image. */
-RewardPreparation
-prepare_reward_grant(std::span<const DirectRecordReward> rewards,
-                     std::uint16_t claimedRecordIndex,
-                     const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
-                     std::uint64_t redeemedInstanceSoid,
-                     std::span<const build_data::vendors::SaleCost> price,
-                     std::int64_t nowSeconds,
-                     PendingRecordRewardGrant& mutation,
-                     const char** refusal,
-                     std::uint64_t replacedInstanceSoid) noexcept {
+RewardPreparation prepare_reward_grant(const RewardGrantRequest& request,
+                                       PendingRecordRewardGrant& mutation,
+                                       const char** refusal) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     reason = "reward_count";
     mutation = {};
-    if ((rewards.empty() && (wrapperFlags == nullptr || wrapperFlags->none())
-         && redeemedInstanceSoid == 0)
+    const std::span<const DirectRecordReward> rewards = request.rewards;
+    const bool flagsWrapper = request.wrapperFlags != nullptr && request.wrapperFlags->any();
+    if ((rewards.empty() && !flagsWrapper && request.redeemedInstanceSoid == 0
+         && !request.carriesSavedEffects)
         || rewards.size() > mutation.rewards.size()) {
         return RewardPreparation::unresolvable;
     }
@@ -582,7 +588,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         || characterIndex >= working.characterCount) {
         return RewardPreparation::deferred;
     }
-    const auto flags = prepare_wrapper_flags(wrapperFlags, mutation, reason);
+    const auto flags = prepare_wrapper_flags(request.wrapperFlags, mutation, reason);
     if (flags != RewardPreparation::prepared) {
         return flags;
     }
@@ -596,39 +602,39 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
     record_grant_before(working, characterIndex, mutation);
     // The redeemed item leaves before the rows are placed, so its row is free for them.
     reason = "redeemed_instance";
-    if (redeemedInstanceSoid != 0
-        && !remove_redeemed(working.characters[characterIndex], redeemedInstanceSoid)) {
+    if (request.redeemedInstanceSoid != 0
+        && !remove_redeemed(working.characters[characterIndex], request.redeemedInstanceSoid)) {
         return RewardPreparation::deferred;
     }
-    mutation.redeemedInstanceSoid = redeemedInstanceSoid;
+    mutation.redeemedInstanceSoid = request.redeemedInstanceSoid;
     // A replaced item leaves the same way; its release publishes with the new rows.
     reason = "replaced_instance";
-    if (replacedInstanceSoid != 0
-        && !remove_redeemed(working.characters[characterIndex], replacedInstanceSoid)) {
+    if (request.replacedInstanceSoid != 0
+        && !remove_redeemed(working.characters[characterIndex], request.replacedInstanceSoid)) {
         return RewardPreparation::deferred;
     }
     // A vendor row's price leaves in the after-image its rows land in.
     reason = "sale_price";
-    if (!price.empty()) {
+    if (!request.price.empty()) {
         const std::unique_ptr<AccountState> charged(new (std::nothrow) AccountState{});
         bool changed = false;
         if (!charged) {
             return RewardPreparation::notReady;
         }
-        if (!apply_sale_price(working, price, *charged, changed)) {
+        if (!apply_sale_price(working, request.price, *charged, changed)) {
             return RewardPreparation::deferred;
         }
         working = *charged;
     }
     // A delivery spends a cookie, which advances the Dawning bounties that count it.
     reason = "dawning_bounty";
-    for (const auto& cost : price) {
+    for (const auto& cost : request.price) {
         build_data::items::Definition spent{};
         if (!build_data::find_item_definition_index(cost.itemIndex, spent)
             || !credit_dawning_bounties(working.characters[characterIndex],
                                         DawningEvent::delivery,
                                         spent.definitionHash,
-                                        nowSeconds)) {
+                                        request.nowSeconds)) {
             return RewardPreparation::notReady;
         }
     }
@@ -638,7 +644,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                              std::span(mutation.rewards).first(index),
                              nextInstanceSoid,
                              placed,
-                             nowSeconds};
+                             request.nowSeconds};
         PreparedRecordReward prepared{};
         const auto row = prepare_reward_row(view, rewards[index], prepared, reason);
         if (row != RewardPreparation::prepared) {
@@ -655,7 +661,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         return RewardPreparation::deferred;
     }
     record_grant_after(working, placed, mutation);
-    mutation.claimedRecordIndex = claimedRecordIndex;
+    mutation.claimedRecordIndex = request.claimedRecordIndex;
     mutation.rewardCount = rewards.size();
     reason = nullptr;
     return RewardPreparation::prepared;
@@ -854,8 +860,9 @@ RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward
                                               std::int64_t nowSeconds,
                                               PendingRecordRewardGrant& mutation,
                                               const char** refusal) noexcept {
-    return prepare_reward_grant(
-        rewards, claimedRecordIndex, nullptr, 0, {}, nowSeconds, mutation, refusal);
+    const RewardGrantRequest request{
+        .rewards = rewards, .claimedRecordIndex = claimedRecordIndex, .nowSeconds = nowSeconds};
+    return prepare_reward_grant(request, mutation, refusal);
 }
 
 /** Builds the full account after-image while a record reward remains current. */

@@ -147,7 +147,7 @@ upsert_value(Family5State& family, std::uint16_t slot, std::int32_t value) noexc
                                                           const SaleRows& rows,
                                                           std::size_t count) noexcept {
     std::uint32_t mask = 0;
-    for (std::size_t row = 0; row < count && row < 32; ++row) {
+    for (std::size_t row = 0; row < count && row < kArtifactMaskRows; ++row) {
         if (rows[row].unlockFlagSlot != build_data::collectibles::kUnavailableFlagSlot
             && family5_flag_set(family, rows[row].unlockFlagSlot)) {
             mask |= 1U << row;
@@ -171,12 +171,20 @@ upsert_value(Family5State& family, std::uint16_t slot, std::int32_t value) noexc
     return mask;
 }
 
-/** @return One bit per owned artifact sale row, read from the selected character's bank. */
-[[nodiscard]] std::uint32_t artifact_mask(const SaleRows& rows, std::size_t count) noexcept {
+/**
+ * Reads one bit per owned artifact sale row from the selected character's bank.
+ * @param mask Receives the bits, or zero on failure.
+ * @return False when the bank copy cannot be allocated or read.
+ */
+[[nodiscard]] bool
+artifact_mask(const SaleRows& rows, std::size_t count, std::uint32_t& mask) noexcept {
+    mask = 0;
     const std::unique_ptr<unlocks::Table> banks(new (std::nothrow) unlocks::Table{});
-    return banks && investment::store::read_unlocks(*banks)
-               ? character_bank_artifact_mask(*banks, rows, count)
-               : 0U;
+    if (!banks || !investment::store::read_unlocks(*banks)) {
+        return false;
+    }
+    mask = character_bank_artifact_mask(*banks, rows, count);
+    return true;
 }
 
 /**
@@ -214,7 +222,7 @@ void strip_artifact_flags_locked(Family5State& family,
     for (std::size_t index = 0; index < family.flagCount; ++index) {
         const UnlockFlagOverride flag = family.flags[index];
         bool artifact = false;
-        for (std::size_t row = 0; row < count && row < 32 && !artifact; ++row) {
+        for (std::size_t row = 0; row < count && row < kArtifactMaskRows && !artifact; ++row) {
             artifact = rows[row].unlockFlagSlot != build_data::collectibles::kUnavailableFlagSlot
                        && rows[row].unlockFlagSlot == flag.slot;
         }
@@ -230,7 +238,7 @@ void strip_artifact_flags_locked(Family5State& family,
 
 [[nodiscard]] std::uint16_t points_used(std::uint32_t mask) noexcept {
     std::uint16_t used = 0;
-    for (std::uint16_t bit = 0; bit < 32; ++bit) {
+    for (std::uint16_t bit = 0; bit < kArtifactMaskRows; ++bit) {
         used = static_cast<std::uint16_t>(used + ((mask & (1U << bit)) != 0 ? 1 : 0));
     }
     return used;
@@ -280,7 +288,7 @@ struct CharacterArtifactWrite {
 bool publish_artifact_character_banks(CharacterArtifactWrite& write) noexcept {
     return unlocks::mutate(&write, [](void* context, unlocks::Table& table) noexcept {
         const auto& request = *static_cast<const CharacterArtifactWrite*>(context);
-        for (std::size_t row = 0; row < request.count && row < 32; ++row) {
+        for (std::size_t row = 0; row < request.count && row < kArtifactMaskRows; ++row) {
             const std::uint16_t mapped = (*request.rows)[row].characterFlagIndex;
             if (mapped == build_data::collectibles::kUnavailableFlagIndex
                 || mapped >= table.characterObjectFlags.size()) {
@@ -473,7 +481,11 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
     }
     SaleRows rows{};
     std::size_t count = 0;
-    const std::uint32_t mask = sale_rows(rows, count) ? artifact_mask(rows, count) : 0U;
+    std::uint32_t mask = 0;
+    // Publishing a mask that could not be read would clear every owned row.
+    if (sale_rows(rows, count) && !artifact_mask(rows, count, mask)) {
+        return false;
+    }
     // The caller publishes the whole account image, so it needs no report.
     bool earnedRidesTheImage = false;
     return publish_experience_lanes(total) && publish_artifact_locked(family, mask, total)
@@ -491,8 +503,7 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
                                          const char*& reason) noexcept {
     // The automatic-row check reads the item and reward catalogs.
     reason = "not_ready";
-    if (!build_data::season_pass_ready() || !build_data::reward_definitions_ready()
-        || !build_data::item_definitions_ready()) {
+    if (!season_perks_walkable()) {
         return false;
     }
     reason = "reward_index";
@@ -567,10 +578,10 @@ bool seed_seasonal_progression(bool& perksEarned) noexcept {
         investment::store::g_mutex.unlock();
         return false;
     }
-    const std::uint32_t mask = artifact_mask(rows, count);
+    std::uint32_t mask = 0;
     // A pick changes which class and character flags the perk conditions read.
     bool earned = false;
-    const bool published = publish_experience_lanes(experience)
+    const bool published = artifact_mask(rows, count, mask) && publish_experience_lanes(experience)
                            && publish_artifact_locked(family, mask, experience)
                            && investment::store::write_family5(family) && walk_earned_perks(earned)
                            && transaction.commit();
@@ -787,14 +798,13 @@ bool check_season_pass_reward(std::uint16_t rewardIndex,
     return true;
 }
 
-/** @return Purchased artifact sale rows, one bit per row. */
+/** @return Purchased artifact sale rows, one bit per row; zero when they cannot be read. */
 std::uint32_t artifact_mod_mask() noexcept {
     SaleRows rows{};
     std::size_t count = 0;
-    if (!sale_rows(rows, count)) {
-        return 0;
-    }
-    return artifact_mask(rows, count);
+    std::uint32_t mask = 0;
+    const bool read = sale_rows(rows, count) && artifact_mask(rows, count, mask);
+    return read ? mask : 0U;
 }
 
 /** Replaces the exact published mask, refusing when another action changed it first. */
@@ -812,7 +822,8 @@ bool replace_artifact_mod_mask(std::uint32_t expected, std::uint32_t replacement
         investment::store::g_mutex.unlock();
         return false;
     }
-    bool replaced = artifact_mask(rows, count) == expected;
+    std::uint32_t published = 0;
+    bool replaced = artifact_mask(rows, count, published) && published == expected;
     // A reset publishes the account image after this; a refused purchase rolls the walk back.
     bool earnedRidesTheImage = false;
     if (replaced) {
@@ -831,7 +842,7 @@ bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,
     SaleRows rows{};
     std::size_t count = 0;
     const AccountState account = account_snapshot();
-    if (!sale_rows(rows, count) || saleIndex >= count || saleIndex >= 32
+    if (!sale_rows(rows, count) || saleIndex >= count || saleIndex >= kArtifactMaskRows
         || rows[saleIndex].unlockFlagSlot == build_data::collectibles::kUnavailableFlagSlot
         || !account::valid(account)) {
         return false;
@@ -856,9 +867,10 @@ bool prepare_artifact_mod_unlock(std::uint16_t saleIndex,
         investment::store::g_mutex.unlock();
         return false;
     }
-    const std::uint32_t before = artifact_mask(rows, count);
+    std::uint32_t before = 0;
+    const bool read = artifact_mask(rows, count, before);
     const std::uint16_t used = points_used(before);
-    bool prepared = (before & bit) == 0 && used < earned && used >= column_tier(saleIndex);
+    bool prepared = read && (before & bit) == 0 && used < earned && used >= column_tier(saleIndex);
     bool perksEarned = false;
     if (prepared) {
         prepared = publish_artifact_locked(family, before | bit, experience)

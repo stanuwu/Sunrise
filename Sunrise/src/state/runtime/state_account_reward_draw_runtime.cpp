@@ -55,14 +55,12 @@ prepare_resolved_reward(const reward_resolution::Result& resolved,
                    std::span(grant.sockets).first(grant.socketCount),
                    true};
     }
-    return prepare_reward_grant(std::span(rows).first(resolved.count),
-                                kUnclaimedRecordIndex,
-                                &resolved.wrapperFlags,
-                                openedInstanceSoid,
-                                price,
-                                nowSeconds,
-                                mutation,
-                                refusal);
+    const RewardGrantRequest request{.rewards = std::span(rows).first(resolved.count),
+                                     .wrapperFlags = &resolved.wrapperFlags,
+                                     .redeemedInstanceSoid = openedInstanceSoid,
+                                     .price = price,
+                                     .nowSeconds = nowSeconds};
+    return prepare_reward_grant(request, mutation, refusal);
 }
 
 /** Classifies a catalog refusal: a verdict unless a catalog was cleared meanwhile. */

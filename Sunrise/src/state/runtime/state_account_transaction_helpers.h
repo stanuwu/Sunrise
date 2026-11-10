@@ -147,28 +147,35 @@ quest_value(unlocks::Table& table, const build_data::items::QuestInitialization&
  */
 [[nodiscard]] std::int32_t& progression_value(unlocks::Table& table,
                                               const PreparedProgressionCredit& credit) noexcept;
+/** What one reward grant places, removes and spends. */
+struct RewardGrantRequest {
+    std::span<const DirectRecordReward> rewards{};
+    /** Record already claimed in the banks, or kUnclaimedRecordIndex. */
+    std::uint16_t claimedRecordIndex{kUnclaimedRecordIndex};
+    /** Flags of the wrappers a draw consumed, or null for direct rows. */
+    const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags{};
+    /** Held pursuit or opened wrapper removed before the rows are placed, or zero. */
+    std::uint64_t redeemedInstanceSoid{};
+    /** Held item a row replaces, removed with the redeemed one, or zero. */
+    std::uint64_t replacedInstanceSoid{};
+    /** A vendor row's cost entries, spent before the rows are placed; empty for none. */
+    std::span<const build_data::vendors::SaleCost> price{};
+    /** Server time in Unix seconds; a granted bounty's lifetime runs from it. */
+    std::int64_t nowSeconds{};
+    /**
+     * The caller adds a saved value, a progression credit or seasonal XP to the prepared grant,
+     * which is then a grant even when it places, removes and flags nothing.
+     */
+    bool carriesSavedEffects{};
+};
 /**
  * Prepares inventory rows and consumed-wrapper flags against one account view.
- * @param claimedRecordIndex Record already claimed in the banks, or kUnclaimedRecordIndex.
- * @param wrapperFlags Flags of the wrappers a draw consumed, or null for direct rows.
- * @param redeemedInstanceSoid Held pursuit or opened wrapper removed before the rows are placed, or
- *        zero.
- * @param price A vendor row's cost entries, spent before the rows are placed; empty for none.
- * @param nowSeconds Server time in Unix seconds; a granted bounty's lifetime runs from it.
  * @param refusal Receives a static reason when the result is not prepared.
- * @param replacedInstanceSoid Held item a row replaces, removed with the redeemed one, or zero.
  * @return Deferred only when State may still change the answer; unresolvable is final.
  */
-[[nodiscard]] RewardPreparation
-prepare_reward_grant(std::span<const DirectRecordReward> rewards,
-                     std::uint16_t claimedRecordIndex,
-                     const std::bitset<unlocks::kAccountFlagCapacity>* wrapperFlags,
-                     std::uint64_t redeemedInstanceSoid,
-                     std::span<const build_data::vendors::SaleCost> price,
-                     std::int64_t nowSeconds,
-                     PendingRecordRewardGrant& mutation,
-                     const char** refusal,
-                     std::uint64_t replacedInstanceSoid = 0) noexcept;
+[[nodiscard]] RewardPreparation prepare_reward_grant(const RewardGrantRequest& request,
+                                                     PendingRecordRewardGrant& mutation,
+                                                     const char** refusal) noexcept;
 /**
  * Replaces the socket lanes a reward names; other lanes keep their initial plugs.
  * @param sockets Receives the authored socket block; unchanged on failure.
@@ -179,8 +186,6 @@ apply_reward_sockets(const build_data::items::details::Definition& detail,
                      std::span<const build_data::rewards::SocketOverride> overrides,
                      account::inventory::Sockets& sockets,
                      const char** refusal = nullptr) noexcept;
-/** @return True when the item is one of the Synthesizer's Motes. */
-[[nodiscard]] bool synthesizer_mote(std::uint32_t definitionHash) noexcept;
 /**
  * A bounty starts with its deadline, however it is acquired. Other items, and a bounty whose
  * contract is not read, start with no per-instance values.
@@ -312,6 +317,7 @@ enum class SynthesizerExchange : std::uint8_t { none, paid, refused };
  * either lane returns to its initial plug.
  * @param account Account before the insertion cost.
  * @param synthesizer Detail of the item the plug was requested on, whose lane accepts the plug.
+ * @param reason Receives a static label when the exchange is refused, else null.
  * @return None for any other plug, which leaves the payout empty.
  */
 [[nodiscard]] SynthesizerExchange
@@ -319,7 +325,11 @@ stage_synthesizer_payout(const AccountState& account,
                          const build_data::items::details::Definition& synthesizer,
                          std::uint8_t socketLane,
                          const build_data::items::Definition& requested,
-                         SynthesizerPayout& payout) noexcept;
+                         SynthesizerPayout& payout,
+                         const char*& reason) noexcept;
+
+/** @return True when the item is one of the Synthesizer's Motes. */
+[[nodiscard]] bool synthesizer_mote(std::uint32_t definitionHash) noexcept;
 
 /** What a Dawning oven plug bakes: its cost, its cookie, its discovery and the reset lanes. */
 struct OvenBake {
@@ -353,13 +363,15 @@ enum class OvenAction : std::uint8_t {
  * discovered. A bake returns the ingredient, Combine and recipe lanes to their initial plugs.
  * @param oven Detail of the item the plug was requested on, whose lane accepts the plug.
  * @param sockets The oven's current lanes, native defaults materialized.
+ * @param reason Receives a static label when the plug is refused, else null.
  * @return None for any other plug, which leaves the bake empty.
  */
 [[nodiscard]] OvenAction stage_oven_bake(const build_data::items::details::Definition& oven,
                                          const account::inventory::Sockets& sockets,
                                          std::uint8_t socketLane,
                                          const build_data::items::Definition& requested,
-                                         OvenBake& bake) noexcept;
+                                         OvenBake& bake,
+                                         const char*& reason) noexcept;
 
 /**
  * Pays a staged bake once its cost is charged: credits the cookie, so its rows keep the serials
@@ -376,6 +388,39 @@ enum class OvenAction : std::uint8_t {
                                  OvenBake& bake,
                                  AccountUnlockWrites& writes,
                                  std::int64_t nowSeconds) noexcept;
+
+/**
+ * Prepares crediting one Dawning ingredient pickup to the oven balance its ingredient plug counts.
+ * The caller previews the write over its unlock after-image and writes it in its own transaction,
+ * after checking that the row still holds the observed value.
+ * @param pickupHash Ingredient pickup item the Client acquired.
+ * @param quantity Positive units to credit.
+ * @param credit Receives the account value row, the value it holds and the credited value.
+ * @return False for any other item, an unmapped balance or an overflowing credit.
+ */
+[[nodiscard]] bool prepare_ingredient_credit(std::uint32_t pickupHash,
+                                             std::int32_t quantity,
+                                             AccountUnlockWrite& credit) noexcept;
+
+/**
+ * @return True for a Dawning ingredient pickup, which arrives only with the oven balance credit
+ *         prepare_ingredient_credit stages.
+ */
+[[nodiscard]] bool is_ingredient_pickup(std::uint32_t definitionHash) noexcept;
+
+/**
+ * Prepares opening a newly acquired oven's ingredient chooser. The chooser reads the Dawning Begins
+ * tutorial's quest row, which a tutorial never started and with no item held is set to ready.
+ * The caller previews and writes it as prepare_ingredient_credit's caller does.
+ * @param account Account the oven lands in.
+ * @param readiness Receives the quest row write, or stays empty when the row keeps its value.
+ * @return False when the quest row does not resolve or cannot be read.
+ */
+[[nodiscard]] bool prepare_chooser_readiness(const AccountState& account,
+                                             std::optional<AccountUnlockWrite>& readiness) noexcept;
+
+/** @return True for the Dawning oven, whose acquisition stages prepare_chooser_readiness. */
+[[nodiscard]] bool is_dawning_oven(std::uint32_t definitionHash) noexcept;
 
 /** What advances a Dawning bounty objective. */
 enum class DawningEvent : std::uint8_t {
@@ -431,6 +476,7 @@ enum class ChaliceAction : std::uint8_t {
  * @param account Account the action began with.
  * @param chalice Detail of the item the plug was requested on, whose lane accepts the plug.
  * @param sockets The item's current lanes, native defaults materialized.
+ * @param reason Receives a static label when the plug is refused, else null.
  * @return None for any other item, which leaves the upgrade empty.
  */
 [[nodiscard]] ChaliceAction
@@ -440,7 +486,8 @@ stage_chalice_plug(const AccountState& account,
                    const account::inventory::Sockets& sockets,
                    std::uint8_t socketLane,
                    const build_data::items::Definition& requested,
-                   ChaliceUpgrade& upgrade) noexcept;
+                   ChaliceUpgrade& upgrade,
+                   const char*& reason) noexcept;
 [[nodiscard]] bool stage_item_state(const AccountState& snapshot,
                                     std::size_t characterIndex,
                                     std::uint64_t targetInstanceSoid,

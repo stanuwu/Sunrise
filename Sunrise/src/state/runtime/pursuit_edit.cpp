@@ -17,8 +17,8 @@
 namespace sunrise::state {
 namespace {
 
-namespace objectives = build_data::objectives;
-namespace pursuits = build_data::pursuits;
+namespace objective_data = build_data::objectives;
+namespace pursuit_data = build_data::pursuits;
 namespace store = investment::store;
 
 // The store addresses a row with 16 bits, so a valid operand of every saved bank narrows exactly.
@@ -32,7 +32,7 @@ static_assert((std::max)({unlocks::kAccountFlagCapacity,
 /** The saved view one pursuit edit reads, and the installed contract of the edited pursuit. */
 struct HeldPursuit {
     SavedSelection<AccountState> saved{};
-    pursuits::Definition contract{};
+    pursuit_data::Definition contract{};
     /** The edited copy's row in the selected character's inventory. */
     std::size_t itemRow{};
     /** One of the copy's per-item values changed and the account is written before commit. */
@@ -161,7 +161,7 @@ struct ProgressRow {
     reason = "pursuit_contract";
     if (!build_data::find_pursuit_definition(item.definitionIndex, held.contract)
         || !held.contract.readable || held.contract.definitionHash != identity.definitionHash
-        || held.contract.objectiveCount > pursuits::kObjectiveCapacity) {
+        || held.contract.objectiveCount > pursuit_data::kObjectiveCapacity) {
         return false;
     }
     // An expired bounty can no longer be redeemed, so progress written to it would never count.
@@ -173,10 +173,15 @@ struct ProgressRow {
     return deadline > 0 && nowSeconds < deadline;
 }
 
-/** @return The contract evaluated against the banks and the copy's values as edited so far. */
+/** @return The contract evaluated against the banks and the held items as edited so far. */
 [[nodiscard]] PursuitCompletionStatus inspect_held(const HeldPursuit& held) noexcept {
     const account::inventory::ItemObjectives values = held.item_values();
-    return inspect_pursuit_completion(held.contract, held.saved.context(), values);
+    const account::inventory::CharacterItems& inventory =
+        held.saved.account.characters[held.saved.slot].inventory;
+    return inspect_pursuit_completion(held.contract,
+                                      held.saved.context(),
+                                      values,
+                                      std::span(inventory.values).first(inventory.count));
 }
 
 /**
@@ -185,10 +190,10 @@ struct ProgressRow {
  * @return False when the progress is neither, or would be a bounty's deadline lane.
  */
 [[nodiscard]] bool progress_row(const HeldPursuit& held,
-                                const objectives::Definition& objective,
+                                const objective_data::Definition& objective,
                                 ProgressRow& output) noexcept {
     output = {};
-    if (objective.itemValueSlot != objectives::kNoItemValueSlot) {
+    if (objective.itemValueSlot != objective_data::kNoItemValueSlot) {
         const auto slots =
             std::span(held.contract.itemValueSlots).first(held.contract.itemValueSlotCount);
         const auto found = std::find(slots.begin(), slots.end(), objective.itemValueSlot);
@@ -302,7 +307,7 @@ struct ProgressRow {
                                       AccountEditChange& change,
                                       const char*& reason) noexcept {
     reason = "pursuit_contract";
-    objectives::Definition objective{};
+    objective_data::Definition objective{};
     if (!build_data::find_objective_definition(held.contract.objectives[ordinal], objective)) {
         return false;
     }
@@ -348,7 +353,7 @@ struct ProgressRow {
                                  ProgressRow& at,
                                  const char*& reason) noexcept {
     reason = "objective_changed";
-    objectives::Definition objective{};
+    objective_data::Definition objective{};
     if (ordinal >= held.contract.objectiveCount
         || !build_data::find_objective_definition(held.contract.objectives[ordinal], objective)
         || objective.definitionHash != objectiveHash) {
@@ -362,7 +367,7 @@ struct ProgressRow {
 [[nodiscard]] bool required_objectives_complete(const HeldPursuit& held,
                                                 const PursuitCompletionStatus& status) noexcept {
     for (std::size_t ordinal = 0; ordinal < held.contract.objectiveCount; ++ordinal) {
-        objectives::Definition objective{};
+        objective_data::Definition objective{};
         if (!build_data::find_objective_definition(held.contract.objectives[ordinal], objective)) {
             return false;
         }
