@@ -10,7 +10,9 @@ namespace sunrise::middleware::studio::investment_wire {
 
 /** Investment requests use their own local mapping. The magic reads "SSIV" in memory. */
 inline constexpr std::uint32_t kMagic = 0x56495353;
+/** Wire version. The game serves only a mapping whose editor wrote this exact version. */
 inline constexpr std::uint32_t kVersion = 3;
+/** Name of the mapping Studio creates for one game. The argument is the game's process id. */
 inline constexpr wchar_t kMappingFormat[] = L"Local\\SunriseStudio.Investment.%lu";
 /** How often the game looks for a missing editor mapping. */
 inline constexpr std::uint64_t kConnectIntervalMs = 1'000;
@@ -42,10 +44,13 @@ inline constexpr std::size_t kCharacterItemRecordCapacity = 333 + 17;
 inline constexpr std::size_t kCharacterStackRecordCapacity = 333;
 /** Every bucket id except the all-ones unavailable id. */
 inline constexpr std::size_t kBucketRecordCapacity = 255;
+/** Character records one hello can carry: an account's character slots. */
 inline constexpr std::size_t kCharacterRecordCapacity = 3;
+/** Rows one Season pass snapshot can carry: the pass catalog's reward rows. */
 inline constexpr std::size_t kSeasonPassRowCapacity = 256;
 /** Held pursuits are unequipped character instances. */
 inline constexpr std::size_t kHeldPursuitCapacity = 333;
+/** Objectives one held pursuit can carry: the objectives a pursuit contract can declare. */
 inline constexpr std::size_t kPursuitObjectiveCapacity = 7;
 /**
  * Sources one unlockValues request can carry. The fixed block offsets set this limit: the request
@@ -103,6 +108,7 @@ enum class ReceiptState : std::uint32_t {
 /** Why a non-terminal operation is waiting. */
 enum class Wait : std::uint32_t { none, publicationPeer, accountResync, catalog };
 
+/** The saved row array a quantity edit names. */
 enum class InventoryScope : std::uint8_t { profile, characterItem, characterStack };
 
 /** What one source reads. Zero is never valid, so an unused source is all zero. */
@@ -126,6 +132,7 @@ enum Readiness : std::uint32_t {
     readyPursuits = 128,
 };
 
+/** Bits of SeasonPassRow::flags: what the catalog and the saved state say about one row. */
 enum SeasonPassRowFlags : std::uint16_t {
     rowAvailable = 1,
     rowClaimed = 2,
@@ -136,12 +143,14 @@ enum SeasonPassRowFlags : std::uint16_t {
     rowConditionMet = 64,
 };
 
+/** Bits of HeldPursuit::flags. A bounty is a pursuit with a lifetime. */
 enum PursuitFlags : std::uint8_t {
     pursuitBounty = 1,
     pursuitObjectivesKnown = 2,
     pursuitObjectivesComplete = 4,
 };
 
+/** Bits of PursuitObjective::flags. Known means its value and target were read. */
 enum ObjectiveFlags : std::uint8_t {
     objectiveKnown = 1,
     objectiveComplete = 2,
@@ -205,6 +214,7 @@ static_assert(offsetof(SetQuantityRequest, reserved) == 1
               && offsetof(SetQuantityRequest, expectedQuantity) == 24
               && offsetof(SetQuantityRequest, quantity) == 28);
 
+/** Replaces the seasonal XP total, provided it still equals the total the editor read. */
 struct SetSeasonalExperienceRequest final {
     std::int32_t expected{};
     std::int32_t replacement{};
@@ -269,6 +279,7 @@ static_assert(offsetof(SetPursuitObjectiveRequest, itemHash) == 8
               && offsetof(SetPursuitObjectiveRequest, expected) == 24
               && offsetof(SetPursuitObjectiveRequest, value) == 28);
 
+/** Sets every required objective of one held pursuit that is still incomplete to its target. */
 struct CompletePursuitObjectivesRequest final {
     std::uint64_t instanceSoid{};
     std::uint32_t itemHash{};
@@ -278,6 +289,7 @@ static_assert(sizeof(CompletePursuitObjectivesRequest) == 16);
 static_assert(offsetof(CompletePursuitObjectivesRequest, itemHash) == 8
               && offsetof(CompletePursuitObjectivesRequest, expectedSerial) == 12);
 
+/** Size in bytes of the request payload area, which holds the largest request. */
 inline constexpr std::size_t kRequestPayloadBytes =
     (std::max)({sizeof(GrantItemRequest),
                 sizeof(SetQuantityRequest),
@@ -316,6 +328,7 @@ static_assert(sizeof(UnlockValuesRequest) == kRequestPayloadBytes);
 
 // --- Response payloads: readers decode each counted prefix, and every later slot is zero ---
 
+/** One of the live account's characters. selected is one for the selected character. */
 struct CharacterEntry final {
     std::uint64_t soid{};
     std::uint8_t characterClass{};
@@ -342,6 +355,7 @@ static_assert(sizeof(Hello) == 56);
 static_assert(offsetof(Hello, characterCount) == 4 && offsetof(Hello, peerOwnsAccount) == 5
               && offsetof(Hello, reserved) == 6 && offsetof(Hello, characters) == 8);
 
+/** One account-wide row of the profile. */
 struct ProfileRow final {
     std::uint64_t instanceSoid{};
     std::uint32_t definitionHash{};
@@ -375,6 +389,7 @@ static_assert(offsetof(CharacterItem, definitionHash) == 8
               && offsetof(CharacterItem, equipmentSlot) == 21
               && offsetof(CharacterItem, reserved) == 22);
 
+/** One non-instanced stack of the selected character. */
 struct CharacterStack final {
     std::uint32_t definitionHash{};
     std::int32_t quantity{};
@@ -435,6 +450,7 @@ static_assert(sizeof(SeasonPassRow) == 8);
 static_assert(offsetof(SeasonPassRow, requiredRank) == 4 && offsetof(SeasonPassRow, reserved) == 5
               && offsetof(SeasonPassRow, flags) == 6);
 
+/** The saved seasonal XP and rank beside every catalog row's state. */
 struct SeasonPassSnapshot final {
     std::int32_t experience{};
     std::uint16_t rank{};
@@ -446,6 +462,7 @@ static_assert(sizeof(SeasonPassSnapshot) == 2'056);
 static_assert(offsetof(SeasonPassSnapshot, rank) == 4 && offsetof(SeasonPassSnapshot, rowCount) == 6
               && offsetof(SeasonPassSnapshot, rows) == 8);
 
+/** One declared objective of a held pursuit with its evaluated value and target. */
 struct PursuitObjective final {
     std::uint32_t objectiveHash{};
     std::int32_t value{};
@@ -459,6 +476,7 @@ static_assert(offsetof(PursuitObjective, value) == 4 && offsetof(PursuitObjectiv
               && offsetof(PursuitObjective, flags) == 12
               && offsetof(PursuitObjective, reserved) == 13);
 
+/** One pursuit the selected character holds, with its declared objectives. */
 struct HeldPursuit final {
     std::uint64_t instanceSoid{};
     std::uint32_t itemHash{};
@@ -477,6 +495,7 @@ static_assert(offsetof(HeldPursuit, itemHash) == 8 && offsetof(HeldPursuit, muta
               && offsetof(HeldPursuit, objectiveCount) == 21
               && offsetof(HeldPursuit, reserved) == 22 && offsetof(HeldPursuit, objectives) == 24);
 
+/** The selected character's held pursuits, evaluated against one saved state. */
 struct PursuitSnapshot final {
     std::uint16_t heldCount{};
     std::uint16_t reserved{};
@@ -494,6 +513,7 @@ struct Receipt final {
 };
 static_assert(sizeof(Receipt) == 8 && offsetof(Receipt, wait) == 4);
 
+/** What one source read, and whether the saved banks could answer it. */
 struct UnlockValue final {
     UnlockReadState state{};
     std::uint8_t reserved{};
@@ -514,6 +534,7 @@ struct UnlockValues final {
 };
 static_assert(sizeof(UnlockValues) == 72);
 
+/** Size in bytes of the response payload area, which holds the largest answer. */
 inline constexpr std::size_t kResponsePayloadBytes = (std::max)({sizeof(Hello),
                                                                  sizeof(InventorySnapshot),
                                                                  sizeof(SeasonPassSnapshot),
@@ -589,6 +610,7 @@ struct alignas(8) SharedInvestment final {
     Response response;
 };
 
+/** Size in bytes of the whole mapping, which the editor's header must state. */
 inline constexpr std::size_t kMappingBytes = kControlBytes + sizeof(Request) + sizeof(Response);
 static_assert(offsetof(SharedInvestment, request) == kRequestBlockOffset);
 static_assert(offsetof(SharedInvestment, response) == kResponseBlockOffset);

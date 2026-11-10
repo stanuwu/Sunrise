@@ -63,11 +63,7 @@ inline constexpr std::size_t kUnlockProfilePaddingSize = 2'424;
 inline constexpr std::size_t kProfileFlagsStoreSyncPaddingSize = 12;
 /** Opaque records follow the Store sync state to the end of the object. */
 inline constexpr std::size_t kStoreSyncTailPaddingSize = 21'367;
-/**
- * Store sync state of an account whose wallet sync committed. Native analysis shows the client
- * clears its pending Store sync when the revision changes and opens the Store's purchase actions
- * only in this state; no capture confirms it.
- */
+/** Store sync state of an account whose wallet sync has committed. */
 inline constexpr std::int8_t kStoreSyncStateSynced = 3;
 /** The complete native Family-4 account object occupies 96,280 bytes. */
 inline constexpr std::size_t kObjectSize = 96'280;

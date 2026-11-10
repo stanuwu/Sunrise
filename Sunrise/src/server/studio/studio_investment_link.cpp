@@ -104,16 +104,6 @@ void disconnect() noexcept {
         InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&id), 0, 0));
 }
 
-/** @return An invalid-request answer with one static label and no context or payload. */
-[[nodiscard]] InvestmentAnswer invalid(const char* reason) noexcept {
-    return {.status = wire::Status::invalid, .reason = reason};
-}
-
-/** @return A refused request with one static label and no context or payload. */
-[[nodiscard]] InvestmentAnswer refused(const char* reason) noexcept {
-    return {.status = wire::Status::refused, .reason = reason};
-}
-
 /** A mutation must name every part of the context it was read against. */
 [[nodiscard]] bool context_complete(const wire::Context& context) noexcept {
     return context.accountSoid != 0 && context.characterSoid != 0 && context.contentHash != 0;

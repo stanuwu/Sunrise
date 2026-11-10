@@ -23,54 +23,83 @@ constexpr std::uint8_t kHashBits = 32;
 constexpr std::uint8_t kPlayerKeyBits = 64;
 /** Signed byte fields are written biased by one, so a raw zero is -1. */
 constexpr std::int32_t kSignedByteBias = 1;
+/** Widths of the plain fields the classes below repeat, in bits. */
+constexpr std::uint8_t kFlagBits = 1;
+constexpr std::uint8_t kByteBits = 8;
+constexpr std::uint8_t kWordBits = 32;
+constexpr std::uint8_t kLongWordBits = 64;
+constexpr std::uint8_t kRealBits = 32;
+/** An uncompressed vector is three reals. */
+constexpr std::size_t kVectorBits = 3 * kRealBits;
+/** C80809f7b is an array of eight bytes. */
+constexpr std::size_t kByteArrayBits = 8 * kByteBits;
 
 /** C80809512 opens C808087e2: a 32-bit word, then C80809514's 3-bit byte and 64-bit word. */
-constexpr std::size_t kHeaderBits = 32 + 3 + 64;
+constexpr std::uint8_t kHeaderByteBits = 3;
+constexpr std::size_t kHeaderBits = kWordBits + kHeaderByteBits + kLongWordBits;
 /** C808087e2 continues with the killing source's equipment slot and ability selector. */
 constexpr std::uint8_t kEquipmentSlotBits = 5;
 constexpr std::uint8_t kAbilitySelectorBits = 7;
-/** The fields between the ability selector and the damage type. */
+/** The fields between the ability selector and the damage type. Two are 11 bits wide. */
+constexpr std::uint8_t kEventNarrowFieldBits = 11;
 constexpr SkippedField kEventFields[]{
-    {96, false}, // uncompressed vector
-    {11, true},
-    {32, true},
-    {11, false},
-    {32, false},
-    {32, false},
+    {kVectorBits, false},
+    {kEventNarrowFieldBits, true},
+    {kWordBits, true},
+    {kEventNarrowFieldBits, false},
+    {kWordBits, false},
+    {kWordBits, false},
 };
 /** C808087e2 then names the final blow's damage type in one biased signed byte. */
 constexpr std::uint8_t kDamageTypeBits = 3;
+/** C80804c7c holds one whole byte and one 3-bit byte. */
+constexpr std::uint8_t kTailNarrowByteBits = 3;
 /** The rest of C808087e2, then the fields C80806454 adds after it. */
 constexpr SkippedField kEventTail[]{
-    {8 + 3, true}, // C80804c7c
-    {1, false},
-    {64, false}, // three C80809f7b eight-byte arrays
-    {64, false},
-    {64, false},
+    {kByteBits + kTailNarrowByteBits, true}, // C80804c7c
+    {kFlagBits, false},
+    {kByteArrayBits, false}, // three C80809f7b arrays
+    {kByteArrayBits, false},
+    {kByteArrayBits, false},
 };
 /** C808087e3 opens each C80806446 actor with three flags, the first of them the combatant flag. */
-constexpr std::size_t kActorTrailingFlagBits = 2;
+constexpr std::size_t kActorTrailingFlagBits = 2 * kFlagBits;
 /** C808087e3 closes with three signed bytes. */
-constexpr std::size_t kActorByteBits = 3 + 2 + 6;
+constexpr std::uint8_t kActorFirstByteBits = 3;
+constexpr std::uint8_t kActorSecondByteBits = 2;
+constexpr std::uint8_t kActorThirdByteBits = 6;
+constexpr std::size_t kActorByteBits =
+    kActorFirstByteBits + kActorSecondByteBits + kActorThirdByteBits;
 /** Two optional words follow the C808087e3 block, and again both actors. */
-constexpr SkippedField kOptionalWordPair[]{{32, true}, {32, true}};
+constexpr SkippedField kOptionalWordPair[]{{kWordBits, true}, {kWordBits, true}};
 /** C80806446 fields after the player key. */
-constexpr SkippedField kActorTail[]{{64, true}, {64, true}, {32, true}};
+constexpr SkippedField kActorTail[]{
+    {kLongWordBits, true},
+    {kLongWordBits, true},
+    {kWordBits, true},
+};
 
 /** C80806444 and C8080644a open with a four-bit element count. */
 constexpr std::uint8_t kListCountBits = 4;
 /** C80806444 lists up to nine C80806445 records. */
 constexpr std::uint64_t kRecordCapacity =
     sizeof(generated::C80806443) / sizeof(generated::C80806445);
-/**
- * C80806445: a signed byte, C8080880d and a biased byte. C8080880d holds a player key, a signed
- * byte, a 64-bit word, C8080880e's 64- and 32-bit words, a flag and two signed bytes.
- */
-constexpr std::size_t kRecordBits = 3 + (kPlayerKeyBits + 6 + 64 + (64 + 32) + 1 + 3 + 2) + 8;
-/** A real follows the C80806445 list. */
-constexpr std::size_t kRealBits = 32;
+/** C8080880e holds a 64-bit and a 32-bit word. */
+constexpr std::size_t kRecordWordPairBits = kLongWordBits + kWordBits;
+/** Widths of C8080880d's signed bytes: one after its player key and two that close it. */
+constexpr std::uint8_t kRecordBodyFirstByteBits = 6;
+constexpr std::uint8_t kRecordBodySecondByteBits = 3;
+constexpr std::uint8_t kRecordBodyThirdByteBits = 2;
+/** C8080880d: a player key, a signed byte, a 64-bit word, C8080880e, a flag, two signed bytes. */
+constexpr std::size_t kRecordBodyBits =
+    kPlayerKeyBits + kRecordBodyFirstByteBits + kLongWordBits + kRecordWordPairBits + kFlagBits
+    + kRecordBodySecondByteBits + kRecordBodyThirdByteBits;
+/** C80806445 opens with a signed byte. */
+constexpr std::uint8_t kRecordLeadingByteBits = 3;
+/** C80806445: a signed byte, C8080880d and a biased byte. */
+constexpr std::size_t kRecordBits = kRecordLeadingByteBits + kRecordBodyBits + kByteBits;
 /** Two words close the payload after its three label lists. */
-constexpr std::size_t kTrailingWordBits = 32 + 32;
+constexpr std::size_t kTrailingWordBits = 2 * kWordBits;
 static_assert(kRecordCapacity < (1U << kListCountBits)
               && kLabelCapacity < (1U << kListCountBits));
 
@@ -150,7 +179,7 @@ skip_list(bits::Reader& reader, std::uint64_t capacity, std::size_t elementBits)
     std::uint64_t combatant = 0;
     std::uint64_t classHash = 0;
     std::uint64_t playerKey = 0;
-    if (!reader.read(kPresenceBits, combatant) || !reader.skip(kActorTrailingFlagBits)
+    if (!reader.read(kFlagBits, combatant) || !reader.skip(kActorTrailingFlagBits)
         || !read_optional(reader, kHashBits, classHash) || !reader.skip(kActorByteBits)
         || !skip_fields(reader, kOptionalWordPair)
         || !read_optional(reader, kPlayerKeyBits, playerKey) || !skip_fields(reader, kActorTail)) {

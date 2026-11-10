@@ -4,7 +4,6 @@
 #include <type_traits>
 
 #include "../../../../state/build_data/runtime.h"
-#include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../../definitions.h"
 
 namespace sunrise::middleware::datagen::family4::progression {
@@ -19,13 +18,6 @@ static_assert(std::is_same_v<layout::Values, state::unlocks::ProgressionLanes>);
 } // namespace
 
 /** Keys one object's progression bank and fills each keyed row from the authored lanes. */
-bool key_bank(state::build_data::progressions::Scope scope,
-              std::span<layout::Entry> bank) noexcept {
-    state::unlocks::Table unlocks;
-    return state::unlocks::snapshot(unlocks) && key_bank(scope, bank, unlocks);
-}
-
-/** Keys one object's progression bank from its live or prepared unlock snapshot. */
 bool key_bank(state::build_data::progressions::Scope scope,
               std::span<layout::Entry> bank,
               const state::unlocks::Table& unlocks) noexcept {

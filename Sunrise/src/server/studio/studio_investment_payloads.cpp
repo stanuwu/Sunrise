@@ -48,11 +48,6 @@ static_assert((std::max)({state::unlocks::kAccountFlagCapacity,
                           state::unlocks::kCharacterObjectValueCapacity})
               <= (std::numeric_limits<decltype(wire::UnlockSource::index)>::max)());
 
-/** @return A refusal that carries one static label and no payload. */
-[[nodiscard]] InvestmentAnswer refused(const char* reason) noexcept {
-    return {.status = wire::Status::refused, .reason = reason};
-}
-
 /** Copies one finished record to the front of the payload and binds the answer to context. */
 template <typename Record>
 [[nodiscard]] InvestmentAnswer
@@ -352,6 +347,16 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
 
 } // namespace
 
+/** @return An invalid-request answer with one static label and no context or payload. */
+InvestmentAnswer invalid(const char* reason) noexcept {
+    return {.status = wire::Status::invalid, .reason = reason};
+}
+
+/** @return A refusal with one static label and no context or payload. */
+InvestmentAnswer refused(const char* reason) noexcept {
+    return {.status = wire::Status::refused, .reason = reason};
+}
+
 /** An unreadable account leaves the context empty and lists no characters. */
 InvestmentAnswer encode_hello(InvestmentPayload payload) noexcept {
     bap::InvestmentContext live{};
@@ -444,7 +449,7 @@ InvestmentAnswer encode_unlock_values(const wire::UnlockValuesRequest& request,
                                       InvestmentPayload payload) noexcept {
     std::array<state::unlocks::Instruction, wire::kUnlockReadCapacity> sources{};
     if (!decode_unlock_sources(request, sources)) {
-        return {.status = wire::Status::invalid, .reason = "request_field"};
+        return invalid("request_field");
     }
     std::array<state::UnlockRead, wire::kUnlockReadCapacity> reads{};
     state::UnlockReadOrigin origin{};

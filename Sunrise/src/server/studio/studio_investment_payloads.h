@@ -23,6 +23,12 @@ struct InvestmentAnswer {
     std::uint32_t payloadBytes{};
 };
 
+/** @return An invalid-request answer with one static label and no context or payload. */
+[[nodiscard]] InvestmentAnswer invalid(const char* reason) noexcept;
+
+/** @return A refusal with one static label and no context or payload. */
+[[nodiscard]] InvestmentAnswer refused(const char* reason) noexcept;
+
 /** Encodes the live account, catalog readiness and publication peer an editor binds to. */
 [[nodiscard]] InvestmentAnswer encode_hello(InvestmentPayload payload) noexcept;
 

@@ -14,16 +14,7 @@ namespace sunrise::middleware::datagen::family4::progression {
  * skips a slot only when all bits are set. Keyed slots are this object's scope, in native order.
  * @param scope Replicated object owning the bank.
  * @param bank Fixed progression rows to key.
- * @return True when the definition table is ready and every keyed slot fits the bank.
- */
-[[nodiscard]] bool key_bank(state::build_data::progressions::Scope scope,
-                            std::span<layout::Entry> bank) noexcept;
-
-/**
- * Keys one object's progression bank from the supplied live or prepared unlock snapshot.
- * @param scope Replicated object owning the bank.
- * @param bank Fixed progression rows to key.
- * @param unlocks Unlock snapshot from the same view as the encoded object.
+ * @param unlocks Live or prepared unlock snapshot from the same view as the encoded object.
  * @return True when the definition table is ready and every keyed slot fits the bank.
  */
 [[nodiscard]] bool key_bank(state::build_data::progressions::Scope scope,
