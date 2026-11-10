@@ -333,11 +333,13 @@ bool validate(const Snapshot& snapshot) noexcept {
                                               : 0U);
         const RuntimeSchema* runtime = nullptr;
         if (handle != format::kAbsentIndex) {
+            // Runtime schemas are sorted by handle.
             const auto found =
-                std::find_if(snapshot.runtimeSchemas.begin(),
-                             snapshot.runtimeSchemas.end(),
-                             [handle](const RuntimeSchema& row) { return row.handle == handle; });
-            if (found == snapshot.runtimeSchemas.end()) {
+                std::lower_bound(snapshot.runtimeSchemas.begin(),
+                                 snapshot.runtimeSchemas.end(),
+                                 handle,
+                                 [](const auto& row, auto value) { return row.handle < value; });
+            if (found == snapshot.runtimeSchemas.end() || found->handle != handle) {
                 return false;
             }
             runtime = &*found;

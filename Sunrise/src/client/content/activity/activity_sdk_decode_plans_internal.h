@@ -1,7 +1,5 @@
 #pragma once
 
-#include <Windows.h>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>

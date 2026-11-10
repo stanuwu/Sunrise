@@ -95,8 +95,8 @@ inline constexpr std::uint32_t kSobjectCodecFamilies =
                               : kSobjectCodecFamilies;
             schema.fields = {static_cast<std::uint32_t>(snapshot.runtimeFields.size()),
                              static_cast<std::uint32_t>(codec.fields.size())};
-            // The record's address in the image that was read, relocated when read live.
-            schema.evidenceAddress = address;
+            // Relative to the image base, so a live read and a dump name the same record.
+            schema.evidenceAddress = address - image.image_base();
             schema.flags = format::kRuntimeSchemaExact;
             schema.arrayElementCount = codec.array;
             if (codec.array != 0) {
