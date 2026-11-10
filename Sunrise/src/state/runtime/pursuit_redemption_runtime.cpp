@@ -1467,6 +1467,7 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
                                              const char** refusal) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
+    mutation = {};
     reason = "not_ready";
     if (!build_data::pursuit_definitions_ready() || !build_data::reward_definitions_ready()
         || !build_data::progression_definitions_ready()
@@ -1496,9 +1497,12 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     if (instanceSoid == 0 || source == held.end() || source->definitionHash != definitionHash
         || source->quantity != 1
         || !build_data::find_item_definition_hash(source->definitionHash, item)
-        || !build_data::find_pursuit_definition(item.definitionIndex, contract)
-        || !contract.readable) {
+        || !build_data::find_pursuit_definition(item.definitionIndex, contract)) {
         return PursuitRedemption::refused;
+    }
+    reason = "pursuit_unreadable";
+    if (!contract.readable) {
+        return PursuitRedemption::notRedeemable;
     }
     reason = "locked";
     if ((source->flags & authored_inventory::kLockedItemFlag) != 0) {
@@ -1611,12 +1615,14 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     reason = "quest_successor_placement";
     if (plan.questStep.next.scope != Quest::Scope::none
         && mutation.rewards[0].placedQuantity == 0) {
+        mutation = {};
         return PursuitRedemption::refused;
     }
     // A bounty redeemed for a map that found no row would pay nothing.
     reason = "treasure_map_placement";
     if (treasureMap != nullptr) {
         if (mutation.rewards[0].placedQuantity == 0) {
+            mutation = {};
             return PursuitRedemption::refused;
         }
         keep_bounty_deadline(
