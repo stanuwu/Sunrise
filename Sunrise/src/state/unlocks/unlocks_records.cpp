@@ -43,7 +43,19 @@ std::array<std::uint16_t, kAccountFlagCapacity> g_recordByFlag{};
 /** True for each completion flag owned by a counter-granted lore book. */
 std::array<bool, kAccountFlagCapacity> g_counterGranted{};
 
-/** Both caches are read and written only under the unlock banks' exclusive lock. */
+/** One record's definition hash and its row. */
+struct HashedRecord {
+    std::uint32_t definitionHash{};
+    std::uint16_t row{};
+};
+
+/** Every record row in ascending hash, then row, order, rebuilt when a catalog is replaced. */
+std::array<HashedRecord, catalog::kDefinitionCapacity> g_recordByHash{};
+
+/** Rows of g_recordByHash in use. */
+std::size_t g_recordByHashCount{};
+
+/** The caches are read and written only under the unlock banks' exclusive lock. */
 bool g_cacheReady{};
 
 /** @return True when that lore node's book counts bars instead of claims. */
@@ -52,22 +64,34 @@ bool g_cacheReady{};
            != kCounterGrantedLoreNodes.end();
 }
 
-/** Fills the flag-to-record map and the counter-granted mask from the published catalogs. */
+/** Fills the record maps and the counter-granted mask from the published catalogs. */
 void build_cache() noexcept {
     g_recordByFlag.fill(kUnavailableRecordRow);
     g_counterGranted.fill(false);
+    g_recordByHashCount = 0;
     if (!build_data::record_definitions_ready()) {
         return;
     }
     const std::size_t rows = catalog::count();
     for (std::size_t row = 0; row < rows; ++row) {
         catalog::Definition record{};
-        if (catalog::find(static_cast<std::uint16_t>(row), record)
-            && record.completionFlagIndex < g_recordByFlag.size()
+        if (!catalog::find(static_cast<std::uint16_t>(row), record)) {
+            continue;
+        }
+        g_recordByHash[g_recordByHashCount++] = {record.definitionHash,
+                                                 static_cast<std::uint16_t>(row)};
+        if (record.completionFlagIndex < g_recordByFlag.size()
             && g_recordByFlag[record.completionFlagIndex] == kUnavailableRecordRow) {
             g_recordByFlag[record.completionFlagIndex] = static_cast<std::uint16_t>(row);
         }
     }
+    std::sort(g_recordByHash.begin(),
+              g_recordByHash.begin() + static_cast<std::ptrdiff_t>(g_recordByHashCount),
+              [](const HashedRecord& left, const HashedRecord& right) noexcept {
+                  return left.definitionHash != right.definitionHash
+                             ? left.definitionHash < right.definitionHash
+                             : left.row < right.row;
+              });
     if (!build_data::node_definitions_ready()) {
         return;
     }
@@ -102,6 +126,19 @@ void ensure_cache() noexcept {
     }
     const std::uint16_t row = g_recordByFlag[flagIndex];
     return row != kUnavailableRecordRow && catalog::find(row, record);
+}
+
+/** Finds the lowest record row with one definition hash. */
+[[nodiscard]] bool
+find_by_hash(std::uint32_t definitionHash, catalog::Definition& record) noexcept {
+    const auto rows = std::span(g_recordByHash).first(g_recordByHashCount);
+    const auto found = std::lower_bound(
+        rows.begin(), rows.end(), definitionHash, [](const HashedRecord& row, std::uint32_t hash) {
+            return row.definitionHash < hash;
+        });
+    // A row cached before a catalog replace may hold another record now.
+    return found != rows.end() && found->definitionHash == definitionHash
+           && catalog::find(found->row, record) && record.definitionHash == definitionHash;
 }
 
 [[nodiscard]] bool counter_granted_flag(std::uint16_t flagIndex) noexcept {
@@ -726,17 +763,14 @@ ObjectiveAdvance advance_interval(std::uint32_t definitionHash) noexcept {
         std::uint32_t definitionHash{};
         ObjectiveAdvance advance{ObjectiveAdvance::unavailable};
     } operation{definitionHash, ObjectiveAdvance::unavailable};
-    const bool saved = mutate(&operation, [](void* context, Table& table) noexcept {
+    const bool saved = mutate_if_changed(&operation, [](void* context, Table& table) noexcept {
         auto& request = *static_cast<HashOperation*>(context);
-        const std::size_t rows = catalog::count();
-        for (std::size_t row = 0; row < rows; ++row) {
-            catalog::Definition record{};
-            if (catalog::find(static_cast<std::uint16_t>(row), record)
-                && record.definitionHash == request.definitionHash) {
-                request.advance = advance_interval_locked(table, record);
-                return;
-            }
+        ensure_cache();
+        catalog::Definition record{};
+        if (find_by_hash(request.definitionHash, record)) {
+            request.advance = advance_interval_locked(table, record);
         }
+        return progress_moved(request.advance);
     });
     return saved ? operation.advance : ObjectiveAdvance::unavailable;
 }

@@ -71,6 +71,19 @@ constexpr std::int32_t kKillTypeCode = 1;
     return area;
 }
 
+/** One kill's bubble lookup, kept so its log line shows what State was told. */
+struct AreaLookup {
+    std::uint64_t sessionId{};
+    std::optional<state::KillArea> area{};
+};
+
+/** Resolves the bubble when State asks for it, inside the call that holds the session lock. */
+[[nodiscard]] std::optional<state::KillArea> resolve_kill_area(void* context) noexcept {
+    auto& lookup = *static_cast<AreaLookup*>(context);
+    lookup.area = kill_area_locked(lookup.sessionId);
+    return lookup.area;
+}
+
 } // namespace
 
 /** Decodes the kill, names the live destination, and lets State judge and credit it. */
@@ -110,18 +123,23 @@ void apply_kill_progress(const message::incident::Incident& incident) noexcept {
     observation.damageType = kill.damageType;
     observation.destination = std::string_view(
         reinterpret_cast<const char*>(destination.packageName.data()), packageLength);
-    observation.area = kill_area_locked(destinationSession);
+    // The bubble costs a generated-world scan, so State asks only when a held rule names an area.
+    AreaLookup lookup{destinationSession};
+    observation.resolveArea = resolve_kill_area;
+    observation.areaContext = &lookup;
 
-    const char* reason = nullptr;
+    state::KillReport report{};
     const state::KillProgress progress = state::advance_kill_objectives(
-        observation, core::runtime::server_clock_seconds(), &reason);
+        observation, core::runtime::server_clock_seconds(), report);
     core::log::writef(core::log::Channel::server,
                       progress == state::KillProgress::advanced ? core::log::Level::info
                                                                 : core::log::Level::debug,
-                      "ev=kill_progress result=%u reason=%s class=0x%08X labels=%zu/%zu/%zu "
-                      "slot=%d damage=%d package=%.*s scenario=0x%08X bubble=0x%08X",
+                      "ev=kill_progress result=%u reason=%s ruled=%zu class=0x%08X "
+                      "labels=%zu/%zu/%zu slot=%d damage=%d package=%.*s scenario=0x%08X "
+                      "bubble=0x%08X",
                       static_cast<unsigned>(progress),
-                      reason != nullptr ? reason : "advanced",
+                      report.reason != nullptr ? report.reason : "advanced",
+                      report.ruledItems,
                       kill.victim.classHash,
                       kill.source.count,
                       kill.actor.count,
@@ -130,8 +148,8 @@ void apply_kill_progress(const message::incident::Incident& incident) noexcept {
                       kill.damageType,
                       static_cast<int>(observation.destination.size()),
                       observation.destination.data(),
-                      observation.area ? observation.area->scenarioTag : 0U,
-                      observation.area ? observation.area->bubbleNameHash : 0U);
+                      lookup.area ? lookup.area->scenarioTag : 0U,
+                      lookup.area ? lookup.area->bubbleNameHash : 0U);
     if (progress == state::KillProgress::advanced) {
         bap::arm_account_resync_everywhere();
     }

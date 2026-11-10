@@ -6,17 +6,20 @@
  */
 #include <algorithm>
 #include <array>
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
+#include <optional>
 #include <span>
 #include <string_view>
 
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "../unlocks/unlocks_records.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -248,176 +251,181 @@ struct KillRule {
     Area area{};
 };
 
-/** One row per bounty objective lane; each kill advances a lane by one. */
+/** One row per bounty objective lane, in ascending item order; each kill advances a lane by one. */
 constexpr auto kKillRules = std::to_array<KillRule>({
-    {.itemHash = 0x7296E6D8U, .race = Race::fallen},
-    {.itemHash = 0x7296E6DAU, .race = Race::cabal},
-    {.itemHash = 0x7296E6DCU, .race = Race::taken},
-    {.itemHash = 0xFAFC79E1U, .destination = kIo, .race = Race::taken},
+    {.itemHash = 0x0337775BU, .destination = kMars, .rankLabel = kBossLabel},
+    {.itemHash = 0x0337775CU, .destination = kMars,
+     .area = {kMarsScenario, {0x016F2C45U, 0x4AC36E96U, 0x192B0F82U}}},
+    {.itemHash = 0x0337775DU, .destination = kMars, .element = Element::voidDamage,
+     .sources = kAbility},
     {.itemHash = 0x08CF365AU, .destination = kEdz},
-    {.itemHash = 0xEBBB4B67U, .destination = kEdz, .race = Race::fallen},
-    {.itemHash = 0xF78AFDC6U, .destination = kEdz, .race = Race::cabal},
-    {.itemHash = 0xBCE7E301U, .destination = kTitan},
-    {.itemHash = 0xEBEDB6B5U, .destination = kNessus},
-    {.itemHash = 0x20FD444BU, .destination = kNessus, .race = Race::fallen},
-    {.itemHash = 0x4F435712U, .destination = kNessus, .race = Race::cabal},
-    {.itemHash = 0x4CAEC586U, .destination = kMercury},
-    {.itemHash = 0xD344C544U, .destination = kMars},
-    {.itemHash = 0xBF8448F4U, .destination = kMars, .race = Race::cabal},
-    {.itemHash = 0xC8E05C58U, .destination = kTangledShore},
-    {.itemHash = 0x80BD0E33U, .destination = kIo, .race = Race::taken},
-    {.itemHash = 0x28665292U, .race = Race::cabal},
-    {.itemHash = 0x321406E3U, .race = Race::fallen},
-    {.itemHash = 0x321406E2U, .race = Race::taken},
-    {.itemHash = 0x7296E6DFU, .weaponLabel = kSword},
-    {.itemHash = 0x7296E6DEU, .weaponLabel = kAutoRifle},
-    {.itemHash = 0x9507AC48U, .destination = kEdz, .weaponLabel = kSniperRifle},
-    {.itemHash = 0xB9550F2BU, .destination = kMoon, .weaponLabel = kAutoRifle},
-    {.itemHash = 0xB9550F2AU, .destination = kMoon, .weaponLabel = kSubmachineGun},
-    {.itemHash = 0xB9550F24U, .destination = kMoon, .weaponLabel = kHandCannon},
-    {.itemHash = 0x3B8D663AU, .element = Element::voidDamage},
-    {.itemHash = 0x3B8D663BU, .element = Element::solar},
-    {.itemHash = 0x6DEAB792U, .destination = kIo, .element = Element::voidDamage},
-    {.itemHash = 0x8E5D7083U, .destination = kIo, .element = Element::solar},
-    {.itemHash = 0xF5BB6A03U, .destination = kEdz, .element = Element::voidDamage},
-    {.itemHash = 0x9055E0F2U, .destination = kTitan, .element = Element::voidDamage},
-    {.itemHash = 0x6C382BE3U, .destination = kTitan, .element = Element::solar},
-    {.itemHash = 0xB9550F2CU, .destination = kMoon, .element = Element::solar},
-    {.itemHash = 0xB9550F2FU, .destination = kMoon, .element = Element::voidDamage},
-    {.itemHash = 0x3B8D663CU, .element = Element::arc},
-    {.itemHash = 0x5CBBBE3CU, .destination = kIo, .element = Element::arc},
-    {.itemHash = 0x8DF2981FU, .destination = kEdz, .element = Element::arc},
-    {.itemHash = 0xD72C739CU, .destination = kTitan, .element = Element::arc},
-    {.itemHash = 0xB9550F2DU, .destination = kMoon, .element = Element::arc},
-    {.itemHash = 0x7296E6D1U, .sources = kPrecision},
-    {.itemHash = 0x3B8D6631U, .sources = kSuper},
-    {.itemHash = 0x28665299U, .sources = kGrenade},
-    {.itemHash = 0x772B07C1U, .destination = kIo, .sources = kSuper},
-    {.itemHash = 0xC506DF36U, .destination = kIo, .sources = kGrenade},
-    {.itemHash = 0x23C1FAD4U, .destination = kIo, .sources = kPrecision},
-    {.itemHash = 0x28DFBC86U, .destination = kEdz, .sources = kSuper},
-    {.itemHash = 0x321D9F09U, .destination = kEdz, .sources = kGrenade},
-    {.itemHash = 0x740942DBU, .destination = kEdz, .sources = kPrecision},
-    {.itemHash = 0xFC4D8521U, .destination = kTitan, .sources = kSuper},
-    {.itemHash = 0x8A48A696U, .destination = kTitan, .sources = kGrenade},
-    {.itemHash = 0xDD1D7234U, .destination = kTitan, .sources = kPrecision},
-    {.itemHash = 0xE9BE1ECDU, .destination = kNessus, .sources = kSuper},
+    {.itemHash = 0x0ECA9E33U, .destination = kTitan, .sources = kPrecision},
+    {.itemHash = 0x0ECA9E35U, .destination = kTitan, .element = Element::arc, .sources = kAbility},
+    {.itemHash = 0x0ECA9E36U, .destination = kTitan, .sources = kWeapon,
+     .slot = WeaponSlot::energy},
+    {.itemHash = 0x12DB6D98U, .element = Element::solar},
+    {.itemHash = 0x12DB6D9BU, .sources = kMelee},
+    {.itemHash = 0x12DB6D9EU, .weaponLabel = kBow},
+    {.itemHash = 0x14F1A799U, .subclassElement = Element::solar},
+    {.itemHash = 0x14F1A79AU, .element = Element::solar, .sources = kWeapon},
+    {.itemHash = 0x14F1A79CU, .element = Element::solar, .sources = kWeapon,
+     .slot = WeaponSlot::heavy},
     {.itemHash = 0x1A1BC6CAU, .destination = kNessus, .sources = kGrenade},
     {.itemHash = 0x1D076088U, .destination = kNessus, .sources = kPrecision},
-    {.itemHash = 0xB9550F2EU, .destination = kMoon, .sources = kGrenade},
-    {.itemHash = 0x4B3C5716U, .sources = kPrecision},
+    {.itemHash = 0x20FD444BU, .destination = kNessus, .race = Race::fallen},
+    {.itemHash = 0x2233C578U, .anyOf = {.weaponLabels = {kBow, kSubmachineGun, kHandCannon}}},
+    {.itemHash = 0x2233C579U, .anyOf = {.weaponLabels = {kSword, kSniperRifle, kBow}}},
+    {.itemHash = 0x2233C57AU, .anyOf = {.weaponLabels = {kShotgun}, .slot = WeaponSlot::heavy}},
+    {.itemHash = 0x23C1FAD4U, .destination = kIo, .sources = kPrecision},
+    {.itemHash = 0x27F60EBFU, .rankLabel = kEliteLabel,
+     .anyOf = {.sources = kPrecision | kAbility}},
+    {.itemHash = 0x28665292U, .race = Race::cabal},
+    {.itemHash = 0x28665299U, .sources = kGrenade},
+    {.itemHash = 0x2866529AU, .element = Element::solar, .sources = kWeapon},
+    {.itemHash = 0x2866529BU, .race = Race::scorn},
+    {.itemHash = 0x28DFBC86U, .destination = kEdz, .sources = kSuper},
+    {.itemHash = 0x2D16CE2FU, .destination = kNessus, .element = Element::solar},
+    {.itemHash = 0x2E47D6B9U, .destination = kIo, .race = Race::vex},
     {.itemHash = 0x3069FA4BU, .destination = kMars, .sources = kPrecision},
-    {.itemHash = 0x7296E6D9U, .race = Race::hive},
-    {.itemHash = 0x7296E6DDU, .race = Race::vex},
+    {.itemHash = 0x321406E2U, .race = Race::taken},
+    {.itemHash = 0x321406E3U, .race = Race::fallen},
+    {.itemHash = 0x321406E8U, .race = Race::vex},
+    {.itemHash = 0x321406EAU, .rankLabel = kBossLabel},
+    {.itemHash = 0x321406ECU, .element = Element::voidDamage, .sources = kAbility},
+    {.itemHash = 0x321D9F09U, .destination = kEdz, .sources = kGrenade},
+    {.itemHash = 0x3314085BU, .race = Race::hive},
+    {.itemHash = 0x3314085DU, .weaponLabel = kGrenadeLauncher, .sources = kWeapon,
+     .slot = WeaponSlot::heavy},
+    {.itemHash = 0x34D450B5U, .destination = kMars, .element = Element::arc},
+    {.itemHash = 0x3B8D6631U, .sources = kSuper},
     {.itemHash = 0x3B8D6638U, .anyOf = {.weaponLabels = {kRocketLauncher}, .sources = kGrenade}},
+    {.itemHash = 0x3B8D663AU, .element = Element::voidDamage},
+    {.itemHash = 0x3B8D663BU, .element = Element::solar},
+    {.itemHash = 0x3B8D663CU, .element = Element::arc},
     {.itemHash = 0x3B8D663EU,
      .anyOf = {.weaponLabels = {kScoutRifle, kSniperRifle, kPulseRifle, kBow}}},
-    {.itemHash = 0x2E47D6B9U, .destination = kIo, .race = Race::vex},
-    {.itemHash = 0xAAA306EBU, .destination = kTitan, .race = Race::hive},
-    {.itemHash = 0x9A412E35U, .destination = kNessus, .weaponLabel = kSniperRifle},
+    {.itemHash = 0x3BDD219CU, .destination = kMars, .element = Element::solar},
+    {.itemHash = 0x4A71C838U, .destination = kIo, .sources = kMelee},
+    {.itemHash = 0x4B3C5716U, .sources = kPrecision},
+    {.itemHash = 0x4CAEC586U, .destination = kMercury},
+    {.itemHash = 0x4F435712U, .destination = kNessus, .race = Race::cabal},
+    {.itemHash = 0x52711B35U, .destination = kMercury, .sources = kGrenade},
     {.itemHash = 0x53FCD57EU, .destination = kNessus, .element = Element::voidDamage},
     {.itemHash = 0x55623448U, .destination = kNessus, .element = Element::arc},
-    {.itemHash = 0x2D16CE2FU, .destination = kNessus, .element = Element::solar},
-    {.itemHash = 0xC10FA21AU, .destination = kMercury, .sources = kSuper},
-    {.itemHash = 0x52711B35U, .destination = kMercury, .sources = kGrenade},
-    {.itemHash = 0xD019F9CDU, .race = Race::vex, .sources = kPrecision},
-    {.itemHash = 0x8D419E87U, .destination = kMercury, .element = Element::voidDamage},
-    {.itemHash = 0x6F16E7E3U, .destination = kMercury, .element = Element::arc},
-    {.itemHash = 0x3BDD219CU, .destination = kMars, .element = Element::solar},
-    {.itemHash = 0xC170B55BU, .destination = kMars, .sources = kGrenade},
-    {.itemHash = 0x63D3CE9DU, .destination = kMars, .race = Race::hive},
-    {.itemHash = 0x34D450B5U, .destination = kMars, .element = Element::arc},
-    {.itemHash = 0xEC226745U, .destination = kMars, .element = Element::voidDamage},
-    {.itemHash = 0xC8E05C5BU, .destination = kTangledShore, .sources = kPrecision},
-    {.itemHash = 0xC8E05C5CU, .destination = kTangledShore, .sources = kSuper},
-    {.itemHash = 0x2233C579U, .anyOf = {.weaponLabels = {kSword, kSniperRifle, kBow}}},
-    {.itemHash = 0x2233C578U, .anyOf = {.weaponLabels = {kBow, kSubmachineGun, kHandCannon}}},
-    {.itemHash = 0x80BD0E3DU, .destination = kMars, .race = Race::hive},
-    {.itemHash = 0x80BD0E3CU, .destination = kMercury, .race = Race::vex},
-    {.itemHash = 0x2866529AU, .element = Element::solar, .sources = kWeapon},
-    {.itemHash = 0x3314085BU, .race = Race::hive},
-    {.itemHash = 0x321406E8U, .race = Race::vex},
-    {.itemHash = 0x0ECA9E33U, .destination = kTitan, .sources = kPrecision},
-    {.itemHash = 0xE71C88DBU, .destination = kMercury, .race = Race::vex},
-    {.itemHash = 0xE71C88DFU, .destination = kMercury, .sources = kPrecision},
-    {.itemHash = 0x7296E6D0U, .sources = kMelee},
-    {.itemHash = 0x4A71C838U, .destination = kIo, .sources = kMelee},
-    {.itemHash = 0x93A24325U, .destination = kMars, .sources = kMelee},
-    {.itemHash = 0xB9550F29U, .destination = kMoon, .sources = kMelee},
-    {.itemHash = 0x7296E6DBU, .race = Race::scorn},
-    {.itemHash = 0x2866529BU, .race = Race::scorn},
-    {.itemHash = 0x8DF57AF7U, .element = Element::arc, .sources = kWeapon},
-    {.itemHash = 0x14F1A79AU, .element = Element::solar, .sources = kWeapon},
+    {.itemHash = 0x5CBBBE3CU, .destination = kIo, .element = Element::arc},
+    {.itemHash = 0x5D76391BU, .element = Element::voidDamage, .sources = kWeapon,
+     .slot = WeaponSlot::heavy},
     {.itemHash = 0x5D76391DU, .element = Element::voidDamage, .sources = kWeapon},
-    {.itemHash = 0xE28EF43EU, .race = Race::taken},
-    {.itemHash = 0xE28EF43DU, .race = Race::fallen},
-    {.itemHash = 0xE28EF43CU, .race = Race::cabal},
-    {.itemHash = 0xE28EF433U, .race = Race::hive},
+    {.itemHash = 0x5D76391EU, .subclassElement = Element::voidDamage},
+    {.itemHash = 0x63D3CE9DU, .destination = kMars, .race = Race::hive},
+    {.itemHash = 0x6C382BE3U, .destination = kTitan, .element = Element::solar},
+    {.itemHash = 0x6DEAB792U, .destination = kIo, .element = Element::voidDamage},
+    {.itemHash = 0x6F16E7E3U, .destination = kMercury, .element = Element::arc},
+    {.itemHash = 0x7296E6D0U, .sources = kMelee},
+    {.itemHash = 0x7296E6D1U, .sources = kPrecision},
+    {.itemHash = 0x7296E6D8U, .race = Race::fallen},
+    {.itemHash = 0x7296E6D9U, .race = Race::hive},
+    {.itemHash = 0x7296E6DAU, .race = Race::cabal},
+    {.itemHash = 0x7296E6DBU, .race = Race::scorn},
+    {.itemHash = 0x7296E6DCU, .race = Race::taken},
+    {.itemHash = 0x7296E6DDU, .race = Race::vex},
+    {.itemHash = 0x7296E6DEU, .weaponLabel = kAutoRifle},
+    {.itemHash = 0x7296E6DFU, .weaponLabel = kSword},
+    {.itemHash = 0x740942DBU, .destination = kEdz, .sources = kPrecision},
+    {.itemHash = 0x772B07C1U, .destination = kIo, .sources = kSuper},
+    {.itemHash = 0x77F6C3D4U, .destination = kMercury, .race = Race::vex,
+     .victimClass = 0xCF060C30U},
+    {.itemHash = 0x80BD0E33U, .destination = kIo, .race = Race::taken},
+    {.itemHash = 0x80BD0E3CU, .destination = kMercury, .race = Race::vex},
+    {.itemHash = 0x80BD0E3DU, .destination = kMars, .race = Race::hive},
+    {.itemHash = 0x82640576U, .destination = kIo, .sources = kAbility},
+    {.itemHash = 0x82640577U, .destination = kIo, .sources = kWeapon, .slot = WeaponSlot::kinetic},
+    {.itemHash = 0x82640577U, .objective = 1, .destination = kIo, .sources = kWeapon,
+     .slot = WeaponSlot::energy},
+    {.itemHash = 0x82640577U, .objective = 2, .destination = kIo, .sources = kWeapon,
+     .slot = WeaponSlot::heavy},
+    {.itemHash = 0x8A48A696U, .destination = kTitan, .sources = kGrenade},
+    {.itemHash = 0x8D419E87U, .destination = kMercury, .element = Element::voidDamage},
+    {.itemHash = 0x8DF2981FU, .destination = kEdz, .element = Element::arc},
+    {.itemHash = 0x8DF57AF1U, .element = Element::arc, .sources = kWeapon,
+     .slot = WeaponSlot::heavy},
+    {.itemHash = 0x8DF57AF4U, .subclassElement = Element::arc},
+    {.itemHash = 0x8DF57AF7U, .element = Element::arc, .sources = kWeapon},
+    {.itemHash = 0x8E5D7083U, .destination = kIo, .element = Element::solar},
+    {.itemHash = 0x9055E0F2U, .destination = kTitan, .element = Element::voidDamage},
+    {.itemHash = 0x93A24325U, .destination = kMars, .sources = kMelee},
+    {.itemHash = 0x9507AC48U, .destination = kEdz, .weaponLabel = kSniperRifle},
+    {.itemHash = 0x9A412E35U, .destination = kNessus, .weaponLabel = kSniperRifle},
+    {.itemHash = 0x9B3F41E5U, .destination = kDreamingCity, .race = Race::taken,
+     .rankLabel = kEliteLabel},
+    {.itemHash = 0xA6D6C818U, .destination = kTitan, .sources = kMelee | kAbility},
+    {.itemHash = 0xAAA306EBU, .destination = kTitan, .race = Race::hive},
     {.itemHash = 0xB5603818U, .race = Race::cabal},
     {.itemHash = 0xB5603818U, .objective = 1, .race = Race::vex},
     {.itemHash = 0xB5603818U, .objective = 2, .race = Race::hive},
     {.itemHash = 0xB5603818U, .objective = 3, .race = Race::taken},
     {.itemHash = 0xB5603818U, .objective = 4, .race = Race::scorn},
     {.itemHash = 0xB5603818U, .objective = 5, .race = Race::fallen},
-    {.itemHash = 0x321406EAU, .rankLabel = kBossLabel},
-    {.itemHash = 0xE71C88DCU, .destination = kMercury, .rankLabel = kBossLabel},
-    {.itemHash = 0x0337775BU, .destination = kMars, .rankLabel = kBossLabel},
-    {.itemHash = 0xE68B6181U, .destination = kMercury, .element = Element::solar,
-     .sources = kAbility},
-    {.itemHash = 0x321406ECU, .element = Element::voidDamage, .sources = kAbility},
-    {.itemHash = 0x82640576U, .destination = kIo, .sources = kAbility},
-    {.itemHash = 0x0ECA9E35U, .destination = kTitan, .element = Element::arc, .sources = kAbility},
-    {.itemHash = 0xE71C88D8U, .destination = kMercury, .element = Element::solar,
-     .sources = kAbility},
-    {.itemHash = 0x0337775DU, .destination = kMars, .element = Element::voidDamage,
-     .sources = kAbility},
-    {.itemHash = 0x12DB6D9BU, .sources = kMelee},
-    {.itemHash = 0x12DB6D98U, .element = Element::solar},
-    {.itemHash = 0x12DB6D9EU, .weaponLabel = kBow},
-    {.itemHash = 0x27F60EBFU, .rankLabel = kEliteLabel, .anyOf = {.sources = kPrecision | kAbility}},
-    {.itemHash = 0x3314085DU, .weaponLabel = kGrenadeLauncher, .sources = kWeapon,
-     .slot = WeaponSlot::heavy},
-    {.itemHash = 0x82640577U, .destination = kIo, .sources = kWeapon, .slot = WeaponSlot::kinetic},
-    {.itemHash = 0x82640577U, .objective = 1, .destination = kIo, .sources = kWeapon,
-     .slot = WeaponSlot::energy},
-    {.itemHash = 0x82640577U, .objective = 2, .destination = kIo, .sources = kWeapon,
-     .slot = WeaponSlot::heavy},
-    {.itemHash = 0x8DF57AF1U, .element = Element::arc, .sources = kWeapon,
-     .slot = WeaponSlot::heavy},
-    {.itemHash = 0x14F1A79CU, .element = Element::solar, .sources = kWeapon,
-     .slot = WeaponSlot::heavy},
-    {.itemHash = 0x5D76391BU, .element = Element::voidDamage, .sources = kWeapon,
-     .slot = WeaponSlot::heavy},
-    {.itemHash = 0xE39D657BU, .sources = kWeapon, .slot = WeaponSlot::kinetic},
-    {.itemHash = 0xE39D657BU, .objective = 1, .sources = kWeapon, .slot = WeaponSlot::energy},
-    {.itemHash = 0xE39D657BU, .objective = 2, .sources = kWeapon, .slot = WeaponSlot::heavy},
-    {.itemHash = 0x0ECA9E36U, .destination = kTitan, .sources = kWeapon, .slot = WeaponSlot::energy},
-    {.itemHash = 0x77F6C3D4U, .destination = kMercury, .race = Race::vex,
-     .victimClass = 0xCF060C30U},
-    {.itemHash = 0xA6D6C818U, .destination = kTitan, .sources = kMelee | kAbility},
-    {.itemHash = 0x2233C57AU, .anyOf = {.weaponLabels = {kShotgun}, .slot = WeaponSlot::heavy}},
-    {.itemHash = 0x9B3F41E5U, .destination = kDreamingCity, .race = Race::taken,
-     .rankLabel = kEliteLabel},
-    {.itemHash = 0x8DF57AF4U, .subclassElement = Element::arc},
-    {.itemHash = 0x14F1A799U, .subclassElement = Element::solar},
-    {.itemHash = 0x5D76391EU, .subclassElement = Element::voidDamage},
+    {.itemHash = 0xB9550F24U, .destination = kMoon, .weaponLabel = kHandCannon},
+    {.itemHash = 0xB9550F29U, .destination = kMoon, .sources = kMelee},
+    {.itemHash = 0xB9550F2AU, .destination = kMoon, .weaponLabel = kSubmachineGun},
+    {.itemHash = 0xB9550F2BU, .destination = kMoon, .weaponLabel = kAutoRifle},
+    {.itemHash = 0xB9550F2CU, .destination = kMoon, .element = Element::solar},
+    {.itemHash = 0xB9550F2DU, .destination = kMoon, .element = Element::arc},
+    {.itemHash = 0xB9550F2EU, .destination = kMoon, .sources = kGrenade},
+    {.itemHash = 0xB9550F2FU, .destination = kMoon, .element = Element::voidDamage},
+    {.itemHash = 0xBCE7E301U, .destination = kTitan},
+    {.itemHash = 0xBF8448F4U, .destination = kMars, .race = Race::cabal},
+    {.itemHash = 0xC10FA21AU, .destination = kMercury, .sources = kSuper},
+    {.itemHash = 0xC170B55BU, .destination = kMars, .sources = kGrenade},
+    {.itemHash = 0xC506DF36U, .destination = kIo, .sources = kGrenade},
+    {.itemHash = 0xC8E05C58U, .destination = kTangledShore},
     {.itemHash = 0xC8E05C59U, .destination = kTangledShore, .race = Race::fallen,
      .area = {kTangledShoreScenario, {0x5FE28198U}}},
     {.itemHash = 0xC8E05C5AU, .destination = kTangledShore, .race = Race::cabal,
      .area = {kTangledShoreScenario, {0xD1CF7944U}}},
+    {.itemHash = 0xC8E05C5BU, .destination = kTangledShore, .sources = kPrecision},
+    {.itemHash = 0xC8E05C5CU, .destination = kTangledShore, .sources = kSuper},
     {.itemHash = 0xC8E05C5DU, .destination = kTangledShore, .race = Race::hive,
      .area = {kTangledShoreScenario, {0x618294B3U}}},
-    {.itemHash = 0xD674EC83U, .destination = kMoon, .race = Race::fallen,
-     .area = {kMoonScenario, {0xC64457D2U}}},
-    {.itemHash = 0xD674EC82U, .destination = kMoon, .race = Race::hive,
-     .area = {kMoonScenario, {0x18E267F9U}}},
+    {.itemHash = 0xD019F9CDU, .race = Race::vex, .sources = kPrecision},
+    {.itemHash = 0xD344C544U, .destination = kMars},
     {.itemHash = 0xD674EC80U, .destination = kMoon, .race = Race::hive,
      .area = {kMoonScenario, {0xFA122719U}}},
+    {.itemHash = 0xD674EC82U, .destination = kMoon, .race = Race::hive,
+     .area = {kMoonScenario, {0x18E267F9U}}},
+    {.itemHash = 0xD674EC83U, .destination = kMoon, .race = Race::fallen,
+     .area = {kMoonScenario, {0xC64457D2U}}},
     {.itemHash = 0xD674EC87U, .destination = kMoon, .race = Race::fallen,
      .area = {kMoonScenario, {0xEFEF8119U}}},
-    {.itemHash = 0x0337775CU, .destination = kMars,
-     .area = {kMarsScenario, {0x016F2C45U, 0x4AC36E96U, 0x192B0F82U}}},
+    {.itemHash = 0xD72C739CU, .destination = kTitan, .element = Element::arc},
+    {.itemHash = 0xDD1D7234U, .destination = kTitan, .sources = kPrecision},
+    {.itemHash = 0xE28EF433U, .race = Race::hive},
+    {.itemHash = 0xE28EF43CU, .race = Race::cabal},
+    {.itemHash = 0xE28EF43DU, .race = Race::fallen},
+    {.itemHash = 0xE28EF43EU, .race = Race::taken},
+    {.itemHash = 0xE39D657BU, .sources = kWeapon, .slot = WeaponSlot::kinetic},
+    {.itemHash = 0xE39D657BU, .objective = 1, .sources = kWeapon, .slot = WeaponSlot::energy},
+    {.itemHash = 0xE39D657BU, .objective = 2, .sources = kWeapon, .slot = WeaponSlot::heavy},
+    {.itemHash = 0xE68B6181U, .destination = kMercury, .element = Element::solar,
+     .sources = kAbility},
+    {.itemHash = 0xE71C88D8U, .destination = kMercury, .element = Element::solar,
+     .sources = kAbility},
+    {.itemHash = 0xE71C88DBU, .destination = kMercury, .race = Race::vex},
+    {.itemHash = 0xE71C88DCU, .destination = kMercury, .rankLabel = kBossLabel},
+    {.itemHash = 0xE71C88DFU, .destination = kMercury, .sources = kPrecision},
+    {.itemHash = 0xE9BE1ECDU, .destination = kNessus, .sources = kSuper},
+    {.itemHash = 0xEBBB4B67U, .destination = kEdz, .race = Race::fallen},
+    {.itemHash = 0xEBEDB6B5U, .destination = kNessus},
+    {.itemHash = 0xEC226745U, .destination = kMars, .element = Element::voidDamage},
+    {.itemHash = 0xF5BB6A03U, .destination = kEdz, .element = Element::voidDamage},
+    {.itemHash = 0xF78AFDC6U, .destination = kEdz, .race = Race::cabal},
+    {.itemHash = 0xFAFC79E1U, .destination = kIo, .race = Race::taken},
+    {.itemHash = 0xFC4D8521U, .destination = kTitan, .sources = kSuper},
 });
+
+/** An item's rows are found by binary search, which needs the ascending item order. */
+static_assert(std::ranges::is_sorted(kKillRules, {}, &KillRule::itemHash));
 
 // --- Kill matching -------------------------------------------------------------------------
 
@@ -432,12 +440,27 @@ struct KillFacts {
     WeaponSlot slot{WeaponSlot::any};
     Element element{Element::any};
     Element subclassElement{Element::any};
+};
+
+/** What one pass over the killer's held items found. */
+struct HeldPass {
+    /** Lanes the kill advanced. */
+    std::size_t advanced{};
+    /** Rule rows whose lane was open, before the kill, on a bounty that has not expired. */
+    std::bitset<kKillRules.size()> openRules{};
+    /** Held items a kill rule names. */
+    std::size_t ruledItems{};
+    /** The kill's bubble, asked of its reporter the first time a rule names an area. */
     std::optional<KillArea> area{};
+    bool areaAsked{};
+    /** Static reason an area rule the kill otherwise met did not count; null when none did. */
+    const char* areaRefusal{};
 };
 
 /** @return The labels in the named group, and the last of them in `member`. */
-[[nodiscard]] std::size_t
-members(std::span<const std::uint32_t> labels, std::uint32_t group, std::uint32_t& member) noexcept {
+[[nodiscard]] std::size_t members(std::span<const std::uint32_t> labels,
+                                  std::uint32_t group,
+                                  std::uint32_t& member) noexcept {
     std::size_t count = 0;
     for (const std::uint32_t label : labels) {
         if (build_data::label_in_group(group, label)) {
@@ -468,12 +491,20 @@ members(std::span<const std::uint32_t> labels, std::uint32_t group, std::uint32_
 
 /**
  * Reads the victim's race, rank and class.
- * @return False when the victim is not a combatant of a known enemy race.
+ * @return Null for a combatant of a known enemy race, else the static name of the failed check.
  */
-[[nodiscard]] bool classify_victim(const KillObservation& kill, KillFacts& facts) noexcept {
-    if (kill.victimKey != 0 || !kill.victimCombatant || kill.victimClassHash == 0
-        || members(kill.victimLabels, kPlayerGroup) != 0) {
-        return false;
+[[nodiscard]] const char* victim_refusal(const KillObservation& kill, KillFacts& facts) noexcept {
+    if (kill.victimKey != 0) {
+        return "victim_player";
+    }
+    if (!kill.victimCombatant) {
+        return "victim_not_combatant";
+    }
+    if (kill.victimClassHash == 0) {
+        return "victim_no_class";
+    }
+    if (members(kill.victimLabels, kPlayerGroup) != 0) {
+        return "victim_player_label";
     }
     facts.victimClass = kill.victimClassHash;
     std::uint8_t ordinal = 0;
@@ -481,11 +512,13 @@ members(std::span<const std::uint32_t> labels, std::uint32_t group, std::uint32_
     if (carries(kill.victimLabels, kScornLabel)) {
         // A class the race table places elsewhere contradicts the label, so neither is trusted.
         if (installed) {
-            return false;
+            return "victim_scorn_class";
         }
         facts.race = Race::scorn;
-    } else if (!installed || !enemy_race(static_cast<Race>(ordinal))) {
-        return false;
+    } else if (!installed) {
+        return "victim_class";
+    } else if (!enemy_race(static_cast<Race>(ordinal))) {
+        return "victim_race";
     } else {
         facts.race = static_cast<Race>(ordinal);
     }
@@ -499,7 +532,7 @@ members(std::span<const std::uint32_t> labels, std::uint32_t group, std::uint32_
     if (ranks != 1) {
         facts.rankLabel = 0;
     }
-    return true;
+    return nullptr;
 }
 
 /**
@@ -576,15 +609,34 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
            || (anyOf.slot != WeaponSlot::any && anyOf.slot == kill.slot);
 }
 
-/** @return True when no area is named, or the kill happened in one of its bubbles. */
-[[nodiscard]] bool area_matches(const Area& area, const std::optional<KillArea>& kill) noexcept {
-    return area.scenarioTag == 0
-           || (kill.has_value() && kill->scenarioTag == area.scenarioTag
-               && std::find(area.bubbles.begin(), area.bubbles.end(), kill->bubbleNameHash)
-                      != area.bubbles.end());
+/**
+ * Asks the reporter for the kill's bubble the first time a rule names an area.
+ * @return True when no area is named, or the kill happened in one of its bubbles.
+ */
+[[nodiscard]] bool in_area(const Area& area, const KillObservation& kill, HeldPass& pass) noexcept {
+    if (area.scenarioTag == 0) {
+        return true;
+    }
+    if (!pass.areaAsked) {
+        pass.areaAsked = true;
+        if (kill.resolveArea != nullptr) {
+            pass.area = kill.resolveArea(kill.areaContext);
+        }
+    }
+    if (!pass.area.has_value()) {
+        pass.areaRefusal = "area_unbound";
+        return false;
+    }
+    if (pass.area->scenarioTag != area.scenarioTag) {
+        // The destination matched, so the authored tag does not name the bound scenario.
+        pass.areaRefusal = "scenario_tag";
+        return false;
+    }
+    return std::find(area.bubbles.begin(), area.bubbles.end(), pass.area->bubbleNameHash)
+           != area.bubbles.end();
 }
 
-/** @return True when the kill meets every condition the rule names. */
+/** @return True when the kill meets every condition the rule names, its area aside. */
 [[nodiscard]] bool matches(const KillRule& rule, const KillFacts& kill) noexcept {
     return (rule.destination.empty() || rule.destination == kill.destination)
            && (rule.race == Race::any || rule.race == kill.race)
@@ -597,7 +649,18 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
            && (rule.victimClass == 0 || rule.victimClass == kill.victimClass)
            && (rule.subclassElement == Element::any
                || rule.subclassElement == kill.subclassElement)
-           && area_matches(rule.area, kill.area) && alternative_matches(rule.anyOf, kill);
+           && alternative_matches(rule.anyOf, kill);
+}
+
+/** @return True when the kill meets one of the given rule rows, its area aside. */
+[[nodiscard]] bool meets_any(const std::bitset<kKillRules.size()>& rules,
+                             const KillFacts& kill) noexcept {
+    for (std::size_t row = 0; row < kKillRules.size(); ++row) {
+        if (rules[row] && matches(kKillRules[row], kill)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /** @return The element of the subclass the character has equipped; any when none is known. */
@@ -616,42 +679,86 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
 }
 
 /**
- * Advances the grenade Triumph that counts the final blow's grenade for the killer's class.
- * @return True when the Triumph's progress moved.
+ * What a read found the selected character had left to advance, kept while the saved revision and
+ * the contract revision it was read under both stand. A stale entry may only cause another read:
+ * a kill skipped on one is lost, while a needless read is only slow.
  */
-[[nodiscard]] bool advance_grenade_triumph(const KillObservation& kill,
-                                           const KillFacts& facts,
-                                           CharacterClass characterClass) noexcept {
-    if ((facts.sources & kGrenade) == 0) {
-        return false;
+struct OpenWork {
+    std::uint64_t savedRevision{};
+    std::uint64_t contractRevision{};
+    /** A read of the held items filled readSeconds, openRules, subclassElement and ruledItems. */
+    bool heldRead{};
+    /** Server time of that read; an earlier clock could reopen a bounty it found expired. */
+    std::int64_t readSeconds{};
+    /** Rule rows whose lane that read found open on a held bounty that had not expired. */
+    std::bitset<kKillRules.size()> openRules{};
+    /** Element of the subclass the character had equipped at that read. */
+    Element subclassElement{Element::any};
+    /** Held items a kill rule names, as that read counted them. */
+    std::size_t ruledItems{};
+    /** Grenade Triumph rows a read found already held. */
+    std::bitset<kGrenadeTriumphs.size()> heldTriumphs{};
+    /**
+     * This path wrote under the saved revision, which moves only when the request's transaction
+     * commits. Until then a read sees a write a rollback would undo, so nothing more is kept.
+     */
+    bool written{};
+};
+
+/** Read and written only under the store lock. */
+OpenWork g_openWork{};
+
+/** @return The kept findings, emptied when the save or the contracts moved after their read. */
+[[nodiscard]] OpenWork& current_open_work() noexcept {
+    const std::uint64_t saved = investment::store::revision();
+    const std::uint64_t contracts = build_data::pursuit_definitions_revision();
+    if (g_openWork.savedRevision != saved || g_openWork.contractRevision != contracts) {
+        g_openWork = OpenWork{.savedRevision = saved, .contractRevision = contracts};
     }
+    return g_openWork;
+}
+
+/** @return The class's grenade Triumph row whose label the source carries, else the row count. */
+[[nodiscard]] std::size_t carried_triumph(std::span<const std::uint32_t> sourceLabels,
+                                          CharacterClass characterClass) noexcept {
     const auto found = std::find_if(
         kGrenadeTriumphs.begin(), kGrenadeTriumphs.end(), [&](const GrenadeTriumph& row) {
-            return row.characterClass == characterClass
-                   && carries(kill.sourceLabels, row.sourceLabel);
+            return row.characterClass == characterClass && carries(sourceLabels, row.sourceLabel);
         });
-    if (found == kGrenadeTriumphs.end()) {
-        return false;
-    }
-    const auto advance = unlocks::records::advance_interval(found->recordHash);
-    return advance == unlocks::records::ObjectiveAdvance::advanced
-           || advance == unlocks::records::ObjectiveAdvance::completed;
+    return static_cast<std::size_t>(found - kGrenadeTriumphs.begin());
 }
 
 /**
- * Advances every open lane of one held item that the kill meets.
+ * Advances one grenade Triumph and keeps a finding that it is already held.
+ * @param row Row of kGrenadeTriumphs whose grenade made the final blow.
+ * @return True when the Triumph's progress moved.
+ */
+[[nodiscard]] bool advance_grenade_triumph(std::size_t row, OpenWork& work) noexcept {
+    const auto advance = unlocks::records::advance_interval(kGrenadeTriumphs[row].recordHash);
+    if (advance == unlocks::records::ObjectiveAdvance::alreadyHeld && !work.written) {
+        work.heldTriumphs[row] = true;
+    }
+    return unlocks::records::progress_moved(advance);
+}
+
+/**
+ * Advances every open lane of one held item that the kill meets, and notes its open lanes.
  * @return The lanes advanced.
  */
 [[nodiscard]] std::size_t advance_item(authored_inventory::Item& held,
-                                       const KillFacts& kill,
-                                       std::int64_t nowSeconds) noexcept {
-    const auto rules = std::span(kKillRules);
-    const bool mapped = std::any_of(rules.begin(), rules.end(), [&](const KillRule& rule) {
-        return rule.itemHash == held.definitionHash;
-    });
+                                       const KillObservation& kill,
+                                       const KillFacts& facts,
+                                       std::int64_t nowSeconds,
+                                       HeldPass& pass) noexcept {
+    const auto rules =
+        std::ranges::equal_range(kKillRules, held.definitionHash, {}, &KillRule::itemHash);
+    if (rules.empty()) {
+        return 0;
+    }
+    ++pass.ruledItems;
     build_data::items::Definition item{};
     pursuits::Definition contract{};
-    if (!mapped || !build_data::find_item_definition_hash(held.definitionHash, item)
+    if (!build_data::find_item_definition_hash(held.definitionHash, item)
         || !build_data::find_pursuit_definition(item.definitionIndex, contract)
         || !contract.readable) {
         return 0;
@@ -666,9 +773,12 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
     for (const KillRule& rule : rules) {
         std::size_t lane = 0;
         std::int32_t target = 0;
-        if (rule.itemHash != held.definitionHash || !matches(rule, kill)
-            || !objective_lane(contract, rule.objective, lane, target) || values[lane] < 0
+        if (!objective_lane(contract, rule.objective, lane, target) || values[lane] < 0
             || values[lane] >= target) {
+            continue;
+        }
+        pass.openRules[static_cast<std::size_t>(&rule - kKillRules.data())] = true;
+        if (!matches(rule, facts) || !in_area(rule.area, kill, pass)) {
             continue;
         }
         ++values[lane];
@@ -678,6 +788,31 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
         held.objectives = values;
     }
     return advanced;
+}
+
+/**
+ * Advances every held bounty lane the kill meets and gives each changed item a new serial.
+ * @return False when the character's serials are exhausted.
+ */
+[[nodiscard]] bool advance_held_bounties(CharacterState& killer,
+                                         const KillObservation& kill,
+                                         KillFacts& facts,
+                                         std::int64_t nowSeconds,
+                                         HeldPass& pass) noexcept {
+    facts.subclassElement = equipped_subclass_element(killer);
+    auto& inventory = killer.inventory;
+    for (auto& held : std::span(inventory.values).first(inventory.count)) {
+        const std::size_t lanes = advance_item(held, kill, facts, nowSeconds, pass);
+        if (lanes == 0) {
+            continue;
+        }
+        // A new serial is what tells the client the copy changed, as for any other item mutation.
+        if (!next_character_serial(killer, held.mutationSerial)) {
+            return false;
+        }
+        pass.advanced += lanes;
+    }
+    return true;
 }
 
 } // namespace
@@ -706,68 +841,93 @@ bool objective_lane(const pursuits::Definition& contract,
 
 } // namespace runtime::detail
 
-/** Classifies the kill once, then advances the held bounties in one account after-image. */
+/** Checks the killer, then what is left to advance, before judging the kill or reading items. */
 KillProgress advance_kill_objectives(const KillObservation& kill,
                                      std::int64_t nowSeconds,
-                                     const char** refusal) noexcept {
-    const char* unused = nullptr;
-    auto& reason = refusal != nullptr ? *refusal : unused;
-    reason = "not_ready";
+                                     KillReport& report) noexcept {
+    report = KillReport{.reason = "not_ready"};
     if (!build_data::combat_taxonomy_ready() || !build_data::item_definitions_ready()
         || !build_data::pursuit_definitions_ready()) {
         return KillProgress::notReady;
     }
+    // One lock spans the identity read, the kept findings and the save transaction.
+    const std::lock_guard lock(investment::store::g_mutex);
+    AccountIdentity identity{};
+    report.reason = "identity_read";
+    if (!investment::store::read_account_identity(identity)) {
+        return KillProgress::notReady;
+    }
+    const CharacterIdentity* const killer = account::selected_character(identity);
+    report.reason = "killer";
+    if (killer == nullptr || killer->soid != kill.killerKey) {
+        return KillProgress::refused;
+    }
+    OpenWork& work = current_open_work();
+    const bool heldKnown = work.heldRead && nowSeconds >= work.readSeconds;
+    const std::size_t triumph = carried_triumph(kill.sourceLabels, killer->characterClass);
+    const bool triumphOpen = triumph < kGrenadeTriumphs.size() && !work.heldTriumphs[triumph];
+    report.reason = "no_open_objective";
+    report.ruledItems = work.ruledItems;
+    // With nothing left open, the kill is not judged at all.
+    if (heldKnown && work.openRules.none() && !triumphOpen) {
+        return KillProgress::unchanged;
+    }
     KillFacts facts{};
     facts.destination = kill.destination;
-    facts.area = kill.area;
-    reason = "victim";
-    if (!classify_victim(kill, facts)) {
+    // The open rules are checked against the subclass their read found; a new read replaces it.
+    facts.subclassElement = work.subclassElement;
+    report.reason = victim_refusal(kill, facts);
+    if (report.reason != nullptr) {
         return KillProgress::refused;
     }
     classify_source(kill, facts);
-    investment::store::Transaction transaction;
-    const std::unique_ptr<AccountState> saved(new (std::nothrow) AccountState{});
-    reason = "account_read";
-    if (!transaction.ready() || !saved || !investment::store::read_account(*saved)) {
-        return KillProgress::notReady;
-    }
-    const std::size_t character = selected_character_index(*saved);
-    reason = "killer";
-    if (character >= saved->characterCount
-        || saved->characters[character].soid != kill.killerKey) {
-        return KillProgress::refused;
-    }
-    CharacterState& killer = saved->characters[character];
-    facts.subclassElement = equipped_subclass_element(killer);
-    auto& inventory = killer.inventory;
-    std::size_t advanced = 0;
-    for (auto& held : std::span(inventory.values).first(inventory.count)) {
-        const std::size_t lanes = advance_item(held, facts, nowSeconds);
-        if (lanes == 0) {
-            continue;
-        }
-        // A new serial is what tells the client the copy changed, as for any other item mutation.
-        reason = "serial";
-        if (killer.nextInventorySerial
-            >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
-            return KillProgress::refused;
-        }
-        held.mutationSerial = static_cast<std::int32_t>(killer.nextInventorySerial++);
-        advanced += lanes;
-    }
-    // The Triumph's banks share this transaction, so a refused account write undoes it too.
-    const bool triumphAdvanced = advance_grenade_triumph(kill, facts, killer.characterClass);
-    reason = "no_open_objective";
-    if (advanced == 0 && !triumphAdvanced) {
+    const bool readsBounties = !heldKnown || meets_any(work.openRules, facts);
+    const bool countsTriumph = triumphOpen && (facts.sources & kGrenade) != 0;
+    report.reason = "no_open_objective";
+    // A kill that meets no open rule and counts no open Triumph reads nothing more.
+    if (!readsBounties && !countsTriumph) {
         return KillProgress::unchanged;
     }
-    reason = "account_write";
-    if ((advanced != 0
+    investment::store::Transaction transaction;
+    report.reason = "account_read";
+    if (!transaction.ready()) {
+        return KillProgress::notReady;
+    }
+    HeldPass pass{};
+    std::unique_ptr<AccountState> saved;
+    if (readsBounties) {
+        saved.reset(new (std::nothrow) AccountState{});
+        if (!saved || !investment::store::read_account(*saved)) {
+            return KillProgress::notReady;
+        }
+        const auto slot = static_cast<std::size_t>(killer - identity.characters.data());
+        report.reason = "serial";
+        if (!advance_held_bounties(saved->characters[slot], kill, facts, nowSeconds, pass)) {
+            return KillProgress::refused;
+        }
+        report.ruledItems = pass.ruledItems;
+    }
+    // The Triumph's banks share this transaction, so a refused account write undoes it too.
+    const bool triumphAdvanced = countsTriumph && advance_grenade_triumph(triumph, work);
+    if (pass.advanced == 0 && !triumphAdvanced) {
+        if (readsBounties && !work.written) {
+            work.heldRead = true;
+            work.readSeconds = nowSeconds;
+            work.openRules = pass.openRules;
+            work.subclassElement = facts.subclassElement;
+            work.ruledItems = pass.ruledItems;
+        }
+        report.reason = pass.areaRefusal != nullptr ? pass.areaRefusal : "no_open_objective";
+        return KillProgress::unchanged;
+    }
+    report.reason = "account_write";
+    if ((pass.advanced != 0
          && (!account::valid(*saved) || !investment::store::write_account(*saved)))
         || !transaction.commit()) {
         return KillProgress::refused;
     }
-    reason = nullptr;
+    work.written = true;
+    report.reason = nullptr;
     return KillProgress::advanced;
 }
 

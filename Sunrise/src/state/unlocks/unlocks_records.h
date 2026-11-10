@@ -12,6 +12,11 @@ enum class ObjectiveAdvance : std::uint8_t {
     completed,
 };
 
+/** @return True when the advance moved the record's progress. */
+[[nodiscard]] constexpr bool progress_moved(ObjectiveAdvance advance) noexcept {
+    return advance == ObjectiveAdvance::advanced || advance == ObjectiveAdvance::completed;
+}
+
 /** Why one exact lore chapter grant did not change the banks. */
 enum class GrantOutcome : std::uint8_t {
     granted,

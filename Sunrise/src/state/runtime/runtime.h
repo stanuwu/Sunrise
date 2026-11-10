@@ -1024,6 +1024,9 @@ struct KillArea {
     std::uint32_t bubbleNameHash{};
 };
 
+/** Names the bubble a kill happened in; absent when the region or its world does not bind. */
+using KillAreaResolver = std::optional<KillArea> (*)(void* context) noexcept;
+
 /** The facts one kill incident reports, as kill objectives read them. */
 struct KillObservation {
     /** Player key of the killer; a character's player key is its SOID. */
@@ -1046,15 +1049,17 @@ struct KillObservation {
     std::int8_t damageType{-1};
     /** Package name of the destination the kill happened in. */
     std::string_view destination{};
-    /** Bubble the kill happened in; absent when the region or its generated world does not bind. */
-    std::optional<KillArea> area{};
+    /** Called at most once, and only when a held rule the kill otherwise meets names an area. */
+    KillAreaResolver resolveArea{};
+    /** Passed to resolveArea untouched. */
+    void* areaContext{};
 };
 
 /** How one kill changed the selected character's held bounties. */
 enum class KillProgress : std::uint8_t {
     /** At least one objective lane or grenade Triumph advanced and the save holds it. */
     advanced,
-    /** The kill counted, but no open bounty objective it meets and no Triumph counts it. */
+    /** No open bounty objective the kill meets and no Triumph counts it. */
     unchanged,
     /** The kill is not the selected character's enemy kill, or the save refused the change. */
     refused,
@@ -1062,15 +1067,24 @@ enum class KillProgress : std::uint8_t {
     notReady,
 };
 
+/** What the receipt of one kill logs beside its progress. */
+struct KillReport {
+    /** Static reason nothing advanced; null when the kill advanced. */
+    const char* reason{};
+    /** Held items a kill rule names, as last counted; zero until the held items are read. */
+    std::size_t ruledItems{};
+};
+
 /**
  * Advances, by one, every open objective lane of the selected character's held bounties that the
- * kill meets, and the grenade interval Triumph it counts, in one save transaction.
+ * kill meets, and the grenade interval Triumph it counts, in one save transaction. The victim is
+ * judged and the held items are read only while something is left to advance.
  * @param nowSeconds Server time in Unix seconds; an expired bounty does not advance.
- * @param refusal Receives a static reason when nothing advanced.
+ * @param report Receives why nothing advanced and how many held items a rule names.
  */
 [[nodiscard]] KillProgress advance_kill_objectives(const KillObservation& kill,
                                                    std::int64_t nowSeconds,
-                                                   const char** refusal = nullptr) noexcept;
+                                                   KillReport& report) noexcept;
 
 /** Reserves the selected character's next mutation serial for a transient inventory update. */
 [[nodiscard]] bool
