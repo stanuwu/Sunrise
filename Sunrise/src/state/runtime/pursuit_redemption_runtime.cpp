@@ -1231,10 +1231,7 @@ pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcep
     return true;
 }
 
-/**
- * Logs a reward row the tables cannot settle, or whose condition cannot be evaluated; the
- * redemption skips it.
- */
+/** Logs a reward row the tables cannot settle; the redemption skips it. */
 void report_skipped_row(std::uint32_t bountyHash,
                         std::uint16_t rowItemIndex,
                         const char* reason) noexcept {
@@ -1242,6 +1239,19 @@ void report_skipped_row(std::uint32_t bountyHash,
                       core::log::Level::warn,
                       "ev=pursuit_redemption stage=reward_row result=skipped bounty=0x%08X "
                       "row_item=%u reason=%s",
+                      static_cast<unsigned>(bountyHash),
+                      static_cast<unsigned>(rowItemIndex),
+                      reason);
+}
+
+/** Logs a reward row paid although its condition could not be judged. */
+void report_unjudged_row(std::uint32_t bountyHash,
+                         std::uint16_t rowItemIndex,
+                         const char* reason) noexcept {
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::info,
+                      "ev=pursuit_redemption stage=reward_row result=unjudged_condition "
+                      "bounty=0x%08X row_item=%u reason=%s",
                       static_cast<unsigned>(bountyHash),
                       static_cast<unsigned>(rowItemIndex),
                       reason);
@@ -1320,7 +1330,8 @@ void report_skipped_row(std::uint32_t bountyHash,
 /**
  * Resolves the reward rows a pursuit shows into items, seasonal XP and a progression credit. A
  * wrapper draws from its own pool. A row whose condition does not hold pays nothing. A row whose
- * condition cannot be evaluated, or that the tables cannot settle, is logged and pays nothing.
+ * condition cannot be judged pays and is logged. A row the tables cannot settle is logged and pays
+ * nothing.
  * @param bountyHash The pursuit's item hash, which skipped rows are logged with.
  * @param rules The pursuit's cadence and gear source.
  * @param character The redeeming character, whose held Synthesizer an upgrade replaces.
@@ -1342,8 +1353,10 @@ void report_skipped_row(std::uint32_t bountyHash,
         const pursuits::RewardPreview& reward = rewards[index];
         bool applies = false;
         if (!row_applies(reward, context, applies, reason)) {
-            report_skipped_row(bountyHash, reward.itemIndex, reason);
-            continue;
+            // TODO: source the computed values these conditions read. No saved bank holds them,
+            // so the row pays as the pursuit shows it.
+            report_unjudged_row(bountyHash, reward.itemIndex, reason);
+            applies = true;
         }
         if (!applies) {
             continue;
