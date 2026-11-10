@@ -757,6 +757,14 @@ bool claim_interval(std::uint16_t recordIndex, std::uint32_t definitionHash) noe
     return saved && operation.result;
 }
 
+/** @return True when the next interval claim redeems the last step of a flagged record. */
+bool interval_claim_completes(std::uint16_t recordIndex) noexcept {
+    catalog::Definition record{};
+    return build_data::find_record_definition(recordIndex, record)
+           && record.completionFlagIndex != catalog::kUnavailableFlagIndex
+           && objective_value(record.redeemedCountValueIndex) + 1 == record.intervalCount;
+}
+
 /** Adds one to the progress of the interval record with one definition hash. */
 ObjectiveAdvance advance_interval(std::uint32_t definitionHash) noexcept {
     struct HashOperation {

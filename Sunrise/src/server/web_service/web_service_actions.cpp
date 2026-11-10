@@ -346,7 +346,8 @@ void report_item_dismantle(const middleware::web_service::Message& message,
 
 /**
  * Redeems a completed pursuit through the shared reward grant. The seed is drawn in this layer.
- * @return False when the pursuit is not redeemed, so the request removes it as an ordinary item.
+ * @return True when the pursuit is redeemed or its refusal is reported, which settles the request.
+ *         False when it is not redeemable, so the request removes it as an ordinary item.
  */
 [[nodiscard]] bool redeem_pursuit(const middleware::web_service::Message& message,
                                   std::uint64_t instanceSoid,

@@ -70,9 +70,6 @@ enum class WorldRewardAttempt : std::uint8_t {
     retry,
 };
 
-/** Log stage of every refused world-reward publication. */
-constexpr const char* kWorldRewardStage = "world_publish";
-
 /** Grants and publishes one world reward, retiring one that State can never grant. */
 [[nodiscard]] WorldRewardAttempt consume_world_reward(const WorldRewardRequest& request,
                                                       Session& session,
@@ -82,7 +79,7 @@ constexpr const char* kWorldRewardStage = "world_publish";
                                                       bool& touchesScratch) noexcept {
     const auto fail = [&](const char* reason, WorldRewardAttempt attempt) noexcept {
         if (reason != nullptr) {
-            report_reward_refusal(kWorldRewardStage, request.itemDefinitionIndex, reason);
+            report_reward_refusal("world_publish", request.itemDefinitionIndex, reason);
         }
         return attempt;
     };

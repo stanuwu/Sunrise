@@ -15,7 +15,6 @@
 #include "../../state/progression/season_pass_reward_catalog.h"
 #include "../../state/runtime/runtime.h"
 #include "../../state/unlocks/unlocks_records.h"
-#include "../../state/unlocks/unlocks_runtime.h"
 #include "internal_actions.h"
 #include "web_service_actions.h"
 
@@ -131,7 +130,7 @@ bool prepare_season_pass_claim(std::uint16_t rewardIndex,
                                const char*& reason) noexcept {
     std::uint64_t seed = 0;
     reason = "random_source";
-    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
+    if (!middleware::crypto::random::draw_seed(seed)) {
         return false;
     }
     reason = nullptr;
@@ -229,9 +228,7 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
         // through the second reserved objective-value slot. A flag, if it has one, follows the
         // last step, which also pays the record's rewards as a one-step claim does.
         const bool completesRecord =
-            definition.completionFlagIndex != records::kUnavailableFlagIndex
-            && state::unlocks::objective_value(definition.redeemedCountValueIndex) + 1
-                   == definition.intervalCount;
+            state::unlocks::records::interval_claim_completes(request.recordIndex);
         const RecordRewardPreparation reward =
             completesRecord ? prepare_record_reward(message, request.recordIndex, outcome)
                             : RecordRewardPreparation::absent;

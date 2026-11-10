@@ -431,16 +431,9 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
         return;
     }
 
-    // An incident can arrive on the private activity while its object belongs to the public
-    // region, so the grant follows the instantiated region, not the delivering session.
-    const std::uint64_t destinationSession =
-        state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
-    state::activity::destination::DestinationSelection destination{};
-    static_cast<void>(state::activity::destination::snapshot(destinationSession, destination));
-    const std::size_t packageLength = (std::min)(
-        static_cast<std::size_t>(destination.packageNameLength), destination.packageName.size());
-    const std::string_view packageName(
-        reinterpret_cast<const char*>(destination.packageName.data()), packageLength);
+    // The grant follows the instantiated region, not the delivering session.
+    const LiveDestination destination = live_destination();
+    const std::string_view packageName = destination.package_name();
 
     core::log::writef(core::log::Channel::server,
                       core::log::Level::debug,
@@ -453,7 +446,7 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
                                    : state::build_data::sobjects::kAbsentTypeCode,
                       primaryFound ? primary.lane4 : 0U,
                       static_cast<unsigned>(isCorruptedEgg),
-                      static_cast<unsigned long long>(destinationSession),
+                      static_cast<unsigned long long>(destination.sessionId),
                       static_cast<int>(packageName.size()),
                       packageName.data());
 
@@ -470,6 +463,22 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
             bap::arm_account_resync_everywhere();
         }
     }
+}
+
+/** @return The package bytes in use, bounded by their fixed storage. */
+std::string_view LiveDestination::package_name() const noexcept {
+    const std::size_t length = (std::min)(static_cast<std::size_t>(selection.packageNameLength),
+                                          selection.packageName.size());
+    return {reinterpret_cast<const char*>(selection.packageName.data()), length};
+}
+
+/** Reads the destination of the session the client last reported a region on. */
+LiveDestination live_destination() noexcept {
+    LiveDestination live{};
+    live.sessionId =
+        state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
+    static_cast<void>(state::activity::destination::snapshot(live.sessionId, live.selection));
+    return live;
 }
 
 /** Commits collectible progress and every reward earned by the same report together. */

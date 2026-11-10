@@ -68,6 +68,13 @@ void revoke(std::uint16_t recordIndex) noexcept;
 [[nodiscard]] bool claim_interval(std::uint16_t recordIndex, std::uint32_t definitionHash) noexcept;
 
 /**
+ * @param recordIndex Native record row.
+ * @return True when the record has a completion flag and its next interval claim redeems its
+ *         last step, which sets that flag.
+ */
+[[nodiscard]] bool interval_claim_completes(std::uint16_t recordIndex) noexcept;
+
+/**
  * Adds one to the progress every step of an interval record reads.
  * @param definitionHash Authored record definition hash.
  * @return Completed when a step becomes earned; already held at the last step or once claimed.

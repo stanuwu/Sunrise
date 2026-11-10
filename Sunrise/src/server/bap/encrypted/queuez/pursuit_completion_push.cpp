@@ -34,6 +34,19 @@ void reset_stale_sweep(Session& session,
     session.pursuitPublicationFailureReported = false;
 }
 
+/** Logs a sweep's first refused completion, so a repeat does not log on every poll. */
+void report_refusal_once(Session& session, std::uint64_t sourceSoid, const char* reason) noexcept {
+    if (session.pursuitPublicationFailureReported) {
+        return;
+    }
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::warn,
+                      "ev=pursuit stage=automatic_publish result=refused source=%llu reason=%s",
+                      static_cast<unsigned long long>(sourceSoid),
+                      reason);
+    session.pursuitPublicationFailureReported = true;
+}
+
 } // namespace
 
 /** Prepares, stages and encodes before committing, so a refused frame leaves nothing granted. */
@@ -48,15 +61,16 @@ bool consume_pursuit_completion(Session& session,
     const std::uint64_t investmentRevision = state::investment::store::revision();
     const std::uint64_t definitionsRevision = state::build_data::pursuit_definitions_revision();
     reset_stale_sweep(session, investmentRevision, definitionsRevision);
-    // A draw is not kept between polls, so wait for a response that can hold a whole frame.
-    if (session.pursuitCompletionScanned || response.size() < scratch.framed.size()) {
+    // A draw is not kept between polls, so wait for a response that can hold a whole frame, and
+    // for the contracts a sweep reads.
+    if (session.pursuitCompletionScanned || response.size() < scratch.framed.size()
+        || !state::build_data::pursuit_definitions_ready()) {
         return false;
     }
     const std::unique_ptr<state::PendingRecordRewardGrant> pending(
         new (std::nothrow) state::PendingRecordRewardGrant);
     std::uint64_t seed = 0;
-    if (!pending
-        || !middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
+    if (!pending || !middleware::crypto::random::draw_seed(seed)) {
         return false;
     }
     state::investment::store::Transaction transaction;
@@ -92,29 +106,21 @@ bool consume_pursuit_completion(Session& session,
                                                                     frame.size)
                          && frame.size != 0 && frame.size <= response.size();
     if (!encoded) {
-        // Staging refuses this peer's manifest, so the sweep moves past the candidate. Encoding can
-        // fail transiently, so that candidate stays owed.
-        if (!staged) {
-            session.pursuitCompletionCursor = cursor;
-        }
-        if (!session.pursuitPublicationFailureReported) {
-            core::log::writef(
-                core::log::Channel::server,
-                core::log::Level::warn,
-                "ev=pursuit stage=automatic_publish result=refused source=%llu reason=%s",
-                static_cast<unsigned long long>(pending->redeemedInstanceSoid),
-                staged ? "encode" : "stage");
-            session.pursuitPublicationFailureReported = true;
-        }
+        // The sweep moves past a candidate it cannot stage or encode, so a poll does not retry it
+        // until saved state, the contracts or this peer's Family-4 version change.
+        session.pursuitCompletionCursor = cursor;
+        report_refusal_once(session, pending->redeemedInstanceSoid, staged ? "encode" : "stage");
         return false;
     }
     const bool presentsReward = pending->rewardCount != 0;
+    const std::uint64_t sourceSoid = pending->redeemedInstanceSoid;
     // Commit consumes the grant. This transaction keeps its XP with it, and the staged frame
     // already carries the new total.
     const std::int32_t experience = pending->seasonalExperience;
     if (!state::commit_record_reward(*pending)
         || (experience != 0 && !bap::grant_seasonal_experience(experience))
         || !transaction.commit()) {
+        report_refusal_once(session, sourceSoid, "commit");
         return false;
     }
     middleware::secure_channel::advance_nonce(frame.sendNonce);

@@ -209,8 +209,7 @@ void submit_committed_authority_reset(Session& session,
 [[nodiscard]] bool socket_reply_omits_character(const ServiceOutcome& outcome) noexcept {
     const auto* socket = transaction_if<SocketPlugTransaction>(outcome);
     return socket != nullptr && socket->pending != nullptr && socket->pending->profileChanged
-           && socket->pending->beforeCharacter.nextInventorySerial
-                  == socket->pending->afterCharacter.nextInventorySerial;
+           && !socket->pending->updates_character();
 }
 
 } // namespace

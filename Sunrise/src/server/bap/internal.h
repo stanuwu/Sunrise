@@ -364,7 +364,9 @@ struct Session {
     bool authenticated{};
     /** Owes one family-five snapshot for the overrides an artifact change or a held item moved. */
     bool artifactRefreshArmed{};
+    /** Owes one Family-4 copy of the selected character once the due tick has passed. */
     bool artifactFamily4RefreshArmed{};
+    /** Tick count after which the owed Family-4 character copy may go out. */
     std::uint64_t artifactFamily4RefreshDueTick{};
     state::ArtifactResetResult artifactResetRefresh{};
     std::size_t artifactResetRefreshCursor{};
@@ -563,15 +565,15 @@ void arm_acquisition_presentation_hold(Session& session) noexcept;
 void arm_artifact_refresh(Session& session) noexcept;
 
 /**
- * Schedules the delayed Family-4 character copy alone, for an account published without its
- * character. The client rebuilds what its sockets offer only on a character update.
+ * Schedules the Family-4 character copy alone, after the same delay, for an account published
+ * without its character. The client rebuilds what its sockets offer only on a character update.
  */
 void arm_unlock_character_refresh(Session& session) noexcept;
 
-/** Queues one character item for normal acquisition feedback. */
+/** Queues one item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;
 
-/** Queues one profile material for normal acquisition feedback. */
+/** Queues a positive quantity of one item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,
                                                       std::int32_t quantity) noexcept;
 
@@ -593,11 +595,8 @@ current_world_reward(WorldRewardRequest& request, std::uint64_t afterId, bool* e
                                        const WorldRewardRequest& request,
                                        const char* reason) noexcept;
 
-/**
- * Grants every saved reward that can settle with no flyout, retiring those never grantable.
- * @param unchanged Store revision read before the newest reward was saved, under the same lock.
- */
-void settle_world_reward(std::uint64_t unchanged) noexcept;
+/** Grants every saved reward that can settle with no flyout, retiring those never grantable. */
+void settle_world_reward() noexcept;
 
 /** Grants seasonal XP for a grant whose own frame carries the new total, with no XP item update. */
 [[nodiscard]] bool grant_seasonal_experience(std::int32_t amount) noexcept;
@@ -626,6 +625,7 @@ struct InvestmentTransition {
 }
 
 /**
+ * Maps the refusal of a State edit that reports only a label. A typed result decides for itself.
  * @param reason State's label. A null label refuses as `transaction`.
  * @return A catalog wait for `not_ready`, otherwise a refusal carrying the label.
  */

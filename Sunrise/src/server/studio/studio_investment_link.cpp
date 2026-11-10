@@ -149,16 +149,16 @@ template <typename Payload>
 }
 
 /** @return False for a scope value the wire does not define. */
-[[nodiscard]] bool edit_scope(wire::InventoryScope scope, state::EditScope& output) noexcept {
+[[nodiscard]] bool edit_scope(wire::InventoryScope scope, state::GrantedRowArray& output) noexcept {
     switch (scope) {
     case wire::InventoryScope::profile:
-        output = state::EditScope::profile;
+        output = state::GrantedRowArray::profile;
         return true;
     case wire::InventoryScope::characterItem:
-        output = state::EditScope::characterItem;
+        output = state::GrantedRowArray::characterItem;
         return true;
     case wire::InventoryScope::characterStack:
-        output = state::EditScope::characterStack;
+        output = state::GrantedRowArray::characterStack;
         return true;
     }
     return false;
@@ -178,7 +178,7 @@ template <typename Payload>
     }
     case wire::Opcode::setQuantity: {
         const auto edit = payload_of<wire::SetQuantityRequest>(request);
-        state::EditScope scope{};
+        state::GrantedRowArray scope{};
         if (!edit_scope(edit.scope, scope) || edit.reserved != decltype(edit.reserved){}) {
             return false;
         }

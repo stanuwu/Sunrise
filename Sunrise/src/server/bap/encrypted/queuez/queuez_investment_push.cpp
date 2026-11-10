@@ -23,7 +23,7 @@
 namespace sunrise::server::bap::encrypted {
 namespace {
 
-using state::EditScope;
+using state::GrantedRowArray;
 using state::QuantityEdit;
 
 /**
@@ -183,14 +183,16 @@ publish_operation(const GrantItemOperation& request,
     switch (stage_item_grant(grant, session, scratch, response, touchesScratch, staged, reason)) {
     case ItemGrantStage::committed:
         break;
-    case ItemGrantStage::waiting:
     case ItemGrantStage::notReady:
+        // A catalog or a saved read was not ready, so a later poll tries the step again.
+        return deferred_transition(InvestmentWait::catalog);
+    case ItemGrantStage::waiting:
     case ItemGrantStage::deferred:
     case ItemGrantStage::unresolvable:
     case ItemGrantStage::failed:
         // The lane runs only with a whole-frame buffer, so a grant never waits for one. A grant
-        // that State cannot draw or place is refused for resubmission, unless a catalog is loading.
-        return state_refusal_transition(reason);
+        // that State cannot draw or place is refused for resubmission.
+        return refused_transition(reason != nullptr ? reason : "transaction");
     }
     // An item with no room anywhere would be dropped, so the grant is refused and its savepoint is
     // never committed.
@@ -263,7 +265,7 @@ publish_operation(const QuantityEdit& edit,
                   std::span<std::byte> response,
                   std::size_t& written,
                   bool& touchesScratch) noexcept {
-    if (edit.scope == EditScope::characterItem && edit.quantity == 0) {
+    if (edit.scope == GrantedRowArray::characterItem && edit.quantity == 0) {
         return publish_item_removal(
             edit, transaction, session, scratch, response, written, touchesScratch);
     }
@@ -447,7 +449,7 @@ publish_operation(const ObjectiveCompletionOperation& request,
         return session.pendingSeasonalExperienceAmount != 0;
     }
     const auto* edit = std::get_if<QuantityEdit>(&operation.request);
-    return edit != nullptr && edit->scope == EditScope::characterItem && edit->quantity == 0
+    return edit != nullptr && edit->scope == GrantedRowArray::characterItem && edit->quantity == 0
            && GetTickCount64() < session.acquisitionPresentationUntilTick;
 }
 

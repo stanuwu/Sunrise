@@ -12,22 +12,6 @@
 #include "queuez_state_validation.h"
 
 namespace sunrise::server::bap::encrypted {
-namespace {
-
-/** Records why a committed grant has no frame, or steps the staged nonce past its frame. */
-void close_staged_grant(StagedItemGrant& staged,
-                        bool stagedUpdate,
-                        bool encoded,
-                        const queuez::SessionState& after) noexcept {
-    if (!encoded) {
-        staged.unpublished = !stagedUpdate ? "inventory_stage" : "inventory_encode";
-        return;
-    }
-    middleware::secure_channel::advance_nonce(staged.frame.sendNonce);
-    staged.frame.after = after;
-}
-
-} // namespace
 
 /** Draws and places the item through its installed reward definition. */
 ItemGrantStage stage_item_grant(const ItemGrant& grant,
@@ -93,7 +77,13 @@ ItemGrantStage stage_item_grant(const ItemGrant& grant,
         reason = "inventory_commit";
         return ItemGrantStage::failed;
     }
-    close_staged_grant(staged, stagedUpdate, encoded, update.after);
+    // The staged nonce steps past the frame. A committed grant without one records why.
+    if (encoded) {
+        middleware::secure_channel::advance_nonce(staged.frame.sendNonce);
+        staged.frame.after = update.after;
+    } else {
+        staged.unpublished = stagedUpdate ? "inventory_encode" : "inventory_stage";
+    }
     return ItemGrantStage::committed;
 }
 

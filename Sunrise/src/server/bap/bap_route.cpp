@@ -42,7 +42,10 @@ std::atomic<InvestmentSliceConsumer> g_investmentSliceConsumer{};
 /** Lifetime of the native item-acquisition flyout, which the hold must outlast. */
 constexpr std::uint64_t kAcquisitionPresentationHoldMs = 8'000;
 
-/** Delay before the Family-4 copy of an artifact change, so its Family-5 refresh lands first. */
+/**
+ * Delay before the owed Family-4 character copy. Beside a Family-5 refresh it lets that refresh
+ * land first. The copy owed for an account published without its character waits the same time.
+ */
 constexpr std::uint64_t kArtifactFamily4RefreshDelayMs = 100;
 
 /** Arms every other active peer after one shared-account transaction is published. */
@@ -388,7 +391,7 @@ void arm_artifact_refresh(Session& session) noexcept {
     arm_unlock_character_refresh(session);
 }
 
-/** Schedules this peer's delayed Family-4 character copy alone. */
+/** Schedules this peer's Family-4 character copy alone, after the same delay. */
 void arm_unlock_character_refresh(Session& session) noexcept {
     session.artifactFamily4RefreshDueTick = GetTickCount64() + kArtifactFamily4RefreshDelayMs;
     session.artifactFamily4RefreshArmed = true;

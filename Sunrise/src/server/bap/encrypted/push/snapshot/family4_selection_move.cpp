@@ -618,6 +618,7 @@ bool prepare_artifact_item_refresh(Scratch& scratch,
     return true;
 }
 
+/** Builds one held item's resident, then the selected character and, when asked, the account. */
 bool prepare_item_values_refresh(
     Scratch& scratch,
     const queuez::EquipmentSwap& update,
@@ -640,7 +641,8 @@ bool prepare_item_values_refresh(
         return report_failure("item_values_refresh_selection");
     }
     family4_datagen::loadout::ResolvedInstances changed{};
-    for (const auto& item : selected.loadout.items) {
+    for (std::size_t index = 0; index < selected.loadout.itemCount; ++index) {
+        const family4_datagen::loadout::ResolvedItem& item = selected.loadout.items[index];
         if (item.instance.instanceSoid != instanceSoid) {
             continue;
         }

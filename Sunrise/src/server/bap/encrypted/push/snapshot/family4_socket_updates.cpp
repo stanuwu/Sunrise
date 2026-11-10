@@ -96,8 +96,7 @@ bool prepare_socket_plug(Scratch& scratch,
     }
     // The client reloads held items' content only when a character row changes, which a new
     // serial marks: the oven's after a bake, and each bounty the bake advanced.
-    const bool editsCharacter = mutation.beforeCharacter.nextInventorySerial
-                                != mutation.afterCharacter.nextInventorySerial;
+    const bool editsCharacter = mutation.updates_character();
 
     const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     const std::size_t requiredRawSize = (std::max)(
@@ -129,12 +128,18 @@ bool prepare_socket_plug(Scratch& scratch,
     std::size_t objectCount = itemCursor;
     if (socketPlug.updatesAccount) {
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes, unlocks)
-            || write_exchange_changes(
-                   *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()),
-                   std::span(mutation.changes).first(mutation.changeCount))
-                   != nullptr
-            || objectCount == staged.objects.size()
+        if (!family4_datagen::account::encode(account, accountBytes, unlocks)) {
+            clear_after(scratch, reservation);
+            return report_failure("socket_plug_account_object");
+        }
+        const char* const ringFailure = write_exchange_changes(
+            *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()),
+            std::span(mutation.changes).first(mutation.changeCount));
+        if (ringFailure != nullptr) {
+            clear_after(scratch, reservation);
+            return report_failure(ringFailure);
+        }
+        if (objectCount == staged.objects.size()
             || !append_object(scratch,
                               accountBytes,
                               socketPlug.accountDefinitionId,

@@ -657,9 +657,10 @@ bool process(const ServiceRoute& route,
                                 && queuez::stage_record_reward_grant(
                                     queuezState, *recordRewardGrant, transaction->update);
             if (!staged) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::warn,
-                                 "ev=ws1801 stage=reward_preflight result=fail");
+                core::log::writef(core::log::Channel::server,
+                                  core::log::Level::warn,
+                                  "ev=ws%u stage=reward_preflight result=fail",
+                                  static_cast<unsigned>(message.opcode));
                 clear_transaction(outcome);
                 return refuse_web_action(message, output, written);
             }
@@ -671,9 +672,10 @@ bool process(const ServiceRoute& route,
                     status,
                     output,
                     written)) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::warn,
-                                 "ev=ws1801 stage=reward_response result=fail");
+                core::log::writef(core::log::Channel::server,
+                                  core::log::Level::warn,
+                                  "ev=ws%u stage=reward_response result=fail",
+                                  static_cast<unsigned>(message.opcode));
                 clear_transaction(outcome);
                 return refuse_web_action(message, output, written);
             }

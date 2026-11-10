@@ -53,6 +53,55 @@ granted_row_definition(const state::AccountState& account,
            && state::build_data::find_item_definition_hash(definitionHash, definition);
 }
 
+/**
+ * Names the granted rows of one encoded object in its change ring, which is still empty.
+ * @param profileRows True for the account's profile rows, false for the character's rows.
+ * @param items The object's encoded rows; each granted row must be exactly one of them.
+ * @return Null on success, or the step that failed.
+ */
+template <typename ChangeList>
+[[nodiscard]] static const char*
+write_granted_changes(const state::AccountState& account,
+                      const state::PendingRecordRewardGrant& mutation,
+                      bool profileRows,
+                      std::uint8_t changeKind,
+                      std::span<const family4_datagen::inventory::layout::Entry> items,
+                      ChangeList& changes) noexcept {
+    std::size_t written = 0;
+    for (std::size_t rowIndex = 0; rowIndex < mutation.rowCount; ++rowIndex) {
+        const state::GrantedRow& granted = mutation.rows[rowIndex];
+        if ((granted.array == state::GrantedRowArray::profile) != profileRows) {
+            continue;
+        }
+        state::build_data::items::Definition definition{};
+        if (written >= changes.records.size()
+            || !granted_row_definition(account, mutation.characterIndex, granted, definition)) {
+            return profileRows ? "record_reward_profile_definition"
+                               : "record_reward_character_definition";
+        }
+        const auto matches =
+            std::count_if(items.begin(), items.end(), [&](const auto& item) noexcept {
+                return item.definitionIndex == definition.definitionIndex
+                       && item.mutationSerial == granted.mutationSerial;
+            });
+        if (matches != 1) {
+            return profileRows ? "record_reward_profile_row" : "record_reward_character_row";
+        }
+        auto& change = changes.records[written];
+        change.sequence = static_cast<std::uint16_t>(written);
+        change.mutationSerial = granted.mutationSerial;
+        change.kind = changeKind;
+        change.flags = static_cast<std::uint16_t>(
+            change_flags(definition)
+            | (state::newly_collected(mutation, granted, definition) ? kNewCollectibleChangeFlag
+                                                                     : 0U));
+        ++written;
+    }
+    changes.writeSlot = static_cast<std::uint16_t>(written);
+    changes.nextSequence = static_cast<std::uint16_t>(written);
+    return nullptr;
+}
+
 /** Builds all record rewards and the pending claim into one Family-4 revision. */
 bool prepare_record_reward_grant(
     Scratch& scratch,
@@ -63,10 +112,8 @@ bool prepare_record_reward_grant(
     Prepared& prepared) noexcept {
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
-    if (!mutation.prepared
-        || (mutation.rewardCount == 0 && mutation.wrapperFlagCount == 0 && mutation.rowCount == 0
-            && mutation.redeemedInstanceSoid == 0)
-        || mutation.rewardCount > mutation.rewards.size() || !queuez::valid(before)
+    if (!mutation.prepared || mutation.rewardCount > mutation.rewards.size()
+        || !queuez::valid(before)
         || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || update.accountSoid != mutation.accountSoid
@@ -218,41 +265,17 @@ bool prepare_record_reward_grant(
         clear_after(scratch, reservation);
         return report_failure("record_reward_character_changes");
     }
-    std::size_t characterChanges = 0;
-    for (std::size_t rowIndex = 0; rowIndex < mutation.rowCount; ++rowIndex) {
-        const state::GrantedRow& granted = mutation.rows[rowIndex];
-        if (granted.array == state::GrantedRowArray::profile) {
-            continue;
-        }
-        state::build_data::items::Definition definition{};
-        if (characterChanges >= characterObject.inventoryChanges.records.size()
-            || !granted_row_definition(account, mutation.characterIndex, granted, definition)) {
-            clear_after(scratch, reservation);
-            return report_failure("record_reward_character_definition");
-        }
-        const auto matches =
-            std::count_if(characterObject.inventoryItems.cbegin(),
-                          characterObject.inventoryItems.cend(),
-                          [&](const auto& item) noexcept {
-                              return item.definitionIndex == definition.definitionIndex
-                                     && item.mutationSerial == granted.mutationSerial;
-                          });
-        if (matches != 1) {
-            clear_after(scratch, reservation);
-            return report_failure("record_reward_character_row");
-        }
-        auto& change = characterObject.inventoryChanges.records[characterChanges];
-        change.sequence = static_cast<std::uint16_t>(characterChanges);
-        change.mutationSerial = granted.mutationSerial;
-        change.kind = changeKind;
-        change.flags = static_cast<std::uint16_t>(
-            change_flags(definition)
-            | (state::newly_collected(mutation, granted, definition) ? kNewCollectibleChangeFlag
-                                                                     : 0U));
-        ++characterChanges;
+    const char* const characterRingFailure =
+        write_granted_changes(account,
+                              mutation,
+                              false,
+                              changeKind,
+                              characterObject.inventoryItems,
+                              characterObject.inventoryChanges);
+    if (characterRingFailure != nullptr) {
+        clear_after(scratch, reservation);
+        return report_failure(characterRingFailure);
     }
-    characterObject.inventoryChanges.writeSlot = static_cast<std::uint16_t>(characterChanges);
-    characterObject.inventoryChanges.nextSequence = static_cast<std::uint16_t>(characterChanges);
     if (!apply_acquisition_presentation(
             characterBytes, selected.loadout, acquisitionPresentationRows)) {
         clear_after(scratch, reservation);
@@ -282,41 +305,17 @@ bool prepare_record_reward_grant(
         clear_after(scratch, reservation);
         return report_failure("record_reward_profile_changes");
     }
-    std::size_t profileChanges = 0;
-    for (std::size_t rowIndex = 0; rowIndex < mutation.rowCount; ++rowIndex) {
-        const state::GrantedRow& granted = mutation.rows[rowIndex];
-        if (granted.array != state::GrantedRowArray::profile) {
-            continue;
-        }
-        state::build_data::items::Definition definition{};
-        if (profileChanges >= accountObject.profileInventoryChanges.records.size()
-            || !granted_row_definition(account, mutation.characterIndex, granted, definition)) {
-            clear_after(scratch, reservation);
-            return report_failure("record_reward_profile_definition");
-        }
-        const auto matches =
-            std::count_if(accountObject.profileItems.cbegin(),
-                          accountObject.profileItems.cend(),
-                          [&](const auto& item) noexcept {
-                              return item.definitionIndex == definition.definitionIndex
-                                     && item.mutationSerial == granted.mutationSerial;
-                          });
-        if (matches != 1) {
-            clear_after(scratch, reservation);
-            return report_failure("record_reward_profile_row");
-        }
-        auto& change = accountObject.profileInventoryChanges.records[profileChanges];
-        change.sequence = static_cast<std::uint16_t>(profileChanges);
-        change.mutationSerial = granted.mutationSerial;
-        change.kind = changeKind;
-        change.flags = static_cast<std::uint16_t>(
-            change_flags(definition)
-            | (state::newly_collected(mutation, granted, definition) ? kNewCollectibleChangeFlag
-                                                                     : 0U));
-        ++profileChanges;
+    const char* const profileRingFailure =
+        write_granted_changes(account,
+                              mutation,
+                              true,
+                              changeKind,
+                              accountObject.profileItems,
+                              accountObject.profileInventoryChanges);
+    if (profileRingFailure != nullptr) {
+        clear_after(scratch, reservation);
+        return report_failure(profileRingFailure);
     }
-    accountObject.profileInventoryChanges.writeSlot = static_cast<std::uint16_t>(profileChanges);
-    accountObject.profileInventoryChanges.nextSequence = static_cast<std::uint16_t>(profileChanges);
     if (!append_object(scratch,
                        accountBytes,
                        update.accountDefinitionId,

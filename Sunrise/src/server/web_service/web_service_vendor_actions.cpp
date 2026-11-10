@@ -55,14 +55,8 @@ constexpr std::size_t kExchangePayoutCapacity = 2;
 // Every credited stack is announced to the account's change ring, so a kind that paid more than
 // the mutation can announce would pay out silently. Raising one raises the other.
 static_assert(kExchangePayoutCapacity <= state::kProfileStackChangeCapacity);
-
-// --- Authored game data --------------------------------------------------------------------
-
-// TODO: extract this identity from the packages; no extracted field names the currency that
-// stands in for a restricted one.
-
-/** Bright Dust, which a restricted price is charged in instead, one unit for one. */
-constexpr std::uint32_t kBrightDustHash = 2817410917U;
+/** Bright Dust, charged one for one for a restricted price. No package field names it. */
+constexpr std::uint32_t kBrightDustHash = 0xA7EE4765U;
 
 } // namespace
 

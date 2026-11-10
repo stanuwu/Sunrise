@@ -2,25 +2,23 @@
 
 #include "activity_kill_progress.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
 #include <span>
-#include <string_view>
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../core/runtime/server_clock.h"
 #include "../../../../../middleware/bap/activity_message/kill_incident.h"
-#include "../../../../../state/activity/destination/activity_destination_snapshot.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/activity/runtime.h"
 #include "../../../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../../../state/activity_sdk/runtime.h"
-#include "../../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "../../../../bap/internal.h"
+#include "activity_incident_grants.h"
 
 namespace sunrise::server::bap::encrypted::activity_message::receipts {
 
@@ -37,8 +35,8 @@ constexpr std::int32_t kKillTypeCode = 1;
 [[nodiscard]] bool reports_kill(const message::incident::Incident& incident) noexcept {
     state::build_data::sobjects::Definition target{};
     return incident.primaryTarget <= (std::numeric_limits<std::uint16_t>::max)()
-           && state::build_data::sobjects::find(static_cast<std::uint16_t>(incident.primaryTarget),
-                                                target)
+           && state::build_data::find_sobject_definition(
+               static_cast<std::uint16_t>(incident.primaryTarget), target)
            && target.nameHash == kAnyKillNameHash && target.typeCode == kKillTypeCode;
 }
 
@@ -101,14 +99,8 @@ void apply_kill_progress(const message::incident::Incident& incident) noexcept {
                           incident.payloadLength);
         return;
     }
-    // A kill can arrive on the private activity while its region is the public one, so the
-    // destination follows the instantiated region, not the delivering session.
-    const std::uint64_t destinationSession =
-        state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
-    state::activity::destination::DestinationSelection destination{};
-    static_cast<void>(state::activity::destination::snapshot(destinationSession, destination));
-    const std::size_t packageLength = (std::min)(
-        static_cast<std::size_t>(destination.packageNameLength), destination.packageName.size());
+    // The destination follows the instantiated region, not the delivering session.
+    const LiveDestination destination = live_destination();
 
     state::KillObservation observation{};
     observation.killerKey = kill.killer.playerKey;
@@ -121,10 +113,9 @@ void apply_kill_progress(const message::incident::Incident& incident) noexcept {
     observation.equipmentSlot = kill.equipmentSlot;
     observation.abilitySelector = kill.abilitySelector;
     observation.damageType = kill.damageType;
-    observation.destination = std::string_view(
-        reinterpret_cast<const char*>(destination.packageName.data()), packageLength);
+    observation.destination = destination.package_name();
     // The bubble costs a generated-world scan, so State asks only when a held rule names an area.
-    AreaLookup lookup{destinationSession};
+    AreaLookup lookup{destination.sessionId};
     observation.resolveArea = resolve_kill_area;
     observation.areaContext = &lookup;
 
