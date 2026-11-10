@@ -79,8 +79,9 @@ void read_plug_set_flags(Storage& storage) noexcept {
 
 /**
  * Binds the insertion rules one plug declares. A list that does not read, bind or fit is kept as
- * an unreadable row, which refuses the plug; a plug with no rules adds no row.
- * @return False when the rows are full or a bank allocation failed, which retries the walk.
+ * an unreadable row, which refuses the plug; a plug with no rules adds no row. A plug past the
+ * rule rows is counted, not kept, so the walk can refuse the whole list.
+ * @return False when a bank allocation failed, which retries the walk.
  */
 [[nodiscard]] bool read_insertion_rules(Storage& storage, const tables::items::Row& item) noexcept {
     std::size_t at = 0;
@@ -108,11 +109,46 @@ void read_plug_set_flags(Storage& storage) noexcept {
         rule.conditionCount = static_cast<std::uint8_t>(count);
         rule.requiredFlagIndex = bank_index(storage.slotMaps.accountFlag, item.insertionFlagSlot);
     }
-    if (storage.insertionRuleCount == storage.insertionRules.size()) {
-        return false;
+    if (storage.insertionRuleCount < storage.insertionRules.size()) {
+        storage.insertionRules[storage.insertionRuleCount] = rule;
     }
-    storage.insertionRules[storage.insertionRuleCount++] = rule;
+    ++storage.insertionRuleCount;
     return true;
+}
+
+/** Settles the insertion rules unsupported over a refusal the installed data decides. */
+void settle_insertion_rules_unsupported(const char* reason, std::size_t rules) noexcept {
+    state::build_data::settle_plug_insertion_rules_unsupported();
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::warn,
+                      "ev=pkg stage=insertion_rules result=unsupported reason=%s rules=%zu "
+                      "capacity=%zu",
+                      reason,
+                      rules,
+                      insertion_rules::kRuleCapacity);
+}
+
+/**
+ * Publishes the rules one walk read. More rule plugs than rows, no rule at all and rows the
+ * catalog refuses are the data's own, so each settles the domain; a failed cache write repeats
+ * the walk.
+ */
+void publish_insertion_rules(const Storage& storage) noexcept {
+    const std::size_t count = storage.insertionRuleCount;
+    if (count > storage.insertionRules.size()) {
+        settle_insertion_rules_unsupported("capacity", count);
+        return;
+    }
+    const auto rules = std::span(storage.insertionRules).first(count);
+    if (!state::build_data::valid_plug_insertion_rules(rules)) {
+        settle_insertion_rules_unsupported("rows", count);
+        return;
+    }
+    if (!state::build_data::publish_plug_insertion_rules(rules)) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         "ev=pkg stage=insertion_rules result=fail reason=publish");
+    }
 }
 
 } // namespace
@@ -121,6 +157,12 @@ void read_plug_set_flags(Storage& storage) noexcept {
 bool exotic_catalysts_settled() noexcept {
     return state::build_data::exotic_catalysts_ready()
            || state::build_data::exotic_catalysts_unsupported();
+}
+
+/** @return True when the plug insertion rules are published or can never be. */
+bool plug_insertion_rules_settled() noexcept {
+    return state::build_data::plug_insertion_rules_ready()
+           || state::build_data::plug_insertion_rules_unsupported();
 }
 
 /**
@@ -153,9 +195,14 @@ bool build_item_rows(const reader::Source& source,
     const bool needSocketPlugs = !state::build_data::socket_plug_rules_ready();
     const bool needCatalysts = !exotic_catalysts_settled();
     const bool needBuckets = !state::build_data::inventory_bucket_descriptors_ready();
-    // Insertion rules bind through the reward condition tables, which load before this walk.
-    const bool needInsertionRules = !state::build_data::plug_insertion_rules_ready()
-                                    && storage.rewardBuild.conditions.loaded();
+    // Insertion rules bind through the reward condition tables, which load before this walk. A
+    // refused reward graph that left those tables unloaded can never bind a rule.
+    if (!plug_insertion_rules_settled() && !storage.rewardBuild.conditions.loaded()
+        && state::build_data::reward_definitions_unsupported()) {
+        settle_insertion_rules_unsupported("condition_tables", 0);
+    }
+    const bool needInsertionRules =
+        !plug_insertion_rules_settled() && storage.rewardBuild.conditions.loaded();
     const bool retainDetails = needDetails || needCatalysts;
     const bool needSocketRows = needSocketPlugs || needCatalysts;
     const bool needDetailRows = needDetails || needSocketRows;
@@ -212,11 +259,12 @@ bool build_item_rows(const reader::Source& source,
         std::uint32_t itemClass = 0;
         if (!reader::read_tag(
                 source, storage.scratch, row.targetTag, storage.definition, itemClass)) {
-            // The published catalog read this row before, so its reward and contract wait for a
-            // retry. A row the catalog lacks stays out of the rewards and contracts as well.
+            // The published catalog read this row before, so its reward, contract and insertion
+            // rules wait for a retry. A row the catalog lacks stays out of all three as well.
             state::build_data::items::Definition cataloged{};
             const bool retryable =
                 state::build_data::find_item_definition_index(item.definitionIndex, cataloged);
+            insertionRulesRead = insertionRulesRead && !retryable;
             if (rewardStorageReady && retryable) {
                 storage.rewardBuild.item_unread(item.definitionIndex);
             }
@@ -300,6 +348,9 @@ bool build_item_rows(const reader::Source& source,
                                                      storage.rewardBuild.conditions))) {
             storage.pursuitBuild.read_failed(item.definitionIndex);
         }
+        // The list holds one entry per catalog row, and a table position can pass that capacity.
+        const bool restrictedGrant = item.definitionIndex < storage.restrictedGrants.size()
+                                     && storage.restrictedGrants[item.definitionIndex];
         storage.rows[rowCount++] =
             state::build_data::items::Definition{item.definitionHash,
                                                  item.definitionIndex,
@@ -315,7 +366,7 @@ bool build_item_rows(const reader::Source& source,
                                                  item.quietAcquisition,
                                                  item.toastlessAcquisition,
                                                  item.stackUniqueLabel,
-                                                 storage.restrictedGrants[item.definitionIndex],
+                                                 restrictedGrant,
                                                  bank_index(storage.slotMaps.accountValue,
                                                             item.quantityValueSlot),
                                                  storage.plugSetFlagIndices[item.definitionIndex],
@@ -358,20 +409,15 @@ bool build_item_rows(const reader::Source& source,
     if (pursuitStorageReady) {
         storage.pursuitBuild.publish();
     }
+    // Insertion rules settle on their own too. A plug whose rules failed to read keeps its
+    // unreadable row; only a failed item read or allocation leaves the rules for another pass.
+    if (published && insertionRulesRead) {
+        publish_insertion_rules(storage);
+    }
     if (!published) {
         reason = !detailStorageReady ? "detail_storage"
                  : !requestsFit      ? "detail_capacity"
                                      : "publish";
-    }
-    // A plug whose rules failed to read keeps its unreadable row; only a full or failed walk
-    // leaves the rules for another pass.
-    if (published && needInsertionRules) {
-        published = insertionRulesRead && index == table.count
-                    && state::build_data::publish_plug_insertion_rules(
-                        std::span(storage.insertionRules).first(storage.insertionRuleCount));
-        if (!published) {
-            reason = "insertion_rules";
-        }
     }
     SocketPlugBuild socketPlugBuild;
     const bool socketStorageReady =
@@ -492,14 +538,16 @@ bool build_item_rows(const reader::Source& source,
         }
     }
     // Named last; later stages overwrite the reason as they start.
+    if (published && !plug_insertion_rules_settled()) {
+        reason = "insertion_rules";
+    }
     if (published && !rewardsPublished) {
         reason = "rewards";
     }
     return published && state::build_data::item_definitions_ready()
            && state::build_data::configured_item_details_ready()
            && state::build_data::socket_plug_rules_ready() && exotic_catalysts_settled()
-           && state::build_data::ability_buckets_ready()
-           && state::build_data::plug_insertion_rules_ready();
+           && state::build_data::ability_buckets_ready();
 }
 
 } // namespace sunrise::client::content::items::packages

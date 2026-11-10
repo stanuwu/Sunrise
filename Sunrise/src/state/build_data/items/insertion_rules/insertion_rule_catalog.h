@@ -8,8 +8,12 @@
 
 namespace sunrise::state::build_data::items::insertion_rules {
 
-/** Discards every published rule row. */
+/** Discards every published rule row and forgets an unsupported settlement. */
 void clear() noexcept;
+/** True once the installed data has settled that no rule list can be published. */
+[[nodiscard]] bool unsupported() noexcept;
+/** Discards every rule row and records that the installed data supports none. */
+void settle_unsupported() noexcept;
 /** Checks rows in strictly ascending plug order with bounded, valid instructions. */
 [[nodiscard]] bool valid(std::span<const Rule> rules) noexcept;
 /** Publishes a validated rule list. */

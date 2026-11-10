@@ -287,8 +287,13 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         || !bounties::valid(domains.bounties)
         // An empty table is complete: an installed table with another layout publishes none.
         || !starter_sets::valid(domains.starterSets)
-        || !items::insertion_rules::valid(domains.plugInsertionRules)
-        || !combat::valid(domains.enemyRaces) || !combat::valid(domains.labelGroups)
+        // An empty rule list marks an unsupported insertion-rule domain.
+        || (!domains.plugInsertionRules.empty()
+            && !items::insertion_rules::valid(domains.plugInsertionRules))
+        // An empty race table marks an unsupported taxonomy, with no label groups either.
+        || (domains.enemyRaces.empty()
+                ? !domains.labelGroups.empty()
+                : !(combat::valid(domains.enemyRaces) && combat::valid(domains.labelGroups)))
         || !build_data::records::valid(domains.records,
                                        domains.recordObjectives,
                                        domains.recordIntervals,

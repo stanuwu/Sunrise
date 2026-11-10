@@ -17,6 +17,7 @@ constexpr std::uint32_t kEmptyNameHash = 0x811C9DC5U;
 core::threading::SrwLock g_lock;
 Table<EnemyRace, kEnemyRaceCapacity> g_races;
 Table<LabelGroup, kLabelGroupCapacity> g_groups;
+bool g_unsupported{};
 
 /** @return True when a name hash can name an installed class, label or group. */
 [[nodiscard]] bool named(std::uint32_t hash) noexcept {
@@ -25,11 +26,26 @@ Table<LabelGroup, kLabelGroupCapacity> g_groups;
 
 } // namespace
 
-/** Clears both tables under the catalog lock. */
+/** Clears both tables and forgets an unsupported settlement. */
 void clear() noexcept {
     const std::lock_guard guard(g_lock);
     g_races.clear();
     g_groups.clear();
+    g_unsupported = false;
+}
+
+/** @return True once the installed data has settled that no taxonomy can be read. */
+bool unsupported() noexcept {
+    const std::shared_lock guard(g_lock);
+    return g_unsupported;
+}
+
+/** Discards both tables and records that the installed data supports no taxonomy. */
+void settle_unsupported() noexcept {
+    const std::lock_guard guard(g_lock);
+    g_races.clear();
+    g_groups.clear();
+    g_unsupported = true;
 }
 
 /** Ascending class order lets a lookup binary-search the table. */
@@ -74,6 +90,7 @@ bool replace(std::span<const EnemyRace> races, std::span<const LabelGroup> group
         g_groups.clear();
         return false;
     }
+    g_unsupported = false;
     return true;
 }
 

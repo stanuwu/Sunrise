@@ -136,6 +136,7 @@ struct Storage {
     std::vector<std::uint16_t> plugSetFlagIndices{};
     /** Insertion rules of the plugs walked so far, in item-table order. */
     std::vector<state::build_data::items::insertion_rules::Rule> insertionRules{};
+    /** Plugs that declared rules so far. A plug past the rule rows is counted, not kept. */
     std::size_t insertionRuleCount{};
     /** Item rows the installed restricted-grant list names, by item-table index. */
     std::vector<bool> restrictedGrants{};
@@ -232,6 +233,12 @@ struct Storage {
 /** @return True when the pursuit contracts are published or can never be. */
 [[nodiscard]] bool pursuit_catalog_settled() noexcept;
 
+/** @return True when the plug insertion rules are published or can never be. */
+[[nodiscard]] bool plug_insertion_rules_settled() noexcept;
+
+/** @return True when the combat taxonomy is published or can never be. */
+[[nodiscard]] bool combat_taxonomy_settled() noexcept;
+
 /** Adds one native definition index to the deduplicated request set. */
 void request(std::uint16_t definitionIndex, DetailRequests& requested) noexcept;
 
@@ -307,7 +314,8 @@ read_investment_constants(const reader::Source& source,
  * @param scratch Reader scratch.
  * @param root Investment root bytes.
  * @param blob Scratch storage for each table blob.
- * @return False when a table does not read or the publish fails, so a later slice retries it.
+ * @return False when a table does not read or the publish fails, which a later slice retries, or
+ *         when the installed data refuses a table, which settles the taxonomy unsupported.
  */
 [[nodiscard]] bool build_combat_taxonomy(const reader::Source& source,
                                          reader::Scratch& scratch,

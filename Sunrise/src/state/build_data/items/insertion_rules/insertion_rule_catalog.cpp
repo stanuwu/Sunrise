@@ -14,12 +14,27 @@ namespace sunrise::state::build_data::items::insertion_rules {
 namespace {
 core::threading::SrwLock g_lock;
 Table<Rule, kRuleCapacity> g_rules;
+bool g_unsupported{};
 } // namespace
 
-/** Clears the rule rows under the catalog lock. */
+/** Clears the rule rows and forgets an unsupported settlement. */
 void clear() noexcept {
     const std::lock_guard guard(g_lock);
     g_rules.clear();
+    g_unsupported = false;
+}
+
+/** @return True once the installed data has settled that no rule list can be published. */
+bool unsupported() noexcept {
+    const std::shared_lock guard(g_lock);
+    return g_unsupported;
+}
+
+/** Discards every rule row and records that the installed data supports none. */
+void settle_unsupported() noexcept {
+    const std::lock_guard guard(g_lock);
+    g_rules.clear();
+    g_unsupported = true;
 }
 
 /** Checks one complete rule list; an unreadable row carries nothing but its plug. */
@@ -57,7 +72,11 @@ bool replace(std::span<const Rule> rules) noexcept {
         return false;
     }
     const std::lock_guard guard(g_lock);
-    return g_rules.replace(rules);
+    if (!g_rules.replace(rules)) {
+        return false;
+    }
+    g_unsupported = false;
+    return true;
 }
 
 /** Finds one plug's row by binary search over the ascending plug order. */

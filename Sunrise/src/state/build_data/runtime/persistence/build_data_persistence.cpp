@@ -148,13 +148,16 @@ to_record(const constants::InvestmentConstants& value) noexcept {
  */
 [[nodiscard]] bool required_domains_ready(const Context& state) noexcept {
     constants::InvestmentConstants published{};
-    // A refused reward graph is settled; the cache then carries no reward rows.
+    // A refused reward graph is settled; the cache then carries no reward rows. Unsupported
+    // insertion rules and an unsupported combat taxonomy are settled the same way.
     return runtime::named::ready() && item_definitions_ready() && configured_item_details_ready()
            && collectible_definitions_ready() && socket_plug_rules_ready()
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && season_pass_ready() && repeatable_bounties_ready()
-           && starter_sets_ready() && plug_insertion_rules_ready() && combat_taxonomy_ready()
+           && starter_sets_ready()
+           && (plug_insertion_rules_ready() || plug_insertion_rules_unsupported())
+           && (combat_taxonomy_ready() || combat_taxonomy_unsupported())
            && (reward_definitions_ready() || state.rewardsUnsupported)
            && record_definitions_ready() && node_definitions_ready() && sobject_definitions_ready()
            && scenario_layouts_ready() && spawn_sets_ready() && hash_names_ready()

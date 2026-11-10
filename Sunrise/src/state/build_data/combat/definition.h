@@ -8,7 +8,10 @@
 
 namespace sunrise::state::build_data::combat {
 
-/** Race rows. The installed race table declares 66 actor classes. */
+/**
+ * Race rows. The installed race table declares 66 actor classes. A build declaring more settles
+ * the taxonomy unsupported.
+ */
 inline constexpr std::size_t kEnemyRaceCapacity = 1024;
 /** Labels one group mask can name: one bit per label. The installed table declares 306. */
 inline constexpr std::size_t kLabelCapacity =

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <climits>
-#include <cstring>
 #include <limits>
 #include <tuple>
 #include <vector>
@@ -10,6 +9,7 @@
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/schema/generated/tag_classes_808000.h"
 #include "../../../../middleware/content/packages/schema/generated/tag_classes_808094.h"
+#include "../../../../middleware/content/packages/tables/field_reader.h"
 #include "../../../../state/build_data/combat/definition.h"
 #include "../../../../state/build_data/runtime.h"
 #include "internal.h"
@@ -25,7 +25,7 @@ struct LabelTableSweep {
     std::size_t matches{};
 };
 
-/** Logs one refused combat taxonomy read. */
+/** Logs one combat taxonomy read that failed and that a later slice retries. */
 void report_failure(const char* reason, std::size_t value) noexcept {
     core::log::writef(core::log::Channel::client,
                       core::log::Level::warn,
@@ -34,24 +34,19 @@ void report_failure(const char* reason, std::size_t value) noexcept {
                       value);
 }
 
-/** Copies one little-endian field the caller has already bounded. */
-template <typename Value>
-[[nodiscard]] Value field(std::span<const std::byte> blob, std::size_t offset) noexcept {
-    Value value{};
-    std::memcpy(&value, blob.data() + offset, sizeof value);
-    return value;
-}
-
-/** @return True when an array's rows of one stride end inside the blob. */
-[[nodiscard]] bool rows_fit(std::span<const std::byte> blob,
-                            const tables::Array& array,
-                            std::size_t stride) noexcept {
-    return array.dataOffset <= blob.size()
-           && array.count <= (blob.size() - array.dataOffset) / stride;
+/** Settles the taxonomy unsupported over a refusal the installed data decides, and logs it. */
+void settle_unsupported(const char* reason, std::size_t value) noexcept {
+    state::build_data::settle_combat_taxonomy_unsupported();
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::warn,
+                      "ev=pkg stage=combat_taxonomy result=unsupported reason=%s value=%zu",
+                      reason,
+                      value);
 }
 
 /**
- * Reads the race of every actor class from the table the investment root names.
+ * Reads the race of every actor class from the table the investment root names. A table the
+ * installed data refuses settles the taxonomy; a failed package read or allocation is retried.
  * @param races Receives the rows in ascending class order.
  */
 [[nodiscard]] bool read_enemy_races(const reader::Source& source,
@@ -60,29 +55,39 @@ template <typename Value>
                                     std::vector<std::byte>& blob,
                                     std::vector<combat::EnemyRace>& races) noexcept {
     std::uint32_t tag = 0;
-    tables::Array rows{};
-    if (!tables::slot_tag(root, tables::kEnemyRaceTableSlot, tag) || tag == 0
-        || !reader::read_tag(source, scratch, tag, blob)
-        || !tables::find_array_at(
-            std::span<const std::byte>{blob}, tables::kEnemyRaceArrayDescriptor, rows)
-        || rows.elementClass != tables::kEnemyRaceRowClass
-        || rows.count > combat::kEnemyRaceCapacity
-        || !rows_fit(blob, rows, tables::kEnemyRaceRowStride)) {
-        report_failure("race_table", blob.size());
+    if (!tables::slot_tag(root, tables::kEnemyRaceTableSlot, tag)
+        || tables::package_of(tag) == tables::kAbsentPackageId) {
+        settle_unsupported("race_slot", tag);
+        return false;
+    }
+    if (!reader::read_tag(source, scratch, tag, blob)) {
+        report_failure("race_read", tag);
         return false;
     }
     const std::span<const std::byte> bytes{blob};
+    tables::Array rows{};
+    if (!tables::read_array(bytes,
+                            tables::kEnemyRaceArrayDescriptor,
+                            tables::kEnemyRaceRowClass,
+                            tables::kEnemyRaceRowStride,
+                            rows)
+        || rows.count == 0 || rows.count > combat::kEnemyRaceCapacity) {
+        settle_unsupported("race_table", rows.count);
+        return false;
+    }
     try {
         races.clear();
         for (std::size_t row = 0; row < rows.count; ++row) {
             const std::size_t at = rows.dataOffset + row * tables::kEnemyRaceRowStride;
-            const auto race = field<std::uint32_t>(bytes, at + tables::kEnemyRaceOrdinalOffset);
-            if (race > std::uint32_t{(std::numeric_limits<std::uint8_t>::max)()}) {
-                report_failure("race_ordinal", race);
+            std::uint32_t classHash = 0;
+            std::uint32_t race = 0;
+            if (!tables::read(bytes, at + tables::kEnemyRaceClassOffset, classHash)
+                || !tables::read(bytes, at + tables::kEnemyRaceOrdinalOffset, race)
+                || race > std::uint32_t{(std::numeric_limits<std::uint8_t>::max)()}) {
+                settle_unsupported("race_ordinal", race);
                 return false;
             }
-            races.push_back({field<std::uint32_t>(bytes, at + tables::kEnemyRaceClassOffset),
-                             static_cast<std::uint8_t>(race)});
+            races.push_back({classHash, static_cast<std::uint8_t>(race)});
         }
     } catch (...) {
         report_failure("race_storage", rows.count);
@@ -106,7 +111,9 @@ bool collect_label_table_tag(void* context, std::uint32_t tag) noexcept {
 
 /**
  * Reads every group membership of the combat label table. A repack moves the tag but not the
- * class, so the table is found by its class; the installed packages carry exactly one.
+ * class, so the table is found by its class; the installed packages carry exactly one. Any other
+ * number of tables, or a table the installed data refuses, settles the taxonomy; a failed sweep,
+ * package read or allocation is retried.
  * @param groups Receives the rows in ascending group, then label, order.
  */
 [[nodiscard]] bool read_label_groups(const reader::Source& source,
@@ -119,53 +126,60 @@ bool collect_label_table_tag(void* context, std::uint32_t tag) noexcept {
                             generated::PerkLabelTable::kClass,
                             &collect_label_table_tag,
                             &sweep,
-                            scanned)
-        || sweep.matches != 1) {
+                            scanned)) {
         report_failure("label_sweep", sweep.matches);
         return false;
     }
+    if (sweep.matches != 1) {
+        settle_unsupported("label_sweep", sweep.matches);
+        return false;
+    }
     std::uint32_t tableClass = 0;
-    tables::Array labels{};
-    tables::Array members{};
-    if (!reader::read_tag(source, scratch, sweep.tag, blob, tableClass)
-        || tableClass != generated::PerkLabelTable::kClass
-        || !tables::find_array_at(std::span<const std::byte>{blob},
-                                  offsetof(generated::PerkLabelTable, labels),
-                                  labels)
-        || labels.elementClass != generated::SU32HashElement::kClass
-        || labels.count > combat::kLabelCapacity
-        || !rows_fit(blob, labels, sizeof(generated::SU32HashElement))
-        || !tables::find_array_at(std::span<const std::byte>{blob},
-                                  offsetof(generated::PerkLabelTable, compression.groups),
-                                  members)
-        || members.elementClass != generated::SPerkLabelGroup::kClass
-        || !rows_fit(blob, members, sizeof(generated::SPerkLabelGroup))) {
-        report_failure("label_table", blob.size());
+    if (!reader::read_tag(source, scratch, sweep.tag, blob, tableClass)) {
+        report_failure("label_read", sweep.tag);
         return false;
     }
     const std::span<const std::byte> bytes{blob};
+    tables::Array labels{};
+    tables::Array members{};
+    if (tableClass != generated::PerkLabelTable::kClass
+        || !tables::read_array(bytes,
+                               offsetof(generated::PerkLabelTable, labels),
+                               generated::SU32HashElement::kClass,
+                               sizeof(generated::SU32HashElement),
+                               labels)
+        || labels.count > combat::kLabelCapacity
+        || !tables::read_array(bytes,
+                               offsetof(generated::PerkLabelTable, compression.groups),
+                               generated::SPerkLabelGroup::kClass,
+                               sizeof(generated::SPerkLabelGroup),
+                               members)) {
+        settle_unsupported("label_table", blob.size());
+        return false;
+    }
     try {
         groups.clear();
         for (std::size_t group = 0; group < members.count; ++group) {
-            const std::size_t at = members.dataOffset + group * sizeof(generated::SPerkLabelGroup);
-            const auto groupHash =
-                field<std::uint32_t>(bytes, at + offsetof(generated::SPerkLabelGroup, groupHash));
-            const auto mask = field<decltype(generated::SPerkLabelGroup::labelMask)>(
-                bytes, at + offsetof(generated::SPerkLabelGroup, labelMask));
+            generated::SPerkLabelGroup row{};
+            if (!tables::read(bytes, members.dataOffset + group * sizeof row, row)) {
+                settle_unsupported("label_group", group);
+                return false;
+            }
             // Bit n of a mask names label n, least significant bit first within each byte.
             for (std::size_t label = 0; label < combat::kLabelCapacity; ++label) {
-                if ((mask[label / CHAR_BIT] & (1U << (label % CHAR_BIT))) == 0) {
+                if ((row.labelMask[label / CHAR_BIT] & (1U << (label % CHAR_BIT))) == 0) {
                     continue;
-                }
-                if (label >= labels.count) {
-                    report_failure("label_bit", label);
-                    return false;
                 }
                 const std::size_t labelAt =
                     labels.dataOffset + label * sizeof(generated::SU32HashElement);
-                groups.push_back({groupHash, field<std::uint32_t>(bytes, labelAt)});
+                std::uint32_t labelHash = 0;
+                if (label >= labels.count || !tables::read(bytes, labelAt, labelHash)) {
+                    settle_unsupported("label_bit", label);
+                    return false;
+                }
+                groups.push_back({row.groupHash, labelHash});
                 if (groups.size() > combat::kLabelGroupCapacity) {
-                    report_failure("label_capacity", groups.size());
+                    settle_unsupported("label_capacity", groups.size());
                     return false;
                 }
             }
@@ -183,7 +197,16 @@ bool collect_label_table_tag(void* context, std::uint32_t tag) noexcept {
 
 } // namespace
 
-/** Publishes the race table and the label groups together; a refused read retries next slice. */
+/** @return True when the combat taxonomy is published or can never be. */
+bool combat_taxonomy_settled() noexcept {
+    return state::build_data::combat_taxonomy_ready()
+           || state::build_data::combat_taxonomy_unsupported();
+}
+
+/**
+ * Publishes the race table and the label groups together. A failed read or cache write retries
+ * next slice; rows the catalog refuses settle the taxonomy unsupported.
+ */
 bool build_combat_taxonomy(const reader::Source& source,
                            reader::Scratch& scratch,
                            std::span<const std::byte> root,
@@ -194,11 +217,19 @@ bool build_combat_taxonomy(const reader::Source& source,
         || !read_label_groups(source, scratch, blob, groups)) {
         return false;
     }
-    const bool published = state::build_data::publish_combat_taxonomy(races, groups);
+    // Rows the catalog refuses, such as a repeated class or an empty group table, are the data's
+    // own, so that refusal is final.
+    const bool valid = state::build_data::valid_combat_taxonomy(races, groups);
+    const bool published = valid && state::build_data::publish_combat_taxonomy(races, groups);
+    const char* result = published ? "ok" : "fail";
+    if (!valid) {
+        state::build_data::settle_combat_taxonomy_unsupported();
+        result = "unsupported";
+    }
     core::log::writef(core::log::Channel::client,
                       published ? core::log::Level::info : core::log::Level::warn,
                       "ev=pkg stage=combat_taxonomy result=%s races=%zu label_groups=%zu",
-                      published ? "ok" : "fail",
+                      result,
                       races.size(),
                       groups.size());
     return published;

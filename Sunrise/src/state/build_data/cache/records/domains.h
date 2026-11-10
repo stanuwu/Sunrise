@@ -198,7 +198,9 @@ struct Domains {
     std::span<const unlocks::Instruction> objectiveInstructions;
     std::span<const pursuits::Definition> pursuits;
     std::span<const starter_sets::Definition> starterSets;
+    /** An empty list records a build whose insertion rules are unsupported. */
     std::span<const items::insertion_rules::Rule> plugInsertionRules;
+    /** An empty table records a build whose combat taxonomy is unsupported. */
     std::span<const combat::EnemyRace> enemyRaces;
     std::span<const combat::LabelGroup> labelGroups;
 };

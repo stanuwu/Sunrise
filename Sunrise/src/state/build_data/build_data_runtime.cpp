@@ -131,6 +131,20 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         pursuitsReplaced = objectives::replace({domains.objectives, domains.objectiveInstructions})
                            && pursuits::replace(domains.pursuits, domains.objectives.size());
     }
+    // A cache with no insertion rules records a build whose rule list is unsupported.
+    bool insertionRulesReplaced = true;
+    if (domains.plugInsertionRules.empty()) {
+        items::insertion_rules::settle_unsupported();
+    } else {
+        insertionRulesReplaced = items::insertion_rules::replace(domains.plugInsertionRules);
+    }
+    // A cache with no race table records a build whose combat taxonomy is unsupported.
+    bool combatReplaced = true;
+    if (domains.enemyRaces.empty()) {
+        combat::settle_unsupported();
+    } else {
+        combatReplaced = combat::replace(domains.enemyRaces, domains.labelGroups);
+    }
     // A checked cache with no reward pools records a refused reward graph.
     const bool rewardsCached = !domains.rewardPools.empty();
     const constants::InvestmentConstants cachedConstants{
@@ -149,7 +163,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
                                   domains.rewardInstructions,
                                   domains.rewardModifiers,
                                   domains.rewardSockets}))
-        || !pursuitsReplaced
+        || !pursuitsReplaced || !insertionRulesReplaced || !combatReplaced
         || !material_requirements::replace(domains.materialRequirementSets, domains.currencyScalars)
         || !inventory::buckets::replace(domains.inventoryBuckets)
         || !socket_entry_lists::replace(domains.socketEntryLists)
@@ -165,8 +179,6 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         || !bounties::replace(domains.bounties)
         // An empty table publishes too, so creation keeps refusing an unknown layout.
         || !starter_sets::replace(domains.starterSets)
-        || !items::insertion_rules::replace(domains.plugInsertionRules)
-        || !combat::replace(domains.enemyRaces, domains.labelGroups)
         || !records::replace(domains.records,
                              domains.recordObjectives,
                              domains.recordIntervals,

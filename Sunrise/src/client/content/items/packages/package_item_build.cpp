@@ -46,8 +46,8 @@ namespace {
            && state::build_data::sobject_definitions_ready()
            && state::build_data::investment_constants_ready()
            && state::build_data::starter_sets_ready() && exotic_catalysts_settled()
-           && pursuit_catalog_settled() && state::build_data::plug_insertion_rules_ready()
-           && state::build_data::combat_taxonomy_ready();
+           && pursuit_catalog_settled() && plug_insertion_rules_settled()
+           && combat_taxonomy_settled();
 }
 
 /**
@@ -171,8 +171,7 @@ bool build() noexcept {
             // Quest, record, node, season, catalyst, pursuit, material, plug-rule and vendor reads
             // share these maps.
             if (!state::build_data::item_definitions_ready()
-                || !state::build_data::vendor_catalog_ready()
-                || !state::build_data::plug_insertion_rules_ready()
+                || !state::build_data::vendor_catalog_ready() || !plug_insertion_rules_settled()
                 || !state::build_data::material_requirement_sets_ready()
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
@@ -259,8 +258,7 @@ bool build() noexcept {
             // Pass rows, plug insertion rules and pursuit reward rows bind through the reward
             // condition tables, which load before the pools.
             if (!reward_definitions_settled() || !state::build_data::season_pass_ready()
-                || !state::build_data::plug_insertion_rules_ready()
-                || !pursuit_catalog_settled()) {
+                || !plug_insertion_rules_settled() || !pursuit_catalog_settled()) {
                 (void)storage.rewardBuild.load(
                     source, storage.scratch, storage.root, storage.slotMaps);
             }
@@ -317,7 +315,7 @@ bool build() noexcept {
                     (void)state::build_data::publish_investment_constants(extracted);
                 }
             }
-            if (!state::build_data::combat_taxonomy_ready()) {
+            if (!combat_taxonomy_settled()) {
                 (void)build_combat_taxonomy(source,
                                             storage.scratch,
                                             std::span<const std::byte>{storage.root},

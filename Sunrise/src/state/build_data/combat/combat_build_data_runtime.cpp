@@ -9,12 +9,33 @@ bool combat_taxonomy_ready() noexcept {
     return combat::count() != 0;
 }
 
+/** @return True once the installed data has settled that no taxonomy can be read. */
+bool combat_taxonomy_unsupported() noexcept {
+    return combat::unsupported();
+}
+
+/** Checks both tables against the catalog's publication rules. */
+bool valid_combat_taxonomy(std::span<const combat::EnemyRace> races,
+                           std::span<const combat::LabelGroup> groups) noexcept {
+    return combat::valid(races) && combat::valid(groups);
+}
+
 /** Publishes the actor class races and label groups together. */
 bool publish_combat_taxonomy(std::span<const combat::EnemyRace> races,
                              std::span<const combat::LabelGroup> groups) noexcept {
     runtime::persistence::Transaction transaction;
     return transaction.active()
            && transaction.finish(combat::replace(races, groups), combat::clear);
+}
+
+/** Records the settlement, and forgets it when the first cache write after it fails. */
+void settle_combat_taxonomy_unsupported() noexcept {
+    runtime::persistence::Transaction transaction;
+    if (!transaction.active()) {
+        return;
+    }
+    combat::settle_unsupported();
+    static_cast<void>(transaction.finish(true, combat::clear));
 }
 
 /** Reads the race of one actor class. */

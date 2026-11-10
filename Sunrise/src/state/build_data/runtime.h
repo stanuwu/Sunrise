@@ -248,6 +248,16 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
 [[nodiscard]] bool combat_taxonomy_ready() noexcept;
 
 /**
+ * @return True once the installed data has settled that no taxonomy can be read, so no kill
+ *         objective advances. A cache records that settlement as an empty race table.
+ */
+[[nodiscard]] bool combat_taxonomy_unsupported() noexcept;
+
+/** Checks rows against the rules publish_combat_taxonomy applies to both tables. */
+[[nodiscard]] bool valid_combat_taxonomy(std::span<const combat::EnemyRace> races,
+                                         std::span<const combat::LabelGroup> groups) noexcept;
+
+/**
  * Publishes the race of every installed actor class and every combat label group membership.
  * @param races Rows in strictly ascending class order.
  * @param groups Rows in strictly ascending group, then label, order.
@@ -255,6 +265,9 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
  */
 [[nodiscard]] bool publish_combat_taxonomy(std::span<const combat::EnemyRace> races,
                                            std::span<const combat::LabelGroup> groups) noexcept;
+
+/** Records that the installed data supports no combat taxonomy; a clear forgets it. */
+void settle_combat_taxonomy_unsupported() noexcept;
 
 /**
  * Reads the race of one actor class, the class a kill incident names its victim by.
@@ -270,6 +283,17 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
 [[nodiscard]] bool plug_insertion_rules_ready() noexcept;
 
 /**
+ * @return True once the installed data has settled that no rule list can be published, so every
+ *         plug whose rules would be checked is refused. A cache records that settlement as an
+ *         empty rule list.
+ */
+[[nodiscard]] bool plug_insertion_rules_unsupported() noexcept;
+
+/** Checks rows against the rules publish_plug_insertion_rules applies to the whole list. */
+[[nodiscard]] bool
+valid_plug_insertion_rules(std::span<const items::insertion_rules::Rule> rules) noexcept;
+
+/**
  * Publishes the insertion rules of every plug that declares any, bound to the saved banks.
  * @param rules Rows in strictly ascending plug order.
  * @return True when the rows pass the checks and any needed cache write succeeds.
@@ -277,9 +301,13 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
 [[nodiscard]] bool
 publish_plug_insertion_rules(std::span<const items::insertion_rules::Rule> rules) noexcept;
 
+/** Records that the installed data supports no insertion rule list; a clear forgets it. */
+void settle_plug_insertion_rules_unsupported() noexcept;
+
 /**
  * Reads the insertion rules one plug declares.
- * @return False when the plug declares none.
+ * @return False when the plug declares none, and for every plug while the rules are not ready,
+ *         so a caller checks plug_insertion_rules_ready first.
  */
 [[nodiscard]] bool find_plug_insertion_rule(std::uint16_t plugDefinitionIndex,
                                             items::insertion_rules::Rule& rule) noexcept;

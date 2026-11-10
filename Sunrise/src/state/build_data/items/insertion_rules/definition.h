@@ -8,7 +8,10 @@
 
 namespace sunrise::state::build_data::items::insertion_rules {
 
-/** Rule rows. The installed build declares insertion rules on 1,809 plugs. */
+/**
+ * Rule rows. The installed build declares insertion rules on 1,809 plugs. A build declaring more
+ * settles the domain unsupported.
+ */
 inline constexpr std::size_t kRuleCapacity = 2048;
 
 /**

@@ -8,8 +8,12 @@
 
 namespace sunrise::state::build_data::combat {
 
-/** Discards every published row. */
+/** Discards every published row and forgets an unsupported settlement. */
 void clear() noexcept;
+/** True once the installed data has settled that no taxonomy can be read. */
+[[nodiscard]] bool unsupported() noexcept;
+/** Discards every row and records that the installed data supports no taxonomy. */
+void settle_unsupported() noexcept;
 /** Checks race rows in strictly ascending class order, none naming the empty hash. */
 [[nodiscard]] bool valid(std::span<const EnemyRace> races) noexcept;
 /** Checks group rows in strictly ascending group, then label, order. */
