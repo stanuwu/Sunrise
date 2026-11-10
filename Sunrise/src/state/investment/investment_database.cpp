@@ -37,13 +37,13 @@ constexpr const char* kParkedItemsTable =
     "seen INTEGER NOT NULL CHECK (seen IN (0, 1))"
     ") STRICT;";
 
-/** Version 6 records which bucket a parked row left; a new save gets the column at creation. */
+/** Records which bucket a parked row left; a new save gets the column at creation. */
 constexpr const char* kParkedPlacementColumn =
     "ALTER TABLE parked_items ADD COLUMN placement INTEGER NOT NULL DEFAULT 0 "
     "CHECK (placement IN (0, 1));";
 
 /**
- * Version 7 saves each item's per-instance values, 4 little-endian bytes per lane; an item
+ * Saves each item's per-instance values, 4 little-endian bytes per lane; an item
  * without a row publishes none. A new save and the migration both run these statements.
  */
 constexpr const char* kItemObjectivesTable =
@@ -57,7 +57,7 @@ constexpr const char* kParkedObjectivesColumn =
 static_assert(sizeof(ObjectiveBlob) == 32);
 
 /**
- * Version 8 saves each character's Gambit Prime helmet tier per role. A new save and the
+ * Saves each character's Gambit Prime helmet tier per role. A new save and the
  * migration both run this statement.
  */
 constexpr const char* kCharacterHelmetTiersTable =
@@ -70,7 +70,7 @@ constexpr const char* kCharacterHelmetTiersTable =
     ") STRICT;";
 
 /**
- * Version 9 removes the default Family-5 row that overrides every character's Synthesizer tier
+ * Removes the default Family-5 row that overrides every character's Synthesizer tier
  * (kind 1, slot 5159, value 3) and closes the gap. A row edited to another value stays.
  */
 constexpr const char* kSynthesizerTierOverrideRemoval =
@@ -82,7 +82,7 @@ constexpr const char* kSynthesizerTierOverrideRemoval =
     "DROP TABLE family5_kept;";
 
 /**
- * Version 10 saves the Store wallet sync generation, which outlives every account row rewrite.
+ * Saves the Store wallet sync generation, which outlives every account row rewrite.
  * A new save and the migration both run this statement.
  */
 constexpr const char* kWalletSyncTable =
@@ -91,10 +91,23 @@ constexpr const char* kWalletSyncTable =
     "revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 4294967295)"
     ") STRICT, WITHOUT ROWID;";
 
+/**
+ * Gives each profile row that still has serial 0 its own, from 1 in saved order, and moves the
+ * rows numbered since above them.
+ */
+constexpr const char* kProfileSerialNumbering =
+    "CREATE TEMP TABLE profile_unnumbered AS SELECT position,"
+    "ROW_NUMBER() OVER (ORDER BY position) AS serial FROM profile_items WHERE mutation_serial=0;"
+    "UPDATE profile_items SET mutation_serial=mutation_serial"
+    "+(SELECT COUNT(*) FROM profile_unnumbered) WHERE mutation_serial>0;"
+    "UPDATE profile_items SET mutation_serial=(SELECT serial FROM profile_unnumbered "
+    "WHERE profile_unnumbered.position=profile_items.position) WHERE mutation_serial=0;"
+    "DROP TABLE profile_unnumbered;";
+
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 11;
+constexpr int kSchemaVersion = 6;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
 
@@ -203,9 +216,11 @@ static_assert(account::inventory::kCharacterStackCapacity == 333);
 
 /**
  * Widens saved row bounds to the character ABI, adds item, stack and parked-row placement, and
- * drops the world reward kind: one grant path places every reward.
+ * drops the world reward kind: one grant path places every reward. Adds per-item objectives,
+ * helmet tiers and the wallet sync generation, removes the Synthesizer tier override and numbers
+ * the profile rows.
  */
-static bool migrate_placement_storage() noexcept {
+static bool migrate_investment_storage() noexcept {
     // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
     // no account readers exist yet; restore enforcement after the savepoint ends on either path.
     if (!execute("PRAGMA foreign_keys=OFF")) {
@@ -263,8 +278,11 @@ INSERT INTO pending_rewards_v6 (id, character_slot, definition_hash, quantity)
     SELECT id, character_slot, definition_hash, quantity FROM pending_rewards;
 DROP TABLE pending_rewards;
 ALTER TABLE pending_rewards_v6 RENAME TO pending_rewards;
-PRAGMA user_version=6;
-)sql") || !execute(kParkedPlacementColumn)) {
+)sql") || !execute(kParkedPlacementColumn)
+            || !execute(kItemObjectivesTable) || !execute(kParkedObjectivesColumn)
+            || !execute(kCharacterHelmetTiersTable) || !execute(kSynthesizerTierOverrideRemoval)
+            || !execute(kWalletSyncTable) || !execute(kProfileSerialNumbering)
+            || !execute("PRAGMA user_version=6")) {
             return false;
         }
         // Only the rebuilt tables and the sockets that reference them are rechecked.
@@ -395,57 +413,7 @@ bool open(std::string_view path,
         }
     }
     if (ready && version == 5) {
-        ready = migrate_placement_storage();
-        if (ready) {
-            version = 6;
-        }
-    }
-    if (ready && version == 6) {
-        Transaction transaction;
-        ready = transaction.ready() && execute(kItemObjectivesTable)
-                && execute(kParkedObjectivesColumn) && execute("PRAGMA user_version=7")
-                && transaction.commit();
-        if (ready) {
-            version = 7;
-        }
-    }
-    if (ready && version == 7) {
-        Transaction transaction;
-        ready = transaction.ready() && execute(kCharacterHelmetTiersTable)
-                && execute("PRAGMA user_version=8") && transaction.commit();
-        if (ready) {
-            version = 8;
-        }
-    }
-    if (ready && version == 8) {
-        Transaction transaction;
-        ready = transaction.ready() && execute(kSynthesizerTierOverrideRemoval)
-                && execute("PRAGMA user_version=9") && transaction.commit();
-        if (ready) {
-            version = 9;
-        }
-    }
-    if (ready && version == 9) {
-        Transaction transaction;
-        ready = transaction.ready() && execute(kWalletSyncTable)
-                && execute("PRAGMA user_version=10") && transaction.commit();
-        if (ready) {
-            version = 10;
-        }
-    }
-    if (ready && version == 10) {
-        Transaction transaction;
-        ready = transaction.ready()
-                && execute("CREATE TEMP TABLE profile_unnumbered AS SELECT position,"
-                           "ROW_NUMBER() OVER (ORDER BY position) AS serial FROM profile_items "
-                           "WHERE mutation_serial=0;"
-                           "UPDATE profile_items SET mutation_serial=mutation_serial"
-                           "+(SELECT COUNT(*) FROM profile_unnumbered) WHERE mutation_serial>0;"
-                           "UPDATE profile_items SET mutation_serial=(SELECT serial FROM "
-                           "profile_unnumbered WHERE profile_unnumbered.position="
-                           "profile_items.position) WHERE mutation_serial=0;"
-                           "DROP TABLE profile_unnumbered;")
-                && execute("PRAGMA user_version=11") && transaction.commit();
+        ready = migrate_investment_storage();
     }
     if (!ready) {
         shutdown();

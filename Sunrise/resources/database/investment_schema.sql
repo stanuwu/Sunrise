@@ -1,5 +1,5 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 11;
+PRAGMA user_version = 6;
 -- open() also creates parked_items, item_objectives, character_helmet_tiers and
 -- eververse_wallet_sync.
 
