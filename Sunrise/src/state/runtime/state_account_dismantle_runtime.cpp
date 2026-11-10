@@ -1,10 +1,12 @@
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <new>
+#include <span>
 #include <string_view>
 
 #include "../investment/store_internal.h"
@@ -58,13 +60,39 @@ struct ExpectedItem {
            && item->quantity == expected.quantity;
 }
 
+/** The account one removal is staged against, with its selected character. */
+struct RemovalSnapshot {
+    std::unique_ptr<const AccountState> account;
+    std::size_t characterIndex{};
+    /** Null when the account is valid and has a selected character, else the refusal label. */
+    const char* refusal{};
+};
+
+/** Copies the account to the heap and finds its selected character. */
+[[nodiscard]] RemovalSnapshot take_removal_snapshot() noexcept {
+    RemovalSnapshot snapshot;
+    snapshot.account.reset(new (std::nothrow) AccountState(account_snapshot()));
+    if (!snapshot.account) {
+        snapshot.refusal = "allocation";
+    } else if (!account::valid(*snapshot.account)) {
+        snapshot.refusal = "account_state";
+    } else {
+        snapshot.characterIndex = selected_character_index(*snapshot.account);
+        if (snapshot.characterIndex >= snapshot.account->characterCount) {
+            snapshot.refusal = "character_changed";
+        }
+    }
+    return snapshot;
+}
+
 /**
  * Prepares one selected-character unequipped item removal without changing account State.
  * @param paysRewards False stages an editor removal, which credits no dismantle materials.
  * @param expected The instance the caller read, or null to accept whatever the instance holds.
  * @param reason Receives the refusal label on failure.
  */
-[[nodiscard]] bool prepare_selected_item_dismantle(std::uint64_t instanceSoid,
+[[nodiscard]] bool prepare_selected_item_dismantle(const RemovalSnapshot& snapshot,
+                                                   std::uint64_t instanceSoid,
                                                    bool paysRewards,
                                                    const ExpectedItem* expected,
                                                    PendingItemDismantle& mutation,
@@ -86,19 +114,11 @@ struct ExpectedItem {
                          0);
         return false;
     };
-    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
-                                                           AccountState(account_snapshot()));
-    if (!snapshot) {
-        return fail("allocation");
+    if (snapshot.refusal != nullptr) {
+        return fail(snapshot.refusal);
     }
-    const AccountState& account = *snapshot;
-    if (!account::valid(account)) {
-        return fail("account_state");
-    }
-    const std::size_t characterIndex = selected_character_index(account);
-    if (characterIndex >= account.characterCount) {
-        return fail("character_changed");
-    }
+    const AccountState& account = *snapshot.account;
+    const std::size_t characterIndex = snapshot.characterIndex;
     if (expected != nullptr
         && !holds_expected_item(
             account.characters[characterIndex], instanceSoid, *expected, reason)) {
@@ -107,7 +127,7 @@ struct ExpectedItem {
     // Staging applies the in-game dismantle rules, so a locked item or a row the loadout cannot
     // place is refused here too.
     if (!stage_item_dismantle(account, characterIndex, instanceSoid, paysRewards, mutation)) {
-        return fail("unsupported_removal");
+        return fail(paysRewards ? "ownership_or_resolve" : "unsupported_removal");
     }
     report_dismantle(stage,
                      "ok",
@@ -167,20 +187,26 @@ struct ExpectedItem {
                                               unlocks::kFlagSet);
 }
 
+/** @return True when a profile row carries the instance; a valid account holds it nowhere else. */
+[[nodiscard]] bool profile_holds_instance(const AccountState& account,
+                                          std::uint64_t instanceSoid) noexcept {
+    const auto rows = std::span(account.profileItems).first(account.profileItemCount);
+    return instanceSoid != 0
+           && std::any_of(rows.begin(), rows.end(), [instanceSoid](const auto& row) noexcept {
+                  return row.instanceSoid == instanceSoid;
+              });
+}
+
 /**
  * Prepares the removal of one instanced profile row, which no character inventory holds, without
  * changing account State.
+ * @param snapshot A snapshot that carries no refusal.
  */
-[[nodiscard]] bool prepare_profile_resident_discard(std::uint64_t instanceSoid,
+[[nodiscard]] bool prepare_profile_resident_discard(const RemovalSnapshot& snapshot,
+                                                    std::uint64_t instanceSoid,
                                                     PendingItemDismantle& mutation) noexcept {
-    mutation = {};
-    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
-                                                           AccountState(account_snapshot()));
-    const std::size_t characterIndex =
-        snapshot ? selected_character_index(*snapshot) : std::size_t{};
-    const bool staged =
-        snapshot && account::valid(*snapshot) && characterIndex < snapshot->characterCount
-        && stage_profile_resident_discard(*snapshot, characterIndex, instanceSoid, mutation);
+    const bool staged = stage_profile_resident_discard(
+        *snapshot.account, snapshot.characterIndex, instanceSoid, mutation);
     report_dismantle("prepare_profile_resident",
                      staged ? "ok" : "fail",
                      staged ? "ready" : "not_held",
@@ -199,10 +225,16 @@ struct ExpectedItem {
 
 /** Prepares one unequipped item removal, from the selected character or the profile. */
 bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mutation) noexcept {
+    const RemovalSnapshot snapshot = take_removal_snapshot();
     const char* reason = nullptr;
-    if ((prepare_selected_item_dismantle(instanceSoid, true, nullptr, mutation, reason)
-         || prepare_profile_resident_discard(instanceSoid, mutation))
-        && prepare_acquired_flag(mutation)) {
+    const bool profileResident =
+        snapshot.refusal == nullptr && profile_holds_instance(*snapshot.account, instanceSoid);
+    const bool staged =
+        profileResident
+            ? prepare_profile_resident_discard(snapshot, instanceSoid, mutation)
+            : prepare_selected_item_dismantle(
+                  snapshot, instanceSoid, true, nullptr, mutation, reason);
+    if (staged && prepare_acquired_flag(mutation)) {
         return true;
     }
     mutation = {};
@@ -227,22 +259,13 @@ bool prepare_stack_discard(std::uint32_t definitionHash,
                          0,
                          mutation.afterCharacter.nextInventorySerial);
     };
-    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
-                                                           AccountState(account_snapshot()));
-    if (!snapshot) {
-        report("fail", "allocation");
+    const RemovalSnapshot snapshot = take_removal_snapshot();
+    if (snapshot.refusal != nullptr) {
+        report("fail", snapshot.refusal);
         return false;
     }
-    if (!account::valid(*snapshot)) {
-        report("fail", "account_state");
-        return false;
-    }
-    const std::size_t characterIndex = selected_character_index(*snapshot);
-    if (characterIndex >= snapshot->characterCount) {
-        report("fail", "character_changed");
-        return false;
-    }
-    if (!stage_stack_discard(*snapshot, characterIndex, definitionHash, heldQuantity, mutation)) {
+    if (!stage_stack_discard(
+            *snapshot.account, snapshot.characterIndex, definitionHash, heldQuantity, mutation)) {
         report("fail", "stack_not_held");
         return false;
     }
@@ -266,7 +289,8 @@ bool prepare_item_removal(std::uint64_t characterSoid,
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     const ExpectedItem expected{characterSoid, definitionHash, mutationSerial, quantity};
-    return prepare_selected_item_dismantle(instanceSoid, false, &expected, mutation, reason);
+    return prepare_selected_item_dismantle(
+        take_removal_snapshot(), instanceSoid, false, &expected, mutation, reason);
 }
 
 /** Produces the exact character-and-profile after-image while the captured views remain current. */
@@ -340,19 +364,20 @@ bool commit_item_dismantle(PendingItemDismantle& mutation) noexcept {
     AccountState candidate{};
     const bool ready =
         materialize_item_dismantle(investment::store::account(), prepared, candidate);
+    bool written = false;
     if (ready) {
         // The inventory and the acquisition flag commit together or not at all.
         investment::store::Transaction transaction;
-        if (!transaction.ready() || !investment::store::write_account(candidate)
-            || !write_acquired_flag(prepared) || !transaction.commit()) {
-            investment::store::g_mutex.unlock();
-            return false;
-        }
+        written = transaction.ready() && investment::store::write_account(candidate)
+                  && write_acquired_flag(prepared) && transaction.commit();
     }
     investment::store::g_mutex.unlock();
 
     if (!ready) {
         return fail("stale_or_invalid");
+    }
+    if (!written) {
+        return fail("transaction");
     }
 
     report_dismantle("commit_end",

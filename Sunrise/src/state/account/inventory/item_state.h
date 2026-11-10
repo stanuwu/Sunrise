@@ -10,8 +10,7 @@ namespace sunrise::state::account::inventory {
 inline constexpr std::size_t kItemObjectiveLaneCount = 8;
 /**
  * Lane holding a bounty's deadline in Unix seconds; the client shows the deadline minus its
- * clock. No package field names this lane: it was observed in game, where stamping it set a
- * bounty's timer and writing the next lane moved its first objective's bar.
+ * clock. No package field names this lane; the client's timer is the evidence for it.
  */
 inline constexpr std::size_t kItemExpiryLane = 0;
 /**

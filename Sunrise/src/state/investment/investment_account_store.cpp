@@ -3,6 +3,9 @@
 namespace sunrise::state::investment::store {
 namespace {
 
+// character_helmet_tiers has one column per role, read and written here in GambitPrimeRole order.
+static_assert(kGambitPrimeRoleCount == 4);
+
 /**
  * Reads characters in stable slot order and overlays only process-local session fields. A
  * character with no helmet row has earned no tier.
@@ -286,8 +289,8 @@ bool remove_character_rows(std::size_t slot) noexcept {
     return transaction.commit();
 }
 
-/** Reads the saved account's Store sync revision; an account that never synced reads zero. */
-bool read_store_sync_revision(std::uint32_t& revision) noexcept {
+/** Reads the saved account's Store wallet sync revision; one that never synced reads zero. */
+bool read_store_wallet_sync(std::uint32_t& revision) noexcept {
     revision = 0;
     Transaction transaction;
     Statement row("SELECT revision FROM eververse_wallet_sync "
@@ -303,12 +306,12 @@ bool read_store_sync_revision(std::uint32_t& revision) noexcept {
     return (result == SQLITE_ROW || result == SQLITE_DONE) && transaction.commit();
 }
 
-/** Advances the saved account's Store sync revision by one. */
-bool advance_store_sync_revision(std::uint32_t& revision) noexcept {
+/** Advances the saved account's Store wallet sync revision by one. */
+bool advance_store_wallet_sync(std::uint32_t& revision) noexcept {
     revision = 0;
     Transaction transaction;
     std::uint32_t before = 0;
-    if (!transaction.ready() || !read_store_sync_revision(before)
+    if (!transaction.ready() || !read_store_wallet_sync(before)
         || before == (std::numeric_limits<std::uint32_t>::max)()) {
         return false;
     }

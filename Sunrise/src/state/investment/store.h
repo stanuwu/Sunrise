@@ -61,13 +61,12 @@ void set_sign_in_time(std::uint64_t seconds) noexcept;
  * Reads the generation a Store wallet sync last committed.
  * @param revision Receives the revision, or zero when the account never synced.
  */
-[[nodiscard]] bool read_store_sync_revision(std::uint32_t& revision) noexcept;
+[[nodiscard]] bool read_store_wallet_sync(std::uint32_t& revision) noexcept;
 /**
- * Advances the Store wallet sync generation. Composes with the caller's transaction and grants,
- * charges or reads no currency.
+ * Advances the Store wallet sync generation.
  * @param revision Receives the new revision; zero on failure.
  */
-[[nodiscard]] bool advance_store_sync_revision(std::uint32_t& revision) noexcept;
+[[nodiscard]] bool advance_store_wallet_sync(std::uint32_t& revision) noexcept;
 [[nodiscard]] bool bootstrap_completed(std::string_view name) noexcept;
 [[nodiscard]] bool complete_bootstrap(std::string_view name) noexcept;
 

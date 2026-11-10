@@ -585,9 +585,8 @@ AccountState account_snapshot() noexcept {
     return snapshot;
 }
 
-/** Reads the account and character keys under the store lock. */
+/** Reads the account and character keys; the store call holds its own lock. */
 bool account_identity(AccountIdentity& output) noexcept {
-    const std::lock_guard lock(investment::store::g_mutex);
     return investment::store::read_account_identity(output);
 }
 
@@ -674,12 +673,12 @@ bool ensure_character_subclasses() noexcept {
 
 /** Advances the saved Store wallet sync generation. */
 bool synchronize_store_wallet(std::uint32_t& revision) noexcept {
-    return investment::store::advance_store_sync_revision(revision);
+    return investment::store::advance_store_wallet_sync(revision);
 }
 
 /** Reads the saved Store wallet sync generation. */
 bool read_store_wallet_sync(std::uint32_t& revision) noexcept {
-    return investment::store::read_store_sync_revision(revision);
+    return investment::store::read_store_wallet_sync(revision);
 }
 
 } // namespace sunrise::state

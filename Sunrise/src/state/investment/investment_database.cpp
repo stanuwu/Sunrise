@@ -55,18 +55,6 @@ constexpr const char* kParkedObjectivesColumn =
 static_assert(sizeof(ObjectiveBlob) == 32);
 
 /**
- * Version 9 drops the Family-5 override that forced every character's Synthesizer tier to
- * Powerful, so the account object's per-character tier shows, and closes the gap it leaves.
- */
-constexpr const char* kSynthesizerTierOverrideRemoval =
-    "CREATE TEMP TABLE family5_kept AS SELECT kind,position,slot,value FROM family5 "
-    "WHERE kind<>1 OR slot<>5159;"
-    "DELETE FROM family5;"
-    "INSERT INTO family5 SELECT kind,ROW_NUMBER() OVER (PARTITION BY kind ORDER BY position)-1,"
-    "slot,value FROM family5_kept;"
-    "DROP TABLE family5_kept;";
-
-/**
  * Version 8 saves each character's Gambit Prime helmet tier per role. A new save and the
  * migration both run this statement.
  */
@@ -78,6 +66,19 @@ constexpr const char* kCharacterHelmetTiersTable =
     "collector INTEGER NOT NULL CHECK (collector BETWEEN 0 AND 3),"
     "sentry INTEGER NOT NULL CHECK (sentry BETWEEN 0 AND 3)"
     ") STRICT;";
+
+/**
+ * Version 9 removes the default Family-5 row of kind 1, slot 5159, value 3, which forced every
+ * character's Synthesizer tier to Powerful, so the account object's per-character tier shows. It
+ * closes the gap the row leaves. A row edited to another value stays.
+ */
+constexpr const char* kSynthesizerTierOverrideRemoval =
+    "CREATE TEMP TABLE family5_kept AS SELECT kind,position,slot,value FROM family5 "
+    "WHERE kind<>1 OR slot<>5159 OR value<>3;"
+    "DELETE FROM family5;"
+    "INSERT INTO family5 SELECT kind,ROW_NUMBER() OVER (PARTITION BY kind ORDER BY position)-1,"
+    "slot,value FROM family5_kept;"
+    "DROP TABLE family5_kept;";
 
 /**
  * Version 10 saves the Store wallet sync generation, which outlives every account row rewrite.
@@ -189,6 +190,7 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
     return true;
 }
 
+// The version 6 tables bound item and stack positions by these capacities, written as literals.
 static_assert(account::inventory::kCharacterItemCapacity == 333);
 static_assert(account::inventory::kCharacterStackCapacity == 333);
 

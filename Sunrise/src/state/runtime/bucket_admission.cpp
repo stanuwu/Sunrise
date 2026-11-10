@@ -27,7 +27,7 @@ bool find_recovery_bucket(const build_data::items::Definition& item,
 namespace {
 
 /** Counts occupied rows and remembers the oldest replaceable row in their owning array. */
-struct BucketAdmission {
+struct BucketOccupancy {
     std::size_t count{};
     std::size_t oldest{(std::numeric_limits<std::size_t>::max)()};
     std::int32_t serial{(std::numeric_limits<std::int32_t>::max)()};
@@ -51,9 +51,9 @@ struct BucketAdmission {
 using EvictionChain = std::bitset<inventory_buckets::kDescriptorCapacity>;
 
 /** Counts this bucket's saved profile rows and selects its oldest mutation identity. */
-[[nodiscard]] bool profile_bucket_admission(std::span<const authored_inventory::ProfileItem> items,
+[[nodiscard]] bool profile_bucket_occupancy(std::span<const authored_inventory::ProfileItem> items,
                                             std::uint8_t bucketId,
-                                            BucketAdmission& occupancy) noexcept {
+                                            BucketOccupancy& occupancy) noexcept {
     occupancy = {};
     for (std::size_t index = 0; index < items.size(); ++index) {
         build_data::items::Definition definition{};
@@ -79,6 +79,7 @@ using EvictionChain = std::bitset<inventory_buckets::kDescriptorCapacity>;
     return true;
 }
 
+/** @return True when each unit of the item is its own instance rather than part of a stack. */
 [[nodiscard]] bool instanced(const item_details::Definition& detail) noexcept {
     return detail.instancedDefinitionState == item_details::InstancedDefinitionState::instanced;
 }
@@ -122,9 +123,9 @@ static_assert(
  * Counts one bucket's character rows and picks its oldest. As in the client, an equipped row is
  * an ordinary occupied row of its bucket.
  */
-[[nodiscard]] bool character_bucket_admission(const CharacterState& character,
+[[nodiscard]] bool character_bucket_occupancy(const CharacterState& character,
                                               const inventory_buckets::Descriptor& bucket,
-                                              BucketAdmission& occupancy) noexcept {
+                                              BucketOccupancy& occupancy) noexcept {
     occupancy = {};
     if (character.inventory.count > character.inventory.values.size()
         || character.stacks.count > character.stacks.values.size()) {
@@ -173,15 +174,15 @@ static_assert(
 [[nodiscard]] bool bucket_occupancy(const AccountState& account,
                                     std::size_t characterIndex,
                                     const inventory_buckets::Descriptor& bucket,
-                                    BucketAdmission& occupancy) noexcept {
+                                    BucketOccupancy& occupancy) noexcept {
     if (bucket.arraySelector == inventory_buckets::ArraySelector::profile) {
-        return profile_bucket_admission(
+        return profile_bucket_occupancy(
             std::span(account.profileItems).first(account.profileItemCount),
             bucket.bucketId,
             occupancy);
     }
     return bucket.arraySelector == inventory_buckets::ArraySelector::character
-           && character_bucket_admission(account.characters[characterIndex], bucket, occupancy);
+           && character_bucket_occupancy(account.characters[characterIndex], bucket, occupancy);
 }
 
 /** @return Room the same item's stacks in this bucket still have. */
@@ -336,7 +337,7 @@ template <typename Visit>
                                      bool scanLabel,
                                      std::int32_t& admitted) noexcept {
     admitted = 0;
-    BucketAdmission occupancy;
+    BucketOccupancy occupancy;
     if (!bucket_occupancy(account, characterIndex, bucket, occupancy)) {
         return false;
     }
@@ -418,6 +419,7 @@ template <typename Visit>
  * bucket's no-transfer bit, a recovery bucket other than this one in the same array, the restricted
  * list, the label, then room when the recovery bucket is not FIFO. No kind Sunrise publishes is
  * one the restricted list lets through.
+ * @param bucket A character bucket; find_recovery_bucket names buckets of that array only.
  */
 [[nodiscard]] bool transfers_victim(const AccountState& account,
                                     std::size_t characterIndex,
@@ -432,8 +434,7 @@ template <typename Visit>
     bool labelFits = false;
     if ((bucket.policyFlags & inventory_buckets::kNoTransferOnEviction) != 0
         || victim.recoveryBucketId == bucket.bucketId || !find_recovery_bucket(victim, recovery)
-        || recovery.arraySelector != bucket.arraySelector || chain.test(recovery.bucketId)
-        || victim.grantRestricted) {
+        || chain.test(recovery.bucketId) || victim.grantRestricted) {
         return true;
     }
     if (!victim_label_fits(account, characterIndex, bucket, victim, detail, quantity, labelFits)) {
@@ -463,9 +464,9 @@ template <typename Visit>
                                        PlacedRows& rows,
                                        const char*& reason) noexcept {
     CharacterState& character = working.characters[characterIndex];
-    BucketAdmission occupancy;
+    BucketOccupancy occupancy;
     reason = "fifo_victim";
-    if (!character_bucket_admission(character, bucket, occupancy)
+    if (!character_bucket_occupancy(character, bucket, occupancy)
         || occupancy.oldest >= kCharacterRowCount) {
         return false;
     }
@@ -524,9 +525,9 @@ template <typename Visit>
 [[nodiscard]] bool evict_profile_row(AccountState& working,
                                      const inventory_buckets::Descriptor& bucket,
                                      const char*& reason) noexcept {
-    BucketAdmission occupancy;
+    BucketOccupancy occupancy;
     reason = "fifo_victim";
-    if (!profile_bucket_admission(std::span(working.profileItems).first(working.profileItemCount),
+    if (!profile_bucket_occupancy(std::span(working.profileItems).first(working.profileItemCount),
                                   bucket.bucketId,
                                   occupancy)
         || occupancy.oldest >= working.profileItemCount) {
@@ -537,6 +538,7 @@ template <typename Visit>
     if (working.profileItems[occupancy.oldest].instanceSoid != 0) {
         return false;
     }
+    reason = "fifo_victim";
     return erase_profile_row(working, occupancy.oldest);
 }
 
@@ -547,14 +549,15 @@ template <typename Visit>
                             EvictionChain& chain,
                             PlacedRows& rows,
                             const char*& reason) noexcept {
-    BucketAdmission occupancy;
-    reason = "bucket_full";
+    BucketOccupancy occupancy;
+    reason = "bucket_rows";
     if (!bucket_occupancy(working, characterIndex, bucket, occupancy)) {
         return false;
     }
     if (occupancy.count < bucket.slotCount) {
         return true;
     }
+    reason = "bucket_full";
     if ((bucket.policyFlags & inventory_buckets::kFifo) == 0) {
         return false;
     }
@@ -604,6 +607,7 @@ template <typename Row>
         if (row.definitionHash != item.definitionHash) {
             continue;
         }
+        reason = "serial_exhausted";
         if (!next_profile_serial(working, serial)) {
             return false;
         }
@@ -619,11 +623,20 @@ template <typename Row>
     while (quantity > 0) {
         std::int32_t serial = 0;
         std::uint64_t soid = 0;
-        if (!free_row(working, characterIndex, bucket, chain, rows, reason)
-            || working.profileItemCount >= working.profileItems.size()
-            || !next_profile_serial(working, serial)
-            || (build_data::is_profile_action_source(item.definitionIndex, item.bucketId)
-                && !next_profile_item_instance_soid(working, soid))) {
+        if (!free_row(working, characterIndex, bucket, chain, rows, reason)) {
+            return false;
+        }
+        reason = "profile_capacity";
+        if (working.profileItemCount >= working.profileItems.size()) {
+            return false;
+        }
+        reason = "serial_exhausted";
+        if (!next_profile_serial(working, serial)) {
+            return false;
+        }
+        reason = "instance_identity";
+        if (build_data::is_profile_action_source(item.definitionIndex, item.bucketId)
+            && !next_profile_item_instance_soid(working, soid)) {
             return false;
         }
         record(rows, GrantedRowArray::profile, serial, true);
@@ -657,6 +670,7 @@ template <typename Row>
         if (row.definitionHash != item.definitionHash || row.placement != placement) {
             continue;
         }
+        reason = "serial_exhausted";
         if (!next_character_serial(character, serial)) {
             return false;
         }
@@ -671,9 +685,15 @@ template <typename Row>
     }
     while (quantity > 0) {
         std::int32_t serial = 0;
-        if (!free_row(working, characterIndex, bucket, chain, rows, reason)
-            || character.stacks.count >= character.stacks.values.size()
-            || !next_character_serial(character, serial)) {
+        if (!free_row(working, characterIndex, bucket, chain, rows, reason)) {
+            return false;
+        }
+        reason = "character_stack_capacity";
+        if (character.stacks.count >= character.stacks.values.size()) {
+            return false;
+        }
+        reason = "serial_exhausted";
+        if (!next_character_serial(character, serial)) {
             return false;
         }
         record(rows, GrantedRowArray::characterStack, serial, true);
@@ -726,8 +746,12 @@ bool insert_instance(AccountState& working,
     }
     CharacterState& character = working.characters[characterIndex];
     std::int32_t serial = 0;
-    if (character.inventory.count >= character.inventory.values.size()
-        || !next_character_serial(character, serial)) {
+    reason = "instance_capacity";
+    if (character.inventory.count >= character.inventory.values.size()) {
+        return false;
+    }
+    reason = "serial_exhausted";
+    if (!next_character_serial(character, serial)) {
         return false;
     }
     record(rows, GrantedRowArray::characterItem, serial, true);
@@ -934,6 +958,7 @@ RewardPreparation place_arrival(AccountState& working,
     EvictionChain chain;
     const auto admit = [&](const inventory_buckets::Descriptor& bucket) noexcept {
         std::int32_t admitted = 0;
+        reason = "bucket_rows";
         if (!admitted_quantity(working,
                                characterIndex,
                                bucket,
@@ -1013,6 +1038,7 @@ bool place_claim(AccountState& working,
     }
     authored_inventory::Item moved{};
     EvictionChain chain;
+    reason = "claim_debit";
     if (!debit_claim_source(character, item, instance, claimed, quantity, moved)
         || (instance ? !insert_instance(
                            working, characterIndex, destination, item, moved, chain, rows, reason)

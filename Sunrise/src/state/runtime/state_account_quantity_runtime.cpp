@@ -17,8 +17,8 @@ using namespace runtime::detail;
 
 namespace {
 
-namespace buckets = build_data::inventory::buckets;
-namespace details = build_data::items::details;
+namespace inventory_buckets = build_data::inventory::buckets;
+namespace item_details = build_data::items::details;
 
 /** Finds the installed item a quantity edit names, after checking the quantity is not negative. */
 [[nodiscard]] bool find_edited_item(const QuantityEdit& edit,
@@ -42,18 +42,20 @@ namespace details = build_data::items::details;
                                  account::inventory::ItemPlacement placement,
                                  const char*& reason) noexcept {
     reason = "item_definition";
-    buckets::Descriptor bucket{};
+    inventory_buckets::Descriptor bucket{};
     if (!account::inventory::find_occupied_bucket(definition, placement, bucket)) {
         return false;
     }
     reason = "inventory_scope";
     switch (edit.scope) {
-    case EditScope::profile:
-        return bucket.arraySelector == buckets::ArraySelector::profile;
-    case EditScope::characterItem:
-        return bucket.arraySelector == buckets::ArraySelector::character && edit.instanceSoid != 0;
-    case EditScope::characterStack:
-        return bucket.arraySelector == buckets::ArraySelector::character && edit.instanceSoid == 0;
+    case GrantedRowArray::profile:
+        return bucket.arraySelector == inventory_buckets::ArraySelector::profile;
+    case GrantedRowArray::characterItem:
+        return bucket.arraySelector == inventory_buckets::ArraySelector::character
+               && edit.instanceSoid != 0;
+    case GrantedRowArray::characterStack:
+        return bucket.arraySelector == inventory_buckets::ArraySelector::character
+               && edit.instanceSoid == 0;
     }
     return false;
 }
@@ -63,14 +65,14 @@ namespace details = build_data::items::details;
                                     const QuantityEdit& edit,
                                     const char*& reason) noexcept {
     reason = "item_detail";
-    details::Definition detail{};
+    item_details::Definition detail{};
     if (!build_data::find_configured_item_detail(definition.definitionIndex, detail)
         || detail.definitionHash != definition.definitionHash
         || detail.bucketId != definition.bucketId) {
         return false;
     }
     reason = "quantity";
-    return detail.instancedDefinitionState == details::InstancedDefinitionState::stackable
+    return detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable
            && edit.quantity <= detail.maxStackSize;
 }
 
@@ -126,15 +128,15 @@ template <typename Row, std::size_t Capacity, typename Erase>
                               const build_data::items::Definition& definition,
                               const QuantityEdit& edit,
                               const char*& reason) noexcept {
-    reason = "account_state";
+    reason = "serial_exhausted";
     std::int32_t serial = 0;
     if (edit.quantity != 0
-        && !(edit.scope == EditScope::profile ? next_profile_serial(saved, serial)
-                                              : next_character_serial(character, serial))) {
+        && !(edit.scope == GrantedRowArray::profile ? next_profile_serial(saved, serial)
+                                                    : next_character_serial(character, serial))) {
         return false;
     }
     switch (edit.scope) {
-    case EditScope::profile:
+    case GrantedRowArray::profile:
         return edit_row(
             saved.profileItems,
             saved.profileItemCount,
@@ -143,7 +145,7 @@ template <typename Row, std::size_t Capacity, typename Erase>
             serial,
             reason,
             [&saved](std::size_t index) noexcept { return erase_profile_row(saved, index); });
-    case EditScope::characterItem:
+    case GrantedRowArray::characterItem:
         return edit_row(character.inventory.values,
                         character.inventory.count,
                         definition,
@@ -153,7 +155,7 @@ template <typename Row, std::size_t Capacity, typename Erase>
                         [&character](std::size_t index) noexcept {
                             return erase_character_row(character, index);
                         });
-    case EditScope::characterStack:
+    case GrantedRowArray::characterStack:
         return edit_row(character.stacks.values,
                         character.stacks.count,
                         definition,
@@ -243,7 +245,8 @@ bool set_quantity(const QuantityEdit& edit,
         return false;
     }
     // Profile rows live in the account object, and character rows only in the character object.
-    change = {saved.primarySoid, character.soid, characterIndex, edit.scope == EditScope::profile};
+    change = {
+        saved.primarySoid, character.soid, characterIndex, edit.scope == GrantedRowArray::profile};
     reason = nullptr;
     return true;
 }

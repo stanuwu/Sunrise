@@ -7,36 +7,9 @@
 namespace sunrise::state {
 namespace {
 
-/** Reads the whole account, inventory included. */
-[[nodiscard]] bool read_view(AccountState& account) noexcept {
-    return investment::store::read_account(account);
-}
-
-/** Reads only the account and character keys and classes. */
-[[nodiscard]] bool read_view(AccountIdentity& account) noexcept {
-    return investment::store::read_account_identity(account);
-}
-
-/** read_account has already refused an invalid account. */
-[[nodiscard]] bool usable(const AccountState& /*account*/) noexcept {
-    return true;
-}
-
-/** Keys alone cannot be validated further than naming an account. */
-[[nodiscard]] bool usable(const AccountIdentity& account) noexcept {
-    return account.primarySoid != 0;
-}
-
-/** Reads either account view with its selected character's banks under one store lock. */
+/** Reads the banks of the character either account view selects; the caller holds the lock. */
 template <typename Account>
-[[nodiscard]] SavedSelectionRead read_selection(SavedSelection<Account>& output) noexcept {
-    const std::lock_guard lock(investment::store::g_mutex);
-    if (!read_view(output.account)) {
-        return SavedSelectionRead::accountStorage;
-    }
-    if (!usable(output.account)) {
-        return SavedSelectionRead::accountInvalid;
-    }
+[[nodiscard]] SavedSelectionRead read_selected_banks(SavedSelection<Account>& output) noexcept {
     const auto* selected = account::selected_character(output.account);
     if (selected == nullptr) {
         return SavedSelectionRead::unselected;
@@ -51,12 +24,25 @@ template <typename Account>
 
 /** The inventory and the banks are copied under the same lock. */
 SavedSelectionRead read_saved_selection(SavedSelection<AccountState>& output) noexcept {
-    return read_selection(output);
+    const std::lock_guard lock(investment::store::g_mutex);
+    // read_account refuses an invalid account itself.
+    if (!investment::store::read_account(output.account)) {
+        return SavedSelectionRead::accountStorage;
+    }
+    return read_selected_banks(output);
 }
 
 /** Only the keys and classes are copied with the banks. */
 SavedSelectionRead read_saved_selection(SavedSelection<AccountIdentity>& output) noexcept {
-    return read_selection(output);
+    const std::lock_guard lock(investment::store::g_mutex);
+    if (!investment::store::read_account_identity(output.account)) {
+        return SavedSelectionRead::accountStorage;
+    }
+    // Keys alone cannot be validated further than naming an account.
+    if (output.account.primarySoid == 0) {
+        return SavedSelectionRead::accountInvalid;
+    }
+    return read_selected_banks(output);
 }
 
 } // namespace sunrise::state

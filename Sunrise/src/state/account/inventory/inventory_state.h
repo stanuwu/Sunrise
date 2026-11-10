@@ -139,6 +139,7 @@ struct Item {
     std::uint8_t classAbilityEntry{2};
     /** The client has dismissed this item's new-item marker. */
     bool seen{};
+    /** Overflow and FIFO transfers leave an instance in its recovery bucket. */
     ItemPlacement placement{ItemPlacement::authored};
     /** Absent until the instance has pursuit values to publish; an absent tail publishes none. */
     std::optional<ItemObjectives> objectives;
