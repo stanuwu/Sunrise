@@ -152,11 +152,13 @@ enum class EventKind : std::uint8_t {
     sceneOutput = 41,
     /** Validated type-30 level or explicit continuity invalidation. */
     triggerState = 42,
+    /** A type-26 mission effect reported a changed revision or attachment; from one msg 6 body. */
+    missionEffectState = 43,
 };
 
 /** Kinds are numbered without gaps, so the last one plus one is the count. */
 inline constexpr std::size_t kEventKindCount =
-    static_cast<std::size_t>(EventKind::triggerState) + 1U;
+    static_cast<std::size_t>(EventKind::missionEffectState) + 1U;
 
 /**
  * Terminal delivery outcome of one script-requested effect.
@@ -675,6 +677,9 @@ struct Event final {
     std::int32_t ghostGeneration{};
     float ghostProgress{};
     bool ghostActive{};
+    /** Mission-effect level, for missionEffectState events. */
+    std::int32_t effectRevision{};
+    bool effectAttached{};
     /** Named actor level, for actorPathState events. */
     std::int32_t actorGeneration{};
     std::int32_t actorPathRevision{};

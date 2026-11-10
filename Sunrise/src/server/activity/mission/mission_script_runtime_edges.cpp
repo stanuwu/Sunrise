@@ -8,6 +8,7 @@
 
 #include "../../../middleware/bap/activity_message/damage_monitor_auth.h"
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
+#include "../../../middleware/bap/activity_message/mission_effect_auth.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../state/activity_sdk/scene_triggers.h"
 #include "../../gameplay/squad_entity_retirement.h"
@@ -557,6 +558,37 @@ void push_ghost_edges(RuntimeInstance& instance,
 }
 
 /**
+ * Raises one event per type-26 mission effect whose revision or attachment changed. Every client
+ * applies the effect's body itself, so only the link that simulates the effect reports it.
+ */
+void push_effect_edges(RuntimeInstance& instance,
+                       const host::SenseObservationSnapshot& sense) noexcept {
+    namespace effect = middleware::bap::activity_message::mission_effect;
+    for (std::size_t index = 0; index < sense.observationCount; ++index) {
+        const host::SenseObservation& observation = sense.observations[index];
+        if (!observation_of(observation, sense, effect::kSlotType, effect::kSenseSchema)
+            || !admitted_report(instance, observation.key, sense.sourceGeneration)) {
+            continue;
+        }
+        EffectObservation* const slot = find_slot_row(instance.effectObservations, observation.key);
+        if (slot == nullptr) {
+            log_line(core::log::Level::warn, &instance, "mission_effect", "watch_capacity");
+            continue;
+        }
+        claim_row(*slot, sense.sourceGeneration, true);
+        if (!update_effect_level(
+                slot->level, observation_values(observation, sense), observation.key.schemaRow)) {
+            continue;
+        }
+        host::Event event = shared_edge_event(instance, observation);
+        event.kind = host::EventKind::missionEffectState;
+        event.effectRevision = slot->level.revision;
+        event.effectAttached = slot->level.attached;
+        push_script_event(instance, event);
+    }
+}
+
+/**
  * Publishes each Ghost link's levels from one member's history, never mixing two: the member whose
  * client simulates the link, else the route's member when that member is not present.
  */
@@ -972,6 +1004,7 @@ void push_squad_edges(RuntimeInstance& instance,
 bool reads_pins(const host::SenseObservationSnapshot& sense) noexcept {
     namespace auth = middleware::bap::activity_message::scriptable_auth;
     namespace damage = middleware::bap::activity_message::damage_monitor;
+    namespace effect = middleware::bap::activity_message::mission_effect;
     namespace ghost = middleware::bap::activity_message::ghost_link;
     static constexpr std::array kSharedSlotTypes{
         static_cast<std::uint32_t>(format::kSquadSlotType),
@@ -983,6 +1016,7 @@ bool reads_pins(const host::SenseObservationSnapshot& sense) noexcept {
         static_cast<std::uint32_t>(format::kObjectiveSlotType),
         static_cast<std::uint32_t>(format::kObjectSlotType),
         static_cast<std::uint32_t>(ghost::kSlotType),
+        static_cast<std::uint32_t>(effect::kSlotType),
     };
     const std::size_t count = (std::min)(sense.observationCount, sense.observations.size());
     return std::any_of(sense.observations.begin(),

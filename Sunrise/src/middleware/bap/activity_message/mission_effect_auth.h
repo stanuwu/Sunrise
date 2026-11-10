@@ -23,6 +23,15 @@ inline constexpr std::uint32_t kComponentClass = generated::C8080953f::kClass;
 inline constexpr std::uint32_t kSchema = generated::C8080954b::kClass;
 inline constexpr std::size_t kBits = 186;
 inline constexpr std::size_t kBytes = 24;
+/**
+ * Sense root: three signed 32-bit counters, then a flag. Native analysis shows the effect copies
+ * its applied Auth revision into the third counter and sets the flag while its first attached
+ * child exists.
+ */
+inline constexpr std::uint32_t kSenseSchema = generated::C8080954a::kClass;
+inline constexpr std::uint16_t kSenseCounterCount = 3;
+inline constexpr std::uint16_t kSenseRevisionOrdinal = 2;
+inline constexpr std::uint16_t kSenseAttachedOrdinal = kSenseCounterCount;
 
 /** Encodes the existing constrained wire preset without asserting hop-on lifecycle semantics. */
 [[nodiscard]] inline bool encode(scriptable_auth::Type2LaneClientRef filter,

@@ -22,6 +22,7 @@
 #include "mission_script_actor_path_sense.h"
 #include "mission_script_combatant_damage_sense.h"
 #include "mission_script_device_sense.h"
+#include "mission_script_effect_sense.h"
 #include "mission_script_ghost_sense.h"
 #include "mission_script_object_sense.h"
 #include "mission_script_objective_sense.h"
@@ -98,6 +99,8 @@ constexpr std::size_t kSceneObservationCapacity = 32;
 static_assert(kSquadObjectiveGroupCount == host::kSquadObjectiveGroupCount);
 /** Watched Ghost links, damage monitors, interactable objects and named actors per instance. */
 constexpr std::size_t kGhostObservationCapacity = kGhostLinkCapacity;
+/** Watched mission effects, sized like the Host's own Sense object table; a later one is logged. */
+constexpr std::size_t kEffectObservationCapacity = host::kSenseObservationCapacity;
 constexpr std::size_t kDamageObservationCapacity = 8;
 constexpr std::size_t kObjectInteractionObservationCapacity = 64;
 constexpr std::size_t kActorPathObservationCapacity = 64;
@@ -196,6 +199,17 @@ struct ObjectInteractionObservation final {
 /** Last Ghost-link level seen for one sensor. */
 struct GhostObservation final {
     GhostLevel level{};
+    std::uint32_t registryKey{};
+    std::uint32_t objectTag{};
+    std::uint16_t slotIndex{};
+    bool used{};
+};
+
+/** Last mission-effect level seen for one type-26 slot. */
+struct EffectObservation final {
+    EffectLevel level{};
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -343,6 +357,7 @@ struct RuntimeInstance final {
     /** Set once a shadow found no row, so its warning is logged once until a row frees. */
     bool squadShadowAtCapacity{};
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
+    std::array<EffectObservation, kEffectObservationCapacity> effectObservations{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
     std::array<CombatantDamageObservation, kSquadObservationCapacity> combatantDamageObservations{};
     /** Damage levels replicated by authored entities, kept apart from the Type-2 Sense rows. */
@@ -602,6 +617,9 @@ void publish_objective_levels(RuntimeInstance& instance) noexcept;
  * of the retained bodies faults the instance.
  */
 void publish_objective_offers(RuntimeInstance& instance) noexcept;
+/** Raises one event per type-26 mission effect whose revision or attachment changed. */
+void push_effect_edges(RuntimeInstance& instance,
+                       const host::SenseObservationSnapshot& sense) noexcept;
 /** Raises the squad state, spawn and death events derived from one msg 6 body. */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept;

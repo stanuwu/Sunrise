@@ -547,6 +547,10 @@ constexpr EventBinding kGhostLink[]{
     {"progress", nullptr, &number_field<&E::ghostProgress>},
     {"active", nullptr, &boolean_field<&E::ghostActive>},
 };
+constexpr EventBinding kMissionEffect[]{
+    {"revision", nullptr, &integer_field<&E::effectRevision>},
+    {"attached", nullptr, &boolean_field<&E::effectAttached>},
+};
 // A provocation carries the exact squad reference, not a native Sense body.
 constexpr EventBinding kSquadProvoked[]{
     {"registry_key", nullptr, &integer_field<&E::firstRegistryKey>},
@@ -627,6 +631,7 @@ constexpr std::array<EventBindings, static_cast<std::size_t>(G::count)> kGroupBi
     kSenseGeneration,
     kSquadRemoval,
     kTriggerLevel,
+    kMissionEffect,
 }};
 static_assert([]() consteval {
     for (std::size_t index = 0; index < kGroupBindings.size(); ++index) {

@@ -3193,6 +3193,7 @@
     <ClInclude Include="src\server\activity\mission\mission_script_squad_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_combatant_damage_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_device_sense.h" />
+    <ClInclude Include="src\server\activity\mission\mission_script_effect_sense.h" />
     <ClInclude Include="src\server\activity\activity_sdk_behavior_scope.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\mission_seed_world_change.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\mission_entity_allocation.h" />

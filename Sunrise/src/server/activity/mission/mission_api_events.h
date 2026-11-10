@@ -55,6 +55,7 @@ enum class FieldGroupId : std::uint8_t {
     senseGeneration,
     squadRemoval,
     triggerLevel,
+    missionEffect,
     count,
 };
 
@@ -331,6 +332,10 @@ inline constexpr MemberSpec kGhostLinkFields[]{
     field("progress", kNumber),
     field("active", kBoolean),
 };
+inline constexpr MemberSpec kMissionEffectFields[]{
+    field("revision", kInteger, "the Auth revision the effect echoed"),
+    field("attached", kBoolean),
+};
 inline constexpr MemberSpec kSquadProvokedFields[]{
     field("registry_key", kInteger),
     field("slot_type", kInteger),
@@ -400,6 +405,7 @@ inline constexpr std::array<FieldGroup, static_cast<std::size_t>(FieldGroupId::c
         {"sense_generation", kSenseGenerationFields},
         {"squad_removal", kSquadRemovalFields},
         {"trigger_level", kTriggerLevelFields},
+        {"mission_effect", kMissionEffectFields},
     }};
 
 /** @return The address of one field group, for an event's group list. */
@@ -482,6 +488,8 @@ inline constexpr const FieldGroup* kCinematicGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::cinematic)};
 inline constexpr const FieldGroup* kGhostLinkGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::ghostLink)};
+inline constexpr const FieldGroup* kMissionEffectGroups[]{
+    group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::missionEffect)};
 inline constexpr const FieldGroup* kActorPathGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::actorPath)};
 inline constexpr const FieldGroup* kObjectGroups[]{group(G::common),
@@ -671,6 +679,11 @@ inline constexpr EventSpec kEvents[]{
      kTriggerStateGroups,
      "every accepted occupancy report and its counter continuity; it never changes when "
      "entered and exited fire"},
+    {43,
+     "MISSION_EFFECT_STATE",
+     "on_event_mission_effect_state",
+     "SunriseMissionEffectStateEvent",
+     kMissionEffectGroups},
 };
 
 // --- Program table -----------------------------------------------------------------------------

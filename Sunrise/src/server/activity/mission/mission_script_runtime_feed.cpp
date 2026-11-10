@@ -92,6 +92,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::fireteamState:
     case host::EventKind::objectInteracted:
     case host::EventKind::ghostLinkState:
+    case host::EventKind::missionEffectState:
         return false;
     default:
         return true;
@@ -696,6 +697,7 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         // Shared counters and actor feedback keep one observation stream per target: the link
         // that simulates it. Member-local levels above use separate source histories and cannot
         // impersonate shared simulation output.
+        push_effect_edges(instance, *sense);
         push_damage_edges(instance, *sense);
         push_actor_path_edges(instance, *sense);
         push_squad_edges(instance, *sense);

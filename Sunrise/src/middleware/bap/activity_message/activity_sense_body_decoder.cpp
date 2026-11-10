@@ -15,6 +15,7 @@
 #include "damage_monitor_auth.h"
 #include "ghost_link_auth.h"
 #include "interactable_object_auth.h"
+#include "mission_effect_auth.h"
 #include "scriptable_auth_body.h"
 #include "sense_update_body.h"
 #include "squad_sense_state.h"
@@ -31,7 +32,7 @@ constexpr std::uint32_t kDevice = generated::C80804f47::kClass,
                         kScene = generated::C8080626a::kClass;
 constexpr std::uint32_t kSquad = squad_sense::kSchema, kObjective = generated::C80807f04::kClass;
 constexpr std::uint32_t kOccupancy = generated::C80809531::kClass;
-constexpr std::uint32_t kAttachment = generated::C8080954a::kClass;
+constexpr std::uint32_t kAttachment = mission_effect::kSenseSchema;
 constexpr std::uint32_t kGhostLink = ghost_link::kSenseSchema;
 constexpr std::uint32_t kObject = generated::C8080992e::kClass;
 constexpr std::uint32_t kObjectSpawnMask = generated::C80809e1b::kClass,
@@ -58,9 +59,9 @@ constexpr std::uint16_t kEngagementValueOrdinal = 1;
 constexpr std::uint8_t kEngagementValueWidth = 16;
 constexpr std::int32_t kEngagementValueBias = 32'768;
 /** The type-26 attachment body: three required signed 32-bit counters, then one flag. */
-constexpr std::uint16_t kAttachmentCounterCount = 3;
+constexpr std::uint16_t kAttachmentCounterCount = mission_effect::kSenseCounterCount;
 constexpr std::uint8_t kAttachmentCounterWidth = 32;
-constexpr std::uint16_t kAttachmentFlagOrdinal = kAttachmentCounterCount;
+constexpr std::uint16_t kAttachmentFlagOrdinal = mission_effect::kSenseAttachedOrdinal;
 /** Type-13 participation root and its nested blocks, in body order. */
 constexpr std::uint32_t kPlayer = generated::C80804f2f::kClass,
                         kPlayerState = generated::C808094e4::kClass;
