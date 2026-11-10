@@ -732,12 +732,18 @@ OpenWork g_openWork{};
 /**
  * Advances one grenade Triumph and keeps a finding that it is already held.
  * @param row Row of kGrenadeTriumphs whose grenade made the final blow.
+ * @param refusal Receives a static reason when the Triumph's record or its steps do not resolve.
  * @return True when the Triumph's progress moved.
  */
-[[nodiscard]] bool advance_grenade_triumph(std::size_t row, OpenWork& work) noexcept {
+[[nodiscard]] bool advance_grenade_triumph(std::size_t row,
+                                           OpenWork& work,
+                                           const char*& refusal) noexcept {
     const auto advance = unlocks::records::advance_interval(kGrenadeTriumphs[row].recordHash);
     if (advance == unlocks::records::ObjectiveAdvance::alreadyHeld && !work.written) {
         work.heldTriumphs[row] = true;
+    }
+    if (advance == unlocks::records::ObjectiveAdvance::unavailable) {
+        refusal = "triumph_unresolved";
     }
     return unlocks::records::progress_moved(advance);
 }
@@ -766,8 +772,7 @@ OpenWork g_openWork{};
     }
     authored_inventory::ItemObjectives values = held.objectives.value_or(
         authored_inventory::ItemObjectives{});
-    const std::int32_t deadline = values[authored_inventory::kItemExpiryLane];
-    if (contract.lifetimeSeconds > 0 && (deadline <= 0 || nowSeconds >= deadline)) {
+    if (bounty_expired(contract, values, nowSeconds)) {
         return 0;
     }
     std::size_t advanced = 0;
@@ -818,30 +823,6 @@ OpenWork g_openWork{};
 }
 
 } // namespace
-
-namespace runtime::detail {
-
-/** Reads the lane the objective's item value slot takes in the contract's value list. */
-bool objective_lane(const build_data::pursuits::Definition& contract,
-                    std::uint8_t ordinal,
-                    std::size_t& lane,
-                    std::int32_t& target) noexcept {
-    build_data::objectives::Row objective{};
-    if (ordinal >= contract.objectiveCount
-        || !build_data::find_objective_row(contract.objectives[ordinal], objective)
-        || objective.countsDown || objective.targetAdjustment.count != 0
-        || objective.itemValueSlot == build_data::objectives::kNoItemValueSlot
-        || objective.completionValue <= 0) {
-        return false;
-    }
-    const auto slots = std::span(contract.itemValueSlots).first(contract.itemValueSlotCount);
-    const auto found = std::find(slots.begin(), slots.end(), objective.itemValueSlot);
-    lane = static_cast<std::size_t>(found - slots.begin());
-    target = objective.completionValue;
-    return found != slots.end() && lane < authored_inventory::kItemObjectiveLaneCount;
-}
-
-} // namespace runtime::detail
 
 /** Checks the killer, then what is left to advance, before judging the kill or reading items. */
 KillProgress advance_kill_objectives(const KillObservation& kill,
@@ -910,7 +891,9 @@ KillProgress advance_kill_objectives(const KillObservation& kill,
         report.ruledItems = pass.ruledItems;
     }
     // The Triumph's banks share this transaction, so a refused account write undoes it too.
-    const bool triumphAdvanced = countsTriumph && advance_grenade_triumph(triumph, work);
+    const char* triumphRefusal = nullptr;
+    const bool triumphAdvanced =
+        countsTriumph && advance_grenade_triumph(triumph, work, triumphRefusal);
     if (pass.advanced == 0 && !triumphAdvanced) {
         if (readsBounties && !work.written) {
             work.heldRead = true;
@@ -919,7 +902,13 @@ KillProgress advance_kill_objectives(const KillObservation& kill,
             work.subclassElement = facts.subclassElement;
             work.ruledItems = pass.ruledItems;
         }
-        report.reason = pass.areaRefusal != nullptr ? pass.areaRefusal : "no_open_objective";
+        report.reason = "no_open_objective";
+        if (triumphRefusal != nullptr) {
+            report.reason = triumphRefusal;
+        }
+        if (pass.areaRefusal != nullptr) {
+            report.reason = pass.areaRefusal;
+        }
         return KillProgress::unchanged;
     }
     report.reason = "account_write";

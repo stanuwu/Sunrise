@@ -10,6 +10,7 @@
 #include "../account/account_state.h"
 #include "../entitlements/definition.h"
 #include "../unlocks/definition.h"
+#include "../unlocks/unlocks_expression.h"
 #include "investment.h"
 
 namespace sunrise::state::investment::store {
@@ -25,6 +26,33 @@ enum class Bank : int {
     accountProgressions,
     characterProgressions
 };
+
+/**
+ * Names the saved bank a bound flag or value instruction reads.
+ * @param source The instruction's bank.
+ * @param flag True for a flag instruction, false for a value instruction.
+ * @param bank Receives the saved bank.
+ * @return False for a source no saved bank answers: none, a class flag, an external read, or a
+ *         profile value.
+ */
+[[nodiscard]] constexpr bool saved_bank(unlocks::Bank source, bool flag, Bank& bank) noexcept {
+    switch (source) {
+    case unlocks::Bank::account:
+        bank = flag ? Bank::accountFlags : Bank::objectiveValues;
+        return true;
+    case unlocks::Bank::profile:
+        bank = Bank::profileFlags;
+        return flag;
+    case unlocks::Bank::character:
+        bank = flag ? Bank::characterObjectFlags : Bank::characterObjectValues;
+        return true;
+    case unlocks::Bank::none:
+    case unlocks::Bank::characterClass:
+    case unlocks::Bank::external:
+        break;
+    }
+    return false;
+}
 
 [[nodiscard]] bool initialize(void* module) noexcept;
 [[nodiscard]] bool validate() noexcept;

@@ -32,7 +32,10 @@ struct RewardPreview {
     std::uint16_t itemIndex{kAbsent};
     /** Zero when the row names its item without an amount. */
     std::int32_t quantity{};
-    /** Shared expression row that decides whether the row applies, or kAbsent for none. */
+    /**
+     * Shared expression row that decides whether the row applies, or kAbsent for none. Once bound
+     * it serves validation only: a row naming an expression holds its program or is unreadable.
+     */
     std::uint16_t conditionIndex{kAbsent};
     /** That expression, expanded and bound to the saved banks. */
     std::array<unlocks::Instruction, kRewardConditionCapacity> condition{};

@@ -690,6 +690,8 @@ inline constexpr std::size_t kBucketArraySelectorOffset =
  */
 inline constexpr std::size_t kBucketFifoOffset = kBucketArraySelectorOffset + 1;
 inline constexpr std::size_t kBucketNoTransferOnEvictionOffset = kBucketArraySelectorOffset + 2;
+// Pins the offsets the unnamed bytes above were measured at against a regenerated layout.
+static_assert(kBucketFifoOffset == 25 && kBucketNoTransferOnEvictionOffset == 26);
 
 /** Installed tags carrying the sobject definition table. The first one that reads is used. */
 inline constexpr std::uint32_t kSobjectTablePrimaryTag = 0x81327CD4U;

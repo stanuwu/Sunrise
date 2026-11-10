@@ -86,9 +86,9 @@ find_recovery_bucket(const build_data::items::Definition& item,
 /**
  * Each native change list must fit independently. Only rows still present are announced; unlock
  * flags and dropped quantity publish no change record.
- * @return Null when both lists fit, else the static label of the one that does not.
+ * @return True when both lists hold the rows.
  */
-[[nodiscard]] const char* change_ring_refusal(std::span<const GrantedRow> rows) noexcept;
+[[nodiscard]] bool change_rings_fit(std::span<const GrantedRow> rows) noexcept;
 
 /** @return True when a row with this serial is still in the after-image of its array. */
 [[nodiscard]] bool row_present(const AccountState& account,

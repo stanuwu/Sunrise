@@ -258,10 +258,12 @@ enum class RecordRewardKind : std::uint8_t {
     accountUnlock,
 };
 
+/** The account unlock bank a transaction row belongs to. */
+enum class AccountUnlockBank : std::uint8_t { values, flags };
+
 /** One account unlock row a transaction writes, and the value its preparation observed. */
 struct AccountUnlockWrite {
-    /** The account flag bank when set, the account value bank otherwise. */
-    bool flag{};
+    AccountUnlockBank bank{AccountUnlockBank::values};
     std::uint16_t index{};
     std::int32_t previousValue{};
     std::int32_t value{};
@@ -369,7 +371,7 @@ struct PendingRecordRewardGrant {
     PreparedQuestStep completionContextValue{};
     PreparedQuestStep questStep{};
     PreparedProgressionCredit progression{};
-    /** Seasonal XP the server grants in the transaction that commits this grant. */
+    /** Seasonal XP the commit grants with the rest of this grant. */
     std::int32_t seasonalExperience{};
     /** Seasonal XP total the preparation observed; the grant is refused once it moves. */
     std::int32_t seasonalExperienceBefore{};
@@ -742,6 +744,16 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
 [[nodiscard]] bool read_store_wallet_sync(std::uint32_t& revision) noexcept;
 
 /**
+ * Reads the Synthesizer tier each character publishes in its value block of the account object.
+ * @param account Account view the object is encoded from.
+ * @param valueRow Receives the block row the tiers belong in, or kUnboundValueRow for none.
+ * @param tiers Receives one tier per character slot, zero unless it holds exactly one Synthesizer.
+ */
+void synthesizer_tier_values(const AccountState& account,
+                             std::uint16_t& valueRow,
+                             std::array<std::int32_t, kCharacterCapacity>& tiers) noexcept;
+
+/**
  * Moves the selection to one authored character.
  * The Client names its pick only in the select-character request, so this is where a player's
  * choice enters State.
@@ -944,8 +956,12 @@ prepare_vendor_reward(std::uint16_t itemIndex,
 [[nodiscard]] bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
                                           unlocks::Table& after) noexcept;
 
-/** Atomically commits one prepared Triumph reward and its durable record claim. */
-[[nodiscard]] bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept;
+/**
+ * Atomically commits one prepared Triumph reward, its durable record claim and its seasonal XP.
+ * @param artifactBonusMoved Set when the grant's XP changed the artifact Power bonus.
+ */
+[[nodiscard]] bool commit_record_reward(PendingRecordRewardGrant& mutation,
+                                        bool* artifactBonusMoved = nullptr) noexcept;
 
 /**
  * Prepares all direct reward rows over one shared account after-image.
@@ -1406,24 +1422,11 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
  * Adds base XP to the seasonal lanes and republishes every value derived from the total,
  * including earned-perk flags when the grant reaches a new rank.
  * The caller must publish the whole account image, since that carries those flags: after the
- * grant, or before it from preview_seasonal_experience.
+ * grant, or before it from the image preview_reward_unlocks builds for a grant that pays XP.
  * @param amount Positive XP to grant.
  * @return False when the amount is not positive or the total would overflow.
  */
 [[nodiscard]] bool grant_seasonal_experience(std::int32_t amount) noexcept;
-
-/**
- * Applies to a bank image what grant_seasonal_experience will save for the same amount: the
- * seasonal lanes, and the earned-perk flags when the grant reaches a new rank. Nothing is saved.
- * @param expected XP total the grant was prepared against.
- * @param amount Positive XP the grant adds.
- * @param after The selected character's banks, updated in place.
- * @return False when the total moved since the preparation, the new total would overflow, or the
- *         account could not be read.
- */
-[[nodiscard]] bool preview_seasonal_experience(std::int32_t expected,
-                                               std::int32_t amount,
-                                               unlocks::Table& after) noexcept;
 
 /**
  * Replaces the published XP total, provided it still equals expected, and republishes every

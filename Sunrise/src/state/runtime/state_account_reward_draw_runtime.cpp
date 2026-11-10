@@ -16,6 +16,7 @@
 #include "../rewards/reward_resolver.h"
 #include "bucket_admission.h"
 #include "runtime.h"
+#include "saved_selection_runtime.h"
 #include "state_account_transaction_helpers.h"
 
 namespace sunrise::state {
@@ -346,11 +347,7 @@ bool catalogs_settled() noexcept {
 namespace {
 
 /** The saved state one draw runs against. */
-struct DrawState {
-    AccountState account{};
-    std::size_t character{};
-    unlocks::Table flags{};
-};
+using DrawState = SavedSelection<AccountState>;
 
 /**
  * Checks the catalogs a draw reads. A refused reward graph decides every draw; an unpublished one
@@ -375,20 +372,18 @@ struct DrawState {
  * @return Prepared when both read; deferred while State has no selected character.
  */
 [[nodiscard]] RewardPreparation read_draw_state(DrawState& state, const char*& reason) noexcept {
+    const SavedSelectionRead read = read_saved_selection(state);
     reason = "account_read";
-    if (!investment::store::read_account(state.account)) {
+    if (read == SavedSelectionRead::accountStorage || read == SavedSelectionRead::accountInvalid) {
         return RewardPreparation::notReady;
     }
     reason = "selected_character";
-    state.character = selected_character_index(state.account);
-    if (state.character >= state.account.characterCount) {
+    if (read == SavedSelectionRead::unselected) {
         return RewardPreparation::deferred;
     }
     reason = "unlock_read";
-    if (!investment::store::read_unlocks(state.flags, static_cast<int>(state.character))) {
-        return RewardPreparation::notReady;
-    }
-    return RewardPreparation::prepared;
+    return read == SavedSelectionRead::bankStorage ? RewardPreparation::notReady
+                                                   : RewardPreparation::prepared;
 }
 
 /**
@@ -429,7 +424,7 @@ resolve_item_reward(std::uint16_t itemIndex,
     }
     reward_resolution::Result resolved{};
     const auto resolution = reward_resolution::resolve(
-        {state.flags, state.account.characters[state.character].characterClass, seed, &reason},
+        {state.banks, state.account.characters[state.slot].characterClass, seed, &reason},
         itemIndex,
         quantity,
         resolved);
@@ -480,7 +475,7 @@ RewardPreparation prepare_wrapper_opening(std::uint64_t instanceSoid,
         return read;
     }
     reason = "held_wrapper";
-    const auto* source = held_wrapper(state.account.characters[state.character], instanceSoid);
+    const auto* source = held_wrapper(state.account.characters[state.slot], instanceSoid);
     if (source == nullptr) {
         return RewardPreparation::deferred;
     }
@@ -491,7 +486,7 @@ RewardPreparation prepare_wrapper_opening(std::uint64_t instanceSoid,
     }
     reward_resolution::Result resolved{};
     const auto resolution = reward_resolution::open(
-        {state.flags, state.account.characters[state.character].characterClass, seed, &reason},
+        {state.banks, state.account.characters[state.slot].characterClass, seed, &reason},
         item.definitionIndex,
         resolved);
     if (resolution != reward_resolution::Resolution::resolved) {
@@ -564,7 +559,7 @@ bool vendor_row_available(const build_data::vendors::SaleRow& row,
     // An eligibility check draws nothing, so it takes no seed.
     constexpr std::uint64_t kNoSeed = 0;
     const reward_resolution::Context context{
-        state.flags, state.account.characters[state.character].characterClass, kNoSeed, &reason};
+        state.banks, state.account.characters[state.slot].characterClass, kNoSeed, &reason};
     return reward_resolution::eligible(
                std::span(row.availability).first(row.availabilityCount), context, available)
            || fail();

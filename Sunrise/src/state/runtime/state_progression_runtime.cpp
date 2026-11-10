@@ -644,6 +644,8 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
         transaction, total, seasonal_rank_for(previous) != seasonal_rank_for(total));
 }
 
+namespace runtime::detail {
+
 /** Applies the lanes and earned-perk flags grant_seasonal_experience saves for the same amount. */
 bool preview_seasonal_experience(std::int32_t expected,
                                  std::int32_t amount,
@@ -665,7 +667,7 @@ bool preview_seasonal_experience(std::int32_t expected,
     if (!investment::store::read_account(account)) {
         return false;
     }
-    const auto character = runtime::detail::selected_character_index(account);
+    const auto character = selected_character_index(account);
     // The frame built from this image carries the flags, so the walk needs no report.
     bool earnedRidesTheImage = false;
     return character >= account.characterCount
@@ -675,6 +677,8 @@ bool preview_seasonal_experience(std::int32_t expected,
                                  nullptr,
                                  earnedRidesTheImage);
 }
+
+} // namespace runtime::detail
 
 /** Refuses a decrease below the artifact points any character has spent. */
 bool replace_seasonal_experience(std::int32_t expected,

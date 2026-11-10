@@ -93,12 +93,15 @@ private:
 /** Reward metadata collected alongside the existing item-definition walk. */
 class RewardBuild {
 public:
+    /** The pass's condition tables, loaded before the pools and every domain that binds a row. */
     RewardConditions conditions;
-    /** Reads every reward pool; unreadable entries are skipped, a full bank refuses the load. */
+    /**
+     * Reads every reward pool through the loaded conditions; unreadable entries are skipped, a
+     * full bank refuses the load.
+     */
     [[nodiscard]] bool load(const middleware::content::packages::reader::Source& source,
                             middleware::content::packages::reader::Scratch& scratch,
-                            std::span<const std::byte> root,
-                            const SlotMaps& maps) noexcept;
+                            std::span<const std::byte> root) noexcept;
     /** Sizes the dense item rows before the item walk. */
     [[nodiscard]] bool begin_items(std::size_t count) noexcept;
     /** Records one item's wrapper and acquisition flag; an unreadable item stays unavailable. */

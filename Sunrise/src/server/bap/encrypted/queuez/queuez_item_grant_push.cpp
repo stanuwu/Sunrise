@@ -34,7 +34,7 @@ ItemGrantStage stage_item_grant(const ItemGrant& grant,
         return ItemGrantStage::failed;
     }
     std::uint64_t seed = 0;
-    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
+    if (!middleware::crypto::random::draw_seed(seed)) {
         reason = "random_source";
         return ItemGrantStage::failed;
     }
@@ -87,7 +87,7 @@ ItemGrantStage stage_item_grant(const ItemGrant& grant,
     return ItemGrantStage::committed;
 }
 
-/** Sends the frame, moves the session past it and arms an account resync on every other peer. */
+/** Sends the frame, moves the session past it and publishes the committed account mutation. */
 void publish_staged_frame(const StagedFrame& frame,
                           Session& session,
                           Scratch& scratch,
@@ -97,7 +97,7 @@ void publish_staged_frame(const StagedFrame& frame,
     written = frame.size;
     session.sendNonce = frame.sendNonce;
     session.queuez = frame.after;
-    bap::arm_account_resync_elsewhere(session);
+    bap::publish_account_mutation(session);
 }
 
 /** A committed grant without a frame cannot be retried, so every Family-4 peer resyncs. */
@@ -112,12 +112,9 @@ bool publish_item_grant(const StagedItemGrant& staged,
     }
     publish_staged_frame(staged.frame, session, scratch, response, written);
     bap::arm_acquisition_presentation_hold(session);
-    if (state::presence_flags_pending()) {
-        // A granted Mote supplies a flag Family 5 has not set yet.
-        bap::arm_artifact_refresh(session);
-    } else {
+    if (!session.artifactRefreshArmed) {
         // The grant published the account; the client rebuilds what its sockets offer on the
-        // character copy that follows.
+        // character copy that follows. An armed Family-5 refresh already brings one.
         bap::arm_unlock_character_refresh(session);
     }
     return true;

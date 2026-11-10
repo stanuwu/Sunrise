@@ -7,6 +7,7 @@
 #include <limits>
 #include <span>
 
+#include "../account/inventory/synthesizer_tier.h"
 #include "../build_data/runtime.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
@@ -236,3 +237,24 @@ SynthesizerExchange stage_synthesizer_payout(const AccountState& account,
 }
 
 } // namespace sunrise::state::runtime::detail
+
+/** Reads each character's tier from the one Synthesizer it holds, and the row the tiers fill. */
+void sunrise::state::synthesizer_tier_values(
+    const AccountState& account,
+    std::uint16_t& valueRow,
+    std::array<std::int32_t, kCharacterCapacity>& tiers) noexcept {
+    build_data::constants::InvestmentConstants constants{};
+    valueRow = build_data::find_investment_constants(constants)
+                   ? constants.synthesizerTierValueRow
+                   : build_data::constants::kUnboundValueRow;
+    tiers.fill(account::inventory::kNoSynthesizerTier);
+    const auto characters =
+        std::span(account.characters).first((std::min)(account.characterCount, tiers.size()));
+    for (std::size_t index = 0; index < characters.size(); ++index) {
+        const auto& items = characters[index].inventory;
+        const std::size_t held = account::inventory::held_synthesizer(items);
+        if (held != items.count) {
+            tiers[index] = account::inventory::synthesizer_tier(items.values[held].definitionHash);
+        }
+    }
+}

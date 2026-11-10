@@ -205,12 +205,40 @@ bool prepare_equipped_socket_plug(std::uint64_t targetInstanceSoid,
 /** Applies a socket action's unlock writes, whose rows the catalogs bound, to the banks. */
 static void apply_unlock_writes(const AccountUnlockWrites& writes, unlocks::Table& banks) noexcept {
     for (const AccountUnlockWrite& write : std::span(writes.rows).first(writes.count)) {
-        if (write.flag) {
+        if (write.bank == AccountUnlockBank::flags) {
             banks.accountFlags[write.index] = static_cast<std::uint8_t>(write.value);
         } else {
             banks.objectiveValues[write.index] = write.value;
         }
     }
+}
+
+/**
+ * @return True when two stagings of one socket request reached the same outcome. Their profile
+ *         rows are left to the caller, which checks them against its own account view.
+ */
+[[nodiscard]] static bool same_socket_transition(const PendingSocketPlug& left,
+                                                 const PendingSocketPlug& right) noexcept {
+    return left.accountSoid == right.accountSoid && left.characterSoid == right.characterSoid
+           && left.targetDefinitionHash == right.targetDefinitionHash
+           && left.plugDefinitionHash == right.plugDefinitionHash
+           && left.materialRequirementSetHash == right.materialRequirementSetHash
+           && left.characterIndex == right.characterIndex
+           && left.expectedProfileItemCount == right.expectedProfileItemCount
+           && left.afterProfileItemCount == right.afterProfileItemCount
+           && left.changes == right.changes && left.changeCount == right.changeCount
+           && left.unlockWrites == right.unlockWrites && left.itemIndex == right.itemIndex
+           && left.targetDefinitionIndex == right.targetDefinitionIndex
+           && left.plugDefinitionIndex == right.plugDefinitionIndex
+           && left.requestedPlugDefinitionIndex == right.requestedPlugDefinitionIndex
+           && left.materialRequirementSetIndex == right.materialRequirementSetIndex
+           && left.socketLane == right.socketLane && left.targetBucketId == right.targetBucketId
+           && left.plugBucketId == right.plugBucketId
+           && left.materialRequirementCount == right.materialRequirementCount
+           && left.profileChanged == right.profileChanged
+           && left.targetEquipped == right.targetEquipped
+           && same_character(left.beforeCharacter, right.beforeCharacter)
+           && same_character(left.afterCharacter, right.afterCharacter);
 }
 
 /** Produces the complete account after-image while the prepared socket action remains current. */
@@ -245,29 +273,7 @@ bool preview_socket_plug(const PendingSocketPlug& mutation,
                            mutation.nowSeconds,
                            canonical,
                            mutation.plugDefinitionHash)
-        || canonical.accountSoid != mutation.accountSoid
-        || canonical.characterSoid != mutation.characterSoid
-        || canonical.targetDefinitionHash != mutation.targetDefinitionHash
-        || canonical.plugDefinitionHash != mutation.plugDefinitionHash
-        || canonical.materialRequirementSetHash != mutation.materialRequirementSetHash
-        || canonical.characterIndex != mutation.characterIndex
-        || canonical.expectedProfileItemCount != mutation.expectedProfileItemCount
-        || canonical.afterProfileItemCount != mutation.afterProfileItemCount
-        || canonical.changes != mutation.changes || canonical.changeCount != mutation.changeCount
-        || canonical.unlockWrites != mutation.unlockWrites
-        || canonical.itemIndex != mutation.itemIndex
-        || canonical.targetDefinitionIndex != mutation.targetDefinitionIndex
-        || canonical.plugDefinitionIndex != mutation.plugDefinitionIndex
-        || canonical.requestedPlugDefinitionIndex != mutation.requestedPlugDefinitionIndex
-        || canonical.materialRequirementSetIndex != mutation.materialRequirementSetIndex
-        || canonical.socketLane != mutation.socketLane
-        || canonical.targetBucketId != mutation.targetBucketId
-        || canonical.plugBucketId != mutation.plugBucketId
-        || canonical.materialRequirementCount != mutation.materialRequirementCount
-        || canonical.profileChanged != mutation.profileChanged
-        || canonical.targetEquipped != mutation.targetEquipped
-        || !same_character(canonical.beforeCharacter, mutation.beforeCharacter)
-        || !same_character(canonical.afterCharacter, mutation.afterCharacter)) {
+        || !same_socket_transition(canonical, mutation)) {
         return false;
     }
 
@@ -366,30 +372,7 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
                                prepared.nowSeconds,
                                canonical,
                                prepared.plugDefinitionHash)
-            || canonical.characterSoid != prepared.characterSoid
-            || canonical.accountSoid != prepared.accountSoid
-            || canonical.targetDefinitionHash != prepared.targetDefinitionHash
-            || canonical.plugDefinitionHash != prepared.plugDefinitionHash
-            || canonical.materialRequirementSetHash != prepared.materialRequirementSetHash
-            || canonical.characterIndex != prepared.characterIndex
-            || canonical.expectedProfileItemCount != prepared.expectedProfileItemCount
-            || canonical.afterProfileItemCount != prepared.afterProfileItemCount
-            || canonical.changes != prepared.changes
-            || canonical.changeCount != prepared.changeCount
-            || canonical.unlockWrites != prepared.unlockWrites
-            || canonical.itemIndex != prepared.itemIndex
-            || canonical.targetDefinitionIndex != prepared.targetDefinitionIndex
-            || canonical.plugDefinitionIndex != prepared.plugDefinitionIndex
-            || canonical.requestedPlugDefinitionIndex != prepared.requestedPlugDefinitionIndex
-            || canonical.materialRequirementSetIndex != prepared.materialRequirementSetIndex
-            || canonical.socketLane != prepared.socketLane
-            || canonical.targetBucketId != prepared.targetBucketId
-            || canonical.plugBucketId != prepared.plugBucketId
-            || canonical.materialRequirementCount != prepared.materialRequirementCount
-            || canonical.profileChanged != prepared.profileChanged
-            || canonical.targetEquipped != prepared.targetEquipped
-            || !same_character(canonical.beforeCharacter, prepared.beforeCharacter)
-            || !same_character(canonical.afterCharacter, prepared.afterCharacter)) {
+            || !same_socket_transition(canonical, prepared)) {
             return fail("transition");
         }
 
@@ -410,11 +393,8 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
         }
         for (const AccountUnlockWrite& write :
              std::span(prepared.unlockWrites.rows).first(prepared.unlockWrites.count)) {
-            if (!investment::store::write_unlock(write.flag
-                                                     ? investment::store::Bank::accountFlags
-                                                     : investment::store::Bank::objectiveValues,
-                                                 write.index,
-                                                 write.value)) {
+            if (!investment::store::write_unlock(
+                    store_bank(write.bank), write.index, write.value)) {
                 return fail("unlock_write");
             }
         }

@@ -165,8 +165,10 @@ static_assert(kSocketUnlockWriteCapacity
         reason = "chalice_upgrade_owned";
         return false;
     }
-    if (!write_account_unlock(
-            upgrade.unlockWrites, true, ownedRule.requiredFlagIndex, unlocks::kFlagSet)) {
+    if (!write_account_unlock(upgrade.unlockWrites,
+                              AccountUnlockBank::flags,
+                              ownedRule.requiredFlagIndex,
+                              unlocks::kFlagSet)) {
         reason = "chalice_upgrade_write";
         return false;
     }

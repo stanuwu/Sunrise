@@ -78,6 +78,9 @@ void read_plug_set_flags(Storage& storage) noexcept {
     }
 }
 
+// A catalog row keeps every presence flag the reader's row holds.
+static_assert(tables::items::kPresenceFlagCapacity == build_items::kPresenceFlagCapacity);
+
 // The condition reader walks a plug's rule rows as bare expression fields.
 static_assert(sizeof(generated::C808077e6) == tables::rewards::ConditionRow::kSize
               && offsetof(generated::C808077e6, unlockExpression) == 0);
@@ -153,6 +156,90 @@ void publish_insertion_rules(const Storage& storage) noexcept {
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=pkg stage=insertion_rules result=fail reason=publish");
+    }
+}
+
+/** What an item's quest set gives its catalog row and its pursuit contract. */
+struct QuestMembershipRead {
+    build_items::QuestInitialization initialization{};
+    pursuits::QuestStep step{};
+    /** False when the set owner's read failed and the catalog read that owner before. */
+    bool ownerRead{true};
+};
+
+/**
+ * Reads the quest set of the item in storage.definition from the item it names as the set's owner.
+ * @param table Located item index array within container.
+ * @param needInitialization Reads the first-step plan a catalog row carries.
+ * @param needStep Reads the item's step for its pursuit contract.
+ */
+[[nodiscard]] QuestMembershipRead read_quest_membership(const reader::Source& source,
+                                                        Storage& storage,
+                                                        std::span<const std::byte> container,
+                                                        const tables::Array& table,
+                                                        std::uint16_t itemIndex,
+                                                        std::uint32_t itemClass,
+                                                        bool needInitialization,
+                                                        bool needStep) noexcept {
+    QuestMembershipRead quest{};
+    const auto parentIndex = tables::items::quest_parent(storage.definition);
+    if ((needInitialization || needStep) && itemClass == tables::kItemDefinitionClass
+        && parentIndex < table.count) {
+        std::span<const std::byte> parent = storage.definition;
+        tables::IndexRow parentRow{};
+        std::uint32_t parentClass = itemClass;
+        const bool parentIndexed =
+            parentIndex == itemIndex || tables::index_row(container, table, parentIndex, parentRow);
+        const bool parentReady = parentIndexed
+                                 && (parentIndex == itemIndex
+                                     || reader::read_tag(source,
+                                                         storage.scratch,
+                                                         parentRow.targetTag,
+                                                         storage.questParentDefinition,
+                                                         parentClass));
+        // Like an item's own row, an owner the catalog read before is retried after a failed
+        // read; one it lacks leaves the set unsupported.
+        state::build_data::items::Definition cataloged{};
+        quest.ownerRead = parentReady || !parentIndexed
+                          || !state::build_data::find_item_definition_index(parentIndex, cataloged);
+        if (parentIndex != itemIndex) {
+            parent = storage.questParentDefinition;
+        }
+        const bool parentUsable = parentReady && parentClass == tables::kItemDefinitionClass;
+        if (needInitialization && parentUsable) {
+            quest.initialization =
+                tables::items::read_quest_initialization(storage.definition,
+                                                         itemIndex,
+                                                         parent,
+                                                         static_cast<std::size_t>(table.count),
+                                                         storage.questValueMap);
+        }
+        if (needStep && parentUsable) {
+            quest.step = tables::items::read_quest_step(storage.definition,
+                                                        itemIndex,
+                                                        parent,
+                                                        static_cast<std::size_t>(table.count),
+                                                        storage.questValueMap);
+        } else if (needStep) {
+            quest.step.membership = pursuits::QuestMembership::unsupported;
+        }
+    } else if (parentIndex != tables::items::kUnavailableQuestParent) {
+        quest.step.membership = pursuits::QuestMembership::unsupported;
+    }
+    return quest;
+}
+
+/** Records one read row's pursuit outcome: no contract, its contract, or a read to retry. */
+void record_pursuit_outcome(Storage& storage,
+                            const tables::items::Row& item,
+                            std::uint32_t itemClass,
+                            const QuestMembershipRead& quest) noexcept {
+    if (itemClass != tables::kItemDefinitionClass) {
+        storage.pursuitBuild.unread(item.definitionIndex);
+    } else if (!quest.ownerRead
+               || !storage.pursuitBuild.item(
+                   item, quest.step, storage.questValueMap, storage.rewardBuild.conditions)) {
+        storage.pursuitBuild.read_failed(item.definitionIndex);
     }
 }
 
@@ -294,64 +381,16 @@ bool build_item_rows(const reader::Source& source,
         }
         const std::uint32_t plugCategoryHash =
             corrected_plug_category(item.definitionHash, item.plugCategoryHash);
-        build_items::QuestInitialization quest{};
-        pursuits::QuestStep questStep{};
-        bool questOwnerRead = true;
-        const auto parentIndex = tables::items::quest_parent(storage.definition);
-        if ((needDefinitions || pursuitStorageReady) && itemClass == tables::kItemDefinitionClass
-            && parentIndex < table.count) {
-            std::span<const std::byte> parent = storage.definition;
-            tables::IndexRow parentRow{};
-            std::uint32_t parentClass = itemClass;
-            const bool parentIndexed =
-                parentIndex == item.definitionIndex
-                || tables::index_row(container, table, parentIndex, parentRow);
-            const bool parentReady = parentIndexed
-                                     && (parentIndex == item.definitionIndex
-                                         || reader::read_tag(source,
-                                                             storage.scratch,
-                                                             parentRow.targetTag,
-                                                             storage.questParentDefinition,
-                                                             parentClass));
-            // Like an item's own row, an owner the catalog read before is retried after a failed
-            // read; one it lacks leaves the set unsupported.
-            state::build_data::items::Definition cataloged{};
-            questOwnerRead =
-                parentReady || !parentIndexed
-                || !state::build_data::find_item_definition_index(parentIndex, cataloged);
-            if (parentIndex != item.definitionIndex) {
-                parent = storage.questParentDefinition;
-            }
-            const bool parentUsable = parentReady && parentClass == tables::kItemDefinitionClass;
-            if (needDefinitions && parentUsable) {
-                quest =
-                    tables::items::read_quest_initialization(storage.definition,
-                                                             item.definitionIndex,
-                                                             parent,
-                                                             static_cast<std::size_t>(table.count),
-                                                             storage.questValueMap);
-            }
-            if (pursuitStorageReady && parentUsable) {
-                questStep = tables::items::read_quest_step(storage.definition,
-                                                           item.definitionIndex,
-                                                           parent,
-                                                           static_cast<std::size_t>(table.count),
-                                                           storage.questValueMap);
-            } else if (pursuitStorageReady) {
-                questStep.membership = pursuits::QuestMembership::unsupported;
-            }
-        } else if (parentIndex != tables::items::kUnavailableQuestParent) {
-            questStep.membership = pursuits::QuestMembership::unsupported;
-        }
-        if (pursuitStorageReady && itemClass != tables::kItemDefinitionClass) {
-            storage.pursuitBuild.unread(item.definitionIndex);
-        } else if (pursuitStorageReady
-                   && (!questOwnerRead
-                       || !storage.pursuitBuild.item(item,
-                                                     questStep,
-                                                     storage.questValueMap,
-                                                     storage.rewardBuild.conditions))) {
-            storage.pursuitBuild.read_failed(item.definitionIndex);
+        const QuestMembershipRead quest = read_quest_membership(source,
+                                                                storage,
+                                                                container,
+                                                                table,
+                                                                item.definitionIndex,
+                                                                itemClass,
+                                                                needDefinitions,
+                                                                pursuitStorageReady);
+        if (pursuitStorageReady) {
+            record_pursuit_outcome(storage, item, itemClass, quest);
         }
         build_items::Definition& definition = storage.rows[rowCount++];
         definition = {};
@@ -365,7 +404,7 @@ bool build_item_rows(const reader::Source& source,
         definition.plugCategoryHash = plugCategoryHash;
         definition.rollSetIndex = item.rollSetIndex;
         definition.linkedPlugIndex = item.linkedPlugIndex;
-        definition.questInitialization = quest;
+        definition.questInitialization = quest.initialization;
         definition.recoveryBucketId = item.recoveryBucketId;
         definition.quietAcquisition = item.quietAcquisition;
         definition.toastlessAcquisition = item.toastlessAcquisition;

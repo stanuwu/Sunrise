@@ -13,6 +13,7 @@
 #include "../unlocks/unlocks_expression.h"
 #include "pursuit_completion_runtime.h"
 #include "saved_selection_runtime.h"
+#include "state_account_transaction_helpers.h"
 
 namespace sunrise::state {
 namespace {
@@ -62,9 +63,8 @@ struct ProgressRow {
 };
 
 /**
- * Names the saved bank the evaluator reads for one flag or value instruction, as
- * reward_resolver's readers do. Class flags, external values, constants and operators are not
- * saved rows.
+ * Names the saved bank the evaluator reads for one flag or value instruction. Class flags,
+ * external values, constants and operators are not saved rows.
  */
 [[nodiscard]] bool saved_row(const unlocks::Instruction& instruction, store::Bank& bank) noexcept {
     if (!unlocks::valid(instruction)) {
@@ -74,22 +74,7 @@ struct ProgressRow {
     if (!flag && instruction.opcode != unlocks::Opcode::loadValue) {
         return false;
     }
-    switch (instruction.bank) {
-    case unlocks::Bank::account:
-        bank = flag ? store::Bank::accountFlags : store::Bank::objectiveValues;
-        return true;
-    case unlocks::Bank::profile:
-        bank = store::Bank::profileFlags;
-        return flag;
-    case unlocks::Bank::character:
-        bank = flag ? store::Bank::characterObjectFlags : store::Bank::characterObjectValues;
-        return true;
-    case unlocks::Bank::none:
-    case unlocks::Bank::characterClass:
-    case unlocks::Bank::external:
-        break;
-    }
-    return false;
+    return store::saved_bank(instruction.bank, flag, bank);
 }
 
 /** @return True for banks the account object publishes, false for the character object's. */
@@ -166,11 +151,7 @@ struct ProgressRow {
     }
     // An expired bounty can no longer be redeemed, so progress written to it would never count.
     reason = "expired";
-    if (held.contract.lifetimeSeconds <= 0) {
-        return true;
-    }
-    const std::int32_t deadline = held.item_values()[account::inventory::kItemExpiryLane];
-    return deadline > 0 && nowSeconds < deadline;
+    return !runtime::detail::bounty_expired(held.contract, held.item_values(), nowSeconds);
 }
 
 /** @return The contract evaluated against the banks and the held items as edited so far. */
@@ -194,15 +175,9 @@ struct ProgressRow {
                                 ProgressRow& output) noexcept {
     output = {};
     if (objective.itemValueSlot != objective_data::kNoItemValueSlot) {
-        const auto slots =
-            std::span(held.contract.itemValueSlots).first(held.contract.itemValueSlotCount);
-        const auto found = std::find(slots.begin(), slots.end(), objective.itemValueSlot);
         output.itemHeld = true;
-        output.lane = static_cast<std::size_t>(found - slots.begin());
-        const bool deadlineLane = held.contract.lifetimeSeconds > 0
-                                  && output.lane == account::inventory::kItemExpiryLane;
-        return found != slots.end() && output.lane < account::inventory::kItemObjectiveLaneCount
-               && !deadlineLane;
+        return runtime::detail::item_value_lane(
+            held.contract, objective.itemValueSlot, output.lane);
     }
     if (objective.expression.size() != 1
         || !saved_row(objective.expression.front(), output.bank)) {

@@ -67,7 +67,10 @@ struct StagedItemGrant {
                                               StagedItemGrant& staged,
                                               const char*& reason) noexcept;
 
-/** Copies a staged frame into the response and moves the session to the frame's after-image. */
+/**
+ * Copies a committed change's staged frame into the response, moves the session to the frame's
+ * after-image and publishes the account mutation to the other peers and to Family 5.
+ */
 void publish_staged_frame(const StagedFrame& frame,
                           Session& session,
                           Scratch& scratch,

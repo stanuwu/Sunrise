@@ -85,6 +85,8 @@ constexpr std::uint32_t kActionBlockClass = generated::C80807ad8::kClass;
  */
 constexpr std::size_t kActionDeletesOffset = offsetof(generated::C80807ad8, gap70);
 constexpr std::size_t kActionConsumesStackOffset = kActionDeletesOffset + 1;
+// Pins the offsets the unnamed flags above were measured at against a regenerated layout.
+static_assert(kActionDeletesOffset == 112 && kActionConsumesStackOffset == 113);
 /** Fixed fields end after the acquisition presentation bytes; every installed item reaches it. */
 constexpr std::size_t kFixedFieldEnd = kToastlessAcquisitionOffset + 1;
 /** The plug block is self-relative from this offset, zero when absent. */
@@ -166,8 +168,7 @@ constexpr std::size_t kValueRowsOffset = kValueRowCountOffset + sizeof(std::uint
 constexpr std::size_t kValueRowStride = 3 * sizeof(std::uint32_t);
 constexpr std::size_t kValueRowQuantityOffset = sizeof(std::uint32_t);
 constexpr std::size_t kValueRowConditionOffset = 2 * sizeof(std::uint32_t);
-static_assert(kValueRowsOffset
-                  + state::build_data::pursuits::kRewardPreviewCapacity * kValueRowStride
+static_assert(kValueRowsOffset + kRewardPreviewCapacity * kValueRowStride
               == sizeof(generated::C80807875));
 /**
  * The unlock block's third array lists the value slots an instance record carries. The client
@@ -540,7 +541,7 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
  * @return False when the block or one of its rows is malformed.
  */
 [[nodiscard]] bool read_reward_previews(std::span<const std::byte> definition, Row& row) noexcept {
-    constexpr std::uint32_t kAbsentReference = state::build_data::pursuits::kAbsent;
+    constexpr std::uint32_t kAbsentReference = kUnavailableRewardReference;
     std::size_t block = 0;
     bool present = false;
     std::uint32_t count = 0;
@@ -550,12 +551,10 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
     if (!present) {
         return true;
     }
-    if (!read(definition, block + kValueRowCountOffset, count)
-        || count > state::build_data::pursuits::kRewardPreviewCapacity) {
+    if (!read(definition, block + kValueRowCountOffset, count) || count > kRewardPreviewCapacity) {
         return false;
     }
-    for (std::size_t index = 0; index < state::build_data::pursuits::kRewardPreviewCapacity;
-         ++index) {
+    for (std::size_t index = 0; index < kRewardPreviewCapacity; ++index) {
         const std::size_t at = block + kValueRowsOffset + index * kValueRowStride;
         std::uint32_t item = 0;
         std::uint32_t condition = 0;
@@ -595,7 +594,7 @@ void read_item_value_slots(std::span<const std::byte> definition, Row& row) noex
                        kItemValueSlotClass,
                        kItemValueSlotStride,
                        slots)
-        || slots.count > state::build_data::pursuits::kItemValueCapacity) {
+        || slots.count > kItemValueCapacity) {
         return;
     }
     for (std::size_t index = 0; index < slots.count; ++index) {
@@ -663,7 +662,7 @@ void read_presence_flags(std::span<const std::byte> definition, Row& row) noexce
     // An empty objective list may carry no array header. Its lifetime is read all the same.
     if (objectives.count != 0
         && (objectives.elementClass != kObjectiveReferenceArrayClass
-            || objectives.count > state::build_data::pursuits::kObjectiveCapacity)) {
+            || objectives.count > kObjectiveCapacity)) {
         return false;
     }
     for (std::size_t i = 0; i < objectives.count; ++i) {
@@ -677,9 +676,7 @@ void read_presence_flags(std::span<const std::byte> definition, Row& row) noexce
     read_item_value_slots(definition, row);
     row.rewardPreviewsValid = read_reward_previews(definition, row);
     if (!row.rewardPreviewsValid) {
-        std::fill(std::begin(row.rewardPreviews),
-                  std::end(row.rewardPreviews),
-                  state::build_data::pursuits::RewardPreview{});
+        std::fill(std::begin(row.rewardPreviews), std::end(row.rewardPreviews), RewardPreview{});
     }
     return read_lifetime(definition, row);
 }

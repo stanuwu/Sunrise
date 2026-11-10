@@ -216,6 +216,10 @@ struct AccountState {
     account::settings::AccountSettings settings;
 };
 
+/** Request chains hold several accounts by value, so a capacity cannot grow one past 256 KiB. */
+inline constexpr std::size_t kAccountStateSizeLimit = std::size_t{256} * 1024;
+static_assert(sizeof(AccountState) <= kAccountStateSizeLimit);
+
 /** One character's key, class and selection, read without the rest of its saved state. */
 struct CharacterIdentity {
     std::uint64_t soid{};

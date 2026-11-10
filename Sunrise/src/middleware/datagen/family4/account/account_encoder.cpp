@@ -6,9 +6,7 @@
 #include <limits>
 #include <span>
 
-#include "../../../../state/account/inventory/synthesizer_tier.h"
 #include "../../../../state/build_data/runtime.h"
-#include "../../../../state/runtime/runtime.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../../definitions.h"
 #include "../progression/progression_bank_keys.h"
@@ -26,25 +24,9 @@ constexpr std::byte kSeenMessageByte{0xFF};
 /** A native inventory bucket id is 1 byte, so this covers every bucket. */
 constexpr std::size_t kBucketIdentityCapacity = 256;
 
+// A bound row from State addresses a character's value block.
 static_assert(layout::kCharacterValueCapacity
               == state::build_data::constants::kCharacterValueRowCount);
-
-/** Publishes each character's Synthesizer tier, read from the Synthesizer it holds. */
-void publish_synthesizer_tiers(const state::AccountState& state, layout::Object& object) noexcept {
-    state::build_data::constants::InvestmentConstants constants{};
-    if (!state::build_data::find_investment_constants(constants)
-        || constants.synthesizerTierValueRow == state::build_data::constants::kUnboundValueRow) {
-        return;
-    }
-    for (std::size_t index = 0; index < state.characterCount; ++index) {
-        const auto& items = state.characters[index].inventory;
-        const std::size_t held = state::account::inventory::held_synthesizer(items);
-        object.characterUnlocks[index].values[constants.synthesizerTierValueRow] =
-            held == items.count
-                ? state::account::inventory::kNoSynthesizerTier
-                : state::account::inventory::synthesizer_tier(items.values[held].definitionHash);
-    }
-}
 
 /** Places one profile item in the next free row of its inventory bucket. */
 [[nodiscard]] bool place_profile_item(const state::account::inventory::ProfileItem& item,
@@ -95,19 +77,23 @@ void publish_synthesizer_tiers(const state::AccountState& state, layout::Object&
 } // namespace
 
 /** Encodes a sentinel-correct account object from live State. */
-bool encode(const state::AccountState& state, std::span<std::byte> output) noexcept {
+bool encode(const state::AccountState& state,
+            const StateFields& fields,
+            std::span<std::byte> output) noexcept {
     state::unlocks::Table unlocks;
-    return state::unlocks::snapshot(unlocks) && encode(state, output, unlocks);
+    return state::unlocks::snapshot(unlocks) && encode(state, fields, output, unlocks);
 }
 
 /**
  * Account-wide unlocks use the supplied snapshot; per-character flags still use saved state.
  * @param state Account identity, roster, preferences, and inventory to encode.
+ * @param fields Values State holds outside the account copy, from the same view as state.
  * @param output Receives the account object; unchanged on failure.
  * @param unlocks Account unlocks from the same live or prepared view as state.
  * @return False when state, saved flags, mappings, or output bounds are invalid.
  */
 bool encode(const state::AccountState& state,
+            const StateFields& fields,
             std::span<std::byte> output,
             const state::unlocks::Table& unlocks) noexcept {
     if (state.primarySoid == 0 || !state::account::valid(state)
@@ -134,8 +120,11 @@ bool encode(const state::AccountState& state,
             return false;
         }
         object.characterUnlocks[index].flags = character.characterFlags;
+        if (fields.characterValueRow != state::build_data::constants::kUnboundValueRow) {
+            object.characterUnlocks[index].values[fields.characterValueRow] =
+                fields.characterValues[index];
+        }
     }
-    publish_synthesizer_tiers(state, object);
     object.publicityExpiries.fill(kSuppressedPublicityDeadline);
     object.seenMessages.fill(kSeenMessageByte);
     for (inventory::layout::Entry& item : object.profileItems) {
@@ -159,9 +148,7 @@ bool encode(const state::AccountState& state,
     object.profileItemCount = static_cast<std::uint32_t>(state.profileItemCount);
 
     // A committed wallet sync advances this generation; ordinary inventory updates keep it.
-    if (!state::read_store_wallet_sync(object.storeSyncRevision)) {
-        return false;
-    }
+    object.storeSyncRevision = fields.storeSyncRevision;
     if (object.storeSyncRevision != 0) {
         object.storeSyncState = layout::kStoreSyncStateSynced;
     }

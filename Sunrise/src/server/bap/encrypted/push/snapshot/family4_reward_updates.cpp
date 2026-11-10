@@ -54,7 +54,7 @@ granted_row_definition(const state::AccountState& account,
 }
 
 /**
- * Names the granted rows of one encoded object in its change ring, which is still empty.
+ * Names the granted rows of one encoded object in its change ring, which must still be empty.
  * @param profileRows True for the account's profile rows, false for the character's rows.
  * @param items The object's encoded rows; each granted row must be exactly one of them.
  * @return Null on success, or the step that failed.
@@ -64,9 +64,15 @@ template <typename ChangeList>
 write_granted_changes(const state::AccountState& account,
                       const state::PendingRecordRewardGrant& mutation,
                       bool profileRows,
-                      std::uint8_t changeKind,
                       std::span<const family4_datagen::inventory::layout::Entry> items,
                       ChangeList& changes) noexcept {
+    if (changes.writeSlot != 0 || changes.nextSequence != 0
+        || !std::all_of(changes.records.cbegin(), changes.records.cend(), kChangeRecordIsZero)) {
+        return profileRows ? "record_reward_profile_changes" : "record_reward_character_changes";
+    }
+    // A claim moves existing items, which the client presents without counting an acquisition.
+    const std::uint8_t changeKind =
+        mutation.vendorTransfer ? kVendorTransferChangeKind : kChangeKind;
     std::size_t written = 0;
     for (std::size_t rowIndex = 0; rowIndex < mutation.rowCount; ++rowIndex) {
         const state::GrantedRow& granted = mutation.rows[rowIndex];
@@ -102,6 +108,146 @@ write_granted_changes(const state::AccountState& account,
     return nullptr;
 }
 
+/** @return True when the staged update is one revision past the session and names the grant. */
+[[nodiscard]] static bool
+grant_follows_session(const queuez::SessionState& before,
+                      const queuez::RecordRewardGrant& update,
+                      const state::PendingRecordRewardGrant& mutation) noexcept {
+    return mutation.prepared && mutation.rewardCount <= mutation.rewards.size()
+           && queuez::valid(before) && queuez::valid(update.after) && before.family4Active
+           && before.family4ResidentCount != 0
+           && before.family4Version != (std::numeric_limits<std::int32_t>::max)()
+           && update.accountSoid == mutation.accountSoid
+           && update.characterSoid == mutation.characterSoid
+           && update.accountSoid == before.family4RootSoid
+           && update.after.family4Version == before.family4Version + 1
+           && update.appendedResidentCount <= state::kRecordRewardGrantCapacity
+           && update.releasedResidentCount <= update.releasedResidents.size()
+           && update.releasedResidentCount <= before.family4ResidentCount
+           && update.after.family4ResidentCount
+                  == before.family4ResidentCount - update.releasedResidentCount
+                         + update.appendedResidentCount
+           && update.accountDefinitionId == before.family4Residents.front().definitionId
+           && update.characterDefinitionId != 0 && update.itemInstanceDefinitionId != 0;
+}
+
+/**
+ * Resolves each instance the grant adds and checks it against the staged manifest's new tail.
+ * @param residents Receives the new residents in State's order: character instances, then profile
+ *        action sources.
+ * @return Null on success, or the step that failed.
+ */
+[[nodiscard]] static const char*
+resolve_granted_residents(const state::AccountState& account,
+                          const Resolved& selected,
+                          const queuez::SessionState& before,
+                          const queuez::RecordRewardGrant& update,
+                          const state::PendingRecordRewardGrant& mutation,
+                          family4_datagen::loadout::ResolvedInstances& residents) noexcept {
+    state::GrantedResidents grantedResidents{};
+    if (!state::granted_residents(mutation, grantedResidents)) {
+        return "record_reward_residents";
+    }
+    for (std::size_t index = 0; index < grantedResidents.count; ++index) {
+        const std::uint64_t soid = grantedResidents.soids[index];
+        if (residents.itemCount >= residents.items.size()) {
+            return "record_reward_resident_capacity";
+        }
+        std::size_t matches = 0;
+        for (std::size_t itemIndex = 0; itemIndex < selected.loadout.itemCount; ++itemIndex) {
+            const auto& item = selected.loadout.items[itemIndex];
+            if (item.instance.instanceSoid == soid) {
+                if (item.equipped) {
+                    return "record_reward_character_item";
+                }
+                residents.items[residents.itemCount] = {item.equipmentSlot, item.instance};
+                ++matches;
+            }
+        }
+        for (std::size_t profileIndex = 0; matches == 0 && profileIndex < account.profileItemCount;
+             ++profileIndex) {
+            if (account.profileItems[profileIndex].instanceSoid == soid) {
+                if (!resolve_profile_item_instance(account.profileItems[profileIndex],
+                                                   residents.items[residents.itemCount].instance)) {
+                    return "record_reward_profile_instance";
+                }
+                ++matches;
+            }
+        }
+        if (matches != 1) {
+            return "record_reward_resident_identity";
+        }
+        ++residents.itemCount;
+    }
+    if (residents.itemCount != update.appendedResidentCount) {
+        return "record_reward_resident_count";
+    }
+    for (std::size_t index = 0; index < residents.itemCount; ++index) {
+        const auto& expected =
+            update.after.family4Residents[before.family4ResidentCount - update.releasedResidentCount
+                                          + index];
+        if (expected.objectSoid != residents.items[index].instance.instanceSoid
+            || expected.definitionId != update.itemInstanceDefinitionId) {
+            return "record_reward_resident_order";
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * Encodes the selected character's after-image, names the granted rows in its change ring and
+ * pins the rows an earlier acquisition presents.
+ * @return Null on success, or the step that failed.
+ */
+[[nodiscard]] static const char*
+encode_granted_character(const state::AccountState& account,
+                         const state::unlocks::Table& unlocks,
+                         const state::PendingRecordRewardGrant& mutation,
+                         const Resolved& selected,
+                         std::span<const queuez::AcquisitionPresentationRow> presentationRows,
+                         std::span<std::byte> characterBytes) noexcept {
+    if (!family4_datagen::character::encode(account.characters[mutation.characterIndex],
+                                            selected.loadout,
+                                            selected.lightEvaluation,
+                                            characterBytes,
+                                            unlocks)) {
+        return "record_reward_character_encode";
+    }
+    auto& characterObject =
+        *reinterpret_cast<family4_datagen::character::layout::Object*>(characterBytes.data());
+    const char* const ringFailure = write_granted_changes(
+        account, mutation, false, characterObject.inventoryItems, characterObject.inventoryChanges);
+    if (ringFailure != nullptr) {
+        return ringFailure;
+    }
+    return apply_acquisition_presentation(characterBytes, selected.loadout, presentationRows)
+               ? nullptr
+               : "record_reward_presentation";
+}
+
+/**
+ * Encodes the account's after-image and names the granted profile rows in its change ring.
+ * @return Null on success, or the step that failed.
+ */
+[[nodiscard]] static const char*
+encode_granted_account(const state::AccountState& account,
+                       const state::unlocks::Table& unlocks,
+                       const state::PendingRecordRewardGrant& mutation,
+                       std::span<std::byte> accountBytes) noexcept {
+    family4_datagen::account::StateFields accountFields{};
+    if (!read_account_state_fields(account, accountFields)
+        || !family4_datagen::account::encode(account, accountFields, accountBytes, unlocks)) {
+        return "record_reward_account_encode";
+    }
+    auto& accountObject =
+        *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data());
+    return write_granted_changes(account,
+                                 mutation,
+                                 true,
+                                 accountObject.profileItems,
+                                 accountObject.profileInventoryChanges);
+}
+
 /** Builds all record rewards and the pending claim into one Family-4 revision. */
 bool prepare_record_reward_grant(
     Scratch& scratch,
@@ -112,22 +258,7 @@ bool prepare_record_reward_grant(
     Prepared& prepared) noexcept {
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
-    if (!mutation.prepared || mutation.rewardCount > mutation.rewards.size()
-        || !queuez::valid(before)
-        || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
-        || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
-        || update.accountSoid != mutation.accountSoid
-        || update.characterSoid != mutation.characterSoid
-        || update.accountSoid != before.family4RootSoid
-        || update.after.family4Version != before.family4Version + 1
-        || update.appendedResidentCount > state::kRecordRewardGrantCapacity
-        || update.releasedResidentCount > update.releasedResidents.size()
-        || update.releasedResidentCount > before.family4ResidentCount
-        || update.after.family4ResidentCount
-               != before.family4ResidentCount - update.releasedResidentCount
-                      + update.appendedResidentCount
-        || update.accountDefinitionId != before.family4Residents.front().definitionId
-        || update.characterDefinitionId == 0 || update.itemInstanceDefinitionId == 0) {
+    if (!grant_follows_session(before, update, mutation)) {
         return report_failure("record_reward_session");
     }
 
@@ -146,57 +277,11 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_account");
     }
 
-    // A claim moves existing items, which the client presents without counting an acquisition.
-    const std::uint8_t changeKind =
-        mutation.vendorTransfer ? kVendorTransferChangeKind : kChangeKind;
-    state::GrantedResidents grantedResidents{};
     family4_datagen::loadout::ResolvedInstances residents{};
-    if (!state::granted_residents(mutation, grantedResidents)) {
-        return report_failure("record_reward_residents");
-    }
-    // State lists new character instances first, then new profile action sources.
-    for (std::size_t index = 0; index < grantedResidents.count; ++index) {
-        const std::uint64_t soid = grantedResidents.soids[index];
-        if (residents.itemCount >= residents.items.size()) {
-            return report_failure("record_reward_resident_capacity");
-        }
-        std::size_t matches = 0;
-        for (std::size_t itemIndex = 0; itemIndex < selected.loadout.itemCount; ++itemIndex) {
-            const auto& item = selected.loadout.items[itemIndex];
-            if (item.instance.instanceSoid == soid) {
-                if (item.equipped) {
-                    return report_failure("record_reward_character_item");
-                }
-                residents.items[residents.itemCount] = {item.equipmentSlot, item.instance};
-                ++matches;
-            }
-        }
-        for (std::size_t profileIndex = 0; matches == 0 && profileIndex < account.profileItemCount;
-             ++profileIndex) {
-            if (account.profileItems[profileIndex].instanceSoid == soid) {
-                if (!resolve_profile_item_instance(account.profileItems[profileIndex],
-                                                   residents.items[residents.itemCount].instance)) {
-                    return report_failure("record_reward_profile_instance");
-                }
-                ++matches;
-            }
-        }
-        if (matches != 1) {
-            return report_failure("record_reward_resident_identity");
-        }
-        ++residents.itemCount;
-    }
-    if (residents.itemCount != update.appendedResidentCount) {
-        return report_failure("record_reward_resident_count");
-    }
-    for (std::size_t index = 0; index < residents.itemCount; ++index) {
-        const auto& expected =
-            update.after.family4Residents[before.family4ResidentCount - update.releasedResidentCount
-                                          + index];
-        if (expected.objectSoid != residents.items[index].instance.instanceSoid
-            || expected.definitionId != update.itemInstanceDefinitionId) {
-            return report_failure("record_reward_resident_order");
-        }
+    const char* const residentFailure =
+        resolve_granted_residents(account, selected, before, update, mutation, residents);
+    if (residentFailure != nullptr) {
+        return report_failure(residentFailure);
     }
     // Held items whose values the grant changed, such as bounties a delivery advanced, are upserted
     // after the new residents. The manifest already lists them.
@@ -221,6 +306,11 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_storage");
     }
 
+    // Every failure past the reservation clears what this grant staged behind it.
+    const auto fail = [&scratch, &reservation](const char* step) noexcept {
+        clear_after(scratch, reservation);
+        return report_failure(step);
+    };
     Prepared staged{};
     std::size_t compressedExtent = reservation.compressedWriteOffset;
     std::size_t residentCursor = 0;
@@ -233,8 +323,7 @@ bool prepare_record_reward_grant(
                       residentCursor,
                       compressedExtent)
         || residentCursor != residents.itemCount) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_residents");
+        return fail("record_reward_residents");
     }
     if (!append_items(scratch,
                       rawStorage,
@@ -245,41 +334,14 @@ bool prepare_record_reward_grant(
                       residentCursor,
                       compressedExtent)
         || residentCursor != residents.itemCount + edited.itemCount) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_edited_items");
+        return fail("record_reward_edited_items");
     }
 
     const auto characterBytes = rawStorage.first(character_layout::kObjectSize);
-    const state::CharacterState& character = account.characters[mutation.characterIndex];
-    if (!family4_datagen::character::encode(
-            character, selected.loadout, selected.lightEvaluation, characterBytes, unlocks)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_character_encode");
-    }
-    auto& characterObject = *reinterpret_cast<character_layout::Object*>(characterBytes.data());
-    if (characterObject.inventoryChanges.writeSlot != 0
-        || characterObject.inventoryChanges.nextSequence != 0
-        || !std::all_of(characterObject.inventoryChanges.records.cbegin(),
-                        characterObject.inventoryChanges.records.cend(),
-                        kChangeRecordIsZero)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_character_changes");
-    }
-    const char* const characterRingFailure =
-        write_granted_changes(account,
-                              mutation,
-                              false,
-                              changeKind,
-                              characterObject.inventoryItems,
-                              characterObject.inventoryChanges);
-    if (characterRingFailure != nullptr) {
-        clear_after(scratch, reservation);
-        return report_failure(characterRingFailure);
-    }
-    if (!apply_acquisition_presentation(
-            characterBytes, selected.loadout, acquisitionPresentationRows)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_presentation");
+    const char* const characterFailure = encode_granted_character(
+        account, unlocks, mutation, selected, acquisitionPresentationRows, characterBytes);
+    if (characterFailure != nullptr) {
+        return fail(characterFailure);
     }
     if (!append_object(scratch,
                        characterBytes,
@@ -287,34 +349,14 @@ bool prepare_record_reward_grant(
                        update.characterSoid,
                        staged.objects[residentCursor],
                        compressedExtent)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_character_object");
+        return fail("record_reward_character_object");
     }
 
     const auto accountBytes = rawStorage.first(account_layout::kObjectSize);
-    if (!family4_datagen::account::encode(account, accountBytes, unlocks)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_account_encode");
-    }
-    auto& accountObject = *reinterpret_cast<account_layout::Object*>(accountBytes.data());
-    if (accountObject.profileInventoryChanges.writeSlot != 0
-        || accountObject.profileInventoryChanges.nextSequence != 0
-        || !std::all_of(accountObject.profileInventoryChanges.records.cbegin(),
-                        accountObject.profileInventoryChanges.records.cend(),
-                        kChangeRecordIsZero)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_profile_changes");
-    }
-    const char* const profileRingFailure =
-        write_granted_changes(account,
-                              mutation,
-                              true,
-                              changeKind,
-                              accountObject.profileItems,
-                              accountObject.profileInventoryChanges);
-    if (profileRingFailure != nullptr) {
-        clear_after(scratch, reservation);
-        return report_failure(profileRingFailure);
+    const char* const accountFailure =
+        encode_granted_account(account, unlocks, mutation, accountBytes);
+    if (accountFailure != nullptr) {
+        return fail(accountFailure);
     }
     if (!append_object(scratch,
                        accountBytes,
@@ -322,16 +364,14 @@ bool prepare_record_reward_grant(
                        update.accountSoid,
                        staged.objects[residentCursor + 1U],
                        compressedExtent)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_account_object");
+        return fail("record_reward_account_object");
     }
 
     std::size_t objectCount = residentCursor + 2U;
     for (const auto soid :
          std::span(update.releasedResidents).first(update.releasedResidentCount)) {
         if (objectCount == staged.objects.size()) {
-            clear_after(scratch, reservation);
-            return report_failure("record_reward_releases");
+            return fail("record_reward_releases");
         }
         staged.objects[objectCount++] = {
             update.itemInstanceDefinitionId, soid, middleware::queuez::Encoding::oodle, {}};
@@ -350,8 +390,7 @@ bool prepare_record_reward_grant(
         std::span(staged.objects).first(objectCount),
     };
     if (!commit(staged, prepared)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_commit");
+        return fail("record_reward_commit");
     }
     return true;
 }

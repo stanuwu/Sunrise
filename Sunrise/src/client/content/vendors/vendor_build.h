@@ -1,7 +1,10 @@
 #pragma once
 
 #include "../../../middleware/content/packages/reader/reader.h"
-#include "../items/packages/package_reward_build.h"
+
+namespace sunrise::client::content::items::packages {
+class RewardConditions;
+}
 
 namespace sunrise::client::content::vendors {
 

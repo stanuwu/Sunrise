@@ -39,25 +39,6 @@ struct ObjectiveTable {
     std::vector<state::unlocks::Instruction> program;
 };
 
-/**
- * Loads the condition tables the objective programs bind through. When the reward domain has
- * already settled these tables as unsupported, the pursuit domains settle too.
- * @return True when the tables loaded. A transient read failure is retried on the next pass.
- */
-[[nodiscard]] bool load_conditions(RewardConditions& conditions,
-                                   const reader::Source& source,
-                                   reader::Scratch& scratch,
-                                   std::span<const std::byte> root,
-                                   const SlotMaps& maps) noexcept {
-    if (conditions.load(source, scratch, root, maps)) {
-        return true;
-    }
-    if (reward_definitions_settled() && !state::build_data::reward_definitions_ready()) {
-        settle_pursuits_unsupported("condition_tables");
-    }
-    return false;
-}
-
 /** Reads the completion controls of one bounded objective row. */
 [[nodiscard]] bool read_completion_controls(std::span<const std::byte> blob,
                                             std::size_t at,
@@ -141,7 +122,7 @@ struct ObjectiveTable {
 bool build_objectives(const reader::Source& source,
                       reader::Scratch& scratch,
                       std::span<const std::byte> root,
-                      const SlotMaps& maps) noexcept {
+                      const RewardConditions& conditions) noexcept {
     if (state::build_data::objective_definitions_ready()) {
         return true;
     }
@@ -164,8 +145,13 @@ bool build_objectives(const reader::Source& source,
             settle_pursuits_unsupported("objective_schema");
             return false;
         }
-        RewardConditions conditions;
-        if (!load_conditions(conditions, source, scratch, root, maps)) {
+        // The programs bind through the condition tables. Once the reward domain has settled
+        // those tables as unsupported, the pursuit domains settle too; a read that failed this
+        // pass is retried on the next.
+        if (!conditions.loaded()) {
+            if (reward_definitions_settled() && !state::build_data::reward_definitions_ready()) {
+                settle_pursuits_unsupported("condition_tables");
+            }
             return false;
         }
         ObjectiveTable table;

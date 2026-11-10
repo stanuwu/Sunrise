@@ -285,9 +285,11 @@ publish_operation(const SeasonalExperienceOperation& request,
                   std::size_t& written,
                   bool& touchesScratch) noexcept {
     const char* reason = nullptr;
+    const std::uint16_t previousBonus = state::artifact_power_bonus();
     if (!state::replace_seasonal_experience(request.expected, request.replacement, &reason)) {
         return state_refusal_transition(reason);
     }
+    const bool bonusMoved = state::artifact_power_bonus() != previousBonus;
     const InvestmentTransition transition = publish_changed_objects(transaction,
                                                                     account_row_change(target),
                                                                     session,
@@ -296,7 +298,12 @@ publish_operation(const SeasonalExperienceOperation& request,
                                                                     written,
                                                                     touchesScratch);
     if (transition.state == InvestmentReceiptState::published) {
+        // Family 5 carries the artifact's Power bonus and earned points, both derived from the
+        // total. State reports only the bonus, so the refresh is armed for every committed edit.
         bap::arm_artifact_refresh(session);
+        if (bonusMoved) {
+            bap::arm_social_roster_repush_everywhere();
+        }
     }
     return transition;
 }

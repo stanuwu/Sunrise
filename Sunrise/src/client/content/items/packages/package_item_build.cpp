@@ -186,24 +186,29 @@ bool build() noexcept {
                     continue;
                 }
             }
+            // Objective programs, sale rows, reward pools, pass rows, plug insertion rules and
+            // pursuit reward rows bind through the condition tables, so one load serves the pass.
+            RewardConditions& conditions = storage.rewardBuild.conditions;
+            if (!pursuit_catalog_settled() || !state::build_data::vendor_catalog_ready()
+                || !reward_definitions_settled() || !state::build_data::season_pass_ready()
+                || !plug_insertion_rules_settled()) {
+                (void)conditions.load(source,
+                                      storage.scratch,
+                                      std::span<const std::byte>{storage.root},
+                                      storage.slotMaps);
+            }
             // The objective table settles or retries on its own, so it never holds up the others.
             if (!pursuit_catalog_settled()) {
                 (void)build_objectives(source,
                                        storage.scratch,
                                        std::span<const std::byte>{storage.root},
-                                       storage.slotMaps);
+                                       conditions);
             }
             // Sale rows bind their availability through the condition tables. A refused reward
             // graph still publishes the catalog: a row whose conditions cannot bind is not sold.
-            if (!state::build_data::vendor_catalog_ready()) {
-                RewardConditions conditions;
-                if (conditions.load(source,
-                                    storage.scratch,
-                                    std::span<const std::byte>{storage.root},
-                                    storage.slotMaps)
-                    || state::build_data::reward_definitions_unsupported()) {
-                    (void)content::vendors::build(source, storage.scratch, conditions);
-                }
+            if (!state::build_data::vendor_catalog_ready()
+                && (conditions.loaded() || state::build_data::reward_definitions_unsupported())) {
+                (void)content::vendors::build(source, storage.scratch, conditions);
             }
             // Item rows read the flags the plug sets gate their members on.
             if (!state::build_data::socket_plug_rules_ready()
@@ -258,18 +263,16 @@ bool build() noexcept {
                         std::span(storage.progressionSteps).first(storage.progressionStepCount));
                 }
             }
-            // Pass rows, plug insertion rules and pursuit reward rows bind through the reward
-            // condition tables, which load before the pools.
+            // The pools are read again while any domain that binds through the condition tables
+            // is open.
             if (!reward_definitions_settled() || !state::build_data::season_pass_ready()
                 || !plug_insertion_rules_settled() || !pursuit_catalog_settled()) {
-                (void)storage.rewardBuild.load(
-                    source, storage.scratch, storage.root, storage.slotMaps);
+                (void)storage.rewardBuild.load(source, storage.scratch, storage.root);
             }
             // A refused reward graph still publishes the pass. A row whose condition cannot bind
             // stays unavailable, and every claim refuses without the graph.
             if (!state::build_data::season_pass_ready()
-                && (storage.rewardBuild.conditions.loaded()
-                    || state::build_data::reward_definitions_unsupported())
+                && (conditions.loaded() || state::build_data::reward_definitions_unsupported())
                 && build_season_pass(source, storage, std::span<const std::byte>{storage.root})
                 && !state::build_data::publish_season_pass(
                     std::span(storage.seasonPassRewards).first(storage.seasonPassRewardCount))) {

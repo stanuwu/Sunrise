@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <span>
 
 #include "../../core/logging/log.h"
@@ -19,6 +20,7 @@
 #include "../rewards/reward_resolver.h"
 #include "pursuit_completion_runtime.h"
 #include "runtime.h"
+#include "saved_selection_runtime.h"
 #include "state_account_transaction_helpers.h"
 
 namespace sunrise::state {
@@ -47,6 +49,9 @@ struct CompletionPlan {
     std::size_t rowCount{};
     std::bitset<unlocks::kAccountFlagCapacity> wrapperFlags{};
     std::array<reward_resolution::Grant, kRecordRewardGrantCapacity> grants{};
+    /** The completion values the contract names, each set by the redemption. */
+    PreparedQuestStep completionValue{};
+    PreparedQuestStep completionContextValue{};
     PreparedQuestStep questStep{};
     PreparedProgressionCredit progression{};
     std::int32_t seasonalExperience{};
@@ -54,6 +59,8 @@ struct CompletionPlan {
     std::array<GambitPrimeHelmetTier, kGambitPrimeRoleCount> helmetTiers{};
     /** The held Synthesizer the next tier replaces, or zero. */
     std::uint64_t replacedSynthesizerSoid{};
+    /** The treasure map a Werner bounty pays in place of the rows it shows, or zero. */
+    std::uint32_t treasureMapHash{};
 };
 
 /**
@@ -251,6 +258,19 @@ struct RoleHelmetMarker {
     std::uint32_t hash{};
     std::array<std::array<std::uint32_t, kHelmetTierCount>, kCharacterClassCount> classTiers{};
 };
+
+/** @return The row of an authored table keyed by this item hash, or null. */
+template <typename Row, std::size_t Size>
+[[nodiscard]] const Row* find_row(const std::array<Row, Size>& rows, std::uint32_t hash) noexcept {
+    const auto found =
+        std::find_if(rows.begin(), rows.end(), [hash](const Row& row) { return row.hash == hash; });
+    return found != rows.end() ? &*found : nullptr;
+}
+
+/** @return True when the authored list holds this hash. */
+[[nodiscard]] bool lists(std::span<const std::uint32_t> hashes, std::uint32_t hash) noexcept {
+    return std::find(hashes.begin(), hashes.end(), hash) != hashes.end();
+}
 
 // --- Authored game data --------------------------------------------------------------------
 
@@ -865,6 +885,49 @@ treasure_maps() noexcept {
 }
 constexpr auto kWernerTreasureMaps = treasure_maps();
 
+/**
+ * Plans the treasure map a Werner bounty pays in place of the rows it shows.
+ * @param plan Receives the map's row and hash; unchanged for any other pursuit.
+ * @return False when the bounty's map is not installed.
+ */
+[[nodiscard]] bool plan_treasure_map(std::uint32_t bountyHash, CompletionPlan& plan) noexcept {
+    const TreasureMapTransition* transition = find_row(kTreasureMapTransitions, bountyHash);
+    if (transition == nullptr) {
+        return true;
+    }
+    build_data::items::Definition map{};
+    if (!build_data::find_item_definition_hash(transition->mapHash, map)) {
+        return false;
+    }
+    plan.rows[plan.rowCount++] = {map.definitionIndex, 1};
+    plan.treasureMapHash = transition->mapHash;
+    return true;
+}
+
+/**
+ * Settles the treasure map a prepared grant placed for a Werner bounty.
+ * @param deadline The deadline of the bounty that paid the map.
+ * @return False when the map found no row, so the bounty would pay nothing.
+ */
+[[nodiscard]] bool settle_treasure_map(std::uint32_t mapHash,
+                                       std::int32_t deadline,
+                                       PendingRecordRewardGrant& mutation) noexcept {
+    const PreparedRecordReward& placed = mutation.rewards[0];
+    if (placed.placedQuantity == 0) {
+        return false;
+    }
+    CharacterState& after = mutation.afterCharacter;
+    const auto held = std::span(after.inventory.values).first(after.inventory.count);
+    const auto map = std::find_if(held.begin(), held.end(), [&placed](const auto& item) {
+        return item.instanceSoid != 0 && item.instanceSoid == placed.instanceSoid;
+    });
+    // Authored rule, like the table: a map keeps the deadline of the bounty that paid it.
+    if (placed.definitionHash == mapHash && map != held.end() && map->objectives.has_value()) {
+        (*map->objectives)[authored_inventory::kItemExpiryLane] = deadline;
+    }
+    return true;
+}
+
 /** Every bounty is in at most one family. */
 constexpr std::array<BountyFamily, 19> kBountyFamilies{{
     {kRepeatableBounties, Cadence::repeatable, GearSource::world},
@@ -926,19 +989,6 @@ enum class RowOutcome : std::uint8_t {
     /** A later attempt may settle the row, so the redemption is refused. */
     refused,
 };
-
-/** @return The row of an authored table keyed by this item hash, or null. */
-template <typename Row, std::size_t Size>
-[[nodiscard]] const Row* find_row(const std::array<Row, Size>& rows, std::uint32_t hash) noexcept {
-    const auto found =
-        std::find_if(rows.begin(), rows.end(), [hash](const Row& row) { return row.hash == hash; });
-    return found != rows.end() ? &*found : nullptr;
-}
-
-/** @return True when the authored list holds this hash. */
-[[nodiscard]] bool lists(std::span<const std::uint32_t> hashes, std::uint32_t hash) noexcept {
-    return std::find(hashes.begin(), hashes.end(), hash) != hashes.end();
-}
 
 /**
  * Reads a bounty's rules. Its family decides; a bounty no family names takes its cadence from its
@@ -1071,6 +1121,82 @@ pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcep
 }
 
 /**
+ * Reads a row naming an experience or rank-point marker, which pays no item and takes any
+ * quantity. A rank-point row naming no points pays nothing.
+ * @return False for any other row.
+ */
+[[nodiscard]] bool
+pay_progress_marker(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcept {
+    if (hash == kExperienceMarkerHash || hash == kDoubleExperienceMarkerHash) {
+        payment.kind = PaymentKind::experience;
+        payment.experienceMultiple = hash == kDoubleExperienceMarkerHash ? 2 : 1;
+        return true;
+    }
+    const RankMarker* marker = find_row(kRankMarkers, hash);
+    if (marker == nullptr) {
+        return false;
+    }
+    if (quantity > 0) {
+        payment.kind = PaymentKind::rankPoints;
+        payment.progressionHash = marker->progressionHash;
+        payment.quantity = quantity;
+    }
+    return true;
+}
+
+/**
+ * Reads a row naming a currency. A row with no amount pays its bounty's cadence amount.
+ * @param quantity The row's amount, zero or more.
+ * @param reason Receives a static reason when the row is not settled.
+ * @return Whether the amount and the currency settled, or nothing for any other row.
+ */
+[[nodiscard]] std::optional<bool> pay_currency(std::uint32_t hash,
+                                               std::int32_t quantity,
+                                               Cadence cadence,
+                                               RowPayment& payment,
+                                               const char*& reason) noexcept {
+    const CurrencyPayout* payout = find_row(kCurrencyPayouts, hash);
+    if (payout == nullptr) {
+        return std::nullopt;
+    }
+    if (quantity == 0) {
+        reason = "reward_quantity";
+        if (cadence == Cadence::none) {
+            return false;
+        }
+        quantity = cadence == Cadence::weekly ? payout->weeklyQuantity : payout->dailyQuantity;
+    }
+    reason = "reward_currency";
+    payment.kind = PaymentKind::item;
+    return pay_item(payout->currencyHash, quantity, payment);
+}
+
+/**
+ * Reads a row naming a Gambit Prime role helmet or the Synthesizer Upgrade marker, which only a
+ * role weekly pays.
+ * @param reason Receives a static reason when the row is not settled.
+ * @return Whether the bounty pays the marker, or nothing for any other row.
+ */
+[[nodiscard]] std::optional<bool> pay_role_marker(std::uint32_t hash,
+                                                  std::int32_t quantity,
+                                                  GearSource gear,
+                                                  RowPayment& payment,
+                                                  const char*& reason) noexcept {
+    if (const RoleHelmetMarker* helmet = find_row(kRoleHelmets, hash)) {
+        reason = "reward_role_helmet_source";
+        payment.kind = PaymentKind::roleHelmet;
+        payment.role = static_cast<std::size_t>(helmet - kRoleHelmets.data());
+        return gear == GearSource::gambitPrimeRole;
+    }
+    if (hash == kSynthesizerUpgradeMarkerHash) {
+        reason = "reward_synthesizer_upgrade_source";
+        payment.kind = PaymentKind::synthesizerUpgrade;
+        return gear == GearSource::gambitPrimeRole && quantity == 1;
+    }
+    return std::nullopt;
+}
+
+/**
  * Reads what one reward row pays. The authored tables decide a marker or currency they name; any
  * other row pays its own item, unless it names a stand-in.
  * @param seed Draws a gear marker's item.
@@ -1092,46 +1218,18 @@ pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcep
         return reward.quantity == 0;
     }
     const std::uint32_t hash = item.definitionHash;
-    if (hash == kExperienceMarkerHash || hash == kDoubleExperienceMarkerHash) {
-        payment.kind = PaymentKind::experience;
-        payment.experienceMultiple = hash == kDoubleExperienceMarkerHash ? 2 : 1;
-        return true;
-    }
-    if (const RankMarker* marker = find_row(kRankMarkers, hash)) {
-        if (reward.quantity > 0) {
-            payment.kind = PaymentKind::rankPoints;
-            payment.progressionHash = marker->progressionHash;
-            payment.quantity = reward.quantity;
-        }
+    if (pay_progress_marker(hash, reward.quantity, payment)) {
         return true;
     }
     reason = "reward_quantity";
     if (reward.quantity < 0) {
         return false;
     }
-    if (const CurrencyPayout* payout = find_row(kCurrencyPayouts, hash)) {
-        std::int32_t quantity = reward.quantity;
-        if (quantity == 0) {
-            if (rules.cadence == Cadence::none) {
-                return false;
-            }
-            quantity =
-                rules.cadence == Cadence::weekly ? payout->weeklyQuantity : payout->dailyQuantity;
-        }
-        reason = "reward_currency";
-        payment.kind = PaymentKind::item;
-        return pay_item(payout->currencyHash, quantity, payment);
+    if (const auto currency = pay_currency(hash, reward.quantity, rules.cadence, payment, reason)) {
+        return *currency;
     }
-    reason = "reward_role_helmet_source";
-    if (const RoleHelmetMarker* helmet = find_row(kRoleHelmets, hash)) {
-        payment.kind = PaymentKind::roleHelmet;
-        payment.role = static_cast<std::size_t>(helmet - kRoleHelmets.data());
-        return rules.gear == GearSource::gambitPrimeRole;
-    }
-    reason = "reward_synthesizer_upgrade_source";
-    if (hash == kSynthesizerUpgradeMarkerHash) {
-        payment.kind = PaymentKind::synthesizerUpgrade;
-        return rules.gear == GearSource::gambitPrimeRole && reward.quantity == 1;
+    if (const auto role = pay_role_marker(hash, reward.quantity, rules.gear, payment, reason)) {
+        return *role;
     }
     reason = "reward_gear_source";
     if (is_gear_marker(hash)) {
@@ -1447,67 +1545,41 @@ void report_unjudged_row(std::uint32_t bountyHash,
     return true;
 }
 
-/** A treasure map keeps the deadline of the bounty that paid it. */
-void keep_bounty_deadline(std::uint32_t mapHash,
-                          std::int32_t deadline,
-                          PendingRecordRewardGrant& mutation) noexcept {
-    const PreparedRecordReward& placed = mutation.rewards[0];
-    CharacterState& after = mutation.afterCharacter;
-    const auto held = std::span(after.inventory.values).first(after.inventory.count);
-    const auto map = std::find_if(held.begin(), held.end(), [&placed](const auto& item) {
-        return item.instanceSoid != 0 && item.instanceSoid == placed.instanceSoid;
-    });
-    if (placed.definitionHash == mapHash && map != held.end() && map->objectives.has_value()) {
-        (*map->objectives)[authored_inventory::kItemExpiryLane] = deadline;
-    }
-}
+// --- Redemption stages ---------------------------------------------------------------------
 
-} // namespace
+/** The held pursuit one redemption judges: its item, its installed contract and its own values. */
+struct RedeemedPursuit {
+    build_data::items::Definition item{};
+    pursuit_data::Definition contract{};
+    /** A copy that never saved any reads zero in every lane. */
+    authored_inventory::ItemObjectives itemValues{};
+};
 
-/** Judges completion and plans under one store lock, then prepares the grant from that plan. */
-PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
-                                             std::uint32_t definitionHash,
-                                             std::int64_t nowSeconds,
-                                             std::uint64_t seed,
-                                             PendingRecordRewardGrant& mutation,
-                                             const char** refusal) noexcept {
-    const char* unused = nullptr;
-    auto& reason = refusal != nullptr ? *refusal : unused;
-    mutation = {};
-    reason = "not_ready";
-    if (!build_data::pursuit_definitions_ready() || !build_data::reward_definitions_ready()
-        || !build_data::progression_definitions_ready()
-        || !build_data::repeatable_bounties_ready()) {
-        return PursuitRedemption::notReady;
-    }
-    const std::lock_guard lock(investment::store::g_mutex);
-    const std::unique_ptr<AccountState> account(new (std::nothrow) AccountState{});
-    const std::unique_ptr<unlocks::Table> banks(new (std::nothrow) unlocks::Table{});
-    reason = "saved_state";
-    if (!account || !banks || !investment::store::read_account(*account)) {
-        return PursuitRedemption::notReady;
-    }
-    const std::size_t characterIndex = selected_character_index(*account);
-    if (characterIndex >= account->characterCount
-        || !investment::store::read_unlocks(*banks, static_cast<int>(characterIndex))) {
-        return PursuitRedemption::notReady;
-    }
-    const CharacterState& character = account->characters[characterIndex];
+/**
+ * Finds the held pursuit a redemption names and checks that it can be redeemed at all.
+ * @param reason Receives a static reason when the result is not prepared.
+ * @return Refused when the request names no held, unlocked pursuit of that definition; not
+ *         redeemable for an unreadable or suppressed contract, a treasure map or an expired bounty.
+ */
+[[nodiscard]] PursuitRedemption find_redeemed_pursuit(const CharacterState& character,
+                                                      std::uint64_t instanceSoid,
+                                                      std::uint32_t definitionHash,
+                                                      std::int64_t nowSeconds,
+                                                      RedeemedPursuit& pursuit,
+                                                      const char*& reason) noexcept {
     const auto held = std::span(character.inventory.values).first(character.inventory.count);
     const auto source = std::find_if(held.begin(), held.end(), [instanceSoid](const auto& item) {
         return item.instanceSoid == instanceSoid;
     });
-    build_data::items::Definition item{};
-    pursuit_data::Definition contract{};
     reason = "pursuit";
     if (instanceSoid == 0 || source == held.end() || source->definitionHash != definitionHash
         || source->quantity != 1
-        || !build_data::find_item_definition_hash(source->definitionHash, item)
-        || !build_data::find_pursuit_definition(item.definitionIndex, contract)) {
+        || !build_data::find_item_definition_hash(source->definitionHash, pursuit.item)
+        || !build_data::find_pursuit_definition(pursuit.item.definitionIndex, pursuit.contract)) {
         return PursuitRedemption::refused;
     }
     reason = "pursuit_unreadable";
-    if (!contract.readable) {
+    if (!pursuit.contract.readable) {
         return PursuitRedemption::notRedeemable;
     }
     reason = "locked";
@@ -1515,99 +1587,136 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
         return PursuitRedemption::refused;
     }
     reason = "suppressed";
-    if (contract.suppressCompletion) {
+    if (pursuit.contract.suppressCompletion) {
         return PursuitRedemption::notRedeemable;
     }
     reason = "treasure_map_world_chest";
-    if (lists(kWernerTreasureMaps, item.definitionHash)) {
+    if (lists(kWernerTreasureMaps, pursuit.item.definitionHash)) {
         return PursuitRedemption::notRedeemable;
     }
-    static constexpr authored_inventory::ItemObjectives kUnsetItemValues{};
-    const authored_inventory::ItemObjectives& itemValues =
-        source->objectives.has_value() ? *source->objectives : kUnsetItemValues;
+    pursuit.itemValues = source->objectives.value_or(authored_inventory::ItemObjectives{});
     reason = "expired";
-    if (contract.lifetimeSeconds > 0) {
-        const std::int32_t deadline = itemValues[authored_inventory::kItemExpiryLane];
-        if (deadline <= 0 || nowSeconds >= deadline) {
-            return PursuitRedemption::notRedeemable;
-        }
-    }
-
-    // No refusal slot: a reward row's condition or draw reports through a copy that has one.
-    const reward_resolution::Context context{*banks, character.characterClass, seed, nullptr};
-    const PursuitCompletionStatus status =
-        inspect_pursuit_completion(contract, context, itemValues, held);
-    const pursuit_data::QuestStep& step = contract.questStep;
-    reason = "quest_progress";
-    if (step.membership != pursuit_data::QuestMembership::none && !progress_item_held(status)) {
+    if (bounty_expired(pursuit.contract, pursuit.itemValues, nowSeconds)) {
         return PursuitRedemption::notRedeemable;
+    }
+    return PursuitRedemption::prepared;
+}
+
+/**
+ * Judges whether the server can read the pursuit's objectives, and reads them complete.
+ * @param heldItems The character's held items, which a largest-value objective reads across.
+ * @param reason Receives a static reason when the result is false.
+ * @return False when the pursuit is not redeemed; it can still be removed.
+ */
+[[nodiscard]] bool objectives_complete(const RedeemedPursuit& pursuit,
+                                       std::span<const authored_inventory::Item> heldItems,
+                                       const reward_resolution::Context& context,
+                                       const char*& reason) noexcept {
+    const PursuitCompletionStatus status =
+        inspect_pursuit_completion(pursuit.contract, context, pursuit.itemValues, heldItems);
+    reason = "quest_progress";
+    if (pursuit.contract.questStep.membership != pursuit_data::QuestMembership::none
+        && !progress_item_held(status)) {
+        return false;
+    }
+    // An objective on the deadline lane reads as unknown, so it is named before that check.
+    reason = "objective_reads_deadline";
+    if (reads_deadline(pursuit.contract)) {
+        return false;
     }
     // Progress the server cannot read is progress it cannot call complete, so the pursuit is not
     // redeemed. It can still be removed, or it would hold its slot for good.
     reason = "objective_source";
     if (!status.objectivesKnown) {
-        return PursuitRedemption::notRedeemable;
-    }
-    reason = "objective_reads_deadline";
-    if (reads_deadline(contract)) {
-        return PursuitRedemption::notRedeemable;
+        return false;
     }
     reason = "incomplete";
-    if (!status.objectivesComplete) {
-        return PursuitRedemption::notRedeemable;
-    }
-    PreparedQuestStep completionValue{};
-    PreparedQuestStep completionContextValue{};
+    return status.objectivesComplete;
+}
+
+/**
+ * Plans setting the completion values the contract names.
+ * @param reason Receives a static reason when the result is not prepared.
+ * @return Refused when a named value maps to no saved row; not redeemable when the pursuit's
+ *         completion value is already set.
+ */
+[[nodiscard]] PursuitRedemption plan_completion_values(const pursuit_data::Definition& contract,
+                                                       unlocks::Table& banks,
+                                                       CompletionPlan& plan,
+                                                       const char*& reason) noexcept {
     reason = "completion_value";
-    if (!plan_completion_value(contract.completionValue, *banks, completionValue)
-        || !plan_completion_value(contract.completionContextValue,
-                                  *banks,
-                                  completionContextValue)) {
+    if (!plan_completion_value(contract.completionValue, banks, plan.completionValue)
+        || !plan_completion_value(
+            contract.completionContextValue, banks, plan.completionContextValue)) {
         return PursuitRedemption::refused;
     }
     reason = "completed";
-    if (completionValue.previousValue != 0) {
-        return PursuitRedemption::notRedeemable;
-    }
+    return plan.completionValue.previousValue != 0 ? PursuitRedemption::notRedeemable
+                                                   : PursuitRedemption::prepared;
+}
 
-    CompletionPlan plan{};
-    plan.helmetTiers = character.gambitPrimeHelmetTiers;
+/**
+ * Plans the quest step the pursuit moves to and what it pays: the next step's item, or at the
+ * last step and outside any set, a Werner bounty's map or the reward rows the pursuit shows.
+ * @param context Saved banks and class of the redeeming character; its seed starts the draws.
+ * @param banks The same saved banks, which the quest step and a progression credit read.
+ * @param reason Receives a static reason when the result is false.
+ * @return False when the quest step, the map or a reward row cannot be planned now.
+ */
+[[nodiscard]] bool plan_payout(const RedeemedPursuit& pursuit,
+                               const CharacterState& character,
+                               const reward_resolution::Context& context,
+                               unlocks::Table& banks,
+                               CompletionPlan& plan,
+                               const char*& reason) noexcept {
+    const pursuit_data::QuestStep& step = pursuit.contract.questStep;
     reason = "quest_step";
     if (step.membership == pursuit_data::QuestMembership::unsupported
         || (step.membership == pursuit_data::QuestMembership::step
-            && !plan_quest_step(step, *banks, plan))) {
-        return PursuitRedemption::refused;
+            && !plan_quest_step(step, banks, plan))) {
+        return false;
+    }
+    if (step.membership != pursuit_data::QuestMembership::none
+        && step.successorIndex != pursuit_data::kAbsent) {
+        return true;
+    }
+    reason = "treasure_map";
+    if (!plan_treasure_map(pursuit.item.definitionHash, plan)) {
+        return false;
+    }
+    if (plan.treasureMapHash != authored_inventory::kNoDefinitionHash) {
+        return true;
     }
     reason = "reward_rows";
-    const bool paysRewards = step.membership == pursuit_data::QuestMembership::none
-                             || step.successorIndex == pursuit_data::kAbsent;
-    const TreasureMapTransition* treasureMap =
-        paysRewards ? find_row(kTreasureMapTransitions, item.definitionHash) : nullptr;
-    if (treasureMap != nullptr) {
-        reason = "treasure_map";
-        build_data::items::Definition map{};
-        if (!build_data::find_item_definition_hash(treasureMap->mapHash, map)) {
-            return PursuitRedemption::refused;
-        }
-        plan.rows[plan.rowCount++] = {map.definitionIndex, 1};
-    } else if (paysRewards
-               && (!contract.rewardsReadable
-                   || !plan_rewards(item.definitionHash,
-                                    bounty_rules(item, contract.lifetimeSeconds),
-                                    character,
-                                    contract,
-                                    context,
-                                    *banks,
-                                    plan,
-                                    reason))) {
-        return PursuitRedemption::refused;
-    }
+    return pursuit.contract.rewardsReadable
+           && plan_rewards(pursuit.item.definitionHash,
+                           bounty_rules(pursuit.item, pursuit.contract.lifetimeSeconds),
+                           character,
+                           pursuit.contract,
+                           context,
+                           banks,
+                           plan,
+                           reason);
+}
 
+/**
+ * Prepares the grant a plan describes, then adds the plan's saved effects to it.
+ * @param instanceSoid The redeemed pursuit, which leaves unless it names a completion value.
+ * @param reason Receives a static reason when the result is not prepared.
+ * @return Not ready or refused as the grant's preparation ended; refused when a quest's next step
+ *         or a Werner bounty's map found no row, which leaves no prepared grant behind.
+ */
+[[nodiscard]] PursuitRedemption prepare_planned_grant(const RedeemedPursuit& pursuit,
+                                                      const CompletionPlan& plan,
+                                                      std::uint64_t instanceSoid,
+                                                      std::int64_t nowSeconds,
+                                                      PendingRecordRewardGrant& mutation,
+                                                      const char*& reason) noexcept {
     // What the redemption saves beside inventory rows makes it a grant even when no row is paid.
     const auto moves = [](const PreparedQuestStep& value) noexcept {
         return value.next.scope != Quest::Scope::none;
     };
-    const bool savedEffects = moves(completionValue) || moves(completionContextValue)
+    const bool savedEffects = moves(plan.completionValue) || moves(plan.completionContextValue)
                               || moves(plan.questStep)
                               || plan.progression.scope != progression_data::Scope::unreplicated
                               || plan.seasonalExperience != 0;
@@ -1615,7 +1724,7 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     const RewardGrantRequest request{
         .rewards = std::span(plan.rows).first(plan.rowCount),
         .wrapperFlags = &plan.wrapperFlags,
-        .redeemedInstanceSoid = contract.completionValue.declared ? 0 : instanceSoid,
+        .redeemedInstanceSoid = pursuit.contract.completionValue.declared ? 0 : instanceSoid,
         .replacedInstanceSoid = plan.replacedSynthesizerSoid,
         .nowSeconds = nowSeconds,
         .carriesSavedEffects = savedEffects};
@@ -1633,16 +1742,15 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     }
     // A bounty redeemed for a map that found no row would pay nothing.
     reason = "treasure_map_placement";
-    if (treasureMap != nullptr) {
-        if (mutation.rewards[0].placedQuantity == 0) {
-            mutation = {};
-            return PursuitRedemption::refused;
-        }
-        keep_bounty_deadline(
-            treasureMap->mapHash, itemValues[authored_inventory::kItemExpiryLane], mutation);
+    if (plan.treasureMapHash != authored_inventory::kNoDefinitionHash
+        && !settle_treasure_map(plan.treasureMapHash,
+                                pursuit.itemValues[authored_inventory::kItemExpiryLane],
+                                mutation)) {
+        mutation = {};
+        return PursuitRedemption::refused;
     }
-    mutation.completionValue = completionValue;
-    mutation.completionContextValue = completionContextValue;
+    mutation.completionValue = plan.completionValue;
+    mutation.completionContextValue = plan.completionContextValue;
     mutation.afterCharacter.gambitPrimeHelmetTiers = plan.helmetTiers;
     mutation.questStep = plan.questStep;
     mutation.progression = plan.progression;
@@ -1650,6 +1758,80 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     mutation.seasonalExperienceBefore = seasonal_experience();
     reason = nullptr;
     return PursuitRedemption::prepared;
+}
+
+} // namespace
+
+namespace runtime::detail {
+
+/** The contracts, the reward graph, the progressions and the repeatable pool. */
+bool pursuit_redemption_catalogs_ready() noexcept {
+    return build_data::pursuit_definitions_ready() && build_data::reward_definitions_ready()
+           && build_data::progression_definitions_ready()
+           && build_data::repeatable_bounties_ready();
+}
+
+/** Each stage ends the redemption with its own outcome and reason, in the order a request reads. */
+PursuitRedemption plan_pursuit_redemption(SavedSelection<AccountState>& saved,
+                                          std::uint64_t instanceSoid,
+                                          std::uint32_t definitionHash,
+                                          std::int64_t nowSeconds,
+                                          std::uint64_t seed,
+                                          PendingRecordRewardGrant& mutation,
+                                          const char*& reason) noexcept {
+    mutation = {};
+    const CharacterState& character = saved.account.characters[saved.slot];
+    RedeemedPursuit pursuit{};
+    const PursuitRedemption found =
+        find_redeemed_pursuit(character, instanceSoid, definitionHash, nowSeconds, pursuit, reason);
+    if (found != PursuitRedemption::prepared) {
+        return found;
+    }
+    // No refusal slot: a reward row's condition or draw reports through a copy that has one.
+    const reward_resolution::Context context{
+        saved.banks, character.characterClass, seed, nullptr};
+    const auto held = std::span(character.inventory.values).first(character.inventory.count);
+    if (!objectives_complete(pursuit, held, context, reason)) {
+        return PursuitRedemption::notRedeemable;
+    }
+    CompletionPlan plan{};
+    plan.helmetTiers = character.gambitPrimeHelmetTiers;
+    const PursuitRedemption values =
+        plan_completion_values(pursuit.contract, saved.banks, plan, reason);
+    if (values != PursuitRedemption::prepared) {
+        return values;
+    }
+    if (!plan_payout(pursuit, character, context, saved.banks, plan, reason)) {
+        return PursuitRedemption::refused;
+    }
+    return prepare_planned_grant(pursuit, plan, instanceSoid, nowSeconds, mutation, reason);
+}
+
+} // namespace runtime::detail
+
+/** Reads one saved view under the store lock, then judges and plans against it. */
+PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
+                                             std::uint32_t definitionHash,
+                                             std::int64_t nowSeconds,
+                                             std::uint64_t seed,
+                                             PendingRecordRewardGrant& mutation,
+                                             const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    mutation = {};
+    reason = "not_ready";
+    if (!pursuit_redemption_catalogs_ready()) {
+        return PursuitRedemption::notReady;
+    }
+    const std::lock_guard lock(investment::store::g_mutex);
+    const std::unique_ptr<SavedSelection<AccountState>> saved(
+        new (std::nothrow) SavedSelection<AccountState>{});
+    reason = "saved_state";
+    if (!saved || read_saved_selection(*saved) != SavedSelectionRead::read) {
+        return PursuitRedemption::notReady;
+    }
+    return plan_pursuit_redemption(
+        *saved, instanceSoid, definitionHash, nowSeconds, seed, mutation, reason);
 }
 
 } // namespace sunrise::state

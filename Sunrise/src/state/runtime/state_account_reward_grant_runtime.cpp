@@ -151,7 +151,7 @@ namespace {
             && mutation.redeemedInstanceSoid == 0 && !carries_saved_effects(mutation))
         || mutation.rewardCount > mutation.rewards.size()
         || mutation.rowCount > mutation.rows.size()
-        || change_ring_refusal(std::span(mutation.rows).first(mutation.rowCount)) != nullptr
+        || !change_rings_fit(std::span(mutation.rows).first(mutation.rowCount))
         || mutation.accountSoid == 0 || mutation.characterSoid == 0
         || mutation.characterIndex >= account.characterCount
         || account.primarySoid != mutation.accountSoid
@@ -301,15 +301,18 @@ struct GrantView {
  * Stages the oven balance a placed ingredient pickup credits, by the quantity that found a row. A
  * later pickup of the same balance in the batch credits on top of the earlier one.
  * @param reason Receives a static reason on failure.
- * @return Not ready when the balance cannot be staged now; deferred when it cannot hold the credit.
+ * @return Unresolvable when the pickup's balance row does not resolve; not ready when the balance
+ *         cannot be read; deferred when it cannot hold the credit.
  */
 [[nodiscard]] RewardPreparation prepare_pickup_credit(GrantView view,
                                                       PreparedRecordReward& prepared,
                                                       const char*& reason) noexcept {
     reason = "ingredient_credit";
     AccountUnlockWrite credit{};
-    if (!prepare_ingredient_credit(prepared.definitionHash, prepared.placedQuantity, credit)) {
-        return RewardPreparation::notReady;
+    const RewardPreparation read =
+        prepare_ingredient_credit(prepared.definitionHash, prepared.placedQuantity, credit);
+    if (read != RewardPreparation::prepared) {
+        return read;
     }
     for (const auto& earlier : view.prior) {
         if (earlier.ingredientCredit && earlier.ingredientCredit->index == credit.index) {
@@ -329,7 +332,8 @@ struct GrantView {
  * Stages the chooser readiness a placed oven writes. An earlier oven in the batch already wrote
  * it, so a later one writes nothing.
  * @param reason Receives a static reason on failure.
- * @return Not ready when the tutorial's quest row does not resolve or cannot be read.
+ * @return Unresolvable when the published contracts name no tutorial quest row; not ready while
+ *         they are unpublished or the row cannot be read.
  */
 [[nodiscard]] RewardPreparation prepare_oven_readiness(GrantView view,
                                                        PreparedRecordReward& prepared,
@@ -342,9 +346,106 @@ struct GrantView {
     if (staged) {
         return RewardPreparation::prepared;
     }
-    return prepare_chooser_readiness(view.working, prepared.chooserReadiness)
-               ? RewardPreparation::prepared
-               : RewardPreparation::notReady;
+    return prepare_chooser_readiness(view.working, prepared.chooserReadiness);
+}
+
+/**
+ * @return True for a perk-bucket item the reward graph gives an acquisition flag. One it gives
+ *         none, such as an ingredient pickup, is an inventory row in that FIFO bucket instead.
+ */
+[[nodiscard]] bool flagged_perk(const build_data::items::Definition& item) noexcept {
+    build_data::rewards::Item source{};
+    const bool flagless = build_data::find_reward_item(item.definitionIndex, source)
+                          && source.acquiredFlag == build_data::rewards::kAbsent;
+    return item.bucketId == build_data::inventory::buckets::kPerkBucketId && !flagless;
+}
+
+/**
+ * Reads where a row's item lands and checks that the destination can hold what the row asks.
+ * @param detail Receives the item's configured detail.
+ * @param kind Receives the kind of row the item becomes.
+ * @param reason Receives a static reason on failure.
+ * @return False when the item's own data gives the row no destination, which is final.
+ */
+[[nodiscard]] bool resolve_destination(const DirectRecordReward& requested,
+                                       const build_data::items::Definition& item,
+                                       item_details::Definition& detail,
+                                       RecordRewardKind& kind,
+                                       const char*& reason) noexcept {
+    reason = "item_detail";
+    inventory_buckets::Descriptor bucket{};
+    if (!build_data::find_configured_item_detail(requested.itemDefinitionIndex, detail)
+        || detail.definitionIndex != item.definitionIndex
+        || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
+        || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
+        return false;
+    }
+    kind = reward_kind(detail, bucket);
+    const bool character = bucket.arraySelector == inventory_buckets::ArraySelector::character;
+    const bool instance = kind == RecordRewardKind::characterInstance;
+    reason = "socket_owner";
+    if (!requested.sockets.empty() && !instance) {
+        return false;
+    }
+    // Only a character instance can start a quest, so any other destination refuses one.
+    reason = "quest_destination";
+    if (item.questInitialization.scope != Quest::Scope::none && !instance) {
+        return false;
+    }
+    reason = "instance_quantity";
+    if (instance && requested.quantity != 1) {
+        return false;
+    }
+    reason = "inventory_destination";
+    return (character || bucket.arraySelector == inventory_buckets::ArraySelector::profile)
+           && (!instance || character) && (instance || !detail.equipmentSlot.has_value());
+}
+
+/**
+ * Authors the instance an arrival places: the character's level, the row's socket overrides and a
+ * bounty's deadline.
+ * @param reason Receives a static reason on failure.
+ * @return False when the sockets or the deadline cannot be authored, which is final.
+ */
+[[nodiscard]] bool author_instance(GrantView view,
+                                   std::span<const build_data::rewards::SocketOverride> sockets,
+                                   Arrival& arrival,
+                                   const char*& reason) noexcept {
+    authored_inventory::Item& instance = arrival.instance;
+    instance.level = acquisition_level(view.working.characters[view.characterIndex]);
+    instance.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
+    if (!apply_reward_sockets(arrival.detail, sockets, instance.sockets, &reason)) {
+        return false;
+    }
+    reason = "bounty_deadline";
+    return acquired_objectives(arrival.item.definitionIndex, view.nowSeconds, instance.objectives);
+}
+
+/**
+ * Stages what acquiring a placed item changes beside its row: a new instance's identity, an
+ * ingredient pickup's balance credit, an oven's chooser readiness and a quest item's first step.
+ * @param reason Receives a static reason when the result is not prepared.
+ */
+[[nodiscard]] RewardPreparation
+prepare_acquisition_effects(GrantView view,
+                            const build_data::items::Definition& item,
+                            PreparedRecordReward& prepared,
+                            const char*& reason) noexcept {
+    if (prepared.kind == RecordRewardKind::characterInstance) {
+        prepared.instanceSoid = view.nextInstanceSoid - 1;
+    }
+    if (is_ingredient_pickup(item.definitionHash)) {
+        return prepare_pickup_credit(view, prepared, reason);
+    }
+    if (is_dawning_oven(item.definitionHash)) {
+        const auto readiness = prepare_oven_readiness(view, prepared, reason);
+        if (readiness != RewardPreparation::prepared) {
+            return readiness;
+        }
+    }
+    return item.questInitialization.scope != Quest::Scope::none
+               ? prepare_quest_start(view, item, prepared, reason)
+               : RewardPreparation::prepared;
 }
 
 /**
@@ -374,64 +475,25 @@ struct GrantView {
             return flag;
         }
     }
-    // Only a character instance can start a quest, so any other destination refuses one.
-    const bool quest = item.questInitialization.scope != Quest::Scope::none;
-    // A perk-bucket item the reward graph gives no acquisition flag, such as an ingredient
-    // pickup, is an inventory row in that FIFO bucket rather than a perk.
-    build_data::rewards::Item source{};
-    const bool flagless = build_data::find_reward_item(item.definitionIndex, source)
-                          && source.acquiredFlag == build_data::rewards::kAbsent;
-    if (item.bucketId == build_data::inventory::buckets::kPerkBucketId && !flagless) {
+    if (flagged_perk(item)) {
         reason = "perk_acquisition";
         if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
-            || !requested.sockets.empty() || quest) {
+            || !requested.sockets.empty()
+            || item.questInitialization.scope != Quest::Scope::none) {
             return RewardPreparation::unresolvable;
         }
         prepared.kind = RecordRewardKind::accountUnlock;
         prepared.placedQuantity = 1;
         return RewardPreparation::prepared;
     }
-    reason = "item_detail";
     item_details::Definition detail{};
-    inventory_buckets::Descriptor bucket{};
-    if (!build_data::find_configured_item_detail(requested.itemDefinitionIndex, detail)
-        || detail.definitionIndex != item.definitionIndex
-        || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
-        || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
-        return RewardPreparation::unresolvable;
-    }
-    prepared.kind = reward_kind(detail, bucket);
-    const bool character = bucket.arraySelector == inventory_buckets::ArraySelector::character;
-    const bool instance = prepared.kind == RecordRewardKind::characterInstance;
-    reason = "socket_owner";
-    if (!requested.sockets.empty() && !instance) {
-        return RewardPreparation::unresolvable;
-    }
-    reason = "quest_destination";
-    if (quest && !instance) {
-        return RewardPreparation::unresolvable;
-    }
-    reason = "instance_quantity";
-    if (instance && requested.quantity != 1) {
-        return RewardPreparation::unresolvable;
-    }
-    reason = "inventory_destination";
-    if ((!character && bucket.arraySelector != inventory_buckets::ArraySelector::profile)
-        || (instance && !character) || (!instance && detail.equipmentSlot.has_value())) {
+    if (!resolve_destination(requested, item, detail, prepared.kind, reason)) {
         return RewardPreparation::unresolvable;
     }
     Arrival arrival{item, detail, requested.quantity};
-    if (instance) {
-        arrival.instance.level = acquisition_level(view.working.characters[view.characterIndex]);
-        arrival.instance.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
-        if (!apply_reward_sockets(detail, requested.sockets, arrival.instance.sockets, &reason)) {
-            return RewardPreparation::unresolvable;
-        }
-        reason = "bounty_deadline";
-        if (!acquired_objectives(
-                item.definitionIndex, view.nowSeconds, arrival.instance.objectives)) {
-            return RewardPreparation::unresolvable;
-        }
+    if (prepared.kind == RecordRewardKind::characterInstance
+        && !author_instance(view, requested.sockets, arrival, reason)) {
+        return RewardPreparation::unresolvable;
     }
     const auto placement = place_arrival(view.working,
                                          view.characterIndex,
@@ -443,23 +505,99 @@ struct GrantView {
     if (placement != RewardPreparation::prepared) {
         return placement;
     }
-    if (prepared.placedQuantity == 0) {
-        return RewardPreparation::prepared;
-    }
     // Only an item that found a row runs its acquisition side effects.
-    if (instance) {
-        prepared.instanceSoid = view.nextInstanceSoid - 1;
+    return prepared.placedQuantity != 0 ? prepare_acquisition_effects(view, item, prepared, reason)
+                                        : RewardPreparation::prepared;
+}
+
+/**
+ * Removes the held items a grant redeems and replaces, so their rows are free for the grant's own.
+ * @param reason Receives a static reason on failure.
+ * @return False when the character does not hold one of them unequipped.
+ */
+[[nodiscard]] bool remove_spent_instances(const RewardGrantRequest& request,
+                                          CharacterState& character,
+                                          PendingRecordRewardGrant& mutation,
+                                          const char*& reason) noexcept {
+    // The redeemed item leaves before the rows are placed, so its row is free for them.
+    reason = "redeemed_instance";
+    if (request.redeemedInstanceSoid != 0
+        && !remove_redeemed(character, request.redeemedInstanceSoid)) {
+        return false;
     }
-    if (is_ingredient_pickup(item.definitionHash)) {
-        return prepare_pickup_credit(view, prepared, reason);
+    mutation.redeemedInstanceSoid = request.redeemedInstanceSoid;
+    // A replaced item leaves the same way; its release publishes with the new rows.
+    reason = "replaced_instance";
+    return request.replacedInstanceSoid == 0
+           || remove_redeemed(character, request.replacedInstanceSoid);
+}
+
+/**
+ * Spends a vendor row's price in the after-image its rows land in, and advances the Dawning
+ * bounties that count a cookie it spends.
+ * @param price The row's cost entries; empty spends nothing.
+ * @param reason Receives a static reason when the result is not prepared.
+ * @return Deferred when the account does not hold the price; not ready when an allocation failed
+ *         or a catalog was cleared meanwhile; otherwise as credit_dawning_bounties ended.
+ */
+[[nodiscard]] RewardPreparation spend_price(std::span<const build_data::vendors::SaleCost> price,
+                                            std::int64_t nowSeconds,
+                                            AccountState& working,
+                                            std::size_t characterIndex,
+                                            const char*& reason) noexcept {
+    reason = "sale_price";
+    if (!price.empty()) {
+        const std::unique_ptr<AccountState> charged(new (std::nothrow) AccountState{});
+        bool changed = false;
+        if (!charged) {
+            return RewardPreparation::notReady;
+        }
+        if (!apply_sale_price(working, price, *charged, changed)) {
+            return RewardPreparation::deferred;
+        }
+        working = *charged;
     }
-    if (is_dawning_oven(item.definitionHash)) {
-        const auto readiness = prepare_oven_readiness(view, prepared, reason);
-        if (readiness != RewardPreparation::prepared) {
-            return readiness;
+    // A delivery spends a cookie, which advances the Dawning bounties that count it.
+    reason = "dawning_bounty";
+    for (const auto& cost : price) {
+        build_data::items::Definition spent{};
+        if (!build_data::find_item_definition_index(cost.itemIndex, spent)) {
+            // The charge found this item, so only a settled catalog rules it out for good.
+            return catalogs_settled() ? RewardPreparation::unresolvable
+                                      : RewardPreparation::notReady;
+        }
+        const RewardPreparation credited = credit_dawning_bounties(
+            working.characters[characterIndex],
+            DawningEvent::delivery,
+            spent.definitionHash,
+            nowSeconds);
+        if (credited != RewardPreparation::prepared) {
+            return credited;
         }
     }
-    return quest ? prepare_quest_start(view, item, prepared, reason) : RewardPreparation::prepared;
+    return RewardPreparation::prepared;
+}
+
+/**
+ * Prepares every requested row in order, each against the working view the rows before it left.
+ * @param view The grant's working view; its prior rows are set for each row in turn.
+ * @param reason Receives a static reason when a row is not prepared.
+ * @return How the first row that was not prepared ended, else prepared.
+ */
+[[nodiscard]] RewardPreparation prepare_reward_rows(GrantView view,
+                                                    std::span<const DirectRecordReward> rewards,
+                                                    PendingRecordRewardGrant& mutation,
+                                                    const char*& reason) noexcept {
+    for (std::size_t index = 0; index < rewards.size(); ++index) {
+        view.prior = std::span(mutation.rewards).first(index);
+        PreparedRecordReward prepared{};
+        const auto row = prepare_reward_row(view, rewards[index], prepared, reason);
+        if (row != RewardPreparation::prepared) {
+            return row;
+        }
+        mutation.rewards[index] = prepared;
+    }
+    return RewardPreparation::prepared;
 }
 
 } // namespace
@@ -600,57 +738,19 @@ RewardPreparation prepare_reward_grant(const RewardGrantRequest& request,
         return RewardPreparation::deferred;
     }
     record_grant_before(working, characterIndex, mutation);
-    // The redeemed item leaves before the rows are placed, so its row is free for them.
-    reason = "redeemed_instance";
-    if (request.redeemedInstanceSoid != 0
-        && !remove_redeemed(working.characters[characterIndex], request.redeemedInstanceSoid)) {
+    if (!remove_spent_instances(request, working.characters[characterIndex], mutation, reason)) {
         return RewardPreparation::deferred;
     }
-    mutation.redeemedInstanceSoid = request.redeemedInstanceSoid;
-    // A replaced item leaves the same way; its release publishes with the new rows.
-    reason = "replaced_instance";
-    if (request.replacedInstanceSoid != 0
-        && !remove_redeemed(working.characters[characterIndex], request.replacedInstanceSoid)) {
-        return RewardPreparation::deferred;
+    const auto spent =
+        spend_price(request.price, request.nowSeconds, working, characterIndex, reason);
+    if (spent != RewardPreparation::prepared) {
+        return spent;
     }
-    // A vendor row's price leaves in the after-image its rows land in.
-    reason = "sale_price";
-    if (!request.price.empty()) {
-        const std::unique_ptr<AccountState> charged(new (std::nothrow) AccountState{});
-        bool changed = false;
-        if (!charged) {
-            return RewardPreparation::notReady;
-        }
-        if (!apply_sale_price(working, request.price, *charged, changed)) {
-            return RewardPreparation::deferred;
-        }
-        working = *charged;
-    }
-    // A delivery spends a cookie, which advances the Dawning bounties that count it.
-    reason = "dawning_bounty";
-    for (const auto& cost : request.price) {
-        build_data::items::Definition spent{};
-        if (!build_data::find_item_definition_index(cost.itemIndex, spent)
-            || !credit_dawning_bounties(working.characters[characterIndex],
-                                        DawningEvent::delivery,
-                                        spent.definitionHash,
-                                        request.nowSeconds)) {
-            return RewardPreparation::notReady;
-        }
-    }
-    for (std::size_t index = 0; index < rewards.size(); ++index) {
-        const GrantView view{working,
-                             characterIndex,
-                             std::span(mutation.rewards).first(index),
-                             nextInstanceSoid,
-                             placed,
-                             request.nowSeconds};
-        PreparedRecordReward prepared{};
-        const auto row = prepare_reward_row(view, rewards[index], prepared, reason);
-        if (row != RewardPreparation::prepared) {
-            return row;
-        }
-        mutation.rewards[index] = prepared;
+    const GrantView view{
+        working, characterIndex, {}, nextInstanceSoid, placed, request.nowSeconds};
+    const auto rows = prepare_reward_rows(view, rewards, mutation, reason);
+    if (rows != RewardPreparation::prepared) {
+        return rows;
     }
 
     reason = "loadout";
@@ -754,7 +854,7 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             return false;
         }
     }
-    // The server grants the XP with the commit, after this image has gone out in the grant's frame.
+    // The commit grants the XP, after this image has gone out in the grant's frame.
     return mutation.seasonalExperience == 0
            || preview_seasonal_experience(
                mutation.seasonalExperienceBefore, mutation.seasonalExperience, after);
@@ -890,20 +990,45 @@ void report_dropped_rewards(const PendingRecordRewardGrant& mutation) noexcept {
     }
 }
 
+/**
+ * Grants a grant's seasonal XP inside the commit's transaction.
+ * @param amount XP the grant pays; zero grants nothing.
+ * @param bonusMoved Set when the new total changed the artifact Power bonus.
+ * @return False when a nonzero amount could not be granted.
+ */
+[[nodiscard]] bool grant_reward_experience(std::int32_t amount, bool& bonusMoved) noexcept {
+    if (amount == 0) {
+        return true;
+    }
+    const std::uint16_t bonusBefore = artifact_power_bonus();
+    if (!grant_seasonal_experience(amount)) {
+        return false;
+    }
+    bonusMoved = artifact_power_bonus() != bonusBefore;
+    return true;
+}
+
 } // namespace
 
 /**
  * Commits the shared reward after-image, its flags, its quest starts, completion values and step,
- * its progression and ingredient credits, its chooser readiness and its claim together.
+ * its progression and ingredient credits, its chooser readiness, its claim and its seasonal XP
+ * together.
  * @param mutation Prepared grant, consumed on every exit.
+ * @param artifactBonusMoved Set when the grant's XP changed the artifact Power bonus; clear when
+ *        nothing was committed.
  * @return False when the account or a saved value moved; a record claim is revoked then.
  */
-bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
+bool commit_record_reward(PendingRecordRewardGrant& mutation, bool* artifactBonusMoved) noexcept {
+    if (artifactBonusMoved != nullptr) {
+        *artifactBonusMoved = false;
+    }
     if (!mutation.prepared) {
         return false;
     }
     const PendingConsumption consume{mutation};
     bool ready = false;
+    bool bonusMoved = false;
     {
         investment::store::Transaction transaction;
         AccountState after{};
@@ -957,7 +1082,9 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
                 progression.definitionIndex,
                 progression.value);
         }
-        ready = ready && transaction.commit();
+        // The XP is granted last, onto the total preview_reward_unlocks checked above.
+        ready = ready && grant_reward_experience(mutation.seasonalExperience, bonusMoved)
+                && transaction.commit();
     }
     if (!ready && mutation.claimedRecordIndex != kUnclaimedRecordIndex) {
         // The claim was written when the reward was prepared, so a refused install undoes it.
@@ -965,6 +1092,9 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
     }
     if (ready) {
         report_dropped_rewards(mutation);
+    }
+    if (artifactBonusMoved != nullptr) {
+        *artifactBonusMoved = ready && bonusMoved;
     }
     return ready;
 }

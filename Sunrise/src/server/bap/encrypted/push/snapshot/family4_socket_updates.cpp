@@ -128,7 +128,9 @@ bool prepare_socket_plug(Scratch& scratch,
     std::size_t objectCount = itemCursor;
     if (socketPlug.updatesAccount) {
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes, unlocks)) {
+        family4_datagen::account::StateFields accountFields{};
+        if (!read_account_state_fields(account, accountFields)
+            || !family4_datagen::account::encode(account, accountFields, accountBytes, unlocks)) {
             clear_after(scratch, reservation);
             return report_failure("socket_plug_account_object");
         }

@@ -142,7 +142,9 @@ bool prepare_profile_item_acquisition(Scratch& scratch,
         return report_failure("profile_acquire_account_storage");
     }
     const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-    if (!family4_datagen::account::encode(account, accountBytes)) {
+    family4_datagen::account::StateFields accountFields{};
+    if (!read_account_state_fields(account, accountFields)
+        || !family4_datagen::account::encode(account, accountFields, accountBytes)) {
         return report_failure("profile_acquire_account_encode");
     }
 
@@ -340,8 +342,10 @@ bool prepare_seasonal_experience_presentation(
     }
     const auto accountBytes =
         rawStorage.first(middleware::datagen::family4::account::layout::kObjectSize);
+    middleware::datagen::family4::account::StateFields accountFields{};
     // Publish cumulative account XP before the transient delta row triggers the HUD.
-    if (!middleware::datagen::family4::account::encode(account, accountBytes)
+    if (!read_account_state_fields(account, accountFields)
+        || !middleware::datagen::family4::account::encode(account, accountFields, accountBytes)
         || !append_object(scratch,
                           accountBytes,
                           before.family4Residents.front().definitionId,
@@ -547,7 +551,9 @@ bool prepare_item_acquisition(
             return report_failure("acquire_account_storage");
         }
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes, afterUnlocks)
+        family4_datagen::account::StateFields accountFields{};
+        if (!read_account_state_fields(account, accountFields)
+            || !family4_datagen::account::encode(account, accountFields, accountBytes, afterUnlocks)
             || !append_object(scratch,
                               accountBytes,
                               acquisition.accountDefinitionId,
@@ -678,8 +684,10 @@ bool prepare_item_dismantle(Scratch& scratch,
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
         // The account object carries any acquisition flag the dismantle sets.
         state::unlocks::Table unlocks{};
+        family4_datagen::account::StateFields accountFields{};
         if (!state::preview_dismantle_unlocks(mutation, unlocks)
-            || !family4_datagen::account::encode(account, accountBytes, unlocks)) {
+            || !read_account_state_fields(account, accountFields)
+            || !family4_datagen::account::encode(account, accountFields, accountBytes, unlocks)) {
             clear_after(scratch, reservation);
             return report_failure("dismantle_account_encode");
         }

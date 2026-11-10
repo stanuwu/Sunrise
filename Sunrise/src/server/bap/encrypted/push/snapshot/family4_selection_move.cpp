@@ -188,7 +188,9 @@ bool prepare_selection_move(Scratch& scratch,
             return report_failure("move_account_storage");
         }
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes)) {
+        family4_datagen::account::StateFields accountFields{};
+        if (!read_account_state_fields(account, accountFields)
+            || !family4_datagen::account::encode(account, accountFields, accountBytes)) {
             return report_failure("move_account_object");
         }
         if (!append_object(scratch,
@@ -512,7 +514,9 @@ bool prepare_account_refresh(
         (std::max)(reservation.rawClearSize, reservation.rawWriteOffset + required);
     std::size_t compressedExtent = reservation.compressedWriteOffset;
     const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-    if (!family4_datagen::account::encode(account, accountBytes)
+    family4_datagen::account::StateFields accountFields{};
+    if (!read_account_state_fields(account, accountFields)
+        || !family4_datagen::account::encode(account, accountFields, accountBytes)
         || !append_object(scratch,
                           accountBytes,
                           accountDefinitionId,
@@ -700,7 +704,9 @@ bool prepare_item_values_refresh(
     ++objectCount;
     if (accountRows) {
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes)
+        family4_datagen::account::StateFields accountFields{};
+        if (!read_account_state_fields(account, accountFields)
+            || !family4_datagen::account::encode(account, accountFields, accountBytes)
             || !append_object(scratch,
                               accountBytes,
                               accountDefinitionId,

@@ -357,8 +357,7 @@ void report_item_dismantle(const middleware::web_service::Message& message,
     std::uint64_t seed = 0;
     const char* reason = grant == nullptr ? "storage" : "random_source";
     auto result = state::PursuitRedemption::refused;
-    if (grant != nullptr
-        && middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
+    if (grant != nullptr && middleware::crypto::random::draw_seed(seed)) {
         result = state::prepare_pursuit_redemption(instanceSoid,
                                                    definition.definitionHash,
                                                    core::runtime::server_clock_seconds(),
@@ -465,8 +464,7 @@ void open_stored_wrapper(const middleware::web_service::Message& message,
         auto* grant = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
         std::uint64_t seed = 0;
         reason = grant == nullptr ? "storage" : "random_source";
-        if (grant != nullptr
-            && middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))
+        if (grant != nullptr && middleware::crypto::random::draw_seed(seed)
             && state::prepare_wrapper_opening(request.instanceSoid,
                                               seed,
                                               core::runtime::server_clock_seconds(),

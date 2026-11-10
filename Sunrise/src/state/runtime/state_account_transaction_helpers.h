@@ -15,6 +15,10 @@
 #include "../investment/store.h"
 #include "runtime.h"
 
+namespace sunrise::state {
+template <typename Account> struct SavedSelection;
+}
+
 namespace sunrise::state::runtime::detail {
 
 /** Clears a consumed mutation on every commit exit without copying its full snapshot. */
@@ -147,6 +151,18 @@ quest_value(unlocks::Table& table, const build_data::items::QuestInitialization&
  */
 [[nodiscard]] std::int32_t& progression_value(unlocks::Table& table,
                                               const PreparedProgressionCredit& credit) noexcept;
+/**
+ * Applies to a bank image what grant_seasonal_experience will save for the same amount: the
+ * seasonal lanes, and the earned-perk flags when the grant reaches a new rank. Nothing is saved.
+ * @param expected XP total the grant was prepared against.
+ * @param amount Positive XP the grant adds.
+ * @param after The selected character's banks, updated in place.
+ * @return False when the total moved since the preparation, the new total would overflow, or the
+ *         account could not be read.
+ */
+[[nodiscard]] bool preview_seasonal_experience(std::int32_t expected,
+                                               std::int32_t amount,
+                                               unlocks::Table& after) noexcept;
 /** What one reward grant places, removes and spends. */
 struct RewardGrantRequest {
     std::span<const DirectRecordReward> rewards{};
@@ -396,11 +412,13 @@ enum class OvenAction : std::uint8_t {
  * @param pickupHash Ingredient pickup item the Client acquired.
  * @param quantity Positive units to credit.
  * @param credit Receives the account value row, the value it holds and the credited value.
- * @return False for any other item, an unmapped balance or an overflowing credit.
+ * @return Unresolvable for any other item, a pickup whose plug is not installed or a plug with no
+ *         balance row; not ready when the balance cannot be read; deferred when it cannot hold
+ *         the credit.
  */
-[[nodiscard]] bool prepare_ingredient_credit(std::uint32_t pickupHash,
-                                             std::int32_t quantity,
-                                             AccountUnlockWrite& credit) noexcept;
+[[nodiscard]] RewardPreparation prepare_ingredient_credit(std::uint32_t pickupHash,
+                                                          std::int32_t quantity,
+                                                          AccountUnlockWrite& credit) noexcept;
 
 /**
  * @return True for a Dawning ingredient pickup, which arrives only with the oven balance credit
@@ -414,10 +432,12 @@ enum class OvenAction : std::uint8_t {
  * The caller previews and writes it as prepare_ingredient_credit's caller does.
  * @param account Account the oven lands in.
  * @param readiness Receives the quest row write, or stays empty when the row keeps its value.
- * @return False when the quest row does not resolve or cannot be read.
+ * @return Unresolvable when the published contracts name no one account row for the tutorial;
+ *         not ready while the contracts are unpublished or the row cannot be read.
  */
-[[nodiscard]] bool prepare_chooser_readiness(const AccountState& account,
-                                             std::optional<AccountUnlockWrite>& readiness) noexcept;
+[[nodiscard]] RewardPreparation
+prepare_chooser_readiness(const AccountState& account,
+                          std::optional<AccountUnlockWrite>& readiness) noexcept;
 
 /** @return True for the Dawning oven, whose acquisition stages prepare_chooser_readiness. */
 [[nodiscard]] bool is_dawning_oven(std::uint32_t definitionHash) noexcept;
@@ -436,12 +456,34 @@ enum class DawningEvent : std::uint8_t {
  * finished objective is left alone, and a delivery counts only a recipe's cookie.
  * @param cookieHash The cookie baked or spent.
  * @param nowSeconds Server time in Unix seconds, which a bounty's deadline is compared with.
- * @return False when a held bounty's objective does not resolve or the serials run out.
+ * @return Unresolvable when a held bounty's published contract does not hold the objective the
+ *         rules name; not ready while the contracts are unpublished; deferred when the bounty's
+ *         saved lane is negative or the character's serials have run out.
  */
-[[nodiscard]] bool credit_dawning_bounties(CharacterState& character,
-                                           DawningEvent event,
-                                           std::uint32_t cookieHash,
-                                           std::int64_t nowSeconds) noexcept;
+[[nodiscard]] RewardPreparation credit_dawning_bounties(CharacterState& character,
+                                                        DawningEvent event,
+                                                        std::uint32_t cookieHash,
+                                                        std::int64_t nowSeconds) noexcept;
+
+/**
+ * Finds the lane of a held pursuit's own values that one item value slot names.
+ * @param slot Item value slot an objective reads.
+ * @param lane Receives the slot's position in the contract's value list.
+ * @return False when the contract does not carry the slot, the lane lies past an item's values, or
+ *         it is a bounty's deadline lane, which holds no progress.
+ */
+[[nodiscard]] bool item_value_lane(const build_data::pursuits::Definition& contract,
+                                   std::uint16_t slot,
+                                   std::size_t& lane) noexcept;
+
+/**
+ * @param itemValues The held pursuit's own values; a bounty keeps its deadline in the expiry lane.
+ * @param nowSeconds Server time in Unix seconds.
+ * @return True for a bounty whose deadline is unset or has passed.
+ */
+[[nodiscard]] bool bounty_expired(const build_data::pursuits::Definition& contract,
+                                  const account::inventory::ItemObjectives& itemValues,
+                                  std::int64_t nowSeconds) noexcept;
 
 /**
  * Finds the item lane one objective's progress lives in, and its target.
@@ -453,6 +495,25 @@ enum class DawningEvent : std::uint8_t {
                                   std::uint8_t ordinal,
                                   std::size_t& lane,
                                   std::int32_t& target) noexcept;
+
+/** @return True when every catalog a pursuit redemption reads is published. */
+[[nodiscard]] bool pursuit_redemption_catalogs_ready() noexcept;
+
+/**
+ * Judges one held pursuit and plans its redemption as prepare_pursuit_redemption does, against a
+ * saved view the caller read under the store lock it still holds. The view is only read, so one
+ * read serves every pursuit a sweep judges.
+ * @param saved The selected character's saved view.
+ * @param mutation Receives the prepared grant; emptied first.
+ * @param reason Receives a static reason when the result is not prepared.
+ */
+[[nodiscard]] PursuitRedemption plan_pursuit_redemption(SavedSelection<AccountState>& saved,
+                                                        std::uint64_t instanceSoid,
+                                                        std::uint32_t definitionHash,
+                                                        std::int64_t nowSeconds,
+                                                        std::uint64_t seed,
+                                                        PendingRecordRewardGrant& mutation,
+                                                        const char*& reason) noexcept;
 
 /** The flag a Chalice upgrade purchase sets, and the plug its lane shows after it. */
 struct ChaliceUpgrade {
@@ -529,12 +590,17 @@ stage_chalice_plug(const AccountState& account,
 [[nodiscard]] bool holds_plug_source(const AccountState& account,
                                      std::uint32_t definitionHash) noexcept;
 [[nodiscard]] bool spend_plug_source(AccountState& account, std::uint32_t definitionHash) noexcept;
+/** @return The saved bank that holds one account unlock bank's rows. */
+[[nodiscard]] constexpr investment::store::Bank store_bank(AccountUnlockBank bank) noexcept {
+    return bank == AccountUnlockBank::flags ? investment::store::Bank::accountFlags
+                                            : investment::store::Bank::objectiveValues;
+}
 /**
  * Reads one account unlock row as a transaction's earlier writes leave it.
  * @return False when the saved row cannot be read.
  */
 [[nodiscard]] bool read_account_unlock(const AccountUnlockWrites& writes,
-                                       bool flag,
+                                       AccountUnlockBank bank,
                                        std::uint16_t index,
                                        std::int32_t& value) noexcept;
 /**
@@ -542,7 +608,7 @@ stage_chalice_plug(const AccountState& account,
  * @return False when the row cannot be read or the writes are full.
  */
 [[nodiscard]] bool write_account_unlock(AccountUnlockWrites& writes,
-                                        bool flag,
+                                        AccountUnlockBank bank,
                                         std::uint16_t index,
                                         std::int32_t value) noexcept;
 /** @return False when the account value row holds less than quantity or cannot be staged. */

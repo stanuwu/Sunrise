@@ -37,7 +37,7 @@ using SavedState = SavedSelection<AccountState>;
  * @param heldItems The character's held items, which a largest-value objective reads across.
  * @return False when the resident is not in the pursuit bucket.
  */
-[[nodiscard]] bool read_held_pursuit(const account::inventory::Item& item,
+[[nodiscard]] bool evaluate_resident(const account::inventory::Item& item,
                                      std::span<const account::inventory::Item> heldItems,
                                      const reward_resolution::Context& context,
                                      HeldPursuitStatus& held) {
@@ -91,7 +91,7 @@ PursuitSnapshotRefusal read_pursuit_snapshot(PursuitSnapshot& output) noexcept {
         snapshot.characterSoid = character.soid;
         for (const account::inventory::Item& item : heldItems) {
             HeldPursuitStatus held{};
-            if (read_held_pursuit(item, heldItems, context, held)) {
+            if (evaluate_resident(item, heldItems, context, held)) {
                 snapshot.held.push_back(held);
             }
         }

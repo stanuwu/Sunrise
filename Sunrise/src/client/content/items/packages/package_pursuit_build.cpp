@@ -14,6 +14,12 @@ namespace {
 
 namespace pursuits = state::build_data::pursuits;
 
+// The reader's row and a contract hold the same lists, and mark an absent reward field alike.
+static_assert(tables::items::kObjectiveCapacity == pursuits::kObjectiveCapacity);
+static_assert(tables::items::kItemValueCapacity == pursuits::kItemValueCapacity);
+static_assert(tables::items::kRewardPreviewCapacity == pursuits::kRewardPreviewCapacity);
+static_assert(tables::items::kUnavailableRewardReference == pursuits::kAbsent);
+
 /** @return True when the published item catalog holds the row. */
 [[nodiscard]] bool cataloged(std::uint16_t index) noexcept {
     state::build_data::items::Definition item{};
@@ -143,7 +149,11 @@ bool PursuitBuild::item(const tables::items::Row& row,
                 row.itemValueSlots, row.itemValueSlotCount, output.itemValueSlots.begin());
             output.itemValueSlotCount = row.itemValueSlotCount;
             output.rewardsReadable = row.rewardPreviewsValid;
-            std::copy_n(row.rewardPreviews, row.rewardPreviewCount, output.rewards.begin());
+            for (std::size_t index = 0; index < row.rewardPreviewCount; ++index) {
+                const tables::items::RewardPreview& preview = row.rewardPreviews[index];
+                output.rewards[index] = {
+                    preview.itemIndex, preview.quantity, preview.conditionIndex};
+            }
             output.rewardCount = row.rewardPreviewCount;
             if (!read_reward_conditions(conditions, output, unreadableConditions_)) {
                 return false;

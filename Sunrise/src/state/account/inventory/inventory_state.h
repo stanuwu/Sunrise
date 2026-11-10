@@ -60,9 +60,8 @@ inline constexpr std::size_t kProfileActionSourceCapacity = 100;
 /** Runtime-owned SOIDs for profile stacks use a namespace separate from created item instances. */
 inline constexpr std::uint64_t kFirstProfileItemInstanceSoid = 0x5000000000000001ULL;
 /**
- * Unequipped instances can occupy every character row not reserved for equipped items. An account
- * is then 236,112 bytes; the deepest server-thread chain of account copies, a roster notification,
- * peaks at about 2.8 MiB of the thread's 4 MiB stack.
+ * Unequipped instances can occupy every character row not reserved for equipped items. This sets
+ * most of an account's size, which kAccountStateSizeLimit bounds.
  */
 inline constexpr std::size_t kCharacterItemCapacity =
     build_data::inventory::buckets::kCharacterSlotCapacity - kEquipmentSlotCount;

@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "../build_data/runtime.h"
+#include "../investment/store.h"
 #include "../unlocks/unlocks_expression.h"
 
 namespace sunrise::state::reward_resolution {
@@ -35,6 +36,31 @@ bool refuse(const Context& context, const char* reason) noexcept {
 }
 
 /**
+ * Reads one row from the caller's copy of the saved banks.
+ * @param bank A bank investment::store::saved_bank names for an instruction.
+ * @param index A row the instruction's validation placed inside that bank.
+ * @return The row's value; a flag row reads its stored byte.
+ */
+std::int32_t saved_row(const unlocks::Table& banks,
+                       investment::store::Bank bank,
+                       std::uint32_t index) noexcept {
+    switch (bank) {
+    case investment::store::Bank::accountFlags:
+        return banks.accountFlags[index];
+    case investment::store::Bank::profileFlags:
+        return banks.profileFlags[index];
+    case investment::store::Bank::objectiveValues:
+        return banks.objectiveValues[index];
+    case investment::store::Bank::characterObjectFlags:
+        return banks.characterObjectFlags[index];
+    case investment::store::Bank::characterObjectValues:
+        return banks.characterObjectValues[index];
+    default:
+        return 0;
+    }
+}
+
+/**
  * Reads one validated flag from the caller's unlock banks or selected character.
  * A flag this draw already acquired reads as set before any bank is saved.
  * @param raw The ConditionInputs of the evaluation.
@@ -45,23 +71,18 @@ bool read_flag(const void* raw, const unlocks::Instruction& instruction, bool& s
     const auto& inputs = *static_cast<const ConditionInputs*>(raw);
     const auto& context = inputs.context;
     const auto index = instruction.operand;
-    switch (instruction.bank) {
-    case unlocks::Bank::account:
-        set = (inputs.acquiredFlags != nullptr && (*inputs.acquiredFlags)[index])
-              || context.unlocks.accountFlags[index] == unlocks::kFlagSet;
-        return true;
-    case unlocks::Bank::profile:
-        set = context.unlocks.profileFlags[index] == unlocks::kFlagSet;
-        return true;
-    case unlocks::Bank::character:
-        set = context.unlocks.characterObjectFlags[index] == unlocks::kFlagSet;
-        return true;
-    case unlocks::Bank::characterClass:
+    if (instruction.bank == unlocks::Bank::characterClass) {
         set = index == static_cast<std::uint32_t>(context.characterClass);
         return true;
-    default:
+    }
+    investment::store::Bank bank{};
+    if (!investment::store::saved_bank(instruction.bank, true, bank)) {
         return false;
     }
+    const bool acquired = bank == investment::store::Bank::accountFlags
+                          && inputs.acquiredFlags != nullptr && (*inputs.acquiredFlags)[index];
+    set = acquired || saved_row(context.unlocks, bank, index) == unlocks::kFlagSet;
+    return true;
 }
 
 /**
@@ -74,16 +95,12 @@ bool read_value(const void* raw,
                 const unlocks::Instruction& instruction,
                 std::int32_t& value) noexcept {
     const auto& context = static_cast<const ConditionInputs*>(raw)->context;
-    switch (instruction.bank) {
-    case unlocks::Bank::account:
-        value = context.unlocks.objectiveValues[instruction.operand];
-        return true;
-    case unlocks::Bank::character:
-        value = context.unlocks.characterObjectValues[instruction.operand];
-        return true;
-    default:
+    investment::store::Bank bank{};
+    if (!investment::store::saved_bank(instruction.bank, false, bank)) {
         return false;
     }
+    value = saved_row(context.unlocks, bank, instruction.operand);
+    return true;
 }
 
 /**

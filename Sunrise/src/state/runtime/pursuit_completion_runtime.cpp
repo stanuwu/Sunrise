@@ -5,6 +5,7 @@
 
 #include "../build_data/runtime.h"
 #include "../rewards/reward_resolver.h"
+#include "state_account_transaction_helpers.h"
 
 namespace sunrise::state {
 namespace {
@@ -13,19 +14,17 @@ namespace objective_data = build_data::objectives;
 
 /**
  * Reads the per-item value a slot names from one instance's values.
- * @return False when the instance's contract does not carry the slot.
+ * @return False when the slot names no progress lane of the contract, or one past the values.
  */
 [[nodiscard]] bool read_item_value(std::uint16_t slot,
                                    const build_data::pursuits::Definition& definition,
                                    std::span<const std::int32_t> itemValues,
                                    std::int32_t& value) noexcept {
-    const auto slots = std::span(definition.itemValueSlots).first(definition.itemValueSlotCount);
-    const auto found = std::find(slots.begin(), slots.end(), slot);
-    const auto position = static_cast<std::size_t>(found - slots.begin());
-    if (found == slots.end() || position >= itemValues.size()) {
+    std::size_t lane = 0;
+    if (!runtime::detail::item_value_lane(definition, slot, lane) || lane >= itemValues.size()) {
         return false;
     }
-    value = itemValues[position];
+    value = itemValues[lane];
     return true;
 }
 
@@ -111,6 +110,48 @@ inspect_pursuit_objective(const objective_data::Definition& objective,
 }
 
 } // namespace
+
+namespace runtime::detail {
+
+/** The lane is the slot's position in the contract's value list. */
+bool item_value_lane(const build_data::pursuits::Definition& contract,
+                     std::uint16_t slot,
+                     std::size_t& lane) noexcept {
+    const auto slots = std::span(contract.itemValueSlots).first(contract.itemValueSlotCount);
+    const auto found = std::find(slots.begin(), slots.end(), slot);
+    lane = static_cast<std::size_t>(found - slots.begin());
+    const bool deadlineLane =
+        contract.lifetimeSeconds > 0 && lane == account::inventory::kItemExpiryLane;
+    return found != slots.end() && lane < account::inventory::kItemObjectiveLaneCount
+           && !deadlineLane;
+}
+
+/** Only a contract with a lifetime is a bounty; an unset deadline has already passed. */
+bool bounty_expired(const build_data::pursuits::Definition& contract,
+                    const account::inventory::ItemObjectives& itemValues,
+                    std::int64_t nowSeconds) noexcept {
+    const std::int32_t deadline = itemValues[account::inventory::kItemExpiryLane];
+    return contract.lifetimeSeconds > 0 && (deadline <= 0 || nowSeconds >= deadline);
+}
+
+/** Only a plain count up to a positive completion value has a lane to advance. */
+bool objective_lane(const build_data::pursuits::Definition& contract,
+                    std::uint8_t ordinal,
+                    std::size_t& lane,
+                    std::int32_t& target) noexcept {
+    objective_data::Row objective{};
+    if (ordinal >= contract.objectiveCount
+        || !build_data::find_objective_row(contract.objectives[ordinal], objective)
+        || objective.countsDown || objective.targetAdjustment.count != 0
+        || objective.itemValueSlot == objective_data::kNoItemValueSlot
+        || objective.completionValue <= 0) {
+        return false;
+    }
+    target = objective.completionValue;
+    return item_value_lane(contract, objective.itemValueSlot, lane);
+}
+
+} // namespace runtime::detail
 
 /** An unknown objective still leaves the aggregate determinate when a known one settles it. */
 PursuitCompletionStatus

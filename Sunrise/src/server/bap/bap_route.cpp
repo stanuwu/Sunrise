@@ -48,12 +48,6 @@ constexpr std::uint64_t kAcquisitionPresentationHoldMs = 8'000;
  */
 constexpr std::uint64_t kArtifactFamily4RefreshDelayMs = 100;
 
-/** Arms every other active peer after one shared-account transaction is published. */
-void publish_account_mutation(Session& origin) noexcept {
-    origin.accountMutationPublished = false;
-    arm_account_resync_elsewhere(origin);
-}
-
 /** @param id Nonzero connection id. @return Matching open session, or null. */
 [[nodiscard]] Session* session_for(std::uint32_t id) noexcept {
     if (id == 0 || id > g_sessions.size()) {
@@ -364,6 +358,16 @@ void arm_account_resync_elsewhere(Session& origin) noexcept {
     }
 }
 
+/** Arms every other active peer, and the origin's Family-5 refresh when a held item owes one. */
+void publish_account_mutation(Session& origin) noexcept {
+    origin.accountMutationPublished = false;
+    arm_account_resync_elsewhere(origin);
+    // An armed refresh is built from the saved profile when it is sent, so it needs no second look.
+    if (!origin.artifactRefreshArmed && state::presence_flags_pending()) {
+        arm_artifact_refresh(origin);
+    }
+}
+
 /** Arms every active peer to re-read the account, including the origin. */
 void arm_account_resync_everywhere() noexcept {
     for (auto& peer : g_sessions) {
@@ -425,25 +429,13 @@ void arm_unlock_character_refresh(Session& session) noexcept {
     session.artifactFamily4RefreshArmed = true;
 }
 
-/**
- * Grants seasonal XP with no HUD notification, for a grant whose own frame carries the new total.
- * @param amount Positive XP to grant.
- * @return True when the XP was granted.
- */
-bool grant_seasonal_experience(std::int32_t amount) noexcept {
-    const std::uint16_t previousBonus = state::artifact_power_bonus();
-    if (amount <= 0 || !state::grant_seasonal_experience(amount)) {
-        return false;
-    }
-    // The family-two member record carries Power, which includes the artifact bonus.
-    if (state::artifact_power_bonus() != previousBonus) {
-        for (auto& peer : g_sessions) {
-            if (peer.socialRosterRepushRoot != 0) {
-                peer.socialRosterRepushArmed = true;
-            }
+/** The family-two member record carries Power, which includes the artifact bonus. */
+void arm_social_roster_repush_everywhere() noexcept {
+    for (auto& peer : g_sessions) {
+        if (peer.socialRosterRepushRoot != 0) {
+            peer.socialRosterRepushArmed = true;
         }
     }
-    return true;
 }
 
 /**
@@ -452,8 +444,12 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
  * @return True when the XP was granted.
  */
 bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
-    if (!grant_seasonal_experience(amount)) {
+    const std::uint16_t previousBonus = state::artifact_power_bonus();
+    if (amount <= 0 || !state::grant_seasonal_experience(amount)) {
         return false;
+    }
+    if (state::artifact_power_bonus() != previousBonus) {
+        arm_social_roster_repush_everywhere();
     }
     for (auto& peer : g_sessions) {
         if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active

@@ -22,7 +22,6 @@ namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
 namespace domain = state::build_data::vendors;
 namespace generated = middleware::content::packages::schema::generated;
-namespace reward_build = items::packages;
 
 /** Every extracted row, kept off the caller stack. */
 struct Storage {
@@ -175,20 +174,20 @@ read_sale_cost(std::span<const std::byte> blob, std::size_t at, domain::SaleRow&
  * @param storage Pass storage counting gated and unreadable rows.
  * @return False only when the reader's storage failed, which a later pass retries.
  */
-[[nodiscard]] bool read_availability(const reward_build::RewardConditions& conditions,
+[[nodiscard]] bool read_availability(const items::packages::RewardConditions& conditions,
                                      std::span<const std::byte> blob,
                                      std::size_t at,
                                      domain::SaleRow& value,
                                      Storage& storage) noexcept {
     std::size_t count = 0;
-    reward_build::BankFailure failure = reward_build::BankFailure::none;
+    items::packages::BankFailure failure = items::packages::BankFailure::none;
     const bool readable = conditions.read_list(blob,
                                                at + kSaleAvailabilityDescriptor,
                                                value.availability,
                                                count,
                                                failure,
                                                kSaleAvailabilityRowClass);
-    if (failure == reward_build::BankFailure::storage) {
+    if (failure == items::packages::BankFailure::storage) {
         return false;
     }
     value.availabilityUnreadable = !readable;
@@ -244,7 +243,7 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
  * @param storage Pass storage receiving the rows.
  * @return True when every row is inside the blob and the bank holds them all.
  */
-[[nodiscard]] bool read_sale_rows(const reward_build::RewardConditions& conditions,
+[[nodiscard]] bool read_sale_rows(const items::packages::RewardConditions& conditions,
                                   std::span<const std::byte> blob,
                                   const domain::Definition& definition,
                                   Storage& storage) noexcept {
@@ -346,7 +345,7 @@ static_assert(sizeof(domain::TransferRule) == generated::C8080785f::kSize);
  * @param storage Pass storage receiving the definition and its rows.
  * @return True when the definition blob reads and every array ends inside it.
  */
-[[nodiscard]] bool read_definition(const reward_build::RewardConditions& conditions,
+[[nodiscard]] bool read_definition(const items::packages::RewardConditions& conditions,
                                    const reader::Source& source,
                                    reader::Scratch& scratch,
                                    const domain::IndexEntry& entry,

@@ -660,15 +660,14 @@ bool read_reward_sockets(std::span<const std::byte> blob,
 }
 
 /**
- * Loads the condition tables, then every reward pool and its entries.
+ * Loads every reward pool and its entries, which bind through the loaded condition tables.
  * An unreadable entry or pool is skipped; a full bank or a refused schema settles the domain.
- * @param maps Unlock slot maps the conditions bind through.
- * @return False when a table or bank refused; conditions that loaded still serve the season pass.
+ * @return False when the conditions are not loaded or a table or bank refused; conditions that
+ *         loaded still serve the season pass.
  */
 bool RewardBuild::load(const reader::Source& source,
                        reader::Scratch& scratch,
-                       std::span<const std::byte> root,
-                       const SlotMaps& maps) noexcept {
+                       std::span<const std::byte> root) noexcept {
     loaded_ = false;
     supplementalMissing_ = false;
     pools_.clear();
@@ -679,8 +678,7 @@ bool RewardBuild::load(const reader::Source& source,
     std::vector<std::byte> blob;
     tables::Array rows{};
     std::uint32_t supplementalTag = 0;
-    // Conditions load first; the season pass binds through them even if the pools are refused.
-    if (!conditions.load(source, scratch, root, maps)) {
+    if (!conditions.loaded()) {
         return false;
     }
     if (!tables::slot_tag(root, layout::RootSlots::kSupplementalRewards, supplementalTag)) {

@@ -609,7 +609,9 @@ apply_dismantle_rewards(const AccountState& before,
 /**
  * Builds the one canonical stack discard for an exact account snapshot: the whole row when the
  * item's action consumes the entire stack, otherwise one unit. A surviving row keeps its serial,
- * which holds its grid cell.
+ * which holds its grid cell. The discard names only an item and a quantity, so a row in the item's
+ * authored placement is taken first, a character stack before a profile row, and a recovery-bucket
+ * row only when neither holds it.
  */
 [[nodiscard]] bool stage_stack_discard(const AccountState& account,
                                        std::size_t characterIndex,
@@ -633,20 +635,30 @@ apply_dismantle_rewards(const AccountState& before,
     AccountState candidate = account;
     CharacterState& after = candidate.characters[characterIndex];
     const auto stacks = std::span(before.stacks.values).first(before.stacks.count);
-    const auto stack = std::find_if(stacks.begin(), stacks.end(), holds);
-    const bool profile = stack == stacks.end();
-    std::size_t index = static_cast<std::size_t>(stack - stacks.begin());
-    if (profile) {
+    const auto find_stack = [&](authored_inventory::ItemPlacement placement) noexcept {
+        return std::find_if(stacks.begin(), stacks.end(), [&](const auto& held) noexcept {
+            return held.placement == placement && holds(held);
+        });
+    };
+    const auto rows = std::span(account.profileItems).first(account.profileItemCount);
+    auto stack = find_stack(authored_inventory::ItemPlacement::authored);
+    auto row = rows.end();
+    if (stack == stacks.end()) {
         // A profile row with an instance is an action source, which only its instance names.
-        const auto rows = std::span(account.profileItems).first(account.profileItemCount);
-        const auto row =
-            std::find_if(rows.begin(), rows.end(), [&holds](const auto& item) noexcept {
-                return item.instanceSoid == 0 && holds(item);
-            });
+        row = std::find_if(rows.begin(), rows.end(), [&holds](const auto& held) noexcept {
+            return held.instanceSoid == 0 && holds(held);
+        });
         if (row == rows.end()) {
-            return false;
+            stack = find_stack(authored_inventory::ItemPlacement::recovery);
         }
-        index = static_cast<std::size_t>(row - rows.begin());
+    }
+    const bool profile = row != rows.end();
+    if (!profile && stack == stacks.end()) {
+        return false;
+    }
+    const std::size_t index =
+        static_cast<std::size_t>(profile ? row - rows.begin() : stack - stacks.begin());
+    if (profile) {
         if (!removesRow) {
             --candidate.profileItems[index].quantity;
         } else if (!erase_profile_row(candidate, index)) {

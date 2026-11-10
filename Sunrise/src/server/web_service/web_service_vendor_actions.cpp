@@ -660,8 +660,7 @@ prepare_vendor_reward_grant(std::uint16_t itemDefinitionIndex,
     auto* grant = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
     std::uint64_t seed = 0;
     reason = grant == nullptr ? "storage" : "random_source";
-    if (grant != nullptr
-        && middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))
+    if (grant != nullptr && middleware::crypto::random::draw_seed(seed)
         && state::prepare_vendor_reward(itemDefinitionIndex,
                                         price,
                                         seed,

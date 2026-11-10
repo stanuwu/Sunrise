@@ -6,9 +6,6 @@
 #include <optional>
 #include <span>
 
-#include "../../../../state/build_data/items/item_catalog.h"
-#include "../../../../state/build_data/pursuits/definition.h"
-
 namespace sunrise::middleware::content::packages::tables::items {
 
 /** Ordinary socket lanes an item definition can declare. */
@@ -34,12 +31,31 @@ inline constexpr std::size_t kArtClassCapacity = 4;
 inline constexpr std::uint16_t kUnavailableSocketType = 0xFFFF;
 /** A signed material override key is empty at minus one. */
 inline constexpr std::int8_t kEmptyOverrideKey = -1;
+/** The installed pursuit objective block supports seven displayed objectives. */
+inline constexpr std::size_t kObjectiveCapacity = 7;
+/** The item instance record ends in eight per-item values, so a pursuit maps at most eight. */
+inline constexpr std::size_t kItemValueCapacity = 8;
+/** An item's value block holds six fixed reward rows. */
+inline constexpr std::size_t kRewardPreviewCapacity = 6;
+/** All bits set marks a reward row that names no item or no condition. */
+inline constexpr std::uint16_t kUnavailableRewardReference = 0xFFFF;
+/** The shipped build lists at most 8 presence flags on one item. */
+inline constexpr std::size_t kPresenceFlagCapacity = 8;
 
 /** One material override row, tagged with the art stage that declared it. */
 struct RenderOverride {
     std::uint8_t stage{};
     std::int8_t key{kEmptyOverrideKey};
     std::uint16_t value{};
+};
+
+/** One reward row a pursuit's value block declares. */
+struct RewardPreview {
+    std::uint16_t itemIndex{kUnavailableRewardReference};
+    /** Zero when the row names its item without an amount. */
+    std::int32_t quantity{};
+    /** Shared expression row that decides whether the row applies, or unavailable for none. */
+    std::uint16_t conditionIndex{kUnavailableRewardReference};
 };
 
 /** One item row read from its own definition blob. */
@@ -112,20 +128,19 @@ struct Row {
     std::uint16_t completionValueSlot{kUnavailableValueSlot};
     std::uint16_t completionContextValueSlot{kUnavailableValueSlot};
     std::uint8_t objectiveCount{};
-    std::uint16_t objectiveIndices[state::build_data::pursuits::kObjectiveCapacity]{};
+    std::uint16_t objectiveIndices[kObjectiveCapacity]{};
     /** Positive for a bounty, which expires this many seconds after it is acquired. */
     std::int32_t lifetimeSeconds{};
     /** A pursuit's per-item value slots in record order; none when its list cannot be read. */
     std::uint8_t itemValueSlotCount{};
-    std::uint16_t itemValueSlots[state::build_data::pursuits::kItemValueCapacity]{};
+    std::uint16_t itemValueSlots[kItemValueCapacity]{};
     /** A pursuit's value block is optional: an unreadable one leaves its rows unknown. */
     bool rewardPreviewsValid{true};
     std::uint8_t rewardPreviewCount{};
-    state::build_data::pursuits::RewardPreview
-        rewardPreviews[state::build_data::pursuits::kRewardPreviewCapacity]{};
+    RewardPreview rewardPreviews[kRewardPreviewCapacity]{};
     /** Unlock flag slots the item supplies while held; none when the list cannot be read. */
     std::uint8_t presenceFlagCount{};
-    std::array<std::uint16_t, state::build_data::items::kPresenceFlagCapacity> presenceFlags{};
+    std::array<std::uint16_t, kPresenceFlagCapacity> presenceFlags{};
 };
 
 /**

@@ -454,37 +454,34 @@ bool credit_profile_stack(const AccountState& uncharged,
 
 /** Reads the staged value, or the saved one when the transaction has not written the row. */
 [[nodiscard]] bool read_account_unlock(const AccountUnlockWrites& writes,
-                                       bool flag,
+                                       AccountUnlockBank bank,
                                        std::uint16_t index,
                                        std::int32_t& value) noexcept {
     for (const AccountUnlockWrite& write : std::span(writes.rows).first(writes.count)) {
-        if (write.flag == flag && write.index == index) {
+        if (write.bank == bank && write.index == index) {
             value = write.value;
             return true;
         }
     }
-    return investment::store::read_unlock(flag ? investment::store::Bank::accountFlags
-                                               : investment::store::Bank::objectiveValues,
-                                          index,
-                                          value);
+    return investment::store::read_unlock(store_bank(bank), index, value);
 }
 
 /** Keeps the value the save held before the first write, so commit can check it still does. */
 [[nodiscard]] bool write_account_unlock(AccountUnlockWrites& writes,
-                                        bool flag,
+                                        AccountUnlockBank bank,
                                         std::uint16_t index,
                                         std::int32_t value) noexcept {
     for (AccountUnlockWrite& write : std::span(writes.rows).first(writes.count)) {
-        if (write.flag == flag && write.index == index) {
+        if (write.bank == bank && write.index == index) {
             write.value = value;
             return true;
         }
     }
     std::int32_t saved = 0;
-    if (writes.count == writes.rows.size() || !read_account_unlock(writes, flag, index, saved)) {
+    if (writes.count == writes.rows.size() || !read_account_unlock(writes, bank, index, saved)) {
         return false;
     }
-    writes.rows[writes.count++] = {flag, index, saved, value};
+    writes.rows[writes.count++] = {bank, index, saved, value};
     return true;
 }
 
@@ -493,11 +490,11 @@ bool credit_profile_stack(const AccountState& uncharged,
                                        std::uint16_t index,
                                        std::uint32_t quantity) noexcept {
     std::int32_t balance = 0;
-    return read_account_unlock(writes, false, index, balance) && balance >= 0
+    return read_account_unlock(writes, AccountUnlockBank::values, index, balance) && balance >= 0
            && static_cast<std::uint32_t>(balance) >= quantity
            && write_account_unlock(
                writes,
-               false,
+               AccountUnlockBank::values,
                index,
                static_cast<std::int32_t>(static_cast<std::uint32_t>(balance) - quantity));
 }
@@ -531,7 +528,8 @@ apply_action_materials(const AccountState& before,
         const std::uint32_t debit = requirement.deleteOnAction ? requirement.quantity : 0;
         std::int32_t balance = 0;
         if (requirement.valueIndex == materials::kUnavailableValueIndex
-            || !read_account_unlock(charged, false, requirement.valueIndex, balance)
+            || !read_account_unlock(
+                charged, AccountUnlockBank::values, requirement.valueIndex, balance)
             || balance < 0 || static_cast<std::uint32_t>(balance) < requirement.quantity
             || (debit != 0 && !debit_account_value(charged, requirement.valueIndex, debit))) {
             return false;

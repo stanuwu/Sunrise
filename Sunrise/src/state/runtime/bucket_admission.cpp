@@ -32,10 +32,14 @@ struct BucketOccupancy {
     std::size_t oldest{(std::numeric_limits<std::size_t>::max)()};
     std::int32_t serial{(std::numeric_limits<std::int32_t>::max)()};
 
-    /** Counts one replaceable row and keeps the lowest mutation serial as the oldest. */
+    /**
+     * Counts one replaceable row and keeps the lowest mutation serial as the oldest. Rows sharing
+     * a serial keep the lowest index, whatever order they are counted in.
+     */
     void include(std::size_t index, std::int32_t mutationSerial) noexcept {
         ++count;
-        if (oldest == (std::numeric_limits<std::size_t>::max)() || mutationSerial < serial) {
+        if (oldest == (std::numeric_limits<std::size_t>::max)() || mutationSerial < serial
+            || (mutationSerial == serial && index < oldest)) {
             oldest = index;
             serial = mutationSerial;
         }
@@ -49,35 +53,6 @@ struct BucketOccupancy {
  * victim is discarded instead.
  */
 using EvictionChain = std::bitset<inventory_buckets::kDescriptorCapacity>;
-
-/** Counts this bucket's saved profile rows and selects its oldest mutation identity. */
-[[nodiscard]] bool profile_bucket_occupancy(std::span<const authored_inventory::ProfileItem> items,
-                                            std::uint8_t bucketId,
-                                            BucketOccupancy& occupancy) noexcept {
-    occupancy = {};
-    for (std::size_t index = 0; index < items.size(); ++index) {
-        build_data::items::Definition definition{};
-        if (!build_data::find_item_definition_hash(items[index].definitionHash, definition)) {
-            return false;
-        }
-        if (definition.bucketId == bucketId) {
-            occupancy.include(index, items[index].mutationSerial);
-        }
-    }
-    return true;
-}
-
-/** Finds the bucket a saved row occupies from its item and placement. */
-[[nodiscard]] bool occupied_bucket(std::uint32_t definitionHash,
-                                   authored_inventory::ItemPlacement placement,
-                                   std::uint8_t& bucketId) noexcept {
-    build_data::items::Definition definition{};
-    if (!build_data::find_item_definition_hash(definitionHash, definition)) {
-        return false;
-    }
-    bucketId = authored_inventory::occupied_bucket_id(definition, placement);
-    return true;
-}
 
 /** @return True when each unit of the item is its own instance rather than part of a stack. */
 [[nodiscard]] bool instanced(const item_details::Definition& detail) noexcept {
@@ -119,72 +94,6 @@ static_assert(
     >= middleware::datagen::family4::character::layout::kInventoryChangeRecordCapacity
            + middleware::datagen::family4::account::layout::kProfileInventoryChangeRecordCapacity);
 
-/**
- * Counts one bucket's character rows and picks its oldest. As in the client, an equipped row is
- * an ordinary occupied row of its bucket.
- */
-[[nodiscard]] bool character_bucket_occupancy(const CharacterState& character,
-                                              const inventory_buckets::Descriptor& bucket,
-                                              BucketOccupancy& occupancy) noexcept {
-    occupancy = {};
-    if (character.inventory.count > character.inventory.values.size()
-        || character.stacks.count > character.stacks.values.size()) {
-        return false;
-    }
-    const auto include = [&](std::uint32_t definitionHash,
-                             authored_inventory::ItemPlacement placement,
-                             std::int32_t mutationSerial,
-                             std::size_t row) noexcept {
-        std::uint8_t bucketId = 0;
-        if (!occupied_bucket(definitionHash, placement, bucketId)) {
-            return false;
-        }
-        if (bucketId == bucket.bucketId) {
-            occupancy.include(row, mutationSerial);
-        }
-        return true;
-    };
-    for (std::size_t index = 0; index < character.inventory.count; ++index) {
-        const auto& item = character.inventory.values[index];
-        if (!include(item.definitionHash, item.placement, item.mutationSerial, index)) {
-            return false;
-        }
-    }
-    for (std::size_t index = 0; index < character.stacks.count; ++index) {
-        const auto& item = character.stacks.values[index];
-        if (!include(
-                item.definitionHash, item.placement, item.mutationSerial, kStackRowBase + index)) {
-            return false;
-        }
-    }
-    for (std::size_t slot = 0; slot < character.equipment.slots.size(); ++slot) {
-        const auto& item = character.equipment.slots[slot];
-        if (item
-            && !include(item->definitionHash,
-                        item->placement,
-                        item->mutationSerial,
-                        kEquippedRowBase + slot)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/** Counts one bucket's rows in whichever saved array it belongs to. */
-[[nodiscard]] bool bucket_occupancy(const AccountState& account,
-                                    std::size_t characterIndex,
-                                    const inventory_buckets::Descriptor& bucket,
-                                    BucketOccupancy& occupancy) noexcept {
-    if (bucket.arraySelector == inventory_buckets::ArraySelector::profile) {
-        return profile_bucket_occupancy(
-            std::span(account.profileItems).first(account.profileItemCount),
-            bucket.bucketId,
-            occupancy);
-    }
-    return bucket.arraySelector == inventory_buckets::ArraySelector::character
-           && character_bucket_occupancy(account.characters[characterIndex], bucket, occupancy);
-}
-
 /** @return Room the same item's stacks in this bucket still have. */
 [[nodiscard]] std::int64_t stack_headroom(const AccountState& account,
                                           std::size_t characterIndex,
@@ -216,10 +125,13 @@ static_assert(
     return headroom;
 }
 
-/** One saved row as the fit rules see it: its item, quantity and the bucket it occupies. */
+/** One saved row as the fit rules see it: its item, quantity, age and the bucket it occupies. */
 struct HeldRow {
     build_data::items::Definition item{};
     std::int32_t quantity{};
+    std::int32_t mutationSerial{};
+    /** A profile index, or an index in the character row space kStackRowBase divides. */
+    std::size_t row{};
     std::uint8_t bucketId{};
 };
 
@@ -235,22 +147,29 @@ template <typename Visit>
                                std::size_t characterIndex,
                                const inventory_buckets::Descriptor& bucket,
                                Visit&& visit) noexcept {
-    const auto row = [](std::uint32_t definitionHash,
-                        std::int32_t quantity,
-                        authored_inventory::ItemPlacement placement,
-                        HeldRow& held) noexcept {
-        held.quantity = quantity;
-        return build_data::find_item_definition_hash(definitionHash, held.item)
-               && occupied_bucket(definitionHash, placement, held.bucketId);
-    };
     HeldRow held{};
+    const auto resolve = [&held](std::uint32_t definitionHash,
+                                 std::int32_t quantity,
+                                 std::int32_t mutationSerial,
+                                 authored_inventory::ItemPlacement placement,
+                                 std::size_t row) noexcept {
+        if (!build_data::find_item_definition_hash(definitionHash, held.item)) {
+            return false;
+        }
+        held.quantity = quantity;
+        held.mutationSerial = mutationSerial;
+        held.row = row;
+        held.bucketId = authored_inventory::occupied_bucket_id(held.item, placement);
+        return true;
+    };
     if (bucket.arraySelector == inventory_buckets::ArraySelector::profile) {
         for (std::size_t index = 0; index < account.profileItemCount; ++index) {
             const auto& item = account.profileItems[index];
-            if (!row(item.definitionHash,
-                     item.quantity,
-                     authored_inventory::ItemPlacement::authored,
-                     held)) {
+            if (!resolve(item.definitionHash,
+                         item.quantity,
+                         item.mutationSerial,
+                         authored_inventory::ItemPlacement::authored,
+                         index)) {
                 return false;
             }
             if (!visit(held)) {
@@ -260,8 +179,14 @@ template <typename Visit>
         return true;
     }
     const CharacterState& character = account.characters[characterIndex];
-    for (const auto& equipped : character.equipment.slots) {
-        if (equipped && !row(equipped->definitionHash, 1, equipped->placement, held)) {
+    for (std::size_t slot = 0; slot < character.equipment.slots.size(); ++slot) {
+        const auto& equipped = character.equipment.slots[slot];
+        if (equipped
+            && !resolve(equipped->definitionHash,
+                        1,
+                        equipped->mutationSerial,
+                        equipped->placement,
+                        kEquippedRowBase + slot)) {
             return false;
         }
         if (equipped && !visit(held)) {
@@ -270,7 +195,8 @@ template <typename Visit>
     }
     for (std::size_t index = 0; index < character.inventory.count; ++index) {
         const auto& item = character.inventory.values[index];
-        if (!row(item.definitionHash, item.quantity, item.placement, held)) {
+        if (!resolve(
+                item.definitionHash, item.quantity, item.mutationSerial, item.placement, index)) {
             return false;
         }
         if (!visit(held)) {
@@ -279,7 +205,11 @@ template <typename Visit>
     }
     for (std::size_t index = 0; index < character.stacks.count; ++index) {
         const auto& item = character.stacks.values[index];
-        if (!row(item.definitionHash, item.quantity, item.placement, held)) {
+        if (!resolve(item.definitionHash,
+                     item.quantity,
+                     item.mutationSerial,
+                     item.placement,
+                     kStackRowBase + index)) {
             return false;
         }
         if (!visit(held)) {
@@ -287,6 +217,32 @@ template <typename Visit>
         }
     }
     return true;
+}
+
+/**
+ * Counts one bucket's rows in whichever saved array it belongs to and picks its oldest. As in the
+ * client, an equipped row is an ordinary occupied row of its bucket.
+ */
+[[nodiscard]] bool bucket_occupancy(const AccountState& account,
+                                    std::size_t characterIndex,
+                                    const inventory_buckets::Descriptor& bucket,
+                                    BucketOccupancy& occupancy) noexcept {
+    occupancy = {};
+    if (bucket.arraySelector == inventory_buckets::ArraySelector::character) {
+        const CharacterState& character = account.characters[characterIndex];
+        if (character.inventory.count > character.inventory.values.size()
+            || character.stacks.count > character.stacks.values.size()) {
+            return false;
+        }
+    } else if (bucket.arraySelector != inventory_buckets::ArraySelector::profile) {
+        return false;
+    }
+    return visit_array(account, characterIndex, bucket, [&](const HeldRow& held) noexcept {
+        if (held.bucketId == bucket.bucketId) {
+            occupancy.include(held.row, held.mutationSerial);
+        }
+        return true;
+    });
 }
 
 /**
@@ -456,30 +412,31 @@ template <typename Visit>
     return true;
 }
 
-/** Evicts the oldest row of a full character FIFO bucket, moving it when allowed. */
+/**
+ * Evicts the oldest row of a full character FIFO bucket, moving it when allowed.
+ * @param oldest The bucket's oldest row as bucket_occupancy found it in this account.
+ */
 [[nodiscard]] bool evict_character_row(AccountState& working,
                                        std::size_t characterIndex,
                                        const inventory_buckets::Descriptor& bucket,
+                                       std::size_t oldest,
                                        EvictionChain& chain,
                                        PlacedRows& rows,
                                        const char*& reason) noexcept {
     CharacterState& character = working.characters[characterIndex];
-    BucketOccupancy occupancy;
     reason = "fifo_victim";
-    if (!character_bucket_occupancy(character, bucket, occupancy)
-        || occupancy.oldest >= kCharacterRowCount) {
+    if (oldest >= kCharacterRowCount) {
         return false;
     }
-    const bool victimStack =
-        occupancy.oldest >= kStackRowBase && occupancy.oldest < kEquippedRowBase;
+    const bool victimStack = oldest >= kStackRowBase && oldest < kEquippedRowBase;
     authored_inventory::Item instance{};
     authored_inventory::CharacterStack stack{};
     if (victimStack) {
-        stack = character.stacks.values[occupancy.oldest - kStackRowBase];
-    } else if (occupancy.oldest < kStackRowBase) {
-        instance = character.inventory.values[occupancy.oldest];
+        stack = character.stacks.values[oldest - kStackRowBase];
+    } else if (oldest < kStackRowBase) {
+        instance = character.inventory.values[oldest];
     } else {
-        instance = *character.equipment.slots[occupancy.oldest - kEquippedRowBase];
+        instance = *character.equipment.slots[oldest - kEquippedRowBase];
     }
     build_data::items::Definition victim{};
     item_details::Definition victimDetail{};
@@ -497,7 +454,7 @@ template <typename Visit>
                              chain,
                              recovery,
                              transfers)
-        || !erase_character_row(character, occupancy.oldest)) {
+        || !erase_character_row(character, oldest)) {
         return false;
     }
     if (!transfers) {
@@ -521,25 +478,22 @@ template <typename Visit>
 /**
  * Evicts the oldest row of a full profile FIFO bucket. The client moves a victim only within its
  * array, and saved profile rows record no placement, so a profile victim is discarded.
+ * @param oldest The bucket's oldest row as bucket_occupancy found it in this account.
  */
 [[nodiscard]] bool evict_profile_row(AccountState& working,
-                                     const inventory_buckets::Descriptor& bucket,
+                                     std::size_t oldest,
                                      const char*& reason) noexcept {
-    BucketOccupancy occupancy;
     reason = "fifo_victim";
-    if (!profile_bucket_occupancy(std::span(working.profileItems).first(working.profileItemCount),
-                                  bucket.bucketId,
-                                  occupancy)
-        || occupancy.oldest >= working.profileItemCount) {
+    if (oldest >= working.profileItemCount) {
         return false;
     }
     // An action-source row is a published resident; evicting one is unsupported, so this refuses.
     reason = "fifo_resident";
-    if (working.profileItems[occupancy.oldest].instanceSoid != 0) {
+    if (working.profileItems[oldest].instanceSoid != 0) {
         return false;
     }
     reason = "fifo_victim";
-    return erase_profile_row(working, occupancy.oldest);
+    return erase_profile_row(working, oldest);
 }
 
 /** Makes one free row in a bucket, evicting under FIFO policy; an ordinary bucket refuses. */
@@ -564,8 +518,9 @@ template <typename Visit>
     chain.set(bucket.bucketId);
     const bool evicted =
         bucket.arraySelector == inventory_buckets::ArraySelector::profile
-            ? evict_profile_row(working, bucket, reason)
-            : evict_character_row(working, characterIndex, bucket, chain, rows, reason);
+            ? evict_profile_row(working, occupancy.oldest, reason)
+            : evict_character_row(
+                  working, characterIndex, bucket, occupancy.oldest, chain, rows, reason);
     chain.reset(bucket.bucketId);
     return evicted;
 }
@@ -1058,21 +1013,21 @@ bool place_claim(AccountState& working,
 }
 
 /** Counts announced rows against each change list's capacity. */
-const char* change_ring_refusal(std::span<const GrantedRow> rows) noexcept {
+bool change_rings_fit(std::span<const GrantedRow> rows) noexcept {
     std::size_t characterChanges = 0;
     std::size_t profileChanges = 0;
     for (const auto& row : rows) {
         if (row.array == GrantedRowArray::profile) {
             if (++profileChanges > middleware::datagen::family4::account::layout::
                     kProfileInventoryChangeRecordCapacity) {
-                return "profile_change_capacity";
+                return false;
             }
         } else if (++characterChanges > middleware::datagen::family4::character::layout::
                        kInventoryChangeRecordCapacity) {
-            return "character_change_capacity";
+            return false;
         }
     }
-    return nullptr;
+    return true;
 }
 
 /** Looks a granted row up by its serial in the array it names. */

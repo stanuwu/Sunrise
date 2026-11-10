@@ -4,6 +4,7 @@
 #include <optional>
 #include <span>
 
+#include "../../../../../middleware/datagen/family4/account/account_encoder.h"
 #include "../../../../../middleware/datagen/family4/account/layout.h"
 #include "../../../../../middleware/datagen/family4/loadout/definition.h"
 #include "../../../../../middleware/datagen/family4/loadout/loadout_resolver.h"
@@ -357,6 +358,16 @@ resolve(const state::AccountState& account, std::size_t characterIndex, Resolved
 
 /** Logs which step of preparation failed. @return Always false. */
 [[nodiscard]] bool report_failure(const char* step) noexcept;
+
+/**
+ * Reads the account-object fields State holds outside the account copy, for the account encoder.
+ * @param account Account view the object is encoded from.
+ * @param fields Receives each character's published value and the Store wallet sync generation.
+ * @return False when the saved generation cannot be read.
+ */
+[[nodiscard]] bool
+read_account_state_fields(const state::AccountState& account,
+                          middleware::datagen::family4::account::StateFields& fields) noexcept;
 
 /**
  * Compresses one raw object and advances the shared sealed-buffer extent.

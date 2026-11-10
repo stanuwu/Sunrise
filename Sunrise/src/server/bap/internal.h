@@ -562,6 +562,13 @@ void drain_world_rewards() noexcept;
 /** Arms every other Family-4 peer after the origin publishes a complete account mutation. */
 void arm_account_resync_elsewhere(Session& origin) noexcept;
 
+/**
+ * Settles what one committed account publication owes beyond its own frame: every other peer's
+ * resync, and the origin's Family-5 refresh when the profile's held items supply other presence
+ * flags than Family 5 last set.
+ */
+void publish_account_mutation(Session& origin) noexcept;
+
 /** Arms every Family-4 peer, including the origin, for a full account resync. */
 void arm_account_resync_everywhere() noexcept;
 
@@ -616,8 +623,8 @@ current_world_reward(WorldRewardRequest& request, std::uint64_t afterId, bool* e
 /** Grants every saved reward that can settle with no flyout, retiring those never grantable. */
 void settle_world_reward() noexcept;
 
-/** Grants seasonal XP for a grant whose own frame carries the new total, with no XP item update. */
-[[nodiscard]] bool grant_seasonal_experience(std::int32_t amount) noexcept;
+/** Arms every subscribed peer's social roster, whose member record carries Power, for a re-push. */
+void arm_social_roster_repush_everywhere() noexcept;
 
 /** Queues one transient XP item update so the native HUD presents a seasonal XP gain. */
 [[nodiscard]] bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept;

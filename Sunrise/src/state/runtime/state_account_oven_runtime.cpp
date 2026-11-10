@@ -172,7 +172,7 @@ static_assert(kSocketUnlockWriteCapacity
     std::int32_t flag = 0;
     if (!build_data::find_item_definition_hash(recipe.recipePlugHash, plug)
         || plug.plugSetFlagIndex == build_data::items::kUnavailableFlagIndex
-        || !read_account_unlock(writes, true, plug.plugSetFlagIndex, flag)) {
+        || !read_account_unlock(writes, AccountUnlockBank::flags, plug.plugSetFlagIndex, flag)) {
         return false;
     }
     discovered = flag == unlocks::kFlagSet;
@@ -363,17 +363,35 @@ static_assert(kSocketUnlockWriteCapacity
     return nullptr;
 }
 
+/** An item the item table does not hold is final once the catalogs a grant reads have settled. */
+[[nodiscard]] RewardPreparation missing_item() noexcept {
+    return catalogs_settled() ? RewardPreparation::unresolvable : RewardPreparation::notReady;
+}
+
+/**
+ * A contract or objective the pursuit catalog does not hold is final once the contracts and their
+ * objectives are published, or the catalog is settled unsupported. Until then nothing is decided.
+ */
+[[nodiscard]] RewardPreparation missing_contract() noexcept {
+    const bool settled =
+        (build_data::pursuit_definitions_ready() && build_data::objective_definitions_ready())
+        || build_data::pursuit_catalog_unsupported();
+    return settled ? RewardPreparation::unresolvable : RewardPreparation::notReady;
+}
+
 /**
  * Reads the account row the tutorial's quest steps share.
- * @return False unless a step names an account row and every step names the same one.
+ * @return Unresolvable when a step names another bank or two steps name different rows. A
+ *         tutorial item that is not installed ends as missing_item does, and contracts that name
+ *         no step as missing_contract does.
  */
-[[nodiscard]] bool tutorial_quest_row(std::uint16_t& row) noexcept {
+[[nodiscard]] RewardPreparation tutorial_quest_row(std::uint16_t& row) noexcept {
     bool found = false;
     for (const std::uint32_t hash : kTutorialItemHashes) {
         build_data::items::Definition item{};
         build_data::pursuits::Definition contract{};
         if (!build_data::find_item_definition_hash(hash, item)) {
-            return false;
+            return missing_item();
         }
         if (!build_data::find_pursuit_definition(item.definitionIndex, contract)
             || contract.questStep.membership != build_data::pursuits::QuestMembership::step) {
@@ -382,12 +400,12 @@ static_assert(kSocketUnlockWriteCapacity
         const build_data::pursuits::QuestStep& step = contract.questStep;
         if (step.scope != build_data::items::QuestInitialization::Scope::account
             || (found && step.row != row)) {
-            return false;
+            return RewardPreparation::unresolvable;
         }
         row = step.row;
         found = true;
     }
-    return found;
+    return found ? RewardPreparation::prepared : missing_contract();
 }
 
 /** @return True when a character holds a tutorial item. */
@@ -429,43 +447,49 @@ static_assert(kSocketUnlockWriteCapacity
 /**
  * Advances one objective of a held bounty by one, unless it is finished.
  * @param advanced Set when the objective moved.
- * @return False when the contract does not hold the objective or its lane does not resolve.
+ * @return Unresolvable when the published contract does not hold the objective or names no lane
+ *         for it; not ready while its objectives are unpublished; deferred when the saved lane is
+ *         negative.
  */
-[[nodiscard]] bool advance_objective(const build_data::pursuits::Definition& contract,
-                                     std::uint32_t objectiveHash,
-                                     account::inventory::ItemObjectives& values,
-                                     bool& advanced) noexcept {
+[[nodiscard]] RewardPreparation advance_objective(const build_data::pursuits::Definition& contract,
+                                                  std::uint32_t objectiveHash,
+                                                  account::inventory::ItemObjectives& values,
+                                                  bool& advanced) noexcept {
     for (std::uint8_t ordinal = 0; ordinal < contract.objectiveCount; ++ordinal) {
         build_data::objectives::Definition objective{};
         if (!build_data::find_objective_definition(contract.objectives[ordinal], objective)) {
-            return false;
+            return missing_contract();
         }
         if (objective.definitionHash != objectiveHash) {
             continue;
         }
         std::size_t lane = 0;
         std::int32_t target = 0;
-        if (!objective_lane(contract, ordinal, lane, target) || values[lane] < 0) {
-            return false;
+        if (!objective_lane(contract, ordinal, lane, target)) {
+            return missing_contract();
+        }
+        // Only a later save can make a negative lane count again.
+        if (values[lane] < 0) {
+            return RewardPreparation::deferred;
         }
         if (values[lane] < target) {
             ++values[lane];
             advanced = true;
         }
-        return true;
+        return RewardPreparation::prepared;
     }
-    return false;
+    return RewardPreparation::unresolvable;
 }
 
 } // namespace
 
 /** Bounties are matched by the authored rules; their lanes come from the installed contract. */
-bool credit_dawning_bounties(CharacterState& character,
-                             DawningEvent event,
-                             std::uint32_t cookieHash,
-                             std::int64_t nowSeconds) noexcept {
+RewardPreparation credit_dawning_bounties(CharacterState& character,
+                                          DawningEvent event,
+                                          std::uint32_t cookieHash,
+                                          std::int64_t nowSeconds) noexcept {
     if (!recipe_cookie(cookieHash)) {
-        return true;
+        return RewardPreparation::prepared;
     }
     const auto rules = std::span(kDawningBountyRules);
     for (auto& held : std::span(character.inventory.values).first(character.inventory.count)) {
@@ -477,33 +501,40 @@ bool credit_dawning_bounties(CharacterState& character,
         }
         build_data::items::Definition item{};
         build_data::pursuits::Definition contract{};
-        if (!build_data::find_item_definition_hash(held.definitionHash, item)
-            || !build_data::find_pursuit_definition(item.definitionIndex, contract)
-            || !contract.readable) {
-            return false;
+        if (!build_data::find_item_definition_hash(held.definitionHash, item)) {
+            return missing_item();
+        }
+        if (!build_data::find_pursuit_definition(item.definitionIndex, contract)) {
+            return missing_contract();
+        }
+        if (!contract.readable) {
+            return RewardPreparation::unresolvable;
         }
         account::inventory::ItemObjectives values =
             held.objectives.value_or(account::inventory::ItemObjectives{});
-        const std::int32_t deadline = values[account::inventory::kItemExpiryLane];
-        if (contract.lifetimeSeconds > 0 && (deadline <= 0 || nowSeconds >= deadline)) {
+        if (bounty_expired(contract, values, nowSeconds)) {
             continue;
         }
         bool advanced = false;
         for (const DawningBountyRule& rule : rules) {
-            if (counted(rule)
-                && !advance_objective(contract, rule.objectiveHash, values, advanced)) {
-                return false;
+            if (!counted(rule)) {
+                continue;
+            }
+            const auto outcome = advance_objective(contract, rule.objectiveHash, values, advanced);
+            if (outcome != RewardPreparation::prepared) {
+                return outcome;
             }
         }
         if (!advanced) {
             continue;
         }
         held.objectives = values;
+        // Exhausted serials are saved State, which only a later save changes.
         if (!next_character_serial(character, held.mutationSerial)) {
-            return false;
+            return RewardPreparation::deferred;
         }
     }
-    return true;
+    return RewardPreparation::prepared;
 }
 
 /** Chooses what an oven plug bakes, its cost and the lanes it resets, or gates the Masterwork. */
@@ -583,39 +614,53 @@ bool pay_oven_bake(const AccountState& uncharged,
                               bake.changes,
                               bake.changeCount)
         || !build_data::find_item_definition_index(bake.cookieIndex, cookie)
-        || !credit_dawning_bounties(account.characters[characterIndex],
-                                    DawningEvent::bake,
-                                    cookie.definitionHash,
-                                    nowSeconds)) {
+        || credit_dawning_bounties(account.characters[characterIndex],
+                                   DawningEvent::bake,
+                                   cookie.definitionHash,
+                                   nowSeconds)
+               != RewardPreparation::prepared) {
         return false;
     }
     if (bake.discoveryFlagIndex == build_data::items::kUnavailableFlagIndex) {
         return true;
     }
     std::int32_t discovered = 0;
-    return read_account_unlock(writes, true, bake.discoveryFlagIndex, discovered)
+    return read_account_unlock(
+               writes, AccountUnlockBank::flags, bake.discoveryFlagIndex, discovered)
            && (discovered == unlocks::kFlagSet
-               || write_account_unlock(writes, true, bake.discoveryFlagIndex, unlocks::kFlagSet));
+               || write_account_unlock(writes,
+                                       AccountUnlockBank::flags,
+                                       bake.discoveryFlagIndex,
+                                       unlocks::kFlagSet));
 }
 
 /** Credits a pickup to the balance its ingredient plug's quantity expression counts. */
-bool prepare_ingredient_credit(std::uint32_t pickupHash,
-                               std::int32_t quantity,
-                               AccountUnlockWrite& credit) noexcept {
+RewardPreparation prepare_ingredient_credit(std::uint32_t pickupHash,
+                                            std::int32_t quantity,
+                                            AccountUnlockWrite& credit) noexcept {
     credit = {};
     const IngredientPickup* pickup = find_pickup(pickupHash);
-    build_data::items::Definition plug{};
-    std::int32_t balance = 0;
-    if (pickup == nullptr || quantity <= 0
-        || !build_data::find_item_definition_hash(pickup->ingredientPlugHash, plug)
-        || plug.quantityValueIndex == build_data::items::kUnavailableValueIndex
-        || !investment::store::read_unlock(
-            investment::store::Bank::objectiveValues, plug.quantityValueIndex, balance)
-        || balance > (std::numeric_limits<std::int32_t>::max)() - quantity) {
-        return false;
+    if (pickup == nullptr || quantity <= 0) {
+        return RewardPreparation::unresolvable;
     }
-    credit = {false, plug.quantityValueIndex, balance, balance + quantity};
-    return true;
+    build_data::items::Definition plug{};
+    if (!build_data::find_item_definition_hash(pickup->ingredientPlugHash, plug)) {
+        return missing_item();
+    }
+    if (plug.quantityValueIndex == build_data::items::kUnavailableValueIndex) {
+        return RewardPreparation::unresolvable;
+    }
+    std::int32_t balance = 0;
+    if (!investment::store::read_unlock(
+            investment::store::Bank::objectiveValues, plug.quantityValueIndex, balance)) {
+        return RewardPreparation::notReady;
+    }
+    // Spending the ingredient makes room, so a full balance is refused only for now.
+    if (balance > (std::numeric_limits<std::int32_t>::max)() - quantity) {
+        return RewardPreparation::deferred;
+    }
+    credit = {AccountUnlockBank::values, plug.quantityValueIndex, balance, balance + quantity};
+    return RewardPreparation::prepared;
 }
 
 /** Answers from the authored pickup table alone, without reading the balance. */
@@ -624,20 +669,23 @@ bool is_ingredient_pickup(std::uint32_t definitionHash) noexcept {
 }
 
 /** A tutorial under way keeps its step, so only an unset row is set to ready. */
-bool prepare_chooser_readiness(const AccountState& account,
-                               std::optional<AccountUnlockWrite>& readiness) noexcept {
+RewardPreparation
+prepare_chooser_readiness(const AccountState& account,
+                          std::optional<AccountUnlockWrite>& readiness) noexcept {
     readiness.reset();
     std::uint16_t row = 0;
+    const RewardPreparation resolved = tutorial_quest_row(row);
+    if (resolved != RewardPreparation::prepared) {
+        return resolved;
+    }
     std::int32_t saved = 0;
-    if (!tutorial_quest_row(row)
-        || !investment::store::read_unlock(
-            investment::store::Bank::objectiveValues, row, saved)) {
-        return false;
+    if (!investment::store::read_unlock(investment::store::Bank::objectiveValues, row, saved)) {
+        return RewardPreparation::notReady;
     }
     if (saved == build_data::items::kUnsetQuestValue && !holds_tutorial_item(account)) {
-        readiness = AccountUnlockWrite{false, row, saved, kChooserReadyValue};
+        readiness = AccountUnlockWrite{AccountUnlockBank::values, row, saved, kChooserReadyValue};
     }
-    return true;
+    return RewardPreparation::prepared;
 }
 
 /** Answers from the authored oven identity alone. */

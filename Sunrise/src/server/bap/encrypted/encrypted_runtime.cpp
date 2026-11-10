@@ -570,11 +570,10 @@ bool consume(Session& session,
             if (resyncsCommittedAccount) {
                 bap::arm_account_resync_everywhere();
             }
-            if (artifactPurchase || outcome.hasArtifactReset
-                || (mutatesAccount && state::presence_flags_pending())) {
-                // Artifact overrides and the flags a held item supplies live in Family 5, so they
-                // need their own refresh. A record claim does not: its Family-4 replacement rearms
-                // the client rebuild.
+            if (artifactPurchase || outcome.hasArtifactReset) {
+                // Artifact overrides live in Family 5, so they need their own refresh. A record
+                // claim does not: its Family-4 replacement rearms the client rebuild. The flags a
+                // held item supplies are checked where the account mutation is published.
                 bap::arm_artifact_refresh(session);
             } else if (socketReplyOmitsCharacter) {
                 bap::arm_unlock_character_refresh(session);

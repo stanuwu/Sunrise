@@ -114,14 +114,14 @@ bool consume_pursuit_completion(Session& session,
     }
     const bool presentsReward = pending->rewardCount != 0;
     const std::uint64_t sourceSoid = pending->redeemedInstanceSoid;
-    // Commit consumes the grant. This transaction keeps its XP with it, and the staged frame
-    // already carries the new total.
-    const std::int32_t experience = pending->seasonalExperience;
-    if (!state::commit_record_reward(*pending)
-        || (experience != 0 && !bap::grant_seasonal_experience(experience))
-        || !transaction.commit()) {
+    // The staged frame already carries the grant's XP total, so only the roster can be owed.
+    bool artifactBonusMoved = false;
+    if (!state::commit_record_reward(*pending, &artifactBonusMoved) || !transaction.commit()) {
         report_refusal_once(session, sourceSoid, "commit");
         return false;
+    }
+    if (artifactBonusMoved) {
+        bap::arm_social_roster_repush_everywhere();
     }
     middleware::secure_channel::advance_nonce(frame.sendNonce);
     frame.after = update.after;
