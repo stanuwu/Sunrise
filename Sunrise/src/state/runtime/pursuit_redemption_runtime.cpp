@@ -37,12 +37,9 @@ static_assert(pursuit_data::kItemValueCapacity == authored_inventory::kItemObjec
 namespace {
 
 /**
- * What redeeming one pursuit grants. The objectives, per-item values, reward rows and quest set
- * it is built from are read from the installed packages; the effects are reconstructed. Native
- * completion runs operation bodies the packages do not describe, so the server instead removes
- * the pursuit, moves its quest set's saved step to the next member and grants that member. Only
- * the last member, or a pursuit outside any set, grants the reward rows it shows, so a set pays
- * them once.
+ * What redeeming one pursuit grants: the pursuit leaves, its quest set's saved step moves to the
+ * next member, and that member is granted. Only the last member, or a pursuit outside any set,
+ * grants the reward rows it shows, so a set pays them once.
  */
 struct CompletionPlan {
     std::array<DirectRecordReward, kRecordRewardGrantCapacity> rows{};
@@ -64,14 +61,9 @@ struct CompletionPlan {
 };
 
 /**
- * A reward row names a stand-in rather than an item when nothing in the packages turns it into
- * inventory: its item is homed in a bucket that keeps only its newest row, or it is a perk-bucket
- * item with no acquisition flag to set. In the shipped build every experience, gear, powerful and
- * pinnacle marker and the Glimmer and Bright Dust stand-ins sit in the build's only one-row FIFO
- * bucket, and the rank-point markers in the perk bucket. What each one pays is server policy the
- * packages do not hold: the authored tables below pay the ones they name, and any other row naming
- * a stand-in is logged and grants nothing. A Dawning ingredient pickup in the perk bucket is no
- * stand-in: the grant places it and credits the oven balance it fills.
+ * A reward row names a stand-in when its item sits in a one-row FIFO bucket, or in the perk bucket
+ * with no acquisition flag. The authored tables pay the stand-ins they name; any other is logged
+ * and grants nothing. A Dawning ingredient pickup is placed by the grant, so it is no stand-in.
  */
 [[nodiscard]] bool names_stand_in(std::uint16_t itemIndex) noexcept {
     build_data::items::Definition item{};
@@ -355,7 +347,7 @@ constexpr std::array<RoleHelmetMarker, kGambitPrimeRoleCount> kRoleHelmets{{
 /** The Synthesizer Upgrade marker, which replaces the held Synthesizer with the next tier. */
 constexpr std::uint32_t kSynthesizerUpgradeMarkerHash = 596773932U;
 
-/** The Legendary Rune marker. No source of the rune it pays is known, so it pays nothing. */
+/** The Legendary Rune marker, which pays nothing. */
 constexpr std::uint32_t kLegendaryRuneMarkerHash = 1772646107U;
 
 /** Repeatable bounties. */
@@ -420,7 +412,7 @@ constexpr std::array<std::uint32_t, 8> kTrialsWeeklyBounties{
     2780182450U,
     3099386391U,
 };
-/** End Game, whose engram draws the whole Trials pool since its weekly rotation is not known. */
+/** End Game, whose engram draws from the whole Trials pool. */
 constexpr std::array<std::uint32_t, 1> kTrialsEndGameBounties{
     45262603U,
 };
@@ -921,7 +913,7 @@ constexpr auto kWernerTreasureMaps = treasure_maps();
     const auto map = std::find_if(held.begin(), held.end(), [&placed](const auto& item) {
         return item.instanceSoid != 0 && item.instanceSoid == placed.instanceSoid;
     });
-    // Authored rule, like the table: a map keeps the deadline of the bounty that paid it.
+    // A map keeps the deadline of the bounty that paid it.
     if (placed.definitionHash == mapHash && map != held.end() && map->objectives.has_value()) {
         (*map->objectives)[authored_inventory::kItemExpiryLane] = deadline;
     }

@@ -73,7 +73,7 @@ bool valid_pursuit_definitions(std::span<const pursuits::Definition> rows) noexc
     if (index != rows.size()) {
         core::log::writef(core::log::Channel::state,
                           core::log::Level::warn,
-                          "ev=pursuit_definitions result=rejected item=%u row=%zu total=%zu",
+                          "ev=build_data stage=pursuits result=rejected item=%u row=%zu total=%zu",
                           static_cast<unsigned>(rows[index].definitionIndex),
                           index,
                           rows.size());

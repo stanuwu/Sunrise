@@ -64,8 +64,7 @@ struct UnlockReadOrigin {
 
 /**
  * Reads any of the selected character's saved flag and value rows under one store lock; the rows
- * need not belong to a pursuit. It lives here because it shares the pursuit snapshot's saved-view
- * read, evaluator and refusals. It never writes, draws or publishes.
+ * need not belong to a pursuit. It never writes, draws or publishes.
  * @param sources One flag or value instruction per row. A source the banks cannot answer reads as
  * unknown.
  * @param output Receives one read per source, in order. It must be at least as long as sources.

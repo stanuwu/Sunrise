@@ -68,9 +68,8 @@ constexpr const char* kCharacterHelmetTiersTable =
     ") STRICT;";
 
 /**
- * Version 9 removes the default Family-5 row of kind 1, slot 5159, value 3, which forced every
- * character's Synthesizer tier to Powerful, so the account object's per-character tier shows. It
- * closes the gap the row leaves. A row edited to another value stays.
+ * Version 9 removes the default Family-5 row that overrides every character's Synthesizer tier
+ * (kind 1, slot 5159, value 3) and closes the gap. A row edited to another value stays.
  */
 constexpr const char* kSynthesizerTierOverrideRemoval =
     "CREATE TEMP TABLE family5_kept AS SELECT kind,position,slot,value FROM family5 "

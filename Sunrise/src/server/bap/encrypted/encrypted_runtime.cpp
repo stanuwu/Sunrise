@@ -468,7 +468,7 @@ bool consume(Session& session,
             if (outcome.hasStoreSync) {
                 core::log::writef(core::log::Channel::server,
                                   core::log::Level::info,
-                                  "ev=store_sync stage=committed revision=%u service=%u",
+                                  "ev=store_sync stage=commit result=ok revision=%u service=%u",
                                   outcome.storeSyncRevision,
                                   static_cast<unsigned>(frame.serviceId));
             }

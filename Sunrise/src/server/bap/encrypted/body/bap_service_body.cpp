@@ -70,7 +70,9 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
         || queuezState.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || !state::synchronize_store_wallet(outcome.storeSyncRevision)) {
         core::log::write(
-            core::log::Channel::server, core::log::Level::warn, "ev=store_sync result=refused");
+            core::log::Channel::server,
+            core::log::Level::warn,
+            "ev=store_sync stage=prepare result=refused source=ws104");
         return refuse_web_action(message, output, written);
     }
     middleware::web_service::StatusResponse status{};
@@ -86,10 +88,8 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
     outcome.hasStoreSync = true;
     core::log::writef(core::log::Channel::server,
                       core::log::Level::info,
-                      "ev=store_sync stage=prepared source=ws104 first=%u second=%u revision=%u "
+                      "ev=store_sync stage=prepare result=ok source=ws104 revision=%u "
                       "family4_version=%d",
-                      request.first ? 1U : 0U,
-                      request.second ? 1U : 0U,
                       outcome.storeSyncRevision,
                       status.value);
     return true;
@@ -145,7 +145,8 @@ bool process(const ServiceRoute& route,
             if (!outcome.hasStoreSync) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
-                                 "ev=store_sync result=refused source=purchased_offers");
+                                 "ev=store_sync stage=prepare result=refused "
+                                 "source=purchased_offers");
             }
         }
         return true;

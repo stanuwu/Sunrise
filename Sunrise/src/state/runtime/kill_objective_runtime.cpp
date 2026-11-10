@@ -172,10 +172,7 @@ constexpr std::uint32_t kVoidProx = 0xD1AB4582U;
 constexpr std::uint32_t kVoidPulse = 0x05D04834U;
 constexpr std::uint32_t kVoidWave = 0x27178AF6U;
 
-/**
- * Every grenade interval Triumph, its grenade's source label and its class. Only Tripmine's label
- * is captured; the rest pair by label name.
- */
+/** Every grenade interval Triumph, its grenade's source label and its class. */
 constexpr auto kGrenadeTriumphs = std::to_array<GrenadeTriumph>({
     {0xB947FBB8U, kVoidFlux, CharacterClass::titan},       // Magnetic
     {0x4C0E42FCU, kVoidWave, CharacterClass::titan},       // Voidwall

@@ -54,11 +54,12 @@ void report_refusal_once(std::size_t row,
     g_reportedRefusals.rowsReported = row + 1;
     core::log::writef(core::log::Channel::state,
                       core::log::Level::info,
-                      "ev=pursuit_completion item=%u instance=%llu result=%s reason=%s",
-                      static_cast<unsigned>(itemIndex),
-                      static_cast<unsigned long long>(instanceSoid),
+                      "ev=pursuit_completion stage=automatic result=%s reason=%s item=%u "
+                      "instance=%llu",
                       outcome == PursuitRedemption::notReady ? "not_ready" : "refused",
-                      reason != nullptr ? reason : "unavailable");
+                      reason != nullptr ? reason : "unavailable",
+                      static_cast<unsigned>(itemIndex),
+                      static_cast<unsigned long long>(instanceSoid));
 }
 
 } // namespace

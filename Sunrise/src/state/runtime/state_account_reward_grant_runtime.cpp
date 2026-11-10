@@ -35,8 +35,10 @@ using Quest = build_data::items::QuestInitialization;
 
 namespace {
 
-/** @return The kind of item a reward grants; overflow can still land a stack in its recovery
- * bucket. */
+/**
+ * @return The kind of item a reward grants; overflow can still land a stack in its recovery
+ *         bucket.
+ */
 [[nodiscard]] RecordRewardKind reward_kind(const item_details::Definition& detail,
                                            const inventory_buckets::Descriptor& bucket) noexcept {
     if (detail.instancedDefinitionState == item_details::InstancedDefinitionState::instanced) {

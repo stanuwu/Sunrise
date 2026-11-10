@@ -552,7 +552,7 @@ struct AccountEditChange {
  * plus the two ingredient balances a burnt bake debits, the discovery flag a recipe sets or the
  * flag a Chalice upgrade sets.
  */
-inline constexpr std::size_t kSocketUnlockWriteCapacity = 8; // 6 cost rows plus 2 burnt debits
+inline constexpr std::size_t kSocketUnlockWriteCapacity = 8;
 
 /** The account unlock rows one socket action writes, each once, in the order first written. */
 struct AccountUnlockWrites {

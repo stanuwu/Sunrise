@@ -95,7 +95,7 @@ void apply_kill_progress(const message::incident::Incident& incident) noexcept {
             std::span(incident.payload).first(incident.payloadLength), kill)) {
         core::log::writef(core::log::Channel::server,
                           core::log::Level::warn,
-                          "ev=kill_progress result=fail reason=payload bytes=%u",
+                          "ev=kill_progress stage=decode result=fail bytes=%u",
                           incident.payloadLength);
         return;
     }
@@ -125,10 +125,13 @@ void apply_kill_progress(const message::incident::Incident& incident) noexcept {
     core::log::writef(core::log::Channel::server,
                       progress == state::KillProgress::advanced ? core::log::Level::info
                                                                 : core::log::Level::debug,
-                      "ev=kill_progress result=%u reason=%s ruled=%zu class=0x%08X "
+                      "ev=kill_progress result=%s reason=%s ruled=%zu class=0x%08X "
                       "labels=%zu/%zu/%zu slot=%d damage=%d package=%.*s scenario=0x%08X "
                       "bubble=0x%08X",
-                      static_cast<unsigned>(progress),
+                      progress == state::KillProgress::advanced    ? "ok"
+                      : progress == state::KillProgress::unchanged ? "unchanged"
+                      : progress == state::KillProgress::refused   ? "refused"
+                                                                   : "not_ready",
                       report.reason != nullptr ? report.reason : "advanced",
                       report.ruledItems,
                       kill.victim.classHash,

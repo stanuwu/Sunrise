@@ -294,29 +294,12 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         return committed;
     }
     if (auto* transaction = transaction_if<SocketPlugTransaction>(outcome)) {
-        // Commit consumes the pending change, so what the reply carried is read first.
-        const state::PendingSocketPlug* const pending = transaction->pending.get();
-        const unsigned target = pending != nullptr ? pending->targetDefinitionIndex : 0U;
-        const unsigned lane = pending != nullptr ? pending->socketLane : 0U;
-        const unsigned requested = pending != nullptr ? pending->requestedPlugDefinitionIndex : 0U;
-        const unsigned landed = pending != nullptr ? pending->plugDefinitionIndex : 0U;
-        const std::size_t unlockWrites = pending != nullptr ? pending->unlockWrites.count : 0;
-        const bool account = pending != nullptr && pending->profileChanged;
-        const bool character = pending != nullptr && pending->updates_character();
         const bool committed =
-            pending != nullptr && state::commit_socket_plug(*transaction->pending);
-        core::log::writef(core::log::Channel::server,
-                          committed ? core::log::Level::debug : core::log::Level::warn,
-                          "ev=socket_plug stage=transaction_commit result=%s target=%u lane=%u "
-                          "requested=%u landed=%u unlock_writes=%zu account=%d character=%d",
-                          committed ? "ok" : "fail",
-                          target,
-                          lane,
-                          requested,
-                          landed,
-                          unlockWrites,
-                          account ? 1 : 0,
-                          character ? 1 : 0);
+            transaction->pending != nullptr && state::commit_socket_plug(*transaction->pending);
+        core::log::write(core::log::Channel::server,
+                         committed ? core::log::Level::debug : core::log::Level::warn,
+                         committed ? "ev=socket_plug stage=transaction_commit result=ok"
+                                   : "ev=socket_plug stage=transaction_commit result=fail");
         reason = "socket_plug";
         return committed;
     }
