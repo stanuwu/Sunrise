@@ -24,6 +24,7 @@
 #include "mission_script_device_sense.h"
 #include "mission_script_ghost_sense.h"
 #include "mission_script_object_sense.h"
+#include "mission_script_objective_sense.h"
 #include "mission_script_player_sense.h"
 #include "mission_script_runtime.h"
 #include "mission_script_squad_sense.h"
@@ -94,8 +95,6 @@ constexpr std::size_t kTriggerOccupancyCapacity = 32;
 constexpr std::size_t kSquadObservationCapacity = 160;
 /** Watched authored scenes retained per instance. */
 constexpr std::size_t kSceneObservationCapacity = 32;
-/** Watched objective sensors retained per instance. */
-constexpr std::size_t kObjectiveObservationCapacity = 32;
 static_assert(kSquadObjectiveGroupCount == host::kSquadObjectiveGroupCount);
 /** Watched Ghost links, damage monitors, interactable objects and named actors per instance. */
 constexpr std::size_t kGhostObservationCapacity = kGhostLinkCapacity;
@@ -104,10 +103,6 @@ constexpr std::size_t kObjectInteractionObservationCapacity = 64;
 constexpr std::size_t kActorPathObservationCapacity = 64;
 /** Watched device levels retained per instance. */
 constexpr std::size_t kDeviceObservationCapacity = 128;
-/** One objective sensor carries this many objective blocks. */
-constexpr std::size_t kObjectiveCapacity = 24;
-/** One objective block carries this many task counters. */
-constexpr std::size_t kObjectiveTaskCapacity = 24;
 /** How long a committed Host output may take to reach transport before the delivery faults. */
 constexpr std::uint64_t kTransportTimeoutMs = 15'000;
 /** How long an enqueued Host output may take to reach the reducer before it is reconciled. */
@@ -257,17 +252,6 @@ struct SceneObservation final {
     bool used{};
 };
 
-/** Last task counters seen for one watched objective sensor, so only a rise raises an event. */
-struct ObjectiveObservation final {
-    std::array<std::array<std::uint8_t, kObjectiveTaskCapacity>, kObjectiveCapacity> counters{};
-    /** Link whose reports these levels were read from. */
-    std::uint64_t sourceGeneration{};
-    std::uint32_t registryKey{};
-    std::uint32_t objectTag{};
-    std::uint16_t slotIndex{};
-    bool used{};
-};
-
 /** Last peer session seen sharing this destination, so only a change raises an event. */
 struct SessionRosterWatch final {
     std::uint64_t sessionId{};
@@ -371,7 +355,8 @@ struct RuntimeInstance final {
         objectStateObservations{};
     std::array<ActorPathObservation, kActorPathObservationCapacity> actorPathObservations{};
     std::array<SceneObservation, kSceneObservationCapacity> sceneObservations{};
-    std::array<ObjectiveObservation, kObjectiveObservationCapacity> objectiveObservations{};
+    /** Last task counters seen per watched objective sensor, so only a rise raises an event. */
+    std::array<ObjectiveLevelRow, kObjectiveObservationCapacity> objectiveObservations{};
     // The table is exactly as large as the session table, so it can never overflow.
     std::array<SessionRosterWatch, state::activity::kSessionCapacity> sessionRoster{};
     std::vector<MemberInputState> memberInputs{};
@@ -610,6 +595,13 @@ void publish_ghost_levels(RuntimeInstance& instance) noexcept;
  * @return False when the list could not be retained.
  */
 [[nodiscard]] bool publish_device_sources(const RuntimeInstance& instance, lua_vm::Vm& vm) noexcept;
+/** Hands the VM the retained objective task counters, so a callback can read any objective's. */
+void publish_objective_levels(RuntimeInstance& instance) noexcept;
+/**
+ * Hands the VM the squads' qualified task costs, so any callback can select a task. A failed copy
+ * of the retained bodies faults the instance.
+ */
+void publish_objective_offers(RuntimeInstance& instance) noexcept;
 /** Raises the squad state, spawn and death events derived from one msg 6 body. */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept;

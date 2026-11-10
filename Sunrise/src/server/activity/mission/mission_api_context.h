@@ -357,14 +357,17 @@ inline constexpr MemberSpec kPeerMembers[]{
     field("join_identity", kDecimal),
 };
 
-// The type of cohort.alive_count.
+// The types of cohort.alive_count and cohort.observed_alive.
 inline constexpr ValueSpec kCohortAlive[]{
     {.kind = ValueKind::integer, .optional = true, .note = "nil while any squad is unknown"}};
+inline constexpr ValueSpec kCohortObservedAlive[]{
+    {.kind = ValueKind::boolean, .optional = true, .note = "nil while any squad is unknown"}};
 
 /** Members of one cohort. A squad with a queued placement counts as unknown. */
 inline constexpr MemberSpec kCohortMembers[]{
     field("alive_count", kCohortAlive),
     field("observed_full", kBoolean, "every squad was seen at full strength"),
+    field("observed_alive", kCohortObservedAlive, "a member of any squad was seen alive"),
     field("cleared", kBoolean, "seen full, and now all dead"),
     field("size", kInteger),
 };

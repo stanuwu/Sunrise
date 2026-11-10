@@ -3183,6 +3183,7 @@
     <ClInclude Include="src\server\activity\mission\mission_script_region.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_ghost_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_object_sense.h" />
+    <ClInclude Include="src\server\activity\mission\mission_script_objective_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_player_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_member_life.h" />
     <ClInclude Include="src\server\activity\mission\mission_input_policy.h" />

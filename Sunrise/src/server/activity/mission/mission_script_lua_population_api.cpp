@@ -27,6 +27,7 @@ struct CohortTotals final {
     std::int64_t alive{};
     bool known{true};
     bool full{true};
+    bool observedAlive{};
     std::uint8_t size{};
 };
 
@@ -45,6 +46,15 @@ constexpr std::array<Binding<CohortTotals>, std::size(api::kCohortMembers)> kCoh
      nullptr,
      [](lua_State* state, const CohortTotals& totals) {
          lua_pushboolean(state, totals.known && totals.full);
+     }},
+    {"observed_alive",
+     nullptr,
+     [](lua_State* state, const CohortTotals& totals) {
+         if (totals.known) {
+             lua_pushboolean(state, totals.observedAlive);
+         } else {
+             lua_pushnil(state);
+         }
      }},
     {"cleared",
      nullptr,
@@ -65,6 +75,7 @@ int cohort_index(lua_State* state) {
     std::int64_t alive = 0;
     bool known = true;
     bool full = true;
+    bool observedAlive = false;
     for (std::size_t index = 0; index < handle->count; ++index) {
         SquadDefinition squad{};
         if (!current_squad(state, SquadHandle{handle->rows[index]}, squad)) {
@@ -105,12 +116,13 @@ int cohort_index(lua_State* state) {
             continue;
         }
         alive += found->alive;
+        observedAlive = observedAlive || found->maximumObservedAlive > 0;
         // Members ever created also prove a full spawn, so an early death cannot hide one.
         full = full && found->expectedAlive > 0
                && (found->maximumObservedAlive >= found->expectedAlive
                    || found->maximumObservedCreated >= found->expectedAlive);
     }
-    const CohortTotals totals{alive, known, full, handle->count};
+    const CohortTotals totals{alive, known, full, observedAlive, handle->count};
     return dispatch<CohortTotals>(state, kCohortBindings, lua_string_view(state, 2), totals);
 }
 

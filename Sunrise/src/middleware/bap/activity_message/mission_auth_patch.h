@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 #include "../../encoding/bit_reader.h"
@@ -13,6 +15,7 @@
 
 // A native sensor override replaces the whole Auth object. A mission API body carries only the
 // root fields it sets, so it is composed over the last transported body before it is staged.
+// A field without a presence bit cannot be left out, so a patch also names the fields it sets.
 // TODO: the field tables below repeat the squad and combatant layouts their codecs own. Read the
 // layout from the codecs once they expose it.
 
@@ -25,6 +28,18 @@ inline constexpr std::size_t kCapacity = 256;
 /** Root field counts of the two supported layouts. */
 inline constexpr std::size_t kSquadFieldCount = 21;
 inline constexpr std::size_t kCombatantFieldCount = 8;
+
+/** Root fields one patch sets, one bit per field ordinal. */
+using FieldSet = std::uint32_t;
+static_assert((std::max)(kSquadFieldCount, kCombatantFieldCount)
+              <= std::numeric_limits<FieldSet>::digits);
+/** A patch that sets every root field it carries. */
+inline constexpr FieldSet kAllFields = (std::numeric_limits<FieldSet>::max)();
+
+/** @return The set holding only root field `index`. */
+[[nodiscard]] constexpr FieldSet field_bit(std::size_t index) noexcept {
+    return FieldSet{1} << index;
+}
 
 /** How one root field's width is found. */
 enum class Kind : std::uint8_t {
@@ -223,8 +238,8 @@ copy_field(encoding::bits::Writer& writer, std::span<const std::byte> body, Fiel
 }
 
 /**
- * Composes a patch over the previous body: a field the patch leaves absent keeps the previous
- * value. With no previous body the patch is written as it is.
+ * Composes a patch over the previous body: a field outside `patchFields`, or one the patch leaves
+ * absent, keeps the previous value. With no previous body the patch is written as it is.
  * @param written Receives the byte count. @param bits Receives the meaningful bit count.
  * @return False when either body fails parse() or the result does not fit output.
  */
@@ -233,6 +248,7 @@ copy_field(encoding::bits::Writer& writer, std::span<const std::byte> body, Fiel
                                   std::size_t previousBits,
                                   std::span<const std::byte> patch,
                                   std::size_t patchBits,
+                                  FieldSet patchFields,
                                   std::span<std::byte> output,
                                   std::size_t& written,
                                   std::size_t& bits) noexcept {
@@ -247,8 +263,10 @@ copy_field(encoding::bits::Writer& writer, std::span<const std::byte> body, Fiel
     std::array<std::byte, kCapacity> staged{};
     encoding::bits::Writer writer(staged);
     for (std::size_t index = 0; index < next.count; ++index) {
+        const bool patchSets = (patchFields & field_bit(index)) != 0;
         const bool keep =
-            !previous.empty() && !next.fields[index].present && old.fields[index].present;
+            !previous.empty()
+            && (!patchSets || (!next.fields[index].present && old.fields[index].present));
         if (!copy_field(
                 writer, keep ? previous : patch, keep ? old.fields[index] : next.fields[index])) {
             return false;

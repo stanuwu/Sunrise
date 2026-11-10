@@ -485,6 +485,8 @@ void accept_mission_state(RuntimeInstance& instance,
     if (instance.attempt.generation != snapshot.state.attempt.generation) {
         clear_sense_levels(instance);
         reset_member_observations(instance);
+        publish_objective_levels(instance);
+        publish_objective_offers(instance);
         // Player life is kept: the client sends only changed fields and never resends the region.
         instance.fireteamLifePublished = false;
         instance.timerPending = false;

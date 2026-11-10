@@ -114,6 +114,11 @@ struct Impl final {
     /** Ghost-link levels the runtime last published, readable outside their own callback. */
     std::array<GhostLinkRow, kGhostLinkCapacity> ghostLevels{};
     std::uint8_t ghostLevelCount{};
+    /** Objective task counters the runtime last published, readable from any callback. */
+    std::array<ObjectiveLevelRow, kObjectiveObservationCapacity> objectiveLevels{};
+    std::uint8_t objectiveLevelCount{};
+    /** Squad task costs that still echo their transported assignment, from any callback. */
+    std::vector<SquadObjectiveOffer> objectiveOffers{};
     Arena arena{};
     ProgramIdentity identity{};
     DefinitionApi definitions{};

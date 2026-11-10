@@ -108,6 +108,8 @@ namespace {
     if (sourceChanged) {
         // The next native report establishes its own baseline, not a delta from another client.
         reset_shared_observations(instance);
+        publish_objective_levels(instance);
+        publish_objective_offers(instance);
         instance.activeRegion = link.sliceSetIndex;
     }
     mission_state::Snapshot snapshot{};

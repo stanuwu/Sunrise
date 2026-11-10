@@ -33,7 +33,10 @@ inline constexpr std::int32_t kTaskGroupBias = 1;
 inline constexpr std::int32_t kNoTaskGroup = -1;
 /** One objective sensor carries this many task groups. */
 inline constexpr std::int32_t kTaskGroupCount = 24;
-/** Root .18 active, 2 bits, written as the active wire value. */
+/**
+ * Root .18 active, 2 bits, written as the active wire value. Active and mode have no presence
+ * bit; over a transported placement, compose keeps the placement's values (see patch_fields).
+ */
 inline constexpr std::uint8_t kActiveWidth = 2;
 inline constexpr std::uint32_t kActiveValue = 2;
 /** Root .19 mode, 3 bits with bias one. Reserve keeps the counts for a delivery. */

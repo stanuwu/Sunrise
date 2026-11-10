@@ -190,6 +190,7 @@ void push_atom_kinds(lua_State* state);
 /** Reads one integer field from a generated declaration table. */
 [[nodiscard]] lua_Integer directive_integer(lua_State* state, int table, const char* field);
 [[nodiscard]] int slot_assign_combat_objective(lua_State* state);
+[[nodiscard]] int slot_select_combat_task(lua_State* state);
 [[nodiscard]] int event_task_cost(lua_State* state);
 [[nodiscard]] int event_task_group(lua_State* state);
 

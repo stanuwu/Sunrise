@@ -12,6 +12,8 @@
 #include "mission_script_catalog_sdk.h"
 #include "mission_script_ghost_sense.h"
 #include "mission_script_manifest_sdk.h"
+#include "mission_script_objective_sense.h"
+#include "mission_script_squad_sense.h"
 #include "mission_script_world_sdk.h"
 
 namespace sunrise::server::activity::mission::lua_vm {
@@ -386,12 +388,16 @@ using ResolveActivityBindingLocator = bool (*)(const void* context,
                                                ActivityBindingLocatorDefinition& output) noexcept;
 using DefinitionCount = std::size_t (*)(const void* context) noexcept;
 
-/** Exact authored task group with its objective's native ClientRef. */
+/** Exact authored task group with its objective's native ClientRef and its task bounds. */
 struct CombatObjectiveGroupDefinition final {
     std::uint32_t slotRow{};
     std::uint32_t groupIndex{};
     std::uint32_t registryKey{};
     std::uint16_t slotIndex{};
+    std::uint32_t taskCount{};
+    std::array<state::activity_sdk::format::CombatTaskBounds,
+               state::activity_sdk::format::kCombatTaskCapacity>
+        tasks{};
 };
 
 /** Native SDK/live projection used by the sandbox; no borrowed pointer is script-visible. */
@@ -563,6 +569,13 @@ void publish_attempt(Vm& vm, state::activity::mission::AttemptState attempt) noe
 /** Copies the retained Ghost-link levels so a reloaded program can re-read them. */
 void publish_ghost_levels(Vm& vm, std::span<const GhostLinkRow> levels) noexcept;
 
+/** Copies the retained objective task counters so a callback can read any objective's. */
+void publish_objective_levels(Vm& vm, std::span<const ObjectiveLevelRow> levels) noexcept;
+
+/** Replaces the squads' qualified task costs that slot:select_combat_task reads. */
+[[nodiscard]] bool publish_objective_offers(Vm& vm,
+                                            std::span<const SquadObjectiveOffer> offers) noexcept;
+
 /** Copies durable native population facts before any callback reads a cohort. */
 [[nodiscard]] bool publish_populations(
     Vm& vm, std::span<const state::activity::mission::SquadPopulation> populations) noexcept;
@@ -612,7 +625,7 @@ void close(Vm& vm) noexcept;
 
 /** Exchanges prepared states only between callbacks; Lua ownership follows each moved arena. */
 [[nodiscard]] bool exchange(Vm& first, Vm& second) noexcept;
-/** Copies the attempt, ghost levels and peers into a prepared VM. */
+/** Copies the attempt, ghost levels, objective counters and offers, and peers into a new VM. */
 [[nodiscard]] bool copy_inputs(const Vm& source, Vm& prepared) noexcept;
 /** True only for a mod whose file successfully loaded in this VM. */
 [[nodiscard]] bool uses_mod(const Vm& vm, std::string_view modId) noexcept;

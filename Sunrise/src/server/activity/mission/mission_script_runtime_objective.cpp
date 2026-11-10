@@ -2,9 +2,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <span>
+#include <vector>
 
 #include "mission_script_runtime_internal.h"
+#include "mission_script_runtime_objective.h"
 
 namespace sunrise::server::activity::mission {
 namespace {
@@ -18,10 +21,10 @@ constexpr std::int32_t kObjectiveTaskCountLimit = 80;
 namespace sense_values = middleware::bap::activity_message::sense_update;
 
 /** @return The retained record for one objective sensor, allocating on a first observation. */
-[[nodiscard]] ObjectiveObservation* find_objective(RuntimeInstance& instance,
-                                                   const host::SenseObservationKey& key) noexcept {
-    ObjectiveObservation* spare = nullptr;
-    for (ObjectiveObservation& retained : instance.objectiveObservations) {
+[[nodiscard]] ObjectiveLevelRow* find_objective(RuntimeInstance& instance,
+                                                const host::SenseObservationKey& key) noexcept {
+    ObjectiveLevelRow* spare = nullptr;
+    for (ObjectiveLevelRow& retained : instance.objectiveObservations) {
         if (retained.used && retained.registryKey == key.registryKey
             && retained.objectTag == key.objectTag && retained.slotIndex == key.slotIndex) {
             return &retained;
@@ -104,6 +107,7 @@ void objective_task_counters(std::span<const sense_values::DecodedValue> body,
  */
 void push_objective_edges(RuntimeInstance& instance,
                           const host::SenseObservationSnapshot& sense) noexcept {
+    bool changed = false;
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
         if (observation.key.slotType != format::kObjectiveSlotType
@@ -120,10 +124,12 @@ void push_objective_edges(RuntimeInstance& instance,
         if (counters.blocks == 0) {
             continue;
         }
-        ObjectiveObservation* const watched = find_objective(instance, observation.key);
+        ObjectiveLevelRow* const watched = find_objective(instance, observation.key);
         if (watched == nullptr) {
             continue;
         }
+        // A row handed to another link drops the counters the script could read.
+        changed = changed || (watched->used && watched->sourceGeneration != sense.sourceGeneration);
         claim_row(*watched, sense.sourceGeneration, false);
         const bool first = !watched->used;
         watched->used = true;
@@ -134,7 +140,10 @@ void push_objective_edges(RuntimeInstance& instance,
                 }
                 const std::uint8_t value = counters.value[block][task];
                 const std::uint8_t previous = watched->counters[block][task];
+                const std::uint32_t taskBit = std::uint32_t{1} << task;
+                changed = changed || value != previous || (watched->known[block] & taskBit) == 0;
                 watched->counters[block][task] = value;
+                watched->known[block] |= taskBit;
                 if (first || value <= previous) {
                     continue;
                 }
@@ -147,6 +156,57 @@ void push_objective_edges(RuntimeInstance& instance,
                 push_script_event(instance, event);
             }
         }
+    }
+    if (changed) {
+        publish_objective_levels(instance);
+    }
+}
+
+/** Hands the VM the retained objective task counters. */
+void publish_objective_levels(RuntimeInstance& instance) noexcept {
+    lua_vm::publish_objective_levels(instance.vm, instance.objectiveObservations);
+}
+
+/**
+ * Hands the VM every squad's costs that echo its transported assignment's evaluation revision.
+ * An assignment that keeps the revision keeps the offer under its new task group. Only a squad
+ * that reported a revision can hold an offer, so only then are the full bodies copied.
+ */
+void publish_objective_offers(RuntimeInstance& instance) noexcept {
+    const auto costed = [](const SquadObservation& squad) noexcept {
+        return squad.used && squad.objectiveCosts.revision != 0;
+    };
+    const auto& squads = instance.squadObservations;
+    if (std::any_of(squads.begin(), squads.end(), costed) && !copy_estate(instance)) {
+        return;
+    }
+    std::vector<SquadObjectiveOffer> offers{};
+    bool built = true;
+    try {
+        for (const SquadObservation& squad : squads) {
+            middleware::bap::activity_message::squad_objective::State assignment{};
+            if (costed(squad)
+                && transported_objective(instance.estate,
+                                         squad.registryKey,
+                                         squad.objectTag,
+                                         squad.slotIndex,
+                                         format::kSquadSlotType,
+                                         assignment)
+                && assignment.revision == squad.objectiveCosts.revision) {
+                offers.push_back({squad.objectiveCosts,
+                                  squad.registryKey,
+                                  squad.objectTag,
+                                  assignment.registryKey,
+                                  assignment.taskGroup,
+                                  squad.slotIndex,
+                                  assignment.objectiveIndex});
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        built = false;
+    }
+    if (!built || !lua_vm::publish_objective_offers(instance.vm, offers)) {
+        fault_instance(instance, "objective offer allocation failed");
     }
 }
 

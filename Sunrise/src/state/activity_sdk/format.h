@@ -26,8 +26,8 @@ namespace generated = middleware::content::packages::schema::generated;
 
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
-/** Runtime-pack schema version accepted by this reader. 48 adds incident definition rows. */
-inline constexpr std::uint32_t kVersion = 48;
+/** Runtime-pack schema version accepted by this reader. 49 adds combat-objective task bounds. */
+inline constexpr std::uint32_t kVersion = 49;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 52;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
@@ -1286,11 +1286,27 @@ struct ActorAbilityTarget final {
     bool operator==(const ActorAbilityTarget&) const = default;
 };
 
+/** Tasks one combat group holds; the objective Sense reports one counter per task. */
+inline constexpr std::size_t kCombatTaskCapacity = 24;
+
+/** One authored task's admission bounds, as signed authored values; -1 means unbounded. */
+struct CombatTaskBounds final {
+    std::int32_t minimumMembers{};
+    std::int32_t maximumMembers{-1};
+    std::int32_t maximumSquads{-1};
+    /** The task stops admitting squads once its objective counter reaches this value. */
+    std::int32_t counterLimit{-1};
+
+    bool operator==(const CombatTaskBounds&) const = default;
+};
+
 /** One authored combat group belongs to an exact objective slot. */
 struct CombatObjectiveGroup final {
     std::uint32_t slotIndex{};
     std::uint32_t groupIndex{};
     std::uint32_t taskCount{};
+    /** The first taskCount rows are authored; the rest keep their defaults. */
+    std::array<CombatTaskBounds, kCombatTaskCapacity> tasks{};
 
     bool operator==(const CombatObjectiveGroup&) const = default;
 };

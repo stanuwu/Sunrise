@@ -373,6 +373,7 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
     pending.expectedActivityClientGeneration = request.expectedActivityClientGeneration;
     std::size_t written = 0;
     std::size_t writtenBits = 0;
+    auto patchFields = middleware::bap::activity_message::mission_auth_patch::kAllFields;
     bool encoded = untargeted || guard != nullptr;
     if (encoded && request.kind == ScriptableOverrideKind::lifetime) {
         pending.lifetimeState = request.lifetimeState;
@@ -439,6 +440,7 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
             written = objective::byte_count(assignment);
             pending.bitCount = static_cast<std::uint16_t>(objective::bit_count(assignment));
             pending.generation = assignment.revision;
+            patchFields = objective::patch_fields(assignment, previous);
             encoded = objective::encode(assignment, std::span(pending.body).first(written));
         }
     } else if (encoded && request.kind == ScriptableOverrideKind::combatantChannel) {
@@ -648,6 +650,7 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
                                     previousBits,
                                     patch,
                                     pending.bitCount,
+                                    patchFields,
                                     pending.body,
                                     written,
                                     composedBits);

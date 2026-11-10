@@ -406,6 +406,12 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
         return;
     }
     lua_vm::consume_intent(instance.vm);
+    // The transported assignment decides which retained costs still echo its revision, and no
+    // earlier copy of the bodies holds it.
+    if (intent.kind == lua_vm::IntentKind::assignCombatObjective) {
+        instance.estateCopied = false;
+        publish_objective_offers(instance);
+    }
     const char* result = nullptr;
     switch (intent.kind) {
     case lua_vm::IntentKind::placeSquad:
