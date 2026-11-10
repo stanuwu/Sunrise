@@ -238,8 +238,8 @@ bool encode(const state::CharacterState& state,
     if (!build_equipment_summary(lightEvaluation, object.equipmentSummary)) {
         return false;
     }
-    if (!progression::key_bank(state::build_data::progressions::Scope::character,
-                               object.progressions)) {
+    if (!progression::key_bank(
+            state::build_data::progressions::Scope::character, object.progressions, unlocks)) {
         return false;
     }
     // Rows are validated sorted, so the last row bounds the prefix the native walk must cover.

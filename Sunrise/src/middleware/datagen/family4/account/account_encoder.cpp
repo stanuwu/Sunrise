@@ -144,8 +144,8 @@ bool encode(const state::AccountState& state,
     for (inventory::layout::Entry& item : object.secondaryItems) {
         item.definitionIndex = kEmptyDefinitionIndex;
     }
-    if (!progression::key_bank(state::build_data::progressions::Scope::account,
-                               object.progressions)) {
+    if (!progression::key_bank(
+            state::build_data::progressions::Scope::account, object.progressions, unlocks)) {
         return false;
     }
     // Profile rows are sentinelled above, so placement only has to claim its own slots.
