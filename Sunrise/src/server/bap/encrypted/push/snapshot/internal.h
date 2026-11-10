@@ -296,18 +296,6 @@ prepare_profile_item_acquisition(Scratch& scratch,
                                  const state::PendingProfileItemAcquisition& mutation,
                                  Prepared& prepared) noexcept;
 
-/**
- * Writes a gain-only row of one stackable item into a character after-image and names it in the
- * change ring, so the client shows the pickup. Neither State nor the resident list keeps the row.
- * @param itemHash Stackable character item that presents the gain.
- * @param mutationSerial Serial the caller reserved for the row.
- * @return False when the item has no free row in its bucket or the ring is full.
- */
-[[nodiscard]] bool append_transient_reward_presentation(std::span<std::byte> characterBytes,
-                                                        std::uint32_t itemHash,
-                                                        std::int32_t amount,
-                                                        std::int32_t mutationSerial) noexcept;
-
 /** Builds a transient XP inventory-row acquisition and the account progression after-image. */
 [[nodiscard]] bool prepare_seasonal_experience_presentation(
     Scratch& scratch,

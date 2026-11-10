@@ -7,7 +7,6 @@
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -945,8 +944,6 @@ struct RowPayment {
     std::int32_t quantity{};
     /** The role whose next helmet a role-helmet row pays. */
     std::size_t role{};
-    /** The marker of a rank-point row, whose pickup presents the credit. */
-    std::uint32_t markerHash{};
 };
 
 /** @return The row of an authored table keyed by this item hash, or null. */
@@ -1137,7 +1134,6 @@ pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcep
     if (const RankMarker* marker = find_row(kRankMarkers, hash)) {
         if (reward.quantity > 0) {
             payment = {PaymentKind::rankPoints, 0, marker->progressionHash};
-            payment.markerHash = marker->hash;
         }
         return true;
     }
@@ -1198,7 +1194,6 @@ pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcep
  * @return False when the progression is not installed or replicated, or a second one is credited.
  */
 [[nodiscard]] bool plan_rank_points(std::uint32_t progressionHash,
-                                    std::uint32_t markerHash,
                                     std::int32_t quantity,
                                     unlocks::Table& banks,
                                     CompletionPlan& plan) noexcept {
@@ -1215,7 +1210,6 @@ pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcep
         credit = {definition.scope, definition.definitionIndex};
         credit.previousValue = progression_value(banks, credit);
         credit.value = credit.previousValue;
-        credit.markerHash = markerHash;
     } else if (credit.scope != definition.scope
                || credit.definitionIndex != definition.definitionIndex) {
         return false;
@@ -1379,8 +1373,7 @@ void report_unjudged_row(std::uint32_t bountyHash,
         }
         reason = "reward_rank_points";
         if (payment.kind == PaymentKind::rankPoints) {
-            if (!plan_rank_points(
-                    payment.progressionHash, payment.markerHash, reward.quantity, banks, plan)) {
+            if (!plan_rank_points(payment.progressionHash, reward.quantity, banks, plan)) {
                 return false;
             }
             continue;
@@ -1630,15 +1623,6 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     mutation.completionValue = completionValue;
     mutation.completionContextValue = completionContextValue;
     mutation.afterCharacter.gambitPrimeHelmetTiers = plan.helmetTiers;
-    // The pickup row takes a serial, though the marker never enters inventory.
-    reason = "rank_presentation_serial";
-    if (plan.progression.value > plan.progression.previousValue) {
-        std::uint32_t& serial = mutation.afterCharacter.nextInventorySerial;
-        if (serial >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
-            return PursuitRedemption::refused;
-        }
-        plan.progression.presentationSerial = static_cast<std::int32_t>(serial++);
-    }
     mutation.questStep = plan.questStep;
     mutation.progression = plan.progression;
     mutation.seasonalExperience = plan.seasonalExperience;
