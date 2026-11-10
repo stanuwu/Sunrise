@@ -72,6 +72,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "ghostLinkState";
     case host::EventKind::missionEffectState:
         return "missionEffectState";
+    case host::EventKind::carrierState:
+        return "carrierState";
     case host::EventKind::clientMessageReceived:
         return "clientMessageReceived";
     case host::EventKind::authStateCommitted:

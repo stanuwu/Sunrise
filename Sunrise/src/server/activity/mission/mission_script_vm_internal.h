@@ -119,6 +119,8 @@ struct Impl final {
     std::uint8_t objectiveLevelCount{};
     /** Squad task costs that still echo their transported assignment, from any callback. */
     std::vector<SquadObjectiveOffer> objectiveOffers{};
+    /** Durable carrier flights the runtime last published, for state:operation. */
+    std::vector<state::activity::mission::CarrierOperation> carriers{};
     Arena arena{};
     ProgramIdentity identity{};
     DefinitionApi definitions{};

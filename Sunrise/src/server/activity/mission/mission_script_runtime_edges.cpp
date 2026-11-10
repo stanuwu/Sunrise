@@ -320,6 +320,7 @@ void push_actor_path_edges(RuntimeInstance& instance,
                 slot->level, observation_values(observation, sense), observation.key.schemaRow)) {
             continue;
         }
+        observe_carrier_actor(instance, observation, slot->level);
         host::Event event = shared_edge_event(instance, observation);
         event.kind = host::EventKind::actorPathState;
         event.actorGeneration = slot->level.generation;

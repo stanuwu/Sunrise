@@ -123,6 +123,7 @@ mission_input_allowed(host::EventKind kind, bool selectedSource, bool currentMem
            || event.kind == host::EventKind::objectInteracted
            || event.kind == host::EventKind::ghostLinkState
            || event.kind == host::EventKind::missionEffectState
+           || event.kind == host::EventKind::carrierState
            || event.kind == host::EventKind::cinematicSkipRequested
            || event.kind == host::EventKind::cinematicTerminated
            || delivery_lifecycle_event(event.kind) || event.has_sense_observations();

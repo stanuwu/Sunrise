@@ -171,10 +171,13 @@ inline constexpr std::size_t kType2MaximumBodyBitCount =
 /** Same size padded up to whole bytes. */
 inline constexpr std::size_t kType2MaximumBodyByteCount = (kType2MaximumBodyBitCount + 7) / 8;
 
+/** Squad references one `.7` passenger manifest carries at most. */
+inline constexpr std::size_t kType2ManifestCapacity = 8;
+
 /** Full Auth also permits spawn generation, eight keyed rows and eight manifest references. */
 inline constexpr std::size_t kType2FullMaximumBitCount =
     kType2MaximumBodyBitCount + 31U + (1U + 8U * (1U + 32U + 1U + 31U) + 1U + 32U)
-    + (4U + 8U * 55U + 31U);
+    + (4U + kType2ManifestCapacity * 55U + 31U);
 inline constexpr std::size_t kType2FullMaximumByteCount = (kType2FullMaximumBitCount + 7U) / 8U;
 
 /** Exact retained spans around `.6`; all other root fields remain byte-for-byte unchanged. */
@@ -184,12 +187,19 @@ struct Type2ProgramLayout final {
     std::size_t channelsOffset{};
     std::size_t programOffset{};
     std::size_t programBits{};
+    /** Squads the `.7` manifest names, as logical type-1 ClientRefs. */
+    std::array<Type2LaneClientRef, kType2ManifestCapacity> deliverySources{};
     std::uint32_t spawnGeneration{};
     std::uint32_t generation{};
     /** `.5` revision; zero while `.5` is absent. */
     std::uint32_t controlRevision{};
     std::uint8_t temperamentCount{};
     std::uint8_t channelCount{};
+    /** Lanes of the `.6` program; zero while `.6` is absent. */
+    std::uint8_t laneCount{};
+    /** Manifest revision; zero while `.7` is absent. */
+    std::uint32_t deliveryRevision{};
+    std::uint8_t deliveryCount{};
     std::uint8_t bindingWire{};
     bool enabled{};
 };
@@ -221,6 +231,22 @@ struct Type2ProgramLayout final {
                                           std::size_t previousBits,
                                           std::span<const std::byte> controls,
                                           std::size_t controlsBits,
+                                          std::span<std::byte> output,
+                                          std::size_t& written,
+                                          std::size_t& writtenBits,
+                                          std::uint32_t& revision) noexcept;
+
+/**
+ * Replaces only `.7` on an enabled actor: the root, controls and program are kept bit for bit.
+ * @param manifest A body whose `.7` names at least one squad; its counters are placeholders.
+ * @param committedRevision Last manifest revision the Host committed for this actor.
+ * @param revision Receives the manifest revision written, one above every earlier one.
+ */
+[[nodiscard]] bool replace_type2_delivery(std::span<const std::byte> previous,
+                                          std::size_t previousBits,
+                                          std::span<const std::byte> manifest,
+                                          std::size_t manifestBits,
+                                          std::uint32_t committedRevision,
                                           std::span<std::byte> output,
                                           std::size_t& written,
                                           std::size_t& writtenBits,

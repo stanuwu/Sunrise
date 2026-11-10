@@ -337,6 +337,12 @@ struct RuntimeInstance final {
     std::uint64_t lastLoggedRevision{};
     std::uint64_t lastMissionSequence{};
     std::uint64_t missionStateRevision{};
+    /** Record revision of the last accepted State snapshot; it moves with every State change. */
+    std::uint64_t missionRecordRevision{};
+    /** Record revision and live links carrier flights were last advanced at. */
+    std::uint64_t carrierRecordRevision{};
+    std::array<std::uint64_t, kLiveLinkCapacity> carrierLinks{};
+    std::size_t carrierLinkCount{};
     std::uint32_t missionPhase{};
     std::uint64_t activityStateRevision{};
     std::uint64_t durableIntentSequence{};
@@ -405,6 +411,8 @@ struct RuntimeInstance final {
     bool sessionRosterObserved{};
     /** This VM reattached to its current session, so its entry is on_load, not on_start. */
     bool missionReattached{};
+    /** A carrier flight runs or still owns a step, so State changes can move one on. */
+    bool carriersActive{};
     bool occupied{};
 };
 
@@ -617,6 +625,16 @@ void publish_objective_levels(RuntimeInstance& instance) noexcept;
  * of the retained bodies faults the instance.
  */
 void publish_objective_offers(RuntimeInstance& instance) noexcept;
+/** Reads the Host counters a transported carrier step's completion report must echo. */
+[[nodiscard]] bool carrier_step_receipt(const RuntimeInstance& instance,
+                                        const lua_vm::Intent& intent,
+                                        mission_state::CarrierReceipt& output) noexcept;
+/** Joins one changed actor level to the carrier step that waits on that actor. */
+void observe_carrier_actor(RuntimeInstance& instance,
+                           const host::SenseObservation& observation,
+                           const ActorPathLevel& level) noexcept;
+/** Moves carrier flights on between deliveries and raises carrier_state when one changed. */
+void advance_carriers(RuntimeInstance& instance) noexcept;
 /** Raises one event per type-26 mission effect whose revision or attachment changed. */
 void push_effect_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;

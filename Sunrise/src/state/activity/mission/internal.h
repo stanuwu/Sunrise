@@ -44,6 +44,16 @@ retain_scene_populations(MissionState& candidate,
                          const TypedIntent& intent,
                          std::span<const SquadPopulation> populations) noexcept;
 
+/** Appends one intent to the durable queue with its sequence and the tables it seeds. */
+[[nodiscard]] Status append_intent(MissionState& candidate,
+                                   const TypedIntent& intent,
+                                   std::uint64_t missionRevision) noexcept;
+
+/** Applies a carrier request, or a carrier step, that leaves the queue accepted or refused. */
+[[nodiscard]] Status settle_carrier_intent(MissionState& candidate,
+                                           const TypedIntent& intent,
+                                           bool accepted) noexcept;
+
 /** Takes the next Activity State revision for one record. @return False when none is left. */
 [[nodiscard]] bool publish(ActivityState& activity, SessionRecord& record) noexcept;
 

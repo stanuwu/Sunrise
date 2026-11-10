@@ -91,6 +91,7 @@ int cohort_index(lua_State* state) {
             const bool source =
                 scene
                 || (intent.kind == IntentKind::placeSquad
+                            || intent.kind == IntentKind::reserveCarrierCargo
                         ? intent.firstRow == squad.nativeRow
                         : intent.kind == IntentKind::runActorProgram && intent.active
                               && intent.secondRow == squad.nativeRow);

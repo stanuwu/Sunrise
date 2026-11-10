@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -149,6 +150,59 @@ void push_variable_value(lua_State* state, const VariableValue& value) {
     return 1;
 }
 
+/**
+ * Reads the request a script holds: its RequestKey, or the decimal value it stored.
+ * @return The key, or the absent key when the value is not one.
+ */
+[[nodiscard]] std::uint64_t request_argument(lua_State* state, int index) {
+    const auto* const handle =
+        static_cast<const RequestKeyHandle*>(luaL_testudata(state, index, kRequestKeyMetatable));
+    if (handle != nullptr) {
+        return handle->key;
+    }
+    std::size_t length = 0;
+    const char* const text = luaL_checklstring(state, index, &length);
+    std::uint64_t key = 0;
+    const auto parsed = std::from_chars(text, text + length, key);
+    return parsed.ec == std::errc{} && parsed.ptr == text + length
+               ? key
+               : state::activity::mission::kAbsentIntentKey;
+}
+
+/** @return The script spelling of a flight's status. */
+[[nodiscard]] const char*
+carrier_status_name(state::activity::mission::CarrierStatus status) noexcept {
+    using Status = state::activity::mission::CarrierStatus;
+    switch (status) {
+    case Status::running:
+        return "running";
+    case Status::complete:
+        return "complete";
+    case Status::refused:
+        return "refused";
+    case Status::cancelled:
+        return "cancelled";
+    }
+    return "running";
+}
+
+/** @return The script spelling of the stage a flight's current step belongs to. */
+[[nodiscard]] const char*
+carrier_stage_name(state::activity::mission::CarrierStage stage) noexcept {
+    using Stage = state::activity::mission::CarrierStage;
+    switch (stage) {
+    case Stage::entry:
+        return "entry";
+    case Stage::unloading:
+        return "unloading";
+    case Stage::departure:
+        return "departure";
+    case Stage::retirement:
+        return "retirement";
+    }
+    return "entry";
+}
+
 /** State view members in table order. */
 constexpr std::array<Binding<Impl>, std::size(api::kStateMembers)> kStateBindings{{
     {"phase",
@@ -163,10 +217,42 @@ constexpr std::array<Binding<Impl>, std::size(api::kStateMembers)> kStateBinding
     {"variable", &state_variable},
     {"has_variable", &state_has_variable},
     {"timer", &state_timer},
+    {"operation", &state_operation},
 }};
 static_assert(bound_to<Impl>(api::kStateMembers, kStateBindings));
 
 } // namespace
+
+/** Reads the carrier flight one start_carrier request opened in this attempt. */
+[[nodiscard]] int state_operation(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kStateMetatable));
+    const std::uint64_t key = request_argument(state, 2);
+    if (key == state::activity::mission::kAbsentIntentKey) {
+        return luaL_error(state, "operation needs a RequestKey or its value");
+    }
+    const Impl* const impl = impl_from_state(state);
+    const auto found = std::find_if(
+        impl->carriers.begin(), impl->carriers.end(), [key, impl](const auto& carrier) {
+            return carrier.requestKey == key
+                   && carrier.attemptGeneration == impl->attempt.generation;
+        });
+    if (found == impl->carriers.end()) {
+        lua_pushnil(state);
+        return 1;
+    }
+    using Status = state::activity::mission::CarrierStatus;
+    lua_createtable(state, 0, 3);
+    lua_pushstring(state, carrier_status_name(found->status));
+    lua_setfield(state, -2, "status");
+    if (found->status == Status::running && found->plan != nullptr
+        && found->step < found->plan->steps.size()) {
+        lua_pushstring(state, carrier_stage_name(found->plan->steps[found->step].stage));
+        lua_setfield(state, -2, "stage");
+    }
+    lua_pushboolean(state, found->delivered);
+    lua_setfield(state, -2, "delivered");
+    return 1;
+}
 
 /** Stages a phase change that commits with the enclosing callback. */
 [[nodiscard]] int context_set_phase(lua_State* state) {

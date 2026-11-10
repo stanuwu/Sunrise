@@ -136,6 +136,7 @@ resolve_activity_binding_locator(const void* context,
     }
     output.name = catalog.string(slots[squad.slotIndex].name);
     output.nativeRow = static_cast<std::uint32_t>(&squad - allSquads.data());
+    output.slotRow = squad.slotIndex;
     output.localRow = localRow;
     output.memberCount = members.size();
     return !output.id.empty();

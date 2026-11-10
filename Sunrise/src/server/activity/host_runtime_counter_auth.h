@@ -15,7 +15,8 @@ namespace sunrise::server::activity::host::counter_auth {
     namespace ghost = middleware::bap::activity_message::ghost_link;
     return (kind == ScriptableOverrideKind::interactableObject
             && target.slotType == auth::kType4SlotType && target.authSchema == auth::kType4Schema)
-           || (kind == ScriptableOverrideKind::combatantControls
+           || ((kind == ScriptableOverrideKind::combatantControls
+                || kind == ScriptableOverrideKind::combatantDelivery)
                && target.slotType == auth::kType2SlotType
                && target.authSchema == auth::kType2Schema)
            || (kind == ScriptableOverrideKind::damageWatch && target.slotType == damage::kSlotType

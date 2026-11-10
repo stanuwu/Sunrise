@@ -488,6 +488,7 @@ inline constexpr const FieldGroup* kCinematicGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::cinematic)};
 inline constexpr const FieldGroup* kGhostLinkGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::ghostLink)};
+inline constexpr const FieldGroup* kCarrierGroups[]{group(G::common), group(G::missionSequence)};
 inline constexpr const FieldGroup* kMissionEffectGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::missionEffect)};
 inline constexpr const FieldGroup* kActorPathGroups[]{
@@ -684,6 +685,12 @@ inline constexpr EventSpec kEvents[]{
      "on_event_mission_effect_state",
      "SunriseMissionEffectStateEvent",
      kMissionEffectGroups},
+    {44,
+     "CARRIER_STATE",
+     "on_event_carrier_state",
+     "SunriseCarrierStateEvent",
+     kCarrierGroups,
+     "one or more carrier flights moved on; state:operation reads each"},
 };
 
 // --- Program table -----------------------------------------------------------------------------

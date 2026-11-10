@@ -342,7 +342,8 @@ collect_targets(std::string_view scope, Message& error, ReloadStatus& failureSta
     lua_vm::publish_attempt(target.vm, prior.attempt);
     if (!lua_vm::publish_device_requests(target.vm, prior.deviceRequests)
         || !publish_device_sources(instance, target.vm)
-        || !lua_vm::publish_populations(target.vm, prior.squadPopulations)) {
+        || !lua_vm::publish_populations(target.vm, prior.squadPopulations)
+        || !lua_vm::publish_carriers(target.vm, prior.carriers)) {
         copy_text(failure, "replacement observations could not be prepared");
         return false;
     }
@@ -385,7 +386,8 @@ collect_targets(std::string_view scope, Message& error, ReloadStatus& failureSta
     }
     if (!lua_vm::publish_device_requests(target.vm, target.replacement.state.deviceRequests)
         || !publish_device_sources(instance, target.vm)
-        || !lua_vm::publish_populations(target.vm, target.replacement.state.squadPopulations)) {
+        || !lua_vm::publish_populations(target.vm, target.replacement.state.squadPopulations)
+        || !lua_vm::publish_carriers(target.vm, target.replacement.state.carriers)) {
         copy_text(failure, "replacement effects could not be retained");
         return false;
     }

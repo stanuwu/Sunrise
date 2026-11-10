@@ -478,6 +478,8 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
         encoded = actor_program::encode(*instance, request, candidate, pending, written);
     } else if (encoded && request.kind == ScriptableOverrideKind::combatantControls) {
         encoded = actor_program::encode_controls(*instance, request, pending, written);
+    } else if (encoded && request.kind == ScriptableOverrideKind::combatantDelivery) {
+        encoded = actor_program::encode_delivery(*instance, request, candidate, pending, written);
     } else if (encoded && request.kind == ScriptableOverrideKind::combatantSequence) {
         const auto* const retained = retained_sequence_combatant(*instance, request);
         std::size_t bits = 0;

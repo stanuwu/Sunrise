@@ -630,6 +630,7 @@ bool inspect_type2_program(std::span<const std::byte> input,
             return false;
         }
         candidate.generation = static_cast<std::uint32_t>(value);
+        candidate.laneCount = static_cast<std::uint8_t>(count);
         for (std::size_t index = 0; index < count; ++index) {
             if (!reader.read(1, present) || (present != 0 && !read_type2_lane(reader))) {
                 return false;
@@ -640,8 +641,29 @@ bool inspect_type2_program(std::span<const std::byte> input,
     if (!reader.read(1, present)) {
         return false;
     }
-    if (present != 0 && (!reader.read(4, count) || count > 8 || !reader.skip(count * 55 + 31))) {
-        return false;
+    if (present != 0) {
+        if (!reader.read(combatant_auth::kManifestCountWidth, count)
+            || count > candidate.deliverySources.size()) {
+            return false;
+        }
+        candidate.deliveryCount = static_cast<std::uint8_t>(count);
+        for (std::size_t index = 0; index < count; ++index) {
+            std::uint64_t key = 0, type = 0, slot = 0;
+            if (!reader.read(kSigned32Width, key) || !reader.read(kClientRefTypeWidth, type)
+                || !reader.read(kClientRefIndexWidth, slot)
+                || type != squad_auth::kSlotType + kClientRefTypeBias
+                || slot < kClientRefIndexBias) {
+                return false;
+            }
+            candidate.deliverySources[index] = {
+                static_cast<std::uint32_t>(key),
+                static_cast<std::int8_t>(squad_auth::kSlotType),
+                static_cast<std::int16_t>(slot - kClientRefIndexBias)};
+        }
+        if (!reader.read(auth_fields::kCounterWidth, value)) {
+            return false;
+        }
+        candidate.deliveryRevision = static_cast<std::uint32_t>(value);
     }
     if (reader.remaining_bits() != input.size() * 8U - bitCount || !finish_padding(reader)) {
         return false;
@@ -749,7 +771,9 @@ bool replace_type2_atoms(std::span<const std::byte> previous,
                          {incoming.programOffset + kProgramRevisionBits + kProgramSeedBits,
                           incoming.programBits - kProgramRevisionBits - kProgramSeedBits,
                           true}))
-        && (retained
+        // A new or retired actor life drops the old passenger manifest: a reused carrier reports
+        // a retained manifest busy again before its new life enters.
+        && (retained && !replacesRoot
                 ? patch::copy_field(writer, previous, {tailOffset, previousBits - tailOffset, true})
                 : writer.write(0, 1));
     const auto bits = writer.bit_count();
@@ -798,6 +822,50 @@ bool replace_type2_controls(std::span<const std::byte> previous,
     written = bytes;
     writtenBits = bits;
     revision = old.controlRevision + 1U;
+    return true;
+}
+
+/** Keeps every root field before `.7` and writes the manifest under the next revision. */
+bool replace_type2_delivery(std::span<const std::byte> previous,
+                            std::size_t previousBits,
+                            std::span<const std::byte> manifest,
+                            std::size_t manifestBits,
+                            std::uint32_t committedRevision,
+                            std::span<std::byte> output,
+                            std::size_t& written,
+                            std::size_t& writtenBits,
+                            std::uint32_t& revision) noexcept {
+    written = writtenBits = 0;
+    revision = 0;
+    Type2ProgramLayout old{}, incoming{};
+    if (!inspect_type2_program(previous, previousBits, old) || !old.enabled
+        || !inspect_type2_program(manifest, manifestBits, incoming)
+        || incoming.deliveryCount == 0) {
+        return false;
+    }
+    const auto last = (std::max)(committedRevision, old.deliveryRevision);
+    if (last >= kMaximumRevision) {
+        return false;
+    }
+    std::array<std::byte, kType2FullMaximumByteCount> staged{};
+    bits::Writer writer(staged);
+    bool encoded = mission_auth_patch::copy_field(
+                       writer, previous, {0, old.programOffset + old.programBits, true})
+                   && writer.write(1, auth_fields::kPresenceWidth)
+                   && writer.write(incoming.deliveryCount, combatant_auth::kManifestCountWidth);
+    for (std::size_t index = 0; encoded && index < incoming.deliveryCount; ++index) {
+        encoded = write_lane_client_ref(writer, incoming.deliverySources[index]);
+    }
+    encoded = encoded && writer.write(last + 1U, auth_fields::kCounterWidth);
+    const auto bits = writer.bit_count();
+    std::size_t bytes = 0;
+    if (!encoded || !writer.finish(bytes) || bytes > output.size()) {
+        return false;
+    }
+    std::copy_n(staged.begin(), bytes, output.begin());
+    written = bytes;
+    writtenBits = bits;
+    revision = last + 1U;
     return true;
 }
 

@@ -177,6 +177,9 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
                       && (pending.actorSpawnGeneration == 0
                           || (pending.actorSpawnGeneration > guard->type2SpawnGeneration
                               && pending.actorSpawnGeneration <= squad::kMaximumGeneration));
+    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::combatantDelivery) {
+        nextCounter = pending.generation > guard->type2DeliveryRevision
+                      && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::combatantSequence) {
         // A retained generic Auth program may be ahead of this typed guard.
         nextCounter = pending.generation > guard->type2AtomGeneration
@@ -256,6 +259,8 @@ void advance_staged_guard(ScriptableGuard* guard,
         if (pending.actorSpawnGeneration != 0) {
             guard->type2SpawnGeneration = pending.actorSpawnGeneration;
         }
+    } else if (pending.kind == ScriptableOverrideKind::combatantDelivery) {
+        guard->type2DeliveryRevision = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::combatantSequence) {
         guard->type2AtomGeneration = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::object

@@ -52,7 +52,7 @@ inline constexpr std::uint8_t kActionTargetMarkerWidth = 8;
 inline constexpr std::uint32_t kActionNoTargetMarker = 127;
 /** Field .7 delivery manifest: a 4-bit squad count, then one type-1 squad ClientRef each. */
 inline constexpr std::uint8_t kManifestCountWidth = 4;
-inline constexpr std::size_t kMaximumManifestSquads = 8;
+inline constexpr std::size_t kMaximumManifestSquads = scriptable_auth::kType2ManifestCapacity;
 /** Bits one manifest squad adds: its ClientRef. */
 inline constexpr std::size_t kManifestSquadBits = fields::kClientRefBits;
 
@@ -62,6 +62,9 @@ inline constexpr std::size_t kPathBytes = 20;
 inline constexpr std::size_t kActionBits = 254;
 inline constexpr std::size_t kActionBytes = 32;
 inline constexpr std::size_t kDeliveryBits = 132;
+/** Bytes of a delivery body naming the most squads. */
+inline constexpr std::size_t kDeliveryMaximumBytes =
+    (kDeliveryBits + (kMaximumManifestSquads - 1) * kManifestSquadBits + 7) / 8;
 inline constexpr std::size_t kRetireBits = 77;
 inline constexpr std::size_t kRetireBytes = 10;
 
@@ -179,7 +182,6 @@ write_root(encoding::bits::Writer& writer, std::uint32_t generation, bool enable
            && fields::finish_exact(writer, kActionBits, kActionBytes, written);
 }
 
-// TODO: expose a named operation once the actor registration consumer is proved.
 /** Encodes a bounded, duplicate-free Type-1 reference list. */
 [[nodiscard]] inline bool encode_delivery(std::uint32_t generation,
                                           std::uint32_t revision,

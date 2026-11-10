@@ -93,6 +93,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::objectInteracted:
     case host::EventKind::ghostLinkState:
     case host::EventKind::missionEffectState:
+    case host::EventKind::carrierState:
         return false;
     default:
         return true;

@@ -154,11 +154,13 @@ enum class EventKind : std::uint8_t {
     triggerState = 42,
     /** A type-26 mission effect reported a changed revision or attachment; from one msg 6 body. */
     missionEffectState = 43,
+    /** State moved one or more carrier flights on. */
+    carrierState = 44,
 };
 
 /** Kinds are numbered without gaps, so the last one plus one is the count. */
 inline constexpr std::size_t kEventKindCount =
-    static_cast<std::size_t>(EventKind::missionEffectState) + 1U;
+    static_cast<std::size_t>(EventKind::carrierState) + 1U;
 
 /**
  * Terminal delivery outcome of one script-requested effect.
@@ -278,6 +280,8 @@ enum class ScriptableOverrideKind : std::uint8_t {
     ghostLink,
     /** Type-2 `.5` actor controls replaced on the live actor, one revision above the last. */
     combatantControls,
+    /** Type-2 `.7` passenger manifest merged into the live actor under a Host-owned revision. */
+    combatantDelivery,
 };
 
 /** The client stalls one frame short of the duration, so this reported fraction is the bar's end.
@@ -303,6 +307,7 @@ inline constexpr float kGhostLinkFinishFraction = 0.99F;
     case ScriptableOverrideKind::combatantRetirement:
     case ScriptableOverrideKind::damageWatch:
     case ScriptableOverrideKind::combatantControls:
+    case ScriptableOverrideKind::combatantDelivery:
         return false;
     case ScriptableOverrideKind::object:
     case ScriptableOverrideKind::sequence:

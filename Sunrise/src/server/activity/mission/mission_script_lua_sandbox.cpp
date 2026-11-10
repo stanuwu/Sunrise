@@ -340,6 +340,7 @@ void destroy_state(Impl& impl) noexcept {
     impl.objectiveLevels = {};
     impl.objectiveLevelCount = 0;
     std::vector<SquadObjectiveOffer>{}.swap(impl.objectiveOffers);
+    std::vector<state::activity::mission::CarrierOperation>{}.swap(impl.carriers);
     std::vector<Intent>{}.swap(impl.outbox);
     impl.variables = {};
     impl.timers = {};

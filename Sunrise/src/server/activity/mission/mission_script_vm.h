@@ -76,6 +76,8 @@ struct SquadDefinition final {
     std::string_view id{};
     std::string_view name{};
     std::uint32_t nativeRow{};
+    /** Catalog row of the squad's authored type-1 slot. */
+    std::uint32_t slotRow{};
     std::uint32_t localRow{};
     std::size_t memberCount{};
 };
@@ -575,6 +577,23 @@ void publish_objective_levels(Vm& vm, std::span<const ObjectiveLevelRow> levels)
 /** Replaces the squads' qualified task costs that slot:select_combat_task reads. */
 [[nodiscard]] bool publish_objective_offers(Vm& vm,
                                             std::span<const SquadObjectiveOffer> offers) noexcept;
+
+/** Copies the durable carrier flights before any callback reads one. */
+[[nodiscard]] bool
+publish_carriers(Vm& vm,
+                 std::span<const state::activity::mission::CarrierOperation> carriers) noexcept;
+
+/** @return True when the request is a step State queued for a carrier, not a script's. */
+[[nodiscard]] bool carrier_step(const Vm& vm, std::uint64_t requestKey) noexcept;
+
+/**
+ * Replaces the unread outbox with State's queue between callbacks, after State queued or removed
+ * carrier steps, so the next commit extends the same queue.
+ */
+[[nodiscard]] bool
+adopt_intents(Vm& vm,
+              std::span<const state::activity::mission::PendingIntent> pendingIntents,
+              std::uint64_t nextIntentKey) noexcept;
 
 /** Copies durable native population facts before any callback reads a cohort. */
 [[nodiscard]] bool publish_populations(

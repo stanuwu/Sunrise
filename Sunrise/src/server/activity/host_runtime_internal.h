@@ -153,6 +153,7 @@ struct ScriptableGuard final {
     std::uint32_t authoredSceneGeneration{};
     std::uint32_t type2AtomGeneration{};
     std::uint32_t type2SpawnGeneration{};
+    std::uint32_t type2DeliveryRevision{};
     std::uint32_t damageRevision{};
     GhostLinkScan ghostLink{};
     bool occupied{};

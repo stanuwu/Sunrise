@@ -88,8 +88,6 @@ ActorProgramSourceStatus actor_program_source_status(const state::activity::Sess
         || !state::activity::binding_matches(binding)) {
         return ActorProgramSourceStatus::incompatible;
     }
-    ScriptableRequest request{};
-    request.programSource = source;
     AcquireSRWLockShared(&g_lock);
     const Instance* instance = find_instance(binding);
     auto status = ActorProgramSourceStatus::incompatible;
@@ -100,7 +98,7 @@ ActorProgramSourceStatus actor_program_source_status(const state::activity::Sess
             if (output != nullptr) {
                 *output = *retained;
             }
-            if (actor_program::source_ready(*instance, request)) {
+            if (actor_program::source_ready(*instance, source)) {
                 status = ActorProgramSourceStatus::ready;
             } else {
                 namespace patch = middleware::bap::activity_message::mission_auth_patch;

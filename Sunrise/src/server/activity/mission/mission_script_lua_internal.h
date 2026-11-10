@@ -177,6 +177,10 @@ void register_actor_sequence_metatables(lua_State* state);
 /** @return True when one live Slot row is an exact type-2 combatant. */
 [[nodiscard]] bool exact_combatant_slot(const SlotDefinition& definition) noexcept;
 
+/** @return True for an exact authored type-58 path of the actor's own object and registry. */
+[[nodiscard]] bool exact_actor_path(const SlotDefinition& path,
+                                    const SlotDefinition& actor) noexcept;
+
 /** Stages one authored native Auth body on the guarded message-5 route. */
 [[nodiscard]] int queue_slot_auth(lua_State* state,
                                   const SlotDefinition& slot,
@@ -231,5 +235,11 @@ void push_atom_kinds(lua_State* state);
 [[nodiscard]] int slot_run_atoms(lua_State* state);
 /** Replaces the controls of one live type-2 combatant. */
 [[nodiscard]] int slot_set_actor_controls(lua_State* state);
+/** Opens one carrier flight that State runs step by step. */
+[[nodiscard]] int slot_start_carrier(lua_State* state);
+/** Ends one actor's carrier flight before its next step. */
+[[nodiscard]] int slot_cancel_carrier(lua_State* state);
+/** Reads the carrier flight one start_carrier request opened. */
+[[nodiscard]] int state_operation(lua_State* state);
 
 } // namespace sunrise::server::activity::mission::lua_vm::detail

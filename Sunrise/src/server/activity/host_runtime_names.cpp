@@ -107,6 +107,8 @@ const char* event_name(EventKind kind) noexcept {
         return "ghost link state";
     case EventKind::missionEffectState:
         return "mission effect state";
+    case EventKind::carrierState:
+        return "carrier state";
     case EventKind::cinematicSkipRequested:
         return "cinematic skip requested";
     case EventKind::cinematicTerminated:

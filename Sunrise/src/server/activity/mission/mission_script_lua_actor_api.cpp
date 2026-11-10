@@ -58,6 +58,16 @@ constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
            && (definition.flags & format::kSlotSchemaJoinExact) != 0;
 }
 
+/** @return True for an exact authored type-58 path of the actor's own object and registry. */
+bool exact_actor_path(const SlotDefinition& path, const SlotDefinition& actor) noexcept {
+    namespace combatant = middleware::bap::activity_message::combatant_auth;
+    return path.slotType == combatant::kPathSlotType
+           && path.componentClass == combatant::kAbilityPointComponentClass
+           && (path.flags & format::kSlotSchemaJoinExact) != 0 && actor.objectTag == path.objectTag
+           && actor.registryKey == path.registryKey
+           && path.slotIndex <= auth_fields::kMaximumClientRefIndex;
+}
+
 /** Follows an authored path while native state owns actor creation and program revisions. */
 [[nodiscard]] int slot_play_actor_path(lua_State* state) {
     namespace combatant = middleware::bap::activity_message::combatant_auth;
@@ -67,11 +77,7 @@ constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
         state, required_key(kActorPath, "path", api::ValueKind::handle), kSlotMetatable);
     SlotDefinition actor{}, path{};
     if (!current_slot(state, *handle, actor) || !exact_combatant_slot(actor)
-        || !current_slot(state, reference, path) || path.slotType != combatant::kPathSlotType
-        || path.componentClass != combatant::kAbilityPointComponentClass
-        || (path.flags & format::kSlotSchemaJoinExact) == 0 || actor.objectTag != path.objectTag
-        || actor.registryKey != path.registryKey
-        || path.slotIndex > auth_fields::kMaximumClientRefIndex) {
+        || !current_slot(state, reference, path) || !exact_actor_path(path, actor)) {
         return luaL_error(state, "actor path requires an exact same-registry authored path");
     }
     const Impl* impl = impl_from_state(state);
