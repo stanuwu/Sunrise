@@ -260,8 +260,9 @@ bool prepare_record_reward_grant(
                                                  rank.markerHash,
                                                  rank.value - rank.previousValue,
                                                  rank.presentationSerial)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_rank_presentation");
+        // The pickup only shows the gain. The credit travels in the account object, so a marker
+        // with no character row to show in leaves the grant itself whole.
+        static_cast<void>(report_failure("record_reward_rank_presentation"));
     }
     if (!apply_acquisition_presentation(
             characterBytes, selected.loadout, acquisitionPresentationRows)) {
