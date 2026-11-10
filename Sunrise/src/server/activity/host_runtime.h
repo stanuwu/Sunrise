@@ -661,6 +661,8 @@ struct Event final {
     state::gameplay::entity_identity::DamagePools damageEntityPools{};
     float damageShield{-1.0F};
     std::int32_t damageRevision{};
+    /** A combatant's damageState carries its suppression and first-Auth flags; others do not. */
+    bool damageLifecycleKnown{}, damageSuppressed{}, damageFirstAuthApplied{};
     /** Current position, power and lock levels; masks distinguish unknown fields. */
     std::array<float, middleware::bap::activity_message::scriptable_auth::kType23ChannelCount>
         deviceValues{};

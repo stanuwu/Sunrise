@@ -313,6 +313,14 @@ inline constexpr MemberSpec kDamageFields[]{
     field("entity_incarnation", kOptionalInteger, "nil unless from_entity"),
     field("allocation_sequence", kOptionalInteger, "nil unless from_entity"),
     field("allocation_domain", kOptionalDecimal, "nil unless from_entity"),
+    field("suppressed",
+          kOptionalBoolean,
+          "a combatant's actor is suppressed, and health and shield read -1; nil for a reporter "
+          "other than a combatant's Sense"),
+    field("first_auth_applied",
+          kOptionalBoolean,
+          "a combatant applied its first Auth; health and shield read -1 until then; nil like "
+          "suppressed"),
 };
 inline constexpr MemberSpec kObjectFields[]{
     field("generation", kInteger),

@@ -521,6 +521,10 @@ constexpr EventBinding kDamage[]{
              lua_pushnil(state);
          }
      }},
+    {"suppressed", nullptr, &present_boolean<&E::damageSuppressed, &E::damageLifecycleKnown>},
+    {"first_auth_applied",
+     nullptr,
+     &present_boolean<&E::damageFirstAuthApplied, &E::damageLifecycleKnown>},
 };
 // Sense ordinal 1 backs interaction_open; its meaning is assumed.
 constexpr EventBinding kObject[]{
