@@ -440,7 +440,7 @@ bool stage_service_outcome(Scratch& scratch,
             || dismantle.accountSoid != pending.accountSoid
             || dismantle.characterSoid != pending.characterSoid
             || dismantle.dismantledInstanceSoid != pending.dismantledInstanceSoid
-            || dismantle.updatesAccount != pending.profileChanged
+            || dismantle.updatesAccount != pending.updates_account()
             || dismantle.accountSoid != before.family4RootSoid || before.family4ResidentCount == 0
             || dismantle.accountDefinitionId != before.family4Residents.front().definitionId
             || dismantle.after.family4RootSoid != before.family4RootSoid
