@@ -371,6 +371,8 @@ struct PendingRecordRewardGrant {
     PreparedProgressionCredit progression{};
     /** Seasonal XP the server grants in the transaction that commits this grant. */
     std::int32_t seasonalExperience{};
+    /** Seasonal XP total the preparation observed; the grant is refused once it moves. */
+    std::int32_t seasonalExperienceBefore{};
     bool prepared{};
 
     /** @return The flags of the wrappers this grant consumes. */
@@ -1409,11 +1411,25 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 /**
  * Adds base XP to the seasonal lanes and republishes every value derived from the total,
  * including earned-perk flags when the grant reaches a new rank.
- * The caller must publish the whole account image after it, since that carries those flags.
+ * The caller must publish the whole account image, since that carries those flags: after the
+ * grant, or before it from preview_seasonal_experience.
  * @param amount Positive XP to grant.
  * @return False when the amount is not positive or the total would overflow.
  */
 [[nodiscard]] bool grant_seasonal_experience(std::int32_t amount) noexcept;
+
+/**
+ * Applies to a bank image what grant_seasonal_experience will save for the same amount: the
+ * seasonal lanes, and the earned-perk flags when the grant reaches a new rank. Nothing is saved.
+ * @param expected XP total the grant was prepared against.
+ * @param amount Positive XP the grant adds.
+ * @param after The selected character's banks, updated in place.
+ * @return False when the total moved since the preparation, the new total would overflow, or the
+ *         account could not be read.
+ */
+[[nodiscard]] bool preview_seasonal_experience(std::int32_t expected,
+                                               std::int32_t amount,
+                                               unlocks::Table& after) noexcept;
 
 /**
  * Replaces the published XP total, provided it still equals expected, and republishes every

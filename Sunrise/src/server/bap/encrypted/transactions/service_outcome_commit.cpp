@@ -350,12 +350,13 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
         if (transaction->pending == nullptr) {
             return false;
         }
-        // Commit consumes the grant. The caller's investment transaction keeps its XP with it.
+        // Commit consumes the grant. The caller's investment transaction keeps its XP with it, and
+        // the grant's staged frame already carries the new total.
         const std::int32_t experience = transaction->pending->seasonalExperience;
         return report_commit(state::commit_record_reward(*transaction->pending),
                              "ev=record_reward stage=transaction_commit result=fail")
                && (experience == 0
-                   || report_commit(bap::arm_seasonal_experience_presentation(experience),
+                   || report_commit(bap::grant_seasonal_experience(experience),
                                     "ev=record_reward stage=experience result=fail"));
     }
     return true;

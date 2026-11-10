@@ -109,10 +109,11 @@ bool consume_pursuit_completion(Session& session,
         return false;
     }
     const bool presentsReward = pending->rewardCount != 0;
-    // Commit consumes the grant. This transaction keeps its XP with it.
+    // Commit consumes the grant. This transaction keeps its XP with it, and the staged frame
+    // already carries the new total.
     const std::int32_t experience = pending->seasonalExperience;
     if (!state::commit_record_reward(*pending)
-        || (experience != 0 && !bap::arm_seasonal_experience_presentation(experience))
+        || (experience != 0 && !bap::grant_seasonal_experience(experience))
         || !transaction.commit()) {
         return false;
     }

@@ -665,10 +665,10 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
 
 /**
  * Applies a prepared grant's flags, quest starts, completion values, quest step, progression
- * credit, ingredient credits and chooser readiness to the saved banks.
+ * credit, ingredient credits, chooser readiness and seasonal XP to the saved banks.
  * @param after Receives the selected character's unlocks with the grant applied.
- * @return False when a flag, quest value, progression, ingredient balance or chooser row moved
- *         since the grant was prepared.
+ * @return False when a flag, quest value, progression, ingredient balance, chooser row or the
+ *         seasonal XP total moved since the grant was prepared.
  */
 bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
                             unlocks::Table& after) noexcept {
@@ -748,7 +748,10 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             return false;
         }
     }
-    return true;
+    // The server grants the XP with the commit, after this image has gone out in the grant's frame.
+    return mutation.seasonalExperience == 0
+           || preview_seasonal_experience(
+               mutation.seasonalExperienceBefore, mutation.seasonalExperience, after);
 }
 
 /** A reward with no acquisition flag leaves its collectible state unknown, so it marks nothing. */

@@ -1628,6 +1628,7 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     mutation.questStep = plan.questStep;
     mutation.progression = plan.progression;
     mutation.seasonalExperience = plan.seasonalExperience;
+    mutation.seasonalExperienceBefore = seasonal_experience();
     reason = nullptr;
     return PursuitRedemption::prepared;
 }

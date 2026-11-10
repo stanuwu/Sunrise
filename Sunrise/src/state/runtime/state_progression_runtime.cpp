@@ -428,14 +428,35 @@ bool walk_earned_perks(bool& earned) noexcept {
                               earned);
 }
 
+/** One seasonal progression and the value an XP total gives its first lane. */
+struct ExperienceLane {
+    std::uint16_t definitionIndex{};
+    std::int32_t value{};
+};
+
+// A preview writes these rows into a bank image without the bounds check a save makes.
+static_assert((std::max)({kArtifactPowerProgressionIndex,
+                          kArtifactUnlockProgressionIndex,
+                          pass::kProgressionDefinitionIndex,
+                          pass::kHudProgressionDefinitionIndex})
+              < build_data::progressions::kDefinitionCapacity);
+
+/** @return The seasonal progressions with the values the given XP total gives them. */
+[[nodiscard]] auto experience_lanes(std::int32_t experience) noexcept {
+    return std::array{ExperienceLane{kArtifactPowerProgressionIndex, experience},
+                      ExperienceLane{kArtifactUnlockProgressionIndex, experience},
+                      ExperienceLane{pass::kProgressionDefinitionIndex,
+                                     (std::min)(experience, kMaximumPassExperience)},
+                      ExperienceLane{pass::kHudProgressionDefinitionIndex,
+                                     (std::max)(experience - kMaximumPassExperience, 0)}};
+}
+
 /** Publishes the four seasonal progression lanes the current XP total implies. */
 bool publish_experience_lanes(std::int32_t experience) noexcept {
-    return unlocks::set_account_progression(kArtifactPowerProgressionIndex, experience)
-           && unlocks::set_account_progression(kArtifactUnlockProgressionIndex, experience)
-           && unlocks::set_account_progression(pass::kProgressionDefinitionIndex,
-                                               (std::min)(experience, kMaximumPassExperience))
-           && unlocks::set_account_progression(pass::kHudProgressionDefinitionIndex,
-                                               (std::max)(experience - kMaximumPassExperience, 0));
+    const auto lanes = experience_lanes(experience);
+    return std::all_of(lanes.begin(), lanes.end(), [](const ExperienceLane& lane) noexcept {
+        return unlocks::set_account_progression(lane.definitionIndex, lane.value);
+    });
 }
 
 /**
@@ -453,7 +474,7 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
     SaleRows rows{};
     std::size_t count = 0;
     const std::uint32_t mask = sale_rows(rows, count) ? artifact_mask(rows, count) : 0U;
-    // The caller publishes the whole account image after the commit, so it needs no report.
+    // The caller publishes the whole account image, so it needs no report.
     bool earnedRidesTheImage = false;
     return publish_experience_lanes(total) && publish_artifact_locked(family, mask, total)
            && investment::store::write_family5(family)
@@ -610,6 +631,38 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
     const auto total = previous + amount;
     return publish_experience_total(
         transaction, total, seasonal_rank_for(previous) != seasonal_rank_for(total));
+}
+
+/** Applies the lanes and earned-perk flags grant_seasonal_experience saves for the same amount. */
+bool preview_seasonal_experience(std::int32_t expected,
+                                 std::int32_t amount,
+                                 unlocks::Table& after) noexcept {
+    const std::int32_t previous = seasonal_experience();
+    if (amount <= 0 || previous != expected
+        || previous > (std::numeric_limits<std::int32_t>::max)() - amount) {
+        return false;
+    }
+    const std::int32_t total = previous + amount;
+    for (const ExperienceLane& lane : experience_lanes(total)) {
+        after.accountProgressions[lane.definitionIndex].front() = lane.value;
+    }
+    // Only a new rank earns a perk, and unpublished rows earn nothing yet.
+    if (seasonal_rank_for(previous) == seasonal_rank_for(total) || !season_perks_walkable()) {
+        return true;
+    }
+    AccountState account;
+    if (!investment::store::read_account(account)) {
+        return false;
+    }
+    const auto character = runtime::detail::selected_character_index(account);
+    // The frame built from this image carries the flags, so the walk needs no report.
+    bool earnedRidesTheImage = false;
+    return character >= account.characterCount
+           || apply_earned_perks(after,
+                                 account.characters[character].characterClass,
+                                 seasonal_rank_for(total),
+                                 nullptr,
+                                 earnedRidesTheImage);
 }
 
 /** Refuses a decrease below the artifact points any character has spent. */

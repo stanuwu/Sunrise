@@ -419,10 +419,13 @@ bool consume(Session& session,
         || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr
         || transaction_if<state::PendingSettingsUpdate>(outcome) != nullptr;
+    // A grant with no reward row, such as a turn-in that pays only XP, shows no flyout to hold.
+    const auto* rewardGrant = transaction_if<RecordRewardGrantTransaction>(outcome);
     const bool presentsAcquisition =
         transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
-        || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
+        || (rewardGrant != nullptr && rewardGrant->pending != nullptr
+            && rewardGrant->pending->rewardCount != 0)
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr;
     const bool invalidatesAcquisitionPresentation =
         outcome.hasChangeCharacter || outcome.hasSelectCharacter || outcome.hasArtifactReset

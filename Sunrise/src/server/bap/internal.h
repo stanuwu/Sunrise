@@ -593,6 +593,9 @@ current_world_reward(WorldRewardRequest& request, std::uint64_t afterId, bool* e
  */
 void settle_world_reward(std::uint64_t unchanged) noexcept;
 
+/** Grants seasonal XP for a grant whose own frame carries the new total, with no XP item update. */
+[[nodiscard]] bool grant_seasonal_experience(std::int32_t amount) noexcept;
+
 /** Queues one transient XP item update so the native HUD presents a seasonal XP gain. */
 [[nodiscard]] bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept;
 

@@ -390,11 +390,11 @@ void arm_artifact_refresh(Session& session) noexcept {
 }
 
 /**
- * Grants seasonal XP and queues its HUD notification on the first peer that can show it.
+ * Grants seasonal XP with no HUD notification, for a grant whose own frame carries the new total.
  * @param amount Positive XP to grant.
  * @return True when the XP was granted.
  */
-bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
+bool grant_seasonal_experience(std::int32_t amount) noexcept {
     const std::uint16_t previousBonus = state::artifact_power_bonus();
     if (amount <= 0 || !state::grant_seasonal_experience(amount)) {
         return false;
@@ -406,6 +406,18 @@ bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
                 peer.socialRosterRepushArmed = true;
             }
         }
+    }
+    return true;
+}
+
+/**
+ * Grants seasonal XP and queues its HUD notification on the first peer that can show it.
+ * @param amount Positive XP to grant.
+ * @return True when the XP was granted.
+ */
+bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
+    if (!grant_seasonal_experience(amount)) {
+        return false;
     }
     for (auto& peer : g_sessions) {
         if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active
