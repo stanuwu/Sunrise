@@ -56,8 +56,8 @@ struct CompletionPlan {
     std::array<GambitPrimeHelmetTier, kGambitPrimeRoleCount> helmetTiers{};
     /** The held Synthesizer the next tier replaces, or zero. */
     std::uint64_t replacedSynthesizerSoid{};
-    /** The treasure map a Werner bounty pays in place of the rows it shows, or zero. */
-    std::uint32_t treasureMapHash{};
+    /** The treasure map a Werner bounty pays in place of the rows it shows, if any. */
+    std::uint32_t treasureMapHash{authored_inventory::kNoDefinitionHash};
 };
 
 /**
