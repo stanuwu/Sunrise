@@ -115,6 +115,10 @@ bool publish_item_grant(const StagedItemGrant& staged,
     if (state::presence_flags_pending()) {
         // A granted Mote supplies a flag Family 5 has not set yet.
         bap::arm_artifact_refresh(session);
+    } else {
+        // The grant published the account; the client rebuilds what its sockets offer on the
+        // character copy that follows.
+        bap::arm_unlock_character_refresh(session);
     }
     return true;
 }
