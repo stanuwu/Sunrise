@@ -55,67 +55,75 @@ bool decode(const NamedRecord& record, content::Definition& value) noexcept {
  * @return True for empty quest state or a supported first-step value, scope, and bank row.
  */
 bool encode(const items::Definition& value, ItemRecord& record) noexcept {
-    record = {
-        value.definitionHash,
-        value.definitionIndex,
-        value.bucketId,
-        value.tier,
-        value.insertionMaterialRequirementSetIndex,
-        value.enabledMaterialRequirementSetIndex,
-        value.plugCategoryHash,
-        value.rollSetIndex,
-        value.linkedPlugIndex,
-        value.questInitialization.value,
-        value.questInitialization.row,
-        static_cast<std::uint8_t>(value.questInitialization.scope),
-        value.recoveryBucketId,
-        static_cast<std::uint8_t>(value.quietAcquisition),
-        static_cast<std::uint8_t>(value.toastlessAcquisition),
-        value.stackUniqueLabel,
-        static_cast<std::uint8_t>(value.grantRestricted),
-        value.quantityValueIndex,
-        value.plugSetFlagIndex,
-        value.presenceFlagCount,
-        value.presenceFlags,
-        static_cast<std::uint8_t>(value.consumesWholeStack),
-        static_cast<std::uint8_t>(value.deletesOnAction),
-    };
+    record = {};
+    record.definitionHash = value.definitionHash;
+    record.definitionIndex = value.definitionIndex;
+    record.bucketId = value.bucketId;
+    record.tier = value.tier;
+    record.insertionMaterialRequirementSetIndex = value.insertionMaterialRequirementSetIndex;
+    record.enabledMaterialRequirementSetIndex = value.enabledMaterialRequirementSetIndex;
+    record.plugCategoryHash = value.plugCategoryHash;
+    record.rollSetIndex = value.rollSetIndex;
+    record.linkedPlugIndex = value.linkedPlugIndex;
+    record.questInitialValue = value.questInitialization.value;
+    record.questValueRow = value.questInitialization.row;
+    record.questValueScope = static_cast<std::uint8_t>(value.questInitialization.scope);
+    record.recoveryBucketId = value.recoveryBucketId;
+    record.quietAcquisition = static_cast<std::uint8_t>(value.quietAcquisition);
+    record.toastlessAcquisition = static_cast<std::uint8_t>(value.toastlessAcquisition);
+    record.stackUniqueLabel = value.stackUniqueLabel;
+    record.grantRestricted = static_cast<std::uint8_t>(value.grantRestricted);
+    record.quantityValueIndex = value.quantityValueIndex;
+    record.plugSetFlagIndex = value.plugSetFlagIndex;
+    record.presenceFlagCount = value.presenceFlagCount;
+    record.presenceFlags = value.presenceFlags;
+    record.consumesWholeStack = static_cast<std::uint8_t>(value.consumesWholeStack);
+    record.deletesOnAction = static_cast<std::uint8_t>(value.deletesOnAction);
     return items::valid(value.questInitialization);
 }
 
 /**
- * Cached quest state must fit the same bank limits as freshly read item metadata.
+ * Cached quest state must fit the same bank limits as freshly read item metadata. Presence-flag
+ * slots past the row's count must hold their zero default.
  * @param record Packed disk row.
  * @param value Receives the runtime item mapping; use only on success.
  * @return True for empty quest state or a supported first-step value, scope, and bank row.
  */
 bool decode(const ItemRecord& record, items::Definition& value) noexcept {
-    value = {record.definitionHash,
-             record.definitionIndex,
-             record.bucketId,
-             record.insertionMaterialRequirementSetIndex,
-             record.enabledMaterialRequirementSetIndex,
-             record.tier,
-             record.plugCategoryHash,
-             record.rollSetIndex,
-             record.linkedPlugIndex,
-             {record.questInitialValue,
-              record.questValueRow,
-              static_cast<items::QuestInitialization::Scope>(record.questValueScope)},
-             record.recoveryBucketId,
-             record.quietAcquisition != 0,
-             record.toastlessAcquisition != 0,
-             record.stackUniqueLabel,
-             record.grantRestricted != 0,
-             record.quantityValueIndex,
-             record.plugSetFlagIndex,
-             record.presenceFlags,
-             record.presenceFlagCount,
-             record.consumesWholeStack != 0,
-             record.deletesOnAction != 0};
+    value = {};
+    value.definitionHash = record.definitionHash;
+    value.definitionIndex = record.definitionIndex;
+    value.bucketId = record.bucketId;
+    value.insertionMaterialRequirementSetIndex = record.insertionMaterialRequirementSetIndex;
+    value.enabledMaterialRequirementSetIndex = record.enabledMaterialRequirementSetIndex;
+    value.tier = record.tier;
+    value.plugCategoryHash = record.plugCategoryHash;
+    value.rollSetIndex = record.rollSetIndex;
+    value.linkedPlugIndex = record.linkedPlugIndex;
+    value.questInitialization.value = record.questInitialValue;
+    value.questInitialization.row = record.questValueRow;
+    value.questInitialization.scope =
+        static_cast<items::QuestInitialization::Scope>(record.questValueScope);
+    value.recoveryBucketId = record.recoveryBucketId;
+    value.quietAcquisition = record.quietAcquisition != 0;
+    value.toastlessAcquisition = record.toastlessAcquisition != 0;
+    value.stackUniqueLabel = record.stackUniqueLabel;
+    value.grantRestricted = record.grantRestricted != 0;
+    value.quantityValueIndex = record.quantityValueIndex;
+    value.plugSetFlagIndex = record.plugSetFlagIndex;
+    value.presenceFlags = record.presenceFlags;
+    value.presenceFlagCount = record.presenceFlagCount;
+    value.consumesWholeStack = record.consumesWholeStack != 0;
+    value.deletesOnAction = record.deletesOnAction != 0;
+    if (record.presenceFlagCount > items::kPresenceFlagCapacity) {
+        return false;
+    }
+    const auto unusedFlags = std::span(value.presenceFlags).subspan(value.presenceFlagCount);
     return items::valid(value.questInitialization) && record.quietAcquisition <= 1
            && record.toastlessAcquisition <= 1 && record.grantRestricted <= 1
-           && record.presenceFlagCount <= items::kPresenceFlagCapacity
+           && std::all_of(unusedFlags.begin(),
+                          unusedFlags.end(),
+                          [](std::uint16_t slot) { return slot == 0; })
            && record.consumesWholeStack <= 1 && record.deletesOnAction <= 1;
 }
 

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 
 #include "../../../../state/build_data/items/quest_initialization.h"
 #include "../reader/typed_array.h"
@@ -177,11 +178,6 @@ constexpr std::size_t kItemValueSlotDescriptor = offsetof(generated::ItemUnlockB
 constexpr std::uint32_t kItemValueSlotClass = generated::C808077ae::kClass;
 constexpr std::size_t kItemValueSlotStride = sizeof(generated::C808077ae);
 constexpr std::size_t kItemValueSlotOffset = offsetof(generated::C808077ae, gap0);
-/** The unlock block's first array lists the flags the item supplies while it is held. */
-constexpr std::size_t kPresenceFlagDescriptor = offsetof(generated::ItemUnlockBlock, presenceFlags);
-constexpr std::uint32_t kPresenceFlagClass = generated::ItemPresenceFlag::kClass;
-constexpr std::size_t kPresenceFlagStride = sizeof(generated::ItemPresenceFlag);
-constexpr std::size_t kPresenceFlagSlotOffset = offsetof(generated::ItemPresenceFlag, unlockSlot);
 
 /**
  * Reads the socket entry list index a definition declares.
@@ -282,11 +278,13 @@ void read_sockets(std::span<const std::byte> definition, Row& row) noexcept {
     }
 }
 
-/** Walks one checked array of 32-byte plug rows. */
-[[nodiscard]] bool visit_plug_array(std::span<const std::byte> blob,
-                                    const Array& array,
-                                    AllowedPlugVisitor visitor,
-                                    void* context) noexcept {
+/**
+ * Walks one located array of 32-byte plug rows after checking that it fits its blob.
+ * @param visit Called with each row's offset and the item index it names; false ends the walk.
+ */
+template <typename Visit>
+[[nodiscard]] bool
+visit_plug_rows(std::span<const std::byte> blob, const Array& array, Visit visit) noexcept {
     if (array.count > kMaximumPlugMemberCount || array.dataOffset > blob.size()
         || array.count > (blob.size() - array.dataOffset) / kPlugMemberStride) {
         return false;
@@ -296,11 +294,40 @@ void read_sockets(std::span<const std::byte> definition, Row& row) noexcept {
         const std::size_t row =
             array.dataOffset + static_cast<std::size_t>(index) * kPlugMemberStride;
         if (!read(blob, row + kPlugMemberIndexOffset, itemDefinitionIndex)
-            || !visitor(context, itemDefinitionIndex)) {
+            || !visit(row, itemDefinitionIndex)) {
             return false;
         }
     }
     return true;
+}
+
+/**
+ * Walks the members of one row of the shared plug-set table. A set with no members visits none.
+ * @param visit Called as visit_plug_rows calls it.
+ * @return False when the row lies outside the table, its members do not parse or a visit fails.
+ */
+template <typename Visit>
+[[nodiscard]] bool visit_plug_set_rows(std::span<const std::byte> plugSetTable,
+                                       const Array& sets,
+                                       std::uint64_t set,
+                                       Visit visit) noexcept {
+    if (set >= sets.count || sets.dataOffset > plugSetTable.size()
+        || sets.count > (plugSetTable.size() - sets.dataOffset) / kPlugSetRowStride) {
+        return false;
+    }
+    const std::size_t descriptor = sets.dataOffset
+                                   + static_cast<std::size_t>(set) * kPlugSetRowStride
+                                   + kPlugSetMemberDescriptorOffset;
+    std::uint64_t memberCount = 0;
+    if (!read(plugSetTable, descriptor, memberCount)) {
+        return false;
+    }
+    if (memberCount == 0) {
+        return true;
+    }
+    Array members{};
+    return find_array_at(plugSetTable, descriptor, members)
+           && visit_plug_rows(plugSetTable, members, visit);
 }
 
 /** Walks one reusable or randomized shared plug-set row, when the socket declares it. */
@@ -318,23 +345,10 @@ void read_sockets(std::span<const std::byte> definition, Row& row) noexcept {
     if (setIndex == kUnavailablePlug) {
         return true;
     }
-    if (setIndex >= sets.count || sets.dataOffset > plugSetTable.size()
-        || sets.count > (plugSetTable.size() - sets.dataOffset) / kPlugSetRowStride) {
-        return false;
-    }
-    const std::size_t descriptor = sets.dataOffset
-                                   + static_cast<std::size_t>(setIndex) * kPlugSetRowStride
-                                   + kPlugSetMemberDescriptorOffset;
-    std::uint64_t memberCount = 0;
-    if (!read(plugSetTable, descriptor, memberCount)) {
-        return false;
-    }
-    if (memberCount == 0) {
-        return true;
-    }
-    Array members{};
-    return find_array_at(plugSetTable, descriptor, members)
-           && visit_plug_array(plugSetTable, members, visitor, context);
+    return visit_plug_set_rows(
+        plugSetTable, sets, setIndex, [=](std::size_t, std::uint32_t item) noexcept {
+            return visitor(context, item);
+        });
 }
 
 /** The block's stat array: its count, then a self-relative pointer to the array header. */
@@ -512,15 +526,12 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
     if (lifetime.count == 0) {
         return true;
     }
-    std::uint32_t opcode = 0;
-    std::int32_t seconds = 0;
-    if (lifetime.count != 1 || lifetime.elementClass != kInvestmentExpressionRowClass
-        || !read(definition, lifetime.dataOffset, opcode) || opcode != kUnlockLiteralOpcode
-        || !read(definition, lifetime.dataOffset + kUnlockInstructionOperandOffset, seconds)
-        || seconds < 0) {
+    std::uint32_t seconds = 0;
+    if (!expression_lone_operand(definition, lifetime, kUnlockLiteralOpcode, seconds)
+        || seconds > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
         return false;
     }
-    row.lifetimeSeconds = seconds;
+    row.lifetimeSeconds = static_cast<std::int32_t>(seconds);
     return true;
 }
 
@@ -610,16 +621,16 @@ void read_presence_flags(std::span<const std::byte> definition, Row& row) noexce
     if (!class_block(definition, kItemUnlockBlockOffset, kItemUnlockBlockClass, block, present)
         || !present
         || !read_array(definition,
-                       block + kPresenceFlagDescriptor,
-                       kPresenceFlagClass,
-                       kPresenceFlagStride,
+                       block + kItemPresenceFlagDescriptor,
+                       kItemPresenceFlagClass,
+                       kItemPresenceFlagStride,
                        flags)
         || flags.count > row.presenceFlags.size()) {
         return;
     }
     for (std::size_t index = 0; index < flags.count; ++index) {
         if (!read(definition,
-                  flags.dataOffset + index * kPresenceFlagStride + kPresenceFlagSlotOffset,
+                  flags.dataOffset + index * kItemPresenceFlagStride + kItemPresenceFlagSlotOffset,
                   row.presenceFlags[index])) {
             row.presenceFlags = {};
             return;
@@ -646,7 +657,7 @@ void read_presence_flags(std::span<const std::byte> definition, Row& row) noexce
     }
     Array objectives{};
     if (!read_completion_metadata(definition, block, row)
-        || !find_optional_array_at(definition, block, objectives)) {
+        || !find_optional_array_at(definition, block + kObjectiveArrayDescriptor, objectives)) {
         return false;
     }
     // An empty objective list may carry no array header. Its lifetime is read all the same.
@@ -690,32 +701,27 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
         return false;
     }
     std::uint8_t instanced = 0;
-    std::uint8_t quietAcquisition = 0;
-    std::uint8_t toastlessAcquisition = 0;
     if (!read(definition, kBucketIdOffset, row.bucketId)
         || !read(definition, kMaxStackSizeOffset, row.maxStackSize)
         || !read(definition, kTierOffset, row.tier)
         || !read(definition, kInstancedOffset, instanced)
         || !read(definition, kRecoveryBucketOffset, row.recoveryBucketId)
         || !read(definition, kStackUniqueLabelOffset, row.stackUniqueLabel)
-        || !read(definition, kQuietAcquisitionOffset, quietAcquisition)
-        || !read(definition, kToastlessAcquisitionOffset, toastlessAcquisition)
-        || quietAcquisition > 1 || toastlessAcquisition > 1) {
+        || !read_boolean(definition, kQuietAcquisitionOffset, row.quietAcquisition)
+        || !read_boolean(definition, kToastlessAcquisitionOffset, row.toastlessAcquisition)) {
         return false;
     }
     row.instanced = instanced != 0;
-    row.quietAcquisition = quietAcquisition != 0;
-    row.toastlessAcquisition = toastlessAcquisition != 0;
     // An action block that does not read leaves the item removed one unit at a time, unrecorded.
     std::size_t action = 0;
     bool hasAction = false;
-    std::uint8_t deletesOnAction = 0;
-    std::uint8_t consumesWholeStack = 0;
+    bool deletesOnAction = false;
+    bool consumesWholeStack = false;
     if (class_block(definition, kActionBlockOffset, kActionBlockClass, action, hasAction)
-        && hasAction && read(definition, action + kActionDeletesOffset, deletesOnAction)
-        && read(definition, action + kActionConsumesStackOffset, consumesWholeStack)) {
-        row.deletesOnAction = deletesOnAction == 1;
-        row.consumesWholeStack = consumesWholeStack == 1;
+        && hasAction && read_boolean(definition, action + kActionDeletesOffset, deletesOnAction)
+        && read_boolean(definition, action + kActionConsumesStackOffset, consumesWholeStack)) {
+        row.deletesOnAction = deletesOnAction;
+        row.consumesWholeStack = consumesWholeStack;
     }
     read_plug_block(definition, row);
     read_stats(definition, row);
@@ -764,7 +770,10 @@ bool visit_allowed_plugs(std::span<const std::byte> definition,
     if (!read(definition, socketEntry + kEmbeddedPlugListOffset, embeddedCount)
         || (embeddedCount != 0
             && (!find_array_at(definition, socketEntry + kEmbeddedPlugListOffset, embedded)
-                || !visit_plug_array(definition, embedded, visitor, context)))) {
+                || !visit_plug_rows(
+                    definition, embedded, [=](std::size_t, std::uint32_t item) noexcept {
+                        return visitor(context, item);
+                    })))) {
         return false;
     }
     return visit_shared_plug_set(definition,
@@ -789,39 +798,21 @@ bool visit_plug_set_flags(std::span<const std::byte> plugSetTable,
                           void* context) noexcept {
     Array sets{};
     if (visitor == nullptr
-        || !find_array_at(plugSetTable, offsetof(generated::C80802cb6, table), sets)
-        || sets.dataOffset > plugSetTable.size()
-        || sets.count > (plugSetTable.size() - sets.dataOffset) / kPlugSetRowStride) {
+        || !find_array_at(plugSetTable, offsetof(generated::C80802cb6, table), sets)) {
         return false;
     }
+    const auto visit = [=](std::size_t row, std::uint32_t item) noexcept {
+        std::int16_t flagSlot = -1;
+        if (!expression_required_flag_slot(
+                plugSetTable, row, kPlugMemberConditionOffset, flagSlot)) {
+            return false;
+        }
+        visitor(context, item, flagSlot);
+        return true;
+    };
     for (std::uint64_t set = 0; set < sets.count; ++set) {
-        const std::size_t descriptor = sets.dataOffset
-                                       + static_cast<std::size_t>(set) * kPlugSetRowStride
-                                       + kPlugSetMemberDescriptorOffset;
-        std::uint64_t memberCount = 0;
-        if (!read(plugSetTable, descriptor, memberCount)) {
+        if (!visit_plug_set_rows(plugSetTable, sets, set, visit)) {
             return false;
-        }
-        if (memberCount == 0) {
-            continue;
-        }
-        Array members{};
-        if (!find_array_at(plugSetTable, descriptor, members)
-            || members.count > kMaximumPlugMemberCount || members.dataOffset > plugSetTable.size()
-            || members.count > (plugSetTable.size() - members.dataOffset) / kPlugMemberStride) {
-            return false;
-        }
-        for (std::uint64_t member = 0; member < members.count; ++member) {
-            const std::size_t row =
-                members.dataOffset + static_cast<std::size_t>(member) * kPlugMemberStride;
-            std::uint32_t itemDefinitionIndex = 0;
-            std::int16_t flagSlot = -1;
-            if (!read(plugSetTable, row + kPlugMemberIndexOffset, itemDefinitionIndex)
-                || !expression_required_flag_slot(
-                    plugSetTable, row, kPlugMemberConditionOffset, flagSlot)) {
-                return false;
-            }
-            visitor(context, itemDefinitionIndex, flagSlot);
         }
     }
     return true;

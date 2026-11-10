@@ -1,7 +1,6 @@
 #include <Windows.h>
 
 #include <array>
-#include <cstring>
 #include <span>
 #include <vector>
 
@@ -9,6 +8,7 @@
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
+#include "../../../../middleware/content/packages/tables/field_reader.h"
 #include "../../../../state/account/inventory/synthesizer_tier.h"
 #include "../../../../state/build_data/activities/activity_catalog.h"
 #include "../../../../state/build_data/runtime.h"
@@ -56,6 +56,7 @@ namespace {
  */
 [[nodiscard]] bool read_restricted_grants(const reader::Source& source, Storage& storage) noexcept {
     std::uint32_t tag = 0;
+    std::uint32_t tableClass = 0;
     std::vector<std::byte> blob{};
     tables::Array rows{};
     if (!tables::slot_tag(
@@ -67,20 +68,22 @@ namespace {
     if (tag == 0) {
         return true;
     }
-    if (!reader::read_tag(source, storage.scratch, tag, blob)
-        || !tables::find_array_at(
-            std::span<const std::byte>{blob}, tables::kRestrictedGrantArrayDescriptor, rows)
-        || rows.elementClass != tables::kRestrictedGrantElementClass
-        || rows.dataOffset > blob.size()
-        || rows.count > (blob.size() - rows.dataOffset) / tables::kRestrictedGrantStride) {
+    if (!reader::read_tag(source, storage.scratch, tag, blob, tableClass)
+        || tableClass != tables::kRestrictedGrantTableClass
+        || !tables::read_array(std::span<const std::byte>{blob},
+                               tables::kRestrictedGrantArrayDescriptor,
+                               tables::kRestrictedGrantElementClass,
+                               tables::kRestrictedGrantStride,
+                               rows)) {
         return false;
     }
     for (std::size_t row = 0; row < rows.count; ++row) {
+        const std::size_t at = rows.dataOffset + row * tables::kRestrictedGrantStride;
         std::uint16_t itemIndex = 0;
-        std::memcpy(&itemIndex,
-                    blob.data() + rows.dataOffset + row * tables::kRestrictedGrantStride,
-                    sizeof itemIndex);
-        if (itemIndex >= storage.restrictedGrants.size()) {
+        if (!tables::read(std::span<const std::byte>{blob},
+                          at + tables::kRestrictedGrantItemIndexOffset,
+                          itemIndex)
+            || itemIndex >= storage.restrictedGrants.size()) {
             return false;
         }
         storage.restrictedGrants[itemIndex] = true;
@@ -327,8 +330,10 @@ bool build() noexcept {
                                          std::span<const std::byte>{storage.root},
                                          storage.child);
             }
+            // Only item rows carry the list, so a pass that has them published skips the read.
             reason = "restricted_grants";
-            if (!read_restricted_grants(source, storage)) {
+            if (!state::build_data::item_definitions_ready()
+                && !read_restricted_grants(source, storage)) {
                 continue;
             }
             reason = "slot";

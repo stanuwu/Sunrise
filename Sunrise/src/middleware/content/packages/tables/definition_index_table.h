@@ -16,6 +16,7 @@
 #include "../schema/generated/tag_classes_80805d.h"
 #include "../schema/generated/tag_classes_808074.h"
 #include "../schema/generated/tag_classes_808077.h"
+#include "../schema/generated/tag_classes_808078.h"
 #include "../schema/generated/tag_classes_80807a.h"
 #include "../schema/generated/tag_classes_80807b.h"
 #include "../schema/generated/tag_classes_80807c.h"
@@ -509,7 +510,7 @@ inline constexpr std::size_t kPlugSetTableSlot =
 /** The investment root holds the items ordinary grants refuse at this slot. */
 inline constexpr std::size_t kRestrictedGrantTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, unk3b8));
-// Unnamed in the generated root; the shipped slot 59 tag is a C8080787a list naming one item.
+// Unnamed in the generated root; the shipped slot 59 tag is a C80807879 whose list names one item.
 static_assert(kRestrictedGrantTableSlot == 59);
 /** The investment root holds the actor class race table at this slot. */
 inline constexpr std::size_t kEnemyRaceTableSlot =
@@ -525,15 +526,17 @@ inline constexpr std::size_t kEnemyRaceArrayDescriptor =
 inline constexpr std::size_t kEnemyRaceClassOffset = offsetof(schema::generated::C80807bc0, unk0);
 inline constexpr std::size_t kEnemyRaceOrdinalOffset = offsetof(schema::generated::C80807bc0, gap4);
 inline constexpr std::size_t kEnemyRaceRowStride = sizeof(schema::generated::C80807bc0);
-/** Element class of the restricted-grant rows. */
+/** Class of the restricted-grant list tag, and element class of its rows. */
+inline constexpr std::uint32_t kRestrictedGrantTableClass = schema::generated::C80807879::kClass;
 inline constexpr std::uint32_t kRestrictedGrantElementClass = schema::generated::C8080787c::kClass;
-/** The list tag opens with the 8-byte tag header that C8080787a's generated layout leaves out. */
-inline constexpr std::size_t kRestrictedGrantTagHeader = 8;
-/** The list tag holds its rows in this array, after the header. */
+/** The list tag holds its rows in this array, after its size word. */
 inline constexpr std::size_t kRestrictedGrantArrayDescriptor =
-    kRestrictedGrantTagHeader + offsetof(schema::generated::C8080787a, trackedItems);
+    offsetof(schema::generated::C80807879, constants.trackedItems);
+static_assert(offsetof(schema::generated::C80807879, constants) == reader::layout::kSizeWordSize);
 /** Each row holds the item-table index first; nothing the client reads follows it. */
 inline constexpr std::size_t kRestrictedGrantStride = sizeof(schema::generated::C8080787c);
+inline constexpr std::size_t kRestrictedGrantItemIndexOffset =
+    offsetof(schema::generated::C8080787c, gap0);
 /** The investment root holds the dense ordinary socket-type table at this slot. */
 inline constexpr std::size_t kSocketTypeTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, slot94SocketTypes));
@@ -586,6 +589,14 @@ inline constexpr std::size_t kItemUnlockBlockOffset =
     offsetof(schema::generated::ItemDefinition, unlockItemBlock);
 /** This block's first array names the flags supplied by item presence. */
 inline constexpr std::uint32_t kItemUnlockBlockClass = schema::generated::ItemUnlockBlock::kClass;
+/** Presence-flag entries hold unlock slot indices, not saved bank rows. */
+inline constexpr std::uint32_t kItemPresenceFlagClass = schema::generated::ItemPresenceFlag::kClass;
+inline constexpr std::size_t kItemPresenceFlagDescriptor =
+    offsetof(schema::generated::ItemUnlockBlock, presenceFlags);
+/** Each presence-flag entry occupies one 16-bit slot. */
+inline constexpr std::size_t kItemPresenceFlagStride = sizeof(schema::generated::ItemPresenceFlag);
+inline constexpr std::size_t kItemPresenceFlagSlotOffset =
+    offsetof(schema::generated::ItemPresenceFlag, unlockSlot);
 /** Objective array entries are 16-bit table indices. */
 inline constexpr std::size_t kObjectiveArrayDescriptor =
     offsetof(schema::generated::ItemObjectiveBlock, objectives);

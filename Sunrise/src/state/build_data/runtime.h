@@ -426,6 +426,10 @@ void set_exotic_catalyst_completion_enabled(bool enabled) noexcept;
 [[nodiscard]] bool
 publish_sobject_definitions(std::span<const sobjects::Definition> definitions) noexcept;
 
+/** Finds one incident target by its wire index. @return False when no row holds that index. */
+[[nodiscard]] bool find_sobject_definition(std::uint16_t targetIndex,
+                                           sobjects::Definition& definition) noexcept;
+
 /** @return True when the whole presentation node table is in State. */
 [[nodiscard]] bool node_definitions_ready() noexcept;
 
@@ -578,6 +582,14 @@ void settle_reward_definitions_unsupported() noexcept;
 [[nodiscard]] bool find_objective_definition(std::uint16_t index,
                                              objectives::Definition& output) noexcept;
 
+/**
+ * Reads one objective row's fixed fields without copying its programs.
+ * @param index Native objective-table index.
+ * @param output Receives the row; its ranges only say how long each program is.
+ * @return True when the table holds that row.
+ */
+[[nodiscard]] bool find_objective_row(std::uint16_t index, objectives::Row& output) noexcept;
+
 /** @return True when the pursuit contracts are in State. */
 [[nodiscard]] bool pursuit_definitions_ready() noexcept;
 
@@ -640,6 +652,12 @@ publish_repeatable_bounties(std::span<const bounties::Definition> definitions) n
 [[nodiscard]] bool repeatable_bounty_pool(const bounties::ItemType& itemType,
                                           std::span<std::uint16_t> output,
                                           std::size_t& count) noexcept;
+
+/**
+ * @param itemIndex Native item-definition index.
+ * @return True when the table is ready and a repeatable vendor's pool holds the item.
+ */
+[[nodiscard]] bool in_repeatable_bounty_pool(std::uint16_t itemIndex) noexcept;
 
 /** Sale rows the seasonal artifact offers. The shipped artifact declares 26. */
 inline constexpr std::size_t kArtifactSaleRowCapacity = 32;

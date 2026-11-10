@@ -5,6 +5,7 @@
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/schema/generated/tag_classes_808077.h"
 #include "../../../../middleware/content/packages/tables/quest_initialization_reader.h"
+#include "../../../../middleware/content/packages/tables/reward_table.h"
 #include "../../../../state/build_data/items/catalysts/exotic_catalyst_builder.h"
 #include "../../../../state/build_data/items/details/item_detail_catalog.h"
 #include "../../../../state/build_data/runtime.h"
@@ -76,6 +77,10 @@ void read_plug_set_flags(Storage& storage) noexcept {
                          "ev=pkg stage=plug_set_flags result=fail");
     }
 }
+
+// The condition reader walks a plug's rule rows as bare expression fields.
+static_assert(sizeof(generated::C808077e6) == tables::rewards::ConditionRow::kSize
+              && offsetof(generated::C808077e6, unlockExpression) == 0);
 
 /**
  * Binds the insertion rules one plug declares. A list that does not read, bind or fit is kept as
@@ -348,32 +353,33 @@ bool build_item_rows(const reader::Source& source,
                                                      storage.rewardBuild.conditions))) {
             storage.pursuitBuild.read_failed(item.definitionIndex);
         }
+        build_items::Definition& definition = storage.rows[rowCount++];
+        definition = {};
+        definition.definitionHash = item.definitionHash;
+        definition.definitionIndex = item.definitionIndex;
+        definition.bucketId = item.bucketId;
+        definition.insertionMaterialRequirementSetIndex =
+            item.insertionMaterialRequirementSetIndex;
+        definition.enabledMaterialRequirementSetIndex = item.enabledMaterialRequirementSetIndex;
+        definition.tier = item.tier;
+        definition.plugCategoryHash = plugCategoryHash;
+        definition.rollSetIndex = item.rollSetIndex;
+        definition.linkedPlugIndex = item.linkedPlugIndex;
+        definition.questInitialization = quest;
+        definition.recoveryBucketId = item.recoveryBucketId;
+        definition.quietAcquisition = item.quietAcquisition;
+        definition.toastlessAcquisition = item.toastlessAcquisition;
+        definition.stackUniqueLabel = item.stackUniqueLabel;
         // The list holds one entry per catalog row, and a table position can pass that capacity.
-        const bool restrictedGrant = item.definitionIndex < storage.restrictedGrants.size()
+        definition.grantRestricted = item.definitionIndex < storage.restrictedGrants.size()
                                      && storage.restrictedGrants[item.definitionIndex];
-        storage.rows[rowCount++] =
-            state::build_data::items::Definition{item.definitionHash,
-                                                 item.definitionIndex,
-                                                 item.bucketId,
-                                                 item.insertionMaterialRequirementSetIndex,
-                                                 item.enabledMaterialRequirementSetIndex,
-                                                 item.tier,
-                                                 plugCategoryHash,
-                                                 item.rollSetIndex,
-                                                 item.linkedPlugIndex,
-                                                 quest,
-                                                 item.recoveryBucketId,
-                                                 item.quietAcquisition,
-                                                 item.toastlessAcquisition,
-                                                 item.stackUniqueLabel,
-                                                 restrictedGrant,
-                                                 bank_index(storage.slotMaps.accountValue,
-                                                            item.quantityValueSlot),
-                                                 storage.plugSetFlagIndices[item.definitionIndex],
-                                                 item.presenceFlags,
-                                                 item.presenceFlagCount,
-                                                 item.consumesWholeStack,
-                                                 item.deletesOnAction};
+        definition.quantityValueIndex =
+            bank_index(storage.slotMaps.accountValue, item.quantityValueSlot);
+        definition.plugSetFlagIndex = storage.plugSetFlagIndices[item.definitionIndex];
+        definition.presenceFlags = item.presenceFlags;
+        definition.presenceFlagCount = item.presenceFlagCount;
+        definition.consumesWholeStack = item.consumesWholeStack;
+        definition.deletesOnAction = item.deletesOnAction;
         if (needSocketRows) {
             storage.specialPlugCategories[item.definitionIndex] =
                 special_plug_category(plugCategoryHash);

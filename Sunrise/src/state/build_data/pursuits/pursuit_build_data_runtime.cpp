@@ -33,6 +33,14 @@ namespace {
                || find_item_definition_index(row.questStep.successorIndex, item));
 }
 
+/** @return The first contract naming an item the catalog lacks, or rows.size() when none does. */
+[[nodiscard]] std::size_t first_uninstalled(std::span<const pursuits::Definition> rows) noexcept {
+    const auto found = std::find_if(rows.begin(), rows.end(), [](const pursuits::Definition& row) {
+        return !names_installed_item(row) || !references_installed_items(row);
+    });
+    return static_cast<std::size_t>(found - rows.begin());
+}
+
 /** Drops both tables when the first cache write after settling fails. */
 void clear_pursuit_catalog() noexcept {
     objectives::clear();
@@ -61,23 +69,23 @@ bool valid_pursuit_definitions(std::span<const pursuits::Definition> rows) noexc
     if (!item_definitions_ready() || !objective_definitions_ready()) {
         return false;
     }
-    for (std::size_t index = 0; index < rows.size(); ++index) {
-        if (!names_installed_item(rows[index]) || !references_installed_items(rows[index])) {
-            core::log::writef(core::log::Channel::state,
-                              core::log::Level::warn,
-                              "ev=pursuit_definitions result=rejected item=%u row=%zu total=%zu",
-                              static_cast<unsigned>(rows[index].definitionIndex),
-                              index,
-                              rows.size());
-            return false;
-        }
+    const std::size_t index = first_uninstalled(rows);
+    if (index != rows.size()) {
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=pursuit_definitions result=rejected item=%u row=%zu total=%zu",
+                          static_cast<unsigned>(rows[index].definitionIndex),
+                          index,
+                          rows.size());
+        return false;
     }
     return pursuits::valid(rows, objectives::count());
 }
 
-/** Publishes the contracts once every edge is checked. */
+/** Publishes the contracts once every edge is checked; the catalog checks their own fields. */
 bool publish_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept {
-    if (!valid_pursuit_definitions(rows)) {
+    if (!item_definitions_ready() || !objective_definitions_ready()
+        || first_uninstalled(rows) != rows.size()) {
         return false;
     }
     runtime::persistence::Transaction transaction;

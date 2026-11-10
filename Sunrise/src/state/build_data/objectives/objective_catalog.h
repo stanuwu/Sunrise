@@ -14,6 +14,8 @@ void clear() noexcept;
 [[nodiscard]] bool replace(View data) noexcept;
 /** Copies one row with its programs, returning false when the row is missing or the copy fails. */
 [[nodiscard]] bool find(std::uint16_t index, Definition& output) noexcept;
+/** Copies one row's fixed fields and leaves its programs in the bank. */
+[[nodiscard]] bool find_row(std::uint16_t index, Row& output) noexcept;
 /** @return Published row count, read under the lock. */
 [[nodiscard]] std::size_t count() noexcept;
 

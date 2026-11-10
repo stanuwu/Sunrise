@@ -55,6 +55,7 @@ void bind_content(std::uint64_t contentHash) noexcept {
     g_contentHash = contentHash;
 }
 
+/** @return The content hash bound at boot, or zero when none was. */
 std::uint64_t content_hash() noexcept {
     return g_contentHash;
 }

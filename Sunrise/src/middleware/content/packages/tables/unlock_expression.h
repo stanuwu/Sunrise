@@ -8,6 +8,7 @@
 
 #include "../reader/typed_array.h"
 #include "definition_index_table.h"
+#include "field_reader.h"
 
 namespace sunrise::middleware::content::packages::tables {
 
@@ -115,6 +116,23 @@ namespace sunrise::middleware::content::packages::tables {
 }
 
 /**
+ * Reads the operand of an expression that is one instruction of the given opcode and nothing else.
+ * @param rows The expression's instruction array, as its field's descriptor located it.
+ * @param operand Receives the operand; unchanged on failure.
+ * @return False when the expression is anything else, an empty one included.
+ */
+[[nodiscard]] inline bool expression_lone_operand(std::span<const std::byte> blob,
+                                                  const Array& rows,
+                                                  std::uint32_t opcode,
+                                                  std::uint32_t& operand) noexcept {
+    std::uint32_t actual = 0;
+    return rows.count == 1 && rows.elementClass == kInvestmentExpressionRowClass
+           && read(blob, rows.dataOffset + kUnlockInstructionOpcodeOffset, actual)
+           && actual == opcode
+           && read(blob, rows.dataOffset + kUnlockInstructionOperandOffset, operand);
+}
+
+/**
  * Reads the value slot of an expression that is one value read and nothing else, the shape of a
  * plug's quantity expression.
  * @return False when the field is anything else.
@@ -123,13 +141,11 @@ namespace sunrise::middleware::content::packages::tables {
                                                      std::size_t rowAt,
                                                      std::size_t field,
                                                      std::int16_t& slot) noexcept {
-    std::int64_t count = 0;
-    reader::TypedArrayRows rows{};
-    std::uint32_t opcode = 0;
+    Array rows{};
     std::uint32_t operand = 0;
-    if (!expression_rows(table, rowAt, field, count, rows) || count != 1
-        || !expression_instruction(table, rows, 0, opcode, operand)
-        || opcode != kUnlockReadValueOpcode || operand > static_cast<std::uint32_t>(INT16_MAX)) {
+    if (!find_array_at(table, rowAt + field, rows)
+        || !expression_lone_operand(table, rows, kUnlockReadValueOpcode, operand)
+        || operand > static_cast<std::uint32_t>(INT16_MAX)) {
         return false;
     }
     slot = static_cast<std::int16_t>(operand);

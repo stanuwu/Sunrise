@@ -26,4 +26,9 @@ bool find_objective_definition(std::uint16_t index, objectives::Definition& outp
     return objectives::find(index, output);
 }
 
+/** Copies one objective row's fixed fields without its programs. */
+bool find_objective_row(std::uint16_t index, objectives::Row& output) noexcept {
+    return objectives::find_row(index, output);
+}
+
 } // namespace sunrise::state::build_data

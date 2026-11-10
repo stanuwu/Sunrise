@@ -58,7 +58,7 @@ completion_value(std::uint16_t slot, std::span<const std::byte> valueMap) noexce
 
 /**
  * Binds the condition each reward row names. An expression that does not read, bind or fit is kept
- * as an unreadable row, which pays nothing.
+ * as a row marked unreadable.
  * @param unreadable Counts the rows kept unreadable.
  * @return False only when the reader's storage failed, which a later pass retries.
  */
@@ -85,6 +85,7 @@ completion_value(std::uint16_t slot, std::span<const std::byte> valueMap) noexce
 
 } // namespace
 
+/** Logs a refusal the installed data decides and settles the objective and pursuit domains. */
 void settle_pursuits_unsupported(const char* reason) noexcept {
     if (state::build_data::pursuit_catalog_unsupported()) {
         return;
@@ -102,6 +103,7 @@ bool pursuit_catalog_settled() noexcept {
            || state::build_data::pursuit_catalog_unsupported();
 }
 
+/** Starts a new walk, discarding what an earlier one collected. */
 void PursuitBuild::begin() noexcept {
     rows_.clear();
     unreadCount_ = 0;
@@ -111,6 +113,7 @@ void PursuitBuild::begin() noexcept {
     unreadableConditions_ = 0;
 }
 
+/** Collects one item's contract, returning false when it could not be stored. */
 bool PursuitBuild::item(const tables::items::Row& row,
                         const pursuits::QuestStep& questStep,
                         std::span<const std::byte> valueMap,
@@ -154,18 +157,21 @@ bool PursuitBuild::item(const tables::items::Row& row,
     }
 }
 
+/** Counts an item the installed data leaves unreadable. That item gets no contract. */
 void PursuitBuild::unread(std::uint16_t index) noexcept {
     if (unreadCount_++ == 0) {
         firstUnread_ = index;
     }
 }
 
+/** Notes a cataloged item whose read or storage failed, which holds publication back. */
 void PursuitBuild::read_failed(std::uint16_t index) noexcept {
     if (readFailures_++ == 0) {
         firstReadFailure_ = index;
     }
 }
 
+/** Publishes the collected contracts, or settles the domain when State refuses them. */
 void PursuitBuild::publish() noexcept {
     // Every contract is checked against the item and objective tables, so wait for both.
     if (!state::build_data::item_definitions_ready()
@@ -194,9 +200,11 @@ void PursuitBuild::publish() noexcept {
     for (pursuits::Definition& row : rows_) {
         unresolved += static_cast<std::size_t>(drop_uncataloged_references(row));
     }
-    const bool valid = state::build_data::valid_pursuit_definitions(rows_);
     // The cache write can still fail, and a failed publish repeats the item walk on a later pass.
-    const bool published = valid && state::build_data::publish_pursuit_definitions(rows_);
+    const bool published = state::build_data::publish_pursuit_definitions(rows_);
+    // Publishing checks the contracts, so only a failed publish is checked again, to tell
+    // contracts State refuses from a write that failed.
+    const bool valid = published || state::build_data::valid_pursuit_definitions(rows_);
     const std::size_t rowCount = rows_.size();
     // State keeps its own copy, so release the collected rows.
     rows_ = {};

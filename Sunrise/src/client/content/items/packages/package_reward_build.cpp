@@ -9,6 +9,7 @@
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../middleware/content/packages/tables/field_reader.h"
 #include "../../../../middleware/content/packages/tables/reward_table.h"
+#include "../../../../middleware/content/packages/tables/unlock_expression.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_expression.h"
 #include "internal.h"
@@ -608,20 +609,11 @@ std::uint16_t RewardConditions::item_value_slot(
     constexpr std::uint16_t kNone = state::build_data::objectives::kNoItemValueSlot;
     mode = Mode::context;
     tables::Array rows{};
-    std::uint32_t native = 0;
     std::uint32_t slot = 0;
     std::uint8_t kind = 0;
     std::uint8_t flags = 0;
-    if (!loaded_
-        || !tables::read_array(blob,
-                               at,
-                               tables::kInvestmentExpressionRowClass,
-                               tables::kUnlockInstructionStride,
-                               rows)
-        || rows.count != 1
-        || !tables::read(blob, rows.dataOffset + tables::kUnlockInstructionOpcodeOffset, native)
-        || native != tables::kUnlockReadValueOpcode
-        || !tables::read(blob, rows.dataOffset + tables::kUnlockInstructionOperandOffset, slot)
+    if (!loaded_ || !tables::find_array_at(blob, at, rows)
+        || !tables::expression_lone_operand(blob, rows, tables::kUnlockReadValueOpcode, slot)
         || slot >= valueRows_.count || slot >= kNone) {
         return kNone;
     }

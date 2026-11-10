@@ -102,6 +102,17 @@ bool find(std::uint16_t index, Definition& output) noexcept {
     return true;
 }
 
+/** Copies one row's fixed fields and leaves its programs in the bank. */
+bool find_row(std::uint16_t index, Row& output) noexcept {
+    output = {};
+    const std::shared_lock guard(g_lock);
+    if (index >= g_rows.count()) {
+        return false;
+    }
+    output = g_rows.rows()[index];
+    return true;
+}
+
 /** @return Published row count, read under the lock. */
 std::size_t count() noexcept {
     const std::shared_lock guard(g_lock);

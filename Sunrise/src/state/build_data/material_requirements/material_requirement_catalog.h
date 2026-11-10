@@ -63,6 +63,7 @@ void clear() noexcept;
 [[nodiscard]] std::uint32_t currency_multiplier(std::uint16_t socketType,
                                                 std::uint16_t itemDefinitionIndex) noexcept;
 [[nodiscard]] bool snapshot(std::span<Definition> output, std::size_t& count) noexcept;
+/** Copies every currency scalar; count is zero when the output is too small. */
 [[nodiscard]] bool snapshot_currency_scalars(std::span<CurrencyScalar> output,
                                              std::size_t& count) noexcept;
 [[nodiscard]] std::size_t count() noexcept;

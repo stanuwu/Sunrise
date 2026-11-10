@@ -258,7 +258,7 @@ bool read_investment_constants(const reader::Source& source,
     return output.extracted;
 }
 
-/** Each value slot's row in the value table opens with the unlock hash it binds. */
+/** Finds the character value-block row holding one unlock value: its slot by hash, then its row. */
 bool read_character_value_row(const reader::Source& source,
                               reader::Scratch& scratch,
                               std::span<const std::byte> root,

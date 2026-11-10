@@ -46,12 +46,6 @@ constexpr std::size_t kQuestSetMemberItemOffset = offsetof(generated::QuestSetMe
 /** Only member rows whose final 16 bits are zero are supported. */
 constexpr std::size_t kQuestSetMemberReservedOffset = offsetof(generated::QuestSetMember, reserved);
 
-/** Presence-flag entries hold unlock slot indices, not saved bank rows. */
-constexpr std::uint32_t kItemPresenceFlagClass = generated::ItemPresenceFlag::kClass;
-constexpr std::size_t kItemPresenceFlagDescriptor =
-    offsetof(generated::ItemUnlockBlock, presenceFlags);
-/** Each presence-flag entry occupies one 16-bit slot. */
-constexpr std::size_t kItemPresenceFlagStride = sizeof(generated::ItemPresenceFlag);
 /** Authored value/flag slots must fit the nonnegative range of a signed 16-bit mapping. */
 constexpr std::uint16_t kUnlockSlotLimit = 0x8000U;
 /** Policy: pursuits without presence flags need a bucket-37 root with no objective block. */

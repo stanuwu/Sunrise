@@ -137,6 +137,7 @@ struct ObjectiveTable {
 
 } // namespace
 
+/** Reads and publishes the objective table; one the data refuses settles the pursuit domains. */
 bool build_objectives(const reader::Source& source,
                       reader::Scratch& scratch,
                       std::span<const std::byte> root,

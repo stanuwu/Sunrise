@@ -20,8 +20,8 @@ inline constexpr std::size_t kObjectiveCapacity = 7;
 inline constexpr std::size_t kRewardPreviewCapacity = 6;
 /**
  * Instructions one reward row's condition expands to. The shipped build declares 318 conditional
- * rows, and the longest expands to seven. A longer one is kept as an unreadable row, which pays
- * nothing. 8 bytes each, so 1.5 MiB across a full catalog.
+ * rows, and the longest expands to seven. A longer one is kept as a row marked unreadable. 8 bytes
+ * each, so 1.5 MiB across a full catalog.
  */
 inline constexpr std::size_t kRewardConditionCapacity = 8;
 /** The item instance record ends in eight per-item values, so a contract maps at most eight. */
@@ -38,7 +38,7 @@ struct RewardPreview {
     std::array<unlocks::Instruction, kRewardConditionCapacity> condition{};
     /** Entries of `condition` in use. Zero when the row names no expression. */
     std::uint8_t conditionCount{};
-    /** True when the expression did not read, bind or fit, so the row pays nothing. */
+    /** True when the expression did not read, bind or fit. */
     bool conditionUnreadable{};
 };
 
