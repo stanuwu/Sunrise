@@ -274,6 +274,8 @@ enum class ScriptableOverrideKind : std::uint8_t {
     damageWatch,
     /** Type-65 Ghost-link scan: the host owns its generation and finishes its bar. */
     ghostLink,
+    /** Type-2 `.5` actor controls replaced on the live actor, one revision above the last. */
+    combatantControls,
 };
 
 /** The client stalls one frame short of the duration, so this reported fraction is the bar's end.
@@ -298,6 +300,7 @@ inline constexpr float kGhostLinkFinishFraction = 0.99F;
     case ScriptableOverrideKind::combatantProgram:
     case ScriptableOverrideKind::combatantRetirement:
     case ScriptableOverrideKind::damageWatch:
+    case ScriptableOverrideKind::combatantControls:
         return false;
     case ScriptableOverrideKind::object:
     case ScriptableOverrideKind::sequence:

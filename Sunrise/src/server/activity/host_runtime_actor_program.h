@@ -110,4 +110,30 @@ retained(const detail::Instance& instance, const ScriptableTarget& target) noexc
     return encoded;
 }
 
+/** Replaces the live actor's controls; the revision follows the transported body's. */
+[[nodiscard]] inline bool encode_controls(const detail::Instance& instance,
+                                          const detail::ScriptableRequest& request,
+                                          PendingScriptableOverride& pending,
+                                          std::size_t& written) noexcept {
+    namespace auth = middleware::bap::activity_message::scriptable_auth;
+    const auto* previous = retained(instance, request.target);
+    if (previous == nullptr) {
+        return false;
+    }
+    std::size_t bits = 0;
+    std::uint32_t revision = 0;
+    const bool encoded =
+        auth::replace_type2_controls(std::span(previous->body).first(previous->byteCount),
+                                     previous->bitCount,
+                                     std::span(request.authBody).first(request.authByteCount),
+                                     request.authBitCount,
+                                     pending.body,
+                                     written,
+                                     bits,
+                                     revision);
+    pending.bitCount = static_cast<std::uint16_t>(bits);
+    pending.generation = revision;
+    return encoded;
+}
+
 } // namespace sunrise::server::activity::host::actor_program

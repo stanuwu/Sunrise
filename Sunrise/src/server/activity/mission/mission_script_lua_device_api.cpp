@@ -272,13 +272,24 @@ constexpr std::int8_t kFilterModeInside = 1;
         && !append_predicate(body, auth::Type34ModeOnlyB{static_cast<std::int8_t>(volumes)})) {
         return luaL_error(state, kCapacityError);
     }
+    // The direct predicate names its target by ClientRef, so it takes a combatant as it takes
+    // an object.
     auth::Type2LaneClientRef target{};
-    if (!optional_slot_reference(state,
-                                 optional_key(kObjectFilter, "target", api::ValueKind::handle),
-                                 auth::kType4SlotType,
-                                 target)) {
-        return luaL_error(state, "filter target must be an authored type-4 object");
+    lua_getfield(state, 2, optional_key(kObjectFilter, "target", api::ValueKind::handle));
+    if (!lua_isnil(state, -1)) {
+        const auto* const targetHandle =
+            static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
+        SlotDefinition targeted{};
+        if (!current_slot(state, *targetHandle, targeted)
+            || (targeted.slotType != auth::kType4SlotType && !exact_combatant_slot(targeted))
+            || targeted.slotIndex > auth_fields::kMaximumClientRefIndex) {
+            return luaL_error(state, "filter target must be an authored object or combatant");
+        }
+        target = {targeted.registryKey,
+                  static_cast<std::int8_t>(targeted.slotType),
+                  static_cast<std::int16_t>(targeted.slotIndex)};
     }
+    lua_pop(state, 1);
     if (target.slotIndex >= 0
         && !append_predicate(body, auth::Type34ModeSlotRefC{kFilterModeDirect, target})) {
         return luaL_error(state, kCapacityError);

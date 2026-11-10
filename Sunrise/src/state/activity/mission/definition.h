@@ -218,6 +218,7 @@ enum class IntentKind : std::uint8_t {
     /** Sends one msg-19 incident to the client; `firstRow` is the target, `authBody` the payload.
      */
     sendIncident,
+    setActorControls,
 };
 
 /** Actor sequence values belong to one combatant and one SDK/client generation. */

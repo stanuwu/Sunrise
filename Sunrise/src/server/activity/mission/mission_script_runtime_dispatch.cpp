@@ -1063,6 +1063,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     case lua_vm::IntentKind::setInteractableObject:
     case lua_vm::IntentKind::setGhostLink:
     case lua_vm::IntentKind::watchDamage:
+    case lua_vm::IntentKind::setActorControls:
     case lua_vm::IntentKind::applySlotAuth: {
         if (intent.authByteCount == 0 || intent.authByteCount != intent.authBody.size()) {
             refuse_delivery(
@@ -1082,6 +1083,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                 ? host::ScriptableOverrideKind::ghostLink
             : intent.kind == lua_vm::IntentKind::watchDamage
                 ? host::ScriptableOverrideKind::damageWatch
+            : intent.kind == lua_vm::IntentKind::setActorControls
+                ? host::ScriptableOverrideKind::combatantControls
                 : host::ScriptableOverrideKind::sdkAuth;
         std::uint64_t carrier = 0;
         const devices::Status status = deliver_through_holder(

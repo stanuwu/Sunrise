@@ -180,15 +180,24 @@ inline constexpr std::size_t kType2FullMaximumByteCount = (kType2FullMaximumBitC
 /** Exact retained spans around `.6`; all other root fields remain byte-for-byte unchanged. */
 struct Type2ProgramLayout final {
     std::size_t controlOffset{};
+    /** Start of `.5`, the actor controls. */
+    std::size_t channelsOffset{};
     std::size_t programOffset{};
     std::size_t programBits{};
     std::uint32_t spawnGeneration{};
     std::uint32_t generation{};
+    /** `.5` revision; zero while `.5` is absent. */
+    std::uint32_t controlRevision{};
+    std::uint8_t temperamentCount{};
+    std::uint8_t channelCount{};
     std::uint8_t bindingWire{};
     bool enabled{};
 };
 
-/** Replaces a program and owns the counters for actor creation or retirement. */
+/**
+ * Replaces a program and owns the counters for actor creation or retirement. A creating program
+ * whose `.5` names a temperament or channel gives the new life those controls.
+ */
 [[nodiscard]] bool replace_type2_atoms(std::span<const std::byte> previous,
                                        std::size_t previousBits,
                                        std::span<const std::byte> program,
@@ -202,6 +211,20 @@ struct Type2ProgramLayout final {
                                        std::uint32_t& generation,
                                        std::uint32_t& spawnGeneration,
                                        bool retire = false) noexcept;
+
+/**
+ * Replaces only `.5` on an enabled actor: the root, program and passengers are kept bit for bit.
+ * @param controls A body whose `.5` holds the complete controls; its revision is a placeholder.
+ * @param revision Receives the control revision written, one above the transported one.
+ */
+[[nodiscard]] bool replace_type2_controls(std::span<const std::byte> previous,
+                                          std::size_t previousBits,
+                                          std::span<const std::byte> controls,
+                                          std::size_t controlsBits,
+                                          std::span<std::byte> output,
+                                          std::size_t& written,
+                                          std::size_t& writtenBits,
+                                          std::uint32_t& revision) noexcept;
 
 /** Reads every full-root field using native bounded arrays and finite atom-lane tags. */
 [[nodiscard]] bool inspect_type2_program(std::span<const std::byte> input,

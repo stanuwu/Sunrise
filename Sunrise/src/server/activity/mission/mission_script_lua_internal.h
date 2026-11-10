@@ -229,5 +229,7 @@ void push_atom_kinds(lua_State* state);
 
 /** Loads the 32-lane client-atom program one type-2 combatant runs on its bound actor. */
 [[nodiscard]] int slot_run_atoms(lua_State* state);
+/** Replaces the controls of one live type-2 combatant. */
+[[nodiscard]] int slot_set_actor_controls(lua_State* state);
 
 } // namespace sunrise::server::activity::mission::lua_vm::detail

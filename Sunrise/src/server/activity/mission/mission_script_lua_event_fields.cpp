@@ -115,6 +115,8 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "slot.set_channel";
     case ActionKind::runActorProgram:
         return "slot.run_atoms";
+    case ActionKind::setActorControls:
+        return "slot.set_actor_controls";
     case ActionKind::retireActor:
         return "slot.retire_actor";
     case ActionKind::setInteractableObject:

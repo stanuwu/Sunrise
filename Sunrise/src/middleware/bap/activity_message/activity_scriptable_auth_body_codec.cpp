@@ -602,15 +602,22 @@ bool inspect_type2_program(std::span<const std::byte> input,
             return false;
         }
     }
+    candidate.channelsOffset = input.size() * 8U - reader.remaining_bits();
     if (!reader.read(1, present)) {
         return false;
     }
     if (present != 0) {
-        if (!reader.skip(31 + 6 + 6) || !reader.read(3, count) || count > kType2TemperamentCapacity
-            || !reader.skip(count * 32) || !reader.skip(55 + 32) || !reader.read(5, count)
-            || count > kType2ChannelCapacity || !reader.skip(count * 64)) {
+        if (!reader.read(31, value) || !reader.skip(6 + 6) || !reader.read(3, count)
+            || count > kType2TemperamentCapacity || !reader.skip(count * 32)) {
             return false;
         }
+        candidate.controlRevision = static_cast<std::uint32_t>(value);
+        candidate.temperamentCount = static_cast<std::uint8_t>(count);
+        if (!reader.skip(55 + 32) || !reader.read(5, count) || count > kType2ChannelCapacity
+            || !reader.skip(count * 64)) {
+            return false;
+        }
+        candidate.channelCount = static_cast<std::uint8_t>(count);
     }
     candidate.programOffset = input.size() * 8U - reader.remaining_bits();
     if (!reader.read(1, present)) {
@@ -643,6 +650,29 @@ bool inspect_type2_program(std::span<const std::byte> input,
     return true;
 }
 
+namespace {
+
+/**
+ * Writes a present `.5` under `revision`, taking the rest of the block from `source`.
+ * @param layout The inspected layout of `source`, whose `.5` is present.
+ */
+[[nodiscard]] bool write_type2_controls(bits::Writer& writer,
+                                        std::span<const std::byte> source,
+                                        const Type2ProgramLayout& layout,
+                                        std::uint32_t revision) noexcept {
+    constexpr std::size_t kHeaderBits = auth_fields::kPresenceWidth + auth_fields::kCounterWidth;
+    return writer.write(1, auth_fields::kPresenceWidth)
+           && writer.write(revision, auth_fields::kCounterWidth)
+           && mission_auth_patch::copy_field(
+               writer,
+               source,
+               {layout.channelsOffset + kHeaderBits,
+                layout.programOffset - layout.channelsOffset - kHeaderBits,
+                true});
+}
+
+} // namespace
+
 /** Splices one validated program over retained actor state without reusing either counter. */
 bool replace_type2_atoms(std::span<const std::byte> previous,
                          std::size_t previousBits,
@@ -670,7 +700,11 @@ bool replace_type2_atoms(std::span<const std::byte> previous,
     const auto last = (std::max)(committedGeneration, old.generation);
     const auto lastSpawn = (std::max)(committedSpawnGeneration, old.spawnGeneration);
     const bool replacesRoot = spawn || retire;
-    if (last >= kMaximumRevision || (replacesRoot && lastSpawn >= kMaximumRevision)) {
+    const bool initialControls =
+        spawn && incoming.controlRevision != 0
+        && (incoming.temperamentCount != 0 || incoming.channelCount != 0);
+    if (last >= kMaximumRevision || (replacesRoot && lastSpawn >= kMaximumRevision)
+        || (initialControls && old.controlRevision >= kMaximumRevision)) {
         return false;
     }
     const auto next = last + 1U;
@@ -679,7 +713,17 @@ bool replace_type2_atoms(std::span<const std::byte> previous,
     bits::Writer writer(staged);
     namespace patch = mission_auth_patch;
     bool encoded = true;
-    if (replacesRoot) {
+    if (initialControls) {
+        // The controls arrive with the creation, so the new life never runs without them.
+        encoded = combatant_auth::write_root(writer, nextSpawn, true)
+                  && (retained ? patch::copy_field(writer,
+                                                   previous,
+                                                   {old.controlOffset,
+                                                    old.channelsOffset - old.controlOffset,
+                                                    true})
+                               : writer.write(0, auth_fields::kPresenceWidth))
+                  && write_type2_controls(writer, program, incoming, old.controlRevision + 1U);
+    } else if (replacesRoot) {
         encoded =
             combatant_auth::write_root(writer, nextSpawn, !retire)
             && (retained ? patch::copy_field(
@@ -718,6 +762,42 @@ bool replace_type2_atoms(std::span<const std::byte> previous,
     writtenBits = bits;
     generation = next;
     spawnGeneration = nextSpawn;
+    return true;
+}
+
+/** Keeps every root field but `.5` and writes the new controls under the next revision. */
+bool replace_type2_controls(std::span<const std::byte> previous,
+                            std::size_t previousBits,
+                            std::span<const std::byte> controls,
+                            std::size_t controlsBits,
+                            std::span<std::byte> output,
+                            std::size_t& written,
+                            std::size_t& writtenBits,
+                            std::uint32_t& revision) noexcept {
+    written = writtenBits = 0;
+    revision = 0;
+    Type2ProgramLayout old{}, incoming{};
+    if (!inspect_type2_program(previous, previousBits, old) || !old.enabled
+        || !inspect_type2_program(controls, controlsBits, incoming)
+        || incoming.controlRevision == 0 || old.controlRevision >= kMaximumRevision) {
+        return false;
+    }
+    std::array<std::byte, kType2FullMaximumByteCount> staged{};
+    bits::Writer writer(staged);
+    const bool encoded =
+        mission_auth_patch::copy_field(writer, previous, {0, old.channelsOffset, true})
+        && write_type2_controls(writer, controls, incoming, old.controlRevision + 1U)
+        && mission_auth_patch::copy_field(
+            writer, previous, {old.programOffset, previousBits - old.programOffset, true});
+    const auto bits = writer.bit_count();
+    std::size_t bytes = 0;
+    if (!encoded || !writer.finish(bytes) || bytes > output.size()) {
+        return false;
+    }
+    std::copy_n(staged.begin(), bytes, output.begin());
+    written = bytes;
+    writtenBits = bits;
+    revision = old.controlRevision + 1U;
     return true;
 }
 

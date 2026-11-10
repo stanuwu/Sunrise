@@ -442,6 +442,7 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
     case lua_vm::IntentKind::setInteractableObject:
     case lua_vm::IntentKind::setGhostLink:
     case lua_vm::IntentKind::watchDamage:
+    case lua_vm::IntentKind::setActorControls:
     case lua_vm::IntentKind::runActorProgram:
     case lua_vm::IntentKind::assignCombatObjective:
         result = "slot_auth_staged";

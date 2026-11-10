@@ -71,8 +71,7 @@ inline constexpr ValueSpec kObjectFilterArguments[]{
      .kind = ValueKind::handle,
      .ref = "slot",
      .optional = true,
-     .slot = type_gate(slot_format::kObjectSlotType),
-     .note = "adds a test: this one object"},
+     .note = "adds a test: this one authored object or exact type-2 combatant"},
     {.name = "targets",
      .kind = ValueKind::list,
      .optional = true,
@@ -415,14 +414,56 @@ inline constexpr ValueSpec kActorActionArguments[]{
     kAbilityTargetArgument,
     kSpawnArgument,
 };
+inline constexpr ValueSpec kTemperament[]{
+    {.kind = ValueKind::integer, .bound = uint32_range(), .note = "a generated temperament"}};
+inline constexpr ValueSpec kActorChannelFields[]{
+    {.name = "channel", .kind = ValueKind::integer, .bound = uint32_range()},
+    {.name = "value", .kind = ValueKind::number, .note = "finite"},
+};
+inline constexpr ValueSpec kActorChannel[]{
+    {.kind = ValueKind::table, .fields = kActorChannelFields}};
+inline constexpr Bound kTemperamentBound =
+    at_most(static_cast<std::int64_t>(slot_auth::kType2TemperamentCapacity));
+inline constexpr Bound kActorChannelBound =
+    at_most(static_cast<std::int64_t>(slot_auth::kType2ChannelCapacity));
+inline constexpr ValueSpec kActorControlsArguments[]{
+    {.name = "temperaments",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("none"),
+     .bound = kTemperamentBound,
+     .element = kTemperament,
+     .note = "distinct"},
+    {.name = "channels",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("none"),
+     .bound = kActorChannelBound,
+     .element = kActorChannel,
+     .note = "one value per channel"},
+};
 inline constexpr ValueSpec kAtom[]{{.kind = ValueKind::atom, .ref = "atom_kinds"}};
 inline constexpr ValueSpec kRunAtomsArguments[]{
     kSpawnArgument,
     {.name = "atoms",
      .kind = ValueKind::list,
-     .bound = between(1, 32),
+     .bound = at_most(static_cast<std::int64_t>(slot_auth::kType2AtomCapacity)),
      .element = kAtom,
-     .note = "one lane per atom, run in order"},
+     .note = "one lane per atom, run in order; empty only with spawn"},
+    {.name = "temperaments",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("the actor's current ones"),
+     .bound = kTemperamentBound,
+     .element = kTemperament,
+     .note = "needs spawn; the new actor is created with these controls"},
+    {.name = "channels",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("the actor's current ones"),
+     .bound = kActorChannelBound,
+     .element = kActorChannel,
+     .note = "needs spawn; the new actor is created with these controls"},
 };
 inline constexpr ValueSpec kActorSequenceArguments[]{
     {.name = "sequence",
@@ -644,6 +685,14 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kRunAtomsArguments,
      .returns = kRequestKey,
      .effect = "slot.run_atoms"},
+    {.name = "set_actor_controls",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = kExactCombatant,
+     .arguments = kActorControlsArguments,
+     .returns = kRequestKey,
+     .effect = "slot.set_actor_controls",
+     .note = "replaces the live actor's whole control set and keeps its program"},
     {.name = "fire_trigger",
      .kind = MemberKind::request,
      .call = CallForm::named,

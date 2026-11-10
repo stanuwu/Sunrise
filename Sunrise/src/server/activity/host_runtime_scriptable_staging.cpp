@@ -145,7 +145,9 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
         || (guard != nullptr && pending.kind == ScriptableOverrideKind::sdkAuth
             && pending.sdkCompiled)) {
         nextCounter = true;
-    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::squadObjective) {
+    } else if (guard != nullptr
+               && (pending.kind == ScriptableOverrideKind::squadObjective
+                   || pending.kind == ScriptableOverrideKind::combatantControls)) {
         // The revision was derived from the transported estate while this ClientRef was reserved.
         nextCounter = pending.generation > 0 && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::squad
