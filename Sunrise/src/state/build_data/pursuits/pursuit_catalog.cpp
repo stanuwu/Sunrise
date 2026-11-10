@@ -40,7 +40,23 @@ std::uint64_t g_revision{};
         unused.begin(), unused.end(), [](std::uint16_t slot) { return slot == 0; });
 }
 
-/** Declared rows name an item with a nonnegative amount; an unreadable block declares none. */
+/**
+ * Only a row naming an expression holds a condition: its instructions when the expression bound,
+ * and none when it is unreadable.
+ */
+[[nodiscard]] bool valid_condition(const RewardPreview& reward) noexcept {
+    if (reward.conditionCount > reward.condition.size()) {
+        return false;
+    }
+    const bool empty = reward.conditionCount == 0;
+    return reward.conditionIndex == kAbsent ? empty && !reward.conditionUnreadable
+                                            : empty == reward.conditionUnreadable;
+}
+
+/**
+ * Declared rows name an item with a nonnegative amount and a condition that fits; an unreadable
+ * block declares none.
+ */
 [[nodiscard]] bool valid_rewards(const Definition& row) noexcept {
     if (row.rewardCount > row.rewards.size() || (!row.rewardsReadable && row.rewardCount != 0)) {
         return false;
@@ -50,11 +66,12 @@ std::uint64_t g_revision{};
     return std::all_of(declared.begin(),
                        declared.end(),
                        [](const RewardPreview& reward) {
-                           return reward.itemIndex != kAbsent && reward.quantity >= 0;
+                           return reward.itemIndex != kAbsent && reward.quantity >= 0
+                                  && valid_condition(reward);
                        })
            && std::all_of(unused.begin(), unused.end(), [](const RewardPreview& reward) {
                   return reward.itemIndex == kAbsent && reward.quantity == 0
-                         && reward.conditionIndex == kAbsent;
+                         && reward.conditionIndex == kAbsent && valid_condition(reward);
               });
 }
 

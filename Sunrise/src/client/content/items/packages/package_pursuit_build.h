@@ -10,6 +10,8 @@
 
 namespace sunrise::client::content::items::packages {
 
+class RewardConditions;
+
 /** Logs a refusal the installed data decides and settles the objective and pursuit domains. */
 void settle_pursuits_unsupported(const char* reason) noexcept;
 
@@ -22,10 +24,12 @@ public:
      * Collects one item's contract, returning false when it could not be stored.
      * @param questStep The item's place in its quest set.
      * @param valueMap Blob containing all four unlock value maps, which map its completion values.
+     * @param conditions Loaded condition tables its reward rows bind through.
      */
     [[nodiscard]] bool item(const middleware::content::packages::tables::items::Row& row,
                             const state::build_data::pursuits::QuestStep& questStep,
-                            std::span<const std::byte> valueMap) noexcept;
+                            std::span<const std::byte> valueMap,
+                            const RewardConditions& conditions) noexcept;
     /** Counts an item the installed data leaves unreadable. That item gets no contract. */
     void unread(std::uint16_t index) noexcept;
     /**
@@ -45,6 +49,7 @@ private:
     std::uint16_t firstUnread_{state::build_data::pursuits::kAbsent};
     std::size_t readFailures_{};
     std::uint16_t firstReadFailure_{state::build_data::pursuits::kAbsent};
+    std::size_t unreadableConditions_{};
 };
 
 } // namespace sunrise::client::content::items::packages

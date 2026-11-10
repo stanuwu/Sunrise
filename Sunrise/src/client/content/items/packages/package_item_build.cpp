@@ -256,10 +256,11 @@ bool build() noexcept {
                         std::span(storage.progressionSteps).first(storage.progressionStepCount));
                 }
             }
-            // Pass rows and plug insertion rules bind through the reward condition tables, which
-            // load before the pools.
+            // Pass rows, plug insertion rules and pursuit reward rows bind through the reward
+            // condition tables, which load before the pools.
             if (!reward_definitions_settled() || !state::build_data::season_pass_ready()
-                || !state::build_data::plug_insertion_rules_ready()) {
+                || !state::build_data::plug_insertion_rules_ready()
+                || !pursuit_catalog_settled()) {
                 (void)storage.rewardBuild.load(
                     source, storage.scratch, storage.root, storage.slotMaps);
             }

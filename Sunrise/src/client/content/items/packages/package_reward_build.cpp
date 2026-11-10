@@ -563,6 +563,37 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
 }
 
 /**
+ * Expands the shared expression a row index names.
+ * @param index Row of the shared expression table.
+ * @param output Receives the program; it bounds the expanded length.
+ * @param count Receives the program length.
+ * @param failure Receives storage when a bank allocation failed.
+ * @return False for a row outside the table or an unreadable, empty or oversized expression.
+ */
+bool RewardConditions::read_index(std::uint16_t index,
+                                  std::span<domain::Instruction> output,
+                                  std::size_t& count,
+                                  BankFailure& failure) const noexcept {
+    count = 0;
+    failure = BankFailure::none;
+    std::vector<domain::Instruction> instructions;
+    domain::Range expression{};
+    if (!loaded_ || index >= expressionRows_.count
+        || !read(expressions_,
+                 expressionRows_.dataOffset + index * layout::ExpressionPoolRow::kSize
+                     + layout::ExpressionPoolRow::kExpression,
+                 instructions,
+                 expression,
+                 failure)
+        || expression.count == 0 || expression.count > output.size()) {
+        return false;
+    }
+    std::copy(instructions.begin(), instructions.end(), output.begin());
+    count = instructions.size();
+    return true;
+}
+
+/**
  * Names the value slot an expression reads from the held item.
  * @param at Offset of the expression field.
  * @param mode Receives which held instances the client reads the slot from.

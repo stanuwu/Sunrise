@@ -137,9 +137,11 @@ bool build_item_rows(const reader::Source& source,
                      const tables::Array& table,
                      std::size_t& rowCount,
                      const char*& reason) noexcept {
-    // Contracts are checked against the objective table, so a walk without it would be wasted.
-    const bool pursuitStorageReady =
-        !pursuit_catalog_settled() && state::build_data::objective_definitions_ready();
+    // Contracts are checked against the objective table and bind their reward rows through the
+    // reward condition tables, so a walk without either would be wasted.
+    const bool pursuitStorageReady = !pursuit_catalog_settled()
+                                     && state::build_data::objective_definitions_ready()
+                                     && storage.rewardBuild.conditions.loaded();
     if (pursuitStorageReady) {
         storage.pursuitBuild.begin();
     }
@@ -292,7 +294,10 @@ bool build_item_rows(const reader::Source& source,
             storage.pursuitBuild.unread(item.definitionIndex);
         } else if (pursuitStorageReady
                    && (!questOwnerRead
-                       || !storage.pursuitBuild.item(item, questStep, storage.questValueMap))) {
+                       || !storage.pursuitBuild.item(item,
+                                                     questStep,
+                                                     storage.questValueMap,
+                                                     storage.rewardBuild.conditions))) {
             storage.pursuitBuild.read_failed(item.definitionIndex);
         }
         storage.rows[rowCount++] =

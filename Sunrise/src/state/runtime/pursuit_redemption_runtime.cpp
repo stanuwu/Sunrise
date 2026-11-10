@@ -1231,7 +1231,10 @@ pay_item(std::uint32_t hash, std::int32_t quantity, RowPayment& payment) noexcep
     return true;
 }
 
-/** Logs a reward row the tables cannot settle; the redemption skips it. */
+/**
+ * Logs a reward row the tables cannot settle, or whose condition cannot be evaluated; the
+ * redemption skips it.
+ */
 void report_skipped_row(std::uint32_t bountyHash,
                         std::uint16_t rowItemIndex,
                         const char* reason) noexcept {
@@ -1289,14 +1292,41 @@ void report_skipped_row(std::uint32_t bountyHash,
 }
 
 /**
+ * Evaluates the condition one reward row names against the redeeming character's saved banks.
+ * @param applies Receives whether the row pays; a row naming no condition always does.
+ * @param reason Receives a static reason when the condition is not settled.
+ * @return False when the condition did not read, bind or fit, or reads outside the saved banks.
+ */
+[[nodiscard]] bool row_applies(const pursuits::RewardPreview& reward,
+                               const reward_resolution::Context& context,
+                               bool& applies,
+                               const char*& reason) noexcept {
+    applies = false;
+    if (reward.conditionUnreadable) {
+        reason = "reward_condition_unreadable";
+        return false;
+    }
+    const char* refusal = "reward_condition";
+    const reward_resolution::Context conditionContext{
+        context.unlocks, context.characterClass, context.seed, &refusal};
+    if (!reward_resolution::eligible(
+            std::span(reward.condition).first(reward.conditionCount), conditionContext, applies)) {
+        reason = refusal;
+        return false;
+    }
+    return true;
+}
+
+/**
  * Resolves the reward rows a pursuit shows into items, seasonal XP and a progression credit. A
- * wrapper draws from its own pool. A row the tables cannot settle is logged and pays nothing.
+ * wrapper draws from its own pool. A row whose condition does not hold pays nothing. A row whose
+ * condition cannot be evaluated, or that the tables cannot settle, is logged and pays nothing.
  * @param bountyHash The pursuit's item hash, which skipped rows are logged with.
  * @param rules The pursuit's cadence and gear source.
  * @param character The redeeming character, whose held Synthesizer an upgrade replaces.
  * @param context Saved banks and class of the redeeming character; its seed starts the draws.
  * @param banks The same saved banks, which a progression credit reads its progress from.
- * @return False when a row is conditional, draws nothing, or outgrows the grant.
+ * @return False when a row draws nothing or outgrows the grant.
  */
 [[nodiscard]] bool plan_rewards(std::uint32_t bountyHash,
                                 const BountyRules& rules,
@@ -1310,6 +1340,14 @@ void report_skipped_row(std::uint32_t bountyHash,
     const auto rewards = std::span(contract.rewards).first(contract.rewardCount);
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         const pursuits::RewardPreview& reward = rewards[index];
+        bool applies = false;
+        if (!row_applies(reward, context, applies, reason)) {
+            report_skipped_row(bountyHash, reward.itemIndex, reason);
+            continue;
+        }
+        if (!applies) {
+            continue;
+        }
         reward_resolution::Context rowContext = context;
         rowContext.seed = context.seed + index;
         RowPayment payment{};
@@ -1320,10 +1358,6 @@ void report_skipped_row(std::uint32_t bountyHash,
         }
         if (payment.kind == PaymentKind::nothing) {
             continue;
-        }
-        reason = "reward_condition";
-        if (reward.conditionIndex != pursuits::kAbsent) {
-            return false;
         }
         if (payment.kind == PaymentKind::experience) {
             // Several experience rows describe one payout.

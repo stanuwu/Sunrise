@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../unlocks/unlocks_expression.h"
 #include "../items/details/definition.h"
 #include "../items/quest_initialization.h"
 
@@ -17,6 +18,12 @@ inline constexpr std::size_t kDefinitionCapacity = 4096;
 inline constexpr std::size_t kObjectiveCapacity = 7;
 /** An item's value block holds six fixed reward rows. */
 inline constexpr std::size_t kRewardPreviewCapacity = 6;
+/**
+ * Instructions one reward row's condition expands to. The shipped build declares 318 conditional
+ * rows, and the longest expands to seven. A longer one is kept as an unreadable row, which pays
+ * nothing. 8 bytes each, so 1.5 MiB across a full catalog.
+ */
+inline constexpr std::size_t kRewardConditionCapacity = 8;
 /** The item instance record ends in eight per-item values, so a contract maps at most eight. */
 inline constexpr std::size_t kItemValueCapacity = 8;
 
@@ -27,6 +34,12 @@ struct RewardPreview {
     std::int32_t quantity{};
     /** Shared expression row that decides whether the row applies, or kAbsent for none. */
     std::uint16_t conditionIndex{kAbsent};
+    /** That expression, expanded and bound to the saved banks. */
+    std::array<unlocks::Instruction, kRewardConditionCapacity> condition{};
+    /** Entries of `condition` in use. Zero when the row names no expression. */
+    std::uint8_t conditionCount{};
+    /** True when the expression did not read, bind or fit, so the row pays nothing. */
+    bool conditionUnreadable{};
 };
 
 /** Whether a pursuit belongs to a quest set the server can advance. */

@@ -7,6 +7,7 @@
 #include "../../../../middleware/content/packages/tables/quest_initialization_reader.h"
 #include "../../../../state/build_data/runtime.h"
 #include "internal.h"
+#include "package_reward_build.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
@@ -55,6 +56,33 @@ completion_value(std::uint16_t slot, std::span<const std::byte> valueMap) noexce
     return value;
 }
 
+/**
+ * Binds the condition each reward row names. An expression that does not read, bind or fit is kept
+ * as an unreadable row, which pays nothing.
+ * @param unreadable Counts the rows kept unreadable.
+ * @return False only when the reader's storage failed, which a later pass retries.
+ */
+[[nodiscard]] bool read_reward_conditions(const RewardConditions& conditions,
+                                          pursuits::Definition& output,
+                                          std::size_t& unreadable) noexcept {
+    for (pursuits::RewardPreview& reward : std::span(output.rewards).first(output.rewardCount)) {
+        if (reward.conditionIndex == pursuits::kAbsent) {
+            continue;
+        }
+        std::size_t count = 0;
+        BankFailure failure = BankFailure::none;
+        const bool readable =
+            conditions.read_index(reward.conditionIndex, reward.condition, count, failure);
+        if (failure == BankFailure::storage) {
+            return false;
+        }
+        reward.conditionUnreadable = !readable;
+        reward.conditionCount = static_cast<std::uint8_t>(count);
+        unreadable += static_cast<std::size_t>(!readable);
+    }
+    return true;
+}
+
 } // namespace
 
 void settle_pursuits_unsupported(const char* reason) noexcept {
@@ -80,11 +108,13 @@ void PursuitBuild::begin() noexcept {
     firstUnread_ = pursuits::kAbsent;
     readFailures_ = 0;
     firstReadFailure_ = pursuits::kAbsent;
+    unreadableConditions_ = 0;
 }
 
 bool PursuitBuild::item(const tables::items::Row& row,
                         const pursuits::QuestStep& questStep,
-                        std::span<const std::byte> valueMap) noexcept {
+                        std::span<const std::byte> valueMap,
+                        const RewardConditions& conditions) noexcept {
     // Only pursuits declare completion metadata. An unreadable metadata block still gets a
     // contract, marked unreadable.
     if (!row.hasCompletionMetadata && row.objectiveMetadataValid) {
@@ -112,6 +142,9 @@ bool PursuitBuild::item(const tables::items::Row& row,
             output.rewardsReadable = row.rewardPreviewsValid;
             std::copy_n(row.rewardPreviews, row.rewardPreviewCount, output.rewards.begin());
             output.rewardCount = row.rewardPreviewCount;
+            if (!read_reward_conditions(conditions, output, unreadableConditions_)) {
+                return false;
+            }
             output.questStep = questStep;
         }
         rows_.push_back(output);
@@ -175,15 +208,18 @@ void PursuitBuild::publish() noexcept {
         return;
     }
     core::log::writef(core::log::Channel::client,
-                      unreadCount_ == 0 && pruned == 0 && unresolved == 0 ? core::log::Level::info
-                                                                          : core::log::Level::warn,
+                      unreadCount_ == 0 && pruned == 0 && unresolved == 0
+                              && unreadableConditions_ == 0
+                          ? core::log::Level::info
+                          : core::log::Level::warn,
                       "ev=pkg stage=pursuits result=ready rows=%zu unread=%zu first_unread=%u "
-                      "pruned=%zu unresolved=%zu",
+                      "pruned=%zu unresolved=%zu unreadable_conditions=%zu",
                       rowCount,
                       unreadCount_,
                       static_cast<unsigned>(firstUnread_),
                       pruned,
-                      unresolved);
+                      unresolved,
+                      unreadableConditions_);
 }
 
 } // namespace sunrise::client::content::items::packages

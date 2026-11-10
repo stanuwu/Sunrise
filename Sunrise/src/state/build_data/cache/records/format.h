@@ -37,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 92;
+inline constexpr std::uint32_t kCacheFormatVersion = 93;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -752,11 +752,15 @@ struct ObjectiveRecord {
     std::uint8_t itemValueMode{};
 };
 
-/** Disk form of one reward row a pursuit shows. */
+/** Disk form of one reward row a pursuit shows. Condition slots past conditionCount are zero. */
 struct PursuitRewardRecord {
     std::int32_t quantity{};
     std::uint16_t itemIndex{pursuits::kAbsent};
     std::uint16_t conditionIndex{pursuits::kAbsent};
+    std::array<RewardInstructionRecord, pursuits::kRewardConditionCapacity> condition{};
+    std::uint8_t conditionCount{};
+    /** 0 or 1. */
+    std::uint8_t conditionUnreadable{};
 };
 
 /** Disk form of one value completing a pursuit sets. */
@@ -816,7 +820,10 @@ static_assert(sizeof(RewardInstructionRecord)
 static_assert(sizeof(ObjectiveRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 5 * sizeof(std::uint8_t)
                      + 2 * sizeof(RewardRangeRecord));
-static_assert(sizeof(PursuitRewardRecord) == sizeof(std::int32_t) + 2 * sizeof(std::uint16_t));
+static_assert(sizeof(PursuitRewardRecord)
+              == sizeof(std::int32_t) + 2 * sizeof(std::uint16_t)
+                     + pursuits::kRewardConditionCapacity * sizeof(RewardInstructionRecord)
+                     + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(PursuitCompletionValueRecord)
               == 2 * sizeof(std::uint8_t) + sizeof(std::uint16_t));
 static_assert(sizeof(PursuitRecord)

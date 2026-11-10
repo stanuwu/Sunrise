@@ -31,6 +31,53 @@ encode_completion_value(const pursuits::CompletionValue& value) noexcept {
     return true;
 }
 
+/** Encodes one reward row and the condition bound to it. */
+[[nodiscard]] bool encode_reward(const pursuits::RewardPreview& value,
+                                 PursuitRewardRecord& record) noexcept {
+    record = {};
+    record.quantity = value.quantity;
+    record.itemIndex = value.itemIndex;
+    record.conditionIndex = value.conditionIndex;
+    record.conditionCount = value.conditionCount;
+    record.conditionUnreadable = static_cast<std::uint8_t>(value.conditionUnreadable);
+    if (record.conditionCount > record.condition.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < record.condition.size(); ++index) {
+        if (!encode(value.condition[index], record.condition[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * Decodes one reward row. Only the instructions it counts are decoded, and the slots after them
+ * must hold their defaults.
+ */
+[[nodiscard]] bool decode_reward(const PursuitRewardRecord& record,
+                                 pursuits::RewardPreview& value) noexcept {
+    value = {};
+    if (record.conditionCount > record.condition.size()
+        || !decode_flag(record.conditionUnreadable, value.conditionUnreadable)) {
+        return false;
+    }
+    const auto unused = std::span(record.condition).subspan(record.conditionCount);
+    if (!std::all_of(unused.begin(), unused.end(), unused_condition)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < record.conditionCount; ++index) {
+        if (!decode(record.condition[index], value.condition[index])) {
+            return false;
+        }
+    }
+    value.itemIndex = record.itemIndex;
+    value.quantity = record.quantity;
+    value.conditionIndex = record.conditionIndex;
+    value.conditionCount = record.conditionCount;
+    return true;
+}
+
 } // namespace
 
 /** Encodes one objective row and the bank ranges of its programs. */
@@ -90,8 +137,9 @@ bool encode(const pursuits::Definition& value, PursuitRecord& record) noexcept {
     record.rewardsReadable = static_cast<std::uint8_t>(value.rewardsReadable);
     record.rewardCount = value.rewardCount;
     for (std::size_t index = 0; index < value.rewards.size(); ++index) {
-        const pursuits::RewardPreview& reward = value.rewards[index];
-        record.rewards[index] = {reward.quantity, reward.itemIndex, reward.conditionIndex};
+        if (!encode_reward(value.rewards[index], record.rewards[index])) {
+            return false;
+        }
     }
     record.questMembership = static_cast<std::uint8_t>(value.questStep.membership);
     record.questScope = static_cast<std::uint8_t>(value.questStep.scope);
@@ -138,8 +186,9 @@ bool decode(const PursuitRecord& record, pursuits::Definition& value) noexcept {
     value.itemValueSlots = record.itemValueSlots;
     value.rewardCount = record.rewardCount;
     for (std::size_t index = 0; index < record.rewards.size(); ++index) {
-        const PursuitRewardRecord& reward = record.rewards[index];
-        value.rewards[index] = {reward.itemIndex, reward.quantity, reward.conditionIndex};
+        if (!decode_reward(record.rewards[index], value.rewards[index])) {
+            return false;
+        }
     }
     value.questStep = {static_cast<pursuits::QuestMembership>(record.questMembership),
                        static_cast<items::QuestInitialization::Scope>(record.questScope),

@@ -50,6 +50,14 @@ public:
                                  BankFailure& failure,
                                  std::uint32_t rowClass) const noexcept;
     /**
+     * Expands the shared expression a row index names.
+     * @param index Row of the shared expression table.
+     */
+    [[nodiscard]] bool read_index(std::uint16_t index,
+                                  std::span<state::build_data::rewards::Instruction> output,
+                                  std::size_t& count,
+                                  BankFailure& failure) const noexcept;
+    /**
      * Names the value slot an expression reads from the held item.
      * @param at Offset of the expression field.
      * @param mode Receives which held instances the client reads the slot from.
