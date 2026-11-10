@@ -493,6 +493,10 @@ void retire_item_values_refresh(Session& session) noexcept {
     middleware::secure_channel::advance_nonce(nextSendNonce);
     session.sendNonce = nextSendNonce;
     session.queuez.family5Version = version;
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::debug,
+                      "ev=queuez stage=family5_refresh result=ok version=%d",
+                      version);
     // The client rebuilds its derived unlock state on the family-4 update that follows this.
     return true;
 }
@@ -547,6 +551,10 @@ void retire_item_values_refresh(Session& session) noexcept {
     session.queuez = update.after;
     session.artifactFamily4RefreshArmed = false;
     session.artifactFamily4RefreshDueTick = 0;
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::debug,
+                      "ev=queuez stage=artifact_refresh result=ok version=%d",
+                      static_cast<int>(session.queuez.family4Version));
     return true;
 }
 
