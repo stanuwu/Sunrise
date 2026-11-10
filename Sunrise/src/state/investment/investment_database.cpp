@@ -90,17 +90,10 @@ constexpr const char* kWalletSyncTable =
     "revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 4294967295)"
     ") STRICT, WITHOUT ROWID;";
 
-/**
- * Version 11 saves each profile row's slot in its bucket, so removing a row no longer moves the
- * rows after it. An older row has none until State gives it the lowest free one.
- */
-constexpr const char* kProfileSlotColumn =
-    "ALTER TABLE profile_items ADD COLUMN slot INTEGER NOT NULL DEFAULT -1 CHECK (slot >= -1);";
-
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 11;
+constexpr int kSchemaVersion = 10;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
 
@@ -429,14 +422,6 @@ bool open(std::string_view path,
         Transaction transaction;
         ready = transaction.ready() && execute(kWalletSyncTable)
                 && execute("PRAGMA user_version=10") && transaction.commit();
-        if (ready) {
-            version = 10;
-        }
-    }
-    if (ready && version == 10) {
-        Transaction transaction;
-        ready = transaction.ready() && execute(kProfileSlotColumn)
-                && execute("PRAGMA user_version=11") && transaction.commit();
     }
     if (!ready) {
         shutdown();

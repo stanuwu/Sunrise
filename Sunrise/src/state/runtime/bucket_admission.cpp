@@ -643,12 +643,6 @@ template <typename Row>
         const std::int32_t added = (std::min)(quantity, detail.maxStackSize);
         working.profileItems[working.profileItemCount++] = {
             soid, item.definitionHash, added, serial};
-        // The new row takes the lowest free slot of its bucket and keeps it.
-        reason = "profile_slot";
-        if (!authored_inventory::settle_profile_slots(
-                std::span(working.profileItems).first(working.profileItemCount))) {
-            return false;
-        }
         quantity -= added;
     }
     return true;
@@ -920,11 +914,10 @@ bool erase_character_row(CharacterState& character, std::size_t row) noexcept {
     return true;
 }
 
-/** Later rows move up one in the saved list; every row keeps its bucket slot. */
+/** Later rows move up one, so the profile stays dense. */
 bool erase_profile_row(AccountState& account, std::size_t index) noexcept {
-    if (index >= account.profileItemCount || account.profileItemCount > account.profileItems.size()
-        || !authored_inventory::settle_profile_slots(
-            std::span(account.profileItems).first(account.profileItemCount))) {
+    if (index >= account.profileItemCount
+        || account.profileItemCount > account.profileItems.size()) {
         return false;
     }
     auto& items = account.profileItems;

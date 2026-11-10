@@ -14,16 +14,27 @@ bool record_profile_seen(const ProfileNewItems& newItems) noexcept {
     if (!transaction.ready() || !store::read_account(account)) {
         return false;
     }
-    const auto items = std::span(account.profileItems).first(account.profileItemCount);
-    std::array<std::uint16_t, kProfileItemCapacity> rows{};
-    if (!resolve_profile_rows(items, rows)) {
-        return false;
-    }
+    // Native bucket identities occupy one byte.
+    constexpr std::size_t kBucketCount = 256;
+    std::array<std::uint16_t, kBucketCount> taken{};
     store::Statement update(
         "UPDATE profile_items SET seen=? WHERE position=? AND definition_hash=?");
-    for (std::size_t index = 0; index < items.size(); ++index) {
-        const auto& item = items[index];
-        const bool seen = seen_at(newItems, rows[index]);
+    for (std::size_t index = 0; index < account.profileItemCount; ++index) {
+        const auto& item = account.profileItems[index];
+        build_data::items::Definition definition;
+        buckets::Descriptor bucket;
+        if (!build_data::find_item_definition_hash(item.definitionHash, definition)
+            || !build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)
+            || bucket.arraySelector != buckets::ArraySelector::profile
+            || taken[definition.bucketId] >= bucket.slotCount) {
+            return false;
+        }
+        const std::size_t row =
+            static_cast<std::size_t>(bucket.firstSlot) + taken[definition.bucketId]++;
+        if (row >= kProfileItemCapacity) {
+            return false;
+        }
+        const bool seen = seen_at(newItems, row);
         if (seen != item.seen && !update.write(seen, index, item.definitionHash)) {
             return false;
         }

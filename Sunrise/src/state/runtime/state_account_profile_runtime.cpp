@@ -388,7 +388,11 @@ static void report_price_refusal(const AccountState& account,
     if (--account.profileItems[row].quantity > 0) {
         return true;
     }
-    return runtime::detail::erase_profile_row(account, row);
+    for (std::size_t index = row; index + 1U < account.profileItemCount; ++index) {
+        account.profileItems[index] = account.profileItems[index + 1U];
+    }
+    account.profileItems[--account.profileItemCount] = {};
+    return true;
 }
 
 /** Credits a stack through the grant's placement, naming each row it created or grew. */
@@ -806,9 +810,12 @@ bool prepare_vendor_exchange(std::uint32_t costDefinitionHash,
     }
     // A stack the charge emptied has to leave the array, because a zero-quantity row is not a valid
     // profile row. It is removed last so the credited rows above were found at their real indices.
-    if (after.profileItems[costIndex].quantity == 0
-        && !runtime::detail::erase_profile_row(after, costIndex)) {
-        return false;
+    if (after.profileItems[costIndex].quantity == 0) {
+        for (std::size_t index = costIndex; index + 1U < after.profileItemCount; ++index) {
+            after.profileItems[index] = after.profileItems[index + 1U];
+        }
+        --after.profileItemCount;
+        after.profileItems[after.profileItemCount] = {};
     }
     if (!account::valid(after) || !runtime::detail::valid_profile_inventory(after)) {
         return false;

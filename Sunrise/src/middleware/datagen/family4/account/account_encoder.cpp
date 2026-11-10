@@ -23,6 +23,8 @@ constexpr std::uint64_t kSuppressedPublicityDeadline =
     static_cast<std::uint64_t>((std::numeric_limits<std::int32_t>::max)());
 /** Every set bit marks all default account messages as already seen. */
 constexpr std::byte kSeenMessageByte{0xFF};
+/** A native inventory bucket id is 1 byte, so this covers every bucket. */
+constexpr std::size_t kBucketIdentityCapacity = 256;
 
 static_assert(layout::kCharacterValueCapacity
               == state::build_data::constants::kCharacterValueRowCount);
@@ -44,9 +46,9 @@ void publish_synthesizer_tiers(const state::AccountState& state, layout::Object&
     }
 }
 
-/** Places one profile item in the array row State resolved for it. */
+/** Places one profile item in the next free row of its inventory bucket. */
 [[nodiscard]] bool place_profile_item(const state::account::inventory::ProfileItem& item,
-                                      std::size_t slot,
+                                      std::array<std::uint16_t, kBucketIdentityCapacity>& taken,
                                       std::span<inventory::layout::Entry> rows,
                                       std::span<std::uint32_t> newItems) noexcept {
     state::build_data::items::Definition definition{};
@@ -69,9 +71,15 @@ void publish_synthesizer_tiers(const state::AccountState& state, layout::Object&
     if (actionSource != (item.instanceSoid != 0)) {
         return false;
     }
+    const std::uint16_t used = taken[definition.bucketId];
+    if (used >= bucket.slotCount) {
+        return false;
+    }
+    const std::size_t slot = static_cast<std::size_t>(bucket.firstSlot) + used;
     if (slot >= rows.size() || rows[slot].definitionIndex != kEmptyDefinitionIndex) {
         return false;
     }
+    taken[definition.bucketId] = static_cast<std::uint16_t>(used + 1);
     rows[slot].definitionIndex = definition.definitionIndex;
     rows[slot].instanceSoid = item.instanceSoid;
     rows[slot].quantity = item.quantity;
@@ -141,16 +149,10 @@ bool encode(const state::AccountState& state,
         return false;
     }
     // Profile rows are sentinelled above, so placement only has to claim its own slots.
-    const auto profileItems = std::span(state.profileItems).first(state.profileItemCount);
-    std::array<std::uint16_t, state::account::inventory::kProfileItemCapacity> profileRows{};
-    if (!state::account::inventory::resolve_profile_rows(profileItems, profileRows)) {
-        return false;
-    }
-    for (std::size_t index = 0; index < profileItems.size(); ++index) {
-        if (!place_profile_item(profileItems[index],
-                                profileRows[index],
-                                object.profileItems,
-                                object.newItemFlags)) {
+    std::array<std::uint16_t, kBucketIdentityCapacity> takenSlots{};
+    for (std::size_t index = 0; index < state.profileItemCount; ++index) {
+        if (!place_profile_item(
+                state.profileItems[index], takenSlots, object.profileItems, object.newItemFlags)) {
             return false;
         }
     }

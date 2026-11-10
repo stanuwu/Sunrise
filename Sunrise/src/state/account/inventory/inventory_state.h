@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <string_view>
 
 #include "../../build_data/inventory/buckets/definition.h"
@@ -98,9 +97,6 @@ resolve_native_equipment_slot(std::uint32_t definitionHash,
                               const std::optional<std::int8_t>& detailEquipmentSlot,
                               std::uint8_t& nativeSlot) noexcept;
 
-/** Marks a profile row saved before rows kept their slot; it takes the lowest free one. */
-inline constexpr std::uint16_t kUnassignedProfileSlot = 0xFFFFU;
-
 /** One authored account-wide item, placed by the inventory bucket its definition names. */
 struct ProfileItem {
     /** Stable runtime identity required to materialize this row as an inventory action source. */
@@ -111,8 +107,6 @@ struct ProfileItem {
     std::int32_t mutationSerial{};
     /** The client has dismissed this item's new-item marker. */
     bool seen{};
-    /** Row within the item's bucket. A row keeps it while other rows of the bucket come and go. */
-    std::uint16_t slot{kUnassignedProfileSlot};
 };
 
 /** Which of its item's buckets a saved row occupies: the authored one, or the recovery one. */
@@ -204,21 +198,5 @@ struct Equipment {
 [[nodiscard]] bool valid(const CharacterItems& items) noexcept;
 
 [[nodiscard]] bool valid(const CharacterStacks& items) noexcept;
-
-/**
- * Finds the profile array row of each saved item: its bucket's first row plus its saved slot, or
- * for an item saved without one the bucket's lowest free row, taken in saved order.
- * @param rows Receives one array row per item.
- * @return False when an item names no installed profile bucket, two items share a row or a
- *         bucket has no row left.
- */
-[[nodiscard]] bool resolve_profile_rows(std::span<const ProfileItem> items,
-                                        std::span<std::uint16_t> rows) noexcept;
-
-/**
- * Saves the slot resolve_profile_rows finds for every item still without one.
- * @return False when the rows do not resolve; the items are then unchanged.
- */
-[[nodiscard]] bool settle_profile_slots(std::span<ProfileItem> items) noexcept;
 
 } // namespace sunrise::state::account::inventory
