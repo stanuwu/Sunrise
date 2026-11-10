@@ -39,7 +39,7 @@ constexpr std::uint16_t kArtifactPointsUsedCharacterRow = 38;
 
 /** One rank of the Season of Arrivals pass costs this much XP. */
 constexpr std::int32_t kExperiencePerRank = 100'000;
-/** The pass stops at rank 100; XP past it feeds the repeating HUD bar instead. */
+/** The pass stops at rank 100; XP past it feeds the repeating progression instead. */
 constexpr std::uint16_t kMaximumRank = 100;
 constexpr std::int32_t kMaximumPassExperience =
     (static_cast<std::int32_t>(kMaximumRank) - 1) * kExperiencePerRank;
@@ -413,9 +413,7 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
            && unlocks::set_account_progression(pass::kProgressionDefinitionIndex,
                                                (std::min)(experience, kMaximumPassExperience))
            && unlocks::set_account_progression(pass::kHudProgressionDefinitionIndex,
-                                               experience < kMaximumPassExperience
-                                                   ? experience % kExperiencePerRank
-                                                   : experience - kMaximumPassExperience);
+                                               (std::max)(experience - kMaximumPassExperience, 0));
 }
 
 /**
