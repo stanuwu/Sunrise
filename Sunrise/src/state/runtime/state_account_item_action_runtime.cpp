@@ -406,7 +406,7 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
             return fail("account_or_resolve");
         }
         if (!investment::store::write_account(candidate)) {
-            return false;
+            return fail("account_write");
         }
         for (const AccountUnlockWrite& write :
              std::span(prepared.unlockWrites.rows).first(prepared.unlockWrites.count)) {
@@ -415,11 +415,11 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
                                                      : investment::store::Bank::objectiveValues,
                                                  write.index,
                                                  write.value)) {
-                return false;
+                return fail("unlock_write");
             }
         }
         if (!transaction.commit()) {
-            return false;
+            return fail("transaction_commit");
         }
     }
 

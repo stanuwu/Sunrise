@@ -203,26 +203,33 @@ scale_socket_costs(std::uint16_t socketType,
     }
 
     // A Synthesizer plug is an exchange, paid after its insertion cost is charged.
+    const char* refusal = nullptr;
     SynthesizerPayout payout{};
     const SynthesizerExchange exchange =
-        stage_synthesizer_payout(snapshot, detail, socketLane, plugDefinition, payout);
+        stage_synthesizer_payout(snapshot, detail, socketLane, plugDefinition, payout, refusal);
     if (exchange == SynthesizerExchange::refused) {
-        return fail("synthesizer_exchange");
+        return fail(refusal);
     }
     // An oven plug that bakes charges its recipe's cost and is paid its cookie after it.
     OvenBake bake{};
     const OvenAction ovenAction =
-        stage_oven_bake(detail, authoredSockets, socketLane, plugDefinition, bake);
+        stage_oven_bake(detail, authoredSockets, socketLane, plugDefinition, bake, refusal);
     if (ovenAction == OvenAction::refused) {
-        return fail("oven_bake");
+        return fail(refusal);
     }
     const bool bakes = ovenAction == OvenAction::baked;
     // A Chalice plug must pass its checks, and an upgrade purchase sets its flag.
     ChaliceUpgrade upgrade{};
-    const ChaliceAction chaliceAction = stage_chalice_plug(
-        snapshot, characterIndex, detail, authoredSockets, socketLane, plugDefinition, upgrade);
+    const ChaliceAction chaliceAction = stage_chalice_plug(snapshot,
+                                                           characterIndex,
+                                                           detail,
+                                                           authoredSockets,
+                                                           socketLane,
+                                                           plugDefinition,
+                                                           upgrade,
+                                                           refusal);
     if (chaliceAction == ChaliceAction::refused) {
-        return fail("chalice");
+        return fail(refusal);
     }
     const bool upgrades = chaliceAction == ChaliceAction::upgraded;
     const bool exchanges = exchange == SynthesizerExchange::paid || bakes || upgrades;

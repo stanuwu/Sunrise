@@ -21,7 +21,6 @@ namespace sunrise::state::runtime::detail {
 namespace {
 
 namespace item_details = build_data::items::details;
-namespace material_requirements = build_data::material_requirements;
 
 /** One recipe: its plug, the discounted plug a masterworked oven offers instead, its cookie. */
 struct OvenRecipe {
@@ -38,8 +37,10 @@ struct IngredientPickup {
 
 // --- Authored game data --------------------------------------------------------------------
 
-// TODO: extract what an oven bake pays; no extractor relates a recipe plug to its cookie or its
-// masterworked plug, an unmatched Combine to its cookie, or a pickup to the plug it fills.
+// TODO: extract these rows from the packages; no extractor relates a recipe plug to its cookie or
+// its masterworked plug, an unmatched Combine to its cookie, a pickup to the plug it fills, the
+// oven to the tutorial quest whose row its ingredient chooser reads, or a Dawning bounty objective
+// to the bake or delivery it counts.
 
 /** The 22 recipes. Each recipe plug's own cost names the ingredient pair a Combine matches. */
 constexpr std::array<OvenRecipe, 22> kOvenRecipes{{
@@ -91,9 +92,6 @@ constexpr std::array<IngredientPickup, 20> kIngredientPickups{{
     {3173226934U, 3331998408U}, {3173226935U, 3331998409U},
 }};
 
-// TODO: extract the oven and the Dawning Begins items; no extractor relates the oven to the
-// tutorial quest whose row its ingredient chooser reads.
-
 /** The Dawning oven. */
 constexpr std::uint32_t kOvenHash = 2742763040U;
 /**
@@ -105,9 +103,6 @@ constexpr std::array<std::uint32_t, 4> kTutorialItemHashes{
 
 /** The tutorial quest value that opens the ingredient chooser; no quest step starts from it. */
 constexpr std::int32_t kChooserReadyValue = build_data::items::kInvalidQuestInitialValue;
-
-// TODO: derive these from the objectives' own conditions; no extractor reads which bake or
-// delivery a Dawning bounty objective counts.
 
 /** One Dawning bounty objective a bake or a delivery advances by one. */
 struct DawningBountyRule {
@@ -154,7 +149,7 @@ constexpr auto kDawningBountyRules = std::to_array<DawningBountyRule>({
 
 // The bake's charge and its own writes must fit the transaction's unlock writes together.
 static_assert(kSocketUnlockWriteCapacity
-              == material_requirements::kRequirementCapacity + kIngredientLanes.size());
+              >= build_data::material_requirements::kRequirementCapacity + kIngredientLanes.size());
 
 /** @return The recipe a recipe plug, normal or masterworked, bakes; null for any other plug. */
 [[nodiscard]] const OvenRecipe* find_recipe(std::uint32_t plugHash) noexcept {
@@ -184,12 +179,20 @@ static_assert(kSocketUnlockWriteCapacity
     return true;
 }
 
-/** @return True when every recipe is discovered, which the Masterwork plug requires. */
-[[nodiscard]] bool all_recipes_discovered() noexcept {
+/**
+ * @param reason Receives a static label when the result is false.
+ * @return True when every recipe is discovered, which the Masterwork plug requires.
+ */
+[[nodiscard]] bool all_recipes_discovered(const char*& reason) noexcept {
     const AccountUnlockWrites unstaged{};
     for (const OvenRecipe& recipe : kOvenRecipes) {
         bool discovered = false;
-        if (!recipe_discovered(recipe, unstaged, discovered) || !discovered) {
+        if (!recipe_discovered(recipe, unstaged, discovered)) {
+            reason = "oven_recipe_flag";
+            return false;
+        }
+        if (!discovered) {
+            reason = "oven_masterwork_undiscovered";
             return false;
         }
     }
@@ -202,14 +205,14 @@ static_assert(kSocketUnlockWriteCapacity
  */
 [[nodiscard]] bool recipe_ingredients(const build_data::items::Definition& recipePlug,
                                       std::array<std::uint16_t, 2>& ingredients) noexcept {
-    material_requirements::Definition cost{};
+    build_data::material_requirements::Definition cost{};
     if (!build_data::find_material_requirement_set(
             recipePlug.insertionMaterialRequirementSetIndex, cost)) {
         return false;
     }
     std::size_t count = 0;
     for (const auto& requirement : std::span(cost.requirements).first(cost.requirementCount)) {
-        if (requirement.condition == material_requirements::kUnconditionalRequirement) {
+        if (requirement.condition == build_data::material_requirements::kUnconditionalRequirement) {
             continue;
         }
         if (count == ingredients.size()) {
@@ -262,17 +265,20 @@ static_assert(kSocketUnlockWriteCapacity
 /**
  * Chooses what a Combine bakes from the plugged ingredients: the recipe they pair, or a burnt
  * cookie that charges the Combine's own cost and one unit of each ingredient's balance.
+ * @param reason Receives a static label when the result is false.
  * @return False when a lane holds no ingredient, a balance does not cover it, or no recipe
  * resolves.
  */
 [[nodiscard]] bool stage_combine(const account::inventory::Sockets& sockets,
                                  const build_data::items::Definition& combine,
-                                 OvenBake& bake) noexcept {
+                                 OvenBake& bake,
+                                 const char*& reason) noexcept {
     std::array<build_data::items::Definition, kIngredientLanes.size()> ingredients{};
     for (std::size_t index = 0; index < ingredients.size(); ++index) {
         const auto& plug = sockets.plugs[kIngredientLanes[index]];
         if (!plug.has_value()
             || !build_data::find_item_definition_hash(*plug, ingredients[index])) {
+            reason = "oven_ingredient_lane";
             return false;
         }
     }
@@ -280,40 +286,59 @@ static_assert(kSocketUnlockWriteCapacity
     build_data::items::Definition recipePlug{};
     if (!match_recipe(
             ingredients[0].definitionIndex, ingredients[1].definitionIndex, recipe, recipePlug)) {
+        reason = "oven_recipe_match";
         return false;
     }
     if (recipe != nullptr) {
         bake.costSetIndex = recipePlug.insertionMaterialRequirementSetIndex;
         bake.discoveryFlagIndex = recipePlug.plugSetFlagIndex;
-        return bake.discoveryFlagIndex != build_data::items::kUnavailableFlagIndex
-               && find_cookie(recipe->cookieHash, bake);
+        if (bake.discoveryFlagIndex == build_data::items::kUnavailableFlagIndex) {
+            reason = "oven_recipe_flag";
+            return false;
+        }
+        if (!find_cookie(recipe->cookieHash, bake)) {
+            reason = "oven_cookie";
+            return false;
+        }
+        return true;
     }
     // Each ingredient plug counts its own balance, which is the one a burnt bake spends.
     for (const auto& ingredient : ingredients) {
-        if (ingredient.quantityValueIndex == build_data::items::kUnavailableValueIndex
-            || !debit_account_value(
+        if (ingredient.quantityValueIndex == build_data::items::kUnavailableValueIndex) {
+            reason = "oven_ingredient_value";
+            return false;
+        }
+        if (!debit_account_value(
                 bake.unlockWrites, ingredient.quantityValueIndex, kBurntIngredientCost)) {
+            reason = "oven_ingredient_balance";
             return false;
         }
     }
     bake.costSetIndex = combine.insertionMaterialRequirementSetIndex;
-    return find_cookie(kBurntCookieHash, bake);
+    if (!find_cookie(kBurntCookieHash, bake)) {
+        reason = "oven_cookie";
+        return false;
+    }
+    return true;
 }
 
 /**
  * Returns every lane before the Masterwork lane to its initial plug.
+ * @param reason Receives a static label when the result is false.
  * @return False when a lane has no initial plug or the requested lane is not reset.
  */
 [[nodiscard]] bool reset_lanes(const item_details::Definition& oven,
                                const account::inventory::Sockets& sockets,
                                std::uint8_t socketLane,
-                               OvenBake& bake) noexcept {
+                               OvenBake& bake,
+                               const char*& reason) noexcept {
     bake.sockets = sockets;
     for (std::uint8_t lane = 0; lane < kMasterworkLane; ++lane) {
         const std::uint16_t initialPlugIndex = oven.initialPlugIndices[lane];
         build_data::items::Definition plug{};
         if (initialPlugIndex == item_details::kUnavailableItemIndex
             || !build_data::find_item_definition_index(initialPlugIndex, plug)) {
+            reason = "oven_initial_plug";
             return false;
         }
         bake.sockets.plugs[lane] = plug.definitionHash;
@@ -321,7 +346,11 @@ static_assert(kSocketUnlockWriteCapacity
             bake.lanePlug = plug;
         }
     }
-    return socketLane < kMasterworkLane;
+    if (socketLane >= kMasterworkLane) {
+        reason = "oven_lane";
+        return false;
+    }
+    return true;
 }
 
 /** @return The oven plug a pickup fills, or null for any other item. */
@@ -346,11 +375,11 @@ static_assert(kSocketUnlockWriteCapacity
         if (!build_data::find_item_definition_hash(hash, item)) {
             return false;
         }
-        const build_data::pursuits::QuestStep& step = contract.questStep;
         if (!build_data::find_pursuit_definition(item.definitionIndex, contract)
-            || step.membership != build_data::pursuits::QuestMembership::step) {
+            || contract.questStep.membership != build_data::pursuits::QuestMembership::step) {
             continue;
         }
+        const build_data::pursuits::QuestStep& step = contract.questStep;
         if (step.scope != build_data::items::QuestInitialization::Scope::account
             || (found && step.row != row)) {
             return false;
@@ -470,7 +499,6 @@ bool credit_dawning_bounties(CharacterState& character,
             continue;
         }
         held.objectives = values;
-        // A new serial is what tells the client the copy changed, as for any other item mutation.
         if (!next_character_serial(character, held.mutationSerial)) {
             return false;
         }
@@ -483,32 +511,53 @@ OvenAction stage_oven_bake(const item_details::Definition& oven,
                            const account::inventory::Sockets& sockets,
                            std::uint8_t socketLane,
                            const build_data::items::Definition& requested,
-                           OvenBake& bake) noexcept {
+                           OvenBake& bake,
+                           const char*& reason) noexcept {
     bake = {};
+    reason = nullptr;
     if (requested.definitionHash == kMasterworkPlugHash) {
-        return all_recipes_discovered() ? OvenAction::none : OvenAction::refused;
+        return all_recipes_discovered(reason) ? OvenAction::none : OvenAction::refused;
     }
     const OvenRecipe* recipe = find_recipe(requested.definitionHash);
     const bool combine = requested.definitionHash == kCombinePlugHash;
     if (recipe == nullptr && !combine) {
         return OvenAction::none;
     }
-    if (oven.ordinarySocketCount <= kMasterworkLane
-        || !reset_lanes(oven, sockets, socketLane, bake)) {
+    if (oven.ordinarySocketCount <= kMasterworkLane) {
+        reason = "oven_socket_count";
+        return OvenAction::refused;
+    }
+    if (!reset_lanes(oven, sockets, socketLane, bake, reason)) {
         return OvenAction::refused;
     }
     const bool masterworked = sockets.plugs[kMasterworkLane] == kMasterworkPlugHash;
     if (combine) {
         // A masterworked oven hides its ingredient and Combine lanes.
-        return !masterworked && stage_combine(sockets, requested, bake) ? OvenAction::baked
-                                                                         : OvenAction::refused;
+        if (masterworked) {
+            reason = "oven_combine_masterworked";
+            return OvenAction::refused;
+        }
+        return stage_combine(sockets, requested, bake, reason) ? OvenAction::baked
+                                                               : OvenAction::refused;
     }
     // A masterworked oven offers only the discounted recipes, and an unmasterworked one only the
     // ordinary ones; either needs the recipe discovered.
     const bool discounted = requested.definitionHash == recipe->masterworkedPlugHash;
     bool discovered = false;
-    if (discounted != masterworked || !recipe_discovered(*recipe, bake.unlockWrites, discovered)
-        || !discovered || !find_cookie(recipe->cookieHash, bake)) {
+    if (discounted != masterworked) {
+        reason = "oven_recipe_variant";
+        return OvenAction::refused;
+    }
+    if (!recipe_discovered(*recipe, bake.unlockWrites, discovered)) {
+        reason = "oven_recipe_flag";
+        return OvenAction::refused;
+    }
+    if (!discovered) {
+        reason = "oven_recipe_undiscovered";
+        return OvenAction::refused;
+    }
+    if (!find_cookie(recipe->cookieHash, bake)) {
+        reason = "oven_cookie";
         return OvenAction::refused;
     }
     bake.costSetIndex = requested.insertionMaterialRequirementSetIndex;
@@ -549,16 +598,12 @@ bool pay_oven_bake(const AccountState& uncharged,
                || write_account_unlock(writes, true, bake.discoveryFlagIndex, unlocks::kFlagSet));
 }
 
-} // namespace sunrise::state::runtime::detail
-
-namespace sunrise::state {
-
 /** Credits a pickup to the balance its ingredient plug's quantity expression counts. */
 bool prepare_ingredient_credit(std::uint32_t pickupHash,
                                std::int32_t quantity,
                                AccountUnlockWrite& credit) noexcept {
     credit = {};
-    const runtime::detail::IngredientPickup* pickup = runtime::detail::find_pickup(pickupHash);
+    const IngredientPickup* pickup = find_pickup(pickupHash);
     build_data::items::Definition plug{};
     std::int32_t balance = 0;
     if (pickup == nullptr || quantity <= 0
@@ -575,7 +620,7 @@ bool prepare_ingredient_credit(std::uint32_t pickupHash,
 
 /** Answers from the authored pickup table alone, without reading the balance. */
 bool is_ingredient_pickup(std::uint32_t definitionHash) noexcept {
-    return runtime::detail::find_pickup(definitionHash) != nullptr;
+    return find_pickup(definitionHash) != nullptr;
 }
 
 /** A tutorial under way keeps its step, so only an unset row is set to ready. */
@@ -584,21 +629,20 @@ bool prepare_chooser_readiness(const AccountState& account,
     readiness.reset();
     std::uint16_t row = 0;
     std::int32_t saved = 0;
-    if (!runtime::detail::tutorial_quest_row(row)
+    if (!tutorial_quest_row(row)
         || !investment::store::read_unlock(
             investment::store::Bank::objectiveValues, row, saved)) {
         return false;
     }
-    if (saved == build_data::items::kUnsetQuestValue
-        && !runtime::detail::holds_tutorial_item(account)) {
-        readiness = AccountUnlockWrite{false, row, saved, runtime::detail::kChooserReadyValue};
+    if (saved == build_data::items::kUnsetQuestValue && !holds_tutorial_item(account)) {
+        readiness = AccountUnlockWrite{false, row, saved, kChooserReadyValue};
     }
     return true;
 }
 
 /** Answers from the authored oven identity alone. */
 bool is_dawning_oven(std::uint32_t definitionHash) noexcept {
-    return definitionHash == runtime::detail::kOvenHash;
+    return definitionHash == kOvenHash;
 }
 
-} // namespace sunrise::state
+} // namespace sunrise::state::runtime::detail

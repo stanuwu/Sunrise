@@ -16,7 +16,6 @@ namespace sunrise::state::runtime::detail {
 namespace {
 
 namespace item_details = build_data::items::details;
-namespace material_requirements = build_data::material_requirements;
 
 /** One Mote and the two Synthesizer plugs that exchange it. */
 struct MoteOutput {
@@ -76,7 +75,7 @@ constexpr std::array<MoteOutput, 12> kSynthesizerMoteOutputs{{
  */
 [[nodiscard]] bool single_cost(std::uint32_t plugHash,
                                build_data::items::Definition& plug,
-                               material_requirements::Definition& cost) noexcept {
+                               build_data::material_requirements::Definition& cost) noexcept {
     return build_data::find_item_definition_hash(plugHash, plug)
            && plug.insertionMaterialRequirementSetIndex
                   != build_data::items::kUnavailableMaterialRequirementSetIndex
@@ -84,42 +83,57 @@ constexpr std::array<MoteOutput, 12> kSynthesizerMoteOutputs{{
                                                         cost)
            && cost.requirementCount == 1 && cost.requirements[0].quantity > 0
            && cost.requirements[0].deleteOnAction
-           && cost.requirements[0].condition == material_requirements::kUnconditionalRequirement;
+           && cost.requirements[0].condition
+                  == build_data::material_requirements::kUnconditionalRequirement;
 }
 
 /**
  * The Synthesizer keeps one Mote out per tier, whichever role it is, so a synthesis lane refuses
  * while the profile holds a Mote that any plug of the lane's pool synthesizes.
+ * @param reason Receives a static label when the result is false.
  * @return False when the lane's Mote is out or an authored plug does not resolve.
  */
 [[nodiscard]] bool lane_mote_absent(const AccountState& account,
                                     std::uint16_t synthesizerIndex,
-                                    std::uint8_t lane) noexcept {
+                                    std::uint8_t lane,
+                                    const char*& reason) noexcept {
     for (const MoteOutput& output : kSynthesizerMoteOutputs) {
         build_data::items::Definition plug{};
         if (!build_data::find_item_definition_hash(output.synthesisPlugHash, plug)) {
+            reason = "synthesizer_plug_definition";
             return false;
         }
         if (holds_profile_item(account, output.moteHash)
             && build_data::is_socket_plug_allowed(synthesizerIndex, lane, plug.definitionIndex)) {
+            reason = "synthesizer_mote_held";
             return false;
         }
     }
     return true;
 }
 
-/** Stages the Mote a synthesis plug pays while its tier holds none. */
+/**
+ * Stages the Mote a synthesis plug pays while its tier holds none.
+ * @param reason Receives a static label when the result is false.
+ */
 [[nodiscard]] bool stage_synthesis(const AccountState& account,
                                    const item_details::Definition& synthesizer,
                                    std::uint8_t lane,
                                    const MoteOutput& output,
-                                   SynthesizerPayout& payout) noexcept {
+                                   SynthesizerPayout& payout,
+                                   const char*& reason) noexcept {
     build_data::items::Definition plug{};
     build_data::items::Definition mote{};
-    material_requirements::Definition cost{};
-    if (!single_cost(output.synthesisPlugHash, plug, cost)
-        || !build_data::find_item_definition_hash(output.moteHash, mote)
-        || !lane_mote_absent(account, synthesizer.definitionIndex, lane)) {
+    build_data::material_requirements::Definition cost{};
+    if (!single_cost(output.synthesisPlugHash, plug, cost)) {
+        reason = "synthesizer_synthesis_cost";
+        return false;
+    }
+    if (!build_data::find_item_definition_hash(output.moteHash, mote)) {
+        reason = "synthesizer_mote_definition";
+        return false;
+    }
+    if (!lane_mote_absent(account, synthesizer.definitionIndex, lane, reason)) {
         return false;
     }
     payout.itemIndex = mote.definitionIndex;
@@ -130,19 +144,31 @@ constexpr std::array<MoteOutput, 12> kSynthesizerMoteOutputs{{
 /**
  * Stages a refund of what the Mote's synthesis plug costs on this Synthesizer, socket scalars
  * included, so recycling reverses synthesis exactly. The recycle plug's own cost debits the Mote.
+ * @param reason Receives a static label when the result is false.
  */
 [[nodiscard]] bool stage_recycle(const item_details::Definition& synthesizer,
                                  const MoteOutput& output,
-                                 SynthesizerPayout& payout) noexcept {
+                                 SynthesizerPayout& payout,
+                                 const char*& reason) noexcept {
     build_data::items::Definition recycle{};
     build_data::items::Definition synthesis{};
     build_data::items::Definition mote{};
-    material_requirements::Definition recycleCost{};
-    material_requirements::Definition synthesisCost{};
-    if (!single_cost(output.recyclePlugHash, recycle, recycleCost)
-        || !single_cost(output.synthesisPlugHash, synthesis, synthesisCost)
-        || !build_data::find_item_definition_hash(output.moteHash, mote)
-        || recycleCost.requirements[0].itemDefinitionIndex != mote.definitionIndex) {
+    build_data::material_requirements::Definition recycleCost{};
+    build_data::material_requirements::Definition synthesisCost{};
+    if (!single_cost(output.recyclePlugHash, recycle, recycleCost)) {
+        reason = "synthesizer_recycle_cost";
+        return false;
+    }
+    if (!single_cost(output.synthesisPlugHash, synthesis, synthesisCost)) {
+        reason = "synthesizer_synthesis_cost";
+        return false;
+    }
+    if (!build_data::find_item_definition_hash(output.moteHash, mote)) {
+        reason = "synthesizer_mote_definition";
+        return false;
+    }
+    if (recycleCost.requirements[0].itemDefinitionIndex != mote.definitionIndex) {
+        reason = "synthesizer_recycle_item";
         return false;
     }
     std::uint8_t lane = 0;
@@ -151,12 +177,17 @@ constexpr std::array<MoteOutput, 12> kSynthesizerMoteOutputs{{
                synthesizer.definitionIndex, lane, synthesis.definitionIndex)) {
         ++lane;
     }
-    if (lane == synthesizer.ordinarySocketCount
-        || !scale_socket_costs(synthesizer.socketTypes[lane], synthesisCost)) {
+    if (lane == synthesizer.ordinarySocketCount) {
+        reason = "synthesizer_synthesis_lane";
+        return false;
+    }
+    if (!scale_socket_costs(synthesizer.socketTypes[lane], synthesisCost)) {
+        reason = "synthesizer_refund_scale";
         return false;
     }
     const std::uint32_t refund = synthesisCost.requirements[0].quantity;
     if (refund > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+        reason = "synthesizer_refund_overflow";
         return false;
     }
     payout.itemIndex = synthesisCost.requirements[0].itemDefinitionIndex;
@@ -180,18 +211,25 @@ SynthesizerExchange stage_synthesizer_payout(const AccountState& account,
                                              const item_details::Definition& synthesizer,
                                              std::uint8_t socketLane,
                                              const build_data::items::Definition& requested,
-                                             SynthesizerPayout& payout) noexcept {
+                                             SynthesizerPayout& payout,
+                                             const char*& reason) noexcept {
     payout = {};
+    reason = nullptr;
     const MoteOutput* output = find_mote_output(requested.definitionHash);
     if (output == nullptr) {
         return SynthesizerExchange::none;
     }
-    const bool staged = output->recyclePlugHash == requested.definitionHash
-                            ? stage_recycle(synthesizer, *output, payout)
-                            : stage_synthesis(account, synthesizer, socketLane, *output, payout);
+    const bool staged =
+        output->recyclePlugHash == requested.definitionHash
+            ? stage_recycle(synthesizer, *output, payout, reason)
+            : stage_synthesis(account, synthesizer, socketLane, *output, payout, reason);
+    if (!staged) {
+        return SynthesizerExchange::refused;
+    }
     const std::uint16_t initialPlugIndex = synthesizer.initialPlugIndices[socketLane];
-    if (!staged || initialPlugIndex == item_details::kUnavailableItemIndex
+    if (initialPlugIndex == item_details::kUnavailableItemIndex
         || !build_data::find_item_definition_index(initialPlugIndex, payout.lanePlug)) {
+        reason = "synthesizer_initial_plug";
         return SynthesizerExchange::refused;
     }
     return SynthesizerExchange::paid;

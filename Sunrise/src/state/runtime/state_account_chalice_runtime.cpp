@@ -15,7 +15,7 @@ namespace sunrise::state::runtime::detail {
 namespace {
 
 namespace item_details = build_data::items::details;
-namespace insertion_rules = build_data::items::insertion_rules;
+namespace item_insertion_rules = build_data::items::insertion_rules;
 
 /** One upgrade the Chalice sells: the plug that buys it and the plug that shows it owned. */
 struct UpgradeOffer {
@@ -118,7 +118,7 @@ static_assert(kSocketUnlockWriteCapacity
                               CharacterClass characterClass,
                               const account::inventory::Sockets& sockets,
                               std::uint8_t lane) noexcept {
-    insertion_rules::Rule rule{};
+    item_insertion_rules::Rule rule{};
     if (!build_data::find_plug_insertion_rule(plug.definitionIndex, rule)) {
         return true;
     }
@@ -139,6 +139,7 @@ static_assert(kSocketUnlockWriteCapacity
 /**
  * Sets the flag of the upgrade a purchase buys and picks the plug its lane shows.
  * @param banks Saved banks; receive the flag, so the bought upgrade's rules see it.
+ * @param reason Receives a static label when the result is false.
  * @return False when the upgrade is owned, its flag does not resolve or its rules then fail.
  */
 [[nodiscard]] bool buy_upgrade(const UpgradeOffer& offer,
@@ -147,19 +148,31 @@ static_assert(kSocketUnlockWriteCapacity
                                std::uint8_t lane,
                                unlocks::Table& banks,
                                CharacterClass characterClass,
-                               ChaliceUpgrade& upgrade) noexcept {
+                               ChaliceUpgrade& upgrade,
+                               const char*& reason) noexcept {
     build_data::items::Definition owned{};
-    insertion_rules::Rule ownedRule{};
-    if (!build_data::find_item_definition_hash(offer.ownedPlugHash, owned)
-        || !build_data::find_plug_insertion_rule(owned.definitionIndex, ownedRule)
-        || ownedRule.requiredFlagIndex == insertion_rules::kUnavailableFlagIndex
-        || banks.accountFlags[ownedRule.requiredFlagIndex] == unlocks::kFlagSet
-        || !write_account_unlock(
+    item_insertion_rules::Rule ownedRule{};
+    if (!build_data::find_item_definition_hash(offer.ownedPlugHash, owned)) {
+        reason = "chalice_upgrade_plug";
+        return false;
+    }
+    if (!build_data::find_plug_insertion_rule(owned.definitionIndex, ownedRule)
+        || ownedRule.requiredFlagIndex == item_insertion_rules::kUnavailableFlagIndex) {
+        reason = "chalice_upgrade_flag";
+        return false;
+    }
+    if (banks.accountFlags[ownedRule.requiredFlagIndex] == unlocks::kFlagSet) {
+        reason = "chalice_upgrade_owned";
+        return false;
+    }
+    if (!write_account_unlock(
             upgrade.unlockWrites, true, ownedRule.requiredFlagIndex, unlocks::kFlagSet)) {
+        reason = "chalice_upgrade_write";
         return false;
     }
     banks.accountFlags[ownedRule.requiredFlagIndex] = unlocks::kFlagSet;
     if (!rules_hold(owned, banks, characterClass, sockets, lane)) {
+        reason = "chalice_upgrade_rules";
         return false;
     }
     if (build_data::is_socket_plug_allowed(chalice.definitionIndex, lane, owned.definitionIndex)) {
@@ -167,8 +180,12 @@ static_assert(kSocketUnlockWriteCapacity
         return true;
     }
     const std::uint16_t initialPlugIndex = chalice.initialPlugIndices[lane];
-    return initialPlugIndex != item_details::kUnavailableItemIndex
-           && build_data::find_item_definition_index(initialPlugIndex, upgrade.lanePlug);
+    if (initialPlugIndex == item_details::kUnavailableItemIndex
+        || !build_data::find_item_definition_index(initialPlugIndex, upgrade.lanePlug)) {
+        reason = "chalice_initial_plug";
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -180,36 +197,53 @@ ChaliceAction stage_chalice_plug(const AccountState& account,
                                  const account::inventory::Sockets& sockets,
                                  std::uint8_t socketLane,
                                  const build_data::items::Definition& requested,
-                                 ChaliceUpgrade& upgrade) noexcept {
+                                 ChaliceUpgrade& upgrade,
+                                 const char*& reason) noexcept {
     upgrade = {};
+    reason = nullptr;
     if (chalice.definitionHash != kChaliceHash) {
         return ChaliceAction::none;
     }
     const CharacterClass characterClass = account.characters[characterIndex].characterClass;
     unlocks::Table banks{};
-    if (!build_data::plug_insertion_rules_ready()
-        || !investment::store::read_unlocks(banks, static_cast<int>(characterIndex))
-        || !offered(requested, banks)
-        || !rules_hold(requested, banks, characterClass, sockets, socketLane)) {
+    if (!build_data::plug_insertion_rules_ready()) {
+        reason = "chalice_rules_not_ready";
+        return ChaliceAction::refused;
+    }
+    if (!investment::store::read_unlocks(banks, static_cast<int>(characterIndex))) {
+        reason = "chalice_unlock_read";
+        return ChaliceAction::refused;
+    }
+    if (!offered(requested, banks)) {
+        reason = "chalice_not_offered";
+        return ChaliceAction::refused;
+    }
+    if (!rules_hold(requested, banks, characterClass, sockets, socketLane)) {
+        reason = "chalice_plug_rules";
         return ChaliceAction::refused;
     }
     if (is_rune(requested)) {
         // A rune lane is open while the rules of its empty plug, which its slot unlock sets, hold.
         const std::uint16_t emptyPlugIndex = chalice.initialPlugIndices[socketLane];
         build_data::items::Definition emptyPlug{};
-        const bool open =
-            emptyPlugIndex != item_details::kUnavailableItemIndex
-            && build_data::find_item_definition_index(emptyPlugIndex, emptyPlug)
-            && rules_hold(emptyPlug, banks, characterClass, sockets, socketLane);
-        return open && banks.objectiveValues[requested.quantityValueIndex] >= kRuneSlotBalance
-                   ? ChaliceAction::none
-                   : ChaliceAction::refused;
+        if (emptyPlugIndex == item_details::kUnavailableItemIndex
+            || !build_data::find_item_definition_index(emptyPlugIndex, emptyPlug)
+            || !rules_hold(emptyPlug, banks, characterClass, sockets, socketLane)) {
+            reason = "chalice_rune_lane";
+            return ChaliceAction::refused;
+        }
+        if (banks.objectiveValues[requested.quantityValueIndex] < kRuneSlotBalance) {
+            reason = "chalice_rune_balance";
+            return ChaliceAction::refused;
+        }
+        return ChaliceAction::none;
     }
     const UpgradeOffer* offer = find_upgrade(requested.definitionHash);
     if (offer == nullptr) {
         return ChaliceAction::none;
     }
-    return buy_upgrade(*offer, chalice, sockets, socketLane, banks, characterClass, upgrade)
+    return buy_upgrade(
+               *offer, chalice, sockets, socketLane, banks, characterClass, upgrade, reason)
                ? ChaliceAction::upgraded
                : ChaliceAction::refused;
 }

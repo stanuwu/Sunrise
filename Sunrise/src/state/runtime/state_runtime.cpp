@@ -439,16 +439,26 @@ bool investment_snapshot(InvestmentState& output) noexcept {
     const std::unique_ptr<AccountState> account(new (std::nothrow) AccountState{});
     InvestmentState snapshot;
     FlagSet published{};
-    bool loaded = false;
+    const char* failure = nullptr;
     {
         const std::lock_guard lock(store::g_mutex);
-        loaded = account && store::read_family5(snapshot.family5) && store::read_account(*account);
+        if (!account) {
+            failure = "account_allocation";
+        } else if (!store::read_family5(snapshot.family5)) {
+            failure = "catalyst";
+        } else if (!store::read_account(*account)) {
+            failure = "account_read";
+        }
         published = store::g_session.presenceFlagsPublished;
     }
-    if (!loaded || !build_data::complete_exotic_catalyst_investment(snapshot.family5)) {
-        core::log::write(core::log::Channel::state,
-                         core::log::Level::warn,
-                         "ev=investment stage=snapshot result=fail reason=catalyst");
+    if (failure == nullptr && !build_data::complete_exotic_catalyst_investment(snapshot.family5)) {
+        failure = "catalyst";
+    }
+    if (failure != nullptr) {
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=investment stage=snapshot result=fail reason=%s",
+                          failure);
         return false;
     }
     const FlagSet held = held_presence_flags(*account);
@@ -460,7 +470,7 @@ bool investment_snapshot(InvestmentState& output) noexcept {
                           held.count(),
                           published.count(),
                           snapshot.family5.flagCount);
-        // A flag the client already holds cannot be cleared by leaving it out.
+        // A flag set earlier is cleared with an explicit false override, which did not fit.
         if (published.any()) {
             return false;
         }

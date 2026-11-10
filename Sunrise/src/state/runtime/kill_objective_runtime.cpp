@@ -27,10 +27,23 @@ namespace sunrise::state {
 
 using namespace runtime::detail;
 namespace authored_inventory = account::inventory;
-namespace objectives = build_data::objectives;
-namespace pursuits = build_data::pursuits;
 
 namespace {
+
+/** Source kinds of a final blow, as bits; a rule requires every bit it names. */
+constexpr std::uint8_t kWeapon = 1;
+constexpr std::uint8_t kGrenade = 2;
+constexpr std::uint8_t kSuper = 4;
+constexpr std::uint8_t kMelee = 8;
+/** An ability-group source that carries no weapon label. */
+constexpr std::uint8_t kAbility = 16;
+constexpr std::uint8_t kPrecision = 32;
+
+// --- Authored game data --------------------------------------------------------------------
+
+// TODO: extract these rows from the packages; no extractor reads which kills an objective counts,
+// no extracted item field carries a subclass's element, and no extractor joins a grenade's talent
+// to the source label its kills carry.
 
 // The label table names its labels and groups; these are FNV-1 hashes of those names.
 /** Group holding every player label. A player-attributed source carries exactly one. */
@@ -69,20 +82,6 @@ constexpr std::uint32_t kSniperRifle = 0x452E6656U;     // "sniper rifle"
 constexpr std::uint32_t kSubmachineGun = 0xE5608E0EU;   // "submachine gun"
 constexpr std::uint32_t kSword = 0x924E78C4U;           // "sword"
 
-/** Source kinds of a final blow, as bits; a rule requires every bit it names. */
-constexpr std::uint8_t kWeapon = 1;
-constexpr std::uint8_t kGrenade = 2;
-constexpr std::uint8_t kSuper = 4;
-constexpr std::uint8_t kMelee = 8;
-/** An ability-group source that carries no weapon label. */
-constexpr std::uint8_t kAbility = 16;
-constexpr std::uint8_t kPrecision = 32;
-
-// --- Authored game data --------------------------------------------------------------------
-
-// TODO: derive these from the objectives' own conditions; no extractor reads which kills an
-// objective counts, so each mapped objective is named here.
-
 /** Ordinals of the installed race enumeration; Scorn has no row and comes from its label. */
 enum class Race : std::uint8_t {
     cabal = 0,
@@ -103,12 +102,12 @@ enum class Element : std::int8_t {
     voidDamage = 3,
 };
 
-/** Equipment slots of the three weapon slots, as the incident names the killing source's. */
+/** The three weapon slots a rule can name, as State's equipment slots. */
 enum class WeaponSlot : std::int8_t {
     any = -1,
-    kinetic = 7,
-    energy = 8,
-    heavy = 9,
+    kinetic = static_cast<std::int8_t>(authored_inventory::EquipmentSlot::kinetic),
+    energy = static_cast<std::int8_t>(authored_inventory::EquipmentSlot::energy),
+    heavy = static_cast<std::int8_t>(authored_inventory::EquipmentSlot::heavy),
 };
 
 /** Free-roam destinations the objectives name, by the package their activity loads. */
@@ -128,7 +127,6 @@ struct SubclassElement {
     Element element{};
 };
 
-// TODO: extract each subclass's element; no extracted item field carries it.
 /** Every subclass item and its element. */
 constexpr auto kSubclassElements = std::to_array<SubclassElement>({
     {0xB0554739U, Element::arc},
@@ -174,9 +172,10 @@ constexpr std::uint32_t kVoidProx = 0xD1AB4582U;
 constexpr std::uint32_t kVoidPulse = 0x05D04834U;
 constexpr std::uint32_t kVoidWave = 0x27178AF6U;
 
-// TODO: extract which grenade each Triumph counts; no extractor joins a grenade's talent to the
-// source label its kills carry. Only Tripmine's label is captured; the rest pair by label name.
-/** Every grenade interval Triumph, its grenade's source label and its class. */
+/**
+ * Every grenade interval Triumph, its grenade's source label and its class. Only Tripmine's label
+ * is captured; the rest pair by label name.
+ */
 constexpr auto kGrenadeTriumphs = std::to_array<GrenadeTriumph>({
     {0xB947FBB8U, kVoidFlux, CharacterClass::titan},       // Magnetic
     {0x4C0E42FCU, kVoidWave, CharacterClass::titan},       // Voidwall
@@ -427,8 +426,6 @@ constexpr auto kKillRules = std::to_array<KillRule>({
 /** An item's rows are found by binary search, which needs the ascending item order. */
 static_assert(std::ranges::is_sorted(kKillRules, {}, &KillRule::itemHash));
 
-// --- Kill matching -------------------------------------------------------------------------
-
 /** The facts of one enemy kill a rule is checked against. */
 struct KillFacts {
     std::string_view destination{};
@@ -570,8 +567,10 @@ void classify_source(const KillObservation& kill, KillFacts& facts) noexcept {
         sources |= kWeapon;
         facts.weaponLabel = weapon;
         // The slot names the killing weapon only when no ability fired it.
-        if (kill.abilitySelector == -1 && kill.equipmentSlot.has_value()) {
-            const auto slot = static_cast<WeaponSlot>(*kill.equipmentSlot);
+        std::size_t equipped = 0;
+        if (kill.abilitySelector == -1 && kill.equipmentSlot.has_value()
+            && semantic_equipment_slot(static_cast<std::uint8_t>(*kill.equipmentSlot), equipped)) {
+            const auto slot = static_cast<WeaponSlot>(equipped);
             if (slot == WeaponSlot::kinetic || slot == WeaponSlot::energy
                 || slot == WeaponSlot::heavy) {
                 facts.slot = slot;
@@ -757,7 +756,7 @@ OpenWork g_openWork{};
     }
     ++pass.ruledItems;
     build_data::items::Definition item{};
-    pursuits::Definition contract{};
+    build_data::pursuits::Definition contract{};
     if (!build_data::find_item_definition_hash(held.definitionHash, item)
         || !build_data::find_pursuit_definition(item.definitionIndex, contract)
         || !contract.readable) {
@@ -806,7 +805,6 @@ OpenWork g_openWork{};
         if (lanes == 0) {
             continue;
         }
-        // A new serial is what tells the client the copy changed, as for any other item mutation.
         if (!next_character_serial(killer, held.mutationSerial)) {
             return false;
         }
@@ -820,15 +818,15 @@ OpenWork g_openWork{};
 namespace runtime::detail {
 
 /** Reads the lane the objective's item value slot takes in the contract's value list. */
-bool objective_lane(const pursuits::Definition& contract,
+bool objective_lane(const build_data::pursuits::Definition& contract,
                     std::uint8_t ordinal,
                     std::size_t& lane,
                     std::int32_t& target) noexcept {
-    objectives::Definition objective{};
+    build_data::objectives::Row objective{};
     if (ordinal >= contract.objectiveCount
-        || !build_data::find_objective_definition(contract.objectives[ordinal], objective)
-        || objective.countsDown || !objective.targetAdjustment.empty()
-        || objective.itemValueSlot == objectives::kNoItemValueSlot
+        || !build_data::find_objective_row(contract.objectives[ordinal], objective)
+        || objective.countsDown || objective.targetAdjustment.count != 0
+        || objective.itemValueSlot == build_data::objectives::kNoItemValueSlot
         || objective.completionValue <= 0) {
         return false;
     }
