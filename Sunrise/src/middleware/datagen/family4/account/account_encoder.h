@@ -25,11 +25,13 @@ struct StateFields {
  * @param state Account identity, roster, preferences, and selected-character state.
  * @param fields Values State holds outside the account copy, from the same view as state.
  * @param output Exact State-mapped account-object storage.
+ * @param publicOnly Publishes identity and roster while omitting private account banks.
  * @return True when State is valid and every required fixed region fits.
  */
 [[nodiscard]] bool encode(const state::AccountState& state,
                           const StateFields& fields,
-                          std::span<std::byte> output) noexcept;
+                          std::span<std::byte> output,
+                          bool publicOnly = false) noexcept;
 
 /**
  * Account-wide unlocks use the supplied snapshot; per-character flags still use saved state.

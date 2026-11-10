@@ -8,6 +8,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
+#include "../account/public_profiles.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "runtime.h"
@@ -251,6 +252,9 @@ bool set_selected_character(std::uint64_t characterSoid, bool& moved, bool& perk
     investment::store::g_mutex.unlock();
     moved = changes;
     (void)seed_seasonal_progression(perksEarned);
+    if (changes) {
+        account::profiles::local_changed();
+    }
     return true;
 }
 
@@ -295,7 +299,7 @@ bool set_selected_title(std::uint16_t recordIndex,
 bool prepare_equipment_swap(std::uint64_t requestedInstanceSoid,
                             PendingEquipmentSwap& mutation) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     if (requestedInstanceSoid == 0 || !account::valid(account)) {
         return false;
     }
@@ -422,7 +426,7 @@ bool prepare_equipment_swap(std::uint64_t requestedInstanceSoid,
 bool prepare_equipment_unequip(std::uint64_t requestedInstanceSoid,
                                PendingEquipmentSwap& mutation) noexcept {
     mutation = {};
-    const AccountState account = account_snapshot();
+    const AccountState account = bound_account_snapshot();
     if (requestedInstanceSoid == 0 || !account::valid(account)) {
         return false;
     }
@@ -577,12 +581,10 @@ bool commit_equipment_swap(PendingEquipmentSwap& mutation) noexcept {
     return true;
 }
 
-/** @return A copy of the active account state, read under the lock. */
-AccountState account_snapshot() noexcept {
-    investment::store::g_mutex.lock();
-    const AccountState snapshot = investment::store::account();
-    investment::store::g_mutex.unlock();
-    return snapshot;
+AccountState bound_account_snapshot() noexcept {
+    AccountState output{};
+    (void)bound_account_snapshot(output);
+    return output;
 }
 
 /** Reads the account and character keys; the store call holds its own lock. */

@@ -403,54 +403,6 @@ retain_sense_observations(Instance& instance, const SenseInput& input, std::uint
     return true;
 }
 
-/** Merges complete squad deltas without discarding fields absent from a later report. */
-void retain_squad_sense(Instance& instance, const SenseInput& input) noexcept {
-    namespace sense = middleware::bap::activity_message::sense_update;
-    namespace squadSense = middleware::bap::activity_message::squad_sense;
-    const sense::DecodedPacket& packet = input.decoded;
-    if (input.sourceGeneration == 0 || input.sourceGeneration < instance.squadSenseSourceGeneration
-        || packet.status == sense::DecodeStatus::malformed || packet.valuesTruncated
-        || packet.objectsTruncated || packet.objectCount > packet.objects.size()
-        || packet.valueCount > packet.values.size()) {
-        return;
-    }
-    if (input.sourceGeneration != instance.squadSenseSourceGeneration) {
-        instance.squadSense.clear();
-        instance.squadSenseSourceGeneration = input.sourceGeneration;
-    }
-    for (const sense::DecodedObject& object : std::span(packet.objects).first(packet.objectCount)) {
-        if (object.slotType != squadSense::kSlotType || object.senseSchema != squadSense::kSchema
-            || object.status != sense::ObjectStatus::decoded || !object.hasGeneration) {
-            continue;
-        }
-        auto found = std::ranges::find_if(instance.squadSense, [&](const SquadSenseRecord& record) {
-            return same_sense_key(record.key, object);
-        });
-        squadSense::State merged =
-            found == instance.squadSense.end() ? squadSense::State{} : found->state;
-        // An uninitialized replica cannot replace the squad's recovery state.
-        if (!squadSense::merge(merged, object, std::span(packet.values).first(packet.valueCount))
-            || !merged.valid) {
-            continue;
-        }
-        if (found != instance.squadSense.end()) {
-            found->state = merged;
-        } else if (instance.squadSense.size() < kScriptableGuardCapacity) {
-            const SenseObservationKey key{object.registryKey,
-                                          object.objectTag,
-                                          object.senseSchema,
-                                          object.schemaRow,
-                                          object.slotIndex,
-                                          object.slotType};
-            try {
-                instance.squadSense.push_back({key, merged});
-            } catch (const std::bad_alloc&) {
-                return;
-            }
-        }
-    }
-}
-
 /** @return The committed guard for one exact reported slot, or null when none was armed. */
 [[nodiscard]] ScriptableGuard* find_ghost_link_guard(
     Instance& instance,
@@ -606,30 +558,6 @@ IngressRefusal submit_sense(const SenseInput& input) noexcept {
     ++g_queuedIngress;
     ReleaseSRWLockExclusive(&g_lock);
     return IngressRefusal::none;
-}
-
-/** Copies initialized recovery state for one exact ActivityClient generation. */
-bool snapshot_squad_sense(const state::activity::SessionBinding& binding,
-                          std::uint64_t sourceGeneration,
-                          const SenseObservationKey& key,
-                          middleware::bap::activity_message::squad_sense::State& output) noexcept {
-    output = {};
-    AcquireSRWLockShared(&g_lock);
-    const Instance* const instance = find_instance(binding);
-    bool found = false;
-    if (instance != nullptr && instance->squadSenseSourceGeneration == sourceGeneration) {
-        for (const SquadSenseRecord& record : instance->squadSense) {
-            if (record.key.registryKey == key.registryKey && record.key.objectTag == key.objectTag
-                && record.key.senseSchema == key.senseSchema && record.key.slotType == key.slotType
-                && record.key.slotIndex == key.slotIndex && record.state.valid) {
-                output = record.state;
-                found = true;
-                break;
-            }
-        }
-    }
-    ReleaseSRWLockShared(&g_lock);
-    return found;
 }
 
 /** Copies the armed scan model for one exact type-65 slot that has reported at least once. */

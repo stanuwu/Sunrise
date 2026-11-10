@@ -32,4 +32,23 @@ using Digest = std::array<std::byte, kDigestSize>;
                              std::span<const std::byte> second,
                              Digest& output) noexcept;
 
+/** One SHA-256 fed in parts. Any failed step makes `finish` fail. */
+class Stream final {
+public:
+    Stream() noexcept;
+    ~Stream() noexcept;
+    Stream(const Stream&) = delete;
+    Stream& operator=(const Stream&) = delete;
+
+    /** Adds `part` to the message. */
+    void add(std::span<const std::byte> part) noexcept;
+    /** @return True and the digest when every step succeeded; the stream is then spent. */
+    [[nodiscard]] bool finish(Digest& output) noexcept;
+
+private:
+    void* algorithm_{};
+    void* handle_{};
+    bool ok_{};
+};
+
 } // namespace sunrise::middleware::crypto::sha256

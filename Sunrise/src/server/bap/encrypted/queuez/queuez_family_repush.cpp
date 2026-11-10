@@ -130,7 +130,7 @@ bool consume_banner_repush(Session& session,
         return false;
     }
     // Retain the arm until the account has a character to name.
-    if (state::account::banner_character_soid(state::account_snapshot()) == 0) {
+    if (state::account::banner_character_soid(state::bound_account_snapshot()) == 0) {
         return false;
     }
     touchesScratch = true;

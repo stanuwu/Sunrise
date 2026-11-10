@@ -6,6 +6,8 @@
 #include <cstring>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_80804b.h"
+#include "../../content/packages/schema/generated/tag_classes_80804c.h"
 #include "../../encoding/bit_raw.h"
 #include "composite_entity_codec.h"
 
@@ -17,6 +19,13 @@ namespace bits = middleware::encoding::bits;
 
 /** Marks a retained mirror body so another callback's layout cannot be read as one. */
 inline constexpr std::uint32_t kMirrorIdentity = 0x4345324DU;
+
+/** Compiled damage-component decode plan, from the generated SDK decode plans for this build. */
+inline constexpr std::uint32_t kCombatantDamageComponentPlan =
+    middleware::content::packages::schema::generated::UnknownDamageComponent::kClass;
+/** Pool-walk schema inside the damage-component plan; each walk carries one pool level. */
+inline constexpr std::uint32_t kCombatantDamagePoolSchema =
+    middleware::content::packages::schema::generated::C80804c5c::kClass;
 
 /** Private header distinguishes retained mirror bodies from other payload layouts. */
 struct MirrorHeader final {
@@ -39,17 +48,15 @@ struct ResolverContext final {
     std::span<std::uint8_t> presence{};
     std::uint32_t firstFieldBit{};
     std::uint32_t componentTag{};
+    std::uint32_t damagePool{format::kAbsentIndex};
 };
 
 /** Builds one bounded canonical body while the input is decoded. */
 class MirrorBuilder final {
 public:
     state::gameplay::entity_identity::ActorSourceReference actorSource{};
-    std::uint16_t damageHealth{};
-    std::uint16_t damageShield{};
-    bool damageKnown{};
-    /** Damage pools seen so far; each pool is its own nested walk. */
-    std::uint8_t damagePools{};
+    /** Pools by their compiled plan position; a pool the update omits stays unknown. */
+    state::gameplay::entity_identity::DamagePools damage{};
     /** Opens an empty fixed-capacity bit writer. */
     MirrorBuilder() noexcept : writer_(bytes_) {}
 
@@ -79,9 +86,16 @@ public:
         std::memcpy(candidate.state.data() + sizeof(header), bytes_.data(), byteCount);
         candidate.byteCount = static_cast<std::uint16_t>(sizeof(header) + byteCount);
         candidate.actorSource = actorSource;
-        candidate.damageHealth = damageHealth;
-        candidate.damageShield = damageShield;
-        candidate.damageKnown = damageKnown;
+        candidate.damage = damage;
+        // The health and shield levels read the same plan positions, so an update that omits
+        // the health pool never reports its shield level as health.
+        namespace identities = state::gameplay::entity_identity;
+        candidate.damageKnown = damage.present[identities::kHealthPoolIndex];
+        candidate.damageHealth =
+            candidate.damageKnown ? damage.levels[identities::kHealthPoolIndex] : std::uint16_t{};
+        candidate.damageShield = damage.present[identities::kShieldPoolIndex]
+                                     ? damage.levels[identities::kShieldPoolIndex]
+                                     : std::uint16_t{};
         output = candidate;
         return true;
     }

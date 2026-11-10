@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 
@@ -173,7 +174,12 @@ bool character_light(const AccountState& account,
     if (!calculation::evaluate(scores, SlotScores{}, std::span<const SlotScores>{}, evaluation)) {
         return false;
     }
-    light = evaluation.average + state::artifact_power_bonus();
+    const auto artifactBonus = state::local_account_access() ? state::artifact_power_bonus()
+                                                             : account.presence.artifactPowerBonus;
+    if (evaluation.average > (std::numeric_limits<std::int32_t>::max)() - artifactBonus) {
+        return false;
+    }
+    light = evaluation.average + artifactBonus;
     return true;
 }
 

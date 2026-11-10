@@ -379,7 +379,7 @@ InvestmentAnswer encode_hello(InvestmentPayload payload) noexcept {
 /** The account copy and the wire record are large, so both live on the heap for one request. */
 InvestmentAnswer encode_inventory_snapshot(InvestmentPayload payload) noexcept {
     const std::unique_ptr<state::AccountState> account(
-        new (std::nothrow) state::AccountState(state::account_snapshot()));
+        new (std::nothrow) state::AccountState(state::bound_account_snapshot()));
     const std::unique_ptr<wire::InventorySnapshot> snapshot(new (std::nothrow)
                                                                 wire::InventorySnapshot{});
     if (account == nullptr || snapshot == nullptr) {

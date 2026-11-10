@@ -51,6 +51,10 @@ make_observation(const middleware::gameplay::external::EntityRecord& record,
         observation.action = identities::Action::remove;
     }
     static_cast<void>(external::extract_actor_source_reference(record, observation.actorSource));
+    if ((record.flags & external::entityUpdate) != 0
+        && (record.flags & external::entityRemove) == 0) {
+        observation.damage = record.update.damage;
+    }
     return observation;
 }
 
@@ -208,6 +212,16 @@ identities::Result snapshot_source(const identities::Source& source,
                                    std::vector<identities::Identity>& output) noexcept {
     AcquireSRWLockShared(&g_lock);
     const auto result = g_store.snapshot_source(source, output);
+    ReleaseSRWLockShared(&g_lock);
+    return result;
+}
+
+/** Visits the full source under the registry lock; the visitor must not re-enter it. */
+identities::Result visit_source(const identities::Source& source,
+                                identities::Store::SlotVisitor visitor,
+                                void* context) noexcept {
+    AcquireSRWLockShared(&g_lock);
+    const auto result = g_store.visit_source(source, visitor, context);
     ReleaseSRWLockShared(&g_lock);
     return result;
 }

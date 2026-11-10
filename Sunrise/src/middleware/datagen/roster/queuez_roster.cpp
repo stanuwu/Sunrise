@@ -7,7 +7,8 @@ namespace sunrise::middleware::datagen::roster {
 
 /** Builds one roster block from authored identities and each character's equipped items. */
 bool initialize(const state::AccountState& account, Block& block) noexcept {
-    if (!state::account::valid(account) || account.characterCount > block.characters.size()) {
+    if (!state::account::valid_public(account)
+        || account.characterCount > block.characters.size()) {
         return false;
     }
     block = {};

@@ -71,7 +71,7 @@ struct RemovalSnapshot {
 /** Copies the account to the heap and finds its selected character. */
 [[nodiscard]] RemovalSnapshot take_removal_snapshot() noexcept {
     RemovalSnapshot snapshot;
-    snapshot.account.reset(new (std::nothrow) AccountState(account_snapshot()));
+    snapshot.account.reset(new (std::nothrow) AccountState(bound_account_snapshot()));
     if (!snapshot.account) {
         snapshot.refusal = "allocation";
     } else if (!account::valid(*snapshot.account)) {
@@ -295,7 +295,7 @@ bool prepare_item_removal(std::uint64_t characterSoid,
 
 /** Produces the exact character-and-profile after-image while the captured views remain current. */
 bool preview_item_dismantle(const PendingItemDismantle& mutation, AccountState& after) noexcept {
-    const AccountState current = account_snapshot();
+    const AccountState current = bound_account_snapshot();
     const bool ready = materialize_item_dismantle(current, mutation, after);
     report_dismantle("preview",
                      ready ? "ok" : "fail",

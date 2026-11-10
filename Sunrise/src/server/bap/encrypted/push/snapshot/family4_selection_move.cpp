@@ -115,7 +115,7 @@ bool prepare_selection_move(Scratch& scratch,
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
         return report_failure("move_reservation");
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const std::optional<std::size_t> selectedIndex = find_character_index(account);
     Resolved selected{};
     if (!state::account::valid(account) || !selectedIndex.has_value()
@@ -266,7 +266,7 @@ bool prepare_equipment_swap(
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
         return report_failure("equip_reservation");
     }
-    state::AccountState account = state::account_snapshot();
+    state::AccountState account = state::bound_account_snapshot();
     if (!mutation.prepared || mutation.characterSoid == 0
         || mutation.characterSoid != swap.characterSoid
         || mutation.characterIndex >= account.characterCount
@@ -346,7 +346,7 @@ bool prepare_item_state(
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
         return report_failure("item_state_reservation");
     }
-    state::AccountState account = state::account_snapshot();
+    state::AccountState account = state::bound_account_snapshot();
     if (!mutation.prepared || mutation.characterSoid == 0
         || mutation.characterSoid != update.characterSoid
         || mutation.characterIndex >= account.characterCount
@@ -417,7 +417,7 @@ bool prepare_selected_character_refresh(
         || reservation.compressedWriteOffset > scratch.sealed.size()) {
         return report_failure("character_refresh_reservation");
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     if (accountSoid == 0 || update.characterSoid == 0 || accountSoid != account.primarySoid
         || characterIndex >= account.characterCount
         || account.characters[characterIndex].soid != update.characterSoid
@@ -482,7 +482,7 @@ bool prepare_account_refresh(
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
     Prepared& prepared) noexcept {
     const Reservation reservation = reserve_prior(scratch, prepared);
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const std::optional<std::size_t> selectedIndex = find_character_index(account);
     Resolved selected{};
     std::uint32_t accountDefinitionId = 0;
@@ -568,7 +568,7 @@ bool prepare_artifact_item_refresh(Scratch& scratch,
                                    std::uint64_t instanceSoid,
                                    Prepared& prepared) noexcept {
     const Reservation reservation = reserve_prior(scratch, prepared);
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const std::optional<std::size_t> selectedIndex = find_character_index(account);
     Resolved selected{};
     if (instanceSoid == 0 || !state::account::valid(account) || !selectedIndex.has_value()
@@ -631,7 +631,7 @@ bool prepare_item_values_refresh(
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
     Prepared& prepared) noexcept {
     const Reservation reservation = reserve_prior(scratch, prepared);
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const std::optional<std::size_t> selectedIndex = find_character_index(account);
     Resolved selected{};
     std::uint32_t accountDefinitionId = 0;

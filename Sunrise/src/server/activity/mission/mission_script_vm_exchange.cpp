@@ -17,7 +17,7 @@ bool exchange(Vm& first, Vm& second) noexcept {
     const auto members = [](Impl& value) noexcept {
         auto& [attempt,
                deviceRequests,
-               deviceRequestGeneration,
+               deviceRequestSources,
                squadPopulations,
                ghostLevels,
                ghostLevelCount,
@@ -58,7 +58,7 @@ bool exchange(Vm& first, Vm& second) noexcept {
                faulted] = value;
         return std::tie(attempt,
                         deviceRequests,
-                        deviceRequestGeneration,
+                        deviceRequestSources,
                         squadPopulations,
                         ghostLevels,
                         ghostLevelCount,

@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "../runtime/storage/internal.h"
+#include "member_selection.h"
 #include "runtime.h"
 #include "transactions/internal.h"
 
@@ -76,6 +77,12 @@ bool snapshot_session_roster(std::span<SessionRosterRow> output, std::size_t& co
         row.binding.createdRevision = record.createdRevision;
         row.binding.timeOrigin = record.timeOrigin;
         row.memberKey = record.memberKey;
+        for (std::size_t member = 0; member < kInvalidMemberRow; ++member) {
+            if (const auto* identity = member_identity(record, member)) {
+                row.presentMemberKey = member == 0 ? record.memberKey : identity->memberKey;
+                break;
+            }
+        }
         row.joinIdentity =
             record.membership.hasIdentity ? record.membership.identity.joinIdentity : 0;
         row.joinedRevision = record.joinedRevision;

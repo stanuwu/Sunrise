@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 #include "../../../../middleware/bap/activity_message/cinematic_incident.h"
@@ -9,6 +10,8 @@
 #include "../../../../middleware/bap/activity_message/incident.h"
 #include "../../../../middleware/bap/activity_message/player_trigger_incident.h"
 #include "../../../../middleware/bap/activity_message/sense_update.h"
+#include "../../../../state/activity/bubble_authority/runtime.h"
+#include "../../../../state/activity/member_context.h"
 #include "../../../../state/activity_sdk/runtime.h"
 #include "activity_message_route_internal.h"
 
@@ -102,6 +105,29 @@ resolve_sense_slot(const void* raw,
     // Native Sense codecs dispatch by the authored schema handle. No SDK reflection row exists.
     output.schemaRow = match->senseSchema;
     return sense_update::TargetStatus::resolved;
+}
+
+/**
+ * Reads the bubbles whose grant one link holds. A grant is recorded when its body is delivered,
+ * under the same lock that frames this link's messages, so a report framed after that delivery
+ * counts it.
+ * @return One bit per bubble ordinal this link holds.
+ */
+[[nodiscard]] std::uint64_t held_bubbles(const ActivityClientBinding& binding) noexcept {
+    namespace authority = state::activity::bubble_authority;
+    static_assert(state::build_data::scenarios::kBubbleCapacity <= authority::kAuthoritySlotCount);
+    std::uint64_t held = 0;
+    if (binding.bindingGeneration == 0) {
+        return held;
+    }
+    authority::GrantHolders holders{};
+    authority::grant_holders(binding.session.sessionId, holders);
+    for (std::size_t bubble = 0; bubble < state::build_data::scenarios::kBubbleCapacity; ++bubble) {
+        if (holders[bubble] == binding.bindingGeneration) {
+            held |= std::uint64_t{1} << bubble;
+        }
+    }
+    return held;
 }
 
 /** One framing-only adapter and the handler that reads its body. */
@@ -216,6 +242,7 @@ bool frame_only(const ActivityClientBinding& binding,
         input.verdict = framed.verdict;
         input.decoded = parsedSense.decoded;
         input.hasFirstObject = parsedSense.hasFirstObject;
+        input.heldBubbles = held_bubbles(binding);
         const auto refusal = server::activity::host::submit_sense(input);
         if (refusal != server::activity::host::IngressRefusal::none) {
             report_message(request.messageType,
@@ -319,7 +346,15 @@ bool prepare_authority_purge(const ActivityClientBinding& binding,
     plan.sessionId = request.sessionId;
     plan.authorityPurge.body.slots = purge.mask;
     plan.authorityPurge.body.reason = static_cast<std::int8_t>(purge.reason);
-    plan.authorityPurge.body.epoch = static_cast<std::uint8_t>(binding.replicationEpoch + 1U);
+    auto& pending = plan.authorityPurge;
+    pending.binding = binding.session;
+    if (!state::activity::replication_sequence(binding.session, pending.expectedSequence)
+        || pending.expectedSequence == (std::numeric_limits<std::uint64_t>::max)()) {
+        return false;
+    }
+    static_cast<void>(state::activity::pending_member_purge(
+        binding.session, state::activity::member_context().memberKey, pending.departure));
+    plan.authorityPurge.body.epoch = static_cast<std::uint8_t>(pending.expectedSequence + 1U);
     plan.authorityPurge.sourceGeneration = binding.bindingGeneration;
     plan.authorityPurge.pending = true;
     plan.delivery = Delivery::purgeNotification;

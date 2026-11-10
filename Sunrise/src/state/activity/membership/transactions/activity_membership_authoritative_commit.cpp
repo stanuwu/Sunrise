@@ -8,6 +8,7 @@ bool commit_authoritative(ActivityState& state,
                           const PendingMutation& prepared,
                           CommittedClientState& clientState) noexcept {
     clientState = {};
+    auto& member = *member_state(record, prepared.memberRow);
     if (!equal(prepared.authoritativeInput, prepared.authoritativeGuard)) {
         return false;
     }
@@ -15,21 +16,21 @@ bool commit_authoritative(ActivityState& state,
     // The merge decides the outcome. The prepared plan is not compared against it. State moves
     // between prepare and commit, and refusing on that difference dropped the whole delta: no
     // revision advanced and the region never moved.
-    const MembershipState before = record.membership;
+    const MembershipState before = member;
     clientState.previousRegion = before.currentRegion.index;
     MembershipState merged = merge(before, prepared.authoritativeInput);
-    const bool changed = !equal_authoritative(record.membership, merged);
-    const bool movesRegion = moves_region(record.membership, merged);
-    const bool revisionExhausted = state.stateRevision == activity::kMaximumRevision
-                                   || (record.membership.hasIdentity
-                                       && record.membership.revision == kMaximumMembershipRevision);
+    const bool changed = !equal_authoritative(member, merged);
+    const bool movesRegion = moves_region(member, merged);
+    const bool revisionExhausted =
+        state.stateRevision == activity::kMaximumRevision
+        || (member.hasIdentity && member.revision == kMaximumMembershipRevision);
     if ((changed || movesRegion) && revisionExhausted) {
         return false;
     }
     if (!changed && !movesRegion) {
         clientState.activityStateRevision = state.stateRevision;
-        clientState.membershipRevision = record.membership.revision;
-        clientState.heldRegion = record.membership.currentRegion.index;
+        clientState.membershipRevision = member.revision;
+        clientState.heldRegion = member.currentRegion.index;
         clientState.committed = true;
         return true;
     }
@@ -37,37 +38,30 @@ bool commit_authoritative(ActivityState& state,
     // Only a changed published field earns a revision. A bare region move changes nothing the
     // membership body carries; a public region's new advertisement is republished by the keepalive
     // when the region it advertises changes.
-    if (changed && record.membership.hasIdentity) {
+    if (changed && member.hasIdentity) {
         ++merged.revision;
         merged.acknowledgedRevision = kAbsentRevision;
     }
-    // A report that the client holds no slice set is the teardown before a load, so the write-back
-    // it sent describes a world it has left. The next load reports its own.
-    if (merged.currentRegion.index < 0) {
-        merged.clientInWorld = false;
-    }
     // The host teleport's spawn step and its retirement are part of the merge, so the staged
     // answer to the report already carries them.
-    record.membership = merged;
+    member = merged;
     publish_change(state, record);
-    clientState.region = record.membership.region;
-    clientState.currentRegion = record.membership.currentRegion;
-    clientState.heldRegion = record.membership.currentRegion.index;
+    clientState.region = member.region;
+    clientState.currentRegion = member.currentRegion;
+    clientState.heldRegion = member.currentRegion.index;
     clientState.activityStateRevision = state.stateRevision;
-    clientState.membershipRevision = record.membership.revision;
-    clientState.teleportSliceSetIndex = record.membership.teleport.sliceSetIndex;
-    clientState.teleportSliceSetHash = record.membership.teleport.spawnSetHash;
-    clientState.spawnState = record.membership.spawn.state;
-    clientState.teleportState = record.membership.teleport.state;
-    clientState.hasRegion = movesRegion && record.membership.region.index >= 0;
+    clientState.membershipRevision = member.revision;
+    clientState.teleportSliceSetIndex = member.teleport.sliceSetIndex;
+    clientState.teleportSliceSetHash = member.teleport.spawnSetHash;
+    clientState.spawnState = member.spawn.state;
+    clientState.teleportState = member.teleport.state;
+    clientState.hasRegion = movesRegion && member.region.index >= 0;
     clientState.hasCurrentRegion =
-        before.currentRegion.index != record.membership.currentRegion.index
-        && record.membership.currentRegion.index >= 0;
-    clientState.hasSpawn = before.spawn.state != record.membership.spawn.state;
-    clientState.hasTeleport =
-        before.teleport.state != record.membership.teleport.state
-        || before.teleport.sliceSetIndex != record.membership.teleport.sliceSetIndex
-        || before.teleport.spawnSetHash != record.membership.teleport.spawnSetHash;
+        before.currentRegion.index != member.currentRegion.index && member.currentRegion.index >= 0;
+    clientState.hasSpawn = before.spawn.state != member.spawn.state;
+    clientState.hasTeleport = before.teleport.state != member.teleport.state
+                              || before.teleport.sliceSetIndex != member.teleport.sliceSetIndex
+                              || before.teleport.spawnSetHash != member.teleport.spawnSetHash;
     clientState.changed = clientState.hasRegion || clientState.hasCurrentRegion
                           || clientState.hasSpawn || clientState.hasTeleport;
     clientState.committed = true;

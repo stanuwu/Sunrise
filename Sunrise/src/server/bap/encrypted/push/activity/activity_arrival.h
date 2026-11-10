@@ -14,6 +14,16 @@
 namespace sunrise::server::bap::encrypted::push::activity {
 
 /**
+ * Resolves the host's current scripted arrival, falling back to destination arrival only when
+ * the activity has no script selection. Callers hold the BAP session lock. A returning player
+ * must load the selected state before receiving its objects; this never changes a reported leg.
+ */
+[[nodiscard]] bool session_arrival_slice_set(const state::activity::SessionBinding& binding,
+                                             const state::build_data::scenarios::Definition& layout,
+                                             std::uint16_t authoredArrival,
+                                             std::uint16_t& output) noexcept;
+
+/**
  * Finds the slice-set index a destination arrives in.
  * Order: authored override, the bubble the client named, the mission program's declared initial
  * state, the default destination's, then its first live one. A fallback never crosses destinations.
@@ -45,6 +55,7 @@ struct EffectiveRegion final {
 /**
  * Resolves the one region a session publishes.
  * The client's report wins. Before the first report the destination's arrival slice set stands in.
+ * Callers hold the BAP session lock.
  * @param binding Exact joined activity-session generation.
  * @return The published region index, its source, and the destination's arrival slice set.
  */
@@ -55,6 +66,7 @@ effective_region(const state::activity::SessionBinding& binding) noexcept;
  * Resolves the region one prepared membership body publishes.
  * Staging runs before the commit, so committed State still names the region just left. The body
  * must name the delta's region or its advertisement fills the wrong record.
+ * Callers hold the BAP session lock.
  * @param mutation Prepared membership operation, whose sparse input may carry a new region.
  * @param binding Exact joined activity-session generation used when the delta names no region.
  * @return The region this body publishes, its source, and the destination's arrival slice set.
@@ -67,6 +79,7 @@ planned_region(const state::activity::membership::PendingMutation& mutation,
  * Resolves the region one private link's membership body publishes.
  * With no reported leg it is the private host row's, not the committed position of the activity
  * being left. The client clears its legs while waiting, so a cleared leg proves nothing.
+ * Callers hold the BAP session lock.
  * @param mutation Prepared membership operation, whose sparse input may carry a new region.
  * @param binding Exact joined activity-session generation that owns the private host row.
  * @return The region this body publishes, its source, and the destination's arrival slice set.

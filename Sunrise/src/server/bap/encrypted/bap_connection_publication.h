@@ -11,10 +11,15 @@ namespace sunrise::server::bap::encrypted {
 
 /** Connection fields one request may publish, captured before its transaction commits. */
 struct ConnectionFields {
+    activity_host_manager::PendingStartupReservations startupReservations{};
+    bool answersActivityStartup{};
+    middleware::bap::activity_message::TransportReport transportReport{};
+    std::uint64_t transportBindingGeneration{};
     middleware::bap::activity_message::patch_epoch::PatchEpoch patchEpoch{};
     activity_message::JoinIngressDiagnostic joinIngress{};
     /** The join carries the only member key the client ever sends. */
     std::uint64_t joinMemberKey{};
+    std::uint32_t joinCorrelation{};
     /** The join also names the character the player signed in on. */
     std::uint64_t joinCharacterSoid{};
     bool retainsPatchEpoch{};
@@ -22,6 +27,8 @@ struct ConnectionFields {
     bool receivesClientIdentity{};
     /** Set by a join alone; publication then resets the connection's roster state. */
     bool joinsActivity{};
+    /** Shared native joins commit their exact BC identity atomically with the owned lease. */
+    bool sharedJoin{};
 };
 
 /** Reserves one process-lifetime ActivityClient generation without wrapping. */

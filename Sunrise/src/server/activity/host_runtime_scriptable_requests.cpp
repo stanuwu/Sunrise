@@ -351,23 +351,26 @@ bool request_state_local_type23_override(
     return enqueue_request(request, reservation);
 }
 
-/** Queues one type-31 pulse for an exact package-derived ClientRef. */
+/** Queues one type-31 arm/disarm for an exact package-derived ClientRef. */
 bool request_type31_override(const state::activity::SessionBinding& binding,
                              const ScriptableTarget& target,
+                             std::uint64_t expectedActivityClientGeneration,
                              const ScriptableOutputReservation* reservation,
                              bool enabled) noexcept {
-    if (target.slotType != auth::kType31SlotType || target.authSchema != auth::kType31Schema) {
+    if (target.slotType != auth::kType31SlotType || target.authSchema != auth::kType31Schema
+        || expectedActivityClientGeneration == 0) {
         return false;
     }
     ScriptableRequest request{};
     request.binding = binding;
     request.target = target;
     request.kind = ScriptableOverrideKind::type31;
+    request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.triggerEnabled = enabled;
     return enqueue_request(request, reservation);
 }
 
-/** Queues one generation-bound type-31 pulse from an exact generated roster group. */
+/** Queues one generation-bound type-31 arm/disarm from an exact generated roster group. */
 bool request_state_local_type31_override(
     const state::activity::SessionBinding& binding,
     const ScriptableTarget& target,

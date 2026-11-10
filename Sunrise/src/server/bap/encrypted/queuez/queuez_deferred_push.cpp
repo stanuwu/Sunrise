@@ -12,6 +12,8 @@
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
+#include "../push/activity/nat_relay_push.h"
+#include "../social_feed_route.h"
 #include "pursuit_completion_push.h"
 #include "queuez_family_repush.h"
 #include "queuez_investment_push.h"
@@ -335,7 +337,7 @@ void retire_item_values_refresh(Session& session) noexcept {
     if (response.size() < scratch.framed.size()) {
         return false;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     // The frame carries the picked character's object; with none picked the resync carries it.
     const state::CharacterState* selected = selected_character(account);
     if (selected == nullptr) {
@@ -512,7 +514,7 @@ void retire_item_values_refresh(Session& session) noexcept {
         || GetTickCount64() < session.artifactFamily4RefreshDueTick) {
         return false;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const state::CharacterState* selected = selected_character(account);
     if (selected == nullptr) {
         return false;
@@ -566,7 +568,7 @@ void retire_item_values_refresh(Session& session) noexcept {
         session.artifactResetRefreshCursor = 0;
         return false;
     }
-    const state::AccountState account = state::account_snapshot();
+    const state::AccountState account = state::bound_account_snapshot();
     const state::CharacterState* selected = selected_character(account);
     if (selected == nullptr) {
         return false;
@@ -620,6 +622,20 @@ bool consume_deferred(Session& session,
     written = 0;
     if (!session.authenticated) {
         return false;
+    }
+    if (push::activity::consume_relay_notifications(
+            session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    // Ahead of the queuez poll so a family burst cannot starve a guest's social publication.
+    if (consume_social_notice(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (consume_reward_mail(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    if (public_queuez::poll(session, scratch, response, written, touchesScratch)) {
+        return true;
     }
     // The overrides go first: they are what the purchased mod unlocks, and the Family-4
     // companion waits on its own delay.

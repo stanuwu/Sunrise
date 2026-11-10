@@ -74,29 +74,14 @@ static_assert(layout::kCharacterValueCapacity
     return true;
 }
 
-} // namespace
-
 /** Encodes a sentinel-correct account object from live State. */
-bool encode(const state::AccountState& state,
-            const StateFields& fields,
-            std::span<std::byte> output) noexcept {
-    state::unlocks::Table unlocks;
-    return state::unlocks::snapshot(unlocks) && encode(state, fields, output, unlocks);
-}
-
-/**
- * Account-wide unlocks use the supplied snapshot; per-character flags still use saved state.
- * @param state Account identity, roster, preferences, and inventory to encode.
- * @param fields Values State holds outside the account copy, from the same view as state.
- * @param output Receives the account object; unchanged on failure.
- * @param unlocks Account unlocks from the same live or prepared view as state.
- * @return False when state, saved flags, mappings, or output bounds are invalid.
- */
-bool encode(const state::AccountState& state,
-            const StateFields& fields,
-            std::span<std::byte> output,
-            const state::unlocks::Table& unlocks) noexcept {
-    if (state.primarySoid == 0 || !state::account::valid(state)
+bool encode_with_unlocks(const state::AccountState& state,
+                         const StateFields& fields,
+                         std::span<std::byte> output,
+                         const state::unlocks::Table* preparedUnlocks,
+                         bool publicOnly) noexcept {
+    if (state.primarySoid == 0
+        || !(publicOnly ? state::account::valid_public(state) : state::account::valid(state))
         || output.size() < layout::kMinimumSize) {
         return false;
     }
@@ -104,25 +89,33 @@ bool encode(const state::AccountState& state,
     layout::Object object{};
     object.accountSoid = state.primarySoid;
     object.selectedCharacterSoid = state::account::selected_character_soid(state);
-    object.profileSetupCompleted = state.profileSetupCompleted ? 1U : 0U;
+    object.profileSetupCompleted = !publicOnly && state.profileSetupCompleted ? 1U : 0U;
     if (!roster::initialize(state, object.roster)
-        || !preferences::encode(state.settings, object.preferences, object.bindings)) {
+        || (!publicOnly
+            && !preferences::encode(state.settings, object.preferences, object.bindings))) {
         return false;
     }
 
-    object.acquiredFlags = unlocks.accountFlags;
-    object.profileUnlockFlags = unlocks.profileFlags;
-    object.objectiveValues = unlocks.objectiveValues;
+    state::unlocks::Table liveUnlocks;
+    if (!publicOnly && preparedUnlocks == nullptr && !state::unlocks::snapshot(liveUnlocks)) {
+        return false;
+    }
+    const auto& unlocks = preparedUnlocks != nullptr ? *preparedUnlocks : liveUnlocks;
+    if (!publicOnly) {
+        object.acquiredFlags = unlocks.accountFlags;
+        object.profileUnlockFlags = unlocks.profileFlags;
+        object.objectiveValues = unlocks.objectiveValues;
 
-    for (std::size_t index = 0; index < state.characterCount; ++index) {
-        state::unlocks::Table character;
-        if (!state::unlocks::snapshot(character, static_cast<int>(index))) {
-            return false;
-        }
-        object.characterUnlocks[index].flags = character.characterFlags;
-        if (fields.characterValueRow != state::build_data::constants::kUnboundValueRow) {
-            object.characterUnlocks[index].values[fields.characterValueRow] =
-                fields.characterValues[index];
+        for (std::size_t index = 0; index < state.characterCount; ++index) {
+            state::unlocks::Table character;
+            if (!state::unlocks::snapshot(character, static_cast<int>(index))) {
+                return false;
+            }
+            object.characterUnlocks[index].flags = character.characterFlags;
+            if (fields.characterValueRow != state::build_data::constants::kUnboundValueRow) {
+                object.characterUnlocks[index].values[fields.characterValueRow] =
+                    fields.characterValues[index];
+            }
         }
     }
     object.publicityExpiries.fill(kSuppressedPublicityDeadline);
@@ -133,30 +126,54 @@ bool encode(const state::AccountState& state,
     for (inventory::layout::Entry& item : object.secondaryItems) {
         item.definitionIndex = kEmptyDefinitionIndex;
     }
-    if (!progression::key_bank(
-            state::build_data::progressions::Scope::account, object.progressions, unlocks)) {
-        return false;
-    }
-    // Profile rows are sentinelled above, so placement only has to claim its own slots.
-    std::array<std::uint16_t, kBucketIdentityCapacity> takenSlots{};
-    for (std::size_t index = 0; index < state.profileItemCount; ++index) {
-        if (!place_profile_item(
-                state.profileItems[index], takenSlots, object.profileItems, object.newItemFlags)) {
+    if (publicOnly) {
+        for (auto& entry : object.progressions) {
+            entry.definitionIndex = kEmptyDefinitionIndex;
+        }
+    } else {
+        if (!progression::key_bank(
+                state::build_data::progressions::Scope::account, object.progressions, unlocks)) {
             return false;
         }
-    }
-    object.profileItemCount = static_cast<std::uint32_t>(state.profileItemCount);
+        // Profile rows are sentinelled above, so placement only has to claim its own slots.
+        std::array<std::uint16_t, kBucketIdentityCapacity> takenSlots{};
+        for (std::size_t index = 0; index < state.profileItemCount; ++index) {
+            if (!place_profile_item(state.profileItems[index],
+                                    takenSlots,
+                                    object.profileItems,
+                                    object.newItemFlags)) {
+                return false;
+            }
+        }
+        object.profileItemCount = static_cast<std::uint32_t>(state.profileItemCount);
 
-    // A committed wallet sync advances this generation; ordinary inventory updates keep it.
-    object.storeSyncRevision = fields.storeSyncRevision;
-    if (object.storeSyncRevision != 0) {
-        object.storeSyncState = layout::kStoreSyncStateSynced;
+        // A committed wallet sync advances this generation; ordinary inventory updates keep it.
+        object.storeSyncRevision = fields.storeSyncRevision;
+        if (object.storeSyncRevision != 0) {
+            object.storeSyncState = layout::kStoreSyncStateSynced;
+        }
     }
 
     // Publish only after every fallible conversion succeeds.
     std::fill(output.begin(), output.end(), std::byte{});
     std::memcpy(output.data(), &object, sizeof object);
     return true;
+}
+
+} // namespace
+
+bool encode(const state::AccountState& state,
+            const StateFields& fields,
+            std::span<std::byte> output,
+            bool publicOnly) noexcept {
+    return encode_with_unlocks(state, fields, output, nullptr, publicOnly);
+}
+
+bool encode(const state::AccountState& state,
+            const StateFields& fields,
+            std::span<std::byte> output,
+            const state::unlocks::Table& unlocks) noexcept {
+    return encode_with_unlocks(state, fields, output, &unlocks, false);
 }
 
 } // namespace sunrise::middleware::datagen::family4::account

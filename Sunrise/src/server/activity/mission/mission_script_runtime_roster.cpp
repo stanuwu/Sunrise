@@ -8,10 +8,18 @@
 namespace sunrise::server::activity::mission {
 namespace {
 
-/** @return True when one roster row is a committed peer of this instance's destination. */
+/** @return True for another committed member of this exact shared activity. */
 [[nodiscard]] bool peer_session(const RuntimeInstance& instance,
                                 const state::activity::SessionRosterRow& row) noexcept {
-    return row.joined && row.binding.sessionId != instance.view.binding.sessionId
+    std::uint64_t ownMember{};
+    for (const auto& member : instance.memberInputs) {
+        if (member.present
+            && member.life.sourceGeneration == instance.view.activityClientGeneration) {
+            ownMember = member.life.member.identity.memberKey;
+        }
+    }
+    return row.joined && row.memberKey != ownMember
+           && state::activity::same_binding(row.binding, instance.view.binding)
            && state::activity::transactions::same_destination(row.binding.destination,
                                                               instance.view.binding.destination);
 }
@@ -54,12 +62,31 @@ void queue_phase_entered(RuntimeInstance& instance, std::uint32_t previousPhase)
 }
 
 /**
- * Raises one event per peer session that appeared or left this instance's destination.
- * A record replacement changes createdRevision, which counts as a leave and a join. The first read
- * only records the current peers, so a reattach never replays them.
+ * Raises one event per peer member that appeared or left this exact shared activity.
+ * A join lifetime replacement counts as a leave and a join. The first read only records the
+ * current peers, so a reattach never replays them.
  */
-void push_session_roster_edges(RuntimeInstance& instance,
-                               std::span<const state::activity::SessionRosterRow> roster) noexcept {
+void push_session_roster_edges(RuntimeInstance& instance) noexcept {
+    refresh_mission_members(instance);
+    if (!instance.partySnapshotValid) {
+        return;
+    }
+    std::array<state::activity::SessionRosterRow,
+               state::activity::entity_slots::kMemberLeaseRowCount>
+        rows{};
+    std::size_t count{};
+    for (const auto& member : instance.memberInputs) {
+        if (!member.present) {
+            continue;
+        }
+        auto& row = rows[count++];
+        row.binding = instance.view.binding;
+        row.memberKey = member.life.member.identity.memberKey;
+        row.joinIdentity = member.life.member.identity.joinIdentity;
+        row.joinedRevision = member.life.member.joinedRevision;
+        row.joined = true;
+    }
+    const auto roster = std::span(rows).first(count);
     const bool first = !instance.sessionRosterObserved;
     instance.sessionRosterObserved = true;
     for (SessionRosterWatch& watched : instance.sessionRoster) {
@@ -69,7 +96,9 @@ void push_session_roster_edges(RuntimeInstance& instance,
         const auto match = std::find_if(
             roster.begin(), roster.end(), [&instance, &watched](const auto& row) noexcept {
                 return peer_session(instance, row) && row.binding.sessionId == watched.sessionId
-                       && row.binding.createdRevision == watched.createdRevision;
+                       && row.binding.createdRevision == watched.createdRevision
+                       && row.memberKey == watched.memberKey
+                       && row.joinedRevision == watched.joinedRevision;
             });
         if (match != roster.end()) {
             continue;
@@ -90,7 +119,9 @@ void push_session_roster_edges(RuntimeInstance& instance,
         bool known = false;
         for (SessionRosterWatch& watched : instance.sessionRoster) {
             if (watched.used && watched.sessionId == row.binding.sessionId
-                && watched.createdRevision == row.binding.createdRevision) {
+                && watched.createdRevision == row.binding.createdRevision
+                && watched.memberKey == row.memberKey
+                && watched.joinedRevision == row.joinedRevision) {
                 watched.memberKey = row.memberKey;
                 watched.joinIdentity = row.joinIdentity;
                 known = true;
@@ -107,6 +138,7 @@ void push_session_roster_edges(RuntimeInstance& instance,
         spare->createdRevision = row.binding.createdRevision;
         spare->memberKey = row.memberKey;
         spare->joinIdentity = row.joinIdentity;
+        spare->joinedRevision = row.joinedRevision;
         spare->used = true;
         if (first) {
             continue;

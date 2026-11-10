@@ -11,6 +11,7 @@
 #include <bit>
 
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
+#include "../../../../steam/interfaces/invitations.h"
 #include "../../../diagnostics/test_input/test_input.h"
 #include "input.h"
 
@@ -64,9 +65,11 @@ LRESULT CALLBACK raw_window_procedure(HWND window,
 
     // A captured message still goes to the default procedure, or the system keeps the raw-input
     // buffer alive. That is also the fallback when there is no procedure to forward to.
+    steam::interfaces::methods::PendingInvitation invitation{};
     // A test process also drops the user's own raw mouse; it runs in the background.
     const bool captured = message == WM_INPUT
                           && (core::ui::runtime::snapshot().visible
+                              || steam::interfaces::methods::pending_invitation(invitation)
                               || diagnostics::test_input::foreign_raw_input(value));
     const bool forward = !captured && original != nullptr;
     const LRESULT result = forward ? CallWindowProcW(original, window, message, word, value)

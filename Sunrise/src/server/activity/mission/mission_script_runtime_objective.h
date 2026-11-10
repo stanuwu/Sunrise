@@ -1,19 +1,31 @@
 #pragma once
 
+#include <algorithm>
+
 #include "../../../middleware/bap/activity_message/squad_objective_state.h"
 #include "mission_script_runtime_internal.h"
 
 namespace sunrise::server::activity::mission {
 
-/** Qualifies reported costs against the exact transported objective and evaluation revision. */
-inline void qualify_objective_costs(const RuntimeInstance& instance, host::Event& event) noexcept {
+/**
+ * Qualifies reported costs against the exact transported objective and evaluation revision. Only
+ * a squad with a retained body has an assignment, so only then are the full bodies copied.
+ * @return False when the bodies could not be copied and the instance was faulted.
+ */
+[[nodiscard]] inline bool qualify_objective_costs(RuntimeInstance& instance,
+                                                  host::Event& event) noexcept {
     namespace objective = middleware::bap::activity_message::squad_objective;
-    std::vector<host::PendingScriptableOverride> estate{};
-    if (!host::scriptable_auth_estate(
-            instance.view.binding, instance.view.activityClientGeneration, estate)) {
-        return;
+    const auto pins = pass_pins(instance);
+    if (std::none_of(pins.begin(), pins.end(), [&event](const host::ScriptablePin& pin) noexcept {
+            return pin.registryKey == event.firstRegistryKey && pin.objectTag == event.slotObjectTag
+                   && pin.slotIndex == event.firstSlotIndex && pin.slotType == event.firstSlotType;
+        })) {
+        return true;
     }
-    for (const auto& retained : estate) {
+    if (!copy_estate(instance)) {
+        return false;
+    }
+    for (const auto& retained : instance.estate) {
         const auto& target = retained.target;
         if (target.registryKey != event.firstRegistryKey || target.objectTag != event.slotObjectTag
             || target.slotIndex != event.firstSlotIndex || target.slotType != event.firstSlotType) {
@@ -30,8 +42,9 @@ inline void qualify_objective_costs(const RuntimeInstance& instance, host::Event
                 event.squadObjectiveRevision != 0
                 && assignment.revision == event.squadObjectiveRevision;
         }
-        return;
+        return true;
     }
+    return true;
 }
 
 } // namespace sunrise::server::activity::mission

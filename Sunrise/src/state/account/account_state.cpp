@@ -86,7 +86,7 @@ constexpr std::uint8_t kDismantleClassMaskBits =
 }
 
 /** Checks the complete authored/runtime structure without consulting installed build data. */
-[[nodiscard]] bool valid_impl(const AccountState& state) noexcept {
+[[nodiscard]] bool valid_impl(const AccountState& state, bool requireSettings = true) noexcept {
     if (state.profileItemCount > state.profileItems.size()
         || state.characterCount > state.characters.size()) {
         return false;
@@ -103,7 +103,7 @@ constexpr std::uint8_t kDismantleClassMaskBits =
                               state.dismantleRewards.cend(),
                               empty_dismantle_reward);
     }
-    if (!settings::valid(state.settings) || !valid_dismantle_rewards(state)) {
+    if ((requireSettings && !settings::valid(state.settings)) || !valid_dismantle_rewards(state)) {
         return false;
     }
 
@@ -172,6 +172,10 @@ constexpr std::uint8_t kDismantleClassMaskBits =
  */
 bool valid(const AccountState& state) noexcept {
     return valid_impl(state);
+}
+
+bool valid_public(const AccountState& state) noexcept {
+    return valid_impl(state, false);
 }
 
 /**

@@ -15,6 +15,8 @@
 
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
+#include "../account/account_token.h"
+#include "../account/public_profiles.h"
 #include "../activity/defaults/activity_defaults_validation.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
@@ -285,6 +287,12 @@ bool initialize(void* module,
         return false;
     }
     initialized->signOn.relayAddress = kLoopbackAddress;
+    // A guest's token names its account to the host. Its sign-on keys stay random; the host
+    // learns them over the guest's encrypted link.
+    if (core::settings::role() == core::settings::Role::client
+        || core::settings::get().server.upstream.enabled) {
+        account::signon_token(runtimeAccount->primarySoid, initialized->signOn.sessionToken);
+    }
     // The published relay port is the one the listener binds, so both move with one setting.
     initialized->signOn.relayPort = core::settings::get().server.bapPort;
     initialized->signOn.tokenLifetimeSeconds = kDefaultTokenLifetimeSeconds;
@@ -304,11 +312,16 @@ bool initialize(void* module,
     bool perksEarned = false;
     (void)seed_seasonal_progression(perksEarned);
     unlocks::records::seed();
-    return transaction.commit();
+    if (!transaction.commit()) {
+        return false;
+    }
+    account::profiles::reset(runtimeAccount->primarySoid);
+    return true;
 }
 
 /** Securely erases State, including activity destinations and matchmaking descriptors. */
 void shutdown() noexcept {
+    account::profiles::reset();
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
     secure_reset(runtime::storage::g_state);
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
@@ -319,6 +332,12 @@ void shutdown() noexcept {
 /** @return Immutable generated SignOn session fields. */
 const SignOnState& sign_on() noexcept {
     return runtime::storage::g_state.signOn;
+}
+
+void publish_bap_port(std::uint16_t port) noexcept {
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    runtime::storage::g_state.signOn.relayPort = port;
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
 }
 
 /** Ensures every native profile action source has one unique runtime item-instance key. */
@@ -508,7 +527,7 @@ bool reset_artifact(std::int32_t glimmerCost, ArtifactResetResult& result) noexc
     }
 
     const std::uint32_t previousMods = artifact_mod_mask();
-    const AccountState before = account_snapshot();
+    const AccountState before = bound_account_snapshot();
     if (previousMods == 0 || !account::valid(before)
         || !runtime::detail::valid_profile_inventory(before)) {
         return false;

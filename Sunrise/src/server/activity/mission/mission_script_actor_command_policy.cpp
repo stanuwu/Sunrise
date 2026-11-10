@@ -11,9 +11,14 @@ ActorCommandPolicy g_actorCommandPolicy{};
 
 } // namespace
 
-/** Resolves one durable selector against the current pinned SDK. */
-[[nodiscard]] ActorCommandPolicyStatus
-dispatch_actor_command(const RuntimeInstance& instance, const lua_vm::Intent& intent) noexcept {
+/**
+ * Resolves one durable selector against the current pinned SDK.
+ * @param generation Link the squad's body lives on. The policy lane reports provocation with it,
+ * and the squad's reports are admitted only from there.
+ */
+[[nodiscard]] ActorCommandPolicyStatus dispatch_actor_command(const RuntimeInstance& instance,
+                                                              const lua_vm::Intent& intent,
+                                                              std::uint64_t generation) noexcept {
     if (instance.view.catalog == nullptr) {
         return ActorCommandPolicyStatus::refused;
     }
@@ -55,6 +60,7 @@ dispatch_actor_command(const RuntimeInstance& instance, const lua_vm::Intent& in
         const ActorCommandPolicyRequest request{
             .binding = instance.view.binding,
             .sdkBuildSha256 = intent.sdkBuildSha256,
+            .activityClientGeneration = generation,
             .squadRow = intent.firstRow,
             .commandRow = static_cast<std::uint32_t>(index),
             .commandSelector = command.selector,

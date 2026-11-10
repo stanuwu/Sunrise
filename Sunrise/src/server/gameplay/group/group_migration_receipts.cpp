@@ -2,10 +2,9 @@
 
 #include <array>
 
-#include "../../../middleware/gameplay/descriptor/join_descriptor.h"
 #include "../../../middleware/gameplay/group/migration_messages.h"
 #include "../../../middleware/gameplay/group/notice_messages.h"
-#include "../endpoint/gameplay_endpoint.h"
+#include "../gameplay_advertisement.h"
 #include "../gameplay_log.h"
 #include "../peer/peer_transport.h"
 #include "group_host.h"
@@ -17,7 +16,6 @@ namespace {
 
 namespace wire = middleware::gameplay::group;
 namespace bits = middleware::encoding::bits;
-namespace descriptor = middleware::gameplay::descriptor;
 
 /**
  * Reasserts the stable logical host after its admitted peer starts an election.
@@ -26,29 +24,30 @@ namespace descriptor = middleware::gameplay::descriptor;
  */
 void answer_private_election(const state::gameplay::Endpoint& from,
                              const wire::Election& election) noexcept {
-    const endpoint::Identity identity = endpoint::identity();
-    if (election.sessionId != identity.machineId
-        || !group::admitted_owner(from, election.sessionId)) {
+    if (!group::admitted_owner(from, election.sessionId)) {
         return;
     }
     HostSessionBinding host{};
-    const state::gameplay::Endpoint advertised = endpoint::advertised();
-    descriptor::JoinEndpoint endpointValue{};
-    endpointValue.machineId = election.sessionId;
-    endpointValue.address = advertised.address;
-    endpointValue.onlineSessionId = identity.onlineSessionId;
     if (!host_session_for_group(election.sessionId, host)) {
         report(core::log::Level::warn,
                "ev=gameplay stage=migration result=reestablish_fail reason=no_host");
         return;
     }
-    endpointValue.port = host.port != 0 ? host.port : advertised.port;
-    std::array<std::byte, descriptor::kDescriptorSize> body{};
-    if (!descriptor::build(endpointValue, body)) {
+    HostSessionBinding privateHost{};
+    if (!private_host_session(host.source, privateHost)
+        || privateHost.groupSessionId != election.sessionId) {
+        return;
+    }
+    middleware::bap::activity_message::replicate_membership::CitizenAdvertisement candidate{};
+    std::uint64_t generation{};
+    build_private_host_advertisement(host.source, host.regionIndex, 0, candidate, generation);
+    if (!candidate.present) {
         report(core::log::Level::warn,
                "ev=gameplay stage=migration result=reestablish_fail reason=descriptor");
         return;
     }
+    const auto body = candidate.descriptor;
+    release_host_session(generation);
     const bool sent = peer::send_out_of_band(
         from,
         static_cast<std::uint8_t>(wire::MigrationMessageId::hostReestablish),

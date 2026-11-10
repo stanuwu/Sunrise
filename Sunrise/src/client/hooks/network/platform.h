@@ -16,6 +16,7 @@ namespace sunrise::client::hooks::network {
 /** Stable slot order shared by target entries and Detours handles. */
 enum class HookSlot : std::size_t {
     transportKind,
+    transportKindSession,
     authenticationStatus,
     setCertificate,
     httpExecuteRequest,
@@ -54,6 +55,9 @@ namespace platform {
 
 /** @return The transport-kind replacement body, from the file that owns it. */
 [[nodiscard]] void* transport_kind_entry_point() noexcept;
+
+/** @return The fireteam/posse transport-kind replacement body. */
+[[nodiscard]] void* transport_kind_session_entry_point() noexcept;
 
 /** @return The authentication-status replacement body, from the file that owns it. */
 [[nodiscard]] void* authentication_status_entry_point() noexcept;

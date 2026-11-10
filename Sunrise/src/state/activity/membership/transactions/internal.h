@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../member_context.h"
+#include "../../member_selection.h"
 #include "../activity_membership_query.h"
 
 namespace sunrise::state::activity::membership::transactions {
@@ -79,12 +81,13 @@ inline bool equal(const Snapshot& first, const Snapshot& second) noexcept {
 inline MembershipState merge(const MembershipState& state,
                              const AuthoritativeUpdate& update) noexcept {
     MembershipState merged = state;
-    // While the host is teleporting the client, the host owns the transition token. A stale
-    // client report would revert the arm's advance, and the client would then reject the target
-    // region record. The client owns the token again once the teleport is spent.
-    const bool hostDrivesToken =
-        state.hasHostTeleport && state.hostTeleport.state != kHostTeleportSpawnState;
-    if (update.hasTransitionToken && !hostDrivesToken) {
+    // The client owns its transition count, independently of the host's teleport request token.
+    // An initial load can consume that request without a second transition. Always reflect its
+    // report: retaining the host's predicted advance leaves the region acknowledgment ahead of
+    // the native transition and prevents the client from switching into the loaded region.
+    if (update.hasTransitionToken) {
+        merged.nativeTransitionToken = update.transitionToken;
+        merged.transitionReported = true;
         merged.transitionToken = update.transitionToken;
         merged.hasTransitionToken = true;
     }
@@ -94,6 +97,7 @@ inline MembershipState merge(const MembershipState& state,
     }
     if (update.hasTeleport) {
         merged.teleport = update.teleport;
+        merged.teleportReported = true;
     }
     // Both legs are kept exactly as reported, -1 included, because message 12 mirrors them back.
     // Where the player is comes from `player_region`, which prefers the current leg.
@@ -163,7 +167,10 @@ inline bool equal_authoritative(const MembershipState& first,
            && equal(first.hostTeleport, second.hostTeleport)
            && equal(first.currentRegion, second.currentRegion) && equal(first.region, second.region)
            && first.currentReported == second.currentReported
-           && first.pendingReported == second.pendingReported;
+           && first.pendingReported == second.pendingReported
+           && first.transitionReported == second.transitionReported
+           && first.nativeTransitionToken == second.nativeTransitionToken
+           && first.teleportReported == second.teleportReported;
 }
 
 /**

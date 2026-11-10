@@ -34,7 +34,7 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
     if (!accepted_claim_rule(vendorIndex, sourceBucket)) {
         return false;
     }
-    AccountState working = account_snapshot();
+    AccountState working = bound_account_snapshot();
     const std::size_t characterIndex = selected_character_index(working);
     reason = "account_state";
     if (!account::valid(working) || !valid_profile_inventory(working)

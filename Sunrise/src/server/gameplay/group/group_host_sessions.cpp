@@ -4,7 +4,9 @@
 
 #include <array>
 #include <limits>
+#include <mutex>
 
+#include "../../../core/threading/srw_lock.h"
 #include "../../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../../state/activity/destination/activity_destination_public.h"
 #include "../../../state/activity/runtime.h"
@@ -14,14 +16,20 @@
 namespace sunrise::server::gameplay::group {
 
 namespace {
+// Local budget for two overlapping private source bindings per player; a full table refuses
+// further distinct sources until pruning releases a slot.
+constexpr std::size_t kSourceCapacity = core::network_capacity::kPlayers * 2;
 
 /** One source-bound activity-host row owned by the fixed table. */
 struct HostSession {
     HostSessionBinding binding{};
+    /** Borrowed private generations; their live owners retain them and join rechecks State. */
+    std::array<state::activity::SessionBinding, kSourceCapacity> sources{};
     HostSessionState state{HostSessionState::absent};
     std::uint64_t lastUse{};
     std::uint32_t references{};
     bool occupied{};
+    bool publicRegion{};
 };
 
 // The table must outsize the directory a body carries, because the previous body's rows are still
@@ -38,6 +46,76 @@ std::array<HostSessionBinding, kHostSessionCapacity> g_retired{};
 std::size_t g_retiredCount = 0;
 std::uint64_t g_useStamp = 0;
 std::uint64_t g_generation = 0;
+
+/** Owns release scratch across State calls. Order: release lock, then host table or State. */
+core::threading::SrwLock g_releaseLock;
+/** Reset can detach every current row plus a full deferred-retirement queue. */
+std::array<HostSessionBinding, kHostSessionCapacity * 2> g_released{};
+
+/** Public content compatibility excludes the launch's nonce and travel provenance. */
+[[nodiscard]] bool
+compatible_destination(const state::activity::destination::DestinationSelection& a,
+                       const state::activity::destination::DestinationSelection& b) noexcept {
+    return a.packageName == b.packageName && a.packageNameLength == b.packageNameLength
+           && a.activityIndex == b.activityIndex && a.elementIndex == b.elementIndex
+           && a.hasElementIndex == b.hasElementIndex && a.arrivalBubbleHash == b.arrivalBubbleHash
+           && a.hasArrivalBubbleHash == b.hasArrivalBubbleHash && a.spawnSetHash == b.spawnSetHash
+           && a.hasSpawnSetHash == b.hasSpawnSetHash
+           && a.arrivalBubbleOverride == b.arrivalBubbleOverride
+           && a.hasArrivalBubbleOverride == b.hasArrivalBubbleOverride
+           && a.sliceSetOverride == b.sliceSetOverride
+           && a.hasSliceSetOverride == b.hasSliceSetOverride
+           && a.spawnSetOverride == b.spawnSetOverride
+           && a.hasSpawnSetOverride == b.hasSpawnSetOverride;
+}
+
+/** Removes expired borrowed generations without holding the host lock across a State call. */
+void prune_sources() noexcept {
+    for (std::size_t index = 0; index < g_hostSessions.size(); ++index) {
+        std::array<state::activity::SessionBinding, kSourceCapacity> sources{};
+        std::uint64_t generation{};
+        AcquireSRWLockShared(&g_hostSessionLock);
+        if (!g_hostSessions[index].occupied || !g_hostSessions[index].publicRegion) {
+            ReleaseSRWLockShared(&g_hostSessionLock);
+            continue;
+        }
+        sources = g_hostSessions[index].sources;
+        generation = g_hostSessions[index].binding.generation;
+        ReleaseSRWLockShared(&g_hostSessionLock);
+        for (const auto& source : sources) {
+            if (source.sessionId == 0 || state::activity::binding_matches(source)) {
+                continue;
+            }
+            AcquireSRWLockExclusive(&g_hostSessionLock);
+            auto& row = g_hostSessions[index];
+            if (row.binding.generation == generation) {
+                for (auto& candidate : row.sources) {
+                    if (same_binding(candidate, source)) {
+                        candidate = {};
+                    }
+                }
+            }
+            ReleaseSRWLockExclusive(&g_hostSessionLock);
+        }
+    }
+}
+
+/** Records one exact source once. The fixed State table bounds simultaneously valid sources. */
+[[nodiscard]] bool remember_source(HostSession& row,
+                                   const state::activity::SessionBinding& source) noexcept {
+    for (const auto& candidate : row.sources) {
+        if (same_binding(candidate, source)) {
+            return true;
+        }
+    }
+    for (auto& candidate : row.sources) {
+        if (candidate.sessionId == 0) {
+            candidate = source;
+            return true;
+        }
+    }
+    return false;
+}
 
 /** Moves one unreferenced occupied row to deferred retirement. The caller holds the lock. */
 [[nodiscard]] bool retire_locked(HostSession& row) noexcept {
@@ -70,16 +148,25 @@ void release_retired(const HostSessionBinding& binding) noexcept {
 
 /** Releases every deferred row. Callers hold no lock. */
 void free_retired_host_sessions() noexcept {
-    std::array<HostSessionBinding, kHostSessionCapacity> retired{};
+    AcquireSRWLockShared(&g_hostSessionLock);
+    const bool pending = g_retiredCount != 0;
+    ReleaseSRWLockShared(&g_hostSessionLock);
+    if (!pending) {
+        return;
+    }
+    std::lock_guard releaseGuard(g_releaseLock);
     std::size_t count = 0;
     AcquireSRWLockExclusive(&g_hostSessionLock);
-    retired = g_retired;
     count = g_retiredCount;
-    g_retired = {};
+    for (std::size_t index = 0; index < count; ++index) {
+        g_released[index] = g_retired[index];
+        g_retired[index] = {};
+    }
     g_retiredCount = 0;
     ReleaseSRWLockExclusive(&g_hostSessionLock);
     for (std::size_t index = 0; index < count; ++index) {
-        release_retired(retired[index]);
+        release_retired(g_released[index]);
+        g_released[index] = {};
     }
 }
 
@@ -109,10 +196,14 @@ template <typename Predicate>
 HostSessionState request_host_session(std::uint64_t groupSessionId,
                                       const state::activity::SessionBinding& source,
                                       std::int32_t regionIndex,
-                                      HostSessionBinding& output) noexcept {
+                                      HostSessionBinding& output,
+                                      bool publicRegion) noexcept {
     output = {};
     if (groupSessionId == 0 || regionIndex < 0 || !state::activity::retain_binding(source)) {
         return HostSessionState::absent;
+    }
+    if (publicRegion) {
+        prune_sources();
     }
 
     HostSessionState result = HostSessionState::full;
@@ -121,16 +212,26 @@ HostSessionState request_host_session(std::uint64_t groupSessionId,
 
     HostSession* matching = nullptr;
     for (HostSession& row : g_hostSessions) {
-        if (row.occupied && row.binding.groupSessionId == groupSessionId) {
+        if (row.occupied
+            && (row.binding.groupSessionId == groupSessionId
+                || (publicRegion && row.publicRegion && row.binding.regionIndex == regionIndex
+                    && compatible_destination(row.binding.source.destination,
+                                              source.destination)))) {
             matching = &row;
             break;
         }
     }
-    if (matching != nullptr && same_binding(matching->binding.source, source)
+    if (matching != nullptr && matching->publicRegion == publicRegion
+        && (same_binding(matching->binding.source, source)
+            || (publicRegion
+                && compatible_destination(matching->binding.source.destination,
+                                          source.destination)))
         && matching->binding.regionIndex == regionIndex) {
-        matching->lastUse = ++g_useStamp;
-        output = matching->binding;
-        result = matching->state;
+        if (!publicRegion || remember_source(*matching, source)) {
+            matching->lastUse = ++g_useStamp;
+            output = matching->binding;
+            result = matching->state;
+        }
     } else if (matching != nullptr && matching->references != 0) {
         result = HostSessionState::conflict;
     } else {
@@ -158,6 +259,10 @@ HostSessionState request_host_session(std::uint64_t groupSessionId,
         if (target != nullptr && retire_locked(*target)) {
             target->binding.previous = previous;
             target->binding.source = source;
+            target->publicRegion = publicRegion;
+            if (publicRegion) {
+                target->sources[0] = source;
+            }
             target->binding.groupSessionId = groupSessionId;
             // Rows are found by a nonzero generation, so the counter starts at one.
             target->binding.generation = ++g_generation;
@@ -183,6 +288,30 @@ HostSessionState request_host_session(std::uint64_t groupSessionId,
         report(core::log::Level::warn, "ev=gameplay stage=activityhost result=full");
     }
     return result;
+}
+
+void host_session_sources(std::uint64_t generation,
+                          std::span<state::activity::SessionBinding> output,
+                          std::size_t& count) noexcept {
+    count = 0;
+    std::array<state::activity::SessionBinding, kSourceCapacity> sources{};
+    AcquireSRWLockShared(&g_hostSessionLock);
+    for (const auto& row : g_hostSessions) {
+        if (row.occupied && row.state == HostSessionState::ready
+            && row.binding.generation == generation) {
+            sources = row.sources;
+            if (!row.publicRegion) {
+                sources[0] = row.binding.source;
+            }
+            break;
+        }
+    }
+    ReleaseSRWLockShared(&g_hostSessionLock);
+    for (const auto& source : sources) {
+        if (count < output.size() && state::activity::binding_matches(source)) {
+            output[count++] = source;
+        }
+    }
 }
 
 /** Copies a ready row by its exact group-session key. */
@@ -212,13 +341,33 @@ bool host_session_for_source_region(const state::activity::SessionBinding& sourc
                                     std::int32_t regionIndex,
                                     HostSessionBinding& output) noexcept {
     output = {};
-    return regionIndex >= 0 && state::activity::binding_matches(source)
-           && find_ready(
-               [&source, regionIndex](const HostSessionBinding& binding) {
-                   return same_binding(binding.source, source)
-                          && binding.regionIndex == regionIndex;
-               },
-               output);
+    if (regionIndex < 0 || !state::activity::binding_matches(source)) {
+        return false;
+    }
+    AcquireSRWLockShared(&g_hostSessionLock);
+    for (const auto& row : g_hostSessions) {
+        if (!row.occupied || row.state != HostSessionState::ready
+            || row.binding.regionIndex != regionIndex) {
+            continue;
+        }
+        bool matches = same_binding(row.binding.source, source);
+        if (row.publicRegion) {
+            for (const auto& candidate : row.sources) {
+                matches |= same_binding(candidate, source);
+            }
+        }
+        if (matches) {
+            output = row.binding;
+            break;
+        }
+    }
+    ReleaseSRWLockShared(&g_hostSessionLock);
+    if (output.generation == 0 || !state::activity::binding_matches(output.source)
+        || !state::activity::binding_matches(output.target)) {
+        output = {};
+        return false;
+    }
+    return true;
 }
 
 /** Copies a ready row by its exact source generation and group-session key. */
@@ -294,10 +443,12 @@ void allocate_claimed_host_sessions() noexcept {
     free_retired_host_sessions();
     for (;;) {
         HostSessionBinding pending{};
+        bool publicRegion{};
         AcquireSRWLockShared(&g_hostSessionLock);
         for (const HostSession& row : g_hostSessions) {
             if (row.occupied && row.state == HostSessionState::pending) {
                 pending = row.binding;
+                publicRegion = row.publicRegion;
                 break;
             }
         }
@@ -307,9 +458,9 @@ void allocate_claimed_host_sessions() noexcept {
         }
 
         // A public region runs its destination's free-roam activity. The private Bubble Host row,
-        // keyed by this machine, runs the source activity.
+        // keyed by its exact source, runs the source activity.
         state::activity::destination::DestinationSelection destination = pending.source.destination;
-        if (pending.groupSessionId != endpoint::identity().machineId
+        if (publicRegion
             && !state::activity::destination::public_destination(pending.source.destination,
                                                                  destination)) {
             report(core::log::Level::info,
@@ -374,28 +525,33 @@ void allocate_claimed_host_sessions() noexcept {
     }
 }
 
-/** Returns every retained binding and allocated target to State, then clears the table. */
 void reset_host_sessions() noexcept {
-    std::array<HostSessionBinding, kHostSessionCapacity * 2> released{};
+    std::lock_guard releaseGuard(g_releaseLock);
     std::size_t count = 0;
     AcquireSRWLockExclusive(&g_hostSessionLock);
     for (const HostSession& row : g_hostSessions) {
         if (row.occupied) {
-            released[count] = row.binding;
+            g_released[count] = row.binding;
             ++count;
         }
     }
     for (std::size_t index = 0; index < g_retiredCount; ++index) {
-        released[count] = g_retired[index];
+        g_released[count] = g_retired[index];
         ++count;
     }
-    g_hostSessions = {};
-    g_retired = {};
+    // Clearing the whole scaled table creates a large temporary on the game's stack.
+    for (auto& row : g_hostSessions) {
+        row = {};
+    }
+    for (auto& row : g_retired) {
+        row = {};
+    }
     g_retiredCount = 0;
     ReleaseSRWLockExclusive(&g_hostSessionLock);
 
     for (std::size_t index = 0; index < count; ++index) {
-        release_retired(released[index]);
+        release_retired(g_released[index]);
+        g_released[index] = {};
     }
 }
 
