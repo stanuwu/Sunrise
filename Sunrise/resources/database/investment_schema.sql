@@ -1,7 +1,6 @@
 PRAGMA application_id = 1397902921;
 PRAGMA user_version = 6;
--- open() also creates parked_items, item_objectives, character_helmet_tiers and
--- eververse_wallet_sync.
+-- open() creates parked_items and character_objective_values with the same SQL as upgrades.
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -104,13 +103,6 @@ CREATE TABLE family5 (
     value INTEGER NOT NULL CHECK (value BETWEEN -2147483648 AND 2147483647),
     PRIMARY KEY (kind, position),
     UNIQUE (kind, slot)
-) STRICT;
-
-CREATE TABLE character_objective_values (
-    character_soid INTEGER NOT NULL REFERENCES characters(soid) DEFERRABLE INITIALLY DEFERRED,
-    slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 32767),
-    value INTEGER NOT NULL CHECK (value BETWEEN 0 AND 2147483647),
-    PRIMARY KEY (character_soid, slot)
 ) STRICT;
 
 CREATE TABLE entitlements (

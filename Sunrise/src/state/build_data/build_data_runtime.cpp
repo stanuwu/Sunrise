@@ -37,6 +37,7 @@
 #include "socket_entry_lists/socket_entry_list_catalog.h"
 #include "spawn_sets/spawn_set_catalog.h"
 #include "starter_sets/starter_set_catalog.h"
+#include "vendors/reputation_turn_in_catalog.h"
 #include "vendors/vendor_catalog.h"
 
 namespace sunrise::state::build_data {

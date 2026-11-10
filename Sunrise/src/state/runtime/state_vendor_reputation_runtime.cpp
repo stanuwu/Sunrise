@@ -300,7 +300,7 @@ bool find_rank_claim_interaction(const build_data::vendors::Definition& vendor,
     interaction = {};
     row = 0;
     bool found = false;
-    for (std::size_t index = 0; index < vendor.thirdCount; ++index) {
+    for (std::size_t index = 0; index < vendor.interactionCount; ++index) {
         vendors::InteractionGate candidate{};
         if (!vendors::find_interaction_gate(
                 vendor.definitionHash, static_cast<std::uint16_t>(index), candidate)

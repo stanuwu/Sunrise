@@ -33,6 +33,8 @@ inline constexpr std::size_t kSaleCostRowStride =
 /** Element class of a sale row's cost array. */
 inline constexpr std::uint32_t kSaleCostRowClass =
     middleware::content::packages::schema::generated::SVendorCost::kClass;
+/** A vendor without a resolved faction has no progression to award. */
+inline constexpr std::uint16_t kUnavailableFactionProgressionIndex = 0xFFFFU;
 
 /** Wrapper class of the vendor index blob. */
 inline constexpr std::uint32_t kIndexWrapperClass =
@@ -107,8 +109,11 @@ struct Definition {
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t interactionCount{};
-    /** Zero when the transfer array is unreadable; that disables transfer alone, not sales. */
-    std::uint16_t transferRuleCount{};
+    /** Index into the faction table, or an out-of-range no-faction value. */
+    std::uint16_t factionIndexRaw{};
+    /** Definition hash and progression selected by the faction row. */
+    std::uint32_t factionHash{};
+    std::uint16_t factionProgressionIndex{kUnavailableFactionProgressionIndex};
 };
 
 /** A cost entry naming no item carries this. */

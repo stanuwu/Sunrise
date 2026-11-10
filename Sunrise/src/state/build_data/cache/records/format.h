@@ -37,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 93;
+inline constexpr std::uint32_t kCacheFormatVersion = 78;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -640,7 +640,9 @@ struct VendorDefinitionRecord {
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t interactionCount{};
-    std::uint16_t transferRuleCount{};
+    std::uint16_t factionIndexRaw{};
+    std::uint16_t factionProgressionIndex{vendors::kUnavailableFactionProgressionIndex};
+    std::uint32_t factionHash{};
 };
 
 /** Disk form of one cost entry of a vendor sale row. */

@@ -396,6 +396,23 @@ static_assert(sizeof(domain::TransferRule) == generated::C8080785f::kSize);
     definition.interactionRowBase = interactions.base;
     definition.interactionRowClass = interactions.classId;
     definition.interactionCount = interactions.count;
+    if (!read(blob, kVendorFactionIndexOffset, definition.factionIndexRaw)) {
+        return false;
+    }
+    if (definition.factionIndexRaw < storage.factionRows.count) {
+        const std::size_t at =
+            storage.factionRows.base
+            + static_cast<std::size_t>(definition.factionIndexRaw) * kFactionRowStride;
+        const std::span<const std::byte> factions{storage.factionBlob};
+        std::uint32_t progressionIndex = 0;
+        if (!read(factions, at + kFactionHashOffset, definition.factionHash)
+            || !read(factions, at + kFactionProgressionIndexOffset, progressionIndex)
+            || definition.factionHash == 0
+            || progressionIndex > (std::numeric_limits<std::uint16_t>::max)()) {
+            return false;
+        }
+        definition.factionProgressionIndex = static_cast<std::uint16_t>(progressionIndex);
+    }
     definition.saleRowOffset = static_cast<std::uint32_t>(storage.saleRowCount);
     definition.installedRowOffset = static_cast<std::uint32_t>(storage.installedRowCount);
     definition.transferRuleOffset = static_cast<std::uint32_t>(storage.transferRuleCount);

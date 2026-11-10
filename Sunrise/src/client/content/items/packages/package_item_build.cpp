@@ -370,7 +370,7 @@ bool build() noexcept {
                     std::span(storage.bountyRows).first(storage.bountyCount));
             }
         }
-        if (root_domains_ready() && !state::build_data::vendors::gates_ready()) {
+        if (located && root_domains_ready() && !state::build_data::vendors::gates_ready()) {
             reason = "vendor_gates";
             const content::vendors::GateMaps maps{storage.slotMaps.accountFlag,
                                                   storage.slotMaps.profileFlag,

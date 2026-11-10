@@ -780,6 +780,7 @@ RewardPreparation prepare_reward_grant(const RewardGrantRequest& request,
  */
 bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
                             unlocks::Table& after) noexcept {
+    const std::lock_guard lock(investment::store::g_mutex);
     if (!mutation.prepared || mutation.rewardCount > mutation.rewards.size()
         || !investment::store::read_unlocks(after, static_cast<int>(mutation.characterIndex))) {
         return false;
@@ -831,110 +832,14 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             value = build_data::items::initialized_value(reward.quest, value);
         }
     }
-    for (const PreparedQuestStep* move : mutation.saved_value_moves()) {
-        if (move->next.scope != Quest::Scope::none) {
-            quest_value(after, move->next) = move->next.value;
-        }
-    }
-    if (credits) {
-        progression_value(after, progression) = progression.value;
-    }
-    // Pickups of one balance chain, so each observes the value the one before it left.
-    const auto apply = [&after](const std::optional<AccountUnlockWrite>& write) noexcept {
-        if (!write) {
-            return true;
-        }
-        if (write->index >= after.objectiveValues.size()
-            || after.objectiveValues[write->index] != write->previousValue) {
+    const VendorRankRewardClaim& claim = mutation.vendorReward;
+    if (claim.beforeCredits != 0) {
+        if (claim.rankCreditRow >= after.characterObjectValues.size()
+            || !vendor_rank_reward_current(claim)
+            || after.characterObjectValues[claim.rankCreditRow] != claim.beforeCredits) {
             return false;
         }
-        after.objectiveValues[write->index] = write->value;
-        return true;
-    };
-    for (const auto& reward : rewards) {
-        if (!apply(reward.ingredientCredit) || !apply(reward.chooserReadiness)) {
-            return false;
-        }
-    }
-    // The commit grants the XP, after this image has gone out in the grant's frame.
-    return mutation.seasonalExperience == 0
-           || preview_seasonal_experience(
-               mutation.seasonalExperienceBefore, mutation.seasonalExperience, after);
-}
-
-/** A reward with no acquisition flag leaves its collectible state unknown, so it marks nothing. */
-bool newly_collected(const PendingRecordRewardGrant& mutation,
-                     const GrantedRow& row,
-                     const build_data::items::Definition& item) noexcept {
-    if (!row.newRow || mutation.rewardCount > mutation.rewards.size()
-        || !build_data::collectibles::grants_item(item.definitionIndex)) {
-        return false;
-    }
-    const auto rewards = std::span(mutation.rewards).first(mutation.rewardCount);
-    return std::any_of(rewards.begin(), rewards.end(), [&](const PreparedRecordReward& reward) {
-        return reward.definitionHash == item.definitionHash
-               && reward.acquiredFlag != build_data::rewards::kAbsent
-               && reward.previousFlag != unlocks::kFlagSet;
-    });
-}
-
-/** Diffs the grant's images by instance identity, new character instances first. */
-bool granted_residents(const PendingRecordRewardGrant& mutation,
-                       GrantedResidents& output) noexcept {
-    output = {};
-    const auto add = [](auto& soids, std::size_t& count, std::uint64_t soid) noexcept {
-        if (count == soids.size()) {
-            return false;
-        }
-        soids[count++] = soid;
-        return true;
-    };
-    const CharacterState& before = mutation.beforeCharacter;
-    const CharacterState& after = mutation.afterCharacter;
-    if (before.inventory.count > before.inventory.values.size()
-        || after.inventory.count > after.inventory.values.size()) {
-        return false;
-    }
-    // A FIFO bucket counts its equipped rows, so an eviction can move or discard one.
-    const auto holds = [](const CharacterState& character, std::uint64_t soid) noexcept {
-        const auto held = std::span(character.inventory.values).first(character.inventory.count);
-        const auto& slots = character.equipment.slots;
-        return std::any_of(held.begin(),
-                           held.end(),
-                           [&](const auto& item) noexcept { return item.instanceSoid == soid; })
-               || std::any_of(slots.begin(), slots.end(), [&](const auto& item) noexcept {
-                      return item && item->instanceSoid == soid;
-                  });
-    };
-    for (std::size_t index = 0; index < after.inventory.count; ++index) {
-        const std::uint64_t soid = after.inventory.values[index].instanceSoid;
-        if (!holds(before, soid) && !add(output.soids, output.count, soid)) {
-            return false;
-        }
-    }
-    for (std::size_t index = 0; index < before.inventory.count; ++index) {
-        const std::uint64_t soid = before.inventory.values[index].instanceSoid;
-        if (!holds(after, soid) && !add(output.released, output.releasedCount, soid)) {
-            return false;
-        }
-    }
-    for (const auto& equipped : before.equipment.slots) {
-        if (equipped && !holds(after, equipped->instanceSoid)
-            && !add(output.released, output.releasedCount, equipped->instanceSoid)) {
-            return false;
-        }
-    }
-    const auto priorProfile =
-        std::span(mutation.beforeProfileItems).first(mutation.beforeProfileItemCount);
-    for (std::size_t index = 0; index < mutation.afterProfileItemCount; ++index) {
-        const std::uint64_t soid = mutation.afterProfileItems[index].instanceSoid;
-        if (soid != 0
-            && std::none_of(priorProfile.begin(),
-                            priorProfile.end(),
-                            [&](const auto& item) noexcept { return item.instanceSoid == soid; })
-            && !add(output.soids, output.count, soid)) {
-            return false;
-        }
+        after.characterObjectValues[claim.rankCreditRow] = claim.beforeCredits - 1;
     }
     return true;
 }

@@ -339,12 +339,6 @@ bool prepare_record_reward_grant(
 
     const auto characterBytes = rawStorage.first(character_layout::kObjectSize);
     const state::CharacterState& character = account.characters[mutation.characterIndex];
-    state::unlocks::Table unlocks{};
-    if (!state::preview_reward_unlocks(mutation, unlocks)) {
-        clear_after(scratch, reservation);
-        return report_failure("record_reward_unlocks");
-    }
-    // Both objects must publish the same reward after-image, including spent claim credit.
     if (!family4_datagen::character::encode(
             character, selected.loadout, selected.lightEvaluation, characterBytes, unlocks)) {
         clear_after(scratch, reservation);

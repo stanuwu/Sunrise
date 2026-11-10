@@ -24,10 +24,6 @@ namespace unlocks = state::unlocks;
 
 /** The native slot maps mark unmapped positions with the all-ones row value. */
 constexpr std::uint16_t kUnmappedRow = 0xFFFFU;
-/** Native class of an eight-byte unlock instruction in an interaction or sale gate. */
-constexpr std::uint32_t kInstructionClass = 0x80807D31U;
-/** Native class of a sale gate list's sixteen-byte expression descriptors. */
-constexpr std::uint32_t kProgramListClass = 0x80807D2FU;
 
 /** One unbound opcode and native slot or literal read from a vendor row. */
 struct NativeInstruction {
@@ -52,7 +48,11 @@ struct NativeProgram {
                                   std::size_t field,
                                   NativeProgram& program) noexcept {
     tables::Array rows{};
-    if (!tables::read_array(blob, field, kInstructionClass, tables::kUnlockInstructionStride, rows)
+    if (!tables::read_array(blob,
+                            field,
+                            tables::kInvestmentExpressionRowClass,
+                            tables::kUnlockInstructionStride,
+                            rows)
         || rows.count > program.instructions.size() - program.count) {
         return false;
     }
@@ -61,7 +61,7 @@ struct NativeProgram {
         std::uint32_t nativeOpcode = 0;
         std::int32_t operand = 0;
         unlocks::Opcode opcode{};
-        if (!tables::read(blob, at, nativeOpcode)
+        if (!tables::read(blob, at + tables::kUnlockInstructionOpcodeOffset, nativeOpcode)
             || !tables::read(blob, at + tables::kUnlockInstructionOperandOffset, operand)
             || !unlocks::decode_opcode(nativeOpcode, opcode)) {
             return false;
@@ -90,8 +90,11 @@ read_program(std::span<const std::byte> blob, std::size_t field, NativeProgram& 
                                      NativeProgram& output) noexcept {
     output = {};
     tables::Array rows{};
-    if (!tables::read_array(
-            blob, field, kProgramListClass, tables::kUnlockExpressionFieldSize, rows)) {
+    if (!tables::read_array(blob,
+                            field,
+                            generated::RewardCondition::kClass,
+                            tables::kUnlockExpressionFieldSize,
+                            rows)) {
         return false;
     }
     NativeProgram parsed{};
@@ -240,12 +243,12 @@ bind_gate(const NativeProgram& program, const GateMaps& maps, domain::Gate& gate
             bytes, kSaleArrayDescriptor, domain::kSaleRowClass, domain::kSaleRowStride, saleRows)
         || saleRows.count != vendor.saleCount || saleRows.dataOffset != vendor.saleRowBase
         || !tables::read_array(bytes,
-                               kThirdArrayDescriptor,
-                               kInteractionRowClass,
-                               domain::kThirdRowStride,
+                               kInteractionArrayDescriptor,
+                               generated::C80807857::kClass,
+                               domain::kInteractionRowStride,
                                interactionRows)
-        || interactionRows.count != vendor.thirdCount
-        || interactionRows.dataOffset != vendor.thirdRowBase) {
+        || interactionRows.count != vendor.interactionCount
+        || interactionRows.dataOffset != vendor.interactionRowBase) {
         return false;
     }
     std::vector<domain::SaleGates> ownSales;
@@ -268,7 +271,7 @@ bind_gate(const NativeProgram& program, const GateMaps& maps, domain::Gate& gate
     }
     std::vector<domain::InteractionGate> ownInteractions;
     for (std::size_t row = 0; row < interactionRows.count; ++row) {
-        const std::size_t at = interactionRows.dataOffset + row * domain::kThirdRowStride;
+        const std::size_t at = interactionRows.dataOffset + row * domain::kInteractionRowStride;
         std::int32_t category = 0;
         if (!tables::read(bytes, at + kInteractionCategoryOffset, category)) {
             return false;
@@ -283,14 +286,20 @@ bind_gate(const NativeProgram& program, const GateMaps& maps, domain::Gate& gate
         tables::Array replies{};
         if (!read_program(bytes, at + kInteractionConditionField, condition)
             || !bind_gate(condition, maps, gate.condition)
-            || !tables::read_array(
-                bytes, at + kInteractionReplyField, kReplyRowClass, kReplyRowStride, replies)) {
+            || !tables::read_array(bytes,
+                                   at + kInteractionReplyField,
+                                   generated::C8080785b::kClass,
+                                   sizeof(generated::C8080785b),
+                                   replies)) {
             return false;
         }
         for (std::size_t reply = 0; reply < replies.count; ++reply) {
             NativeProgram program{};
             domain::Gate replyCondition{};
-            if (!read_program(bytes, replies.dataOffset + reply * kReplyRowStride, program)
+            if (!read_program(bytes,
+                              replies.dataOffset + reply * sizeof(generated::C8080785b)
+                                  + offsetof(generated::C8080785b, h90b11fae),
+                              program)
                 || !bind_gate(program, maps, replyCondition)) {
                 return false;
             }
