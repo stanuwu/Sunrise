@@ -94,7 +94,7 @@ constexpr const char* kWalletSyncTable =
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 10;
+constexpr int kSchemaVersion = 11;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
 
@@ -429,6 +429,23 @@ bool open(std::string_view path,
         Transaction transaction;
         ready = transaction.ready() && execute(kWalletSyncTable)
                 && execute("PRAGMA user_version=10") && transaction.commit();
+        if (ready) {
+            version = 10;
+        }
+    }
+    if (ready && version == 10) {
+        Transaction transaction;
+        ready = transaction.ready()
+                && execute("CREATE TEMP TABLE profile_unnumbered AS SELECT position,"
+                           "ROW_NUMBER() OVER (ORDER BY position) AS serial FROM profile_items "
+                           "WHERE mutation_serial=0;"
+                           "UPDATE profile_items SET mutation_serial=mutation_serial"
+                           "+(SELECT COUNT(*) FROM profile_unnumbered) WHERE mutation_serial>0;"
+                           "UPDATE profile_items SET mutation_serial=(SELECT serial FROM "
+                           "profile_unnumbered WHERE profile_unnumbered.position="
+                           "profile_items.position) WHERE mutation_serial=0;"
+                           "DROP TABLE profile_unnumbered;")
+                && execute("PRAGMA user_version=11") && transaction.commit();
     }
     if (!ready) {
         shutdown();
