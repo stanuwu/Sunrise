@@ -254,9 +254,9 @@ prepare_item_state(Scratch& scratch,
     Prepared& prepared) noexcept;
 
 /**
- * Builds the Family-4 item-instance upsert for one prepared ordinary-socket selection.
- * The character object is unchanged because item identity, placement and mutation generation are
- * preserved; the socket block lives entirely in the resident instance object.
+ * Builds the Family-4 item-instance upsert for one prepared ordinary-socket selection, with the
+ * account it charged or paid. The character follows only when a row took a new serial, as the
+ * oven's does after a bake; any other selection keeps item identity, placement and serial.
  */
 [[nodiscard]] bool prepare_socket_plug(Scratch& scratch,
                                        const queuez::SocketPlug& socketPlug,

@@ -1,6 +1,6 @@
 /**
- * Family-4 socket and subclass updates: one changed item instance, any held items a bake advanced
- * with their character, and any charged account.
+ * Family-4 socket and subclass updates: one changed item instance, any held items a bake advanced,
+ * any charged account, and the character whose rows a bake gave new serials.
  */
 
 #include <algorithm>
@@ -25,7 +25,8 @@ namespace family4_datagen = middleware::datagen::family4;
 /**
  * Builds a resident item upsert followed by the account when the cost consumes or an exchange
  * pays, whose change ring names each credited row and whose banks carry the action's unlock rows.
- * Held items a bake advanced follow the target, and the character then carries their new serials.
+ * Held items a bake advanced follow the target. A bake's character follows the account, carrying
+ * the new serials of the oven and those items.
  */
 bool prepare_socket_plug(Scratch& scratch,
                          const queuez::SocketPlug& socketPlug,
@@ -93,7 +94,10 @@ bool prepare_socket_plug(Scratch& scratch,
             changed.items[changed.itemCount++] = {item.equipmentSlot, item.instance};
         }
     }
-    const bool editsCharacter = changed.itemCount > 1;
+    // The client reloads held items' content only when a character row changes, which a new
+    // serial marks: the oven's after a bake, and each bounty the bake advanced.
+    const bool editsCharacter = mutation.beforeCharacter.nextInventorySerial
+                                != mutation.afterCharacter.nextInventorySerial;
 
     const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     const std::size_t requiredRawSize = (std::max)(
@@ -123,6 +127,28 @@ bool prepare_socket_plug(Scratch& scratch,
     }
 
     std::size_t objectCount = itemCursor;
+    if (socketPlug.updatesAccount) {
+        const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
+        if (!family4_datagen::account::encode(account, accountBytes, unlocks)
+            || write_exchange_changes(
+                   *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()),
+                   std::span(mutation.changes).first(mutation.changeCount))
+                   != nullptr
+            || objectCount == staged.objects.size()
+            || !append_object(scratch,
+                              accountBytes,
+                              socketPlug.accountDefinitionId,
+                              socketPlug.accountSoid,
+                              staged.objects[objectCount],
+                              compressedExtent)) {
+            clear_after(scratch, reservation);
+            return report_failure("socket_plug_account_object");
+        }
+        staged.rawClearSize =
+            (std::max)(staged.rawClearSize,
+                       reservation.rawWriteOffset + family4_datagen::account::layout::kObjectSize);
+        ++objectCount;
+    }
     if (editsCharacter) {
         const auto characterBytes =
             rawStorage.first(family4_datagen::character::layout::kObjectSize);
@@ -144,28 +170,6 @@ bool prepare_socket_plug(Scratch& scratch,
         staged.rawClearSize = (std::max)(
             staged.rawClearSize,
             reservation.rawWriteOffset + family4_datagen::character::layout::kObjectSize);
-        ++objectCount;
-    }
-    if (socketPlug.updatesAccount) {
-        const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes, unlocks)
-            || write_exchange_changes(
-                   *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()),
-                   std::span(mutation.changes).first(mutation.changeCount))
-                   != nullptr
-            || objectCount == staged.objects.size()
-            || !append_object(scratch,
-                              accountBytes,
-                              socketPlug.accountDefinitionId,
-                              socketPlug.accountSoid,
-                              staged.objects[objectCount],
-                              compressedExtent)) {
-            clear_after(scratch, reservation);
-            return report_failure("socket_plug_account_object");
-        }
-        staged.rawClearSize =
-            (std::max)(staged.rawClearSize,
-                       reservation.rawWriteOffset + family4_datagen::account::layout::kObjectSize);
         ++objectCount;
     }
 

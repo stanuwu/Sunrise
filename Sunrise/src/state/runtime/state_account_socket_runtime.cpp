@@ -14,6 +14,7 @@
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state.h"
 #include "state_account_transaction_helpers.h"
@@ -367,6 +368,11 @@ scale_socket_costs(std::uint16_t socketType,
         return fail("target_copy");
     }
     changed->sockets = authoredSockets;
+    // The client reloads held items' content only when a character row changes, and a bake can pay
+    // a cookie the profile did not hold, so the oven takes a new serial.
+    if (bakes && !next_character_serial(after, changed->mutationSerial)) {
+        return fail("target_serial");
+    }
 
     AccountState candidate = chargedAccount;
     candidate.characters[characterIndex] = after;
