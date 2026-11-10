@@ -336,9 +336,14 @@ void retire_item_values_refresh(Session& session) noexcept {
         return false;
     }
     const state::AccountState account = state::account_snapshot();
-    // The frame carries the picked character's object, so the queue waits for a pick.
+    // The frame carries the picked character's object; with none picked the resync carries it.
     const state::CharacterState* selected = selected_character(account);
     if (selected == nullptr) {
+        session.itemValuesRefreshCount = 0;
+        session.accountResyncArmed = true;
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=item_values_refresh result=fail reason=selection");
         return false;
     }
     // A bounty redeemed or discarded since it advanced has nothing left to show.
@@ -647,7 +652,8 @@ bool consume_deferred(Session& session,
         return true;
     }
     // A refresh that could not be built armed the resync, which must be sent before any increment.
-    if (session.accountResyncArmed) {
+    // One still waiting for a whole buffer goes out before anything newer.
+    if (session.accountResyncArmed || session.itemValuesRefreshCount != 0) {
         return false;
     }
     if (consume_pursuit_completion(session, scratch, response, written, touchesScratch)) {
