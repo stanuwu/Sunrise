@@ -362,7 +362,7 @@ struct Session {
     std::int32_t pendingSeasonalExperienceAmount{};
     std::uint32_t pendingSeasonalExperienceMutationSerial{};
     bool authenticated{};
-    /** Owes one family-five snapshot for the unlock overrides an artifact change moved. */
+    /** Owes one family-five snapshot for the overrides an artifact change or a held item moved. */
     bool artifactRefreshArmed{};
     bool artifactFamily4RefreshArmed{};
     std::uint64_t artifactFamily4RefreshDueTick{};
@@ -556,10 +556,11 @@ void arm_account_resync_everywhere() noexcept;
 /** Holds this peer's full Family-4 refreshes until its acquisition flyout has finished. */
 void arm_acquisition_presentation_hold(Session& session) noexcept;
 
-/** Schedules this peer's Family-5 artifact refresh, then its delayed Family-4 character copy. */
+/**
+ * Schedules this peer's Family-5 refresh, for the overrides an artifact change or a held item
+ * moved, then the delayed Family-4 character copy the client rebuilds its unlock state on.
+ */
 void arm_artifact_refresh(Session& session) noexcept;
-/** Schedules this peer's Family-5 refresh alone, for overrides held items supply. */
-void arm_family5_refresh(Session& session) noexcept;
 
 /** Queues one character item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;
