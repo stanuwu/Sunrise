@@ -273,6 +273,8 @@ struct TypedIntent final {
     std::uint32_t actorCommandSelector{};
     /** Spawn set a checkpoint restart respawns at. */
     std::uint32_t checkpointSpawnHash{};
+    /** Spawn set a state selection's arrival uses; zero keeps the program's declared set. */
+    std::uint32_t arrivalSpawnHash{};
     /** Request key of the wipe a checkpoint release ends; zero arms one instead. */
     std::uint64_t checkpointReleaseRequest{};
     /** Authored effective region selected by the generated mission-state table. */

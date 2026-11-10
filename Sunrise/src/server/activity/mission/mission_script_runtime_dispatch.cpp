@@ -12,6 +12,7 @@
 #include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
+#include "../../../state/activity/destination/activity_destination_spawn_binding.h"
 #include "../../../state/activity/entity_slots/member_leases.h"
 #include "../../../state/activity/membership/activity_membership_query.h"
 #include "../../../state/activity/membership/mission_party.h"
@@ -462,6 +463,34 @@ template <typename Result, typename Adapter>
                       });
 }
 
+/** @return True when the destination authors one spawn set that has spawn points. */
+[[nodiscard]] bool authored_spawn_set(const RuntimeInstance& instance, std::uint32_t hash) noexcept {
+    namespace data = ::sunrise::state::build_data;
+    const auto& destination = instance.view.binding.destination;
+    const std::string_view package(reinterpret_cast<const char*>(destination.packageName.data()),
+                                   destination.packageNameLength);
+    data::scenarios::Definition layout{};
+    data::spawn_sets::NameHash spawn{};
+    return data::find_scenario_layout(package, layout)
+           && data::spawn_sets::find_hash(
+               {layout.spawnStem.data(), layout.spawnStemLength}, hash, spawn)
+           && spawn.pointCount != 0;
+}
+
+/**
+ * @return True when a spawn set is authored with points in the bubble of one selected region.
+ * The client searches for a spawn set only in the slice set its arrival names.
+ */
+[[nodiscard]] bool spawn_set_answers_region(const RuntimeInstance& instance,
+                                            std::uint32_t hash,
+                                            std::int32_t region) noexcept {
+    return region >= 0 && region <= ::sunrise::state::activity::membership::kMaximumSliceSetIndex
+           && authored_spawn_set(instance, hash)
+           && ::sunrise::state::activity::destination::spawn_set_slice_set(
+                  instance.view.binding.destination, hash, static_cast<std::uint16_t>(region))
+                  == region;
+}
+
 } // namespace
 
 /** Moves each pin of a one-bubble target to the link holding that bubble's grant. */
@@ -541,6 +570,15 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     }
     switch (intent.kind) {
     case lua_vm::IntentKind::selectMissionState: {
+        if (intent.arrivalSpawnHash != 0
+            && !spawn_set_answers_region(
+                instance, intent.arrivalSpawnHash, intent.effectiveRegion)) {
+            refuse_delivery(instance,
+                            "state_refused",
+                            "arrival_spawn_unavailable",
+                            host::EffectOutcome::refused);
+            return;
+        }
         if (intent.retirePlacedProps) {
             namespace retirement = server::gameplay::squad_entity_retirement;
             const auto* world = instance.worldView.snapshot();
@@ -600,7 +638,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         // move is one host event per selection: a re-dispatch while publication is pending does
         // not move back a player who has since left the region.
         if (instance.armedStateRevision != selected.revision) {
-            arm_state_region_teleport(instance, selected.plan);
+            arm_state_region_teleport(instance, selected.plan, intent.arrivalSpawnHash);
             instance.armedStateRevision = selected.revision;
         }
         if (!selected.regionArrivalPending
@@ -673,13 +711,6 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             }
             return;
         }
-        namespace data = ::sunrise::state::build_data;
-        const auto& destination = instance.view.binding.destination;
-        const std::string_view package(
-            reinterpret_cast<const char*>(destination.packageName.data()),
-            destination.packageNameLength);
-        data::scenarios::Definition layout{};
-        data::spawn_sets::NameHash spawn{};
         // Revalidate native member lifetimes: a reconnect withdraws its old life evidence.
         refresh_mission_members(instance);
         FireteamLife currentLife{};
@@ -694,11 +725,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         // A wipe restarts the whole party at an authored spawn set of the region they are in.
         if (instance.publicTarget || !currentLife.all_dead()
             || instance.activeRegion != intent.effectiveRegion
-            || !data::find_scenario_layout(package, layout)
-            || !data::spawn_sets::find_hash({layout.spawnStem.data(), layout.spawnStemLength},
-                                            intent.checkpointSpawnHash,
-                                            spawn)
-            || spawn.pointCount == 0) {
+            || !authored_spawn_set(instance, intent.checkpointSpawnHash)) {
             refuse_delivery(instance,
                             "checkpoint_refused",
                             "party_or_spawn_unavailable",

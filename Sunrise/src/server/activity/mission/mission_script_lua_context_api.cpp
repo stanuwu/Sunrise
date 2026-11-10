@@ -403,6 +403,18 @@ resolve_message_name(lua_State* state, std::string_view name, ActivityMessageDef
         }
         intent.retirePlacedProps = lua_toboolean(state, -1) != 0;
         lua_pop(state, 1);
+        lua_getfield(state,
+                     3,
+                     table_field_key(
+                         kSelectState, "options", "spawn_set_hash", api::ValueKind::integer, true));
+        if (!lua_isnil(state, -1)) {
+            const lua_Integer hash = lua_isinteger(state, -1) ? lua_tointeger(state, -1) : 0;
+            if (hash <= 0 || hash >= (std::numeric_limits<std::uint32_t>::max)()) {
+                return luaL_argerror(state, 3, "spawn_set_hash must be an authored spawn-set hash");
+            }
+            intent.arrivalSpawnHash = static_cast<std::uint32_t>(hash);
+        }
+        lua_pop(state, 1);
     }
     return queue_intent(state, frame, intent);
 }

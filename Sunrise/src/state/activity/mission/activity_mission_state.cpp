@@ -123,6 +123,7 @@ namespace {
            && left.seedOmissionCount == right.seedOmissionCount && left.burstRows == right.burstRows
            && left.burstRowCount == right.burstRowCount
            && left.checkpointSpawnHash == right.checkpointSpawnHash
+           && left.arrivalSpawnHash == right.arrivalSpawnHash
            && left.checkpointReleaseRequest == right.checkpointReleaseRequest
            && left.entryIndex == right.entryIndex && left.squadCounts == right.squadCounts
            && left.authBody == right.authBody && left.sequenceOwner == right.sequenceOwner

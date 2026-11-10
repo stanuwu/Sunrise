@@ -81,6 +81,11 @@ inline constexpr ValueSpec kSelectStateOptionFields[]{
      .optional = true,
      .fallback = default_boolean(false),
      .note = "ends the map props captured from the old state before the move"},
+    {.name = "spawn_set_hash",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .bound = between(1, kUint32Maximum - 1),
+     .note = "the authored spawn set this arrival uses instead of the declared one"},
 };
 inline constexpr ValueSpec kSelectStateArguments[]{
     {.name = "state",

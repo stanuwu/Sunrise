@@ -661,7 +661,8 @@ void push_objective_edges(RuntimeInstance& instance,
 void queue_phase_entered(RuntimeInstance& instance, std::uint32_t previousPhase) noexcept;
 /** Moves every private member to the region a freshly selected mission state belongs to. */
 void arm_state_region_teleport(RuntimeInstance& instance,
-                               const server::bap::ActivityMissionSeedPlan& plan) noexcept;
+                               const server::bap::ActivityMissionSeedPlan& plan,
+                               std::uint32_t arrivalSpawnHash) noexcept;
 /** @return The identity every host-state edge that is not a Sense edge carries. */
 [[nodiscard]] host::Event state_edge_event(const RuntimeInstance& instance) noexcept;
 /** @return The identity every derived Sense edge carries. */
