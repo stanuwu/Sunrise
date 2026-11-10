@@ -374,6 +374,34 @@ void arm_account_resync_everywhere() noexcept {
     }
 }
 
+/** Queues each item once on every active peer; a full queue resyncs that peer instead. */
+void arm_item_values_refresh_everywhere(std::span<const std::uint64_t> instanceSoids) noexcept {
+    for (auto& peer : g_sessions) {
+        // An armed resync is built from the saved account when it is sent, so it carries the items.
+        if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active
+            || peer.accountResyncArmed) {
+            continue;
+        }
+        for (const std::uint64_t instanceSoid : instanceSoids) {
+            const auto queued =
+                std::span(peer.itemValuesRefreshSoids).first(peer.itemValuesRefreshCount);
+            if (std::find(queued.begin(), queued.end(), instanceSoid) != queued.end()) {
+                continue;
+            }
+            if (queued.size() == peer.itemValuesRefreshSoids.size()) {
+                peer.accountResyncArmed = true;
+                core::log::writef(core::log::Channel::server,
+                                  core::log::Level::warn,
+                                  "ev=queuez stage=item_values_refresh result=fail "
+                                  "reason=queue_full instance=0x%llX",
+                                  static_cast<unsigned long long>(instanceSoid));
+                break;
+            }
+            peer.itemValuesRefreshSoids[peer.itemValuesRefreshCount++] = instanceSoid;
+        }
+    }
+}
+
 /** Extends this peer's flyout hold, clearing a lapsed overlay first. */
 void arm_acquisition_presentation_hold(Session& session) noexcept {
     const std::uint64_t now = GetTickCount64();

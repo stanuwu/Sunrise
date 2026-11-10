@@ -1070,12 +1070,23 @@ enum class KillProgress : std::uint8_t {
     notReady,
 };
 
-/** What the receipt of one kill logs beside its progress. */
+/** The held bounties whose own values one kill changed, in inventory order. */
+struct KillAdvancedItems {
+    /** One slot for every unequipped row, so a kill that advances every held item fits. */
+    std::array<std::uint64_t, account::inventory::kCharacterItemCapacity> instanceSoids{};
+    std::size_t count{};
+};
+
+/** What the receipt of one kill logs beside its progress, and what an advanced kill changed. */
 struct KillReport {
     /** Static reason nothing advanced; null when the kill advanced. */
     const char* reason{};
     /** Held items a kill rule names, as last counted; zero until the held items are read. */
     std::size_t ruledItems{};
+    /** Bounties the kill advanced; empty unless the kill advanced. */
+    KillAdvancedItems advancedItems{};
+    /** The kill moved a grenade Triumph, whose progress lives in the account's unlock banks. */
+    bool triumphAdvanced{};
 };
 
 /**
@@ -1083,7 +1094,8 @@ struct KillReport {
  * kill meets, and the grenade interval Triumph it counts, in one save transaction. The victim is
  * judged and the held items are read only while something is left to advance.
  * @param nowSeconds Server time in Unix seconds; an expired bounty does not advance.
- * @param report Receives why nothing advanced and how many held items a rule names.
+ * @param report Receives why nothing advanced and how many held items a rule names, or which
+ *        bounties advanced and whether a Triumph moved.
  */
 [[nodiscard]] KillProgress advance_kill_objectives(const KillObservation& kill,
                                                    std::int64_t nowSeconds,

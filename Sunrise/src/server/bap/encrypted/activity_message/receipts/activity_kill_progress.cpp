@@ -84,7 +84,7 @@ struct AreaLookup {
 
 } // namespace
 
-/** Decodes the kill, names the live destination, and lets State judge and credit it. */
+/** Decodes the kill, names the live destination, lets State credit it, and arms its publication. */
 void apply_kill_progress(const message::incident::Incident& incident) noexcept {
     if (!reports_kill(incident)) {
         return;
@@ -141,9 +141,17 @@ void apply_kill_progress(const message::incident::Incident& incident) noexcept {
                       observation.destination.data(),
                       lookup.area ? lookup.area->scenarioTag : 0U,
                       lookup.area ? lookup.area->bubbleNameHash : 0U);
-    if (progress == state::KillProgress::advanced) {
-        bap::arm_account_resync_everywhere();
+    if (progress != state::KillProgress::advanced) {
+        return;
     }
+    if (report.triumphAdvanced) {
+        // Triumph progress lives in the account's unlock banks, which the account image carries
+        // along with any bounty the same kill advanced.
+        bap::arm_account_resync_everywhere();
+        return;
+    }
+    bap::arm_item_values_refresh_everywhere(
+        std::span(report.advancedItems.instanceSoids).first(report.advancedItems.count));
 }
 
 } // namespace sunrise::server::bap::encrypted::activity_message::receipts

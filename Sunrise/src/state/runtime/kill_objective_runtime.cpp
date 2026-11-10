@@ -443,6 +443,8 @@ struct KillFacts {
 struct HeldPass {
     /** Lanes the kill advanced. */
     std::size_t advanced{};
+    /** Items those lanes belong to. */
+    KillAdvancedItems advancedItems{};
     /** Rule rows whose lane was open, before the kill, on a bounty that has not expired. */
     std::bitset<kKillRules.size()> openRules{};
     /** Held items a kill rule names. */
@@ -790,7 +792,8 @@ OpenWork g_openWork{};
 }
 
 /**
- * Advances every held bounty lane the kill meets and gives each changed item a new serial.
+ * Advances every held bounty lane the kill meets, gives each changed item a new serial and notes
+ * the item.
  * @return False when the character's serials are exhausted.
  */
 [[nodiscard]] bool advance_held_bounties(CharacterState& killer,
@@ -809,6 +812,7 @@ OpenWork g_openWork{};
             return false;
         }
         pass.advanced += lanes;
+        pass.advancedItems.instanceSoids[pass.advancedItems.count++] = held.instanceSoid;
     }
     return true;
 }
@@ -926,6 +930,8 @@ KillProgress advance_kill_objectives(const KillObservation& kill,
     }
     work.written = true;
     report.reason = nullptr;
+    report.advancedItems = pass.advancedItems;
+    report.triumphAdvanced = triumphAdvanced;
     return KillProgress::advanced;
 }
 

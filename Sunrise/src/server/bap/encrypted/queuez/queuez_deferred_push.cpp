@@ -279,12 +279,100 @@ enum class WorldRewardAttempt : std::uint8_t {
     session.sendNonce = nextSendNonce;
     session.queuez = currentQueuez;
     session.accountResyncArmed = false;
+    // The account image just sent holds every queued item's current values.
+    session.itemValuesRefreshCount = 0;
     if (auxiliaryRefreshFailed) {
         // Family 4 already produced a complete frame. Appearance and roster are derived views,
         // so they retry in their own deferred lane rather than holding the account update.
         session.abilityRefreshDueTick = GetTickCount64();
         session.characterRefreshScope = CharacterRefreshScope::recordsAndRoster;
     }
+    return true;
+}
+
+/** Removes the oldest queued item-values refresh. */
+void retire_item_values_refresh(Session& session) noexcept {
+    const auto queued =
+        std::span(session.itemValuesRefreshSoids).first(session.itemValuesRefreshCount);
+    std::shift_left(queued.begin(), queued.end(), 1);
+    --session.itemValuesRefreshCount;
+}
+
+/** @return True while the character holds the unequipped instance. */
+[[nodiscard]] bool holds_item(const state::CharacterState& character,
+                              std::uint64_t instanceSoid) noexcept {
+    const auto held = std::span(character.inventory.values).first(character.inventory.count);
+    return std::any_of(held.begin(), held.end(), [instanceSoid](const auto& item) noexcept {
+        return item.instanceSoid == instanceSoid;
+    });
+}
+
+/**
+ * Publishes the oldest queued item's resident with its character, built from the saved account as
+ * it stands. An item the selected character no longer holds is retired unsent. A refresh that
+ * cannot be staged or encoded arms this peer's account resync, which carries every queued item.
+ * @param session Auth, nonce, queuez state and the queue owned by the connection.
+ * @param scratch Transform buffers owned by the lock.
+ * @param response Whole-frame storage owned by the caller.
+ * @param written Gets the encoded notification size in bytes.
+ * @param touchesScratch Set before any scratch buffer is used.
+ * @return True when one item's refresh is published.
+ */
+[[nodiscard]] bool consume_item_values_refresh(Session& session,
+                                               Scratch& scratch,
+                                               std::span<std::byte> response,
+                                               std::size_t& written,
+                                               bool& touchesScratch) noexcept {
+    if (session.itemValuesRefreshCount == 0) {
+        return false;
+    }
+    if (!session.queuez.family4Active) {
+        // A peer that left Family 4 reads the whole account again when it subscribes.
+        session.itemValuesRefreshCount = 0;
+        return false;
+    }
+    // The frame is not kept between polls, so it waits for a buffer any frame is sure to fit.
+    if (response.size() < scratch.framed.size()) {
+        return false;
+    }
+    const state::AccountState account = state::account_snapshot();
+    // The frame carries the picked character's object, so the queue waits for a pick.
+    const state::CharacterState* selected = selected_character(account);
+    if (selected == nullptr) {
+        return false;
+    }
+    // A bounty redeemed or discarded since it advanced has nothing left to show.
+    while (session.itemValuesRefreshCount != 0
+           && !holds_item(*selected, session.itemValuesRefreshSoids.front())) {
+        retire_item_values_refresh(session);
+    }
+    if (session.itemValuesRefreshCount == 0) {
+        return false;
+    }
+    const std::uint64_t instanceSoid = session.itemValuesRefreshSoids.front();
+    const state::AccountEditChange change{
+        .accountSoid = account.primarySoid,
+        .characterSoid = selected->soid,
+        .characterIndex = static_cast<std::size_t>(selected - account.characters.data()),
+        .itemInstanceSoid = instanceSoid};
+    touchesScratch = true;
+    StagedFrame frame{};
+    const char* reason = nullptr;
+    if (!stage_changed_objects(change, session, scratch, frame, reason)) {
+        session.accountResyncArmed = true;
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::warn,
+                          "ev=queuez stage=item_values_refresh result=fail reason=%s "
+                          "instance=0x%llX",
+                          reason,
+                          static_cast<unsigned long long>(instanceSoid));
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), frame.size, response.begin());
+    written = frame.size;
+    session.sendNonce = frame.sendNonce;
+    session.queuez = frame.after;
+    retire_item_values_refresh(session);
     return true;
 }
 
@@ -543,6 +631,14 @@ bool consume_deferred(Session& session,
         return true;
     }
     // A failed resync blocks every incremental that could depend on its missing objects.
+    if (session.accountResyncArmed) {
+        return false;
+    }
+    // Queued item values are already saved, so they go out before a lane commits anything newer.
+    if (consume_item_values_refresh(session, scratch, response, written, touchesScratch)) {
+        return true;
+    }
+    // A refresh that could not be built armed the resync, which must be sent before any increment.
     if (session.accountResyncArmed) {
         return false;
     }

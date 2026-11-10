@@ -350,6 +350,10 @@ struct WorldRewardGate {
     [[nodiscard]] bool operator==(const WorldRewardGate&) const noexcept = default;
 };
 
+/** Item-values refreshes one peer can owe: one for every unequipped row of a character. */
+inline constexpr std::size_t kItemValuesRefreshCapacity =
+    state::account::inventory::kCharacterItemCapacity;
+
 /** Mutable transport state owned by one BAP connection. */
 struct Session {
     std::uint64_t acquisitionPresentationUntilTick{};
@@ -492,6 +496,12 @@ struct Session {
     bool accountMutationPublished{};
     /** True while another peer's account mutation still needs a full local refresh. */
     bool accountResyncArmed{};
+    /**
+     * Held items whose own values changed outside this peer's requests, oldest first and each
+     * once. Each is owed one item-values refresh; a published account resync carries them all.
+     */
+    std::array<std::uint64_t, kItemValuesRefreshCapacity> itemValuesRefreshSoids{};
+    std::size_t itemValuesRefreshCount{};
     /** Set when State refused every saved world reward, or none was saved, under the gate. */
     bool worldRewardsAwaitChange{};
     /** A finished automatic pursuit sweep stays current until saved state or contracts change. */
@@ -554,6 +564,14 @@ void arm_account_resync_elsewhere(Session& origin) noexcept;
 
 /** Arms every Family-4 peer, including the origin, for a full account resync. */
 void arm_account_resync_everywhere() noexcept;
+
+/**
+ * Queues one item-values refresh per item on every Family-4 peer, for values changed outside any
+ * peer's request. An item already queued is not queued again, and a peer with an armed resync
+ * queues nothing. A peer whose queue is full resyncs the account instead.
+ * @param instanceSoids Held items of the selected character whose own values changed.
+ */
+void arm_item_values_refresh_everywhere(std::span<const std::uint64_t> instanceSoids) noexcept;
 
 /** Holds this peer's full Family-4 refreshes until its acquisition flyout has finished. */
 void arm_acquisition_presentation_hold(Session& session) noexcept;

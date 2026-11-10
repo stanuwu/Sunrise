@@ -21,22 +21,13 @@
 #include "queuez_state_validation.h"
 
 namespace sunrise::server::bap::encrypted {
-namespace {
 
-using state::GrantedRowArray;
-using state::QuantityEdit;
-
-/**
- * Encodes a refresh of the objects a State edit changed, read from the caller's uncommitted
- * savepoint. That is the selected character, plus the account when the edit changed its rows,
- * and ahead of them the held item whose own values the edit changed.
- * @param reason Receives inventory_stage or inventory_encode on failure.
- */
-[[nodiscard]] bool stage_changed_objects(const state::AccountEditChange& changed,
-                                         Session& session,
-                                         Scratch& scratch,
-                                         StagedFrame& frame,
-                                         const char*& reason) noexcept {
+/** Stages the character upsert, then encodes the item, character and account the change names. */
+bool stage_changed_objects(const state::AccountEditChange& changed,
+                           Session& session,
+                           Scratch& scratch,
+                           StagedFrame& frame,
+                           const char*& reason) noexcept {
     queuez::EquipmentSwap update{};
     if (!queuez::stage_equipment_swap(session.queuez, changed.characterSoid, update)) {
         reason = "inventory_stage";
@@ -80,6 +71,11 @@ using state::QuantityEdit;
     frame.after = update.after;
     return true;
 }
+
+namespace {
+
+using state::GrantedRowArray;
+using state::QuantityEdit;
 
 /** Commits the operation's savepoint, then sends its frame. A failed commit sends nothing. */
 [[nodiscard]] InvestmentTransition
