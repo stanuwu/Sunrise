@@ -1531,13 +1531,15 @@ PursuitRedemption prepare_pursuit_redemption(std::uint64_t instanceSoid,
     if (step.membership != pursuits::QuestMembership::none && !progress_item_held(status)) {
         return PursuitRedemption::notRedeemable;
     }
+    // Progress the server cannot read is progress it cannot call complete, so the pursuit is not
+    // redeemed. It can still be removed, or it would hold its slot for good.
     reason = "objective_source";
     if (!status.objectivesKnown) {
-        return PursuitRedemption::refused;
+        return PursuitRedemption::notRedeemable;
     }
     reason = "objective_reads_deadline";
     if (reads_deadline(contract)) {
-        return PursuitRedemption::refused;
+        return PursuitRedemption::notRedeemable;
     }
     reason = "incomplete";
     if (!status.objectivesComplete) {

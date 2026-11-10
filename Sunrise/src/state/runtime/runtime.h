@@ -965,8 +965,9 @@ prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
 enum class PursuitRedemption : std::uint8_t {
     prepared,
     /**
-     * The pursuit is incomplete, expired or suppressed, or is a quest step whose progress is not
-     * held by the item; it is not redeemed, and the request is an ordinary removal.
+     * The pursuit is incomplete, expired or suppressed, its progress cannot be read, or it is a
+     * quest step whose progress is not held by the item; it is not redeemed, and the request is an
+     * ordinary removal.
      */
     notRedeemable,
     /** A catalog is unpublished, or a saved read or allocation failed, so nothing was decided. */
