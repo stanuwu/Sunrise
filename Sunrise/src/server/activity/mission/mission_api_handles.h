@@ -118,6 +118,18 @@ inline constexpr ValueSpec kActivateArguments[]{
      .optional = true,
      .fallback = default_boolean(false),
      .note = "also spawns the scene's single authored cast"},
+    {.name = "initial_event",
+     .kind = ValueKind::integer,
+     .ref = "mission.SceneInput",
+     .optional = true,
+     .fallback = default_text("none"),
+     .bound = between(1,
+                      static_cast<std::int64_t>(
+                          middleware::bap::activity_message::scene_events::kInvalidEventKey)
+                          - 1),
+     .scope = Scope::receiver,
+     .note = "an input the scene's activation already carries; a key no block waits on is "
+             "refused on delivery"},
 };
 inline constexpr ValueSpec kSendEventArguments[]{
     {.name = "key",

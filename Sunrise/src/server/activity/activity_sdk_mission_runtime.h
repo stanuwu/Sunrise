@@ -219,14 +219,18 @@ play_dialogue_cue_slot_reserved(const state::activity_sdk::BoundView& view,
                                 const host::ScriptableOutputReservation& reservation,
                                 std::optional<std::uint32_t> filterSlotRow = {}) noexcept;
 
-/** Queues only through the exact unarmed Host revision owned by Mission State. */
+/**
+ * Queues only through the exact unarmed Host revision owned by Mission State.
+ * @param initialEventKey An input the activation carries from its start; zero for none.
+ */
 [[nodiscard]] SceneStatus
 activate_authored_scene_reserved(const state::activity_sdk::BoundView& view,
                                  std::uint32_t occurrenceRow,
                                  std::uint32_t slotRow,
                                  const host::ScriptableOutputReservation& reservation,
                                  std::uint32_t eventKey = 0,
-                                 bool stop = false) noexcept;
+                                 bool stop = false,
+                                 std::uint32_t initialEventKey = 0) noexcept;
 
 /** @return Stable concise text for one mission runtime result. */
 [[nodiscard]] const char* status_name(Status status) noexcept;

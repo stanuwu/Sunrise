@@ -1339,7 +1339,8 @@ actor_squad_binding_status(const state::activity::SessionBinding& binding,
     const ScriptableOutputReservation* reservation = nullptr,
     const AuthoredSceneDependencies& dependencies = {},
     std::uint32_t eventKey = 0,
-    bool stop = false) noexcept;
+    bool stop = false,
+    std::uint32_t initialEventKey = 0) noexcept;
 
 /** Queues one authored dialogue line from the exact generated group in the mission seed. */
 [[nodiscard]] bool request_state_local_dialogue_override(

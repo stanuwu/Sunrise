@@ -9,6 +9,7 @@
 #include "../../../middleware/bap/activity_message/damage_monitor_auth.h"
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
 #include "../../../middleware/bap/activity_message/mission_effect_auth.h"
+#include "../../../middleware/bap/activity_message/scene_events_auth.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../state/activity_sdk/scene_triggers.h"
 #include "../../gameplay/squad_entity_retirement.h"
@@ -1048,21 +1049,18 @@ scene_gate_rows(const RuntimeInstance& instance, const host::SenseObservationKey
     return sdk::scene_gates(instance.view.catalog->authored_scene_event_keys(), found.nativeRow);
 }
 
-/**
- * Records the output keys a scene body lists, raising one event per key new to this run.
- * Any root value equal to an output key counts; the keys are name hashes, so no other field
- * carries one.
- */
+/** Records a scene body's exported keys, raising one event per key new to this run. */
 void record_scene_outputs(RuntimeInstance& instance,
                           const host::SenseObservation& observation,
                           std::span<const sense_values::DecodedValue> body,
-                          std::uint32_t root,
                           SceneObservation& scene,
                           bool raise) noexcept {
+    namespace scene_events = middleware::bap::activity_message::scene_events;
     const auto gates = scene_gate_rows(instance, observation.key);
     for (const sense_values::DecodedValue& value : body) {
         const auto key = static_cast<std::uint32_t>(value.unsignedValue);
-        if (value.schemaRow != root || !value.present
+        if (value.schemaRow != scene_events::kSenseKeyListSchema
+            || value.fieldOrdinal != scene_events::kSenseKeyOrdinal || !value.present
             || std::find(scene.outputs.begin(), scene.outputs.begin() + scene.outputCount, key)
                    != scene.outputs.begin() + scene.outputCount
             || std::none_of(gates.begin(), gates.end(), [key](const auto& gate) {
@@ -1139,7 +1137,7 @@ void push_scene_edges(RuntimeInstance& instance,
             spare->completed = completed;
             spare->token = sense_number(body, root, kSceneTokenOrdinal);
             spare->used = true;
-            record_scene_outputs(instance, observation, body, root, *spare, false);
+            record_scene_outputs(instance, observation, body, *spare, false);
             continue;
         }
         // A new activation token is a new run of the scene, whose outputs start empty.
@@ -1148,7 +1146,7 @@ void push_scene_edges(RuntimeInstance& instance,
             slot->token = static_cast<std::int32_t>(token->signedValue);
             slot->outputCount = 0;
         }
-        record_scene_outputs(instance, observation, body, root, *slot, true);
+        record_scene_outputs(instance, observation, body, *slot, true);
         if (!hasCompletion) {
             continue;
         }

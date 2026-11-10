@@ -590,7 +590,12 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
         std::uint32_t generation = 0;
         encoded = next_authored_scene_generation(candidate.authoredSceneGeneration, generation)
                   && scene::encode_authored_scene_auth(
-                      generation, request.sceneDependencies, pending.body, written, bits);
+                      generation,
+                      request.sceneDependencies,
+                      pending.body,
+                      written,
+                      bits,
+                      std::span(&request.sceneEventKey, request.sceneEventKey != 0 ? 1U : 0U));
         pending.bitCount = static_cast<std::uint16_t>(bits);
         pending.generation = generation;
     } else if (encoded

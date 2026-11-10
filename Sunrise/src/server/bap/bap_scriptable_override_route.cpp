@@ -472,7 +472,8 @@ bool request_activity_state_local_authored_scene_override(
     const activity::host::ScriptableOutputReservation* reservation,
     const activity::host::AuthoredSceneDependencies& dependencies,
     std::uint32_t eventKey,
-    bool stop) noexcept {
+    bool stop,
+    std::uint32_t initialEventKey) noexcept {
     const std::lock_guard lock(session_lock());
     std::size_t linkCount = 0;
     const Session* const session =
@@ -491,7 +492,8 @@ bool request_activity_state_local_authored_scene_override(
                                                                        reservation,
                                                                        dependencies,
                                                                        eventKey,
-                                                                       stop);
+                                                                       stop,
+                                                                       initialEventKey);
     return queued;
 }
 

@@ -276,6 +276,7 @@ struct TypedIntent final {
     IntentKind kind{IntentKind::placeSquad};
     std::uint32_t firstRow{};
     std::uint32_t secondRow{};
+    /** The input a scene signal sends, or the one an activation starts with; zero is none. */
     std::uint32_t sceneEventKey{};
     std::uint32_t objectTag{};
     std::uint32_t registryKey{};

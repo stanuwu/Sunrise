@@ -16,6 +16,7 @@
 #include "ghost_link_auth.h"
 #include "interactable_object_auth.h"
 #include "mission_effect_auth.h"
+#include "scene_events_auth.h"
 #include "scriptable_auth_body.h"
 #include "sense_update_body.h"
 #include "squad_sense_state.h"
@@ -39,7 +40,7 @@ constexpr std::uint32_t kObjectSpawnMask = generated::C80809e1b::kClass,
                         kObjectReplies = generated::C80809aea::kClass;
 constexpr std::uint32_t kSceneList = generated::C808094e1::kClass;
 /** A u32 key list; scene events and player keys use the same schema. */
-constexpr std::uint32_t kKeyList = generated::C808094df::kClass;
+constexpr std::uint32_t kKeyList = scene_events::kSenseKeyListSchema;
 constexpr std::uint32_t kSquadCounts = generated::C80809491::kClass,
                         kSquadList = generated::C80807ecf::kClass;
 constexpr std::uint32_t kSquadReals = generated::C80807ecd::kClass;

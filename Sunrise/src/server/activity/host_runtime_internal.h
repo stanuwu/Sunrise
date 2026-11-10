@@ -37,6 +37,7 @@ struct ScriptableRequest final {
     bool objectiveRefreshAwareness{};
     middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies
         sceneDependencies{};
+    /** The input an event request sends, or the one an activation starts with; zero is none. */
     std::uint32_t sceneEventKey{};
     std::uint32_t sequenceHash{};
     state::gameplay::squad_entity_retirement::Eligibility squadRetirement{};

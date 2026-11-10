@@ -1231,19 +1231,25 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         if (!reserve_or_refuse(instance, reservation, "scene_refused")) {
             return;
         }
+        // An activation's key is the input it starts with; a signal's is the input it sends.
+        const bool activation = intent.kind == lua_vm::IntentKind::activateAuthoredScene;
         std::uint64_t carrier = 0;
         const scenes::SceneStatus status = deliver_through_holder(
             instance, intent, kSceneWalk, carrier, [&](const sdk::BoundView& view) noexcept {
-                return intent.kind == lua_vm::IntentKind::activateAuthoredScene && intent.active
-                           ? scenes::activate_authored_scene_spawn_reserved(
-                                 view, intent.firstRow, intent.secondRow, reservation)
+                return activation && intent.active
+                           ? scenes::activate_authored_scene_spawn_reserved(view,
+                                                                            intent.firstRow,
+                                                                            intent.secondRow,
+                                                                            reservation,
+                                                                            intent.sceneEventKey)
                            : scenes::activate_authored_scene_reserved(
                                  view,
                                  intent.firstRow,
                                  intent.secondRow,
                                  reservation,
-                                 intent.sceneEventKey,
-                                 intent.kind == lua_vm::IntentKind::stopAuthoredScene);
+                                 activation ? 0 : intent.sceneEventKey,
+                                 intent.kind == lua_vm::IntentKind::stopAuthoredScene,
+                                 activation ? intent.sceneEventKey : 0);
             });
         finish_reserved_scene(
             instance, now, reservation, status, "scene_enqueued", "scene_refused", carrier);

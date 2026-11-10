@@ -509,12 +509,15 @@ bool request_state_local_authored_scene_override(
     const ScriptableOutputReservation* reservation,
     const AuthoredSceneDependencies& dependencies,
     std::uint32_t eventKey,
-    bool stop) noexcept {
+    bool stop,
+    std::uint32_t initialEventKey) noexcept {
     if (target.slotType != scene::kAuthoredSceneSlotType
         || target.authSchema != scene::kAuthoredSceneAuthSchema
         || !valid_state_local_group(target, stateLocalRosterGroup)
         || !scene::valid_authored_scene_dependencies(dependencies)
         || eventKey == (std::numeric_limits<std::uint32_t>::max)() || (stop && eventKey != 0)
+        || initialEventKey == (std::numeric_limits<std::uint32_t>::max)()
+        || (initialEventKey != 0 && (stop || eventKey != 0))
         || expectedActivityClientGeneration == 0) {
         return false;
     }
@@ -526,7 +529,7 @@ bool request_state_local_authored_scene_override(
     request.kind = stop            ? ScriptableOverrideKind::authoredSceneStop
                    : eventKey == 0 ? ScriptableOverrideKind::authoredScene
                                    : ScriptableOverrideKind::authoredSceneEvent;
-    request.sceneEventKey = eventKey;
+    request.sceneEventKey = eventKey != 0 ? eventKey : initialEventKey;
     request.sceneDependencies = dependencies;
     return enqueue_request(request, reservation);
 }

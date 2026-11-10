@@ -725,14 +725,18 @@ SceneStatus activate_authored_scene_reserved(const sdk::BoundView& view,
                                              std::uint32_t slotRow,
                                              const host::ScriptableOutputReservation& reservation,
                                              std::uint32_t eventKey,
-                                             bool stop) noexcept {
+                                             bool stop,
+                                             std::uint32_t initialEventKey) noexcept {
     PreparedScene prepared{};
     const SceneStatus status = prepare_scene(view, occurrenceRow, slotRow, prepared);
     if (status != SceneStatus::ready) {
         return status;
     }
-    if (eventKey != 0 && !stop
-        && !sdk::scene_listens(view.catalog->authored_scene_event_keys(), slotRow, eventKey)) {
+    const auto listens = [&view, slotRow](std::uint32_t key) {
+        return sdk::scene_listens(view.catalog->authored_scene_event_keys(), slotRow, key);
+    };
+    if ((eventKey != 0 && !stop && !listens(eventKey))
+        || (initialEventKey != 0 && !listens(initialEventKey))) {
         return SceneStatus::unknownEvent;
     }
     if (prepared.omittedParticipants != 0) {
@@ -747,7 +751,8 @@ SceneStatus activate_authored_scene_reserved(const sdk::BoundView& view,
             &reservation,
             prepared.sceneDependencies,
             eventKey,
-            stop)) {
+            stop,
+            initialEventKey)) {
         return SceneStatus::queued;
     }
     return SceneStatus::refused;
