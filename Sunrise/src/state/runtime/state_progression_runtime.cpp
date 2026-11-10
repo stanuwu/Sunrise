@@ -335,29 +335,20 @@ void report_perk_refusal(std::size_t index, const char* reason) noexcept {
 static_assert(build_data::rewards::kAbsent == build_data::season_pass::kUnavailableFlagIndex);
 
 /**
- * Sets the acquisition and claim flags of every perk the selected character has earned.
- * It sets only clear flags, so it runs on every rank change, pick, publication and artifact change.
+ * Sets the acquisition and claim flags of every perk a rank earns in one character's bank image.
+ * A perk's conditions read the flags an earlier perk of the same walk set.
+ * @param flags The character's banks, which receive every flag the walk sets.
+ * @param characterClass Class the perk conditions read.
+ * @param rank One-based season rank the perks are earned at.
+ * @param save Saves one flag the walk sets, or null when the image is a preview.
  * @param earned Set when the walk set at least one flag.
- * @return False when the save could not be read or written.
+ * @return False when a flag could not be saved.
  */
-bool walk_earned_perks(bool& earned) noexcept {
-    // Unpublished rows earn nothing yet; their publication walks again.
-    if (!season_perks_walkable()) {
-        return true;
-    }
-    AccountState account;
-    if (!investment::store::read_account(account)) {
-        return false;
-    }
-    const auto character = runtime::detail::selected_character_index(account);
-    if (character >= account.characterCount) {
-        return true;
-    }
-    unlocks::Table flags{};
-    if (!investment::store::read_unlocks(flags, static_cast<int>(character))) {
-        return false;
-    }
-    const auto rank = seasonal_rank();
+bool apply_earned_perks(unlocks::Table& flags,
+                        CharacterClass characterClass,
+                        std::uint16_t rank,
+                        bool (*save)(std::uint16_t) noexcept,
+                        bool& earned) noexcept {
     const auto count = build_data::season_pass_reward_count();
     for (std::size_t index = 0; index < count; ++index) {
         build_data::season_pass::Reward reward{};
@@ -381,10 +372,9 @@ bool walk_earned_perks(bool& earned) noexcept {
         }
         const char* reason = nullptr;
         bool eligible = false;
-        if (!reward_resolution::eligible(
-                std::span(reward.condition).first(reward.conditionCount),
-                {flags, account.characters[character].characterClass, 0, &reason},
-                eligible)) {
+        if (!reward_resolution::eligible(std::span(reward.condition).first(reward.conditionCount),
+                                         {flags, characterClass, 0, &reason},
+                                         eligible)) {
             report_perk_refusal(index, reason != nullptr ? reason : "perk_condition");
             continue;
         }
@@ -396,7 +386,7 @@ bool walk_earned_perks(bool& earned) noexcept {
                 || flags.accountFlags[flag] == unlocks::kFlagSet) {
                 continue;
             }
-            if (!unlocks::set_account_flag(flag, unlocks::kFlagSet)) {
+            if (save != nullptr && !save(flag)) {
                 return false;
             }
             flags.accountFlags[flag] = unlocks::kFlagSet;
@@ -404,6 +394,38 @@ bool walk_earned_perks(bool& earned) noexcept {
         }
     }
     return true;
+}
+
+/**
+ * Sets the acquisition and claim flags of every perk the selected character has earned.
+ * It sets only clear flags, so it runs on every rank change, pick, publication and artifact change.
+ * @param earned Set when the walk set at least one flag.
+ * @return False when the save could not be read or written.
+ */
+bool walk_earned_perks(bool& earned) noexcept {
+    // Unpublished rows earn nothing yet; their publication walks again.
+    if (!season_perks_walkable()) {
+        return true;
+    }
+    AccountState account;
+    if (!investment::store::read_account(account)) {
+        return false;
+    }
+    const auto character = runtime::detail::selected_character_index(account);
+    if (character >= account.characterCount) {
+        return true;
+    }
+    unlocks::Table flags{};
+    if (!investment::store::read_unlocks(flags, static_cast<int>(character))) {
+        return false;
+    }
+    return apply_earned_perks(flags,
+                              account.characters[character].characterClass,
+                              seasonal_rank(),
+                              [](std::uint16_t flag) noexcept {
+                                  return unlocks::set_account_flag(flag, unlocks::kFlagSet);
+                              },
+                              earned);
 }
 
 /** Publishes the four seasonal progression lanes the current XP total implies. */
