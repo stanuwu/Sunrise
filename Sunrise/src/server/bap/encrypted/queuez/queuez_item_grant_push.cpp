@@ -122,6 +122,10 @@ bool publish_item_grant(const StagedItemGrant& staged,
     }
     publish_staged_frame(staged.frame, session, scratch, response, written);
     bap::arm_acquisition_presentation_hold(session);
+    if (state::presence_flags_pending()) {
+        // A granted Mote supplies a flag Family 5 has not set yet.
+        bap::arm_artifact_refresh(session);
+    }
     return true;
 }
 

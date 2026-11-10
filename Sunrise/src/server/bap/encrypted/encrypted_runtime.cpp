@@ -202,6 +202,17 @@ void submit_committed_authority_reset(Session& session,
            && grant->pending->redeemedInstanceSoid != 0;
 }
 
+/**
+ * @return True when a socket reply carries the account without the character, as a Chalice or
+ *         Synthesizer exchange does. A bake's reply carries both.
+ */
+[[nodiscard]] bool socket_reply_omits_character(const ServiceOutcome& outcome) noexcept {
+    const auto* socket = transaction_if<SocketPlugTransaction>(outcome);
+    return socket != nullptr && socket->pending != nullptr && socket->pending->profileChanged
+           && socket->pending->beforeCharacter.nextInventorySerial
+                  == socket->pending->afterCharacter.nextInventorySerial;
+}
+
 } // namespace
 
 /**
@@ -435,6 +446,7 @@ bool consume(Session& session,
                                               || outcome.hasStoreSync || outcome.hasArtifactReset;
     // Commit consumes pending payloads, so retain the connection fields first.
     const ConnectionFields connection = connection_fields(outcome);
+    const bool socketReplyOmitsCharacter = socket_reply_omits_character(outcome);
     if (handled && processesBody) {
         // State changes become visible only after every requested frame and caller byte fit.
         // A refused commit sends nothing, so the frame's own reason is the only record of why.
@@ -565,6 +577,8 @@ bool consume(Session& session,
                 // need their own refresh. A record claim does not: its Family-4 replacement rearms
                 // the client rebuild.
                 bap::arm_artifact_refresh(session);
+            } else if (socketReplyOmitsCharacter) {
+                bap::arm_unlock_character_refresh(session);
             }
             if (outcome.hasArtifactReset) {
                 session.artifactResetRefresh = outcome.artifactReset;

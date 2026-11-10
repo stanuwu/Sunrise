@@ -562,6 +562,12 @@ void arm_acquisition_presentation_hold(Session& session) noexcept;
  */
 void arm_artifact_refresh(Session& session) noexcept;
 
+/**
+ * Schedules the delayed Family-4 character copy alone, for an account published without its
+ * character. The client rebuilds what its sockets offer only on a character update.
+ */
+void arm_unlock_character_refresh(Session& session) noexcept;
+
 /** Queues one character item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;
 

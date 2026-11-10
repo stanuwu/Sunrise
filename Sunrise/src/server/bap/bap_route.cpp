@@ -385,6 +385,11 @@ void arm_acquisition_presentation_hold(Session& session) noexcept {
 /** Schedules this peer's Family-5 refresh, then its delayed Family-4 character copy. */
 void arm_artifact_refresh(Session& session) noexcept {
     session.artifactRefreshArmed = true;
+    arm_unlock_character_refresh(session);
+}
+
+/** Schedules this peer's delayed Family-4 character copy alone. */
+void arm_unlock_character_refresh(Session& session) noexcept {
     session.artifactFamily4RefreshDueTick = GetTickCount64() + kArtifactFamily4RefreshDelayMs;
     session.artifactFamily4RefreshArmed = true;
 }
