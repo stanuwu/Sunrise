@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "../../middleware/content/packages/tables/scenario_reader.h"
+#include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/activity/transactions/internal.h"
 #include "../../state/build_data/scenarios/definition.h"
 #include "encrypted/push/activity/internal.h"
@@ -154,6 +155,28 @@ bool mission_seed_plan_hosted(const Session& session,
            && ((encrypted::push::activity::hosted_bubble_mask(session) >> bubble) & 1U) != 0;
 }
 
+namespace {
+
+/**
+ * Reads whether a client stands in an alternate state of a bubble its private link does not host,
+ * with that link's own receipt of the plan. The client opens no public link in such a state, so
+ * no other receipt of it can arrive.
+ */
+[[nodiscard]] bool mission_seed_alternate_state_held(const Session& recipient,
+                                                     const ActivityMissionSeedPlan& plan) noexcept {
+    const auto& lease = recipient.activityMissionSeed;
+    return plan.stateOrdinal != 0 && recipient.activity.role == ActivityClientRole::privateCurrent
+           && lease.configured && lease.revision != 0
+           && lease.bindingGeneration == recipient.activity.bindingGeneration
+           && lease.revision == lease.publishedRevision && !lease.regionArrivalPending
+           && same_mission_seed_plan(lease.plan, plan)
+           && encrypted::push::activity::mission_seed_arrival_window_closed(
+               state::activity::membership::player_region(recipient.activity.source.sessionId),
+               plan.effectiveRegion);
+}
+
+} // namespace
+
 bool mission_seed_hosted_publication_locked(const state::activity::SessionBinding& binding,
                                             const ActivityMissionSeedPlan& plan,
                                             bool everyClient) noexcept {
@@ -185,10 +208,12 @@ bool mission_seed_hosted_publication_locked(const state::activity::SessionBindin
             clientHosting = true;
         }
         if (!clientHosting) {
-            if (everyClient) {
+            if (!everyClient) {
+                continue;
+            }
+            if (!mission_seed_alternate_state_held(recipient, plan)) {
                 return false;
             }
-            continue;
         }
         hosting = true;
     }

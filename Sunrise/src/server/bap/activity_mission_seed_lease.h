@@ -31,7 +31,8 @@ namespace sunrise::server::bap {
  * when it hosts the bubble, else by its client's public link that hosts it, which publishes
  * that bubble's own state. Caller holds the BAP session lock.
  * @param everyClient True holds for a recipient whose client has no link in the bubble: the
- * initial-state pass waits for the clients to arrive. False lets it through, for script output
+ * initial-state pass waits for the clients to arrive. A client that stands in an alternate state
+ * of the bubble on its private link alone has arrived. False lets it through, for script output
  * that nothing can carry into a bubble no client hosts; with no hosting link at all it is ready.
  */
 [[nodiscard]] bool
