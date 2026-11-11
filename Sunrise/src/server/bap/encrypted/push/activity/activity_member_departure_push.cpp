@@ -7,6 +7,7 @@
 #include "../../../../../middleware/bap/activity_message/activity_replication_epoch_encoder.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
 #include "../../../../../state/activity/member_departure.h"
+#include "../../../../activity/activity_clock.h"
 #include "../../../../gameplay/peer/peer_transport.h"
 #include "activity_notification_frame.h"
 #include "internal.h"
@@ -148,22 +149,30 @@ bool consume_member_rejoin(Session& session,
     std::array<std::byte, join::kEncodedSize> bytes{};
     std::size_t bodySize{}, framedSize{};
     touchesScratch = true;
-    const bool encoded = join::encode_join_result(session.activityJoinCorrelation,
-                                                  session.activity.session.sessionId,
-                                                  kLocalPeerHeardWindowMilliseconds,
-                                                  kLocalKeepaliveHintMilliseconds,
-                                                  session.activity.replicationEpoch,
-                                                  bytes,
-                                                  bodySize)
-                         && append_notification_frame(scratch,
-                                                      session.activity.session.sessionId,
-                                                      4,
-                                                      std::span(bytes).first(bodySize),
-                                                      session.sessionKey,
-                                                      session.sendNonce,
-                                                      scratch.framed,
-                                                      framedSize)
-                         && framedSize != 0 && framedSize <= response.size();
+    std::uint64_t activityTime = 0;
+    const bool encoded =
+        server::activity::activity_clock_wire_ticks(session.activity.session.sessionId,
+                                                    session.activity.session.createdRevision,
+                                                    GetTickCount64(),
+                                                    false,
+                                                    activityTime)
+        && join::encode_join_result(session.activityJoinCorrelation,
+                                    session.activity.session.sessionId,
+                                    kLocalPeerHeardWindowMilliseconds,
+                                    kLocalKeepaliveHintMilliseconds,
+                                    session.activity.replicationEpoch,
+                                    activityTime,
+                                    bytes,
+                                    bodySize)
+        && append_notification_frame(scratch,
+                                     session.activity.session.sessionId,
+                                     4,
+                                     std::span(bytes).first(bodySize),
+                                     session.sessionKey,
+                                     session.sendNonce,
+                                     scratch.framed,
+                                     framedSize)
+        && framedSize != 0 && framedSize <= response.size();
     if (!encoded) {
         return false;
     }

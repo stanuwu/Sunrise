@@ -72,6 +72,16 @@ void push_player_trigger(RuntimeInstance& instance,
     push_script_event(instance, event);
 }
 
+/** Forwards one integration report; the script decides how reports count. */
+void push_integration(RuntimeInstance& instance, const host::Event& incident) noexcept {
+    if (!incident.hasIntegration) {
+        return;
+    }
+    host::Event event = incident;
+    event.kind = host::EventKind::integration;
+    push_script_event(instance, event);
+}
+
 /** Resolves a native cinematic notification to its exact authored Type-6 source. */
 void push_cinematic(RuntimeInstance& instance, const host::Event& incident) noexcept {
     if (!incident.hasCinematic) {

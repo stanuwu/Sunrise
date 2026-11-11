@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <limits>
 
-#include "../../../middleware/bap/activity_message/incident.h"
+#include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../state/activity/membership/definition.h"
 #include "../../../state/activity/mission/definition.h"
 #include "mission_api_types.h"
@@ -31,12 +31,63 @@ inline constexpr ValueSpec kExactObjectSelector[]{{.kind = ValueKind::selector,
                                                    .ref = "mission.Slot",
                                                    .slot = kExactObject,
                                                    .handleAccepted = true}};
+/** The timed child's clock: remaining counts down from total, in whole seconds. */
+inline constexpr ValueSpec kActivateTimedFields[]{
+    {.name = "remaining",
+     .kind = ValueKind::integer,
+     .bound = between(
+         0, middleware::bap::activity_message::scriptable_auth::kType68MaximumClockSeconds)},
+    {.name = "total",
+     .kind = ValueKind::integer,
+     .bound = between(
+         0, middleware::bap::activity_message::scriptable_auth::kType68MaximumClockSeconds)},
+    {.name = "running",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(true),
+     .note = "false sends the window paused at its current value"},
+    {.name = "in_place",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "repeats the object's current generation, updating the live object without respawn"},
+};
+/** The object's own state-machine position lane, applied to the live object in place. */
+inline constexpr ValueSpec kActivatePositionFields[]{
+    {.name = "value",
+     .kind = ValueKind::number,
+     .note = "0 to 1; the object's graph owns the bins"},
+    {.name = "revision",
+     .kind = ValueKind::integer,
+     .bound = between(1, kInt32Maximum),
+     .note = "lane sequence; must exceed the last one the object took"},
+    {.name = "snap",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(true),
+     .note = "jump to the value instead of blending"},
+};
 inline constexpr ValueSpec kActivateObjectsArguments[]{
     {.name = "slots",
      .kind = ValueKind::list,
      .element = kExactObjectSelector,
      .note = "dense list; a slot may appear once; grouped into one request per object"},
     kActiveArgument,
+    {.name = "capture_plate",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "adds the capture-plate component Auth; it changes no plate field"},
+    {.name = "timed",
+     .kind = ValueKind::table,
+     .optional = true,
+     .fields = kActivateTimedFields,
+     .note = "adds the enabled timed component Auth with a clock of these whole seconds"},
+    {.name = "position",
+     .kind = ValueKind::table,
+     .optional = true,
+     .fields = kActivatePositionFields,
+     .note = "sets the object's state-machine position lane at its current generation"},
 };
 inline constexpr ValueSpec kRequestKeyList[]{
     {.kind = ValueKind::list, .element = kRequestKey, .note = "one key per object group"}};
@@ -150,6 +201,52 @@ inline constexpr ValueSpec kModConfigHandle[]{{.kind = ValueKind::handle, .ref =
 inline constexpr ValueSpec kTimersHandle[]{{.kind = ValueKind::handle, .ref = "timers"}};
 inline constexpr ValueSpec kVariablesHandle[]{{.kind = ValueKind::handle, .ref = "variables"}};
 
+// The Director's public-event schedule for one site, evaluated by the runtime at the host clock.
+inline constexpr ValueSpec kPublicEventScheduleArguments[]{
+    {.name = "site",
+     .kind = ValueKind::integer,
+     .bound = uint32_range(),
+     .note = "roster key of the site"},
+    {.name = "now",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .fallback = default_integer(0),
+     .note = "Unix seconds to evaluate at; zero or absent reads the host clock"},
+};
+inline constexpr ValueSpec kPublicEventScheduleFields[]{
+    {.name = "state", .kind = ValueKind::string, .note = "incoming or active"},
+    {.name = "until_start",
+     .kind = ValueKind::integer,
+     .note = "seconds to the start; zero while active"},
+    {.name = "until_finish",
+     .kind = ValueKind::integer,
+     .note = "seconds to the end of the map window"},
+    {.name = "slot_start", .kind = ValueKind::integer, .note = "Unix seconds"},
+    {.name = "start", .kind = ValueKind::integer, .note = "Unix seconds"},
+    {.name = "finish", .kind = ValueKind::integer, .note = "Unix seconds"},
+    {.name = "slot", .kind = ValueKind::integer},
+    {.name = "row", .kind = ValueKind::integer, .note = "one-based schedule row"},
+    {.name = "selected", .kind = ValueKind::boolean, .note = "the slot's pick is this site"},
+    {.name = "site",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .note = "the picked site's roster key"},
+    {.name = "node",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .note = "the picked site's map node"},
+    {.name = "rally",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .note = "the picked site's rally key"},
+};
+inline constexpr ValueSpec kPublicEventSchedule[]{{.kind = ValueKind::table,
+                                                   .optional = true,
+                                                   .fields = kPublicEventScheduleFields,
+                                                   .note =
+                                                       "nil before the table is extracted or for a "
+                                                       "site no row lists"}};
+
 /** Members of the mission context, in __index order. */
 inline constexpr MemberSpec kContextMembers[]{
     field("sdk_build_id", kString, "sha256:<64 hex>"),
@@ -162,6 +259,14 @@ inline constexpr MemberSpec kContextMembers[]{
     field("lifetime", kLifetimeHandle),
     field("attempt_generation", kDecimal),
     field("mission_complete", kBoolean, "true after complete_mission was accepted"),
+    field(
+        "host_unix_seconds", kInteger, "the host wall clock in Unix seconds, read at each access"),
+    {.name = "public_event_schedule",
+     .kind = MemberKind::query,
+     .call = CallForm::named,
+     .arguments = kPublicEventScheduleArguments,
+     .returns = kPublicEventSchedule,
+     .note = "the Director's schedule of one public-event site, as the client computes it"},
     {.name = "complete_mission",
      .kind = MemberKind::request,
      .call = CallForm::named,

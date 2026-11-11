@@ -257,9 +257,8 @@ append_binding_locators(std::span<const activity_inventory::PackageLocator> sour
         target.senseSchema = linked.senseSchema;
         target.authSchema = linked.authSchema;
         target.flags = linked.flags;
-        target.reserved = (linked.flags & format::kSlotObjectChannelsExact) != 0
-                              ? linked.objectChannelCount
-                              : linked.dialogueCueCount;
+        target.reserved = source.slotType == format::kChannelSlotType ? linked.outputChannelCount
+                                                                      : linked.dialogueCueCount;
         target.aliases = policy.slotAliases[index];
         target.capabilities = ranges.slotCapabilities[index];
         if (!link_text(linker, source.id, target.id) || !link_text(linker, linked.name, target.name)

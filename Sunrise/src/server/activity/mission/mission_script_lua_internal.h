@@ -177,6 +177,8 @@ void register_actor_sequence_metatables(lua_State* state);
 
 /** Sets one verified device channel through the same guarded route. */
 [[nodiscard]] int slot_set_channel(lua_State* state);
+/** Sets an SDK-bounded prefix of authored object output channels. */
+[[nodiscard]] int slot_set_output_channels(lua_State* state);
 
 /** Applies one named device transition over the same guarded channel route. */
 [[nodiscard]] int slot_transition(lua_State* state);
@@ -186,6 +188,9 @@ void register_actor_sequence_metatables(lua_State* state);
 
 /** Shows one generated type-68 HUD directive. */
 [[nodiscard]] int slot_set_directive(lua_State* state);
+
+/** Configures the authored volumes that admit players to a type-70 audience. */
+[[nodiscard]] int slot_set_engagement(lua_State* state);
 
 /** Hides the active type-68 HUD directive. */
 [[nodiscard]] int slot_clear_directives(lua_State* state);
@@ -237,6 +242,8 @@ void push_atom_kinds(lua_State* state);
 [[nodiscard]] int slot_set_object_filter(lua_State* state);
 [[nodiscard]] int slot_generate_map(lua_State* state);
 [[nodiscard]] int slot_watch_damage(lua_State* state);
+/** Queues the authored type-26 hop-on after validating its filter and revision. */
+[[nodiscard]] int slot_set_hop_on(lua_State* state);
 [[nodiscard]] int slot_set_interactable_object(lua_State* state);
 [[nodiscard]] int slot_set_ghost_link(lua_State* state);
 [[nodiscard]] int slot_ghost_link(lua_State* state);

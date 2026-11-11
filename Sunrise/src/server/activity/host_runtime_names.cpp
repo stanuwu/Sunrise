@@ -87,6 +87,10 @@ const char* event_name(EventKind kind) noexcept {
         return "session left";
     case EventKind::playerTrigger:
         return "player trigger";
+    case EventKind::integration:
+        return "integration";
+    case EventKind::engagementState:
+        return "engagement state";
     case EventKind::cinematicStarted:
         return "cinematic started";
     case EventKind::actorPathState:

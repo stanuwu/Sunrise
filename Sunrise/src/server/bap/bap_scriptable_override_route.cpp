@@ -9,7 +9,7 @@
 #include "../../state/build_data/runtime.h"
 #include "../activity/activity_sdk_behavior_scope.h"
 #include "../activity/host_runtime.h"
-#include "activity_mission_seed_lease.h"
+#include "encrypted/push/activity/internal.h"
 #include "internal.h"
 #include "runtime.h"
 
@@ -165,6 +165,24 @@ valid_canonical_sdk_auth_target(const activity::host::ScriptableTarget& target) 
            && session.activity.bindingGeneration == expectedGeneration;
 }
 
+/**
+ * @return True when this link may drive a generated slot in the region: typed Auth, device,
+ * trigger, sequence, cinematic and scene overrides. The public link reaches only the bubbles
+ * whose roster it publishes; the private link keeps its full reach.
+ */
+[[nodiscard]] bool link_hosts_state_local_region_locked(const Session& session,
+                                                        std::int32_t region) noexcept {
+    if (session.activity.role == ActivityClientRole::privateCurrent) {
+        return true;
+    }
+    if (session.activity.role != ActivityClientRole::publicTarget || region < 0) {
+        return false;
+    }
+    const std::uint32_t bubble = static_cast<std::uint32_t>(region) / tables::kSliceSetIndexFactor;
+    return bubble < layouts::kBubbleCapacity
+           && ((encrypted::push::activity::hosted_bubble_mask(session) >> bubble) & 1U) != 0;
+}
+
 /** Checks one generated type-23 request while the BAP lock owns ActivityClient state. */
 [[nodiscard]] bool
 state_local_type23_available_locked(const Session& session,
@@ -174,9 +192,8 @@ state_local_type23_available_locked(const Session& session,
                                     std::uint64_t expectedGeneration) noexcept {
     const std::int32_t region = selected_region_index_locked(session);
     return expectedRegion >= 0 && expectedGeneration != 0
-           && session.activity.role == ActivityClientRole::privateCurrent
-           && region == expectedRegion
-           && carries_state_local_target(session, target, expectedRegion)
+           && link_hosts_state_local_region_locked(session, expectedRegion)
+           && region == expectedRegion && target.stateLocalRegion == expectedRegion
            && session.activity.bindingGeneration == expectedGeneration
            && valid_state_local_type23_target(target, stateLocalRosterGroup);
 }
@@ -204,9 +221,8 @@ state_local_sdk_auth_available_locked(const Session& session,
                                       std::uint64_t expectedGeneration) noexcept {
     const std::int32_t region = selected_region_index_locked(session);
     return expectedRegion >= 0 && expectedGeneration != 0
-           && session.activity.role == ActivityClientRole::privateCurrent
-           && region == expectedRegion
-           && carries_state_local_target(session, target, expectedRegion)
+           && link_hosts_state_local_region_locked(session, expectedRegion)
+           && region == expectedRegion && target.stateLocalRegion == expectedRegion
            && session.activity.bindingGeneration == expectedGeneration
            && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup);
 }
@@ -408,8 +424,8 @@ bool request_activity_state_local_type31_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && link_hosts_state_local_region_locked(*session, expectedRegion)
+        && region == expectedRegion && target.stateLocalRegion == expectedRegion
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_type31_target(target, stateLocalRosterGroup)
         && activity::host::request_state_local_type31_override(
@@ -433,8 +449,8 @@ bool request_activity_state_local_sequence_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && link_hosts_state_local_region_locked(*session, expectedRegion)
+        && region == expectedRegion && target.stateLocalRegion == expectedRegion
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType5SlotType
@@ -460,8 +476,8 @@ bool request_activity_state_local_cinematic_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && link_hosts_state_local_region_locked(*session, expectedRegion)
+        && region == expectedRegion && target.stateLocalRegion == expectedRegion
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType6SlotType
@@ -517,8 +533,8 @@ bool request_activity_state_local_authored_scene_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && link_hosts_state_local_region_locked(*session, expectedRegion)
+        && region == expectedRegion && target.stateLocalRegion == expectedRegion
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_authored_scene_target(target, stateLocalRosterGroup)
         && activity::host::request_state_local_authored_scene_override(binding,
@@ -533,7 +549,10 @@ bool request_activity_state_local_authored_scene_override(
     return queued;
 }
 
-/** Queues one bounded authored-dialogue line from an exact published SDK mission seed. */
+/**
+ * Queues one bounded authored-dialogue line from an exact published SDK mission seed. Like the
+ * sequence route, a public link may play it in a bubble whose roster it publishes.
+ */
 bool request_activity_state_local_dialogue_override(
     const state::activity::SessionBinding& binding,
     const activity::host::ScriptableTarget& target,
@@ -551,8 +570,8 @@ bool request_activity_state_local_dialogue_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && link_hosts_state_local_region_locked(*session, expectedRegion)
+        && region == expectedRegion && target.stateLocalRegion == expectedRegion
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType53SlotType

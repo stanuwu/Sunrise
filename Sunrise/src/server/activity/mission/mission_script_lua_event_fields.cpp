@@ -368,6 +368,19 @@ constexpr EventBinding kPlayerTrigger[]{
     {"volume_slot_index", nullptr, &integer_field<&E::playerTriggerSlotIndex>},
     {"resolved_object_id", nullptr, &integer_field<&E::playerTriggerResolvedObjectId>},
 };
+constexpr EventBinding kIntegration[]{
+    {"report_value", nullptr, &integer_field<&E::integrationValue>},
+    {"report_kind", nullptr, &integer_field<&E::integrationKind>},
+    {"context", nullptr, &decimal_field<&E::integrationContext>},
+};
+constexpr EventBinding kEngagement[]{
+    {"member_count", nullptr, &integer_field<&E::engagementCount>},
+    {"keys_decoded", nullptr, &integer_field<&E::engagementKeysDecoded>},
+    {"local_member", nullptr, &boolean_field<&E::engagementLocalMember>},
+    {"value", nullptr, &integer_field<&E::engagementValue>},
+    {"complete", nullptr, &boolean_field<&E::engagementComplete>},
+    {"first_report", nullptr, &boolean_field<&E::engagementFirstReport>},
+};
 constexpr EventBinding kCinematic[]{
     {"runtime_object_id", nullptr, &decimal_field<&E::cinematicRuntimeObjectId>},
     {"event_value", nullptr, &number_field<&E::cinematicEventValue>},
@@ -576,6 +589,19 @@ constexpr EventBinding kObject[]{
     {"spawn_mask_high",
      nullptr,
      [](lua_State* state, const E& event) { lua_pushinteger(state, event.objectSpawnMask[1]); }},
+    // The plate fields' meanings are inferred from observed captures, not recovered names.
+    {"plate_owner", nullptr, &present_integer<&E::objectPlateOwner, &E::objectPlateKnown>},
+    {"plate_capturing", nullptr, &present_integer<&E::objectPlateCapturing, &E::objectPlateKnown>},
+    {"plate_occupants", nullptr, &present_integer<&E::objectPlateOccupants, &E::objectPlateKnown>},
+    {"plate_progress",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         if (event.objectPlateKnown) {
+             lua_pushnumber(state, static_cast<lua_Number>(event.objectPlateProgress));
+         } else {
+             lua_pushnil(state);
+         }
+     }},
 };
 constexpr EventBinding kGhostLink[]{
     {"generation", nullptr, &integer_field<&E::ghostGeneration>},
@@ -675,8 +701,8 @@ constexpr std::array<EventBindings, static_cast<std::size_t>(G::count)> kGroupBi
     kSenseGeneration,
     kSquadRemoval,
     kTriggerLevel,
-    kHopOn,
-    kSquadMemberLoss,
+    kIntegration,
+    kEngagement,
 }};
 static_assert([]() consteval {
     for (std::size_t index = 0; index < kGroupBindings.size(); ++index) {

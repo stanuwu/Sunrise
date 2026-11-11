@@ -198,9 +198,10 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     } else if (guard != nullptr
                && (pending.kind == ScriptableOverrideKind::object
                    || pending.kind == ScriptableOverrideKind::interactableObject)) {
-        nextCounter =
-            pending.generation > static_cast<std::uint64_t>((std::max)(guard->type4.last, 0))
-            && pending.generation <= squad::kMaximumGeneration;
+        const auto last = static_cast<std::uint64_t>((std::max)(guard->type4.last, 0));
+        nextCounter = (pending.inPlace ? guard->type4.hasLast && pending.generation == last
+                                       : pending.generation > last)
+                      && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::damageWatch) {
         nextCounter = pending.generation > guard->damageRevision
                       && pending.generation <= squad::kMaximumGeneration;

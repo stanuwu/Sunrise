@@ -230,8 +230,9 @@ resolve_activity_binding_locator(const void* context,
     output.senseSchema = slot.senseSchema;
     output.authSchema = slot.authSchema;
     output.flags = slot.flags;
-    output.objectChannelCount = (slot.flags & sdk::format::kSlotObjectChannelsExact) != 0
-                                    ? static_cast<std::uint8_t>(slot.reserved)
+    output.outputChannelCount = slot.slotType == format::kChannelSlotType
+                                        && (slot.flags & format::kSlotOutputChannelsExact) != 0
+                                    ? slot.reserved
                                     : 0;
     return !output.id.empty() && !output.objectId.empty();
 }
@@ -798,6 +799,8 @@ bool program_identity(const sdk::BoundView& view,
     output.activityRow = view.activityRow + 1;
     output.definitionHash = activity->definitionHash;
     output.publicTarget = publicTarget;
+    output.sessionId = view.binding.sessionId;
+    output.sessionCreatedRevision = view.binding.createdRevision;
     return true;
 }
 

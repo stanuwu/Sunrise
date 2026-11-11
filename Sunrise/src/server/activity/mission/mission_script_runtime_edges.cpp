@@ -15,7 +15,7 @@
 #include "../../../state/activity_sdk/scene_triggers.h"
 #include "../../gameplay/squad_entity_retirement.h"
 #include "../activity_sdk_mission_runtime.h"
-#include "mission_script_region.h"
+#include "engagement_observation.h"
 #include "mission_script_runtime_internal.h"
 #include "mission_script_runtime_objective.h"
 #include "mission_script_slot_index.h"
@@ -24,6 +24,8 @@
 
 namespace sunrise::server::activity::mission {
 namespace {
+/** Byte capacity of this module's bounded diagnostic/name buffer. */
+constexpr std::size_t kObjectTraceBytes = 224;
 
 /** Root ordinal of the squad removal flag. */
 constexpr std::uint16_t kSquadRemovalOrdinal = 8;
@@ -283,6 +285,68 @@ void push_trigger_edges(RuntimeInstance& instance,
     }
 }
 
+/**
+ * Raises one engagementState per audience sensor whose report changed. The first report is raised
+ * too, because it is the first time the script can know whether the bound player is listed.
+ */
+void push_engagement_edges(RuntimeInstance& instance,
+                           const host::SenseObservationSnapshot& sense) noexcept {
+    namespace engagement = engagement_observation;
+    for (std::size_t index = 0; index < sense.observationCount; ++index) {
+        const host::SenseObservation& observation = sense.observations[index];
+        if (observation.key.slotType != format::kEngagementSlotType || observation.valueCount == 0
+            || observation.firstValue + observation.valueCount > sense.valueCount) {
+            continue;
+        }
+        const std::span<const sense_values::DecodedValue> body(
+            &sense.values[observation.firstValue], observation.valueCount);
+        engagement::Snapshot level{};
+        if (!engagement::read(body, instance.playerKey, level)) {
+            continue;
+        }
+        EngagementObservation* slot = nullptr;
+        EngagementObservation* spare = nullptr;
+        for (EngagementObservation& retained : instance.engagementObservations) {
+            if (retained.used && retained.registryKey == observation.key.registryKey
+                && retained.objectTag == observation.key.objectTag
+                && retained.slotIndex == observation.key.slotIndex) {
+                slot = &retained;
+                break;
+            }
+            if (!retained.used && spare == nullptr) {
+                spare = &retained;
+            }
+        }
+        const bool first = slot == nullptr;
+        if (first) {
+            if (spare == nullptr) {
+                log_line(core::log::Level::warn, &instance, "engagement", "watch_capacity");
+                continue;
+            }
+            slot = spare;
+            slot->registryKey = observation.key.registryKey;
+            slot->objectTag = observation.key.objectTag;
+            slot->slotIndex = observation.key.slotIndex;
+            slot->used = true;
+        } else if (slot->count == level.count && slot->localMember == level.localMember
+                   && slot->value == level.value) {
+            continue;
+        }
+        slot->count = level.count;
+        slot->localMember = level.localMember;
+        slot->value = level.value;
+        host::Event event = sense_edge_event(instance, observation);
+        event.kind = host::EventKind::engagementState;
+        event.engagementCount = level.count;
+        event.engagementKeysDecoded = level.keysDecoded;
+        event.engagementValue = level.value;
+        event.engagementLocalMember = level.localMember;
+        event.engagementComplete = level.complete;
+        event.engagementFirstReport = first;
+        push_script_event(instance, event);
+    }
+}
+
 namespace {
 
 /** @return True when the observation is one complete body of the given slot type and schema. */
@@ -454,6 +518,11 @@ void copy_object_level(const ObjectInteractionLevel& before,
     event.objectOwnerKnown = level.ownerKnown;
     event.objectHasOwner = level.hasOwner;
     event.objectOwnerKey = level.ownerKey;
+    event.objectPlateKnown = level.plateKnown;
+    event.objectPlateOwner = level.plateOwner;
+    event.objectPlateCapturing = level.plateCapturing;
+    event.objectPlateOccupants = level.plateOccupants;
+    event.objectPlateProgress = level.plateProgress;
 }
 
 /**
@@ -478,25 +547,35 @@ void push_object_state_edge(RuntimeInstance& instance,
         && (!before.stateKnown || before.generation != level.generation
             || before.present != level.present || before.interactionOpen != level.interactionOpen
             || before.ownerKnown != level.ownerKnown || before.hasOwner != level.hasOwner
-            || before.ownerKey != level.ownerKey);
+            || before.ownerKey != level.ownerKey || before.plateKnown != level.plateKnown
+            || before.plateOwner != level.plateOwner
+            || before.plateCapturing != level.plateCapturing
+            || before.plateOccupants != level.plateOccupants
+            || before.plateProgress != level.plateProgress);
     if (!stateChanged) {
         return;
     }
     host::Event event = shared_edge_event(instance, observation);
     copy_object_level(before, level, event);
     event.kind = host::EventKind::objectState;
-    std::array<char, 128> details{};
+    std::array<char, kObjectTraceBytes> details{};
     const int written = std::snprintf(details.data(),
                                       details.size(),
                                       "registry=%08X slot=%u generation=%d present=%u "
-                                      "interaction_open=%u owner_known=%u has_owner=%u",
+                                      "interaction_open=%u owner_known=%u has_owner=%u "
+                                      "plate=%u plate_owner=%d plate_capturing=%d "
+                                      "plate_occupants=%u",
                                       observation.key.registryKey,
                                       static_cast<unsigned>(observation.key.slotIndex),
                                       level.generation,
                                       level.present ? 1U : 0U,
                                       level.interactionOpen ? 1U : 0U,
                                       level.ownerKnown ? 1U : 0U,
-                                      level.hasOwner ? 1U : 0U);
+                                      level.hasOwner ? 1U : 0U,
+                                      level.plateKnown ? 1U : 0U,
+                                      level.plateOwner,
+                                      level.plateCapturing,
+                                      level.plateOccupants);
     if (written > 0 && static_cast<std::size_t>(written) < details.size()) {
         log_line(core::log::Level::debug,
                  &instance,
@@ -714,8 +793,10 @@ namespace {
 struct SquadLevels final {
     std::array<std::int32_t, host::kSquadSlotCapacity> counts{};
     std::int32_t alive{};
-    std::int32_t alertLevel{};
+    std::int32_t spawnGeneration{};
     std::uint8_t countLength{};
+    bool hasSpawnGeneration{};
+    bool generationChanged{};
     bool removal{};
     bool costsChanged{};
     /** The report carried an alive count. */
@@ -730,27 +811,30 @@ struct SquadLevels final {
                                             std::uint32_t root) noexcept {
     SquadLevels levels{};
     levels.costsChanged = update_squad_objective_costs(row.objectiveCosts, body, root);
+    const sense_values::DecodedValue* const spawn =
+        sense_value(body, root, kSquadSpawnGenerationOrdinal);
+    levels.hasSpawnGeneration = spawn != nullptr && spawn->present && spawn->signedValue >= 0
+                                && spawn->signedValue <= kMaximumCounter;
+    if (levels.hasSpawnGeneration) {
+        levels.spawnGeneration = static_cast<std::int32_t>(spawn->signedValue);
+        levels.generationChanged =
+            !row.hasSpawnGeneration || levels.spawnGeneration != row.spawnGeneration;
+    }
     // Cost-only deltas retain combat counts; they must never manufacture a death.
-    levels.alive = row.aliveCount;
+    levels.alive = levels.generationChanged ? 0 : row.aliveCount;
     levels.hasAlive = read_squad_alive(body, root, levels.alive);
     levels.removal = sense_flag(body, root, kSquadRemovalOrdinal);
-    levels.alertLevel = row.alertLevel;
-    const sense_values::DecodedValue* const alert =
-        sense_value(body, root, kSquadAlertLevelOrdinal);
-    if (alert != nullptr && alert->present) {
-        levels.alertLevel = static_cast<std::int32_t>(alert->signedValue);
-    }
-    levels.counts = row.slotCounts;
-    levels.countLength = row.slotCountLength;
+    levels.counts = levels.generationChanged ? std::array<std::int32_t, host::kSquadSlotCapacity>{}
+                                             : row.slotCounts;
+    levels.countLength = levels.generationChanged ? 0 : row.slotCountLength;
     std::array<std::int32_t, host::kSquadSlotCapacity> incomingCounts{};
     const auto incomingLength = read_squad_lost_counts(body, incomingCounts);
     if (incomingLength != 0) {
         levels.counts = incomingCounts;
         levels.countLength = incomingLength;
     }
-    // The alert level can move without any other level, so its change alone is a report.
-    levels.reported = levels.hasAlive || levels.costsChanged || incomingLength != 0
-                      || levels.alertLevel != row.alertLevel;
+    levels.reported =
+        levels.hasAlive || levels.costsChanged || incomingLength != 0 || levels.generationChanged;
     return levels;
 }
 
@@ -759,16 +843,10 @@ struct SquadLevels final {
  * reported, and the spawn generation it echoes. An absent spawn generation keeps the last one
  * reported, like the other retained levels.
  */
-void retain_squad_identity(SquadObservation& row,
-                           std::span<const sense_values::DecodedValue> body,
-                           std::uint32_t root,
-                           bool hasAlive) noexcept {
-    row.populationKnown = row.populationKnown || hasAlive;
-    const sense_values::DecodedValue* const spawn =
-        sense_value(body, root, kSquadSpawnGenerationOrdinal);
-    if (spawn != nullptr && spawn->present && spawn->signedValue >= 0
-        && spawn->signedValue <= kMaximumCounter) {
-        row.spawnGeneration = static_cast<std::int32_t>(spawn->signedValue);
+void retain_squad_identity(SquadObservation& row, const SquadLevels& levels) noexcept {
+    row.populationKnown = levels.hasAlive || (!levels.generationChanged && row.populationKnown);
+    if (levels.hasSpawnGeneration) {
+        row.spawnGeneration = levels.spawnGeneration;
         row.hasSpawnGeneration = true;
     }
 }
@@ -788,7 +866,10 @@ void store_squad_levels(SquadObservation& row, const SquadLevels& levels) noexce
             .aliveCount = row.aliveCount,
             .alertLevel = row.alertLevel,
             .slotCountLength = row.slotCountLength,
-            .removalFlag = row.removalFlag};
+            .removalFlag = row.removalFlag,
+            .spawnGeneration = row.spawnGeneration,
+            .hasSpawnGeneration = row.hasSpawnGeneration,
+            .populationKnown = row.populationKnown};
 }
 
 /** @return True when one generation is a live link of this pass. */
@@ -897,7 +978,7 @@ void shadow_squad_report(RuntimeInstance& instance,
         return;
     }
     shadow->used = true;
-    retain_squad_identity(*shadow, body, observation.key.schemaRow, levels.hasAlive);
+    retain_squad_identity(*shadow, levels);
     store_squad_levels(*shadow, levels);
 }
 
@@ -989,10 +1070,9 @@ link_alive_count(RuntimeInstance& instance,
 
 /**
  * Raises the squad events derived from one msg 6 body.
- * The client publishes levels, so a first sighting of a source only records them. After that a
- * slot count that rose is a member lost, and the alive count falling is a member leaving its task
- * points. Only the link that simulates the squad reports its levels; a replica's counts would
- * interleave with them, so they are kept apart as that link's shadow.
+ * Population comparisons stay within one reported spawn generation. Only the simulating
+ * link publishes squad levels; other links retain their own shadows. An alive decrease
+ * is a population edge, not evidence of its cause.
  */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept {
@@ -1042,11 +1122,17 @@ void push_squad_edges(RuntimeInstance& instance,
             continue;
         }
         // Levels taken over at a re-pin are a baseline, so they raise no spawn or death.
-        const bool first = rebaselined || !squad->used;
+        const bool generationChanged =
+            levels.generationChanged
+            || (squad->hasSpawnGeneration
+                && (!published.hasSpawnGeneration
+                    || squad->spawnGeneration != published.spawnGeneration));
+        const bool first = rebaselined || !squad->used || generationChanged;
         squad->used = true;
-        retain_squad_identity(*squad, body, root, levels.hasAlive);
+        retain_squad_identity(*squad, levels);
         const std::int32_t previousAlive = first ? 0 : published.aliveCount;
-        const bool changed = first || squad->objectiveCosts != published.objectiveCosts
+        const bool changed = first || squad->populationKnown != published.populationKnown
+                             || squad->objectiveCosts != published.objectiveCosts
                              || published.aliveCount != levels.alive
                              || published.alertLevel != levels.alertLevel
                              || published.removalFlag != levels.removal

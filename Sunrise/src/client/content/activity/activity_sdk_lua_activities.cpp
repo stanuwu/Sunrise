@@ -13,6 +13,8 @@
 #include "activity_sdk_lua_missions_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::internal {
+/** Byte capacity of this module's bounded trace/name buffer. */
+constexpr std::size_t kOrdinalSuffixBytes = 16;
 
 /** Appends one Lua string literal without depending on a runtime serializer. */
 void append_string(std::string& output, std::string_view value) {
@@ -79,20 +81,20 @@ std::string identifier(std::string_view value, bool upper) {
 }
 
 void append_hex(std::string& output, std::uint32_t value) {
-    std::array<char, 16> buffer{};
+    std::array<char, kOrdinalSuffixBytes> buffer{};
     const int length = std::snprintf(buffer.data(), buffer.size(), "0x%08X", value);
     output.append(buffer.data(), static_cast<std::size_t>(length));
 }
 
 void append_uint(std::string& output, std::uint32_t value) {
-    std::array<char, 16> buffer{};
+    std::array<char, kOrdinalSuffixBytes> buffer{};
     const int length = std::snprintf(buffer.data(), buffer.size(), "%u", value);
     output.append(buffer.data(), static_cast<std::size_t>(length));
 }
 
 std::string stem(std::string_view name, std::uint32_t identity) {
     std::string output = identifier(name, false);
-    std::array<char, 16> suffix{};
+    std::array<char, kOrdinalSuffixBytes> suffix{};
     const int length = std::snprintf(suffix.data(), suffix.size(), "_%08x", identity);
     output.append(suffix.data(), static_cast<std::size_t>(length));
     return output;
@@ -109,10 +111,19 @@ std::string append_unique_key(std::string& output,
                               std::uint32_t fallback) {
     std::string key = identifier(name, true);
     if (!used.insert(key).second) {
-        std::array<char, 16> suffix{};
+        std::array<char, kOrdinalSuffixBytes> suffix{};
         const int length = std::snprintf(suffix.data(), suffix.size(), "_%08X", fallback);
         key.append(suffix.data(), static_cast<std::size_t>(length));
-        (void)used.insert(key);
+        // Rows sharing the name and the fallback (one directive's elements, or one directive
+        // under several sensors) take an ordinal, so no later row silently replaces an earlier
+        // one in the Lua table.
+        const std::string base = key;
+        for (unsigned ordinal = 2; !used.insert(key).second; ++ordinal) {
+            std::array<char, kOrdinalSuffixBytes> tail{};
+            const int tailLength = std::snprintf(tail.data(), tail.size(), "_%u", ordinal);
+            key = base;
+            key.append(tail.data(), static_cast<std::size_t>(tailLength));
+        }
     }
     output.append("    ");
     output.append(key);

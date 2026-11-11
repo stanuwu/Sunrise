@@ -194,7 +194,7 @@ bool collect_rows(const reader::Source& source, Storage& storage, const char*& r
         storage.rows[row].spawnStem = live->stem;
         storage.rows[row].spawnStemLength = live->stemLength;
     }
-    storage.resolveDeadlineTick = GetTickCount64() + kResolveWindowMs;
+    storage.resolveReportTick = GetTickCount64() + kResolveReportMs;
     return true;
 }
 
@@ -223,9 +223,7 @@ bool resolve_pending(const reader::Source& source,
             ++storage.resolvedCount;
         }
     }
-    // Every row the sweep still carries has read, or the window has closed on the rest.
-    return storage.resolvedCount >= storage.liveRowCount
-           || GetTickCount64() >= storage.resolveDeadlineTick;
+    return collection_complete(storage.resolvedCount, storage.liveRowCount);
 }
 
 /** Reads the bubble layout of every row once, with no budget and no retry window. */
@@ -242,7 +240,7 @@ void resolve_all(const reader::Source& source,
 }
 
 /**
- * Re-arms the resolve window so a pass that read nothing tries the whole row set again.
+ * Clears the resolve state so a pass that read nothing tries the whole row set again.
  * The rows and the name match are kept: only the per-row read outcome is cleared, because every
  * read failed for one reason, the block keys were not ready yet.
  * @param storage Pass storage whose resolve state is cleared.
@@ -251,7 +249,7 @@ void rearm_resolve(Storage& storage) noexcept {
     storage.resolved.fill(0);
     storage.resolvedCount = 0;
     storage.resolveCursor = 0;
-    storage.resolveDeadlineTick = GetTickCount64() + kResolveWindowMs;
+    storage.resolveReportTick = GetTickCount64() + kResolveReportMs;
     ++storage.resolveRounds;
 }
 

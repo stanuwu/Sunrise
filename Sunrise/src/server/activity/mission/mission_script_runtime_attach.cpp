@@ -401,6 +401,18 @@ enum class InitialStateGate : std::uint8_t {
     }
     // The first read records the current peers, so a reattach never replays them.
     push_session_roster_edges(instance);
+    // A player who spawns straight into a zone adopts its seed before the program's first
+    // frame, so the program-wide omissions reach the seed path ahead of any script request.
+    std::array<sdk::MissionSeedOmission, sdk::kMissionSeedOmitCapacity> seedOmissions{};
+    std::size_t seedOmissionCount = 0;
+    if (!lua_vm::program_seed_omissions(instance.vm, seedOmissions, seedOmissionCount)) {
+        lua_vm::fault(instance.vm, "program seed_omit list could not be read");
+        instance.programStatus = ProgramStatus::programError;
+        note_vm_status(instance, "open", "seed_omit_refused");
+        return AttachResult::programError;
+    }
+    state::activity::membership::note_declared_seed_omissions(
+        instance.view.binding.sessionId, std::span(seedOmissions).first(seedOmissionCount));
     instance.initialStateDeclared =
         lua_vm::initial_state_region(instance.vm, instance.initialStateRegion);
     if (instance.initialStateDeclared) {

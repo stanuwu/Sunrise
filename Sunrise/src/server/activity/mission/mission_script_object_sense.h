@@ -6,6 +6,7 @@
 
 #include "../../../middleware/bap/activity_message/interactable_object_auth.h"
 #include "../../../middleware/bap/activity_message/sense_update.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80804d.h"
 #include "../../../middleware/content/packages/schema/generated/tag_classes_80809e.h"
 
 namespace sunrise::server::activity::mission {
@@ -25,10 +26,23 @@ inline constexpr std::uint16_t kOwnerHeldOrdinal = 0;
 inline constexpr std::uint16_t kOwnerKeyOrdinal = 1;
 /** Interaction reply: field 0 is the one-shot used latch. */
 inline constexpr std::uint16_t kInteractedOrdinal = 0;
+/**
+ * Capture-plate reply, sent once the plate component Auth exists. Ordinal meanings are inferred
+ * from observed captures: owner team (-3 before any capture), capturing team (-1 for none),
+ * the mask of players on the plate and the capture progress.
+ */
+inline constexpr std::uint32_t kCapturePlateReplySchema =
+    ::sunrise::middleware::content::packages::schema::generated::C80804df6::kClass;
+inline constexpr std::uint16_t kPlateOwnerOrdinal = 0;
+inline constexpr std::uint16_t kPlateCapturingOrdinal = 4;
+inline constexpr std::uint16_t kPlateOccupantsOrdinal = 5;
+inline constexpr std::uint16_t kPlateProgressOrdinal = 6;
 
 /** Last object level seen for one slot. */
 struct ObjectInteractionLevel final {
+    /** Native object generation, when generationKnown is true. */
     std::int32_t generation{};
+    /** The latest sparse object report supplied a generation. */
     bool generationKnown{};
     bool interacted{};
     bool interactionKnown{};
@@ -40,6 +54,16 @@ struct ObjectInteractionLevel final {
     std::uint64_t ownerKey{};
     std::int32_t entryIndex{};
     std::array<std::uint32_t, 2> spawnMask{};
+    /** Capture-plate level, valid only while the latest body carried a plate reply. */
+    bool plateKnown{};
+    /** Inferred capture-plate owner enum. */
+    std::int32_t plateOwner{};
+    /** Inferred capture-plate capturing enum. */
+    std::int32_t plateCapturing{};
+    /** Reported plate occupant mask/count, retained without a rendering inference. */
+    std::uint32_t plateOccupants{};
+    /** Reported normalized capture progress, valid only with plateKnown. */
+    float plateProgress{};
 };
 
 /**
@@ -66,12 +90,16 @@ struct ObjectInteractionLevel final {
         if (!level.generationKnown || generation != level.generation) {
             level = {};
         }
+        /** Native object generation, when generationKnown is true. */
         level.generation = generation;
         level.generationKnown = true;
     }
     level.ownerKnown = false;
     level.hasOwner = false;
     level.ownerKey = 0;
+    level.plateKnown = false;
+    level.plateOccupants = 0;
+    level.plateProgress = 0.0F;
     for (const auto& value : values) {
         if (!value.present) {
             continue;
@@ -97,6 +125,19 @@ struct ObjectInteractionLevel final {
                    && value.fieldOrdinal == kInteractedOrdinal) {
             level.interacted = value.unsignedValue != 0;
             level.interactionKnown = true;
+        } else if (value.schemaRow == kCapturePlateReplySchema
+                   && value.fieldOrdinal == kPlateOwnerOrdinal) {
+            level.plateKnown = true;
+            level.plateOwner = static_cast<std::int32_t>(value.signedValue);
+        } else if (value.schemaRow == kCapturePlateReplySchema
+                   && value.fieldOrdinal == kPlateCapturingOrdinal) {
+            level.plateCapturing = static_cast<std::int32_t>(value.signedValue);
+        } else if (value.schemaRow == kCapturePlateReplySchema
+                   && value.fieldOrdinal == kPlateOccupantsOrdinal) {
+            level.plateOccupants = static_cast<std::uint32_t>(value.unsignedValue);
+        } else if (value.schemaRow == kCapturePlateReplySchema
+                   && value.fieldOrdinal == kPlateProgressOrdinal) {
+            level.plateProgress = value.realValue;
         }
     }
     return level.generationKnown && level.generation > 0 && level.interactionKnown

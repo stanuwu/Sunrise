@@ -139,14 +139,16 @@ play_combatant_sequence_reserved(const state::activity_sdk::BoundView& view,
  * @param locationSlotRow Type-1 squad every entry spawns at, or none for the package transform.
  * @return `queued` when at least one row resolved, else why the last one did not.
  */
-[[nodiscard]] Status
-set_objects_active_reserved(const state::activity_sdk::BoundView& view,
-                            std::uint32_t slotRow,
-                            std::span<const std::uint32_t> extraRows,
-                            std::int32_t entryIndex,
-                            bool active,
-                            std::optional<std::uint32_t> locationSlotRow,
-                            const host::ScriptableOutputReservation& reservation) noexcept;
+[[nodiscard]] Status set_objects_active_reserved(
+    const state::activity_sdk::BoundView& view,
+    std::uint32_t slotRow,
+    std::span<const std::uint32_t> extraRows,
+    std::int32_t entryIndex,
+    bool active,
+    bool capturePlate,
+    const middleware::bap::activity_message::scriptable_auth::Type4TimedClock& timed,
+    const middleware::bap::activity_message::scriptable_auth::Type4PositionChild& position,
+    const host::ScriptableOutputReservation& reservation) noexcept;
 
 /**
  * Arms one generated combatant for its scene's squad member spawn.

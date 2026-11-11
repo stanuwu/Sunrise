@@ -93,10 +93,10 @@ inline constexpr std::size_t kRosterReadBudget = 150;
 /** Live scenario tags found by the class sweep. The live count is 468. */
 inline constexpr std::size_t kLiveTagCapacity = 1'024;
 /**
- * How long the collection keeps retrying the destinations that have not read yet.
- * Packages register during the boot, so an early attempt reads fewer of them.
+ * How often a collection still waiting on unread destinations logs its progress.
+ * Packages register during the boot at an uneven pace, so the wait itself has no limit.
  */
-inline constexpr std::uint64_t kResolveWindowMs = 15'000;
+inline constexpr std::uint64_t kResolveReportMs = 15'000;
 /** Tag reads one collection call may spend, for the same reason the roster walk is bounded. */
 inline constexpr std::size_t kResolveReadBudget = 150;
 
@@ -122,8 +122,8 @@ struct Storage {
     std::size_t liveRowCount{};
     /** Where the next resolve pass starts, so every pending row is retried in turn. */
     std::size_t resolveCursor{};
-    /** Tick after which the collection stops waiting for the rows that have not read. */
-    std::uint64_t resolveDeadlineTick{};
+    /** Tick at which a collection still waiting next logs its progress. */
+    std::uint64_t resolveReportTick{};
     std::vector<std::byte> blob{};
     RosterStorage roster{};
     /** Resolved rows, moved to the front. The roster walk runs over exactly these. */
@@ -145,6 +145,21 @@ struct Storage {
  */
 [[nodiscard]] bool
 collect_rows(const reader::Source& source, Storage& storage, const char*& reason) noexcept;
+
+/** @return True once every live row has read, so a partial set is never published or cached. */
+[[nodiscard]] constexpr bool collection_complete(std::size_t resolvedCount,
+                                                 std::size_t liveRowCount) noexcept {
+    return resolvedCount >= liveRowCount;
+}
+
+/** @return True at most once per report interval, scheduling the next report from `now`. */
+[[nodiscard]] inline bool progress_report_due(Storage& storage, std::uint64_t now) noexcept {
+    if (now < storage.resolveReportTick) {
+        return false;
+    }
+    storage.resolveReportTick = now + kResolveReportMs;
+    return true;
+}
 
 /**
  * Reads the bubble layout of rows that have not read yet, within this call's budget.
@@ -171,7 +186,7 @@ void resolve_all(const reader::Source& source, reader::Scratch& scratch, Storage
 void compact_rows(Storage& storage) noexcept;
 
 /**
- * Re-arms the resolve window so a pass that read nothing tries the whole row set again.
+ * Clears the resolve state so a pass that read nothing tries the whole row set again.
  * @param storage Pass storage whose resolve state is cleared.
  */
 void rearm_resolve(Storage& storage) noexcept;

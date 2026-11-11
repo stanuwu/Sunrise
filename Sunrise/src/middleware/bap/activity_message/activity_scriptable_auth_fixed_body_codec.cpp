@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 
+#include "darkness_zone_auth.h"
 #include "scriptable_auth_internal.h"
 #include "volume_toggle_auth.h"
 
@@ -21,6 +22,68 @@ constexpr std::uint8_t kSequenceWidth = 16;
 constexpr std::uint64_t kUnusedAuxiliary = 0;
 /** Type-31 reserves the largest generation as its unset sentinel. */
 constexpr std::uint64_t kReservedGeneration = std::numeric_limits<std::uint64_t>::max();
+/** The type-4 selected-child count is two bits; the plate form carries exactly one child. */
+constexpr std::uint8_t kType4ChildCountWidth = 2;
+/** Raw zero in a biased revision is INT32_MIN, never newer than the plate's stored revisions. */
+constexpr std::uint32_t kStaleRevision = 0;
+/** The plate owner is a six-bit field at bias three; raw two is the neutral owner, -1. */
+constexpr std::uint8_t kPlateOwnerWidth = 6;
+constexpr std::uint32_t kPlateNeutralOwner = 2;
+
+/**
+ * Writes the plate child that matches the content defaults: label 0, stale inhibition and owner
+ * revisions, no participant filter and both optional overrides null.
+ */
+[[nodiscard]] bool write_capture_plate_child(bits::Writer& writer) noexcept {
+    return writer.write(1, kBoolWidth) && writer.write(kType4CapturePlateSchema, kSigned32Width)
+           && writer.write(kSigned32Bias, kSigned32Width)
+           && writer.write(kStaleRevision, kSigned32Width) && writer.write(0, kBoolWidth)
+           && writer.write(kStaleRevision, kSigned32Width)
+           && writer.write(kPlateNeutralOwner, kPlateOwnerWidth) && write_absent_client_ref(writer)
+           && writer.write(0, kBoolWidth) && writer.write(0, kBoolWidth);
+}
+
+/**
+ * Writes the timed child enabled, with a running clock window spanning the authored total from
+ * its epoch, exactly as the directive clock is shaped; the trailing flag stays clear.
+ */
+[[nodiscard]] bool write_timed_child(bits::Writer& writer, const Type4TimedClock& clock) noexcept {
+    const std::uint64_t elapsedTicks =
+        static_cast<std::uint64_t>(clock.totalSeconds - clock.remainingSeconds)
+        * darkness_zone::kTicksPerSecond;
+    const SharedTimedState window{
+        .running = clock.running,
+        .minimum = 0,
+        .maximum = static_cast<std::uint64_t>(clock.totalSeconds) * darkness_zone::kTicksPerSecond,
+        .currentAtEpoch = elapsedTicks,
+        .remainingAtEpoch =
+            static_cast<std::uint64_t>(clock.remainingSeconds) * darkness_zone::kTicksPerSecond,
+        .epoch = clock.epochTicks,
+        .rate = 1.0F};
+    return writer.write(1, kBoolWidth) && writer.write(kType4TimedChildSchema, kSigned32Width)
+           && writer.write(1, kBoolWidth) && write_shared_timed_state(writer, window)
+           && writer.write(0, kBoolWidth);
+}
+
+/**
+ * Writes the object state-machine child: lanes 1-2 stale (raw 0, never newer), lane 3 the position
+ * at the given sequence, with the snap revision advanced to the same value when snapping.
+ */
+[[nodiscard]] bool write_position_child(bits::Writer& writer,
+                                        const Type4PositionChild& child) noexcept {
+    const std::uint32_t sequence = std::bit_cast<std::uint32_t>(child.revision) + kSigned32Bias;
+    bool written =
+        writer.write(1, kBoolWidth) && writer.write(kType4PositionChildSchema, kSigned32Width);
+    // Native lanes zero and one stay unchanged; lane two receives the position.
+    constexpr int kUnchangedPositionLanes = 2;
+    for (int lane = 0; lane < kUnchangedPositionLanes && written; ++lane) {
+        written = writer.write(kStaleRevision, kSigned32Width)
+                  && writer.write(kStaleRevision, kSigned32Width) && writer.write(0, kReal32Width);
+    }
+    return written && writer.write(sequence, kSigned32Width)
+           && writer.write(child.snap ? sequence : kStaleRevision, kSigned32Width)
+           && writer.write(std::bit_cast<std::uint32_t>(child.value), kReal32Width);
+}
 
 /** @return The reflected channel ordinal, or the channel count for an invalid enum value. */
 [[nodiscard]] constexpr std::size_t channel_index(Type23Channel channel) noexcept {
@@ -79,18 +142,6 @@ constexpr std::uint64_t kReservedGeneration = std::numeric_limits<std::uint64_t>
            && (!guard.hasLast || preset.generation >= guard.last);
 }
 
-/** Writes the complete fixed-width shared timed-state child. */
-[[nodiscard]] bool write_shared_timed_state(bits::Writer& writer,
-                                            const SharedTimedState& state) noexcept {
-    return writer.write(state.running ? 1U : 0U, kBoolWidth)
-           && writer.write(state.minimum, kWideIntegerWidth)
-           && writer.write(state.maximum, kWideIntegerWidth)
-           && writer.write(state.currentAtEpoch, kWideIntegerWidth)
-           && writer.write(state.remainingAtEpoch, kWideIntegerWidth)
-           && writer.write(state.epoch, kWideIntegerWidth)
-           && writer.write(std::bit_cast<std::uint32_t>(state.rate), kReal32Width);
-}
-
 /** Reads the complete fixed-width shared timed-state child. */
 [[nodiscard]] bool read_shared_timed_state(bits::Reader& reader, SharedTimedState& state) noexcept {
     SharedTimedState parsed{};
@@ -122,17 +173,33 @@ bool next_type4_generation(const Type4GenerationGuard& guard, std::int32_t& next
     return next_positive_generation(guard.hasLast, guard.last, next);
 }
 
-/** Encodes one package-owned entry with no child records; the second flag sends its location. */
+/** Encodes one package-owned entry with no caller-authored transform, plus an optional plate. */
 bool encode_type4(const Type4Preset& preset,
                   const Type4GenerationGuard& guard,
                   std::span<std::byte> output,
                   std::size_t& written) noexcept {
     written = 0;
-    if (preset.generation <= 0 || preset.entryIndex < 0
-        || (guard.hasLast && preset.generation <= guard.last) || output.size() < kType4ByteCount) {
+    const std::size_t bitCount = type4_bit_count(preset);
+    const std::size_t byteCount = (bitCount + 7) / 8;
+    const Type4TimedClock& timed = preset.timed;
+    // An in-place timed update repeats the committed generation; everything else advances it.
+    const Type4PositionChild& position = preset.position;
+    const bool inPlace = (timed.present && timed.inPlace) || position.present;
+    const bool generationAccepted =
+        inPlace ? guard.hasLast && preset.generation == guard.last
+                : !timed.inPlace && (!guard.hasLast || preset.generation > guard.last);
+    if (preset.generation <= 0 || preset.entryIndex < 0 || !generationAccepted
+        || output.size() < byteCount
+        || (position.present
+            && (preset.capturePlate || timed.present || position.revision <= 0
+                || !(position.value >= 0.0F && position.value <= 1.0F)))
+        || (timed.present
+            && (preset.capturePlate || timed.remainingSeconds < 0
+                || timed.totalSeconds < timed.remainingSeconds
+                || timed.totalSeconds > kType68MaximumClockSeconds))) {
         return false;
     }
-    bits::Writer writer(output.first(kType4ByteCount));
+    bits::Writer writer(output.first(byteCount));
     const std::uint32_t generation =
         std::bit_cast<std::uint32_t>(preset.generation) + kSigned32Bias;
     const std::uint32_t entry = std::bit_cast<std::uint32_t>(preset.entryIndex) + kSigned32Bias;
@@ -144,9 +211,14 @@ bool encode_type4(const Type4Preset& preset,
         && writer.write(located ? 1U : 0U, kBoolWidth) && writer.write(neutral, kSigned32Width)
         && write_optional_client_ref(writer, preset.location) && writer.write(0, kReal32Width)
         && writer.write(0, kReal32Width) && writer.write(0, kReal32Width)
-        && writer.write(0, kBoolWidth) && writer.write(0, 2U);
-    return encoded && writer.bit_count() == kType4BitCount && writer.finish(written)
-           && written == kType4ByteCount;
+        && writer.write(0, kReal32Width) && writer.write(0, kBoolWidth)
+        && writer.write(preset.capturePlate || timed.present || position.present ? 1U : 0U,
+                        kType4ChildCountWidth)
+        && (!preset.capturePlate || write_capture_plate_child(writer))
+        && (!timed.present || write_timed_child(writer, timed))
+        && (!position.present || write_position_child(writer, position));
+    return encoded && writer.bit_count() == bitCount && writer.finish(written)
+           && written == byteCount;
 }
 
 /** Finds the next positive type-23 sequence without wrapping. */
@@ -401,45 +473,33 @@ bool encode_type24(const Type24Body& body,
     return true;
 }
 
-/** Decodes the populated channel prefix and requires exact bit length and zero padding. */
-bool decode_type24(std::span<const std::byte> input,
-                   std::size_t bitCount,
-                   Type24Body& body) noexcept {
-    if (bitCount < kType24CountWidth || bitCount > kType24MaximumBitCount
-        || input.size() != (bitCount + 7U) / 8U) {
+/** Checks the shape and values before an output body reaches the native consumer. */
+bool validate_type24_body(std::span<const std::byte> body,
+                          std::size_t bitCount,
+                          std::uint32_t channelCount) noexcept {
+    bits::Reader reader(body);
+    std::uint64_t count = 0;
+    if (channelCount == 0 || channelCount > kType24ChannelCapacity
+        || !reader.read(kType24CountWidth, count) || count == 0 || count > channelCount
+        || bitCount != kType24CountWidth + count * kType24ChannelBitCount
+        || body.size() != (bitCount + 7U) / 8U) {
         return false;
     }
-    bits::Reader reader(input);
-    std::uint64_t count{};
-    if (!reader.read(kType24CountWidth, count) || count > kType24ChannelCapacity
-        || bitCount != kType24CountWidth + count * kType24ChannelBitCount) {
-        return false;
-    }
-    Type24Body parsed{};
-    parsed.count = static_cast<std::uint8_t>(count);
-    for (Type24Channel& channel : std::span(parsed.channels).first(parsed.count)) {
-        std::uint64_t revision{};
-        std::uint64_t value{};
-        std::uint64_t blend{};
-        if (!reader.read(kSigned32Width, revision) || !reader.read(kReal32Width, value)
-            || !reader.read(kReal32Width, blend)) {
+    for (std::size_t index = 0; index < count; ++index) {
+        std::uint64_t revision = 0, valueBits = 0, blendBits = 0;
+        if (!reader.read(kSigned32Width, revision) || !reader.read(kReal32Width, valueBits)
+            || !reader.read(kReal32Width, blendBits)) {
             return false;
         }
-        channel.revision =
-            std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(revision) - kSigned32Bias);
-        channel.value = std::bit_cast<float>(static_cast<std::uint32_t>(value));
-        channel.blend = std::bit_cast<float>(static_cast<std::uint32_t>(blend));
-        if (!std::isfinite(channel.value) || channel.value < kType24MinimumValue
-            || channel.value > kType24MaximumValue || !std::isfinite(channel.blend)
-            || channel.blend < 0.F) {
+        const float value = std::bit_cast<float>(static_cast<std::uint32_t>(valueBits));
+        const float blend = std::bit_cast<float>(static_cast<std::uint32_t>(blendBits));
+        if (revision <= kSigned32Bias || !std::isfinite(value) || value < kType24MinimumValue
+            || value > kType24MaximumValue || !std::isfinite(blend) || blend < 0.F) {
             return false;
         }
     }
-    if (!finish_padding(reader)) {
-        return false;
-    }
-    body = parsed;
-    return true;
+    std::uint64_t padding = 0;
+    return reader.read(static_cast<std::uint8_t>(reader.remaining_bits()), padding) && padding == 0;
 }
 
 /** Encodes one Type-32 volume body: the volume's ClientRef, then its on or off state. */

@@ -398,11 +398,13 @@ void draw_engagement(const sdk::BoundView& view) noexcept {
         preset.revision = static_cast<std::int16_t>(g_engagementRevision);
         std::array<std::byte, scriptable_auth::kType70ByteCount> body{};
         std::size_t written = 0;
-        if (!scriptable_auth::encode_type70(preset, body, written) || written != body.size()) {
+        std::size_t bitCount = 0;
+        if (!scriptable_auth::encode_type70(preset, body, written, bitCount)
+            || written != body.size()) {
             remember("send", "encoder refused");
         } else {
             const devices::Status status = devices::apply_auth_slot(
-                view, g_engagementRow, body, scriptable_auth::kType70BitCount);
+                view, g_engagementRow, body, static_cast<std::uint16_t>(bitCount));
             remember("send", devices::status_name(status));
         }
     }

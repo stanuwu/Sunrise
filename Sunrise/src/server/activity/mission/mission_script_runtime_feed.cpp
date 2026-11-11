@@ -83,6 +83,8 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::sessionJoined:
     case host::EventKind::sessionLeft:
     case host::EventKind::playerTrigger:
+    case host::EventKind::integration:
+    case host::EventKind::engagementState:
     case host::EventKind::cinematicStarted:
     case host::EventKind::cinematicSkipRequested:
     case host::EventKind::cinematicTerminated:
@@ -681,13 +683,15 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         }
     }
     if (event.kind == host::EventKind::incidentReceived) {
-        push_player_trigger(instance, event, kAnyRegion);
+        push_player_trigger(instance, event);
+        push_integration(instance, event);
         push_cinematic(instance, event);
     }
     if (event.kind == host::EventKind::senseUpdate && sense != nullptr) {
         observe_player_life(instance, *sense);
         publish_fireteam_life(now);
-        push_trigger_edges(instance, *sense, kAnyRegion);
+        push_trigger_edges(instance, *sense);
+        push_engagement_edges(instance, *sense);
         push_ghost_edges(instance, *sense);
         push_object_interaction_edges(instance, *sense);
         // Shared counters and actor feedback keep one observation stream per target: the link

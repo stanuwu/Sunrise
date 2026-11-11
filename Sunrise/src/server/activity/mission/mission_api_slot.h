@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 #include "../../../middleware/bap/activity_message/combatant_auth.h"
 #include "../../../middleware/bap/activity_message/damage_monitor_auth.h"
@@ -61,6 +62,22 @@ inline constexpr ValueSpec kAuthType[]{{.kind = ValueKind::string,
 // --- Slot method arguments ----------------------------------------------------------------------
 inline constexpr ValueSpec kVolume[]{
     {.kind = ValueKind::handle, .ref = "slot", .slot = type_gate(slot_auth::kType60SlotType)}};
+inline constexpr ValueSpec kEngagementArguments[]{
+    {.name = "volumes",
+     .kind = ValueKind::list,
+     .bound = between(0, static_cast<std::int64_t>(slot_auth::kType70VolumeCapacity)),
+     .element = kVolume,
+     .note = "same-owner volumes that admit players to the audience"},
+    {.name = "revision",
+     .kind = ValueKind::integer,
+     .bound = between(1, (std::numeric_limits<std::int16_t>::max)()),
+     .note = "increase to clear accumulated members; do not wrap within a sensor lifetime"},
+    {.name = "everyone",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "admit every present player as well, not only the occupants of the volumes"},
+};
 inline constexpr ValueSpec kFilterObject[]{
     {.kind = ValueKind::handle, .ref = "slot", .slot = type_gate(slot_format::kObjectSlotType)}};
 inline constexpr ValueSpec kFilterSquad[]{
@@ -126,6 +143,18 @@ inline constexpr ValueSpec kAttachHopOnArguments[]{
 inline constexpr ValueSpec kWatchDamageArguments[]{
     {.name = "target", .kind = ValueKind::handle, .ref = "slot", .slot = kExactObject},
 };
+inline constexpr ValueSpec kHopOnArguments[]{
+    {.name = "filter",
+     .kind = ValueKind::handle,
+     .ref = "slot",
+     .optional = true,
+     .slot = type_gate(slot_auth::kType34SlotType),
+     .note = "the type-34 filter whose matches the hop-on binds; absent stops it"},
+    {.name = "revision",
+     .kind = ValueKind::integer,
+     .bound = between(1, kInt32Maximum),
+     .note = "bind revision; a higher value drops the spawned copies and gathers again"},
+};
 inline constexpr ValueSpec kBurstSlot[]{
     {.kind = ValueKind::selector, .ref = "mission.Slot", .slot = kExactObject}};
 inline constexpr ValueSpec kObjectChannelValue[]{
@@ -175,6 +204,14 @@ inline constexpr ValueSpec kSetChannelArguments[]{
      .ref = "unit_scalar",
      .note = "context.sdk.unit(x)"},
     kSnapArgument,
+};
+inline constexpr ValueSpec kOutputValue[]{{.kind = ValueKind::handle, .ref = "unit_scalar"}};
+inline constexpr ValueSpec kOutputChannelArguments[]{
+    {.name = "values",
+     .kind = ValueKind::list,
+     .element = kOutputValue,
+     .note = "a prefix of the target object's authored output order"},
+    {.name = "revision", .kind = ValueKind::integer, .bound = between(1, kInt32Maximum)},
 };
 inline constexpr ValueSpec kTransitionArguments[]{
     {.name = "transition", .kind = ValueKind::enumValue, .ref = "device_transitions"},
@@ -262,6 +299,14 @@ inline constexpr ValueSpec kDirectiveRowFields[]{
     {.name = "name_hash", .kind = ValueKind::integer, .bound = uint32_range()},
     {.name = "element", .kind = ValueKind::integer, .bound = between(0, kInt32Maximum)},
 };
+inline constexpr ValueSpec kDirectiveClockFields[]{
+    {.name = "remaining",
+     .kind = ValueKind::integer,
+     .bound = between(0, slot_auth::kType68MaximumClockSeconds)},
+    {.name = "total",
+     .kind = ValueKind::integer,
+     .bound = between(0, slot_auth::kType68MaximumClockSeconds)},
+};
 inline constexpr ValueSpec kSetDirectiveArguments[]{
     {.name = "directive",
      .kind = ValueKind::missionRow,
@@ -274,6 +319,17 @@ inline constexpr ValueSpec kSetDirectiveArguments[]{
      .optional = true,
      .fallback = default_integer(0),
      .bound = between(0, 2)},
+    {.name = "active",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "entry phase: true plays the active transition and admits completion; false incoming"},
+    {.name = "settled",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "entry phase: the HUD shows the entry as presented and plays no transition; "
+             "excludes active"},
     {.name = "navpoint",
      .kind = ValueKind::handle,
      .ref = "slot",
@@ -298,6 +354,17 @@ inline constexpr ValueSpec kSetDirectiveArguments[]{
      .bound = between(1, 4),
      .element = kInt32Element,
      .note = "counter values; only on a directive whose row has counter = true"},
+    {.name = "event",
+     .kind = ValueKind::handle,
+     .ref = "slot",
+     .optional = true,
+     .slot = type_gate(slot_auth::kType71SlotType),
+     .note = "public-event sensor whose state and local-player byte the HUD record copies"},
+    {.name = "clock",
+     .kind = ValueKind::table,
+     .optional = true,
+     .fields = kDirectiveClockFields,
+     .note = "countdown in whole seconds beside the goal; remaining at most total"},
 };
 // Darkness zone, music, interaction, Ghost link and public event arguments.
 inline constexpr ValueSpec kDarknessZoneArguments[]{
@@ -637,21 +704,13 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kVolumeActiveArguments,
      .returns = kRequestKey,
      .note = "turns one authored volume on or off through its type-32 toggle"},
-    {.name = "attach_hop_on",
+    {.name = "set_hop_on",
      .kind = MemberKind::request,
      .call = CallForm::named,
      .gate = schema_gate(middleware::bap::activity_message::mission_effect::kSlotType),
-     .arguments = kAttachHopOnArguments,
+     .arguments = kHopOnArguments,
      .returns = kRequestKey,
-     .note = "attaches the sensor's authored hop-on to every object the filter selects, and "
-             "keeps doing so as objects start and stop matching; on_event_hop_on_state names "
-             "this request once the client has applied it"},
-    {.name = "detach_hop_on",
-     .kind = MemberKind::request,
-     .call = CallForm::named,
-     .gate = schema_gate(middleware::bap::activity_message::mission_effect::kSlotType),
-     .returns = kRequestKey,
-     .note = "removes the sensor's hop-on from every object that carries it"},
+     .note = "spawns the hop-on's object on each match of the filter; absent filter removes them"},
     {.name = "watch_damage",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -673,6 +732,13 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kSetChannelArguments,
      .returns = kRequestKey,
      .effect = "slot.set_channel"},
+    {.name = "set_output_channels",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = exact_sensed_gate(slot_format::kChannelSlotType),
+     .arguments = kOutputChannelArguments,
+     .returns = kRequestKey,
+     .note = "sets a bounded prefix of authored object outputs immediately"},
     {.name = "transition",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -701,6 +767,12 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kGenerateMapArguments,
      .returns = kRequestKey,
      .note = "writes one of the two generator records and leaves the other authored"},
+    {.name = "set_engagement",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = exact_class_gate(slot_auth::kType70SlotType),
+     .arguments = kEngagementArguments,
+     .returns = kRequestKey},
     {.name = "set_directive",
      .kind = MemberKind::request,
      .call = CallForm::named,

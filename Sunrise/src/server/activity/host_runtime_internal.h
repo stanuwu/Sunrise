@@ -85,6 +85,12 @@ struct ScriptableRequest final {
     bool snap{};
     /** The kind's on input: an object or cinematic turns on, a program or binding spawns. */
     bool active{};
+    /** An object request also carries the no-change capture-plate component Auth. */
+    bool capturePlate{};
+    /** An object request also carries the enabled timed component Auth with this clock. */
+    middleware::bap::activity_message::scriptable_auth::Type4TimedClock timed{};
+    /** An object request also carries the state-machine position lane (in place). */
+    middleware::bap::activity_message::scriptable_auth::Type4PositionChild position{};
 };
 
 /** One owned client envelope without a richer typed mission reducer. */

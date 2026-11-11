@@ -325,6 +325,28 @@ struct TypedIntent final {
     std::uint8_t lifetimeState{};
     bool deviceSnap{};
     bool active{};
+    /** An object activation also carries the no-change capture-plate component Auth. */
+    bool capturePlate{};
+    /** An object activation also carries the enabled timed component Auth with this clock. */
+    bool timedChild{};
+    /** Whole seconds left when this timed child is committed. */
+    std::int32_t timedRemainingSeconds{};
+    /** Whole-second total used by the child's countdown ring. */
+    std::int32_t timedTotalSeconds{};
+    /** Activity-clock ticks from the exact public session generation. */
+    std::uint64_t timedEpochTicks{};
+    /** The timed window runs (false: paused at its current value). */
+    bool timedRunning{true};
+    /** The timed child updates the live object at its current generation (no respawn). */
+    bool timedInPlace{};
+    /** An object activation also carries the state-machine position lane (in place). */
+    bool positionChild{};
+    /** Native position-lane revision used without respawning the object. */
+    std::int32_t positionRevision{};
+    /** Requested normalized native position value. */
+    float positionValue{};
+    /** True to snap; false preserves the authored transition rate. */
+    bool positionSnap{true};
     /** A state transition may end its captured map-prop lifetimes before teleporting. */
     bool retirePlacedProps{};
 };

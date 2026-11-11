@@ -83,7 +83,53 @@ void instruction_hook(lua_State* state, lua_Debug*) {
     return output != LUA_NOREF && output != LUA_REFNIL;
 }
 
-/** Captures the optional generated mission-state declaration without retaining its Lua table. */
+/** Bounded generated slot identities omitted from initial or program-wide seed state. */
+using SeedOmissions = std::array<state::activity::mission::MissionSeedOmission,
+                                 state::activity::mission::kMissionSeedOmitCapacity>;
+
+/**
+ * Reads one optional list of generated slots at `key` of the table at `table`.
+ * @return False when the list is present but is not a table of resolvable slots that fits.
+ */
+[[nodiscard]] bool capture_omit_list(lua_State* state,
+                                     int table,
+                                     const char* key,
+                                     SeedOmissions& omissions,
+                                     std::uint8_t& omissionCount) noexcept {
+    omissionCount = 0;
+    lua_pushstring(state, key);
+    lua_rawget(state, table);
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return true;
+    }
+    if (!lua_istable(state, -1)) {
+        lua_pop(state, 1);
+        return false;
+    }
+    const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(state, -1));
+    if (count < 0 || static_cast<std::size_t>(count) > omissions.size()) {
+        lua_pop(state, 1);
+        return false;
+    }
+    for (lua_Integer entry = 1; entry <= count; ++entry) {
+        lua_rawgeti(state, -1, entry);
+        SlotDefinition definition{};
+        const bool resolved = detail::resolve_slot(state, lua_gettop(state), definition);
+        lua_pop(state, 1);
+        if (!resolved) {
+            lua_pop(state, 1);
+            return false;
+        }
+        omissions[static_cast<std::size_t>(entry - 1)] = {definition.objectTag,
+                                                          definition.registryKey};
+    }
+    omissionCount = static_cast<std::uint8_t>(count);
+    lua_pop(state, 1);
+    return true;
+}
+
+/** Captures the initial-state declaration without retaining its Lua table. */
 [[nodiscard]] bool capture_initial_state(lua_State* state, int program, Impl& impl) noexcept {
     impl.initialStateRegion = -1;
     impl.initialStateSpawnSet = 0;
@@ -133,36 +179,19 @@ void instruction_hook(lua_State* state, lua_Debug*) {
     }
     lua_pop(state, 1);
     // The optional omit list names generated slots whose objects stay out of every seed.
-    impl.initialStateOmissionCount = 0;
-    lua_pushstring(state, initial_state_key("omit"));
-    lua_rawget(state, -2);
-    const bool hasOmit = !lua_isnil(state, -1);
-    if (hasOmit) {
-        if (!lua_istable(state, -1)) {
-            lua_pop(state, 2);
-            return false;
-        }
-        const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(state, -1));
-        if (count < 0 || static_cast<std::size_t>(count) > impl.initialStateOmissions.size()) {
-            lua_pop(state, 2);
-            return false;
-        }
-        for (lua_Integer entry = 1; entry <= count; ++entry) {
-            lua_rawgeti(state, -1, entry);
-            SlotDefinition definition{};
-            const bool resolved = detail::resolve_slot(state, lua_gettop(state), definition);
-            lua_pop(state, 1);
-            if (!resolved) {
-                lua_pop(state, 2);
-                return false;
-            }
-            impl.initialStateOmissions[static_cast<std::size_t>(entry - 1)] = {
-                definition.objectTag, definition.registryKey};
-        }
-        impl.initialStateOmissionCount = static_cast<std::uint8_t>(count);
-    }
-    lua_pop(state, 2);
-    return true;
+    const bool omitRead = capture_omit_list(state,
+                                            lua_gettop(state),
+                                            initial_state_key("omit"),
+                                            impl.initialStateOmissions,
+                                            impl.initialStateOmissionCount);
+    lua_pop(state, 1);
+    return omitRead;
+}
+
+/** Reads program.seed_omit, the slots whose objects stay out of every seed the session adopts. */
+[[nodiscard]] bool capture_seed_omit(lua_State* state, int program, Impl& impl) noexcept {
+    return capture_omit_list(
+        state, program, program_key("seed_omit"), impl.seedOmissions, impl.seedOmissionCount);
 }
 
 // One callback per EventKind, in EventKind order; the table owns the names.
@@ -188,6 +217,9 @@ static_assert(std::size(api::kEvents) == host::kEventKindCount);
     if (!capture_initial_state(state, 1, *impl)) {
         return luaL_error(state,
                           "initial_state must be a generated state with an integer region_index");
+    }
+    if (!capture_seed_omit(state, 1, *impl)) {
+        return luaL_error(state, "seed_omit must be a list of generated slots");
     }
     if (!capture_handler(state, 1, program_key("on_start"), impl->startReference)
         || !capture_handler(state, 1, program_key("on_load"), impl->loadReference)) {
@@ -807,6 +839,25 @@ bool initial_state_omissions(const Vm& vm,
     }
     std::copy_n(impl.initialStateOmissions.begin(), impl.initialStateOmissionCount, output.begin());
     count = impl.initialStateOmissionCount;
+    return true;
+}
+
+/**
+ * Copies the objects program.seed_omit keeps out of every seed the session adopts.
+ * @param output Caller storage; the count is refused when the list does not fit.
+ * @param count Receives the copied count, zero when the program declares no list.
+ * @return False when the program is not active or the list does not fit.
+ */
+bool program_seed_omissions(const Vm& vm,
+                            std::span<state::activity::mission::MissionSeedOmission> output,
+                            std::size_t& count) noexcept {
+    const Impl& impl = VmAccess::get(vm);
+    count = 0;
+    if (!impl.active || impl.faulted || impl.seedOmissionCount > output.size()) {
+        return false;
+    }
+    std::copy_n(impl.seedOmissions.begin(), impl.seedOmissionCount, output.begin());
+    count = impl.seedOmissionCount;
     return true;
 }
 

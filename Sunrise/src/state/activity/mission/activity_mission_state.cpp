@@ -148,9 +148,16 @@ namespace {
            && left.squadCount == right.squadCount && left.deviceChannel == right.deviceChannel
            && left.slotType == right.slotType && left.authByteCount == right.authByteCount
            && left.lifetimeState == right.lifetimeState && left.deviceSnap == right.deviceSnap
-           && left.active == right.active && left.requestKey == right.requestKey
-           && left.squadSpawnRuleRow == right.squadSpawnRuleRow
-           && left.dialogueFilterRow == right.dialogueFilterRow;
+           && left.active == right.active && left.capturePlate == right.capturePlate
+           && left.timedChild == right.timedChild
+           && left.timedRemainingSeconds == right.timedRemainingSeconds
+           && left.timedTotalSeconds == right.timedTotalSeconds
+           && left.timedEpochTicks == right.timedEpochTicks
+           && left.timedRunning == right.timedRunning && left.timedInPlace == right.timedInPlace
+           && left.positionChild == right.positionChild
+           && left.positionRevision == right.positionRevision
+           && left.positionValue == right.positionValue && left.positionSnap == right.positionSnap
+           && left.requestKey == right.requestKey;
 }
 
 [[nodiscard]] std::string_view key_view(const StateKey& key) noexcept {

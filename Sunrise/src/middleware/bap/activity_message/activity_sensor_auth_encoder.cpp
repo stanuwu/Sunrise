@@ -1,3 +1,6 @@
+#include <algorithm>
+
+#include "../../encoding/bit_raw.h"
 #include "../../encoding/bit_reader.h"
 #include "scriptable_auth_body.h"
 #include "sensor_auth_update.h"
@@ -336,8 +339,9 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
         encoded = write_bubble_block(writer, snapshot.grant);
     }
     const std::size_t latchBit = kLatchBitWithoutGrant + (snapshot.hasGrant ? kBubbleBlockBits : 0);
-    // The token at the activity object's element 10 is not checked.
-    encoded = encoded && writer.write(0, kActivityTokenWidth) && writer.bit_count() == latchBit;
+    // The clock is a raw native u64 (low byte first), not a schema integer.
+    encoded = encoded && bits::write_raw_u64(writer, snapshot.activityTime)
+              && writer.bit_count() == latchBit;
     // The enable latch is not sticky, so it goes on every message.
     encoded = encoded && writer.write(1, kPresenceWidth)
               && write_roster_delta(writer, snapshot.roster, snapshot.stateSequence)
@@ -353,6 +357,38 @@ constexpr std::uint32_t kMaximumRegion = 0x7FFFFFFF;
 }
 
 } // namespace
+
+/**
+ * Compares complete grant-free bodies, ignoring only the activity-clock field.
+ * @param left Borrowed previously encoded body.
+ * @param right Borrowed newly encoded body.
+ * @return True when all content bits match; short or grant-bearing bodies return false.
+ */
+bool same_roster_content(std::span<const std::byte> left,
+                         std::span<const std::byte> right) noexcept {
+    constexpr std::size_t kBitsPerByte = 8;
+    constexpr std::size_t kTimeStartBit = kLatchBitWithoutGrant - kActivityTimeWidth;
+    constexpr std::size_t kFirstByte = kTimeStartBit / kBitsPerByte;
+    constexpr std::size_t kLastByte = kLatchBitWithoutGrant / kBitsPerByte;
+    constexpr unsigned kPrefixMask = 0xFFU << (kBitsPerByte - kTimeStartBit % kBitsPerByte);
+    constexpr unsigned kSuffixMask =
+        (1U << (kBitsPerByte - kLatchBitWithoutGrant % kBitsPerByte)) - 1U;
+    // The grant-presence bit immediately precedes time in a grant-free body.
+    constexpr unsigned kGrantMask = 1U << (kBitsPerByte - kTimeStartBit % kBitsPerByte);
+    if (left.size() != right.size() || left.size() <= kLastByte
+        || ((std::to_integer<unsigned>(left[kFirstByte])
+             | std::to_integer<unsigned>(right[kFirstByte]))
+            & kGrantMask)
+               != 0) {
+        return false;
+    }
+    const unsigned firstDifference =
+        std::to_integer<unsigned>(left[kFirstByte] ^ right[kFirstByte]);
+    const unsigned lastDifference = std::to_integer<unsigned>(left[kLastByte] ^ right[kLastByte]);
+    return (firstDifference & kPrefixMask) == 0 && (lastDifference & kSuffixMask) == 0
+           && std::equal(left.begin(), left.begin() + kFirstByte, right.begin())
+           && std::equal(left.begin() + kLastByte + 1, left.end(), right.begin() + kLastByte + 1);
+}
 
 /** Encodes one `sensor_auth_update` body. */
 bool encode_sensor_auth_update(const Snapshot& snapshot,

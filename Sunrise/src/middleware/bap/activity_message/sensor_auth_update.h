@@ -269,6 +269,8 @@ struct Snapshot final {
     Grant grant{};
     /** Message 12's member record key. Zero leaves every type-13 block inert. */
     std::uint64_t playerKey{};
+    /** Activity-clock base in native ticks; directive epochs use the same origin. */
+    std::uint64_t activityTime{};
     /** Compatibility revision used by groups without an explicit per-key value. */
     std::uint8_t stateSequence{};
     /** The participation record's region index. Its `+8` latch needs it. */
@@ -309,7 +311,7 @@ struct Snapshot final {
                                              std::span<std::byte> output,
                                              std::size_t& written) noexcept;
 
-/** Bits before the enable latch, no bubble block: 8 hardwipe, 128 epoch, 1 present, 64 token. */
+/** Bits before the enable latch: 8 hardwipe, 128 epoch, 1 absent grant, 64 clock ticks. */
 inline constexpr std::size_t kLatchBitWithoutGrant = 201;
 /** A bubble block adds the 65-bit authority mask, two head bits, three per element, one token. */
 inline constexpr std::size_t kBubbleBlockBits =
@@ -318,8 +320,17 @@ inline constexpr std::size_t kBubbleBlockBits =
 inline constexpr std::uint8_t kEpochWidth = 64;
 /** The unchecked hardwipe token is one byte, before the patch epoch. */
 inline constexpr std::uint8_t kHardwipeWidth = 8;
-/** The unchecked activity token follows the bubble block. */
-inline constexpr std::uint8_t kActivityTokenWidth = 64;
+/** The activity-clock base follows the optional bubble block. */
+inline constexpr std::uint8_t kActivityTimeWidth = 64;
+
+/**
+ * Compares encoded rosters without treating clock advancement as a content change.
+ * @param left Previously encoded body, borrowed for the comparison.
+ * @param right Newly encoded body, borrowed for the comparison.
+ * @return True for equal content apart from time; grant-bearing or short bodies return false.
+ */
+[[nodiscard]] bool same_roster_content(std::span<const std::byte> left,
+                                       std::span<const std::byte> right) noexcept;
 /** Changed authority tokens use the schema's unsigned 16-bit field. */
 inline constexpr std::uint8_t kGrantTokenWidth = 16;
 /** Every presence bit and every loop continuation bit is one bit wide. */

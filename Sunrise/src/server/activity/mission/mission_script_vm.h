@@ -61,6 +61,10 @@ struct ProgramIdentity final {
     std::uint32_t definitionHash{};
     /** The player key the bound link's message 5 binds; the client matches it on its own datum. */
     std::uint64_t playerKey{};
+    /** Session generation whose message-5 clock directive epochs count on. */
+    std::uint64_t sessionId{};
+    /** Exact allocation generation; prevents reusing a retired session's clock. */
+    std::uint64_t sessionCreatedRevision{};
     /** Id of the mod that supplied the controller; empty for a base or generated script. */
     std::array<char, state::mods::kIdCapacity> modId{};
     /** Reads `context.mod_config`; null leaves every entry nil. */
@@ -108,8 +112,8 @@ struct SlotDefinition final {
     std::uint32_t senseSchema{};
     std::uint32_t authSchema{};
     std::uint32_t flags{};
-    /** Runtime-extracted writable object channels; zero when unverified. */
-    std::uint8_t objectChannelCount{};
+    /** Exact output count, or zero when the target was not resolved. */
+    std::uint32_t outputChannelCount{};
     /** FNV-1 of the slot name, the hash the packages key the slot by. */
     std::uint32_t nameHash{};
     /** Slice-set hash of the object's bubble in this scenario, or zero when unknown. */
@@ -610,6 +614,11 @@ void publish_objective_levels(Vm& vm, std::span<const ObjectiveLevelRow> levels)
 initial_state_omissions(const Vm& vm,
                         std::span<state::activity::mission::MissionSeedOmission> output,
                         std::size_t& count) noexcept;
+/** Copies the objects program.seed_omit keeps out of every adopted seed; count may be zero. */
+[[nodiscard]] bool
+program_seed_omissions(const Vm& vm,
+                       std::span<state::activity::mission::MissionSeedOmission> output,
+                       std::size_t& count) noexcept;
 /** Copies the oldest committed action without consuming it. */
 [[nodiscard]] bool pending_intent(const Vm& vm, Intent& output) noexcept;
 /** Copies the complete ordered outbox without consuming an action. */

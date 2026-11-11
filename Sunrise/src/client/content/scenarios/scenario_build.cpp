@@ -1,5 +1,7 @@
 #include "scenario_build.h"
 
+#include <Windows.h>
+
 #include <array>
 #include <cstdio>
 #include <memory>
@@ -97,6 +99,9 @@ void report(const Storage& storage,
     }
     if (!storage.compacted) {
         if (!resolve_pending(source, scratch, storage)) {
+            if (progress_report_due(storage, GetTickCount64())) {
+                report(storage, storage.resolvedCount, 0, "waiting");
+            }
             return false;
         }
         compact_rows(storage);

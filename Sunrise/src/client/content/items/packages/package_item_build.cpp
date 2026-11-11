@@ -15,6 +15,7 @@
 #include "../../../../state/build_data/vendors/vendor_gate_catalog.h"
 #include "../../activity/activity_catalog_build.h"
 #include "../../activity/entity_position_profile_build.h"
+#include "../../activity/public_event_schedule_build.h"
 #include "../../hash_names/hash_name_build.h"
 #include "../../scenarios/scenario_build.h"
 #include "../../spawn_sets/spawn_set_build.h"
@@ -130,6 +131,7 @@ bool build() noexcept {
         const reader::Source packageSource{directory.chars.data(), &keys};
         // Process-local launcher data is extracted even when persistent build data was loaded.
         (void)content::activity::build_catalog(packageSource, storage.scratch);
+        (void)content::activity::build_public_event_schedule(packageSource, storage.scratch);
         (void)content::activity::entity_position_profiles::build(packageSource, storage.scratch);
         (void)content::scenarios::build(packageSource, storage.scratch);
         (void)content::spawn_sets::build(packageSource, storage.scratch);

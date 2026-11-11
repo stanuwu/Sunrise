@@ -14,6 +14,7 @@
 #include "../../middleware/content/packages/schema/generated/tag_classes_80807f.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808083.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808088.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_808094.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808095.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808099.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_80809a.h"
@@ -106,12 +107,12 @@ inline constexpr std::uint32_t kSlotDialogueCuesExact = 0x4U;
  * gets no flag.
  */
 inline constexpr std::uint32_t kSlotAuthoredSceneUnresourced = 0x8U;
-/** The target Variables component proves the type-24 output row count. */
-inline constexpr std::uint32_t kSlotObjectChannelsExact = 0x10U;
-/** Slot rows expose only verified reader, schema and authored metadata facts. */
+/** The type-24 target has a counted, unambiguous authored output array. */
+inline constexpr std::uint32_t kSlotOutputChannelsExact = 0x10U;
+/** Slot flags record facts recovered from package content. */
 inline constexpr std::uint32_t kSlotFlagMask =
     kSlotReaderVerified | kSlotSchemaJoinExact | kSlotDialogueCuesExact
-    | kSlotAuthoredSceneUnresourced | kSlotObjectChannelsExact;
+    | kSlotAuthoredSceneUnresourced | kSlotOutputChannelsExact;
 /** Component class of an authored type-4 object slot. */
 inline constexpr std::uint32_t kObjectComponentClass = generated::ObjectSlotHandleType4::kClass;
 /** Sense schema of an authored type-4 object slot. */
@@ -132,6 +133,12 @@ inline constexpr std::uint32_t kDeviceComponentClass = generated::DeviceSlotHand
 inline constexpr std::uint32_t kDeviceSenseSchema = generated::C80804f47::kClass;
 /** Auth schema of a type-23 device slot. */
 inline constexpr std::uint32_t kDeviceAuthSchema = generated::C80804f48::kClass;
+/** Component class of a type-24 output-channel slot. */
+inline constexpr std::uint32_t kChannelComponentClass = generated::C80804f3b::kClass;
+/** Sense schema of a type-24 output-channel slot. */
+inline constexpr std::uint32_t kChannelSenseSchema = generated::C80804f3d::kClass;
+/** Auth schema of a type-24 output-channel slot. */
+inline constexpr std::uint32_t kChannelAuthSchema = generated::C80804f40::kClass;
 /** Component class of a type-30 occupancy-condition slot. */
 inline constexpr std::uint32_t kOccupancyComponentClass =
     generated::MonitorSlotHandleType30::kClass;
@@ -139,6 +146,12 @@ inline constexpr std::uint32_t kOccupancyComponentClass =
 inline constexpr std::uint32_t kOccupancySenseSchema = generated::C80809531::kClass;
 /** Auth schema of a type-30 occupancy-condition slot. */
 inline constexpr std::uint32_t kOccupancyAuthSchema = generated::C80809532::kClass;
+/** Component class of a type-70 engagement slot. */
+inline constexpr std::uint32_t kEngagementComponentClass = generated::C808094ee::kClass;
+/** Sense schema of a type-70 engagement slot. */
+inline constexpr std::uint32_t kEngagementSenseSchema = generated::C808094f0::kClass;
+/** Auth schema of a type-70 engagement slot. */
+inline constexpr std::uint32_t kEngagementAuthSchema = generated::C808094f1::kClass;
 /** Component class of a type-68 directive slot. */
 inline constexpr std::uint32_t kDirectiveComponentClass = generated::C80804f53::kClass;
 /** Auth schema of a type-68 directive slot. */
@@ -184,8 +197,13 @@ inline constexpr std::uint32_t kSequenceSlotType = 5U;
 inline constexpr std::uint32_t kCinematicSlotType = 6U;
 /** Slot type of the three-channel device Auth surface. */
 inline constexpr std::uint32_t kDeviceSlotType = 23U;
+/** Slot type and native capacity for authored object output channels. */
+inline constexpr std::uint32_t kChannelSlotType = 24U;
+inline constexpr std::uint32_t kOutputChannelCapacity = 4U;
 /** Slot type of the occupancy-condition Auth surface. */
 inline constexpr std::uint32_t kOccupancySlotType = 30U;
+/** Slot type of the encounter-engagement audience surface. */
+inline constexpr std::uint32_t kEngagementSlotType = 70U;
 /** Authored three-lane HUD directive state. */
 inline constexpr std::uint32_t kDirectiveSlotType = 68U;
 /** Only the counter bit of a directive element's flag word is named. */
@@ -1058,7 +1076,7 @@ struct Slot final {
     std::uint32_t senseSchema{};
     std::uint32_t authSchema{};
     std::uint32_t flags{};
-    /** Dialogue cue count or object-channel count under its exactness flag; zero otherwise. */
+    /** Authored dialogue or output count when its exact-count flag is set; zero otherwise. */
     std::uint32_t reserved{};
     Range aliases{};
     Range capabilities{};

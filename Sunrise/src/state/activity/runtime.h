@@ -91,6 +91,23 @@ bool release_session(std::uint64_t sessionId) noexcept;
 [[nodiscard]] bool snapshot_binding(std::uint64_t sessionId, SessionBinding& output) noexcept;
 
 /**
+ * Reads or starts the native join clock of one exact session generation under the State lock.
+ * @param sessionId Allocated session id.
+ * @param createdRevision Exact allocation generation.
+ * @param nowMilliseconds Host uptime used only for the first public start.
+ * @param start Whether a public join may start the clock.
+ * @param origin Receives host uptime in milliseconds, or zero for an unstarted clock.
+ * @param started Receives whether this generation's clock has started.
+ * @return False for a stale or absent record; outputs are cleared.
+ */
+[[nodiscard]] bool native_clock_origin(std::uint64_t sessionId,
+                                       std::uint64_t createdRevision,
+                                       std::uint64_t nowMilliseconds,
+                                       bool start,
+                                       std::uint64_t& origin,
+                                       bool& started) noexcept;
+
+/**
  * Copies the binding of every committed session.
  * A per-session service needs the whole set, including private activities that have no gameplay
  * peer from which to discover their identity.

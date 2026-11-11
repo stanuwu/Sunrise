@@ -22,13 +22,12 @@ template <typename Row, typename Id>
     return true;
 }
 
-/** @return True when every directive element has a valid description or progress label. */
+/** @return True when every directive element's description and progress label are plain text. */
 [[nodiscard]] bool directive_texts(const Catalog& catalog) noexcept {
     for (const format::DirectiveElement& row : catalog.directive_elements()) {
         const std::string_view description = catalog.string(row.description);
         const std::string_view progress = catalog.string(row.progress);
-        if ((description.empty() && progress.empty())
-            || description.find('\0') != std::string_view::npos
+        if (description.find('\0') != std::string_view::npos
             || progress.find('\0') != std::string_view::npos) {
             return false;
         }
@@ -88,6 +87,18 @@ template <typename Row, typename Id>
     }
     for (const format::Object& row : catalog.objects()) {
         if (!range(row.slots, catalog.slots().size())) {
+            return false;
+        }
+    }
+    for (const format::Slot& row : catalog.slots()) {
+        if ((row.flags & format::kSlotOutputChannelsExact) != 0
+            && (row.slotType != format::kChannelSlotType
+                || row.componentClass != format::kChannelComponentClass
+                || row.senseSchema != format::kChannelSenseSchema
+                || row.authSchema != format::kChannelAuthSchema
+                || (row.flags & format::kSlotSchemaJoinExact) == 0
+                || (row.flags & format::kSlotDialogueCuesExact) != 0 || row.reserved == 0
+                || row.reserved > format::kOutputChannelCapacity)) {
             return false;
         }
     }

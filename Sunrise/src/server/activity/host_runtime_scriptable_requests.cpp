@@ -236,7 +236,9 @@ bool request_state_local_type4_override(
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::int32_t entryIndex,
     bool active,
-    const auth::Type2LaneClientRef& location,
+    bool capturePlate,
+    const auth::Type4TimedClock& timed,
+    const auth::Type4PositionChild& position,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation,
     const ScriptableOutputReservation* burstHead) noexcept {
@@ -251,7 +253,9 @@ bool request_state_local_type4_override(
     request.stateLocalRosterGroup = stateLocalRosterGroup;
     request.entryIndex = entryIndex;
     request.active = active;
-    request.objectLocation = location;
+    request.capturePlate = capturePlate;
+    request.timed = timed;
+    request.position = position;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = ScriptableOverrideKind::object;
     if (burstHead != nullptr) {

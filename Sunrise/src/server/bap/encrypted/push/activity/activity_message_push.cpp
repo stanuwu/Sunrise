@@ -8,6 +8,7 @@
 #include "../../../../../middleware/bap/activity_message/bubble_host_state.h"
 #include "../../../../../middleware/bap/activity_message/entity_slots.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
+#include "../../../../activity/activity_clock.h"
 #include "../../../../gameplay/gameplay_advertisement.h"
 #include "activity_arrival.h"
 #include "activity_global_state_push.h"
@@ -50,22 +51,37 @@ bool append_join_notifications(Scratch& scratch,
     const std::size_t initialWritten = written;
     auto initialNonce = nonce;
     std::size_t messageSize = 0;
-    bool encoded = service::join_result::encode_join_result(
-                       activity.correlation,
-                       activity.sessionId,
-                       kLocalPeerHeardWindowMilliseconds,
-                       kLocalKeepaliveHintMilliseconds,
-                       static_cast<std::uint8_t>(activity.entitySlotMutation.replicationSequence),
-                       scratch.responseBody,
-                       messageSize)
-                   && append_notification_frame(scratch,
-                                                activity.sessionId,
-                                                kJoinResultMessageType,
-                                                std::span(scratch.responseBody).first(messageSize),
-                                                key,
-                                                nonce,
-                                                response,
-                                                written);
+    // A public session's clock starts at its accepted join, so this seed is zero and message 5
+    // continues from the same origin. A private session never starts its clock: the heartbeat
+    // telemetry lives on that link, and a nonzero clock there floods it.
+    const bool publicSession =
+        activity.bindingIntent == activity_message::BindingIntent::publicTarget
+        || (activity.bindingIntent == activity_message::BindingIntent::preserveCurrent
+            && session.activity.role == ActivityClientRole::publicTarget);
+    std::uint64_t activityTime = 0;
+    bool encoded =
+        server::activity::activity_clock_wire_ticks(activity.targetBinding.sessionId,
+                                                    activity.targetBinding.createdRevision,
+                                                    GetTickCount64(),
+                                                    publicSession,
+                                                    activityTime)
+        && service::join_result::encode_join_result(
+            activity.correlation,
+            activity.sessionId,
+            kLocalPeerHeardWindowMilliseconds,
+            kLocalKeepaliveHintMilliseconds,
+            static_cast<std::uint8_t>(activity.entitySlotMutation.replicationSequence),
+            activityTime,
+            scratch.responseBody,
+            messageSize)
+        && append_notification_frame(scratch,
+                                     activity.sessionId,
+                                     kJoinResultMessageType,
+                                     std::span(scratch.responseBody).first(messageSize),
+                                     key,
+                                     nonce,
+                                     response,
+                                     written);
     clear_prefix(scratch.responseBody, messageSize);
     if (encoded) {
         middleware::secure_channel::advance_nonce(nonce);

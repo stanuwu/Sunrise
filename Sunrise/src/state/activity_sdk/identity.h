@@ -38,9 +38,11 @@ derive(const Digest& sourceFingerprint, const Digest& payloadSha256, Expected& o
     if (!valid(sourceFingerprint) || !valid(payloadSha256)) {
         return false;
     }
-    // Domain tags separate the two derived digests; the build tag changes with the pack layout.
+    // Domain tags separate the two derived digests. The build tag changes with the pack layout
+    // and whenever the generator emits different rows from the same installed content, so a
+    // cached pack from an older generator is rebuilt.
     constexpr auto kLogicalDomain = std::to_array("sunrise-activity-sdk-logical-ir-v1");
-    constexpr auto kBuildDomain = std::to_array("sunrise-activity-sdk-build-v15");
+    constexpr auto kBuildDomain = std::to_array("sunrise-activity-sdk-build-v17");
     const auto logicalDomain = std::as_bytes(std::span(kLogicalDomain));
     const auto buildDomain = std::as_bytes(std::span(kBuildDomain));
     Digest logical{};

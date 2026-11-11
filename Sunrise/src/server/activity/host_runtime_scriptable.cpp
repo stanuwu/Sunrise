@@ -529,7 +529,13 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
     } else if (encoded && request.kind == ScriptableOverrideKind::ghostLink) {
         encoded = ghost_link::encode(*instance, request, candidate, pending, written);
     } else if (encoded && request.kind == ScriptableOverrideKind::object) {
-        pending.bitCount = static_cast<std::uint16_t>(auth::kType4BitCount);
+        auth::Type4Preset preset{};
+        preset.entryIndex = request.entryIndex;
+        preset.active = request.active;
+        preset.capturePlate = request.capturePlate;
+        preset.timed = request.timed;
+        preset.position = request.position;
+        pending.bitCount = static_cast<std::uint16_t>(auth::type4_bit_count(preset));
         std::int32_t generation = 0;
         std::uint32_t retainedGeneration = 0;
         encoded = counter_auth::previous_revision(*instance, request.target, 0, retainedGeneration);
@@ -539,13 +545,18 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
             candidate.type4.last = static_cast<std::int32_t>(retainedGeneration);
             candidate.type4.hasLast = true;
         }
-        encoded = encoded && auth::next_type4_generation(candidate.type4, generation)
-                  && auth::encode_type4(
-                      {generation, request.entryIndex, request.active, request.objectLocation},
-                      candidate.type4,
-                      pending.body,
-                      written);
+        const bool inPlace = request.timed.inPlace || request.position.present;
+        if (inPlace) {
+            // Same generation: the client updates the live object's components in place.
+            encoded = encoded && candidate.type4.hasLast && candidate.type4.last > 0;
+            generation = candidate.type4.last;
+        } else {
+            encoded = encoded && auth::next_type4_generation(candidate.type4, generation);
+        }
+        preset.generation = generation;
+        encoded = encoded && auth::encode_type4(preset, candidate.type4, pending.body, written);
         pending.generation = static_cast<std::uint64_t>(generation);
+        pending.inPlace = inPlace;
     } else if (encoded && request.kind == ScriptableOverrideKind::sequence) {
         pending.bitCount = static_cast<std::uint16_t>(auth::kType5BitCount);
         const auth::Type5Selection& selection = request.sequenceSelection;

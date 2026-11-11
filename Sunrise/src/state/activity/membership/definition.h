@@ -1,7 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <limits>
+
+#include "../mission/definition.h"
 
 namespace sunrise::state::activity::membership {
 
@@ -209,6 +212,11 @@ struct MembershipState final {
     std::int32_t declaredInitialRegion{kAbsentRegionIndex};
     /** Spawn set the attached mission program declared with that state; zero when none. */
     std::uint32_t declaredSpawnSetHash{};
+    /** Objects the attached program keeps out of every seed, the adopted arrival seed included. */
+    std::array<mission::MissionSeedOmission, mission::kMissionSeedOmitCapacity>
+        declaredSeedOmissions{};
+    /** Valid entries in declaredSeedOmissions, copied with the attached VM ownership. */
+    std::uint8_t declaredSeedOmissionCount{};
     /** The mission program holds the spawn: the player has no body until it releases. */
     bool programSpawnHold{};
     std::uint32_t revision{};

@@ -40,6 +40,7 @@ enum class Status : std::uint8_t {
     luaBuild,
     publication,
     luaPublication,
+    channelBounds,
 };
 
 /** Real pack-building boundaries exposed to presentation without changing generation state. */
@@ -60,6 +61,7 @@ enum class Phase : std::uint8_t {
     packTables,
     luaDeclarations,
     outputFiles,
+    channelBounds,
 };
 
 /** Optional worker cancellation probe checked across package-backed stages. */

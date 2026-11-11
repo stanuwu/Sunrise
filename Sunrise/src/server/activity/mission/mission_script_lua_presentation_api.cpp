@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "../../../middleware/bap/activity_message/music_section_auth.h"
+#include "../activity_clock.h"
 #include "mission_script_lua_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
@@ -20,6 +21,7 @@ namespace {
 
 // Table entries of the slot members this file implements.
 constexpr const api::MemberSpec& kSetDirective = api::slot_member("set_directive");
+constexpr const api::MemberSpec& kSetEngagement = api::slot_member("set_engagement");
 constexpr const api::MemberSpec& kClearDirectives = api::slot_member("clear_directives");
 constexpr const api::MemberSpec& kMusicSection = api::slot_member("set_music_section");
 constexpr const api::MemberSpec& kPublicEvent = api::slot_member("set_public_event_state");
@@ -92,6 +94,70 @@ constexpr const api::MemberSpec& kDialogueCue = api::slot_member("play_dialogue_
 
 } // namespace
 
+/**
+ * Stages audience admission: the occupants of the volumes, and with `everyone` every present
+ * player. The native flag bit 0 suppresses the client's player-table admission; the shipped
+ * default keeps it set, so only volume occupants enter unless the script asks for everyone.
+ * @param state Borrowed Lua call with a current sensor and named volumes/revision arguments.
+ * @return One RequestKey; invalid inputs raise a Lua error before an intent is queued.
+ */
+[[nodiscard]] int slot_set_engagement(lua_State* state) {
+    const SlotHandle* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    refuse_unknown_arguments(state, kSetEngagement);
+    SlotDefinition slot{};
+    if (!current_slot(state, *handle, slot) || slot.slotType != scriptable_auth::kType70SlotType
+        || slot.componentClass != scriptable_auth::kType70ComponentClass
+        || slot.authSchema != scriptable_auth::kType70Schema
+        || (slot.flags & format::kSlotSchemaJoinExact) == 0) {
+        return luaL_error(state, "engagement requires an exact type-70 sensor");
+    }
+    const lua_Integer revision = checked_integer_argument(
+        state, required_key(kSetEngagement, "revision", api::ValueKind::integer));
+    if (revision < 1 || revision > (std::numeric_limits<std::int16_t>::max)()) {
+        return luaL_error(state, "engagement revision must be a positive signed 16-bit integer");
+    }
+    static_cast<void>(
+        push_argument(state, required_key(kSetEngagement, "volumes", api::ValueKind::list)));
+    luaL_checktype(state, -1, LUA_TTABLE);
+    refuse_unknown_fields(state, -1, {});
+    const std::size_t count = lua_rawlen(state, -1);
+    scriptable_auth::Type70Preset preset{};
+    if (count > preset.volumes.size()) {
+        return luaL_error(state, "engagement volume count exceeds native capacity");
+    }
+    preset.revision = static_cast<std::int16_t>(revision);
+    preset.volumeCount = static_cast<std::uint8_t>(count);
+    if (optional_boolean_argument(state, boolean_option(kSetEngagement, "everyone"))) {
+        preset.flags = scriptable_auth::kType70AdmitEveryoneFlags;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        lua_rawgeti(state, -1, static_cast<lua_Integer>(index + 1));
+        const SlotHandle* const volumeHandle =
+            static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
+        SlotDefinition volume{};
+        if (!current_slot(state, *volumeHandle, volume)
+            || volume.slotType != scriptable_auth::kType60SlotType
+            || volume.objectTag != slot.objectTag || volume.registryKey != slot.registryKey
+            || volume.slotIndex > auth_fields::kMaximumClientRefIndex) {
+            return luaL_error(state, "engagement requires current same-owner type-60 volumes");
+        }
+        preset.volumes[index] = {volume.registryKey,
+                                 static_cast<std::int8_t>(scriptable_auth::kType60SlotType),
+                                 static_cast<std::int16_t>(volume.slotIndex)};
+        lua_pop(state, 1);
+    }
+    lua_pop(state, 1);
+    std::array<std::byte, scriptable_auth::kType70MaximumByteCount> body{};
+    std::size_t written = 0;
+    std::size_t bitCount = 0;
+    if (!scriptable_auth::encode_type70(preset, body, written, bitCount)) {
+        return luaL_error(state, "engagement native encoder failed");
+    }
+    return queue_slot_auth(
+        state, slot, scriptable_auth::kType70Schema, bitCount, std::span(body).first(written));
+}
+
 /** Shows one generated directive through the exact type-68 Auth schema. */
 [[nodiscard]] int slot_set_directive(lua_State* state) {
     const auto* const handle =
@@ -133,10 +199,19 @@ constexpr const api::MemberSpec& kDialogueCue = api::slot_member("play_dialogue_
         || resolved.slotRow != slot.nativeRow) {
         return luaL_error(state, "directive does not belong to this slot");
     }
-    scriptable_auth::Type68Preset preset{.nameHash = resolved.nameHash,
-                                         .elementIndex = resolved.elementIndex,
-                                         .state = static_cast<std::int8_t>(directiveState),
-                                         .visible = true};
+    scriptable_auth::Type68Preset preset{
+        .nameHash = resolved.nameHash,
+        .elementIndex = resolved.elementIndex,
+        .state = static_cast<std::int8_t>(directiveState),
+        .visible = true,
+        .phase = static_cast<std::int8_t>(
+            optional_boolean_argument(state, boolean_option(kSetDirective, "active")) ? 1 : 0)};
+    if (optional_boolean_argument(state, boolean_option(kSetDirective, "settled"))) {
+        if (preset.phase != 0) {
+            return luaL_error(state, "directive settled excludes active");
+        }
+        preset.phase = -1;
+    }
     // Progress rides only on an element that declares a counter; the HUD ignores it otherwise.
     if (push_argument(state, optional_key(kSetDirective, "progress", Kind::list)) != LUA_TNIL) {
         luaL_checktype(state, -1, LUA_TTABLE);
@@ -180,6 +255,34 @@ constexpr const api::MemberSpec& kDialogueCue = api::slot_member("play_dialogue_
                                  preset.waypoint)) {
         return luaL_error(state, "directive waypoint requires a current authored type-60 volume");
     }
+    if (!optional_slot_reference(state,
+                                 optional_key(kSetDirective, "event", Kind::handle),
+                                 scriptable_auth::kType71SlotType,
+                                 preset.event)) {
+        return luaL_error(state, "directive event requires a current authored type-71 sensor");
+    }
+    // The clock counts whole seconds down from its total; the encoder refuses it when hidden.
+    if (push_argument(state, optional_key(kSetDirective, "clock", Kind::table)) != LUA_TNIL) {
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const lua_Integer remaining = directive_integer(
+            state, -1, table_field_key(kSetDirective, "clock", "remaining", Kind::integer));
+        const lua_Integer total = directive_integer(
+            state, -1, table_field_key(kSetDirective, "clock", "total", Kind::integer));
+        if (remaining < 0 || total < remaining
+            || total > scriptable_auth::kType68MaximumClockSeconds) {
+            return luaL_error(state, "directive clock needs 0 <= remaining <= total <= one year");
+        }
+        preset.clockRemainingSeconds = static_cast<std::int32_t>(remaining);
+        preset.clockTotalSeconds = static_cast<std::int32_t>(total);
+        if (!activity_clock_wire_ticks(impl->identity.sessionId,
+                                       impl->identity.sessionCreatedRevision,
+                                       active_frame(state).now,
+                                       false,
+                                       preset.clockEpochTicks)) {
+            return luaL_error(state, "directive clock is outside the activity time domain");
+        }
+    }
+    lua_pop(state, 1);
     if (preset.navpoint.slotIndex >= 0) {
         lua_getfield(state, 2, navpointKey);
         const auto* const navpoint =
@@ -286,8 +389,10 @@ constexpr const api::MemberSpec& kDialogueCue = api::slot_member("play_dialogue_
     const lua_Number seconds =
         checked_number_argument(state, required_key(kPublicEvent, "leave_seconds", Kind::number));
     SlotDefinition area{};
-    if (!current_slot(state, areaHandle, area)) {
-        return luaL_error(state, "area slot is stale or invalid");
+    // Restrict this API to authored trigger volumes until other spatial area types are supported.
+    if (!current_slot(state, areaHandle, area)
+        || area.slotType != scriptable_auth::kType60SlotType) {
+        return luaL_error(state, "public-event area requires a current type-60 volume");
     }
     if (!std::isfinite(seconds) || seconds < 0.0
         || seconds > static_cast<lua_Number>((std::numeric_limits<float>::max)())) {

@@ -107,6 +107,10 @@ struct SessionRecord {
      * so it must not be re-read per message or per member.
      */
     std::uint64_t timeOrigin{};
+    /** Host uptime in milliseconds when this generation's public join clock first started. */
+    std::uint64_t nativeClockOriginMilliseconds{};
+    /** Private links remain unstarted; clearing the session record retires this origin. */
+    bool nativeClockStarted{};
     /** Last State revision that changed this record. */
     std::uint64_t recordRevision{};
     /** Last successful join revision, or the invalid revision before any join. */

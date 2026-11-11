@@ -27,6 +27,9 @@ constexpr std::size_t kJoinStatusBitOffset = 570;
 constexpr std::size_t kJoinStatusBitCount = 3;
 /** Stored join-status value 1 decodes to the accepted enum. */
 constexpr std::uint8_t kAcceptedJoinStatus = 1;
+/** The activity-clock base starts at schema bit 1,693; the join seeds the clock message 5 moves. */
+constexpr std::size_t kActivityTimeBitOffset = 1'693;
+constexpr std::size_t kActivityTimeBitCount = encoding::kU64Size * encoding::kBitsPerByte;
 /** Native schema 0x80808693 decodes bits 1757..1764 into join-result +0x2A08. */
 constexpr std::size_t kReplicationEpochBitOffset = 1'757;
 /** The replication epoch is one unsigned 8-bit schema field, bits 1757..1764. */
@@ -64,6 +67,9 @@ static_assert(kPeerHeardWindowBitOffset + kPeerHeardWindowBitCount <= kMeaningfu
 static_assert(kKeepaliveBitOffset + kKeepaliveBitCount <= kMeaningfulBitCount);
 // The two fields abut, so a gap or an overlap here would silently corrupt both.
 static_assert(kPeerHeardWindowBitOffset + kPeerHeardWindowBitCount == kKeepaliveBitOffset);
+static_assert(kActivityTimeBitOffset + kActivityTimeBitCount == kReplicationEpochBitOffset);
+// The return code and one unwritten 32-bit field precede the clock base.
+static_assert(kOopahReturnCodeBitOffset + 2 * kOopahReturnCodeBitCount == kActivityTimeBitOffset);
 // The status field ends where the host session text begins, and the workspace name ends the body.
 static_assert(kJoinStatusBitOffset + kJoinStatusBitCount == kHostSessionTextBitOffset);
 static_assert(kOopahReturnCodeBitOffset + kOopahReturnCodeBitCount <= kMeaningfulBitCount);
@@ -76,15 +82,15 @@ static_assert(kWorkspaceTextBitOffset + kWorkspaceTextByteCount * encoding::kBit
  * Writes one unsigned value into a zeroed most-significant-bit-first field.
  * @param output Whole join-result body, already zeroed.
  * @param bitOffset First destination schema bit.
- * @param bitCount How many low bits of the value to encode.
+ * @param bitCount How many low bits of the value to encode, at most 64.
  */
 void write_bits(std::span<std::byte> output,
                 std::size_t bitOffset,
                 std::size_t bitCount,
-                std::uint32_t value) noexcept {
+                std::uint64_t value) noexcept {
     for (std::size_t index = 0; index < bitCount; ++index) {
         const std::size_t sourceShift = bitCount - index - 1;
-        const std::uint32_t sourceMask = std::uint32_t{1} << sourceShift;
+        const std::uint64_t sourceMask = std::uint64_t{1} << sourceShift;
         if ((value & sourceMask) == 0) {
             continue;
         }
@@ -129,6 +135,7 @@ bool encode_join_result(std::uint32_t correlation,
                         std::uint16_t peerHeardWindowMs,
                         std::uint16_t keepaliveHintMs,
                         std::uint8_t replicationEpoch,
+                        std::uint64_t activityTime,
                         std::span<std::byte> output,
                         std::size_t& written) noexcept {
     written = {};
@@ -143,6 +150,7 @@ bool encode_join_result(std::uint32_t correlation,
     encoding::write_u64_be(body.subspan<JoinResultLayout::sessionId, encoding::kU64Size>(),
                            sessionId);
     write_bits(body, kJoinStatusBitOffset, kJoinStatusBitCount, kAcceptedJoinStatus);
+    write_bits(body, kActivityTimeBitOffset, kActivityTimeBitCount, activityTime);
     write_bits(body, kPeerHeardWindowBitOffset, kPeerHeardWindowBitCount, peerHeardWindowMs);
     write_bits(body, kKeepaliveBitOffset, kKeepaliveBitCount, keepaliveHintMs);
     write_bits(body, kReplicationEpochBitOffset, kReplicationEpochBitCount, replicationEpoch);

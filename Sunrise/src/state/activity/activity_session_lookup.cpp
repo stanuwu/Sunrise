@@ -26,6 +26,33 @@ bool contains(std::uint64_t sessionId) noexcept {
     return found;
 }
 
+bool native_clock_origin(std::uint64_t sessionId,
+                         std::uint64_t createdRevision,
+                         std::uint64_t nowMilliseconds,
+                         bool start,
+                         std::uint64_t& origin,
+                         bool& started) noexcept {
+    origin = 0;
+    started = false;
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t slot = transactions::find_session(state, sessionId);
+    const bool found =
+        slot < kSessionCapacity && state.sessions[slot].createdRevision == createdRevision;
+    if (found) {
+        SessionRecord& record = state.sessions[slot];
+        // Clock bookkeeping must not invalidate the join plan's membership revisions.
+        if (start && !record.nativeClockStarted) {
+            record.nativeClockOriginMilliseconds = nowMilliseconds;
+            record.nativeClockStarted = true;
+        }
+        started = record.nativeClockStarted;
+        origin = record.nativeClockOriginMilliseconds;
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    return found;
+}
+
 /**
  * Copies the binding of every committed session.
  * @param output Caller-owned storage.

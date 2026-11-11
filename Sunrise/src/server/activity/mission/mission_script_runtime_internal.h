@@ -118,21 +118,49 @@ constexpr std::size_t kLiveLinkCapacity = state::activity::entity_slots::kMember
 struct TriggerOccupancy final {
     /** Counter continuity of the volume's reports, for triggerState events only. */
     trigger_observation::Tracker tracker{};
+    /** Registry identity of the observed scriptable sensor. */
     std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
     std::uint32_t objectTag{};
+    /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
     bool occupied{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
+
+/** Last engagement report seen for one audience sensor, so only a change raises an edge. */
+struct EngagementObservation final {
+    /** Registry identity of the observed scriptable sensor. */
+    std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
+    std::uint32_t objectTag{};
+    /** Exact sensor slot within its registry. */
+    std::uint16_t slotIndex{};
+    /** Last decoded participant count. */
+    std::int32_t count{};
+    /** Last biased native value; gameplay meaning remains unknown. */
+    std::int32_t value{};
+    /** The bound player key was in the last complete participant list. */
+    bool localMember{};
+    /** This retained observation row has been initialized. */
+    bool used{};
+};
+// A free-roam zone can carry more engagement sensors than a mission (the Rig reports 16).
+constexpr std::size_t kEngagementObservationCapacity = 32;
 
 /** Last movement and delivery level seen for one named actor, so only a change raises an event. */
 struct ActorPathObservation final {
     ActorPathLevel level{};
     /** Link whose reports these levels were read from. */
     std::uint64_t sourceGeneration{};
+    /** Registry identity of the observed scriptable sensor. */
     std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
     std::uint32_t objectTag{};
+    /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 
@@ -140,12 +168,16 @@ struct ActorPathObservation final {
 struct DamageObservation final {
     /** Link whose reports these levels were read from. */
     std::uint64_t sourceGeneration{};
+    /** Registry identity of the observed scriptable sensor. */
     std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
     std::uint32_t objectTag{};
+    /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
     std::int32_t revision{};
     float health{-1.0F};
     float shield{-1.0F};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 
@@ -154,9 +186,13 @@ struct CombatantDamageObservation final {
     CombatantDamageLevel level{};
     /** Link whose reports these levels were read from. */
     std::uint64_t sourceGeneration{};
+    /** Registry identity of the observed scriptable sensor. */
     std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
     std::uint32_t objectTag{};
+    /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 
@@ -173,6 +209,7 @@ struct EntityDamageObservation final {
     bool withheld{};
     /** Set when the last poll of the source found the entity still listed. */
     bool listed{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 /** Last reported current values for one exact Type-23 source. */
@@ -180,9 +217,13 @@ struct DeviceObservation final {
     DeviceLevel level{};
     /** Link whose reports these levels were read from. */
     std::uint64_t sourceGeneration{};
+    /** Registry identity of the observed scriptable sensor. */
     std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
     std::uint32_t objectTag{};
+    /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 
@@ -191,18 +232,26 @@ struct ObjectInteractionObservation final {
     ObjectInteractionLevel level{};
     /** Link whose reports the shared object state was read from. */
     std::uint64_t sourceGeneration{};
+    /** Registry identity of the observed scriptable sensor. */
     std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
     std::uint32_t objectTag{};
+    /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 
 /** Last Ghost-link level seen for one sensor. */
 struct GhostObservation final {
     GhostLevel level{};
+    /** Registry identity of the observed scriptable sensor. */
     std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
     std::uint32_t objectTag{};
+    /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 
@@ -254,6 +303,11 @@ struct SquadPublishedLevels final {
     std::int32_t alertLevel{};
     std::uint8_t slotCountLength{};
     bool removalFlag{};
+    /** Spawn generation retained with the comparison baseline. */
+    std::int32_t spawnGeneration{};
+    bool hasSpawnGeneration{};
+    /** The baseline has an alive count reported in that generation. */
+    bool populationKnown{};
     bool operator==(const SquadPublishedLevels&) const = default;
 };
 
@@ -268,19 +322,21 @@ struct SquadObservation final {
     SquadPublishedLevels published{};
     /** Link whose reports these levels were read from. */
     std::uint64_t sourceGeneration{};
+    /** Registry identity of the observed scriptable sensor. */
     std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
     std::uint32_t objectTag{};
     std::int32_t aliveCount{};
     /** Last spawn generation the squad Sense echoed from its placement Auth. */
     std::int32_t spawnGeneration{};
-    /** Last alert level the squad Sense reported. */
-    std::int32_t alertLevel{};
+    /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
     std::uint8_t slotCountLength{};
     bool removalFlag{};
     bool hasSpawnGeneration{};
     /** An alive count was reported; until then aliveCount is a zero placeholder. */
     bool populationKnown{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 /** Last completion latch seen for one watched authored scene, so only the edge raises an event. */
@@ -289,13 +345,32 @@ struct SceneObservation final {
     std::array<std::uint32_t, 32> outputs{};
     /** Link whose reports these levels were read from. */
     std::uint64_t sourceGeneration{};
+    /** Registry identity of the observed scriptable sensor. */
     std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
     std::uint32_t objectTag{};
     /** Activation token of the run the outputs belong to; a new token starts a new run. */
     std::int32_t token{};
+    /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
     std::uint8_t outputCount{};
     bool completed{};
+    /** This retained observation row has been initialized. */
+    bool used{};
+};
+
+/** Last task counters seen for one watched objective sensor, so only a rise raises an event. */
+struct ObjectiveObservation final {
+    std::array<std::array<std::uint8_t, kObjectiveTaskCapacity>, kObjectiveCapacity> counters{};
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
+    /** Registry identity of the observed scriptable sensor. */
+    std::uint32_t registryKey{};
+    /** Generated object tag resolving this observed sensor. */
+    std::uint32_t objectTag{};
+    /** Exact sensor slot within its registry. */
+    std::uint16_t slotIndex{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 
@@ -306,6 +381,7 @@ struct SessionRosterWatch final {
     std::uint64_t memberKey{};
     std::uint64_t joinIdentity{};
     std::uint64_t joinedRevision{};
+    /** This retained observation row has been initialized. */
     bool used{};
 };
 
@@ -383,6 +459,7 @@ struct RuntimeInstance final {
     std::uint64_t firstIntentAttempt{};
     host::Event pendingTimerEvent{};
     std::array<TriggerOccupancy, kTriggerOccupancyCapacity> triggerOccupancy{};
+    std::array<EngagementObservation, kEngagementObservationCapacity> engagementObservations{};
     std::array<SquadObservation, kSquadObservationCapacity> squadObservations{};
     /**
      * The levels each other link reported for a squad it does not simulate. Squad Sense restates
@@ -548,8 +625,11 @@ void claim_row(Row& row, std::uint64_t sourceGeneration, bool allocatedUsed) noe
     }
     Row fresh{};
     fresh.sourceGeneration = sourceGeneration;
+    /** Registry identity of the observed scriptable sensor. */
     fresh.registryKey = row.registryKey;
+    /** Generated object tag resolving this observed sensor. */
     fresh.objectTag = row.objectTag;
+    /** Exact sensor slot within its registry. */
     fresh.slotIndex = row.slotIndex;
     fresh.used = allocatedUsed;
     row = fresh;
@@ -580,15 +660,14 @@ void observe_player_life(RuntimeInstance& instance,
  * @param region Region the volume must lie in, or kAnyRegion.
  */
 void push_trigger_edges(RuntimeInstance& instance,
-                        const host::SenseObservationSnapshot& sense,
-                        std::int32_t region) noexcept;
-/**
- * Raises one dedicated type-31 edge from a decoded player-trigger msg-19 payload.
- * @param region Region the volume must lie in, or kAnyRegion.
- */
-void push_player_trigger(RuntimeInstance& instance,
-                         const host::Event& incident,
-                         std::int32_t region) noexcept;
+                        const host::SenseObservationSnapshot& sense) noexcept;
+/** Raises one engagementState per type-70 report whose count, membership or value changed. */
+void push_engagement_edges(RuntimeInstance& instance,
+                           const host::SenseObservationSnapshot& sense) noexcept;
+/** Raises one dedicated type-31 edge from a decoded player-trigger msg-19 payload. */
+void push_player_trigger(RuntimeInstance& instance, const host::Event& incident) noexcept;
+/** Forwards one decoded integration report to the script with its three fields. */
+void push_integration(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Raises one exact Type-6 start/finish edge from a decoded cinematic msg-19 payload. */
 void push_cinematic(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Raises one event per named actor whose movement or delivery level changed. */
@@ -685,8 +764,11 @@ template <typename Row, std::size_t N>
     }
     if (spare != nullptr) {
         spare->used = true;
+        /** Registry identity of the observed scriptable sensor. */
         spare->registryKey = key.registryKey;
+        /** Generated object tag resolving this observed sensor. */
         spare->objectTag = key.objectTag;
+        /** Exact sensor slot within its registry. */
         spare->slotIndex = key.slotIndex;
     }
     return spare;
