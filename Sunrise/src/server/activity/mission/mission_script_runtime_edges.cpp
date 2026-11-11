@@ -560,8 +560,8 @@ void push_ghost_edges(RuntimeInstance& instance,
 }
 
 /**
- * Raises one event per type-26 mission effect whose revision or attachment changed. Every client
- * applies the effect's body itself, so only the link that simulates the effect reports it.
+ * Raises one event per hop-on sensor whose applied request or attachment changed. Every client
+ * applies the sensor's body itself, so only the link that simulates it reports it.
  */
 void push_effect_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept {
@@ -574,7 +574,7 @@ void push_effect_edges(RuntimeInstance& instance,
         }
         EffectObservation* const slot = find_slot_row(instance.effectObservations, observation.key);
         if (slot == nullptr) {
-            log_line(core::log::Level::warn, &instance, "mission_effect", "watch_capacity");
+            log_line(core::log::Level::warn, &instance, "hop_on", "watch_capacity");
             continue;
         }
         claim_row(*slot, sense.sourceGeneration, true);
@@ -583,9 +583,9 @@ void push_effect_edges(RuntimeInstance& instance,
             continue;
         }
         host::Event event = shared_edge_event(instance, observation);
-        event.kind = host::EventKind::missionEffectState;
-        event.effectRevision = slot->level.revision;
-        event.effectAttached = slot->level.attached;
+        event.kind = host::EventKind::hopOnState;
+        event.hopOnRevision = slot->level.revision;
+        event.hopOnAttached = slot->level.attached;
         push_script_event(instance, event);
     }
 }

@@ -7,6 +7,7 @@
 #include "../../../middleware/bap/activity_message/darkness_zone_auth.h"
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
 #include "../../../middleware/bap/activity_message/map_generator_auth.h"
+#include "../../../middleware/bap/activity_message/mission_effect_auth.h"
 #include "../../../middleware/bap/activity_message/music_section_auth.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../middleware/bap/activity_message/squad_objective_auth.h"
@@ -105,6 +106,13 @@ inline constexpr ValueSpec kVolumeActiveArguments[]{
      .scope = Scope::sameObject,
      .note = "an authored volume of the toggle's own object"},
     {.name = "active", .kind = ValueKind::boolean, .note = "true turns it on, false off"},
+};
+inline constexpr ValueSpec kAttachHopOnArguments[]{
+    {.name = "filter",
+     .kind = ValueKind::handle,
+     .ref = "slot",
+     .slot = type_gate(slot_auth::kType34SlotType),
+     .note = "the object filter whose matches host the hop-on; set it with set_object_filter"},
 };
 inline constexpr ValueSpec kWatchDamageArguments[]{
     {.name = "target", .kind = ValueKind::handle, .ref = "slot", .slot = kExactObject},
@@ -615,6 +623,21 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kVolumeActiveArguments,
      .returns = kRequestKey,
      .note = "turns one authored volume on or off through its type-32 toggle"},
+    {.name = "attach_hop_on",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = schema_gate(middleware::bap::activity_message::mission_effect::kSlotType),
+     .arguments = kAttachHopOnArguments,
+     .returns = kRequestKey,
+     .note = "attaches the sensor's authored hop-on to every object the filter selects, and "
+             "keeps doing so as objects start and stop matching; on_event_hop_on_state names "
+             "this request once the client has applied it"},
+    {.name = "detach_hop_on",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = schema_gate(middleware::bap::activity_message::mission_effect::kSlotType),
+     .returns = kRequestKey,
+     .note = "removes the sensor's hop-on from every object that carries it"},
     {.name = "watch_damage",
      .kind = MemberKind::request,
      .call = CallForm::named,

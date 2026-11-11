@@ -7,6 +7,7 @@
 
 #include "../../../middleware/bap/activity_message/auth_fields.h"
 #include "../../../middleware/bap/activity_message/auth_schema_catalog.h"
+#include "../../../middleware/bap/activity_message/mission_effect_auth.h"
 #include "../../../middleware/bap/activity_message/volume_toggle_auth.h"
 #include "mission_script_lua_dispatch.h"
 #include "mission_script_lua_internal.h"
@@ -107,6 +108,8 @@ namespace {
 
 // The generated member row that names and documents this binding.
 constexpr const api::MemberSpec& kVolumeActive = api::slot_member("set_volume_active");
+constexpr const api::MemberSpec& kAttachHopOn = api::slot_member("attach_hop_on");
+constexpr const api::MemberSpec& kDetachHopOn = api::slot_member("detach_hop_on");
 
 /** Reads one required boolean argument; any other type is an error. */
 [[nodiscard]] bool required_boolean(lua_State* state, const char* name) {
@@ -154,6 +157,56 @@ constexpr const api::MemberSpec& kVolumeActive = api::slot_member("set_volume_ac
     }
     return queue_slot_auth(
         state, source, scriptable_auth::kType32Schema, scriptable_auth::kType32BitCount, body);
+}
+
+/**
+ * Queues one hop-on sensor body. Its revision is the key this request is about to take, so the
+ * report that echoes it names the request, and a later request always carries a higher one.
+ */
+[[nodiscard]] int queue_hop_on(lua_State* state,
+                               const SlotHandle& handle,
+                               scriptable_auth::Type2LaneClientRef filter,
+                               bool attach) {
+    namespace hop_on = middleware::bap::activity_message::mission_effect;
+    SlotDefinition slot{};
+    if (!current_slot(state, handle, slot) || slot.slotType != hop_on::kSlotType
+        || slot.authSchema != hop_on::kSchema) {
+        return luaL_error(state, "the slot is not a hop-on sensor");
+    }
+    const std::uint64_t key = active_frame(state).candidate.nextIntentKey;
+    if (key == 0 || key > static_cast<std::uint64_t>((std::numeric_limits<std::int32_t>::max)())) {
+        return luaL_error(state, "mission request keys are past the hop-on revision range");
+    }
+    std::array<std::byte, hop_on::kBytes> body{};
+    std::size_t written = 0;
+    if (!hop_on::encode(filter, attach, static_cast<std::int32_t>(key), body, written)) {
+        return luaL_error(state, "hop-on sensor body could not be encoded");
+    }
+    return queue_slot_auth(state, slot, hop_on::kSchema, hop_on::kBits, body);
+}
+
+/** Attaches the sensor's hop-on to every object one type-34 filter selects. */
+[[nodiscard]] int slot_attach_hop_on(lua_State* state) {
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    refuse_unknown_arguments(state, kAttachHopOn);
+    scriptable_auth::Type2LaneClientRef filter{};
+    if (!optional_slot_reference(state,
+                                 required_key(kAttachHopOn, "filter", api::ValueKind::handle),
+                                 scriptable_auth::kType34SlotType,
+                                 filter)
+        || filter.slotIndex < 0) {
+        return luaL_error(state, "attach_hop_on requires a type-34 filter");
+    }
+    return queue_hop_on(state, *handle, filter, true);
+}
+
+/** Removes the sensor's hop-on from every object that carries it. */
+[[nodiscard]] int slot_detach_hop_on(lua_State* state) {
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    refuse_unknown_arguments(state, kDetachHopOn);
+    return queue_hop_on(state, *handle, {}, false);
 }
 
 /** Pushes one property of the slot's Auth catalog entry, or nil when it has none. */
@@ -273,6 +326,8 @@ constexpr std::array<SlotBinding, std::size(api::kSlotMembers)> kSlotBindings{{
      [](lua_State* state, const SlotDefinition& slot) { lua_pushinteger(state, slot.flags); }},
     {"set_object_filter", &slot_set_object_filter},
     {"set_volume_active", &slot_set_volume_active},
+    {"attach_hop_on", &slot_attach_hop_on},
+    {"detach_hop_on", &slot_detach_hop_on},
     {"watch_damage", &slot_watch_damage},
     {"set_object_active", &slot_set_object_active},
     {"set_channel", &slot_set_channel},

@@ -55,7 +55,7 @@ enum class FieldGroupId : std::uint8_t {
     senseGeneration,
     squadRemoval,
     triggerLevel,
-    missionEffect,
+    hopOn,
     count,
 };
 
@@ -340,9 +340,9 @@ inline constexpr MemberSpec kGhostLinkFields[]{
     field("progress", kNumber),
     field("active", kBoolean),
 };
-inline constexpr MemberSpec kMissionEffectFields[]{
-    field("revision", kInteger, "the Auth revision the effect echoed"),
-    field("attached", kBoolean),
+inline constexpr MemberSpec kHopOnFields[]{
+    field("attached", kBoolean, "at least one host carries the hop-on"),
+    field("request_key", kRequestKey, "the attach or detach request the client last applied"),
 };
 inline constexpr MemberSpec kSquadProvokedFields[]{
     field("registry_key", kInteger),
@@ -413,7 +413,7 @@ inline constexpr std::array<FieldGroup, static_cast<std::size_t>(FieldGroupId::c
         {"sense_generation", kSenseGenerationFields},
         {"squad_removal", kSquadRemovalFields},
         {"trigger_level", kTriggerLevelFields},
-        {"mission_effect", kMissionEffectFields},
+        {"hop_on", kHopOnFields},
     }};
 
 /** @return The address of one field group, for an event's group list. */
@@ -497,8 +497,8 @@ inline constexpr const FieldGroup* kCinematicGroups[]{
 inline constexpr const FieldGroup* kGhostLinkGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::ghostLink)};
 inline constexpr const FieldGroup* kCarrierGroups[]{group(G::common), group(G::missionSequence)};
-inline constexpr const FieldGroup* kMissionEffectGroups[]{
-    group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::missionEffect)};
+inline constexpr const FieldGroup* kHopOnGroups[]{
+    group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::hopOn)};
 inline constexpr const FieldGroup* kActorPathGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::actorPath)};
 inline constexpr const FieldGroup* kObjectGroups[]{group(G::common),
@@ -689,10 +689,10 @@ inline constexpr EventSpec kEvents[]{
      "every accepted occupancy report and its counter continuity; it never changes when "
      "entered and exited fire"},
     {43,
-     "MISSION_EFFECT_STATE",
-     "on_event_mission_effect_state",
-     "SunriseMissionEffectStateEvent",
-     kMissionEffectGroups},
+     "HOP_ON_STATE",
+     "on_event_hop_on_state",
+     "SunriseHopOnStateEvent",
+     kHopOnGroups},
     {44,
      "CARRIER_STATE",
      "on_event_carrier_state",

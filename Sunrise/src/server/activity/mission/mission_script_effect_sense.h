@@ -8,7 +8,7 @@
 
 namespace sunrise::server::activity::mission {
 
-/** Last mission-effect level seen for one slot. */
+/** Last hop-on sensor level seen for one slot. */
 struct EffectLevel final {
     std::int32_t revision{};
     bool attached{};

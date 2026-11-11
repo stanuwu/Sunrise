@@ -152,8 +152,8 @@ enum class EventKind : std::uint8_t {
     sceneOutput = 41,
     /** Validated type-30 level or explicit continuity invalidation. */
     triggerState = 42,
-    /** A type-26 mission effect reported a changed revision or attachment; from one msg 6 body. */
-    missionEffectState = 43,
+    /** A hop-on sensor applied a request or changed attachment; from one msg 6 body. */
+    hopOnState = 43,
     /** State moved one or more carrier flights on. */
     carrierState = 44,
 };
@@ -684,9 +684,9 @@ struct Event final {
     std::int32_t ghostGeneration{};
     float ghostProgress{};
     bool ghostActive{};
-    /** Mission-effect level, for missionEffectState events. */
-    std::int32_t effectRevision{};
-    bool effectAttached{};
+    /** Hop-on sensor level, for hopOnState events. */
+    std::int32_t hopOnRevision{};
+    bool hopOnAttached{};
     /** Named actor level, for actorPathState events. */
     std::int32_t actorGeneration{};
     std::int32_t actorPathRevision{};

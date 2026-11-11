@@ -205,7 +205,7 @@ struct GhostObservation final {
     bool used{};
 };
 
-/** Last mission-effect level seen for one type-26 slot. */
+/** Last hop-on sensor level seen for one type-26 slot. */
 struct EffectObservation final {
     EffectLevel level{};
     /** Link whose reports these levels were read from. */

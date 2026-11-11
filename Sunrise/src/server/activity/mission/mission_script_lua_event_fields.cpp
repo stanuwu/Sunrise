@@ -557,9 +557,18 @@ constexpr EventBinding kGhostLink[]{
     {"progress", nullptr, &number_field<&E::ghostProgress>},
     {"active", nullptr, &boolean_field<&E::ghostActive>},
 };
-constexpr EventBinding kMissionEffect[]{
-    {"revision", nullptr, &integer_field<&E::effectRevision>},
-    {"attached", nullptr, &boolean_field<&E::effectAttached>},
+// The sensor echoes the revision it applied, and attach_hop_on writes its request key there.
+constexpr EventBinding kHopOn[]{
+    {"attached", nullptr, &boolean_field<&E::hopOnAttached>},
+    {"request_key",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         if (event.hopOnRevision > 0) {
+             push_request_key(state, static_cast<std::uint64_t>(event.hopOnRevision));
+         } else {
+             lua_pushnil(state);
+         }
+     }},
 };
 // A provocation carries the exact squad reference, not a native Sense body.
 constexpr EventBinding kSquadProvoked[]{
@@ -641,7 +650,7 @@ constexpr std::array<EventBindings, static_cast<std::size_t>(G::count)> kGroupBi
     kSenseGeneration,
     kSquadRemoval,
     kTriggerLevel,
-    kMissionEffect,
+    kHopOn,
 }};
 static_assert([]() consteval {
     for (std::size_t index = 0; index < kGroupBindings.size(); ++index) {
