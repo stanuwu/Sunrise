@@ -443,7 +443,10 @@ inline constexpr ValueSpec kActorControlsArguments[]{
      .note = "one value per channel"},
 };
 inline constexpr ValueSpec kCarrierCargo[]{
-    {.kind = ValueKind::handle, .ref = "squad", .note = "a squad of the actor's own object"}};
+    {.kind = ValueKind::handle,
+     .ref = "slot",
+     .slot = type_gate(slot_format::kSquadSlotType),
+     .note = "the type-1 slot of a squad of the actor's own object"}};
 inline constexpr ValueSpec kStartCarrierArguments[]{
     {.name = "entry",
      .kind = ValueKind::handle,
