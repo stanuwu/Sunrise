@@ -517,6 +517,8 @@ struct Session {
     std::uint64_t activityDialogueRevision{};
     /** The delivered roster carries the team wait bit; the arrival report is answered while set. */
     bool activityRosterAwaitClientSync{};
+    /** A raised host-teleport spawn state has yet to ride a membership body. */
+    bool activityTeleportSpawnOwed{};
     /** One bounded authority-mask readback owned by this exact ActivityClient generation. */
     authority_query::Owner activityAuthorityQuery{};
     /** One bounded authority-mask reset owned by this exact ActivityClient generation. */

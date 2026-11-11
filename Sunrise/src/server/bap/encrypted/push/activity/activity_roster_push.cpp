@@ -780,6 +780,14 @@ void commit_staged_roster(Session& session) noexcept {
         if (answeredArrival) {
             note_client_entered(session);
         }
+        // This body lets the client spawn, so the teleport that moved it may now run its spawn.
+        // The membership body carrying that state follows this roster on the same link.
+        if (!session.activityRosterAwaitClientSync
+            && session.activity.role == ActivityClientRole::privateCurrent
+            && state::activity::membership::raise_host_teleport_spawn(
+                session.activity.session.sessionId)) {
+            session.activityTeleportSpawnOwed = true;
+        }
     }
     if (session.activityRosterStaged.entityRetirement.pending) {
         server::gameplay::squad_entity_retirement::commit_retirement(

@@ -109,13 +109,6 @@ inline MembershipState merge(const MembershipState& state,
         merged.region = update.region;
         merged.pendingReported = true;
     }
-    // The client has reported the region the arm named, so the move is done and the same machine
-    // owes the spawn. Its step 3 runs the spawn only while the host state reads 3, so the arm is
-    // raised rather than dropped. Step 0 refuses to re-latch on 3, so this cannot re-arm.
-    if (merged.hasHostTeleport && merged.region.index >= 0
-        && merged.region.index == merged.hostTeleport.sliceSetIndex) {
-        merged.hostTeleport.state = kHostTeleportSpawnState;
-    }
     // Retire the matching teleport before staging the answer so its screen can release.
     if (merged.hasHostTeleport && merged.hostTeleport.state == kHostTeleportSpawnState
         && merged.teleport.state == kClientTeleportResetState

@@ -366,6 +366,7 @@ bool consume_activity_keepalive(Session& session,
     const bool hostTeleportDue =
         active
         && (state::activity::membership::host_teleport_armed(session.activity.session.sessionId)
+            || session.activityTeleportSpawnOwed
             || state::activity::membership::hard_wipe_start_unseen(
                 session.activity.session.sessionId))
         && state::activity::membership::acknowledged(session.activity.session.sessionId);
@@ -416,6 +417,7 @@ bool consume_activity_keepalive(Session& session,
     // Held until the frame reaches the caller. Encoding alone does not spend the region trigger.
     std::int32_t stagedAdvertisedRegion = -1;
     bool stagedAdvertisedPrivate = false;
+    bool stagedTeleportSpawn = false;
     // Only a changed Host value or mission state, retirement or the arrival answer can publish a
     // standalone roster.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue && !membershipDue) {
@@ -548,6 +550,7 @@ bool consume_activity_keepalive(Session& session,
     const bool needsRepublish =
         (advertisedRegionReady
          || state::activity::membership::host_teleport_armed(session.activity.session.sessionId)
+         || session.activityTeleportSpawnOwed
          || state::activity::membership::hard_wipe_needs_publish(
              session.activity.session.sessionId))
         && state::activity::membership::acknowledged(session.activity.session.sessionId);
@@ -644,6 +647,7 @@ bool consume_activity_keepalive(Session& session,
                                                          framedSize,
                                                          suppressUnchanged);
         appendedMembership = sent;
+        stagedTeleportSpawn = sent && preparedRepublish && session.activityTeleportSpawnOwed;
         // Only `pending` leaves the trigger armed, because only `pending` is transient. `absent`
         // means this channel advertises nothing, so re-arming there republishes on every poll.
         if (sent && reportedRegion >= 0) {
@@ -721,6 +725,9 @@ bool consume_activity_keepalive(Session& session,
         commit_membership_body_record(session);
     }
     // A body the client never saw must advertise its region again on the next poll.
+    if (delivered && stagedTeleportSpawn) {
+        session.activityTeleportSpawnOwed = false;
+    }
     if (delivered && stagedAdvertisedRegion >= 0) {
         session.activity.advertisedRegion = stagedAdvertisedRegion;
         session.activity.advertisedPrivate = stagedAdvertisedPrivate;
