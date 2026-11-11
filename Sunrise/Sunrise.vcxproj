@@ -2982,6 +2982,7 @@
     <ClInclude Include="src\client\content\activity\activity_sdk_squad_graph_shard.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_squad_inventory.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_squad_inventory_internal.h" />
+    <ClInclude Include="src\client\content\activity\activity_sdk_squad_occurrence_rule.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_topology_enrichment.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_topology_inventory.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_topology_inventory_internal.h" />

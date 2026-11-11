@@ -26,8 +26,11 @@ namespace generated = middleware::content::packages::schema::generated;
 
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
-/** Runtime-pack schema version accepted by this reader. 49 adds combat-objective task bounds. */
-inline constexpr std::uint32_t kVersion = 49;
+/**
+ * Runtime-pack schema version accepted by this reader. 50 marks squads whose rule resolves inside
+ * their own occurrence.
+ */
+inline constexpr std::uint32_t kVersion = 50;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 52;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
@@ -313,14 +316,20 @@ inline constexpr std::uint32_t kSquadRequiresSelectedRule = 0x40U;
 /** Runnable without the authored edge and its points, which a selected rule replaces. */
 inline constexpr std::uint32_t kSquadSourcePrerequisiteMask =
     kSquadRunnableMask & ~(kSquadSpawnerRuleEdgeExact | kSquadAllPointsExact);
+/** The spawner's rule reference resolved inside this squad's own object occurrence. */
+inline constexpr std::uint32_t kSquadOccurrenceRuleExact = 0x80U;
 /**
  * @return True when a squad row may be placed or commanded. A rule-less squad is exempt from the
- * rule edge and points that its selected rule supplies.
+ * rule edge and points that its selected rule supplies; a rule resolved inside the squad's
+ * occurrence is exempt from the points, which the client reads from that rule.
  */
 [[nodiscard]] constexpr bool squad_runnable(std::uint32_t flags) noexcept {
-    const std::uint32_t required = (flags & kSquadRequiresSelectedRule) != 0
-                                       ? kSquadSourcePrerequisiteMask
-                                       : kSquadRunnableMask;
+    std::uint32_t required = kSquadRunnableMask;
+    if ((flags & kSquadRequiresSelectedRule) != 0) {
+        required = kSquadSourcePrerequisiteMask;
+    } else if ((flags & kSquadOccurrenceRuleExact) != 0) {
+        required = kSquadRunnableMask & ~kSquadAllPointsExact;
+    }
     return (flags & required) == required;
 }
 /** Member flags separate actor resolution from count-array completeness. */
