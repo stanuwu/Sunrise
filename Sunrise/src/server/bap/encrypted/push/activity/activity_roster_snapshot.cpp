@@ -490,9 +490,13 @@ build_roster_snapshot(Session& session,
     const std::uint16_t setAnswers = programOwnsSpawn
                                          ? static_cast<std::uint16_t>(snapshot.spawnSliceSet)
                                          : static_cast<std::uint16_t>(region.arrival);
+    // The program's set is declared by its own destination. A public link runs another one, whose
+    // tables do not list the set and so cannot say where it has points.
+    const state::activity::destination::DestinationSelection& setOwner =
+        programOwnsSpawn ? session.activity.source.destination : selection;
     if (snapshot.spawnSliceSet
         != state::activity::destination::spawn_set_slice_set(
-            selection, snapshot.spawnSetHash, setAnswers)) {
+            setOwner, snapshot.spawnSetHash, setAnswers)) {
         snapshot.spawnSetHash = message::kAbsentSpawnSetHash;
     }
     // An armed wipe respawns at its checkpoint spawn set, not at the arrival override.
