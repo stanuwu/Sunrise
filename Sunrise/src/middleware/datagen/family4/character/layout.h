@@ -205,8 +205,9 @@ struct Object {
     std::array<std::int32_t, kObjectiveValueCapacity> objectiveValues{};
     std::array<std::byte, kValuesActivityPaddingSize> valuesActivityPadding{};
     /**
-     * The activity the character was in before this session. The client seeds the session's
-     * previous-activity parameter from its destination. 0xFFFF means none; 0 is the orbit.
+     * The activity a launch leaves from. The client seeds the session's previous activity from
+     * it, and keeps an onward link's seamless transition only when it names the activity being
+     * left. 0xFFFF means none; 0 is the orbit.
      */
     std::uint16_t previousActivityIndex{};
     /**

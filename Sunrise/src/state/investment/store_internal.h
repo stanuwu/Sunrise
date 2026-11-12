@@ -37,6 +37,9 @@ extern std::uint64_t g_failureSerial;
 struct Session {
     std::array<bool, kCharacterCapacity> selected{};
     std::array<std::uint16_t, kCharacterCapacity> activities{};
+    /** Slot of the character in an activity, or kCharacterCapacity in orbit. */
+    std::size_t occupiedSlot{kCharacterCapacity};
+    std::uint16_t occupiedActivity{kNoActivityIndex};
     std::uint64_t signInSeconds{};
     /** Counts committed writes and selection changes; a refused grant waits for it to move. */
     std::uint64_t revision{};

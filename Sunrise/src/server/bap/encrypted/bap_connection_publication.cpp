@@ -2,14 +2,18 @@
 
 #include <Windows.h>
 
+#include <array>
 #include <atomic>
+#include <cstdio>
 #include <limits>
 
 #include "../../../core/logging/log.h"
+#include "../../../state/account/account_context.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
 #include "../../../state/activity/member_context.h"
 #include "../../../state/activity/member_departure.h"
 #include "../../../state/activity/runtime.h"
+#include "../../../state/runtime/runtime.h"
 #include "../../gameplay/group/group_host_sessions.h"
 #include "../activity_transport_publication.h"
 #include "push/activity/internal.h"
@@ -40,6 +44,38 @@ void release_host_generations(AdvertisementRetains& retains) noexcept {
         release_host_generation(retains.hostGenerations[entry]);
     }
     retains = {};
+}
+
+/**
+ * Moves the account's selected character into or out of a private link's activity, and owes
+ * every peer the changed character record. The client reads it as its next launch's from side.
+ * @param session Link whose binding is about to publish or close.
+ * @param entered True when the link now holds its activity, false when it closes.
+ */
+void note_private_activity(const Session& session, bool entered) noexcept {
+    const std::int16_t index = session.activity.session.destination.activityIndex;
+    if (session.activity.role != ActivityClientRole::privateCurrent || index < 0) {
+        return;
+    }
+    const state::ScopedAccount scope(session.accountHandle);
+    const auto activity = static_cast<std::uint16_t>(index);
+    const bool changed = entered ? state::publish_entered_activity(activity)
+                                 : state::publish_left_activity(activity);
+    if (!changed) {
+        return;
+    }
+    arm_account_resync_everywhere();
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=occupied result=%s activity=%u",
+                                      entered ? "entered" : "left",
+                                      static_cast<unsigned>(activity));
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
 }
 
 /**
@@ -180,6 +216,7 @@ void publish_connection_fields(Session& session,
             release_activity_ownership(
                 session, fields.joinsActivity && session.activityJoinMembershipStaged);
             session.activity = publication.activity;
+            note_private_activity(session, true);
             reset_join_state(session);
         }
         session.activity.bindingGeneration = publication.activity.bindingGeneration;
@@ -346,6 +383,7 @@ void release_activity_ownership(Session& session, bool preserveJoinPublication) 
     if (session.activity.session.sessionId != state::activity::kAbsentSessionId) {
         state::activity::release_binding(session.activity.session);
     }
+    note_private_activity(session, false);
     session.activity = {};
     session.activityJoinCorrelation = 0;
     session.activityMemberSet = {};
