@@ -255,8 +255,7 @@ build_roster_snapshot(Session& session,
     // A public link publishes the content its private link's mission places in a bubble the
     // mission's world authors public and this link hosts.
     const Session* const owner = public_mission_owner_locked(session);
-    const std::uint64_t ownerBubbles =
-        owner != nullptr ? hostedBubbles & ~hosted_bubble_mask(*owner) : 0;
+    const std::uint64_t ownerBubbles = owner != nullptr ? owner_public_bubbles(session, *owner) : 0;
     layouts::Definition ownerLayout{};
     if (owner != nullptr) {
         begin_owner_publication(session, *owner);

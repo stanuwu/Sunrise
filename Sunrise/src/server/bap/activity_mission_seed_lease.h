@@ -70,6 +70,19 @@ void commit_mission_seed_publication(Session& session, const RosterPublication& 
 void commit_owner_seed_publication(Session& link, const RosterPublication& staged) noexcept;
 
 /**
+ * @return The bit of the bubble a public link's host row was advertised for, numbered in the
+ * world of the private link that advertised it; zero before the link has one.
+ */
+[[nodiscard]] std::uint64_t advertised_bubble(const Session& link) noexcept;
+
+/**
+ * Reads the bubbles a public link publishes for its owner's mission: the one it was advertised for,
+ * when the owner's world authors that bubble public. The public link's own free-roam world says
+ * nothing about the mission's bubbles.
+ */
+[[nodiscard]] std::uint64_t owner_public_bubbles(const Session& link, const Session& owner) noexcept;
+
+/**
  * Finds the private link a public link stands beside: the same account's joined private link.
  * Caller holds the BAP session lock.
  * @return Null when there is none or more than one.

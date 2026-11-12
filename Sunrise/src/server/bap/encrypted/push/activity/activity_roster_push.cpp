@@ -146,7 +146,7 @@ body_carried_here(const Session& link,
     const std::uint32_t bubble = static_cast<std::uint32_t>(pending.target.stateLocalRegion)
                                  / middleware::content::packages::tables::kSliceSetIndexFactor;
     return publishes_on_public(*owner, pending.target)
-           && ((hosted_bubble_mask(link) >> bubble) & 1U) != 0;
+           && ((owner_public_bubbles(link, *owner) >> bubble) & 1U) != 0;
 }
 
 /** Flags the decode entries of groups this body published for the owner's mission. */
@@ -796,8 +796,12 @@ bool append_roster_notification(
             core::log::writef(core::log::Channel::server,
                               core::log::Level::debug,
                               "ev=activity stage=roster_push link=public owner_gen=%llu "
+                              "owner_bubbles=0x%llX advertised=%d owner_pending=%u "
                               "owner_groups=%zu owner_auth=%zu seed_rev=%llu/%llu",
                               static_cast<unsigned long long>(owner->activity.bindingGeneration),
+                              static_cast<unsigned long long>(owner_public_bubbles(session, *owner)),
+                              session.activity.advertisedRegion,
+                              ownerScriptable ? 1U : 0U,
                               scratch.rosterOwnerKeyCount,
                               owner_auth_count(scratch, snapshot),
                               static_cast<unsigned long long>(session.activityPublicOwner.seed.revision),

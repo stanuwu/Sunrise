@@ -154,6 +154,20 @@ bool mission_seed_public_link(const Session& link, const Session& recipient) noe
            && link.accountHandle == recipient.accountHandle;
 }
 
+std::uint64_t advertised_bubble(const Session& link) noexcept {
+    const std::int32_t region = link.activity.advertisedRegion;
+    if (region < 0) {
+        return 0;
+    }
+    const std::uint32_t bubble = static_cast<std::uint32_t>(region)
+                                 / middleware::content::packages::tables::kSliceSetIndexFactor;
+    return bubble < state::build_data::scenarios::kBubbleCapacity ? std::uint64_t{1} << bubble : 0;
+}
+
+std::uint64_t owner_public_bubbles(const Session& link, const Session& owner) noexcept {
+    return advertised_bubble(link) & ~encrypted::push::activity::hosted_bubble_mask(owner);
+}
+
 Session* public_mission_owner_locked(const Session& link) noexcept {
     if (link.activity.role != ActivityClientRole::publicTarget) {
         return nullptr;
@@ -236,7 +250,7 @@ const Session* public_publisher_locked(const Session& owner,
     }
     for (const Session& link : sessions()) {
         if (mission_seed_public_link(link, owner)
-            && ((encrypted::push::activity::hosted_bubble_mask(link) >> bubble) & 1U) != 0
+            && ((owner_public_bubbles(link, owner) >> bubble) & 1U) != 0
             && public_mission_owner_locked(link) == &owner) {
             return &link;
         }
@@ -249,8 +263,7 @@ bool owner_publication_due_locked(const Session& link) noexcept {
     if (owner == nullptr) {
         return false;
     }
-    const std::uint64_t ownerBubbles = encrypted::push::activity::hosted_bubble_mask(link)
-                                       & ~encrypted::push::activity::hosted_bubble_mask(*owner);
+    const std::uint64_t ownerBubbles = owner_public_bubbles(link, *owner);
     if (ownerBubbles == 0) {
         return false;
     }
@@ -306,8 +319,11 @@ bool mission_seed_plan_hosted(const Session& session,
                               const ActivityMissionSeedPlan& plan) noexcept {
     const std::uint32_t bubble =
         plan.effectiveRegion / middleware::content::packages::tables::kSliceSetIndexFactor;
-    return bubble < state::build_data::scenarios::kBubbleCapacity
-           && ((encrypted::push::activity::hosted_bubble_mask(session) >> bubble) & 1U) != 0;
+    // The plan numbers regions in the mission's world, as the public link's advertised region is.
+    const std::uint64_t hosted = session.activity.role == ActivityClientRole::publicTarget
+                                     ? advertised_bubble(session)
+                                     : encrypted::push::activity::hosted_bubble_mask(session);
+    return bubble < state::build_data::scenarios::kBubbleCapacity && ((hosted >> bubble) & 1U) != 0;
 }
 
 namespace {
