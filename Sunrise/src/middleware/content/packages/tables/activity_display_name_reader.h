@@ -84,9 +84,8 @@ struct Source final {
 resolve(const Source& source, std::span<const Reference> references, Snapshot& output) noexcept;
 
 /**
- * Finds the string container that holds each wanted string hash, for text known only by hash.
- * Containers are read in ascending tag order and the first one holding a hash wins, so one install
- * always gives the same answer. A container that cannot be read is skipped.
+ * Finds the string container that holds each wanted hash. The lowest container tag holding a hash
+ * wins, so one install always gives the same answer; an unreadable container is skipped.
  * @param containerTags Installed string containers, in any order.
  * @param stringHashes Hashes to find, ascending without repeats.
  * @param output Receives one reference per located hash, in hash order.

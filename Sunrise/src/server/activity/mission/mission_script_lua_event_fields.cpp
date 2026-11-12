@@ -170,6 +170,8 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "expired";
     case Outcome::canceled:
         return "canceled";
+    case Outcome::queued:
+        return "queued";
     }
     return {};
 }

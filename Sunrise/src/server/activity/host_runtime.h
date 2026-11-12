@@ -172,6 +172,8 @@ enum class EffectOutcome : std::uint8_t {
     expired,
     /** The request lost its exact activity generation before it staged. */
     canceled,
+    /** The host queued the request; its own delivery events report the transport stage. */
+    queued,
 };
 
 /** Latest attempt to place one committed operator output onto its normal BAP path. */
@@ -1154,8 +1156,17 @@ enum class IngressRefusal : std::uint8_t {
 [[nodiscard]] bool request_auth_state(const state::activity::SessionBinding& binding,
                                       std::uint8_t lifetimeState) noexcept;
 
-/** Queues one outer-valid operator msg 19 for the exact activity generation. */
-[[nodiscard]] bool
+/** How the host answered one incident request. */
+enum class IncidentAnswer : std::uint8_t {
+    queued,
+    /** The output lane or the control queue is occupied; the same request can pass later. */
+    busy,
+    /** The incident, the binding or the instance cannot carry it; a retry cannot pass. */
+    refused,
+};
+
+/** Queues one outer-valid operator msg 19 for the exact, active activity generation. */
+[[nodiscard]] IncidentAnswer
 request_incident(const state::activity::SessionBinding& binding,
                  const middleware::bap::activity_message::incident::Incident& incident) noexcept;
 

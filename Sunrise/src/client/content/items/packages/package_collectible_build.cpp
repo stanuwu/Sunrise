@@ -12,10 +12,6 @@
 namespace sunrise::client::content::items::packages {
 namespace {
 
-/** The sobject table root names its row array here. */
-constexpr std::size_t kSobjectArrayDescriptor =
-    offsetof(generated::C80807c9b, incidentGlobals.hAd7fd470);
-
 /**
  * Reads the one flag slot a collectible's acquired-state expression tests.
  * A collectible gated by anything other than one plain flag test keeps the unavailable slot.
@@ -88,11 +84,7 @@ bool build_collectibles(const reader::Source& source,
             std::vector<std::byte>& blob = storage.definition;
             tables::Array sobjectRows{};
             if (!reader::read_tag(source, storage.scratch, tag, blob)
-                || !tables::read_array(std::span<const std::byte>{blob},
-                                       kSobjectArrayDescriptor,
-                                       generated::SobjectRow::kClass,
-                                       tables::kSobjectRowStride,
-                                       sobjectRows)
+                || !tables::read_sobject_rows(std::span<const std::byte>{blob}, sobjectRows)
                 || sobjectRows.count == 0 || sobjectRows.count > sobjects::kDefinitionCapacity) {
                 continue;
             }
@@ -106,9 +98,7 @@ bool build_collectibles(const reader::Source& source,
                 std::memcpy(&definition.lane4,
                             blob.data() + at + tables::kSobjectLaneOffset,
                             sizeof definition.lane4);
-                std::memcpy(&definition.typeCode,
-                            blob.data() + at + tables::kSobjectTypeCodeOffset,
-                            sizeof definition.typeCode);
+                definition.typeCode = tables::sobject_type_code(blob, at);
             }
             (void)state::build_data::publish_sobject_definitions(
                 std::span(storage.sobjectRows).first(count));

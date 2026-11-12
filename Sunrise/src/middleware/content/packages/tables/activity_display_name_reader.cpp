@@ -571,8 +571,10 @@ bool locate(const Source& source,
             std::span<const std::uint32_t> stringHashes,
             std::vector<Reference>& output) noexcept {
     output.clear();
+    // Ascending without repeats: no neighbour pair may be out of order or equal.
     if (source.read == nullptr
-        || !std::is_sorted(stringHashes.begin(), stringHashes.end(), std::less_equal<>{})) {
+        || std::adjacent_find(stringHashes.begin(), stringHashes.end(), std::greater_equal<>{})
+               != stringHashes.end()) {
         return false;
     }
     try {
@@ -591,7 +593,7 @@ bool locate(const Source& source,
             if (tag == 0 || !source.read(source.context, tag, kStringContainerClass, container)
                 || !read_array(container,
                                kContainerHashFieldOffset,
-                               sizeof(std::uint32_t),
+                               activities::kBankHashStride,
                                kMaximumArrayRows,
                                kContainerHashElementClass,
                                hashes)) {
@@ -599,7 +601,7 @@ bool locate(const Source& source,
             }
             for (std::size_t index = 0; index < hashes.count; ++index) {
                 std::uint32_t hash = 0;
-                if (!read(container, hashes.data + index * sizeof hash, hash)) {
+                if (!read(container, hashes.data + index * activities::kBankHashStride, hash)) {
                     break;
                 }
                 const auto found = std::lower_bound(stringHashes.begin(), stringHashes.end(), hash);

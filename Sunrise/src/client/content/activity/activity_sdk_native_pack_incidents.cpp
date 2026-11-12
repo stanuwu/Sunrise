@@ -1,8 +1,6 @@
 /**
- * Incident notifications for the SDK pack. An activity incident (message 19) targets one row of
- * the SObject table. A notification row (type code 0) displays its text when sent with the empty
- * incident header, and its name hash is also the string hash of that text in an installed string
- * bank, so the table and the banks together name every notification the client can show.
+ * Incident notifications for the SDK pack. A notification is an SObject row with type code 0. Its
+ * name hash is also the string hash of the text it shows, which names it in Lua.
  */
 
 #include <algorithm>
@@ -63,23 +61,18 @@ struct Row final {
     for (const std::uint32_t tag :
          {tables::kSobjectTablePrimaryTag, tables::kSobjectTableAlternateTag}) {
         std::uint32_t classId = 0;
+        tables::Array rows{};
         if (!read_tag(&packageContext, tag, blob, classId)
-            || blob.size() < tables::kSobjectFirstRow) {
+            || !tables::read_sobject_rows(std::span<const std::byte>{blob}, rows) || rows.count == 0
+            || rows.count > format::kIncidentTargetCapacity) {
             continue;
         }
-        std::uint64_t rowCount = 0;
-        std::memcpy(&rowCount, blob.data() + tables::kSobjectCountOffset, sizeof rowCount);
-        if (rowCount == 0 || rowCount > format::kIncidentTargetCapacity
-            || tables::kSobjectFirstRow
-                       + static_cast<std::size_t>(rowCount) * tables::kSobjectRowStride
-                   > blob.size()) {
-            continue;
-        }
-        for (std::uint32_t target = 0; target < static_cast<std::uint32_t>(rowCount); ++target) {
-            const std::size_t at = tables::kSobjectFirstRow + target * tables::kSobjectRowStride;
-            Row row{target, 0, 0};
-            std::memcpy(&row.nameHash, blob.data() + at + tables::kSobjectNameHashOffset, 4);
-            std::memcpy(&row.typeCode, blob.data() + at + tables::kSobjectTypeCodeOffset, 4);
+        for (std::uint32_t target = 0; target < static_cast<std::uint32_t>(rows.count); ++target) {
+            const std::size_t at = rows.dataOffset + target * tables::kSobjectRowStride;
+            Row row{target, 0, tables::sobject_type_code(blob, at)};
+            std::memcpy(&row.nameHash,
+                        blob.data() + at + tables::kSobjectNameHashOffset,
+                        sizeof row.nameHash);
             if (row.typeCode == format::kIncidentNotificationTypeCode && row.nameHash != 0
                 && row.nameHash != kEmptyNameHash) {
                 output.push_back(row);
@@ -94,7 +87,7 @@ void log_incidents(const incidents::Snapshot& snapshot, std::size_t containers) 
     std::array<char, 160> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
-                                      "ev=activity_sdk_incidents table=%08X notifications=%u "
+                                      "ev=activity_sdk_incidents table=0x%08X notifications=%u "
                                       "named=%zu containers=%zu",
                                       snapshot.tableTag,
                                       snapshot.notificationRows,

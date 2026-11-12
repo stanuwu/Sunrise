@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "../../middleware/bap/activity_message/incident.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_80804f.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808062.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808063.h"
@@ -1216,8 +1217,9 @@ struct AuthoredSceneEventKey final {
     std::uint32_t reserved{};
 };
 
-/** Rows of the SObject table, the 13-bit incident target domain. */
-inline constexpr std::uint32_t kIncidentTargetCapacity = 8192U;
+/** Valid incident targets, 0 to the highest row the wire allows. */
+inline constexpr std::uint32_t kIncidentTargetCapacity =
+    middleware::bap::activity_message::incident::kTargetMaximum + 1U;
 /** SObject type code of a notification: the empty incident header displays its text. */
 inline constexpr std::int32_t kIncidentNotificationTypeCode = 0;
 

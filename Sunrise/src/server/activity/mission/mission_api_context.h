@@ -70,7 +70,7 @@ inline constexpr ValueSpec kSendIncidentArguments[]{
      .kind = ValueKind::string,
      .optional = true,
      .bound = at_most(middleware::bap::activity_message::incident::kPayloadMaximum),
-     .note = "raw bytes; absent sends the all-zero 42-byte header, \"\" sends none"},
+     .note = "raw bytes; absent sends the all-zero notification body, \"\" sends none"},
 };
 inline constexpr ValueSpec kStateRowFields[]{
     {.name = "region_index", .kind = ValueKind::integer, .bound = between(0, kInt32Maximum)},

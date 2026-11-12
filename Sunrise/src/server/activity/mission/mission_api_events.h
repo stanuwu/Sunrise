@@ -90,9 +90,9 @@ inline constexpr ValueSpec kEffectName[]{
 inline constexpr ValueSpec kEffectOutcome[]{
     {.kind = ValueKind::string,
      .optional = true,
-     .note = "transport_staged, refused, expired or canceled"}};
+     .note = "transport_staged, refused, expired, canceled or queued"}};
 inline constexpr ValueSpec kOutcomeCode[]{
-    {.kind = ValueKind::integer, .bound = between(0, 3), .note = "the outcome in the same order"}};
+    {.kind = ValueKind::integer, .bound = between(0, 4), .note = "the outcome in the same order"}};
 inline constexpr ValueSpec kEnteredFlag[]{
     {.kind = ValueKind::boolean,
      .optional = true,

@@ -89,10 +89,7 @@ void append_hex(std::array<char, core::log::kLineCapacity>& line,
     }
 }
 
-/**
- * Logs one incident in either direction with its complete outer fields, so a live run shows what
- * the client raised and whether an operator incident reached transport. Diagnostic only.
- */
+/** Logs one incident in either direction with its complete outer fields. */
 void log_incident(const char* direction,
                   const char* result,
                   const middleware::bap::activity_message::incident::Incident& incident,
@@ -102,7 +99,7 @@ void log_incident(const char* direction,
     int used = std::snprintf(line.data(),
                              line.size(),
                              "ev=activity_incident dir=%s result=%s target=%u revision=%llu "
-                             "reason=%s extra=%u optional=%u words=%08x:%08x selector=%u:",
+                             "reason=%s extra=%u optional=%u words=0x%08X:0x%08X selector=%u:",
                              direction,
                              result,
                              incident.primaryTarget,
@@ -140,7 +137,7 @@ void log_incident(const char* direction,
         return;
     }
     core::log::write(core::log::Channel::server,
-                     core::log::Level::info,
+                     core::log::Level::debug,
                      std::string_view(line.data(), static_cast<std::size_t>(used)));
 }
 
@@ -319,35 +316,37 @@ IngressRefusal submit_incident(const IncidentInput& input) noexcept {
     return IngressRefusal::none;
 }
 
-/** Queues one outer-valid operator msg 19 for the exact activity generation. */
-bool request_incident(
-    const state::activity::SessionBinding& binding,
-    const middleware::bap::activity_message::incident::Incident& incident) noexcept {
+/** Queues one outer-valid operator msg 19 for the exact, active activity generation. */
+IncidentAnswer
+request_incident(const state::activity::SessionBinding& binding,
+                 const middleware::bap::activity_message::incident::Incident& incident) noexcept {
     if (!incident_allowed(incident) || !state::activity::binding_matches(binding)) {
-        return false;
+        ++g_refusedControls;
+        ++g_refusedIncidents;
+        return IncidentAnswer::refused;
     }
     AcquireSRWLockExclusive(&g_lock);
     const Instance* const instance = find_instance(binding);
-    if (has_queued_control(binding)
-        || (instance != nullptr
-            && (instance->view.outputPending || instance->view.scriptableReservationPending))) {
+    IncidentAnswer answer = IncidentAnswer::queued;
+    if (instance == nullptr || !instance->view.active) {
+        answer = IncidentAnswer::refused;
+    } else if (has_queued_control(binding) || instance->view.outputPending
+               || instance->view.scriptableReservationPending) {
+        answer = IncidentAnswer::busy;
+    } else {
+        PendingInput pending{};
+        pending.kind = PendingKind::incidentControl;
+        pending.incidentControl = {binding, incident};
+        answer = append_pending(pending) ? IncidentAnswer::queued : IncidentAnswer::busy;
+    }
+    if (answer == IncidentAnswer::queued) {
+        ++g_queuedControls;
+    } else {
         ++g_refusedControls;
         ++g_refusedIncidents;
-        ReleaseSRWLockExclusive(&g_lock);
-        return false;
     }
-    PendingInput pending{};
-    pending.kind = PendingKind::incidentControl;
-    pending.incidentControl = {binding, incident};
-    if (!append_pending(pending)) {
-        ++g_refusedControls;
-        ++g_refusedIncidents;
-        ReleaseSRWLockExclusive(&g_lock);
-        return false;
-    }
-    ++g_queuedControls;
     ReleaseSRWLockExclusive(&g_lock);
-    return true;
+    return answer;
 }
 
 bool incident_in_flight(const state::activity::SessionBinding& binding) noexcept {

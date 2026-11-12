@@ -200,15 +200,11 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
 }
 
 /**
- * Sends one activity incident (message 19) to the client, as the activity host would.
- * The target is an sobject row, the 13-bit incident target the client resolves to a handler. The
- * Last Wish HUD callouts are type-0 rows: 5124 "Kalli prepares to wield her weapon", 5330 "Kalli
- * conceives an ontological weapon". Out-of-range and poisoned targets are refused here, because
- * the client indexes its handler tables with them unchecked.
- * @param state Lua call holding the context and `{target, payload?}`; `payload` is a raw byte
- * string of at most 500 bytes. Absent sends the all-zero 42-byte metadata header, which is what a
- * type-0 notification row needs; pass `""` to send no payload at all.
- * @return One RequestKey. Its effect result reports that the host queued the incident.
+ * Sends one activity incident (message 19) to the client. The client indexes its handler tables
+ * with the target unchecked, so out-of-range and poisoned targets are refused here.
+ * @param state Lua call holding the context and `{target, payload?}`. An absent payload sends the
+ * all-zero notification body; `""` sends none.
+ * @return One RequestKey. Its effect result is `queued`; host delivery events report the stage.
  */
 [[nodiscard]] int context_send_incident(lua_State* state) {
     namespace incident = ::sunrise::middleware::bap::activity_message::incident;
@@ -227,8 +223,8 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
     intent.firstRow = static_cast<std::uint32_t>(target);
     lua_getfield(state, 2, optional_key(kSendIncident, "payload", api::ValueKind::string));
     if (lua_isnil(state, -1)) {
-        intent.authBody.assign(incident::kHeaderOnlyPayloadBytes, std::byte{0});
-        intent.authByteCount = static_cast<std::uint16_t>(incident::kHeaderOnlyPayloadBytes);
+        intent.authBody.assign(incident::kNotificationPayloadBytes, std::byte{0});
+        intent.authByteCount = static_cast<std::uint16_t>(incident::kNotificationPayloadBytes);
     } else {
         if (lua_type(state, -1) != LUA_TSTRING) {
             return luaL_argerror(state, 2, "send_incident payload must be a byte string");
