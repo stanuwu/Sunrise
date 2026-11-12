@@ -205,15 +205,26 @@ bool owner_scenario_wide(const Session& owner,
            && wide;
 }
 
+/** @return True when the state that owns this region of the owner's mission is public. */
+[[nodiscard]] static bool owner_state_public(const Session& owner, std::int32_t region) noexcept {
+    const state::activity_sdk::Snapshot catalog = state::activity_sdk::snapshot();
+    state::activity_sdk::BoundView view{};
+    const state::activity_sdk::Selection selection{
+        owner.activity.session, 1, owner.activity.bindingGeneration};
+    bool isPublic = false;
+    return catalog != nullptr
+           && state::activity_sdk::resolve(catalog, selection, view)
+                  == state::activity_sdk::Status::ready
+           && state::activity_sdk::state_region_is_public(view, region, isPublic) && isPublic;
+}
+
 bool publishes_on_public(const Session& owner,
                          const activity::host::ScriptableTarget& target) noexcept {
     // Publicity belongs to the state, not the bubble: an alternate state of a public bubble, such
     // as a cutscene, is private, and the client opens no public link while it stands there.
     const std::uint32_t bubble = target_bubble(target);
     return bubble < state::build_data::scenarios::kBubbleCapacity
-           && target.stateLocalRoster
-           && encrypted::push::activity::public_region(
-               owner.activity.session, owner.activity.bindingGeneration, target.stateLocalRegion)
+           && owner_state_public(owner, target.stateLocalRegion)
            && !owner_scenario_wide(owner, target.objectTag, target.registryKey);
 }
 

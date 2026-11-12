@@ -143,4 +143,29 @@ bool mod_region_is_public(const BoundView& view,
     return true;
 }
 
+bool state_region_is_public(const BoundView& view,
+                            std::int32_t effectiveRegion,
+                            bool& isPublic) noexcept {
+    isPublic = false;
+    const format::Scenario* const scenario = bound_scenario(view);
+    if (scenario == nullptr || effectiveRegion < 0) {
+        return false;
+    }
+    const auto region = static_cast<std::uint32_t>(effectiveRegion);
+    const format::State* owner = nullptr;
+    for (const format::State& state : scenario_states(*view.catalog, *scenario)) {
+        if (state.sliceSetIndex + state.stateOrdinal == region) {
+            if (owner != nullptr) {
+                return false;
+            }
+            owner = &state;
+        }
+    }
+    if (owner == nullptr) {
+        return false;
+    }
+    isPublic = (owner->publicValue & kPublicFlagMask) != 0;
+    return true;
+}
+
 } // namespace sunrise::state::activity_sdk
