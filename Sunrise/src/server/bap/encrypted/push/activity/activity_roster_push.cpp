@@ -769,9 +769,10 @@ void note_client_entered(const Session& session) noexcept {
         || mission_seed_plan_hosted(privateLink, lease.plan)) {
         return true;
     }
+    // The public link runs the bubble's own activity, so its destination is not the mission's and
+    // its hosted mask says nothing about the mission's bubbles.
     for (const Session& link : sessions()) {
-        if (mission_seed_public_link(link, privateLink) && mission_seed_plan_hosted(link, lease.plan)
-            && !link.activityRosterAwaitClientSync) {
+        if (mission_seed_public_link(link, privateLink) && !link.activityRosterAwaitClientSync) {
             return true;
         }
     }
@@ -795,11 +796,34 @@ void raise_teleport_spawn_when_valid(const Session& committed) noexcept {
             break;
         }
     }
-    if (privateLink != nullptr && !privateLink->activityRosterAwaitClientSync
-        && destination_bubble_valid(*privateLink)
-        && state::activity::membership::raise_host_teleport_spawn(
+    if (privateLink == nullptr
+        || !state::activity::membership::host_teleport_in_flight(
             privateLink->activity.session.sessionId)) {
+        return;
+    }
+    const bool arrived = !privateLink->activityRosterAwaitClientSync;
+    const bool bubbleValid = destination_bubble_valid(*privateLink);
+    const bool raised = arrived && bubbleValid
+                        && state::activity::membership::raise_host_teleport_spawn(
+                            privateLink->activity.session.sessionId);
+    if (raised) {
         privateLink->activityTeleportSpawnOwed = true;
+    }
+    std::array<char, 160> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=teleport_spawn result=%s committed=%s "
+                                      "arrived=%u bubble_valid=%u",
+                                      raised ? "raised" : "waiting",
+                                      committed.activity.role == ActivityClientRole::publicTarget
+                                          ? "public"
+                                          : "private",
+                                      arrived ? 1U : 0U,
+                                      bubbleValid ? 1U : 0U);
+    if (written > 0 && static_cast<std::size_t>(written) < line.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {line.data(), static_cast<std::size_t>(written)});
     }
 }
 

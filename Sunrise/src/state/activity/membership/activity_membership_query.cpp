@@ -358,6 +358,21 @@ bool raise_host_teleport_spawn(std::uint64_t sessionId) noexcept {
     return raised;
 }
 
+bool host_teleport_in_flight(std::uint64_t sessionId) noexcept {
+    if (sessionId == kAbsentSessionId) {
+        return false;
+    }
+    bool inFlight = false;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        inFlight = selected_member(state.sessions[target])->hasHostTeleport;
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return inFlight;
+}
+
 /** Reads the pending region the client last reported. */
 std::int32_t reported_region(std::uint64_t sessionId) noexcept {
     if (sessionId == kAbsentSessionId) {

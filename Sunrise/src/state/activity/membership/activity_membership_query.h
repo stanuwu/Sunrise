@@ -152,6 +152,9 @@ void set_program_spawn_hold(std::uint64_t sessionId, bool held) noexcept;
  */
 [[nodiscard]] bool host_teleport_armed(std::uint64_t sessionId) noexcept;
 
+/** @return True from the arm of a host-named teleport until the client's spawn retires it. */
+[[nodiscard]] bool host_teleport_in_flight(std::uint64_t sessionId) noexcept;
+
 /**
  * Raises an armed host teleport to its spawn state once the client holds the region it names.
  * The client refuses the spawn until it has applied a roster whose lifetime state passes the spawn
