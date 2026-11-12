@@ -180,7 +180,7 @@ mirror_leg(const state::activity::membership::RegionState& leg, bool reported) n
  * Maps a lock-consistent State snapshot into the fixed Middleware schema.
  * @param session Exact ActivityClient owner, which selects the authored region policy.
  * @param mutation Prepared membership operation this body publishes.
- * @param activityHostId Activity session soid this link answers on, published as identity field 4.
+ * @param activityHostId Private activity of the link's players, published as identity field 4.
  * @return Membership encoder input, without the citizen advertisement.
  */
 [[nodiscard]] membership_message::MembershipSnapshot
@@ -228,7 +228,7 @@ make_base_snapshot(const Session& session,
  * @param session Exact ActivityClient owner of the membership body.
  * @param mutation Prepared membership operation, whose region this body publishes.
  * @param retains Cleared, then receives one retained host row per advertised region.
- * @param activityHostId Activity session soid this link answers on, published as identity field 4.
+ * @param activityHostId Private activity of the link's players, published as identity field 4.
  * @return Whole current membership encoder input.
  */
 [[nodiscard]] membership_message::MembershipSnapshot
@@ -446,6 +446,16 @@ server::gameplay::AdvertisementState region_advertisement(const Session& session
         region_host(session.activity.source, session.activity.bindingGeneration, region));
 }
 
+/**
+ * A player's activity is its own private activity on every link: the client counts a private
+ * link's player monitors only for players of that activity, and never revises it once added.
+ * @return The private session a link's membership names as each player's activity.
+ */
+[[nodiscard]] static std::uint64_t player_activity_id(std::uint64_t source,
+                                                      std::uint64_t linked) noexcept {
+    return source != state::activity::kAbsentSessionId ? source : linked;
+}
+
 /** Appends one current membership svc9 notification and advances its local nonce. */
 bool append_membership_notification(Scratch& scratch,
                                     Session& session,
@@ -468,7 +478,10 @@ bool append_membership_notification(Scratch& scratch,
     std::size_t messageSize = 0;
     AdvertisementRetains retains{};
     const membership_message::MembershipSnapshot snapshot = make_wire_snapshot(
-        session, activity.membershipMutation, retains, session.activity.session.sessionId);
+        session,
+        activity.membershipMutation,
+        retains,
+        player_activity_id(session.activity.source.sessionId, session.activity.session.sessionId));
     bool encoded = membership_message::encode_replicate_membership(
         snapshot, scratch.responseBody, messageSize);
     if (!encoded) {
@@ -545,7 +558,10 @@ bool append_join_membership_notification(Scratch& scratch,
     auto initialNonce = nonce;
     std::size_t messageSize = 0;
     const membership_message::MembershipSnapshot snapshot =
-        make_base_snapshot(session, activity.membershipMutation, activity.sessionId);
+        make_base_snapshot(session,
+                           activity.membershipMutation,
+                           player_activity_id(activity.publicHost.source.sessionId,
+                                              activity.sessionId));
     const bool bodyEncoded = membership_message::encode_replicate_membership(
         snapshot, scratch.responseBody, messageSize);
     if (!bodyEncoded) {
