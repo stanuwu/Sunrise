@@ -449,10 +449,14 @@ retirement_eligibility(const sdk::BoundView& view,
     return Status::ready;
 }
 
-/** The rule is a type-66 slot of the squad's own object, sent as its wire slot. */
+/**
+ * The rule is a type-66 slot of the squad's own object, sent as its wire slot. A reservation
+ * spawns nothing on the ground: its carrier's unload supplies the spawn point.
+ */
 [[nodiscard]] Status resolve_spawn_rule(const sdk::Catalog& catalog,
                                         std::uint32_t squadRow,
                                         std::uint32_t registryKey,
+                                        squad_auth::Mode mode,
                                         std::optional<std::uint32_t> spawnRuleSlotRow,
                                         std::optional<squad_auth::SpawnRule>& output) noexcept {
     output.reset();
@@ -460,7 +464,7 @@ retirement_eligibility(const sdk::BoundView& view,
     const auto slots = catalog.slots();
     if (!spawnRuleSlotRow.has_value()) {
         // A spawner with no rule of its own cannot be placed without a selected one.
-        return squadRow < squads.size()
+        return mode != squad_auth::Mode::reserve && squadRow < squads.size()
                        && (squads[squadRow].flags & format::kSquadRequiresSelectedRule) != 0
                    ? Status::notRunnable
                    : Status::ready;
@@ -506,7 +510,7 @@ retirement_eligibility(const sdk::BoundView& view,
     }
     std::optional<squad_auth::SpawnRule> spawnRule{};
     const Status ruleStatus = resolve_spawn_rule(
-        *view.catalog, squadRow, prepared.target.registryKey, spawnRuleSlotRow, spawnRule);
+        *view.catalog, squadRow, prepared.target.registryKey, mode, spawnRuleSlotRow, spawnRule);
     if (ruleStatus != Status::ready) {
         return ruleStatus;
     }
@@ -561,7 +565,7 @@ Status availability(const sdk::BoundView& view,
     }
     std::optional<squad_auth::SpawnRule> spawnRule{};
     return resolve_spawn_rule(
-        *view.catalog, squadRow, prepared.target.registryKey, spawnRuleSlotRow, spawnRule);
+        *view.catalog, squadRow, prepared.target.registryKey, mode, spawnRuleSlotRow, spawnRule);
 }
 
 /** Queues one preflighted generated squad through the proved private type-1 route. */
