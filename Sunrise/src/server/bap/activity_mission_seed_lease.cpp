@@ -5,6 +5,7 @@
 
 #include "../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../state/activity/membership/activity_membership_query.h"
+#include "../../state/activity/runtime.h"
 #include "../../state/activity/transactions/internal.h"
 #include "../../state/build_data/scenarios/definition.h"
 #include "encrypted/push/activity/internal.h"
@@ -30,6 +31,21 @@ void commit_mission_seed_publication(Session& session, const RosterPublication& 
     lease.publishedRevision = staged.missionSeedRevision;
     if (staged.missionSeedFullSet) {
         lease.fullSetTransportRevision = staged.missionSeedRevision;
+    }
+}
+
+void commit_owner_seed_publication(Session& link, const RosterPublication& staged) noexcept {
+    MissionSeedLease& lease = link.activityPublicOwner.seed;
+    if (!staged.staged || !staged.hasOwnerSeedRevision || !lease.configured
+        || staged.bindingGeneration != link.activity.bindingGeneration
+        || lease.bindingGeneration != link.activity.bindingGeneration
+        || !state::activity::same_binding(link.activityPublicOwner.binding, staged.ownerBinding)
+        || !staged.ownerSeedRevision || lease.revision != staged.ownerSeedRevision) {
+        return;
+    }
+    lease.publishedRevision = staged.ownerSeedRevision;
+    if (staged.ownerSeedFullSet) {
+        lease.fullSetTransportRevision = staged.ownerSeedRevision;
     }
 }
 
@@ -138,8 +154,132 @@ bool mission_seed_public_link(const Session& link, const Session& recipient) noe
            && link.accountHandle == recipient.accountHandle;
 }
 
+Session* public_mission_owner_locked(const Session& link) noexcept {
+    if (link.activity.role != ActivityClientRole::publicTarget) {
+        return nullptr;
+    }
+    Session* owner = nullptr;
+    for (Session& candidate : sessions()) {
+        if (candidate.id == 0 || !candidate.authenticated
+            || candidate.activity.role != ActivityClientRole::privateCurrent
+            || candidate.activity.bindingGeneration == 0
+            || candidate.activityJoinGeneration != candidate.activity.bindingGeneration
+            || !state::activity::binding_matches(candidate.activity.session)
+            || !mission_seed_public_link(link, candidate)) {
+            continue;
+        }
+        if (owner != nullptr) {
+            return nullptr;
+        }
+        owner = &candidate;
+    }
+    return owner;
+}
+
+namespace {
+
+/** @return The bubble a state-local target's region belongs to, or the capacity when none. */
+[[nodiscard]] std::uint32_t target_bubble(const activity::host::ScriptableTarget& target) noexcept {
+    if (!target.stateLocalRoster || target.stateLocalRegion < 0) {
+        return state::build_data::scenarios::kBubbleCapacity;
+    }
+    return static_cast<std::uint32_t>(target.stateLocalRegion)
+           / middleware::content::packages::tables::kSliceSetIndexFactor;
+}
+
+} // namespace
+
+bool owner_scenario_wide(const Session& owner,
+                         std::uint32_t objectTag,
+                         std::uint32_t registryKey) noexcept {
+    const state::activity_sdk::Snapshot catalog = state::activity_sdk::snapshot();
+    state::activity_sdk::BoundView view{};
+    const state::activity_sdk::Selection selection{
+        owner.activity.session, 1, owner.activity.bindingGeneration};
+    bool wide = false;
+    return catalog != nullptr
+           && state::activity_sdk::resolve(catalog, selection, view)
+                  == state::activity_sdk::Status::ready
+           && state::activity_sdk::mission_seed_group_is_scenario_wide(
+               view, objectTag, registryKey, wide)
+           && wide;
+}
+
+bool publishes_on_public(const Session& owner,
+                         const activity::host::ScriptableTarget& target) noexcept {
+    const std::uint32_t bubble = target_bubble(target);
+    return bubble < state::build_data::scenarios::kBubbleCapacity
+           && ((encrypted::push::activity::hosted_bubble_mask(owner) >> bubble) & 1U) == 0
+           && !owner_scenario_wide(owner, target.objectTag, target.registryKey);
+}
+
+const Session* public_publisher_locked(const Session& owner,
+                                       const activity::host::ScriptableTarget& target) noexcept {
+    const std::uint32_t bubble = target_bubble(target);
+    if (bubble >= state::build_data::scenarios::kBubbleCapacity) {
+        return nullptr;
+    }
+    for (const Session& link : sessions()) {
+        if (mission_seed_public_link(link, owner)
+            && ((encrypted::push::activity::hosted_bubble_mask(link) >> bubble) & 1U) != 0
+            && public_mission_owner_locked(link) == &owner) {
+            return &link;
+        }
+    }
+    return nullptr;
+}
+
+bool owner_publication_due_locked(const Session& link) noexcept {
+    const Session* const owner = public_mission_owner_locked(link);
+    if (owner == nullptr) {
+        return false;
+    }
+    const std::uint64_t ownerBubbles = encrypted::push::activity::hosted_bubble_mask(link)
+                                       & ~encrypted::push::activity::hosted_bubble_mask(*owner);
+    if (ownerBubbles == 0) {
+        return false;
+    }
+    const std::uint64_t ownerGeneration = owner->activity.bindingGeneration;
+    const PublicOwnerPublication& publication = link.activityPublicOwner;
+    activity::host::AuthState ownerState{};
+    if (activity::host::auth_state(owner->activity.session, ownerGeneration, ownerState)
+        && (!state::activity::same_binding(publication.binding, owner->activity.session)
+            || ownerState.estateRevision != publication.estateRevision)) {
+        return true;
+    }
+    const MissionSeedLease& selected = owner->activityMissionSeed;
+    const std::uint32_t selectedBubble =
+        selected.plan.effectiveRegion / middleware::content::packages::tables::kSliceSetIndexFactor;
+    const MissionSeedLease& lease = publication.seed;
+    const bool selectionOwed =
+        selected.configured && selected.scriptSelected
+        && selected.bindingGeneration == ownerGeneration
+        && selectedBubble < state::build_data::scenarios::kBubbleCapacity
+        && ((ownerBubbles >> selectedBubble) & 1U) != 0
+        && (!lease.configured || lease.bindingGeneration != link.activity.bindingGeneration
+            || !same_mission_seed_plan(lease.plan, selected.plan)
+            || (mission_seed_publication_pending(lease, link.activity.bindingGeneration)
+                && lease.revision != lease.refusedRevision));
+    if (selectionOwed) {
+        return true;
+    }
+    activity::host::PendingScriptableOverride pending{};
+    if (!activity::host::pending_scriptable_override_for_activity_client(
+            owner->activity.session, ownerGeneration, pending)
+        || !publishes_on_public(*owner, pending.target)) {
+        return false;
+    }
+    const std::uint32_t pendingBubble =
+        static_cast<std::uint32_t>(pending.target.stateLocalRegion)
+        / middleware::content::packages::tables::kSliceSetIndexFactor;
+    return ((ownerBubbles >> pendingBubble) & 1U) != 0;
+}
+
 bool mission_seed_region_published(const Session& link, std::uint32_t effectiveRegion) noexcept {
-    const auto& lease = link.activityMissionSeed;
+    // A public link carries the selection as the owner's publication, under its own generation.
+    const auto& lease = link.activity.role == ActivityClientRole::publicTarget
+                            ? link.activityPublicOwner.seed
+                            : link.activityMissionSeed;
     return lease.configured && lease.revision != 0
            && lease.bindingGeneration == link.activity.bindingGeneration
            && lease.revision == lease.publishedRevision
@@ -193,9 +333,8 @@ bool mission_seed_hosted_publication_locked(const state::activity::SessionBindin
             continue;
         }
         // This link publishes nothing of a bubble it does not host. The client's public link
-        // hosts it and runs the free-roam activity, so it cannot carry this plan: it publishes
-        // the bubble's own state, and that receipt is the client's acknowledgement of the
-        // bubble's content.
+        // hosts it and publishes this plan for it, so that link's receipt is the client's
+        // acknowledgement of the bubble's content.
         bool clientHosting = false;
         for (const Session& link : sessions()) {
             if (!mission_seed_public_link(link, recipient)

@@ -185,6 +185,8 @@ enum class OutputStatus : std::uint8_t {
     idle,
     pending,
     waitingForEpoch,
+    /** The target's bubble is public and no public link of its client hosts it yet. */
+    waitingForPublisher,
     noLayout,
     noGroups,
     noOverrideTarget,
@@ -1547,10 +1549,16 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
                              const PendingScriptableOverride& pending,
                              OutputStatus status) noexcept;
 
-/** Commits one exact typed body and only then advances its full-slot counter. */
+/**
+ * Commits one exact typed body and only then advances its full-slot counter.
+ * @param publisher The link whose body carried it: the source link, or the public link beside it
+ * for a target in a public bubble. Delivered squad targets are recorded under it.
+ */
 void note_scriptable_transport_staged(const state::activity::SessionBinding& binding,
                                       std::uint64_t sourceGeneration,
-                                      const PendingScriptableOverride& pending) noexcept;
+                                      const PendingScriptableOverride& pending,
+                                      const state::activity::SessionBinding& publisher,
+                                      std::uint64_t publisherGeneration) noexcept;
 
 /** Clears every instance, queue, and diagnostic counter. */
 void reset() noexcept;

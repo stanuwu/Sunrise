@@ -55,9 +55,14 @@ void returned_slots(const state::activity::SessionBinding&,
                                                 entity_identities::PublicationLease&) noexcept;
 /** Commits only after the complete carrying transport publication succeeds. */
 void commit_retirement(const RetirementPlan&) noexcept;
-/** Authored opt-in becomes eligible only after its positive Auth body was delivered. */
+/**
+ * Authored opt-in becomes eligible only after its positive Auth body was delivered.
+ * @param generation The publishing link's generation; the target is recorded under that link.
+ * @param ownerGeneration The generation the body was authorized for.
+ */
 void record_delivered_target(const state::activity::SessionBinding&,
                              std::uint64_t generation,
+                             std::uint64_t ownerGeneration,
                              const activity::host::PendingScriptableOverride&) noexcept;
 /**
  * Moves a squad's target to the link that delivered its body while that link is live, else to the

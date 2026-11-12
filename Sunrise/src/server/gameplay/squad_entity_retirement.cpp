@@ -485,9 +485,10 @@ void cancel_placed_transition(const state::activity::SessionBinding& binding,
 /** Delivered squad choices replace eligibility for their exact authored target. */
 void record_delivered_target(const state::activity::SessionBinding& binding,
                              std::uint64_t generation,
+                             std::uint64_t ownerGeneration,
                              const activity::host::PendingScriptableOverride& pending) noexcept {
     if (!generation || pending.target.slotType != 1
-        || pending.expectedActivityClientGeneration != generation) {
+        || pending.expectedActivityClientGeneration != ownerGeneration) {
         return;
     }
     AcquireSRWLockExclusive(&g_lock);

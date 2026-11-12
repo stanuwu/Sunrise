@@ -107,12 +107,19 @@ struct Scratch {
                    middleware::bap::activity_message::sensor_auth_update::kBubbleKeyCapacity>,
         state::build_data::scenarios::kBubbleCapacity>
         rosterSubBlockKeys{};
+    /** Keys a public link's body publishes for the mission of the private link beside it. */
+    std::array<std::uint32_t,
+               middleware::bap::activity_message::sensor_auth_update::kPublishedGroupCapacity>
+        rosterOwnerKeys{};
+    std::size_t rosterOwnerKeyCount{};
 };
 
 /** One registry key and its package object tag copied from an exact msg-5 roster snapshot. */
 struct RosterDecodeEntry final {
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
+    /** The group belongs to the map's owner mission, so its reports are that mission's input. */
+    bool ownerPublished{};
 };
 
 /** Complete msg-5 roster identity map retained for one exact ActivityClient generation. */
@@ -121,6 +128,9 @@ struct RosterDecodeMap final {
                middleware::bap::activity_message::sensor_auth_update::kPublishedGroupCapacity>
         entries{};
     std::uint64_t bindingGeneration{};
+    /** Private link whose mission the owner-published entries belong to; empty when none. */
+    state::activity::SessionBinding ownerBinding{};
+    std::uint64_t ownerGeneration{};
     std::uint16_t count{};
     bool valid{};
 };
@@ -225,6 +235,24 @@ struct RosterPublication {
     bool activatesSquadOverride{};
     /** Set when the staged squad body carries its own per-group revision. */
     bool hasSquadStateSequence{};
+    /** Private link whose mission content this public link's body carried; empty when none. */
+    state::activity::SessionBinding ownerBinding{};
+    /** That private link's generation when the body was built. */
+    std::uint64_t ownerGeneration{};
+    /** Owner estate revision the body carried. */
+    std::uint64_t ownerEstateRevision{};
+    /** Newest owner dialogue pulse the body could carry. */
+    std::uint64_t ownerDialogueRevision{};
+    /** Owner selection revision the body carried. */
+    std::uint64_t ownerSeedRevision{};
+    /** Set when the body carried the owner's estate. */
+    bool hasOwnerEstateRevision{};
+    /** Set when the body carried an unpublished owner selection revision. */
+    bool hasOwnerSeedRevision{};
+    /** The body carried the owner selection's complete definition set. */
+    bool ownerSeedFullSet{};
+    /** The typed body above is the owner's, published here because its bubble is public. */
+    bool ownerScriptable{};
     /** Set when this body is the leave delta answering activity msg 15. */
     bool peerLeave{};
     /** Set when this body carries the team wait bit, built before the client's arrival report. */
@@ -313,6 +341,22 @@ struct MissionSeedLease {
 
 static_assert(middleware::bap::activity_message::sensor_auth_update::kAuthOverrideCapacity
               == state::build_data::scenarios::kRosterSlotCapacity);
+
+/**
+ * Mission content a public link publishes for the private link beside it: the state-local groups
+ * the mission places in a bubble its world authors public. The client counts a player in such a
+ * bubble only on the link that hosts it.
+ */
+struct PublicOwnerPublication {
+    /** The owner's activity; a different one restarts everything below. */
+    state::activity::SessionBinding binding{};
+    /** The owner's selection as this link publishes it, pinned to this link's generation. */
+    MissionSeedLease seed{};
+    /** Owner estate revision this link last carried. */
+    std::uint64_t estateRevision{};
+    /** Newest owner dialogue pulse this link carried. */
+    std::uint64_t dialogueRevision{};
+};
 
 /** ActivityClient role owned by one authenticated BAP link. */
 enum class ActivityClientRole : std::uint8_t {
@@ -539,6 +583,8 @@ struct Session {
     SquadOverrideLease activitySquadOverride{};
     /** Generated selected-state roster lease. Disabled until an operator enables its SDK row. */
     MissionSeedLease activityMissionSeed{};
+    /** A public link's publication of the mission content its private link cannot host. */
+    PublicOwnerPublication activityPublicOwner{};
     /** Queuez versions and residents published only through this authenticated peer. */
     encrypted::queuez::SessionState queuez{};
     encrypted::public_queuez::Subscriptions publicSubscriptions{};

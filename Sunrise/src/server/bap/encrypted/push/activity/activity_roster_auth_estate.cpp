@@ -1,10 +1,75 @@
 // Full retained Host Auth projected into one recipient's native roster.
+#include "../../../../../core/logging/log.h"
+#include "../../../activity_mission_seed_lease.h"
 #include "internal.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
 namespace layouts = state::build_data::scenarios;
 
+void report_state_local_unhosted(const server::activity::host::ScriptableTarget& target,
+                                 std::uint64_t revision) noexcept {
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::debug,
+                      "ev=activity stage=state_local_unhosted key=0x%08X object=0x%08X bubble=%d "
+                      "rev=%llu",
+                      target.registryKey,
+                      target.objectTag,
+                      target.stateLocalRegion
+                          / static_cast<std::int32_t>(
+                              middleware::content::packages::tables::kSliceSetIndexFactor),
+                      static_cast<unsigned long long>(revision));
+}
+
+void report_owner_key_conflict(const Session* owner,
+                               const server::activity::host::ScriptableTarget& target) noexcept {
+    if (owner == nullptr) {
+        return;
+    }
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::warn,
+                      "ev=activity stage=owner_key_conflict key=0x%08X object=0x%08X region=%d",
+                      target.registryKey,
+                      target.objectTag,
+                      target.stateLocalRegion);
+}
+
+namespace {
+
+/**
+ * @return True when this pass carries the target: a public link carries only its owner's
+ * state-local targets in the bubbles it publishes for it, and a private link carries every
+ * target except those its public link publishes.
+ */
+[[nodiscard]] bool estate_carries(const Session& link,
+                                  const Session* owner,
+                                  std::uint64_t ownerBubbles,
+                                  const server::activity::host::PendingScriptableOverride& retained)
+    noexcept {
+    const server::activity::host::ScriptableTarget& target = retained.target;
+    if (owner != nullptr) {
+        const std::uint32_t bubble =
+            static_cast<std::uint32_t>(target.stateLocalRegion)
+            / middleware::content::packages::tables::kSliceSetIndexFactor;
+        return target.stateLocalRoster && target.stateLocalRegion >= 0
+               && bubble < layouts::kBubbleCapacity && ((ownerBubbles >> bubble) & 1U) != 0
+               && publishes_on_public(*owner, target);
+    }
+    if (link.activity.role != ActivityClientRole::privateCurrent
+        || !publishes_on_public(link, target)) {
+        return true;
+    }
+    if (public_publisher_locked(link, target) == nullptr) {
+        report_state_local_unhosted(target, retained.revision);
+    }
+    return false;
+}
+
+} // namespace
+
 const char* append_retained_auth_estate(
+    const Session& link,
+    const Session* owner,
+    std::uint64_t ownerBubbles,
     const layouts::Definition& layout,
     const EffectiveRegion& region,
     Scratch& scratch,
@@ -24,6 +89,9 @@ const char* append_retained_auth_estate(
         // its first body after the pulse was retained, and its later bodies leave the slot out.
         if (retained.kind == server::activity::host::ScriptableOverrideKind::dialogue
             && retained.revision <= deliveredDialogueRevision) {
+            continue;
+        }
+        if (!estate_carries(link, owner, ownerBubbles, retained)) {
             continue;
         }
         const server::activity::host::ScriptableTarget& target = retained.target;
@@ -50,12 +118,16 @@ const char* append_retained_auth_estate(
             std::size_t position = snapshot.roster.groups.size();
             const ExistingGroup existing = find_existing_group(
                 retained.stateLocalRosterGroup, scratch, snapshot.roster, position);
-            if (existing == ExistingGroup::conflict
-                || (existing == ExistingGroup::exact
-                    && !activate_existing_group(position, bubble, scratch, snapshot.roster))
+            if (existing == ExistingGroup::conflict) {
+                report_owner_key_conflict(owner, target);
+                return "retained_group_install";
+            }
+            if ((existing == ExistingGroup::exact
+                 && !activate_existing_group(position, bubble, scratch, snapshot.roster))
                 || (existing == ExistingGroup::missing
                     && !append_state_local_group(
-                        retained.stateLocalRosterGroup, bubble, scratch, snapshot.roster))) {
+                        retained.stateLocalRosterGroup, bubble, scratch, snapshot.roster))
+                || (owner != nullptr && !note_owner_key(scratch, target.registryKey))) {
                 return "retained_group_install";
             }
         }

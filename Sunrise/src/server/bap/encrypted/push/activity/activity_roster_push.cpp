@@ -81,6 +81,8 @@ host_output_status(RosterOutcome outcome) noexcept {
  * @param hostState Host revision the body carried.
  * @param hasHostState True when the activity has a Host instance.
  * @param scriptable Typed body the body carried.
+ * @param scriptableSource The link the typed body was authorized for: this one, or the private
+ * link a public link publishes it for.
  * @param ownsPending True when the body carried the typed body.
  * @param status Refusal; only a missing epoch leaves the outputs owed.
  */
@@ -88,12 +90,15 @@ void refuse_roster_outputs(Session& session,
                            const server::activity::host::AuthState& hostState,
                            bool hasHostState,
                            const server::activity::host::PendingScriptableOverride& scriptable,
+                           const Session& scriptableSource,
                            bool ownsPending,
                            server::activity::host::OutputStatus status) noexcept {
     const std::uint64_t generation = session.activity.bindingGeneration;
     if (ownsPending) {
-        server::activity::host::note_scriptable_attempt(
-            session.activity.session, generation, scriptable, status);
+        server::activity::host::note_scriptable_attempt(scriptableSource.activity.session,
+                                                        scriptableSource.activity.bindingGeneration,
+                                                        scriptable,
+                                                        status);
         return;
     }
     if (hasHostState) {
@@ -114,11 +119,110 @@ void refuse_roster_outputs(Session& session,
     if (seedOwed) {
         seed.refusedRevision = seed.revision;
     }
+    MissionSeedLease& ownerSeed = session.activityPublicOwner.seed;
+    if (mission_seed_publication_pending(ownerSeed, generation)) {
+        ownerSeed.refusedRevision = ownerSeed.revision;
+    }
     core::log::writef(core::log::Channel::server,
                       core::log::Level::warn,
                       "ev=activity stage=roster_push result=refused host_rev=%llu seed_rev=%llu",
                       static_cast<unsigned long long>(hostState.revision),
                       static_cast<unsigned long long>(seedOwed ? seed.revision : 0));
+}
+
+/**
+ * @return True when this link's body carries the typed body: an owner's body in a bubble this
+ * public link publishes for it, else any body its private link does not leave to the public one.
+ * @param owner The private link a public link publishes for, or null for the link's own body.
+ */
+[[nodiscard]] bool
+body_carried_here(const Session& link,
+                  const Session* owner,
+                  const server::activity::host::PendingScriptableOverride& pending) noexcept {
+    if (owner == nullptr) {
+        return link.activity.role != ActivityClientRole::privateCurrent
+               || !publishes_on_public(link, pending.target);
+    }
+    const std::uint32_t bubble = static_cast<std::uint32_t>(pending.target.stateLocalRegion)
+                                 / middleware::content::packages::tables::kSliceSetIndexFactor;
+    return publishes_on_public(*owner, pending.target)
+           && ((hosted_bubble_mask(link) >> bubble) & 1U) != 0;
+}
+
+/** Flags the decode entries of groups this body published for the owner's mission. */
+void mark_owner_entries(const Scratch& scratch,
+                        const Session& owner,
+                        RosterDecodeMap& decodeMap) noexcept {
+    bool marked = false;
+    for (RosterDecodeEntry& entry : std::span(decodeMap.entries).first(decodeMap.count)) {
+        entry.ownerPublished = owner_key(scratch, entry.registryKey);
+        marked = marked || entry.ownerPublished;
+    }
+    if (marked) {
+        decodeMap.ownerBinding = owner.activity.session;
+        decodeMap.ownerGeneration = owner.activity.bindingGeneration;
+    }
+}
+
+/** Records the owner content a public link's staged body carried, settled at its commit. */
+void stage_owner_publication(Session& link,
+                             const Session& owner,
+                             const server::activity::host::AuthState& ownerState,
+                             bool hasOwnerState,
+                             bool peerLeave) noexcept {
+    RosterPublication& staged = link.activityRosterStaged;
+    const MissionSeedLease& seed = link.activityPublicOwner.seed;
+    staged.ownerBinding = owner.activity.session;
+    staged.ownerGeneration = owner.activity.bindingGeneration;
+    staged.hasOwnerEstateRevision = hasOwnerState && !peerLeave;
+    staged.ownerEstateRevision = hasOwnerState ? ownerState.estateRevision : 0;
+    staged.ownerDialogueRevision = hasOwnerState ? ownerState.dialogueRevision : 0;
+    staged.ownerSeedRevision = seed.revision;
+    staged.hasOwnerSeedRevision =
+        !peerLeave && mission_seed_publication_pending(seed, link.activity.bindingGeneration);
+    staged.ownerSeedFullSet = !peerLeave && seed.fullSetPublished;
+}
+
+/** Logs which link publishes one typed body, or that its public publisher is missing. */
+void report_scriptable_publisher(const server::activity::host::PendingScriptableOverride& pending,
+                                 const char* publisher) noexcept {
+    const server::activity::host::ScriptableTarget& target = pending.target;
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::debug,
+                      "ev=activity stage=scriptable_publisher key=0x%08X object=0x%08X slot=%u "
+                      "bubble=%d publisher=%s rev=%llu",
+                      target.registryKey,
+                      target.objectTag,
+                      static_cast<unsigned>(target.slotIndex),
+                      target.stateLocalRegion < 0
+                          ? -1
+                          : target.stateLocalRegion
+                                / static_cast<std::int32_t>(
+                                    middleware::content::packages::tables::kSliceSetIndexFactor),
+                      publisher,
+                      static_cast<unsigned long long>(pending.revision));
+}
+
+/**
+ * Reads the owner's pending typed body a public link publishes: one whose target lies in a bubble
+ * the owner's world authors public and this link hosts.
+ */
+[[nodiscard]] bool
+owner_pending_scriptable(const Session& link,
+                         const Session& owner,
+                         server::activity::host::PendingScriptableOverride& output) noexcept {
+    return server::activity::host::pending_scriptable_override_for_activity_client(
+               owner.activity.session, owner.activity.bindingGeneration, output)
+           && body_carried_here(link, &owner, output);
+}
+
+/** @return How many Auth bodies of this body target groups published for the owner. */
+[[nodiscard]] std::size_t owner_auth_count(const Scratch& scratch,
+                                           const message::Snapshot& snapshot) noexcept {
+    return static_cast<std::size_t>(std::count_if(
+        snapshot.authOverrides.begin(),
+        snapshot.authOverrides.end(),
+        [&scratch](const message::AuthOverride& value) { return owner_key(scratch, value.key); }));
 }
 
 } // namespace
@@ -181,6 +285,13 @@ bool append_roster_notification(
     server::activity::host::AuthState hostState{};
     const bool hasHostState = server::activity::host::auth_state(
         session.activity.session, session.activity.bindingGeneration, hostState);
+    // A public link also publishes its private link's mission content in public bubbles.
+    const Session* const owner = public_mission_owner_locked(session);
+    server::activity::host::AuthState ownerState{};
+    const bool hasOwnerState =
+        owner != nullptr
+        && server::activity::host::auth_state(
+            owner->activity.session, owner->activity.bindingGeneration, ownerState);
     // A link's first roster since it joined carries no line said before it: the cursor starts at
     // the newest pulse, so only the pulses retained after this body are owed to the link.
     if (hasHostState && session.activityRosterSends == 0) {
@@ -189,16 +300,39 @@ bool append_roster_notification(
     const bool hostStatePending = hasHostState && hostState.revision != 0
                                   && hostState.revision != session.activityHostStateRevision;
     server::activity::host::PendingScriptableOverride scriptablePending{};
-    const bool hasScriptablePending =
+    bool hasScriptablePending =
         server::activity::host::pending_scriptable_override_for_activity_client(
             session.activity.session, session.activity.bindingGeneration, scriptablePending);
+    // The owner's body is this link's alone: no other link publishes its public bubbles.
+    const bool ownerScriptable = !hasScriptablePending && owner != nullptr
+                                 && owner_pending_scriptable(session, *owner, scriptablePending);
+    hasScriptablePending = hasScriptablePending || ownerScriptable;
+    const Session& scriptableSource = ownerScriptable ? *owner : session;
     const bool singleScriptableLink =
-        !hasScriptablePending
+        !hasScriptablePending || ownerScriptable
         || activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
                == 1;
+    // A private link leaves a target in a public bubble to the public link that hosts it; the
+    // body waits while no such link exists, since publishing it here registers its key twice.
+    const bool publicScriptable = hasScriptablePending
+                                  && session.activity.role == ActivityClientRole::privateCurrent
+                                  && publishes_on_public(session, scriptablePending.target);
+    if (publicScriptable && !peerLeave
+        && public_publisher_locked(session, scriptablePending.target) == nullptr) {
+        report_scriptable_publisher(scriptablePending, "waiting");
+        server::activity::host::note_scriptable_attempt(
+            session.activity.session,
+            session.activity.bindingGeneration,
+            scriptablePending,
+            server::activity::host::OutputStatus::waitingForPublisher);
+    }
     // A leave delta retires every group, so it carries no host state and no typed body. Both stay
     // owed and neither is spent on it.
-    const bool ownsPending = hasScriptablePending && singleScriptableLink && !peerLeave;
+    const bool ownsPending =
+        hasScriptablePending && singleScriptableLink && !peerLeave && !publicScriptable;
+    if (ownsPending) {
+        report_scriptable_publisher(scriptablePending, ownerScriptable ? "public" : "private");
+    }
     const bool ownsHostState = hostStatePending && !peerLeave;
     // The estate this body carries holds a body another link's push staged, and the client
     // behind this link applies it itself; only a push lets that client see it. The push that
@@ -208,6 +342,10 @@ bool append_roster_notification(
     const bool estatePending = hasHostState && !peerLeave
                                && session.activity.role == ActivityClientRole::privateCurrent
                                && hostState.estateRevision != session.activityEstateRevision;
+    // The same for the owner's estate on a public link.
+    const bool ownerEstatePending =
+        hasOwnerState && !peerLeave
+        && ownerState.estateRevision != session.activityPublicOwner.estateRevision;
     const bool squadPending =
         ownsPending
         && scriptablePending.kind == server::activity::host::ScriptableOverrideKind::squad;
@@ -236,13 +374,26 @@ bool append_roster_notification(
     std::array<TailAuthOverride, server::activity::host::kPendingScriptableTailCapacity>
         tailOverrides{};
     std::size_t tailCount = 0;
+    // Owner keys are gathered while the body is built, from the typed bodies first.
+    scratch.rosterOwnerKeyCount = 0;
+    if (ownerScriptable && !note_owner_key(scratch, scriptablePending.target.registryKey)) {
+        return false;
+    }
     if (bodyPending) {
         const std::size_t queued = server::activity::host::pending_scriptable_tail(
-            session.activity.session, std::span(tailPending));
+            scriptableSource.activity.session, std::span(tailPending));
         for (std::size_t index = 0; index < queued; ++index) {
             const server::activity::host::PendingScriptableOverride& source = tailPending[index];
             if (source.byteCount == 0 || source.byteCount > source.body.size()) {
                 continue;
+            }
+            // A queued body for the other link's bubbles stages with the head and reaches its
+            // client through that link's projection of the estate.
+            if (!body_carried_here(session, ownerScriptable ? owner : nullptr, source)) {
+                continue;
+            }
+            if (ownerScriptable && !note_owner_key(scratch, source.target.registryKey)) {
+                return false;
             }
             TailAuthOverride& target = tailOverrides[tailCount];
             std::copy(source.body.begin(), source.body.end(), target.value.body.begin());
@@ -277,7 +428,7 @@ bool append_roster_notification(
         authOverride.sdkCompiled = scriptablePending.sdkCompiled;
         authOverride.present = true;
         authOverride.originatingHostRevision = scriptablePending.revision;
-    } else if (hasScriptablePending && !singleScriptableLink && !peerLeave) {
+    } else if (hasScriptablePending && !singleScriptableLink && !peerLeave && !publicScriptable) {
         server::activity::host::note_scriptable_attempt(
             session.activity.session,
             session.activity.bindingGeneration,
@@ -329,6 +480,7 @@ bool append_roster_notification(
                                   hostState,
                                   hasHostState,
                                   scriptablePending,
+                                  scriptableSource,
                                   ownsPending,
                                   host_output_status(outcome));
         }
@@ -409,7 +561,9 @@ bool append_roster_notification(
     // During the region-arrival window the pending revision's content is deliberately not in
     // this body, so the pending revision neither forces a send nor commits as published.
     const bool missionSeedPending =
-        mission_seed_publication_pending(stagedMissionSeed, session.activity.bindingGeneration);
+        mission_seed_publication_pending(stagedMissionSeed, session.activity.bindingGeneration)
+        || mission_seed_publication_pending(session.activityPublicOwner.seed,
+                                            session.activity.bindingGeneration);
     state::activity::entity_slots::PendingMutation entitySlotAllocation{};
     const bool allocationOwed = mission_entity_allocation_owed(session, squadPending);
     // Client reports commit their own State revision after this builder. Publish the dependent
@@ -502,6 +656,10 @@ bool append_roster_notification(
             session.activityEstateRevision = hostState.estateRevision;
             session.activityDialogueRevision = hostState.dialogueRevision;
         }
+        if (ownerEstatePending) {
+            session.activityPublicOwner.estateRevision = ownerState.estateRevision;
+            session.activityPublicOwner.dialogueRevision = ownerState.dialogueRevision;
+        }
         report_roster_push(
             session, snapshot, name, 0, kNoGrant, RosterOutcome::unchanged, bodyHash, forced);
         return false;
@@ -579,6 +737,9 @@ bool append_roster_notification(
     encoded =
         encoded
         && build_roster_decode_map(snapshot.roster, session.activity.bindingGeneration, decodeMap);
+    if (encoded && owner != nullptr) {
+        mark_owner_entries(scratch, *owner, decodeMap);
+    }
     encoded = encoded && stage_roster_device_publications(session, scratch, snapshot);
     bodyRefused = bodyRefused || (framed && !encoded);
     if (encoded) {
@@ -629,6 +790,20 @@ bool append_roster_notification(
         session.activityRosterStaged.hasScriptableOverride = ownsPending;
         session.activityRosterStaged.stateLocalRegion = scriptablePending.target.stateLocalRegion;
         session.activityRosterStaged.activatesSquadOverride = squadPending;
+        if (owner != nullptr) {
+            stage_owner_publication(session, *owner, ownerState, hasOwnerState, peerLeave);
+            session.activityRosterStaged.ownerScriptable = ownerScriptable && ownsPending;
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::debug,
+                              "ev=activity stage=roster_push link=public owner_gen=%llu "
+                              "owner_groups=%zu owner_auth=%zu seed_rev=%llu/%llu",
+                              static_cast<unsigned long long>(owner->activity.bindingGeneration),
+                              scratch.rosterOwnerKeyCount,
+                              owner_auth_count(scratch, snapshot),
+                              static_cast<unsigned long long>(session.activityPublicOwner.seed.revision),
+                              static_cast<unsigned long long>(
+                                  session.activityPublicOwner.seed.publishedRevision));
+        }
         if (squadPending && scriptablePending.target.stateLocalRoster
             && snapshot.roster.groupCount != 0) {
             for (std::size_t index = 0; index < snapshot.roster.groupCount; ++index) {
@@ -672,6 +847,7 @@ bool append_roster_notification(
                                   hostState,
                                   hasHostState,
                                   scriptablePending,
+                                  scriptableSource,
                                   ownsPending,
                                   server::activity::host::OutputStatus::frameRefused);
         }
@@ -731,6 +907,15 @@ bool begin_staged_roster_publication(
 
 namespace {
 
+/** @return True while the public link still stands beside the owner generation it published for. */
+[[nodiscard]] bool owner_still_current(const Session& link,
+                                       const RosterPublication& published) noexcept {
+    const Session* const owner = public_mission_owner_locked(link);
+    return owner != nullptr
+           && state::activity::same_binding(owner->activity.session, published.ownerBinding)
+           && owner->activity.bindingGeneration == published.ownerGeneration;
+}
+
 /** Tells the mission surface that the arrival answer reached the client, which spawns on it. */
 void note_client_entered(const Session& session) noexcept {
     server::activity::host::ClientStateChangeInput input{};
@@ -759,9 +944,8 @@ void note_client_entered(const Session& session) noexcept {
 
 /**
  * @return True once the bubble the client's mission selection moves it into is valid on the link
- * that hosts it: the private link itself, or else the public link the same client holds beside it.
- * The public link runs the bubble's free-roam activity and carries no mission selection, so it is
- * valid once its own roster has answered the client standing in that bubble.
+ * that hosts it: the private link itself, or else the public link the same client holds beside it,
+ * once its roster has answered the client standing in that bubble and carried the selection.
  */
 [[nodiscard]] bool destination_bubble_valid(const Session& privateLink) noexcept {
     const MissionSeedLease& lease = privateLink.activityMissionSeed;
@@ -769,10 +953,12 @@ void note_client_entered(const Session& session) noexcept {
         || mission_seed_plan_hosted(privateLink, lease.plan)) {
         return true;
     }
-    // The public link runs the bubble's own activity, so its destination is not the mission's and
-    // its hosted mask says nothing about the mission's bubbles.
+    // The public link carries the selection only where its own world also hosts the bubble;
+    // elsewhere its answer alone makes the bubble valid.
     for (const Session& link : sessions()) {
-        if (mission_seed_public_link(link, privateLink) && !link.activityRosterAwaitClientSync) {
+        if (mission_seed_public_link(link, privateLink) && !link.activityRosterAwaitClientSync
+            && (!mission_seed_plan_hosted(link, lease.plan)
+                || mission_seed_region_published(link, lease.plan.effectiveRegion))) {
             return true;
         }
     }
@@ -898,28 +1084,50 @@ void commit_staged_roster(Session& session) noexcept {
             session.activityRosterStaged.hostLifetimeState);
     }
     commit_mission_seed_publication(session, session.activityRosterStaged);
-    bool scriptableCommitReady = session.activityRosterStaged.hasScriptableOverride;
-    if (scriptableCommitReady && session.activityRosterStaged.activatesSquadOverride) {
+    commit_owner_seed_publication(session, session.activityRosterStaged);
+    const RosterPublication& published = session.activityRosterStaged;
+    // An owner body is settled under the owner's identity, and only while that owner is the one
+    // it was built for; another generation leaves it pending for its own link to publish.
+    const bool ownerCurrent = !published.ownerScriptable || owner_still_current(session, published);
+    const state::activity::SessionBinding& scriptableBinding =
+        published.ownerScriptable ? published.ownerBinding : session.activity.session;
+    const std::uint64_t scriptableGeneration =
+        published.ownerScriptable ? published.ownerGeneration : session.activity.bindingGeneration;
+    bool scriptableCommitReady = published.hasScriptableOverride && ownerCurrent;
+    if (scriptableCommitReady && published.activatesSquadOverride) {
         scriptableCommitReady = activate_staged_squad_override(session);
     }
     if (scriptableCommitReady) {
-        server::activity::host::note_scriptable_transport_staged(
-            session.activity.session,
-            session.activity.bindingGeneration,
-            session.activityRosterStaged.scriptableOverride);
-    } else if (session.activityRosterStaged.hasScriptableOverride) {
+        server::activity::host::note_scriptable_transport_staged(scriptableBinding,
+                                                                 scriptableGeneration,
+                                                                 published.scriptableOverride,
+                                                                 session.activity.session,
+                                                                 session.activity.bindingGeneration);
+    } else if (published.hasScriptableOverride && ownerCurrent) {
         server::activity::host::note_scriptable_attempt(
-            session.activity.session,
-            session.activity.bindingGeneration,
-            session.activityRosterStaged.scriptableOverride,
+            scriptableBinding,
+            scriptableGeneration,
+            published.scriptableOverride,
             server::activity::host::OutputStatus::noOverrideTarget);
+    }
+    if (published.hasOwnerEstateRevision
+        && state::activity::same_binding(session.activityPublicOwner.binding, published.ownerBinding)) {
+        // As below: a pending owner body this frame carried joined the owner's estate.
+        server::activity::host::AuthState ownerState{};
+        const bool staged = scriptableCommitReady && published.ownerScriptable
+                            && server::activity::host::auth_state(
+                                published.ownerBinding, published.ownerGeneration, ownerState);
+        session.activityPublicOwner.estateRevision =
+            staged ? ownerState.estateRevision : published.ownerEstateRevision;
+        session.activityPublicOwner.dialogueRevision =
+            staged ? ownerState.dialogueRevision : published.ownerDialogueRevision;
     }
     if (session.activityRosterStaged.hasEstateRevision) {
         // The body carried the estate as read when it was built. A pending body it also carried
         // joined the estate just above, delivered by this same body, so the cursors take that.
         server::activity::host::AuthState hostState{};
         const bool staged =
-            scriptableCommitReady
+            scriptableCommitReady && !published.ownerScriptable
             && server::activity::host::auth_state(
                 session.activity.session, session.activity.bindingGeneration, hostState);
         session.activityEstateRevision =

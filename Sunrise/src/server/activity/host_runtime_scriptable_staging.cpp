@@ -303,7 +303,9 @@ void advance_staged_guard(ScriptableGuard* guard,
 /** Records that one pending body reached the transport, so its retained estate can advance. */
 void note_scriptable_transport_staged(const state::activity::SessionBinding& binding,
                                       std::uint64_t sourceGeneration,
-                                      const PendingScriptableOverride& pending) noexcept {
+                                      const PendingScriptableOverride& pending,
+                                      const state::activity::SessionBinding& publisher,
+                                      std::uint64_t publisherGeneration) noexcept {
     if (pending.revision == 0
         || (pending.expectedActivityClientGeneration != 0
             && pending.expectedActivityClientGeneration != sourceGeneration)) {
@@ -323,7 +325,7 @@ void note_scriptable_transport_staged(const state::activity::SessionBinding& bin
             return;
         }
         server::gameplay::squad_entity_retirement::record_delivered_target(
-            binding, sourceGeneration, pending);
+            publisher, publisherGeneration, sourceGeneration, pending);
         advance_staged_guard(guard, pending);
         bool clientApplied = client_applied_override(pending.kind);
         if (pending.kind == ScriptableOverrideKind::lifetime) {
@@ -346,7 +348,7 @@ void note_scriptable_transport_staged(const state::activity::SessionBinding& bin
                 continue;
             }
             server::gameplay::squad_entity_retirement::record_delivered_target(
-                binding, sourceGeneration, queued);
+                publisher, publisherGeneration, sourceGeneration, queued);
             advance_staged_guard(queuedGuard, queued);
             clientApplied = clientApplied || client_applied_override(queued.kind);
             event.scriptableRevision = queued.revision;

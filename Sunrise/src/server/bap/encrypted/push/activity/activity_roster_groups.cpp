@@ -14,6 +14,7 @@
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/activity_sdk/runtime.h"
 #include "../../../../../state/build_data/runtime.h"
+#include "../../../activity_mission_seed_lease.h"
 #include "internal.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
@@ -270,6 +271,22 @@ same_retained_scope(const RetainedSquadGroup& group,
     return session.activity.role == ActivityClientRole::publicTarget ? publicMask : ~publicMask;
 }
 
+bool note_owner_key(Scratch& scratch, std::uint32_t key) noexcept {
+    if (owner_key(scratch, key)) {
+        return true;
+    }
+    if (scratch.rosterOwnerKeyCount >= scratch.rosterOwnerKeys.size()) {
+        return false;
+    }
+    scratch.rosterOwnerKeys[scratch.rosterOwnerKeyCount++] = key;
+    return true;
+}
+
+bool owner_key(const Scratch& scratch, std::uint32_t key) noexcept {
+    const auto keys = std::span(scratch.rosterOwnerKeys).first(scratch.rosterOwnerKeyCount);
+    return std::find(keys.begin(), keys.end(), key) != keys.end();
+}
+
 /**
  * Reports whether one link registers the destination's top-level groups.
  * The client keeps one reference table for all links. A second link that sends the same key
@@ -367,6 +384,64 @@ same_retained_scope(const RetainedSquadGroup& group,
         }
     }
     return roster.playerKeyGroup != 0;
+}
+
+bool append_owner_layout_groups(const Session& owner,
+                                std::uint64_t ownerBubbles,
+                                Scratch& scratch,
+                                message::Roster& roster) noexcept {
+    layouts::Definition layout{};
+    if (!session_scenario_layout(owner, layout)) {
+        return true;
+    }
+    if (layout.bubbleGroupCount > layout.bubbleGroups.size()
+        || layout.bubbleGroupCount > layout.bubbleGroupMasks.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < layout.bubbleGroupCount; ++index) {
+        const std::uint64_t mask = layout.bubbleGroupMasks[index] & ownerBubbles;
+        if (mask == 0) {
+            continue;
+        }
+        layouts::RosterGroup candidate{};
+        if (!state::build_data::find_roster_group(layout.bubbleGroups[index], candidate)) {
+            return false;
+        }
+        if (owner_scenario_wide(owner, candidate.objectTag, candidate.registryKey)) {
+            continue;
+        }
+        std::size_t position = roster.groups.size();
+        ExistingGroup existing = find_existing_group(candidate, scratch, roster, position);
+        if (existing == ExistingGroup::conflict) {
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::warn,
+                              "ev=activity stage=owner_key_conflict key=0x%08X object=0x%08X "
+                              "source=layout",
+                              candidate.registryKey,
+                              candidate.objectTag);
+            return false;
+        }
+        for (std::uint32_t bubble = 0; bubble < layouts::kBubbleCapacity; ++bubble) {
+            if (((mask >> bubble) & 1U) == 0) {
+                continue;
+            }
+            if (existing == ExistingGroup::missing) {
+                position = roster.groupCount;
+                if (!append_state_local_group(candidate, bubble, scratch, roster)) {
+                    return false;
+                }
+                // A layout group carries its authored body, as on the link that hosts it.
+                roster.groups[position].missionSeedOnly = false;
+                existing = ExistingGroup::exact;
+            } else if (!activate_existing_group(position, bubble, scratch, roster)) {
+                return false;
+            }
+        }
+        if (!note_owner_key(scratch, candidate.registryKey)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /** Appends one selected-state group and registers its key in its exact authored bubble. */

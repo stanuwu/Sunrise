@@ -146,6 +146,8 @@ const char* output_status_name(OutputStatus status) noexcept {
         return "pending";
     case OutputStatus::waitingForEpoch:
         return "waiting for epoch";
+    case OutputStatus::waitingForPublisher:
+        return "waiting for the public link";
     case OutputStatus::noLayout:
         return "no roster layout";
     case OutputStatus::noGroups:

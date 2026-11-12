@@ -99,6 +99,7 @@ void reset_join_state(Session& session) noexcept {
     session.activityRosterDecode = {};
     SecureZeroMemory(&session.activitySquadOverride, sizeof session.activitySquadOverride);
     session.activityMissionSeed = {};
+    session.activityPublicOwner = {};
     if (session.activity.role == ActivityClientRole::privateCurrent) {
         session.activity.advertisedRegion = -1;
     }

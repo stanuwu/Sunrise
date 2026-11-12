@@ -19,6 +19,7 @@
 #include "../../../../gameplay/squad_entity_retirement.h"
 #include "../../../activity_authority_query_owner.h"
 #include "../../../activity_authority_reset_owner.h"
+#include "../../../activity_mission_seed_lease.h"
 #include "../../activity_message/definition.h"
 #include "../../bap_connection_publication.h"
 #include "activity_arrival.h"
@@ -273,12 +274,14 @@ bool consume_activity_keepalive(Session& session,
     const bool estateDue = hostKnown && !hostRefused && isPrivate
                            && hostState.estateRevision != session.activityEstateRevision;
     server::activity::host::PendingScriptableOverride pendingScriptable{};
+    // A target in a public bubble is the public link's to publish, so it owes this link nothing.
     const bool scriptableDue =
         rosterOpen
         && activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
                == 1
         && server::activity::host::pending_scriptable_override_for_activity_client(
-            session.activity.session, session.activity.bindingGeneration, pendingScriptable);
+            session.activity.session, session.activity.bindingGeneration, pendingScriptable)
+        && !(isPrivate && publishes_on_public(session, pendingScriptable.target));
     // An operator incident waits for the arrival report. Its body always fits an empty frame, so a
     // refused attempt only lost its slot and the next push carries it.
     const bool incidentClientReady = regionReady;
@@ -331,9 +334,9 @@ bool consume_activity_keepalive(Session& session,
                 server::gameplay::complete_host_session(
                     session.activity.session,
                     arrival.index,
-                    public_region(session.activity.session,
-                                  session.activity.bindingGeneration,
-                                  arrival.index));
+                    region_host(session.activity.session,
+                                session.activity.bindingGeneration,
+                                arrival.index));
             }
             core::log::writef(core::log::Channel::server,
                               core::log::Level::info,
@@ -393,6 +396,9 @@ bool consume_activity_keepalive(Session& session,
     }
     const bool missionAllocationDue =
         rosterOpen && !hostRefused && mission_entity_allocation_owed(session, false);
+    // A public link carries the mission content its private link places in public bubbles.
+    const bool ownerPublicationDue =
+        rosterOpen && !hostRefused && !isPrivate && owner_publication_due_locked(session);
     // A bubble its holder abdicated is owed to a client still inside it, and that client's link
     // may owe nothing else, so the grant alone schedules the roster that carries it. A sole link
     // renews on its own region reports. The question is the one the roster asks, so a roster that
@@ -405,7 +411,7 @@ bool consume_activity_keepalive(Session& session,
         || (!keepaliveDue && !regionChanged && !hostStateDue && !estateDue && !scriptableDue
             && !incidentDue && !authorityResetDue && !authorityQueryDue && !hostTeleportDue
             && !retirementDue && !arrivalDue && !membershipDue && !missionAllocationDue && !grantDue
-            && !missionSeedDue)) {
+            && !missionSeedDue && !ownerPublicationDue)) {
         return false;
     }
     touchesScratch = true;
@@ -422,7 +428,7 @@ bool consume_activity_keepalive(Session& session,
     // standalone roster.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue && !membershipDue) {
         if (hostStateDue || estateDue || scriptableDue || retirementDue || arrivalDue
-            || missionAllocationDue || grantDue || missionSeedDue) {
+            || missionAllocationDue || grantDue || missionSeedDue || ownerPublicationDue) {
             published = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
         }
@@ -500,7 +506,7 @@ bool consume_activity_keepalive(Session& session,
             SecureZeroMemory(&plan, sizeof plan);
         }
         if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue || grantDue
-            || missionSeedDue) {
+            || missionSeedDue || ownerPublicationDue) {
             published = append_roster_notification(
                             session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                         || published;
