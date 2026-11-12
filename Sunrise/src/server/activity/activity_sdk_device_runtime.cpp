@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -188,9 +189,31 @@ Status set_objects_active_reserved(const sdk::BoundView& view,
                                    std::span<const std::uint32_t> extraRows,
                                    std::int32_t entryIndex,
                                    bool active,
+                                   std::optional<std::uint32_t> locationSlotRow,
                                    const host::ScriptableOutputReservation& reservation) noexcept {
     if (extraRows.size() > state::activity::mission::kIntentBurstCapacity) {
         return Status::refused;
+    }
+    auth::Type2LaneClientRef location{};
+    if (locationSlotRow.has_value()) {
+        if (view.catalog == nullptr) {
+            return Status::invalidView;
+        }
+        const auto slots = view.catalog->slots();
+        const auto objects = view.catalog->objects();
+        if (*locationSlotRow >= slots.size()) {
+            return Status::invalidSlot;
+        }
+        const sdk::format::Slot& squad = slots[*locationSlotRow];
+        if (squad.slotType != format::kSquadSlotType || squad.objectIndex >= objects.size()
+            || squad.slotIndex
+                   > static_cast<std::uint32_t>((std::numeric_limits<std::int16_t>::max)())
+            || objects[squad.objectIndex].objectKey == 0) {
+            return Status::invalidSlot;
+        }
+        location = {objects[squad.objectIndex].objectKey,
+                    static_cast<std::int8_t>(format::kSquadSlotType),
+                    static_cast<std::int16_t>(squad.slotIndex)};
     }
     // One push carries the run: the first row that resolves owns the revision and later rows
     // answer under it. A row the client's state lacks, or from a second object, is dropped.
@@ -215,6 +238,7 @@ Status set_objects_active_reserved(const sdk::BoundView& view,
                                                      prepared.generatedRosterGroup,
                                                      entryIndex,
                                                      active,
+                                                     location,
                                                      prepared.activityClientGeneration,
                                                      head ? nullptr : &reservation,
                                                      head ? &reservation : nullptr);

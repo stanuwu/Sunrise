@@ -1197,13 +1197,17 @@ request_type23_override(const state::activity::SessionBinding& binding,
                         std::uint64_t expectedActivityClientGeneration,
                         const ScriptableOutputReservation* reservation = nullptr) noexcept;
 
-/** Queues one authored object entry activation from an exact generated roster group. */
+/**
+ * Queues one authored object entry activation from an exact generated roster group.
+ * @param location Slot the entry spawns at, or an absent reference for its package transform.
+ */
 [[nodiscard]] bool request_state_local_type4_override(
     const state::activity::SessionBinding& binding,
     const ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::int32_t entryIndex,
     bool active,
+    const middleware::bap::activity_message::scriptable_auth::Type2LaneClientRef& location,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation = nullptr,
     const ScriptableOutputReservation* burstHead = nullptr) noexcept;

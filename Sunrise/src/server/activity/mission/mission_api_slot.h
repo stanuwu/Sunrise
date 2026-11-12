@@ -127,6 +127,12 @@ inline constexpr ValueSpec kObjectActiveArguments[]{
      .bound = at_most(static_cast<std::int64_t>(state::activity::mission::kIntentBurstCapacity)),
      .element = kBurstSlot,
      .note = "more objects sent on the same request"},
+    {.name = "at",
+     .kind = ValueKind::handle,
+     .ref = "slot",
+     .optional = true,
+     .slot = type_gate(slot_format::kSquadSlotType),
+     .note = "spawns each entry at the centre of this squad's living members"},
 };
 inline constexpr ValueSpec kSnapArgument{.name = "snap",
                                          .kind = ValueKind::boolean,

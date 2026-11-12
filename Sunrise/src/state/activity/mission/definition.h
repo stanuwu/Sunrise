@@ -295,6 +295,8 @@ struct TypedIntent final {
     std::int32_t squadSpawnRuleRow{-1};
     /** Catalog slot row of the type-60 volume a dialogue line waits for; absent is -1. */
     std::int32_t dialogueFilterRow{-1};
+    /** Catalog slot row of the type-1 squad an object entry spawns at; absent is -1. */
+    std::int32_t objectLocationRow{-1};
     std::int32_t entryIndex{};
     std::int32_t actorCommandValue{};
     float deviceValue{};

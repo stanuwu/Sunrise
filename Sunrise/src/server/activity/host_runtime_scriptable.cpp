@@ -514,10 +514,11 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
             candidate.type4.hasLast = true;
         }
         encoded = encoded && auth::next_type4_generation(candidate.type4, generation)
-                  && auth::encode_type4({generation, request.entryIndex, request.active},
-                                        candidate.type4,
-                                        pending.body,
-                                        written);
+                  && auth::encode_type4(
+                      {generation, request.entryIndex, request.active, request.objectLocation},
+                      candidate.type4,
+                      pending.body,
+                      written);
         pending.generation = static_cast<std::uint64_t>(generation);
     } else if (encoded && request.kind == ScriptableOverrideKind::sequence) {
         pending.bitCount = static_cast<std::uint16_t>(auth::kType5BitCount);

@@ -56,6 +56,8 @@ struct ScriptableRequest final {
     std::uint16_t authByteCount{};
     std::uint16_t dialogueCue{};
     middleware::bap::activity_message::scriptable_auth::Type2LaneClientRef dialogueFilter{};
+    /** The slot an authored object entry spawns at; absent keeps the package transform. */
+    middleware::bap::activity_message::scriptable_auth::Type2LaneClientRef objectLocation{};
     std::optional<std::uint32_t> nameHash{};
     std::optional<middleware::bap::activity_message::squad_auth::Destination> squadDestination{};
     std::optional<middleware::bap::activity_message::squad_auth::SpawnRule> squadSpawnRule{};

@@ -136,6 +136,7 @@ namespace {
            && left.actorCommandValue == right.actorCommandValue
            && left.authBitCount == right.authBitCount
            && left.effectiveRegion == right.effectiveRegion
+           && left.objectLocationRow == right.objectLocationRow
            && left.retirePlacedProps == right.retirePlacedProps && left.slotIndex == right.slotIndex
            && left.deviceValue == right.deviceValue && left.squadMode == right.squadMode
            && left.squadRetireOnReturn == right.squadRetireOnReturn

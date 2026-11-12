@@ -497,6 +497,18 @@ constexpr std::int8_t kFilterModeInside = 1;
     if (!parse_object_burst(state, intent)) {
         return 0;
     }
+    lua_getfield(state, 2, optional_key(kObjectActive, "at", api::ValueKind::handle));
+    if (!lua_isnil(state, -1)) {
+        const auto* const squadHandle =
+            static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
+        SlotDefinition squad{};
+        if (!current_slot(state, *squadHandle, squad) || squad.slotType != format::kSquadSlotType
+            || squad.slotIndex > auth_fields::kMaximumClientRefIndex) {
+            return luaL_error(state, "object location must be an authored type-1 squad");
+        }
+        intent.objectLocationRow = static_cast<std::int32_t>(squad.nativeRow);
+    }
+    lua_pop(state, 1);
     return queue_intent(state, frame, intent);
 }
 

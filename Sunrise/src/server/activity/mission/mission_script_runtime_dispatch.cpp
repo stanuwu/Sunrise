@@ -919,6 +919,10 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         if (!reserve_or_refuse(instance, reservation, "object_refused")) {
             return;
         }
+        const std::optional<std::uint32_t> location =
+            intent.objectLocationRow < 0 ? std::nullopt
+                                         : std::optional<std::uint32_t>{static_cast<std::uint32_t>(
+                                               intent.objectLocationRow)};
         std::uint64_t carrier = 0;
         const devices::Status status = deliver_through_holder(
             instance, intent, kDeviceWalk, carrier, [&](const sdk::BoundView& view) noexcept {
@@ -928,6 +932,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                     std::span(intent.burstRows).first(intent.burstRowCount),
                     intent.entryIndex,
                     intent.active,
+                    location,
                     reservation);
             });
         finish_reserved(

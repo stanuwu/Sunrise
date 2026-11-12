@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 #include "../../middleware/bap/activity_message/scriptable_auth_body.h"
@@ -134,6 +135,7 @@ play_combatant_sequence_reserved(const state::activity_sdk::BoundView& view,
  * A row is dropped, not refused, when the client's state does not hold it, or when it names a
  * second object. Only the first row's group reaches the roster, so a stranger discards the push.
  * @param extraRows Slot rows that share the reservation, so one push carries the whole run.
+ * @param locationSlotRow Type-1 squad every entry spawns at, or none for the package transform.
  * @return `queued` when at least one row resolved, else why the last one did not.
  */
 [[nodiscard]] Status
@@ -142,6 +144,7 @@ set_objects_active_reserved(const state::activity_sdk::BoundView& view,
                             std::span<const std::uint32_t> extraRows,
                             std::int32_t entryIndex,
                             bool active,
+                            std::optional<std::uint32_t> locationSlotRow,
                             const host::ScriptableOutputReservation& reservation) noexcept;
 
 /** Arms one generated combatant for its scene's squad member spawn. */

@@ -457,7 +457,7 @@ set_type2_channel(Type2ChannelState& state, std::uint32_t nameHash, float value)
 /** ClientRef slot type for an authored object entry. */
 inline constexpr std::uint8_t kType4SlotType = 4;
 inline constexpr std::uint32_t kType4Schema = generated::C8080992f::kClass;
-/** Canonical body with no transform override and no dynamic trailing entries. */
+/** Body with no position vector and no dynamic trailing entries; a location ClientRef fits. */
 inline constexpr std::size_t kType4BitCount = 252;
 inline constexpr std::size_t kType4ByteCount = (kType4BitCount + 7) / 8;
 
@@ -467,11 +467,16 @@ struct Type4GenerationGuard final {
     bool hasLast{};
 };
 
-/** One authored object entry activation. The package owns the entry and its transform. */
+/**
+ * One authored object entry activation. The package owns the entry and its transform.
+ * A present location moves the spawn: the client places the entry at a squad's live-member
+ * centroid (identity rotation) or at a combatant's transform.
+ */
 struct Type4Preset final {
     std::int32_t generation{1};
     std::int32_t entryIndex{};
     bool active{true};
+    Type2LaneClientRef location{};
 };
 
 /** Finds the next positive authored-object generation without wrapping. */

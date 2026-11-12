@@ -122,7 +122,7 @@ bool next_type4_generation(const Type4GenerationGuard& guard, std::int32_t& next
     return next_positive_generation(guard.hasLast, guard.last, next);
 }
 
-/** Encodes one package-owned entry with no caller-authored transform or child records. */
+/** Encodes one package-owned entry with no child records; the second flag sends its location. */
 bool encode_type4(const Type4Preset& preset,
                   const Type4GenerationGuard& guard,
                   std::span<std::byte> output,
@@ -137,10 +137,12 @@ bool encode_type4(const Type4Preset& preset,
         std::bit_cast<std::uint32_t>(preset.generation) + kSigned32Bias;
     const std::uint32_t entry = std::bit_cast<std::uint32_t>(preset.entryIndex) + kSigned32Bias;
     const std::uint32_t neutral = kSigned32Bias;
+    const bool located = preset.location.slotIndex >= 0;
     const bool encoded =
         writer.write(generation, kSigned32Width) && writer.write(entry, kSigned32Width)
-        && writer.write(preset.active ? 1U : 0U, kBoolWidth) && writer.write(0, kBoolWidth)
-        && writer.write(neutral, kSigned32Width) && write_absent_client_ref(writer)
+        && writer.write(preset.active ? 1U : 0U, kBoolWidth)
+        && writer.write(located ? 1U : 0U, kBoolWidth) && writer.write(neutral, kSigned32Width)
+        && write_optional_client_ref(writer, preset.location)
         && writer.write(0, kReal32Width) && writer.write(0, kReal32Width)
         && writer.write(0, kReal32Width) && writer.write(0, kBoolWidth) && writer.write(0, 2U);
     return encoded && writer.bit_count() == kType4BitCount && writer.finish(written)
