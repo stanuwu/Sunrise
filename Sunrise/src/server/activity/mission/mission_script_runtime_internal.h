@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -671,6 +672,7 @@ template <typename Row, std::size_t N>
 /**
  * Retains generation-qualified population facts before the derived squad callback.
  * Only the link that simulates the squad reports here, so the population follows that link.
+ * @param linkAlive The link's alive count after this report, or null for an invalid count.
  * @param moved The squad's levels were last read from another link, so the report moves the
  * population even when it restates no count.
  */
@@ -678,6 +680,7 @@ template <typename Row, std::size_t N>
     RuntimeInstance& instance,
     const host::SenseObservation& observation,
     std::span<const middleware::bap::activity_message::sense_update::DecodedValue> values,
+    std::optional<std::int32_t> linkAlive,
     bool moved) noexcept;
 /** Raises one event per watched authored scene that latched complete. */
 void push_scene_edges(RuntimeInstance& instance,

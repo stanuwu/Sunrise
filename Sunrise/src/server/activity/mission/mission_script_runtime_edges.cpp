@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <span>
 
 #include "../../../middleware/bap/activity_message/damage_monitor_auth.h"
@@ -876,6 +877,30 @@ void log_squad_takeover(const RuntimeInstance& instance,
     return true;
 }
 
+/**
+ * @return The alive count one link reports after this body, or null for an invalid count. The
+ * client sends the count only when it differs from the last one it sent, starting from zero, so an
+ * omitted count is the link's last level.
+ */
+[[nodiscard]] std::optional<std::int32_t>
+link_alive_count(RuntimeInstance& instance,
+                 const host::SenseObservation& observation,
+                 std::span<const sense_values::DecodedValue> body,
+                 std::uint64_t sourceGeneration) noexcept {
+    const SquadObservation* levels = retained_squad(instance, observation.key);
+    if (levels == nullptr || levels->sourceGeneration != sourceGeneration) {
+        levels = find_squad_shadow(instance, observation.key, sourceGeneration, false);
+    }
+    std::int32_t alive = levels != nullptr ? levels->aliveCount : 0;
+    const sense_values::DecodedValue* const reported =
+        sense_value(body, observation.key.schemaRow, kSquadAliveOrdinal);
+    if (reported != nullptr && reported->present
+        && !read_squad_alive(body, observation.key.schemaRow, alive)) {
+        return std::nullopt;
+    }
+    return alive;
+}
+
 } // namespace
 
 /**
@@ -915,7 +940,9 @@ void push_squad_edges(RuntimeInstance& instance,
             sense.sourceGeneration,
             {observation.key.registryKey, observation.key.slotIndex, observation.key.slotType},
             live_links(instance));
-        if (!observe_population(instance, observation, body, moved)) {
+        const std::optional<std::int32_t> linkAlive =
+            link_alive_count(instance, observation, body, sense.sourceGeneration);
+        if (!observe_population(instance, observation, body, linkAlive, moved)) {
             return;
         }
         // Accepting the population can start a new attempt, which clears every row.
