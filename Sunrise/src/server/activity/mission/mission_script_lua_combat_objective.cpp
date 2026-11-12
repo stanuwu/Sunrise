@@ -134,7 +134,8 @@ void push_task_group(lua_State* state, std::uint32_t slotRow, std::int32_t group
  * seen in the placed generation. Zero while it has no placement. A population keeps its squad's
  * catalog row, not the slot's, so it is found by the slot's ClientRef.
  */
-[[nodiscard]] std::int32_t squad_membership(const Impl& impl, const SlotDefinition& squad) noexcept {
+[[nodiscard]] std::int32_t squad_membership(const Impl& impl,
+                                            const SlotDefinition& squad) noexcept {
     const auto found = std::find_if(
         impl.squadPopulations.begin(), impl.squadPopulations.end(), [&](const auto& population) {
             return population.registryKey == squad.registryKey
@@ -150,6 +151,28 @@ void push_task_group(lua_State* state, std::uint32_t slotRow, std::int32_t group
     }
     return (std::max)(
         {found->expectedAlive, found->maximumObservedAlive, found->maximumObservedCreated});
+}
+
+/**
+ * @return The member count the squad's slot authors, or zero. A reserved squad whose members are
+ * created through their own actor slots places no counts, so its population never counts them.
+ */
+[[nodiscard]] std::int32_t authored_membership(const Impl& impl,
+                                               const SlotDefinition& slot) noexcept {
+    if (impl.definitions.squadCount == nullptr || impl.definitions.resolveSquadRow == nullptr) {
+        return 0;
+    }
+    // Squad rows are one-based within the bound scenario.
+    const std::size_t count = impl.definitions.squadCount(impl.definitions.context);
+    for (std::size_t row = 1; row <= count; ++row) {
+        SquadDefinition squad{};
+        if (impl.definitions.resolveSquadRow(
+                impl.definitions.context, static_cast<std::uint32_t>(row), squad)
+            && squad.slotRow == slot.nativeRow) {
+            return static_cast<std::int32_t>(squad.memberCount);
+        }
+    }
+    return 0;
 }
 
 /** @return True while an assignment of the squad waits in this callback or in the outbox. */
@@ -318,7 +341,8 @@ int slot_select_combat_task(lua_State* state) {
                    && retained.objectiveRegistryKey == target.registryKey
                    && retained.objectiveSlotIndex == target.slotIndex;
         });
-    const std::int32_t members = squad_membership(*impl, squad);
+    const std::int32_t counted = squad_membership(*impl, squad);
+    const std::int32_t members = counted > 0 ? counted : authored_membership(*impl, squad);
     const bool pending = assignment_pending(state, *impl, squad.nativeRow);
     const bool offered = offer != impl->objectiveOffers.end();
     if (authored == 0 || !offered || members <= 0 || pending) {
