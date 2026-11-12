@@ -37,6 +37,7 @@ constexpr float kHighlightAlpha = 0.35F;
 constexpr float kAgeColumnWidth = 34.0F;
 /** Authored width of the key column. Long keys clip; the value gets the rest. */
 constexpr float kKeyColumnWidth = 200.0F;
+/** Age, key and value. */
 constexpr int kColumnCount = 3;
 /** The Sunrise accent, as the theme defines it. */
 constexpr ImVec4 kAccent{0.95F, 0.42F, 0.16F, 1.0F};
@@ -47,9 +48,14 @@ using ValueText = std::array<char, 160>;
 /** One formatted age. */
 using AgeText = std::array<char, 16>;
 
+/** HUD-thread copy of the log; refreshed only when its sequence moves. */
 variable_log::Snapshot g_snapshot{};
 
-/** Writes one value the way a script would read it. */
+/**
+ * Writes one value the way a script would read it.
+ * @param value Value to format.
+ * @param output Receives the text; empty for an unknown kind.
+ */
 void format_value(const mission_state::VariableValue& value, ValueText& output) noexcept {
     switch (value.kind) {
     case mission_state::VariableValueKind::boolean:
@@ -77,7 +83,12 @@ void format_value(const mission_state::VariableValue& value, ValueText& output) 
     output = {};
 }
 
-/** Writes how long ago a change landed, in the largest whole unit. */
+/**
+ * Writes how long ago a change landed, in the largest whole unit.
+ * @param now Current `GetTickCount64`.
+ * @param tick Commit time of the change.
+ * @param output Receives the age text.
+ */
 void format_age(std::uint64_t now, std::uint64_t tick, AgeText& output) noexcept {
     const std::uint64_t seconds = now > tick ? (now - tick) / 1000U : 0U;
     if (seconds == 0) {
@@ -123,7 +134,12 @@ void tint_recent(std::uint64_t now, std::uint64_t tick) noexcept {
     ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(tint));
 }
 
-/** Draws one change as an age, a key and a value. */
+/**
+ * Draws one change as an age, a key and a value.
+ * @param entry Change to draw.
+ * @param now Current `GetTickCount64`.
+ * @param showSource Prefix the key with its activity id.
+ */
 void draw_row(const variable_log::Entry& entry, std::uint64_t now, bool showSource) noexcept {
     ImGui::TableNextRow();
     tint_recent(now, entry.tick);
@@ -174,9 +190,8 @@ void draw() noexcept {
         return;
     }
     // Rows on screen at once, from `client.ui.mission_variable_rows`. Older changes scroll off.
-    const std::size_t visibleRows = (std::min)(
-        static_cast<std::size_t>(settings::get().client.userInterface.missionVariableRows),
-        variable_log::kEntryCapacity);
+    const auto visibleRows =
+        static_cast<std::size_t>(settings::get().client.userInterface.missionVariableRows);
     const std::size_t first = g_snapshot.count - (std::min)(g_snapshot.count, visibleRows);
     const bool showSource = mixed_sources(first);
     const ImVec2 outerSize{ImGui::GetContentRegionAvail().x, 0.0F};

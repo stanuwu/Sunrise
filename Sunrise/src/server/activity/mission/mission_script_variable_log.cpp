@@ -15,10 +15,13 @@ namespace {
 
 namespace mission_state = state::activity::mission;
 
+/** Guards the ring: the server thread writes it, the HUD thread copies it. */
 SRWLOCK g_lock{SRWLOCK_INIT};
+/** The ring, oldest entry at `g_next` once it is full. */
 std::array<Entry, kEntryCapacity> g_entries{};
 /** Ring index the next entry is written to. */
 std::size_t g_next{};
+/** Entries held, at most the capacity. */
 std::size_t g_count{};
 /** Written under the lock, read without it by `newest_sequence`. */
 std::atomic<std::uint64_t> g_newestSequence{};
@@ -52,7 +55,15 @@ std::atomic<std::uint64_t> g_newestSequence{};
     return false;
 }
 
-/** Appends one change, holding the exclusive lock the caller already took. */
+/**
+ * Appends one change, holding the exclusive lock the caller already took.
+ * @param activityId Program that committed the change.
+ * @param key Variable that changed.
+ * @param previous Value before the change, or null when the key is new.
+ * @param value Value after the change, or null when the key was cleared.
+ * @param change How the key moved.
+ * @param tick Commit time, one per callback.
+ */
 void append_locked(std::string_view activityId,
                    const mission_state::StateKey& key,
                    const mission_state::VariableValue* previous,
@@ -155,6 +166,17 @@ void snapshot(Snapshot& output) noexcept {
         output.entries[index] = g_entries[(first + index) % kEntryCapacity];
     }
     ReleaseSRWLockShared(&g_lock);
+}
+
+/** Drops every retained change and bumps the sequence so the HUD copies the empty ring. */
+void reset() noexcept {
+    AcquireSRWLockExclusive(&g_lock);
+    g_entries = {};
+    g_next = 0;
+    g_count = 0;
+    g_newestSequence.store(g_newestSequence.load(std::memory_order_relaxed) + 1,
+                           std::memory_order_release);
+    ReleaseSRWLockExclusive(&g_lock);
 }
 
 } // namespace sunrise::server::activity::mission::variable_log

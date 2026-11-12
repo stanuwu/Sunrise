@@ -56,6 +56,8 @@ struct Snapshot final {
  * Records every difference between the variables before and after one committed callback.
  * Both spans must be sorted by key, which is the order the VM keeps them in.
  * @param activityId Program that committed the change.
+ * @param before Variables before the callback.
+ * @param after Variables the callback committed.
  */
 void record_commit(std::string_view activityId,
                    std::span<const state::activity::mission::ScriptVariable> before,
@@ -66,5 +68,8 @@ void record_commit(std::string_view activityId,
 
 /** Copies every retained change, oldest first. Safe from any thread. */
 void snapshot(Snapshot& output) noexcept;
+
+/** Drops every retained change. The sequence keeps rising, so a reader sees the drop. */
+void reset() noexcept;
 
 } // namespace sunrise::server::activity::mission::variable_log

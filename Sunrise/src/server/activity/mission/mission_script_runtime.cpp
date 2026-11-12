@@ -29,6 +29,7 @@
 #include "../host_runtime.h"
 #include "mission_script_event_batch.h"
 #include "mission_script_runtime_internal.h"
+#include "mission_script_variable_log.h"
 #include "mission_script_vm.h"
 
 namespace sunrise::server::activity::mission {
@@ -893,6 +894,7 @@ void shutdown() noexcept {
     clear_script_sources();
     clear_feed_cursors();
     clear_reload_mailbox();
+    variable_log::reset();
     g_enabled = false;
     g_pathReady = false;
     ReleaseSRWLockExclusive(&g_lock);

@@ -6,7 +6,7 @@
 
 namespace sunrise::core::ui::runtime {
 
-/** Most rows `missionVariableRows` may ask for; the variable log retains this many changes. */
+/** Most rows `missionVariableRows` may ask for; never above the variable log's capacity. */
 inline constexpr std::uint32_t kMissionVariableRowsMaximum = 48;
 
 /** In-game UI settings, read at boot. */
