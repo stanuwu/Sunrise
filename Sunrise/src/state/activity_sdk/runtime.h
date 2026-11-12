@@ -254,6 +254,8 @@ public:
     actor_sequence_bindings() const noexcept;
     [[nodiscard]] std::span<const format::AuthoredSceneEventKey>
     authored_scene_event_keys() const noexcept;
+    /** @return Every published incident notification, in target order. */
+    [[nodiscard]] std::span<const format::IncidentDefinition> incident_definitions() const noexcept;
 
 private:
     friend bool

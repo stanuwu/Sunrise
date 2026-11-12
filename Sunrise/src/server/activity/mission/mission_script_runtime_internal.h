@@ -747,8 +747,10 @@ release_delivery_state(RuntimeInstance& instance,
 /** Returns the instance to the idle stage and clears delivery timing. */
 void clear_delivery(RuntimeInstance& instance) noexcept;
 /** Retires one successfully applied local effect without assigning a Host output revision. */
-[[nodiscard]] bool complete_local_effect(RuntimeInstance& instance,
-                                         std::string_view result) noexcept;
+[[nodiscard]] bool
+complete_local_effect(RuntimeInstance& instance,
+                      std::string_view result,
+                      host::EffectOutcome outcome = host::EffectOutcome::transportStaged) noexcept;
 /** Faults the program and abandons the delivery. */
 void fault_delivery(RuntimeInstance& instance,
                     std::string_view result,
@@ -763,6 +765,8 @@ inline constexpr std::uint16_t kIntentStatusCancelPending = 0x2FF;
 inline constexpr std::uint16_t kIntentStatusSceneOutputBusy = 0x301;
 inline constexpr std::uint16_t kIntentStatusStateTransitionPending = 0x302;
 inline constexpr std::uint16_t kIntentStatusSceneLeasePending = 0x303;
+/** The host's incident slot or output lane is busy with an outbound incident. */
+inline constexpr std::uint16_t kIntentStatusIncidentBusy = 0x304;
 /** Logs one adapter status, and only when it differs from the last one logged. */
 void report_intent_status(RuntimeInstance& instance,
                           std::uint16_t status,

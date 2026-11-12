@@ -215,6 +215,9 @@ enum class IntentKind : std::uint8_t {
     watchDamage,
     setGhostLink,
     holdSpawn,
+    /** Sends one msg-19 incident to the client; `firstRow` is the target, `authBody` the payload.
+     */
+    sendIncident,
 };
 
 /** Actor sequence values belong to one combatant and one SDK/client generation. */
@@ -254,7 +257,7 @@ struct TypedIntent final {
     std::array<std::uint32_t, kIntentBurstCapacity> burstRows{};
     std::uint8_t burstRowCount{};
     std::uint8_t seedOmissionCount{};
-    /** Exact body bytes used only by the generic typed Auth action. */
+    /** Exact body bytes of the typed Auth action, or the payload of `sendIncident`. */
     std::vector<std::byte> authBody{};
     std::array<std::byte, 32> sdkBuildSha256{};
     /** Nonzero key the effect call returned to the script, for effectResult correlation. */

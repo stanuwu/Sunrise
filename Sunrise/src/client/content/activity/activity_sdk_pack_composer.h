@@ -25,6 +25,10 @@ namespace sunrise::client::content::activity::sdk_generation::behavior_inventory
 struct Snapshot;
 }
 
+namespace sunrise::client::content::activity::sdk_generation::incident_inventory {
+struct Snapshot;
+}
+
 namespace sunrise::client::content::activity::sdk_generation::policy_inventory {
 struct Snapshot;
 }
@@ -59,6 +63,8 @@ struct Inputs final {
     const squad_inventory::Snapshot* squads{};
     const authored_scene_inventory::Snapshot* authoredScenes{};
     const behavior_inventory::Snapshot* behaviors{};
+    /** Optional: without it the pack carries no incident definitions. */
+    const incident_inventory::Snapshot* incidents{};
 };
 
 /** Owned final rows whose borrowed view remains valid until this object changes. */
@@ -114,6 +120,7 @@ struct Storage final {
     std::vector<format::ActorAbility> actorAbilities{};
     std::vector<format::ActorAbilityTarget> actorAbilityTargets{};
     std::vector<format::AuthoredSceneEventKey> authoredSceneEventKeys{};
+    std::vector<format::IncidentDefinition> incidentDefinitions{};
 
     /** @return Borrowed sections in exact current format order. */
     [[nodiscard]] pack::Tables tables() const noexcept;

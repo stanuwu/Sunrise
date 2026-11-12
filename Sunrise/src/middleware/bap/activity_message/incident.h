@@ -45,6 +45,11 @@ inline constexpr std::size_t kMaximumBodyBits =
 /** Fixed byte capacity needed by the largest padded incident body. */
 inline constexpr std::size_t kMaximumBodyBytes = (kMaximumBodyBits + 7) / 8;
 
+/** Common header C80809512: a 32-bit word, then C80809514's 3-bit byte and 64-bit word. */
+inline constexpr std::size_t kCommonHeaderBits = 32 + 3 + 64;
+/** Type-0 root 0x808087F1 holds only the common header; all zero shows the row's text. */
+inline constexpr std::size_t kNotificationPayloadBytes = (kCommonHeaderBits + 7) / 8;
+
 /** Why one incident did not pass validation. */
 enum class Verdict : std::uint8_t {
     accepted,

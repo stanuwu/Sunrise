@@ -261,7 +261,9 @@ void clear_delivery(RuntimeInstance& instance) noexcept {
 }
 
 /** Retires one idempotently applied local effect and emits its terminal result. */
-bool complete_local_effect(RuntimeInstance& instance, std::string_view result) noexcept {
+bool complete_local_effect(RuntimeInstance& instance,
+                           std::string_view result,
+                           host::EffectOutcome outcome) noexcept {
     lua_vm::Intent intent{};
     if (!lua_vm::pending_intent(instance.vm, intent)
         || instance.durableIntentSequence == mission_state::kAbsentIntentSequence
@@ -287,7 +289,7 @@ bool complete_local_effect(RuntimeInstance& instance, std::string_view result) n
     lua_vm::consume_intent(instance.vm);
     ++instance.intentsTransportStaged;
     log_line(core::log::Level::info, &instance, "delivery", result);
-    queue_effect_result(instance, intent, host::EffectOutcome::transportStaged);
+    queue_effect_result(instance, intent, outcome);
     clear_delivery(instance);
     return true;
 }

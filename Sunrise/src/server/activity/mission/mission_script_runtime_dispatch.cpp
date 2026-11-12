@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
 #include "../../../state/activity/entity_slots/member_leases.h"
@@ -129,6 +130,11 @@ reserve_or_refuse(RuntimeInstance& instance,
                   host::ScriptableOutputReservation& reservation,
                   std::string_view result,
                   std::string_view reason = "host_reservation_unavailable") noexcept {
+    // An outbound incident holds the output lane until it stages, so the intent waits for it.
+    if (host::incident_in_flight(instance.view.binding)) {
+        report_intent_status(instance, kIntentStatusIncidentBusy, "incident_in_flight");
+        return false;
+    }
     if (reserve_delivery(instance, reservation)) {
         return true;
     }
@@ -616,6 +622,34 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             instance.view.binding.sessionId, intent.active);
         static_cast<void>(
             complete_local_effect(instance, intent.active ? "spawn_held" : "spawn_released"));
+        return;
+    }
+    case lua_vm::IntentKind::sendIncident: {
+        namespace incident = middleware::bap::activity_message::incident;
+        incident::Incident body{};
+        body.primaryTarget = intent.firstRow;
+        // A restored intent comes from the save, so its payload is bounded before the copy.
+        if (intent.authBody.size() > body.payload.size()) {
+            refuse_delivery(
+                instance, "incident_refused", "payload_too_long", host::EffectOutcome::refused);
+            return;
+        }
+        std::copy(intent.authBody.begin(), intent.authBody.end(), body.payload.begin());
+        body.payloadLength = static_cast<std::uint32_t>(intent.authBody.size());
+        switch (host::request_incident(instance.view.binding, body)) {
+        case host::IncidentAnswer::queued:
+            static_cast<void>(
+                complete_local_effect(instance, "incident_queued", host::EffectOutcome::queued));
+            return;
+        case host::IncidentAnswer::busy:
+            // The intent stays queued and retries each tick until its lifetime runs out.
+            report_intent_status(instance, kIntentStatusIncidentBusy, "incident_host_busy");
+            return;
+        case host::IncidentAnswer::refused:
+            refuse_delivery(
+                instance, "incident_refused", "host_refused", host::EffectOutcome::refused);
+            return;
+        }
         return;
     }
     case lua_vm::IntentKind::restartCheckpoint: {

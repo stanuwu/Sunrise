@@ -19,6 +19,7 @@
 #include "activity_sdk_actor_rsat_inventory.h"
 #include "activity_sdk_authored_scene_inventory.h"
 #include "activity_sdk_behavior_inventory.h"
+#include "activity_sdk_incident_inventory.h"
 #include "activity_sdk_pack_composer_internal.h"
 #include "activity_sdk_policy_inventory.h"
 #include "activity_sdk_squad_inventory.h"
@@ -670,6 +671,13 @@ template <typename Text> [[nodiscard]] bool keep_legacy(StringLinker& linker, co
             return false;
         }
     }
+    if (inputs.incidents != nullptr) {
+        for (const incident_inventory::Definition& row : inputs.incidents->definitions) {
+            if (!keep_legacy(linker, row.text)) {
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -729,6 +737,7 @@ pack::Tables Storage::tables() const noexcept {
         actorAbilities,
         actorAbilityTargets,
         authoredSceneEventKeys,
+        incidentDefinitions,
     };
 }
 

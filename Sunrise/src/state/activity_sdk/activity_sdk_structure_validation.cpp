@@ -139,6 +139,8 @@ bool structure(const Catalog& catalog) {
            && required_ids(catalog.task_targets(), catalog, [](const auto& row) { return row.id; })
            && required_ids(catalog.dialogue_cues(), catalog, [](const auto& row) { return row.id; })
            && required_ids(
+               catalog.incident_definitions(), catalog, [](const auto& row) { return row.text; })
+           && required_ids(
                catalog.dialogue_cue_texts(), catalog, [](const auto& row) { return row.id; })
            && required_ids(
                catalog.dialogue_cue_texts(), catalog, [](const auto& row) { return row.text; })

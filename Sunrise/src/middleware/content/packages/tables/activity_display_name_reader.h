@@ -83,4 +83,17 @@ struct Source final {
 [[nodiscard]] bool
 resolve(const Source& source, std::span<const Reference> references, Snapshot& output) noexcept;
 
+/**
+ * Finds the string container that holds each wanted hash. The lowest container tag holding a hash
+ * wins, so one install always gives the same answer; an unreadable container is skipped.
+ * @param containerTags Installed string containers, in any order.
+ * @param stringHashes Hashes to find, ascending without repeats.
+ * @param output Receives one reference per located hash, in hash order.
+ * @return False only on bad input or allocation failure.
+ */
+[[nodiscard]] bool locate(const Source& source,
+                          std::span<const std::uint32_t> containerTags,
+                          std::span<const std::uint32_t> stringHashes,
+                          std::vector<Reference>& output) noexcept;
+
 } // namespace sunrise::middleware::content::packages::tables::activity_display_names

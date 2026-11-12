@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "activity_sdk_authored_scene_inventory.h"
+#include "activity_sdk_incident_inventory.h"
 #include "activity_sdk_native_pack_pipeline.h"
 #include "activity_sdk_squad_inventory.h"
 #include "activity_sdk_topology_enrichment.h"
@@ -84,6 +85,13 @@ struct CachedTag final {
                                               const squads::Facts& facts,
                                               PackageContext& packageContext,
                                               topology_enrichment::Snapshot& enrichment);
+
+/**
+ * Reads the SObject table's notification rows and names each one by the English text its name
+ * hash keys in an installed string bank. Rows without text are left out.
+ */
+[[nodiscard]] bool build_incident_definitions(PackageContext& packageContext,
+                                              incident_inventory::Snapshot& output);
 
 /** Marks the SDK slot row of every type-43 scene whose descriptor names no resource. */
 [[nodiscard]] bool attach_unresourced_scenes(const topology_inventory::Snapshot& topology,

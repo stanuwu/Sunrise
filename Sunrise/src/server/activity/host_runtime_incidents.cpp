@@ -7,8 +7,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
+#include <string_view>
 
+#include "../../core/logging/log.h"
 #include "../../state/activity/runtime.h"
 #include "host_runtime_internal.h"
 
@@ -63,6 +66,81 @@ namespace detail {
     return nullptr;
 }
 
+/** Appends up to `limit` bytes as lowercase hex, marking a truncated tail with `+`. */
+void append_hex(std::array<char, core::log::kLineCapacity>& line,
+                int& used,
+                const std::byte* bytes,
+                std::uint32_t count,
+                std::uint32_t limit) noexcept {
+    const std::uint32_t shown = count < limit ? count : limit;
+    for (std::uint32_t index = 0; index < shown && used > 0; ++index) {
+        const int written = std::snprintf(line.data() + used,
+                                          line.size() - static_cast<std::size_t>(used),
+                                          "%02x",
+                                          std::to_integer<unsigned>(bytes[index]));
+        if (written <= 0 || static_cast<std::size_t>(used + written) >= line.size()) {
+            used = -1;
+            return;
+        }
+        used += written;
+    }
+    if (shown < count && used > 0 && static_cast<std::size_t>(used + 1) < line.size()) {
+        line[static_cast<std::size_t>(used++)] = '+';
+    }
+}
+
+/** Logs one incident in either direction with its complete outer fields. */
+void log_incident(const char* direction,
+                  const char* result,
+                  const middleware::bap::activity_message::incident::Incident& incident,
+                  std::uint64_t revision,
+                  const char* reason) noexcept {
+    std::array<char, core::log::kLineCapacity> line{};
+    int used = std::snprintf(line.data(),
+                             line.size(),
+                             "ev=activity_incident dir=%s result=%s target=%u revision=%llu "
+                             "reason=%s extra=%u optional=%u words=0x%08X:0x%08X selector=%u:",
+                             direction,
+                             result,
+                             incident.primaryTarget,
+                             static_cast<unsigned long long>(revision),
+                             reason,
+                             incident.extraTargetCount,
+                             incident.hasOptionalBlock ? 1U : 0U,
+                             incident.optionalWordA,
+                             incident.optionalWordB,
+                             incident.selectorLength);
+    if (used <= 0 || static_cast<std::size_t>(used) >= line.size()) {
+        return;
+    }
+    append_hex(line, used, incident.selector.data(), incident.selectorLength, 64);
+    if (used > 0) {
+        const int written = std::snprintf(line.data() + used,
+                                          line.size() - static_cast<std::size_t>(used),
+                                          " payload=%u:",
+                                          incident.payloadLength);
+        used = written > 0 && static_cast<std::size_t>(used + written) < line.size()
+                   ? used + written
+                   : -1;
+    }
+    append_hex(line, used, incident.payload.data(), incident.payloadLength, 160);
+    for (std::uint32_t index = 0; index < incident.extraTargetCount && used > 0; ++index) {
+        const int written = std::snprintf(line.data() + used,
+                                          line.size() - static_cast<std::size_t>(used),
+                                          index == 0 ? " extra_targets=%u" : ",%u",
+                                          incident.extraTargets[index]);
+        used = written > 0 && static_cast<std::size_t>(used + written) < line.size()
+                   ? used + written
+                   : -1;
+    }
+    if (used <= 0) {
+        return;
+    }
+    core::log::write(core::log::Channel::server,
+                     core::log::Level::debug,
+                     std::string_view(line.data(), static_cast<std::size_t>(used)));
+}
+
 /** Copies one incident summary into the chronological event history. */
 void fill_incident_event(Event& event,
                          const middleware::bap::activity_message::incident::Incident& incident,
@@ -80,8 +158,10 @@ void apply_incident(const IncidentInput& input, std::uint64_t now) noexcept {
     if (instance == nullptr || !instance->view.active) {
         ++g_droppedIngress;
         ++g_droppedIncidents;
+        log_incident("in", "dropped", input.incident, 0, "no_active_instance");
         return;
     }
+    log_incident("in", "received", input.incident, 0, "-");
     touch(*instance);
     Event event{};
     event.attemptGeneration = input.attemptGeneration;
@@ -143,6 +223,17 @@ void apply_incident_control(const IncidentRequest& request, std::uint64_t now) n
         || (record = reserve_incident_record()) == nullptr) {
         ++g_refusedControls;
         ++g_refusedIncidents;
+        log_incident("out",
+                     "refused",
+                     request.incident,
+                     0,
+                     instance == nullptr            ? "no_instance"
+                     : !instance->view.active       ? "inactive"
+                     : instance->view.outputPending ? "output_pending"
+                     : instance->view.incidentRevision
+                             == (std::numeric_limits<std::uint64_t>::max)()
+                         ? "revision_exhausted"
+                         : "history_full");
     } else {
         touch(*instance);
         ++instance->view.incidentRevision;
@@ -162,6 +253,7 @@ void apply_incident_control(const IncidentRequest& request, std::uint64_t now) n
         record->outbound = true;
         event.kind = EventKind::incidentQueued;
         fill_incident_event(event, request.incident, record->revision);
+        log_incident("out", "queued", request.incident, record->revision, "-");
     }
     append_event(event);
     if (record != nullptr && event.kind == EventKind::incidentQueued) {
@@ -224,35 +316,54 @@ IngressRefusal submit_incident(const IncidentInput& input) noexcept {
     return IngressRefusal::none;
 }
 
-/** Queues one outer-valid operator msg 19 for the exact activity generation. */
-bool request_incident(
-    const state::activity::SessionBinding& binding,
-    const middleware::bap::activity_message::incident::Incident& incident) noexcept {
+/** Queues one outer-valid operator msg 19 for the exact, active activity generation. */
+IncidentAnswer
+request_incident(const state::activity::SessionBinding& binding,
+                 const middleware::bap::activity_message::incident::Incident& incident) noexcept {
     if (!incident_allowed(incident) || !state::activity::binding_matches(binding)) {
-        return false;
+        ++g_refusedControls;
+        ++g_refusedIncidents;
+        return IncidentAnswer::refused;
     }
     AcquireSRWLockExclusive(&g_lock);
     const Instance* const instance = find_instance(binding);
-    if (has_queued_control(binding)
-        || (instance != nullptr
-            && (instance->view.outputPending || instance->view.scriptableReservationPending))) {
+    IncidentAnswer answer = IncidentAnswer::queued;
+    if (instance == nullptr || !instance->view.active) {
+        answer = IncidentAnswer::refused;
+    } else if (has_queued_control(binding) || instance->view.outputPending
+               || instance->view.scriptableReservationPending) {
+        answer = IncidentAnswer::busy;
+    } else {
+        PendingInput pending{};
+        pending.kind = PendingKind::incidentControl;
+        pending.incidentControl = {binding, incident};
+        answer = append_pending(pending) ? IncidentAnswer::queued : IncidentAnswer::busy;
+    }
+    if (answer == IncidentAnswer::queued) {
+        ++g_queuedControls;
+    } else {
         ++g_refusedControls;
         ++g_refusedIncidents;
-        ReleaseSRWLockExclusive(&g_lock);
-        return false;
     }
-    PendingInput pending{};
-    pending.kind = PendingKind::incidentControl;
-    pending.incidentControl = {binding, incident};
-    if (!append_pending(pending)) {
-        ++g_refusedControls;
-        ++g_refusedIncidents;
-        ReleaseSRWLockExclusive(&g_lock);
-        return false;
-    }
-    ++g_queuedControls;
     ReleaseSRWLockExclusive(&g_lock);
-    return true;
+    return answer;
+}
+
+bool incident_in_flight(const state::activity::SessionBinding& binding) noexcept {
+    AcquireSRWLockShared(&g_lock);
+    bool inFlight = false;
+    for (std::size_t index = g_pendingRead; index < g_pending.size() && !inFlight; ++index) {
+        const PendingInput& pending = g_pending[index];
+        inFlight = pending.kind == PendingKind::incidentControl
+                   && same_binding(pending.incidentControl.binding, binding);
+    }
+    if (!inFlight) {
+        const Instance* const instance = find_instance(binding);
+        inFlight = instance != nullptr && instance->view.outputPending
+                   && instance->view.outputKind == OutputKind::incident;
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return inFlight;
 }
 
 /** Reads the one pending incident occupying the exact instance's serialized output slot. */
@@ -308,6 +419,11 @@ void note_incident_attempt(const state::activity::SessionBinding& binding,
         record->lastSourceGeneration = sourceGeneration;
         ++record->attempts;
         record->status = status;
+        log_incident("out",
+                     status == IncidentStatus::encodeFailed ? "encode_failed" : "frame_refused",
+                     record->incident,
+                     revision,
+                     "-");
         instance->view.lastOutputAttemptTick = record->lastAttemptTick;
         instance->view.lastOutputSourceGeneration = sourceGeneration;
         ++instance->view.outputAttempts;
@@ -334,6 +450,7 @@ void note_incident_transport_staged(const state::activity::SessionBinding& bindi
         ++record->attempts;
         ++record->transportStages;
         record->status = IncidentStatus::transportStaged;
+        log_incident("out", "transport_staged", record->incident, revision, "-");
         instance->view.incidentTransportRevision = revision;
         instance->view.lastOutputAttemptTick = record->lastAttemptTick;
         instance->view.lastOutputSourceGeneration = sourceGeneration;

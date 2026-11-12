@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <span>
 #include <utility>
@@ -560,6 +561,69 @@ bool resolve(const Source& source,
         return true;
     } catch (...) {
         output = {};
+        return false;
+    }
+}
+
+/** Reads each container's hash array once and keeps the first container for every wanted hash. */
+bool locate(const Source& source,
+            std::span<const std::uint32_t> containerTags,
+            std::span<const std::uint32_t> stringHashes,
+            std::vector<Reference>& output) noexcept {
+    output.clear();
+    // Ascending without repeats: no neighbour pair may be out of order or equal.
+    if (source.read == nullptr
+        || std::adjacent_find(stringHashes.begin(), stringHashes.end(), std::greater_equal<>{})
+               != stringHashes.end()) {
+        return false;
+    }
+    try {
+        std::vector<std::uint32_t> tags(containerTags.begin(), containerTags.end());
+        std::sort(tags.begin(), tags.end());
+        tags.erase(std::unique(tags.begin(), tags.end()), tags.end());
+        // One owning container per wanted hash, zero until a container holding it is read.
+        std::vector<std::uint32_t> owners(stringHashes.size(), 0U);
+        std::size_t remaining = owners.size();
+        std::vector<std::byte> container;
+        for (const std::uint32_t tag : tags) {
+            if (remaining == 0) {
+                break;
+            }
+            Array hashes{};
+            if (tag == 0 || !source.read(source.context, tag, kStringContainerClass, container)
+                || !read_array(container,
+                               kContainerHashFieldOffset,
+                               activities::kBankHashStride,
+                               kMaximumArrayRows,
+                               kContainerHashElementClass,
+                               hashes)) {
+                continue;
+            }
+            for (std::size_t index = 0; index < hashes.count; ++index) {
+                std::uint32_t hash = 0;
+                if (!read(container, hashes.data + index * activities::kBankHashStride, hash)) {
+                    break;
+                }
+                const auto found = std::lower_bound(stringHashes.begin(), stringHashes.end(), hash);
+                if (found == stringHashes.end() || *found != hash) {
+                    continue;
+                }
+                std::uint32_t& owner =
+                    owners[static_cast<std::size_t>(found - stringHashes.begin())];
+                if (owner == 0) {
+                    owner = tag;
+                    --remaining;
+                }
+            }
+        }
+        for (std::size_t index = 0; index < owners.size(); ++index) {
+            if (owners[index] != 0) {
+                output.push_back({owners[index], stringHashes[index]});
+            }
+        }
+        return true;
+    } catch (...) {
+        output.clear();
         return false;
     }
 }

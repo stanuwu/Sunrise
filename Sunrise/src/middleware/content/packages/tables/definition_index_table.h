@@ -710,6 +710,31 @@ inline constexpr std::size_t kSobjectTypeCodeOffset =
     offsetof(schema::generated::SobjectRow, typeCode);
 static_assert(offsetof(schema::generated::SobjectRow, loreObjectOrdinal)
               == kSobjectLaneOffset + sizeof(schema::generated::SobjectRow::recordRow));
+/** The sobject table root names its row array here. */
+inline constexpr std::size_t kSobjectArrayDescriptor =
+    offsetof(schema::generated::C80807c9b, incidentGlobals.hAd7fd470);
+
+/**
+ * Locates the sobject rows in one table blob.
+ * @return False when the array is unreadable or a row falls outside the blob.
+ */
+[[nodiscard]] inline bool read_sobject_rows(std::span<const std::byte> blob, Array& rows) noexcept {
+    return read_array(blob,
+                      kSobjectArrayDescriptor,
+                      schema::generated::SobjectRow::kClass,
+                      kSobjectRowStride,
+                      rows);
+}
+
+/**
+ * Reads one row's type code. It is one signed byte; a wider read turns -1 into 255.
+ * @param blob Table blob the row lies in, already bounds checked by `read_sobject_rows`.
+ * @param row Offset of the row.
+ */
+[[nodiscard]] inline std::int32_t sobject_type_code(std::span<const std::byte> blob,
+                                                    std::size_t row) noexcept {
+    return static_cast<std::int8_t>(blob[row + kSobjectTypeCodeOffset]);
+}
 
 /** @param blob Whole container bytes. @return Its child count. */
 [[nodiscard]] std::size_t child_count(std::span<const std::byte> blob) noexcept;
