@@ -628,9 +628,12 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     // The native authority may replicate an enemy immediately after receiving its squad Auth.
     // Retain output until every recipient in that state's bubble can decode its entity
     // definitions. A client with no link in the bubble is not waited for: nothing can carry the
-    // output there, and a held intent never starts its lifetime.
+    // output there, and a held intent never starts its lifetime. A spawn hold is no output: it
+    // rides the participation record, whose roster publication waits for the arrival itself, and
+    // a release held here keeps the arrival it waits for from finishing.
     if (intent.kind != lua_vm::IntentKind::selectMissionState
         && intent.kind != lua_vm::IntentKind::restartCheckpoint
+        && intent.kind != lua_vm::IntentKind::holdSpawn
         && !server::bap::mission_seed_publication_ready(
             instance.view.binding, instance.view.activityClientGeneration, false)) {
         report_intent_status(
