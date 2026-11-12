@@ -128,11 +128,17 @@ struct MembershipSnapshot final {
     std::array<std::uint16_t, kPlayerNameUnitCount> localName{};
     std::uint8_t localNameLength{};
     /**
-     * Activity Host id every member row publishes as player-state field 4.
-     * The client sends zero there in its own join request, so the host names itself. It is the
-     * activity session soid, the same value the join result carries as its field 1.
+     * Group Activity Host id every member row publishes as player-state field 4: the activity
+     * session soid this link answers on, the same value the join result carries as its field 1.
      */
     std::uint64_t activityHostId{};
+    /**
+     * Fireteam Activity Host id the local and peer rows publish as player-state field 3: the
+     * private activity the player's fireteam runs. The client sends zero there and skips a member
+     * whose field 3 is zero; a private link counts its player monitors only for players whose
+     * field 3 names that link's activity.
+     */
+    std::uint64_t fireteamActivityHostId{};
     /** The local member's own current and pending region legs. */
     RegionLeg currentLeg{};
     RegionLeg pendingLeg{};

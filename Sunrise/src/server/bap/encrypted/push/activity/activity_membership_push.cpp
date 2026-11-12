@@ -180,16 +180,19 @@ mirror_leg(const state::activity::membership::RegionState& leg, bool reported) n
  * Maps a lock-consistent State snapshot into the fixed Middleware schema.
  * @param session Exact ActivityClient owner, which selects the authored region policy.
  * @param mutation Prepared membership operation this body publishes.
- * @param activityHostId Private activity of the link's players, published as identity field 4.
+ * @param activityHostId Activity session soid this link answers on, published as identity field 4.
+ * @param fireteamActivityHostId Private activity of the link's players, published as field 3.
  * @return Membership encoder input, without the citizen advertisement.
  */
 [[nodiscard]] membership_message::MembershipSnapshot
 make_base_snapshot(const Session& session,
                    const state::activity::membership::PendingMutation& mutation,
-                   std::uint64_t activityHostId) noexcept {
+                   std::uint64_t activityHostId,
+                   std::uint64_t fireteamActivityHostId) noexcept {
     const state::activity::membership::Snapshot& snapshot = mutation.snapshot;
     membership_message::MembershipSnapshot wire{};
     wire.activityHostId = activityHostId;
+    wire.fireteamActivityHostId = fireteamActivityHostId;
     if (mutation.memberDirectory.valid) {
         project_activity_peers(mutation.memberDirectory, wire);
     } else {
@@ -228,17 +231,19 @@ make_base_snapshot(const Session& session,
  * @param session Exact ActivityClient owner of the membership body.
  * @param mutation Prepared membership operation, whose region this body publishes.
  * @param retains Cleared, then receives one retained host row per advertised region.
- * @param activityHostId Private activity of the link's players, published as identity field 4.
+ * @param activityHostId Activity session soid this link answers on, published as identity field 4.
+ * @param fireteamActivityHostId Private activity of the link's players, published as field 3.
  * @return Whole current membership encoder input.
  */
 [[nodiscard]] membership_message::MembershipSnapshot
 make_wire_snapshot(const Session& session,
                    const state::activity::membership::PendingMutation& mutation,
                    AdvertisementRetains& retains,
-                   std::uint64_t activityHostId) noexcept {
+                   std::uint64_t activityHostId,
+                   std::uint64_t fireteamActivityHostId) noexcept {
     retains = {};
     membership_message::MembershipSnapshot wire =
-        make_base_snapshot(session, mutation, activityHostId);
+        make_base_snapshot(session, mutation, activityHostId, fireteamActivityHostId);
     if (session.activity.role != ActivityClientRole::privateCurrent
         || !state::activity::binding_matches(session.activity.source)) {
         return wire;
@@ -447,9 +452,10 @@ server::gameplay::AdvertisementState region_advertisement(const Session& session
 }
 
 /**
- * A player's activity is its own private activity on every link: the client counts a private
- * link's player monitors only for players of that activity, and never revises it once added.
- * @return The private session a link's membership names as each player's activity.
+ * A player's fireteam activity is its own private activity on every link: the client counts a
+ * private link's player monitors only for players of that activity, and never revises it once
+ * the player is added.
+ * @return The private session a link's membership names as each player's fireteam activity.
  */
 [[nodiscard]] static std::uint64_t player_activity_id(std::uint64_t source,
                                                       std::uint64_t linked) noexcept {
@@ -481,6 +487,7 @@ bool append_membership_notification(Scratch& scratch,
         session,
         activity.membershipMutation,
         retains,
+        session.activity.session.sessionId,
         player_activity_id(session.activity.source.sessionId, session.activity.session.sessionId));
     bool encoded = membership_message::encode_replicate_membership(
         snapshot, scratch.responseBody, messageSize);
@@ -560,6 +567,7 @@ bool append_join_membership_notification(Scratch& scratch,
     const membership_message::MembershipSnapshot snapshot =
         make_base_snapshot(session,
                            activity.membershipMutation,
+                           activity.sessionId,
                            player_activity_id(activity.publicHost.source.sessionId,
                                               activity.sessionId));
     const bool bodyEncoded = membership_message::encode_replicate_membership(
