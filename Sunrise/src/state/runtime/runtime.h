@@ -365,6 +365,19 @@ struct PendingRecordRewardGrant {
     std::size_t afterProfileItemCount{};
     std::size_t rewardCount{};
     VendorRankRewardClaim vendorReward{};
+    /** The rows are existing items a vendor moved, not acquisitions. */
+    bool vendorTransfer{};
+    /** A held pursuit or wrapper the grant consumes; it leaves the selected character with it. */
+    std::uint64_t redeemedInstanceSoid{};
+    /** The completion and completion-context values a redemption sets, before its quest step. */
+    PreparedQuestStep completionValue{};
+    PreparedQuestStep completionContextValue{};
+    PreparedQuestStep questStep{};
+    PreparedProgressionCredit progression{};
+    /** Seasonal XP the commit grants with the rest of this grant. */
+    std::int32_t seasonalExperience{};
+    /** Seasonal XP total the preparation observed; the grant is refused once it moves. */
+    std::int32_t seasonalExperienceBefore{};
     bool prepared{};
 
     /** @return The flags of the wrappers this grant consumes. */

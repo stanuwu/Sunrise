@@ -480,8 +480,7 @@ prepare_acquisition_effects(GrantView view,
     if (flagged_perk(item)) {
         reason = "perk_acquisition";
         if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
-            || !requested.sockets.empty()
-            || item.questInitialization.scope != Quest::Scope::none) {
+            || !requested.sockets.empty() || item.questInitialization.scope != Quest::Scope::none) {
             return RewardPreparation::unresolvable;
         }
         prepared.kind = RecordRewardKind::accountUnlock;
@@ -568,11 +567,11 @@ prepare_acquisition_effects(GrantView view,
             return catalogs_settled() ? RewardPreparation::unresolvable
                                       : RewardPreparation::notReady;
         }
-        const RewardPreparation credited = credit_dawning_bounties(
-            working.characters[characterIndex],
-            DawningEvent::delivery,
-            spent.definitionHash,
-            nowSeconds);
+        const RewardPreparation credited =
+            credit_dawning_bounties(working.characters[characterIndex],
+                                    DawningEvent::delivery,
+                                    spent.definitionHash,
+                                    nowSeconds);
         if (credited != RewardPreparation::prepared) {
             return credited;
         }
@@ -748,8 +747,7 @@ RewardPreparation prepare_reward_grant(const RewardGrantRequest& request,
     if (spent != RewardPreparation::prepared) {
         return spent;
     }
-    const GrantView view{
-        working, characterIndex, {}, nextInstanceSoid, placed, request.nowSeconds};
+    const GrantView view{working, characterIndex, {}, nextInstanceSoid, placed, request.nowSeconds};
     const auto rows = prepare_reward_rows(view, rewards, mutation, reason);
     if (rows != RewardPreparation::prepared) {
         return rows;
@@ -840,6 +838,111 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             return false;
         }
         after.characterObjectValues[claim.rankCreditRow] = claim.beforeCredits - 1;
+    }
+    for (const PreparedQuestStep* move : mutation.saved_value_moves()) {
+        if (move->next.scope != Quest::Scope::none) {
+            quest_value(after, move->next) = move->next.value;
+        }
+    }
+    if (credits) {
+        progression_value(after, progression) = progression.value;
+    }
+    // Pickups of one balance chain, so each observes the value the one before it left.
+    const auto apply = [&after](const std::optional<AccountUnlockWrite>& write) noexcept {
+        if (!write) {
+            return true;
+        }
+        if (write->index >= after.objectiveValues.size()
+            || after.objectiveValues[write->index] != write->previousValue) {
+            return false;
+        }
+        after.objectiveValues[write->index] = write->value;
+        return true;
+    };
+    for (const auto& reward : rewards) {
+        if (!apply(reward.ingredientCredit) || !apply(reward.chooserReadiness)) {
+            return false;
+        }
+    }
+    // The commit grants the XP, after this image has gone out in the grant's frame.
+    return mutation.seasonalExperience == 0
+           || preview_seasonal_experience(
+               mutation.seasonalExperienceBefore, mutation.seasonalExperience, after);
+}
+
+/** A reward with no acquisition flag leaves its collectible state unknown, so it marks nothing. */
+bool newly_collected(const PendingRecordRewardGrant& mutation,
+                     const GrantedRow& row,
+                     const build_data::items::Definition& item) noexcept {
+    if (!row.newRow || mutation.rewardCount > mutation.rewards.size()
+        || !build_data::collectibles::grants_item(item.definitionIndex)) {
+        return false;
+    }
+    const auto rewards = std::span(mutation.rewards).first(mutation.rewardCount);
+    return std::any_of(rewards.begin(), rewards.end(), [&](const PreparedRecordReward& reward) {
+        return reward.definitionHash == item.definitionHash
+               && reward.acquiredFlag != build_data::rewards::kAbsent
+               && reward.previousFlag != unlocks::kFlagSet;
+    });
+}
+
+/** Diffs the grant's images by instance identity, new character instances first. */
+bool granted_residents(const PendingRecordRewardGrant& mutation,
+                       GrantedResidents& output) noexcept {
+    output = {};
+    const auto add = [](auto& soids, std::size_t& count, std::uint64_t soid) noexcept {
+        if (count == soids.size()) {
+            return false;
+        }
+        soids[count++] = soid;
+        return true;
+    };
+    const CharacterState& before = mutation.beforeCharacter;
+    const CharacterState& after = mutation.afterCharacter;
+    if (before.inventory.count > before.inventory.values.size()
+        || after.inventory.count > after.inventory.values.size()) {
+        return false;
+    }
+    // A FIFO bucket counts its equipped rows, so an eviction can move or discard one.
+    const auto holds = [](const CharacterState& character, std::uint64_t soid) noexcept {
+        const auto held = std::span(character.inventory.values).first(character.inventory.count);
+        const auto& slots = character.equipment.slots;
+        return std::any_of(held.begin(),
+                           held.end(),
+                           [&](const auto& item) noexcept { return item.instanceSoid == soid; })
+               || std::any_of(slots.begin(), slots.end(), [&](const auto& item) noexcept {
+                      return item && item->instanceSoid == soid;
+                  });
+    };
+    for (std::size_t index = 0; index < after.inventory.count; ++index) {
+        const std::uint64_t soid = after.inventory.values[index].instanceSoid;
+        if (!holds(before, soid) && !add(output.soids, output.count, soid)) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < before.inventory.count; ++index) {
+        const std::uint64_t soid = before.inventory.values[index].instanceSoid;
+        if (!holds(after, soid) && !add(output.released, output.releasedCount, soid)) {
+            return false;
+        }
+    }
+    for (const auto& equipped : before.equipment.slots) {
+        if (equipped && !holds(after, equipped->instanceSoid)
+            && !add(output.released, output.releasedCount, equipped->instanceSoid)) {
+            return false;
+        }
+    }
+    const auto priorProfile =
+        std::span(mutation.beforeProfileItems).first(mutation.beforeProfileItemCount);
+    for (std::size_t index = 0; index < mutation.afterProfileItemCount; ++index) {
+        const std::uint64_t soid = mutation.afterProfileItems[index].instanceSoid;
+        if (soid != 0
+            && std::none_of(priorProfile.begin(),
+                            priorProfile.end(),
+                            [&](const auto& item) noexcept { return item.instanceSoid == soid; })
+            && !add(output.soids, output.count, soid)) {
+            return false;
+        }
     }
     return true;
 }
@@ -979,7 +1082,24 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation, bool* artifactBonu
                                                     mutation.vendorReward.rankCreditRow,
                                                     mutation.vendorReward.beforeCredits - 1);
         }
-        ready = ready && transaction.commit();
+        for (const PreparedQuestStep* move : mutation.saved_value_moves()) {
+            const Quest& value = move->next;
+            if (ready && value.scope != Quest::Scope::none) {
+                ready = investment::store::write_unlock(quest_bank(value), value.row, value.value);
+            }
+        }
+        const PreparedProgressionCredit& progression = mutation.progression;
+        if (ready && progression.scope != build_data::progressions::Scope::unreplicated) {
+            ready = investment::store::write_unlock(
+                progression.scope == build_data::progressions::Scope::account
+                    ? investment::store::Bank::accountProgressions
+                    : investment::store::Bank::characterProgressions,
+                progression.definitionIndex,
+                progression.value);
+        }
+        // The XP is granted last, onto the total preview_reward_unlocks checked above.
+        ready = ready && grant_reward_experience(mutation.seasonalExperience, bonusMoved)
+                && transaction.commit();
     }
     if (!ready && mutation.claimedRecordIndex != kUnclaimedRecordIndex) {
         // The claim was written when the reward was prepared, so a refused install undoes it.

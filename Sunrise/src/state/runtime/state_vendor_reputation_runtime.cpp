@@ -4,6 +4,7 @@
 #include <limits>
 #include <span>
 
+#include "../../core/runtime/server_clock.h"
 #include "../../middleware/crypto/random_bytes.h"
 #include "../build_data/progressions/progression_catalog.h"
 #include "../build_data/vendors/reconstructed_rank_claim_links.h"
@@ -653,7 +654,8 @@ VendorReputationDisposition prepare_rank_reward(std::uint16_t vendorIndex,
     if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
         return VendorReputationDisposition::refused;
     }
-    if (prepare_item_reward(binding.itemIndex, 1, seed, mutation, &reason)
+    if (prepare_item_reward(
+            binding.itemIndex, 1, seed, core::runtime::server_clock_seconds(), mutation, &reason)
         != RewardPreparation::prepared) {
         mutation = {};
         return VendorReputationDisposition::refused;

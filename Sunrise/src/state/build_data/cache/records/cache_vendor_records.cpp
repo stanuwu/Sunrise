@@ -49,6 +49,7 @@ bool encode(const vendors::Definition& value, VendorDefinitionRecord& record) no
     record.factionIndexRaw = value.factionIndexRaw;
     record.factionProgressionIndex = value.factionProgressionIndex;
     record.factionHash = value.factionHash;
+    record.transferRuleCount = value.transferRuleCount;
     return true;
 }
 
@@ -82,6 +83,7 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
     value.factionIndexRaw = record.factionIndexRaw;
     value.factionProgressionIndex = record.factionProgressionIndex;
     value.factionHash = record.factionHash;
+    value.transferRuleCount = record.transferRuleCount;
     return true;
 }
 

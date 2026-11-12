@@ -259,6 +259,8 @@
     <ClCompile Include="src\state\runtime\state_account_profile_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_vendor_reputation_runtime.cpp" />
     <ClInclude Include="src\state\runtime\state_vendor_reputation_runtime.h" />
+    <ClCompile Include="src\state\runtime\state_account_oven_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\state_account_chalice_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_socket_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_synthesizer_runtime.cpp" />
     <ClCompile Include="src\state\runtime\state_account_settings_runtime.cpp" />

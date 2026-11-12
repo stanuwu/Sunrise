@@ -44,6 +44,9 @@ inline constexpr std::size_t kInteractionReplyField = offsetof(generated::C80807
 /** Sale admission and selection each have a list of conditions. */
 inline constexpr std::size_t kSaleAdmissionField = offsetof(generated::SVendorSale, array8);
 inline constexpr std::size_t kSaleSelectionField = offsetof(generated::SVendorSale, array120);
+/** A vendor definition's transfer rule array descriptor. */
+inline constexpr std::size_t kTransferArrayDescriptor =
+    offsetof(generated::SInvestmentVendor, additionalPolicy96);
 /** Raw reset interval. Its unit, epoch and scope are open, so it is stored unconverted. */
 inline constexpr std::size_t kResetIntervalOffset =
     offsetof(generated::SInvestmentVendor, resetInterval);

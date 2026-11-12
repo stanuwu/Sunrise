@@ -139,7 +139,8 @@ bool build() noexcept {
             return true;
         }
     }
-    if (root_domains_ready() && state::build_data::vendors::gates_ready()) {
+    if (root_domains_ready() && state::build_data::vendor_catalog_ready()
+        && state::build_data::vendors::gates_ready()) {
         SecureZeroMemory(&keys, sizeof keys);
         return ready();
     }
@@ -180,7 +181,8 @@ bool build() noexcept {
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
                 || !state::build_data::season_pass_ready() || !reward_definitions_settled()
-                || !exotic_catalysts_settled() || !state::build_data::vendors::gates_ready()) {
+                || !exotic_catalysts_settled() || !pursuit_catalog_settled()
+                || !state::build_data::vendors::gates_ready()) {
                 reason = "unlock_maps";
                 if (!read_unlock_slot_maps(
                         source, storage, std::span<const std::byte>{storage.root})) {
@@ -200,10 +202,8 @@ bool build() noexcept {
             }
             // The objective table settles or retries on its own, so it never holds up the others.
             if (!pursuit_catalog_settled()) {
-                (void)build_objectives(source,
-                                       storage.scratch,
-                                       std::span<const std::byte>{storage.root},
-                                       conditions);
+                (void)build_objectives(
+                    source, storage.scratch, std::span<const std::byte>{storage.root}, conditions);
             }
             // Sale rows bind their availability through the condition tables. A refused reward
             // graph still publishes the catalog: a row whose conditions cannot bind is not sold.

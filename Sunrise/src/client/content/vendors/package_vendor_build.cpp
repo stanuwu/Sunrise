@@ -11,6 +11,7 @@
 #include "../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/build_data/vendors/definition.h"
+#include "../items/packages/package_reward_build.h"
 #include "layout.h"
 #include "vendor_build.h"
 
@@ -38,6 +39,7 @@ struct Storage {
     std::array<domain::Definition, domain::kDefinitionCapacity> definitions{};
     std::array<domain::SaleRow, domain::kSaleRowCapacity> saleRows{};
     std::array<domain::InstalledRow, domain::kInstalledRowCapacity> installedRows{};
+    std::array<domain::TransferRule, domain::kTransferRuleCapacity> transferRules{};
     std::size_t indexCount{};
     std::size_t definitionCount{};
     std::size_t saleRowCount{};
@@ -505,7 +507,7 @@ bool build(const reader::Source& source,
     std::size_t skipped = 0;
     for (std::size_t row = 0; row < storage.indexCount; ++row) {
         const domain::IndexEntry entry = storage.index[row];
-        if (read_definition(source, scratch, entry, storage)) {
+        if (read_definition(conditions, source, scratch, entry, storage)) {
             continue;
         }
         ++skipped;

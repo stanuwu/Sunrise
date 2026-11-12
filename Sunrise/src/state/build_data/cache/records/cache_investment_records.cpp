@@ -84,6 +84,7 @@ bool encode(const progressions::Definition& value, ProgressionRecord& record) no
         value.stepCount,
         static_cast<std::uint8_t>(value.scope),
         static_cast<std::uint8_t>(value.repeatLastStep),
+        value.definitionHash,
     };
     return true;
 }
@@ -98,7 +99,8 @@ bool decode(const ProgressionRecord& record, progressions::Definition& value) no
              record.stepOffset,
              record.stepCount,
              static_cast<progressions::Scope>(record.scope),
-             record.repeatLastStep != 0};
+             record.repeatLastStep != 0,
+             record.definitionHash};
     return true;
 }
 

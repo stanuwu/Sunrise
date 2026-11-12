@@ -114,6 +114,8 @@ struct Definition {
     /** Definition hash and progression selected by the faction row. */
     std::uint32_t factionHash{};
     std::uint16_t factionProgressionIndex{kUnavailableFactionProgressionIndex};
+    /** Zero when the transfer array is unreadable; that disables transfer alone, not sales. */
+    std::uint16_t transferRuleCount{};
 };
 
 /** A cost entry naming no item carries this. */

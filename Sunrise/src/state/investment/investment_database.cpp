@@ -107,7 +107,7 @@ constexpr const char* kProfileSerialNumbering =
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 6;
+constexpr int kSchemaVersion = 7;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
 
@@ -238,6 +238,92 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
     return true;
 }
 
+// The version 6 tables bound item and stack positions by these capacities, written as literals.
+static_assert(account::inventory::kCharacterItemCapacity == 333);
+static_assert(account::inventory::kCharacterStackCapacity == 333);
+
+/**
+ * Widens saved row bounds to the character ABI, adds item, stack and parked-row placement, and
+ * drops the world reward kind: one grant path places every reward. Adds per-item objectives,
+ * helmet tiers and the wallet sync generation, removes the Synthesizer tier override and numbers
+ * the profile rows.
+ */
+static bool migrate_investment_storage() noexcept {
+    // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
+    // no account readers exist yet; restore enforcement after the savepoint ends on either path.
+    if (!execute("PRAGMA foreign_keys=OFF")) {
+        return false;
+    }
+    const bool migrated = []() noexcept {
+        Transaction transaction;
+        if (!transaction.ready() || !execute(R"sql(
+CREATE TABLE items_v6 (
+    character_slot INTEGER NOT NULL REFERENCES characters(slot),
+    location INTEGER NOT NULL CHECK (location IN (0, 1)),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    instance_soid INTEGER NOT NULL UNIQUE,
+    definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
+    level INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    flags INTEGER NOT NULL CHECK (flags BETWEEN 0 AND 7),
+    socket_policy INTEGER NOT NULL CHECK (socket_policy IN (0, 1)),
+    plug_count INTEGER NOT NULL CHECK (plug_count BETWEEN 0 AND 12),
+    movement_ability INTEGER NOT NULL,
+    grenade_ability INTEGER NOT NULL,
+    super_ability INTEGER NOT NULL,
+    melee_ability INTEGER NOT NULL,
+    class_ability INTEGER NOT NULL,
+    seen INTEGER NOT NULL CHECK (seen IN (0, 1)),
+    placement INTEGER NOT NULL CHECK (placement IN (0, 1)),
+    PRIMARY KEY (character_slot, location, position),
+    CHECK ((location = 0 AND position < 17 AND placement = 0)
+           OR (location = 1 AND position < 333)),
+    CHECK (placement = 0 OR quantity = 1)
+) STRICT;
+INSERT INTO items_v6 SELECT items.*, 0 FROM items;
+DROP TABLE items;
+ALTER TABLE items_v6 RENAME TO items;
+CREATE TABLE character_stacks_v6 (
+    character_slot INTEGER NOT NULL REFERENCES characters(slot),
+    position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 332),
+    definition_hash INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    placement INTEGER NOT NULL CHECK (placement IN (0, 1)),
+    PRIMARY KEY (character_slot, position)
+) STRICT;
+INSERT INTO character_stacks_v6 SELECT character_stacks.*, 0 FROM character_stacks;
+DROP TABLE character_stacks;
+ALTER TABLE character_stacks_v6 RENAME TO character_stacks;
+CREATE TABLE pending_rewards_v6 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_slot INTEGER NOT NULL CHECK (character_slot BETWEEN 0 AND 2),
+    definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
+    quantity INTEGER NOT NULL CHECK (quantity > 0)
+) STRICT;
+INSERT INTO pending_rewards_v6 (id, character_slot, definition_hash, quantity)
+    SELECT id, character_slot, definition_hash, quantity FROM pending_rewards;
+DROP TABLE pending_rewards;
+ALTER TABLE pending_rewards_v6 RENAME TO pending_rewards;
+)sql") || !execute(kParkedPlacementColumn)
+            || !execute(kItemObjectivesTable) || !execute(kParkedObjectivesColumn)
+            || !execute(kCharacterHelmetTiersTable) || !execute(kSynthesizerTierOverrideRemoval)
+            || !execute(kWalletSyncTable) || !execute(kProfileSerialNumbering)
+            || !execute("PRAGMA user_version=6")) {
+            return false;
+        }
+        // Only the rebuilt tables and the sockets that reference them are rechecked.
+        Statement items("PRAGMA foreign_key_check(items)");
+        Statement stacks("PRAGMA foreign_key_check(character_stacks)");
+        Statement sockets("PRAGMA foreign_key_check(sockets)");
+        return items.step() == SQLITE_DONE && stacks.step() == SQLITE_DONE
+               && sockets.step() == SQLITE_DONE && transaction.commit();
+    }();
+    const bool enforced = execute("PRAGMA foreign_keys=ON");
+    return migrated && enforced;
+}
+
 /**
  * Opens the save, creating it from the bundled SQL or upgrading an older schema in place.
  * A new database gets the schema and every default in one durable transaction.
@@ -288,11 +374,13 @@ bool open(std::string_view path,
         // The default characters copy the starter unlock rows, so the starter tables come first.
         ready = transaction.ready() && !schema.empty() && !defaults.empty()
                 && !characterStarter.empty() && execute(schemaText.c_str())
-                && execute(kParkedItemsTable) && execute(kCharacterObjectivesTable)
-                && execute(starterText.c_str()) && execute(defaultText.c_str())
-                && !settingsSchema.empty() && !settingsDefaults.empty()
-                && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
-                && transaction.commit();
+                && execute(kParkedItemsTable) && execute(kParkedPlacementColumn)
+                && execute(kItemObjectivesTable) && execute(kParkedObjectivesColumn)
+                && execute(kCharacterHelmetTiersTable) && execute(starterText.c_str())
+                && execute(kWalletSyncTable) && execute(kCharacterObjectivesTable)
+                && execute(defaultText.c_str()) && !settingsSchema.empty()
+                && !settingsDefaults.empty() && execute(preferenceSchema.c_str())
+                && execute(preferenceDefaults.c_str()) && transaction.commit();
         // The bundled schema stamps the save; it must name the version this build writes.
         int created = 0;
         ready = ready && read_stamp(created) && created == kSchemaVersion;
@@ -349,6 +437,20 @@ bool open(std::string_view path,
         }
     }
     if (ready && version == 5) {
+        ready = migrate_investment_storage();
+        if (ready) {
+            version = 6;
+        }
+    }
+    if (ready && version == 6) {
+        // A vendor reputation branch save is stamped 6 without the version 6 storage tables.
+        bool branchSave = false;
+        ready = schema_flag("SELECT NOT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND "
+                            "name='item_objectives')",
+                            branchSave)
+                && (!branchSave || migrate_investment_storage());
+    }
+    if (ready && version == 6) {
         Transaction transaction;
         // Development version 4 kept the validity flag and predates the starter unlock rows.
         bool legacyHeader = false;
@@ -359,7 +461,7 @@ bool open(std::string_view path,
                 && (!legacyHeader
                     || (!characterStarter.empty() && execute(kNormalizeAppearanceHeader)
                         && execute(starterText.c_str())))
-                && execute(kCharacterObjectivesTable) && execute("PRAGMA user_version=6")
+                && execute(kCharacterObjectivesTable) && execute("PRAGMA user_version=7")
                 && transaction.commit();
     }
     if (!ready) {

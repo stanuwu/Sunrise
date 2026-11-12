@@ -70,20 +70,20 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
     if (!opcode104::parse_request(message, request)
         || queuezState.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || !state::synchronize_store_wallet(outcome.storeSyncRevision)) {
-        core::log::write(
-            core::log::Channel::server,
-            core::log::Level::warn,
-            "ev=store_sync stage=prepare result=refused source=ws104");
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=store_sync stage=prepare result=refused source=ws104");
         return refuse_web_action(message, output, written);
     }
     middleware::web_service::StatusResponse status{};
     status.value = queuezState.family4Active ? queuezState.family4Version + 1
                                              : middleware::web_service::kNoFamily4Publication;
-    if (!middleware::web_service::encode_response(message,
-                                                  middleware::web_service::ResponseShape::statusPairWithBool,
-                                                  status,
-                                                  output,
-                                                  written)) {
+    if (!middleware::web_service::encode_response(
+            message,
+            middleware::web_service::ResponseShape::statusPairWithBool,
+            status,
+            output,
+            written)) {
         return false;
     }
     outcome.hasStoreSync = true;
@@ -446,6 +446,34 @@ bool process(const ServiceRoute& route,
                 clear_transaction(outcome);
                 return refuse_web_action(message, output, written);
             }
+        }
+        if (postmasterClaim != nullptr) {
+            auto* transaction = emplace_transaction<PostmasterClaimTransaction>(outcome);
+            if (transaction == nullptr
+                || !queuez::stage_record_reward_grant(
+                    queuezState, postmasterClaim->grant, transaction->update)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=ws405 stage=queuez_preflight result=fail");
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            middleware::web_service::StatusResponse status{};
+            status.value = transaction->update.after.family4Version;
+            if (!middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPair,
+                    status,
+                    output,
+                    written)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=ws405 stage=response result=fail");
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            transaction->pending =
+                web_service::take_mutation<state::PendingPostmasterClaim>(webOutcome);
         }
         if (equipmentSwap != nullptr) {
             // Promise the Family-4 revision carrying this optimistic equip.

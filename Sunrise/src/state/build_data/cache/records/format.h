@@ -37,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 78;
+inline constexpr std::uint32_t kCacheFormatVersion = 94;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -344,6 +344,7 @@ struct ProgressionRecord {
     std::uint8_t stepCount{};
     std::uint8_t scope{};
     std::uint8_t repeatLastStep{};
+    std::uint32_t definitionHash{};
 };
 
 /** Disk form of one progression rank step. */
@@ -643,6 +644,7 @@ struct VendorDefinitionRecord {
     std::uint16_t factionIndexRaw{};
     std::uint16_t factionProgressionIndex{vendors::kUnavailableFactionProgressionIndex};
     std::uint32_t factionHash{};
+    std::uint16_t transferRuleCount{};
 };
 
 /** Disk form of one cost entry of a vendor sale row. */
@@ -848,7 +850,7 @@ static_assert(sizeof(SpawnPointRecord)
                      + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorIndexRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorDefinitionRecord)
-              == 15 * sizeof(std::uint32_t) + 6 * sizeof(std::uint16_t));
+              == 16 * sizeof(std::uint32_t) + 7 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorSaleCostRecord) == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorSaleRowRecord)
               == sizeof(std::int32_t) + vendors::kSaleCostCapacity * sizeof(VendorSaleCostRecord)
@@ -881,7 +883,8 @@ static_assert(sizeof(RosterGroupRecord)
               == 2 * sizeof(std::uint32_t) + sizeof(std::uint16_t)
                      + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
-static_assert(sizeof(ProgressionRecord) == 2 * sizeof(std::uint16_t) + 3 * sizeof(std::uint8_t));
+static_assert(sizeof(ProgressionRecord)
+              == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(ProgressionStepRecord) == sizeof(std::int32_t));
 static_assert(sizeof(SeasonPassRewardRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)

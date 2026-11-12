@@ -459,8 +459,7 @@ bool consume(Session& session,
         transaction_if<state::PendingVendorReputation>(outcome) != nullptr;
     const bool mutatesAccount =
         outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasStoreSync
-        || outcome.hasArtifactReset
-        || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
+        || outcome.hasArtifactReset || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
         || transaction_if<PostmasterClaimTransaction>(outcome) != nullptr
         || transaction_if<SubclassSelectionTransaction>(outcome) != nullptr
         || transaction_if<SocketPlugTransaction>(outcome) != nullptr
@@ -471,6 +470,8 @@ bool consume(Session& session,
         || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr
         || transaction_if<state::PendingSettingsUpdate>(outcome) != nullptr || vendorReputation;
+    // A grant with no reward row, such as a turn-in that pays only XP, shows no flyout to hold.
+    const auto* rewardGrant = transaction_if<RecordRewardGrantTransaction>(outcome);
     const bool presentsAcquisition =
         transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
@@ -508,6 +509,13 @@ bool consume(Session& session,
                 frame.serviceId, "commit", fits ? commitReason : "frame_capacity");
         }
         if (handled) {
+            if (outcome.hasStoreSync) {
+                core::log::writef(core::log::Channel::server,
+                                  core::log::Level::info,
+                                  "ev=store_sync stage=commit result=ok revision=%u service=%u",
+                                  outcome.storeSyncRevision,
+                                  static_cast<unsigned>(frame.serviceId));
+            }
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
             written = framedSize;
             if (outcome.nativePresence) {

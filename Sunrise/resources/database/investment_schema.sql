@@ -1,6 +1,7 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 6;
--- open() creates parked_items and character_objective_values with the same SQL as upgrades.
+PRAGMA user_version = 7;
+-- open() also creates parked_items, item_objectives, character_helmet_tiers,
+-- eververse_wallet_sync and character_objective_values.
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),

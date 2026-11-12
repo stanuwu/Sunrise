@@ -384,9 +384,19 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     }
     if (auto* transaction = transaction_if<RecordRewardGrantTransaction>(outcome)) {
         reason = "record_reward";
-        return transaction->pending != nullptr
-               && report_commit(state::commit_record_reward(*transaction->pending),
-                                "ev=record_reward stage=transaction_commit result=fail");
+        if (transaction->pending == nullptr) {
+            return false;
+        }
+        // The grant's staged frame already carries its XP total, so only the roster can be owed.
+        bool artifactBonusMoved = false;
+        if (!report_commit(state::commit_record_reward(*transaction->pending, &artifactBonusMoved),
+                           "ev=record_reward stage=transaction_commit result=fail")) {
+            return false;
+        }
+        if (artifactBonusMoved) {
+            bap::arm_social_roster_repush_everywhere();
+        }
+        return true;
     }
     return true;
 }
