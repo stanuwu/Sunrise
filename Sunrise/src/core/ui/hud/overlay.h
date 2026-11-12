@@ -4,7 +4,7 @@
 
 namespace sunrise::core::ui::hud {
 
-/** Every HUD overlay, in the order the menu lists them and the corner stacks them. */
+/** Every HUD overlay, in the order the menu lists them and their corner stacks them. */
 enum class Overlay : std::uint8_t {
     /** The Sunrise name, version and animated logo. */
     logoCard,
@@ -18,6 +18,8 @@ enum class Overlay : std::uint8_t {
     sensorEvents,
     /** What the mission script VM is doing, per attached activity. */
     missionScript,
+    /** The newest mission variable changes. It draws in the top-right corner. */
+    missionVariables,
     count,
 };
 
@@ -59,7 +61,7 @@ void set_enabled(Overlay overlay, bool on) noexcept;
 void set_enabled(StatusLine line, bool on) noexcept;
 
 /**
- * Draws every enabled overlay, stacked down the top-left corner. It runs whether the menu is
+ * Draws every enabled overlay, stacked down its top corner. It runs whether the menu is
  * open or not.
  * @param interfaceEnabled Core UI enabled state. A disabled interface draws no overlay, because
  * the menu that switches them off cannot be opened either.

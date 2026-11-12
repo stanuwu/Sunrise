@@ -25,6 +25,7 @@
 #include "mission_script_runtime.h"
 #include "mission_script_runtime_internal.h"
 #include "mission_script_sdk_bridge.h"
+#include "mission_script_variable_log.h"
 #include "mission_script_vm.h"
 
 namespace sunrise::server::activity::mission {
@@ -301,6 +302,8 @@ enum class InitialStateGate : std::uint8_t {
 
 /** Runs and durably commits a fresh program only after its initial-state gate is open. */
 [[nodiscard]] bool start_program(RuntimeInstance& instance, std::uint64_t now) noexcept {
+    // A new run starts an empty history, so a restart shows no rows from the run before.
+    variable_log::reset();
     const lua_vm::CallStatus started = lua_vm::start(instance.vm, now);
     note_vm_status(instance, "start", lua_vm::status_name(started));
     if (started != lua_vm::CallStatus::committed && started != lua_vm::CallStatus::noHandler) {

@@ -6,6 +6,7 @@
 
 #include "mission_api.h"
 #include "mission_script_lua_resolve.h"
+#include "mission_script_variable_log.h"
 #include "mission_script_vm_internal.h"
 
 namespace sunrise::server::activity::mission::lua_vm {
@@ -347,6 +348,13 @@ void initialize_candidate(const Impl& impl, Candidate& candidate) noexcept {
         impl.phase = candidate.phase;
     }
     if (stateChanged) {
+        // The HUD's variable history sees the change at the one point it becomes committed.
+        const auto& id = impl.identity.activityId;
+        variable_log::record_commit(
+            {id.data(),
+             static_cast<std::size_t>(std::find(id.begin(), id.end(), '\0') - id.begin())},
+            {impl.variables.data(), impl.variableCount},
+            {candidate.variables.data(), candidate.variableCount});
         impl.variables = candidate.variables;
         impl.timers = candidate.timers;
         impl.variableCount = candidate.variableCount;

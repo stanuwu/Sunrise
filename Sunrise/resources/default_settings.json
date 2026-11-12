@@ -28,7 +28,8 @@
   "client": {
     "ui": {
       "enabled": true,
-      "toggle_key": "insert"
+      "toggle_key": "insert",
+      "mission_variable_rows": 15
     },
     "external_server": {
       "enabled": false,

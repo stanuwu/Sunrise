@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "../../../core/ui/components/section/ui_section_component.h"
+#include "../../../core/ui/hud/overlay.h"
 #include "../../activity/host_runtime.h"
 #include "../../bap/runtime.h"
 #include "activity_host_event_view.h"
@@ -18,6 +19,7 @@ namespace {
 
 namespace host = server::activity::host;
 namespace section = core::ui::components::section;
+namespace hud = core::ui::hud;
 
 host::DiagnosticsSnapshot g_snapshot{};
 state::activity::SessionBinding g_selected{};
@@ -149,6 +151,21 @@ void draw_launcher(const host::InstanceSnapshot* instance) noexcept {
     }
 }
 
+/**
+ * Draws the HUD overlays that belong with the host tools. Each checkbox is the HUD page's own
+ * switch, so flipping it here flips it there too and is saved with the rest.
+ */
+void draw_overlay_switches() noexcept {
+    section::header("Overlays", nullptr);
+    bool variables = hud::enabled(hud::Overlay::missionVariables);
+    if (ImGui::Checkbox("Mission variables##activity_host_overlays", &variables)) {
+        hud::set_enabled(hud::Overlay::missionVariables, variables);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Recent mission variable changes, top-right, while the game runs.");
+    }
+}
+
 } // namespace
 
 /** Draws the Activity Host instance selector and its window launcher. */
@@ -161,6 +178,8 @@ void draw() noexcept {
     ImGui::Spacing();
     const host::InstanceSnapshot* instance = selected_instance();
     draw_launcher(instance);
+    ImGui::Spacing();
+    draw_overlay_switches();
     ImGui::PopID();
 }
 

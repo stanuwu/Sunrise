@@ -1,16 +1,19 @@
 /**
- * The HUD overlay stack. Overlays are fixed windows in the top-left corner: each one draws its
- * own content, and the stack places it under the one before it.
+ * The HUD overlay stack. Overlays are fixed windows in a top corner: each one draws its own
+ * content, and the stack places it under the one before it in the same corner.
  */
 
 #include <array>
+#include <cfloat>
 #include <cstddef>
+#include <cstdint>
 #include <imgui.h>
 
 #include "../scaling/dpi/ui_dpi_scaling.h"
 #include "overlay.h"
 #include "overlays/ui_hud_logo_overlay.h"
 #include "overlays/ui_hud_mission_script_overlay.h"
+#include "overlays/ui_hud_mission_variables_overlay.h"
 #include "overlays/ui_hud_sensor_events_overlay.h"
 #include "overlays/ui_hud_session_overlay.h"
 #include "overlays/ui_hud_startup_hint_overlay.h"
@@ -20,7 +23,13 @@
 namespace sunrise::core::ui::hud {
 namespace {
 
-/** One overlay's identity, frame entry and starting switch state. */
+/** The screen corner an overlay stacks in. */
+enum class Corner : std::uint8_t {
+    topLeft,
+    topRight,
+};
+
+/** One overlay's identity, frame entry, starting switch state and placement. */
 struct Entry {
     const char* displayName;
     /** Key the switch file stores this overlay under. It must outlive every table change. */
@@ -28,12 +37,21 @@ struct Entry {
     const char* windowId;
     void (*draw)() noexcept;
     bool startsOn;
+    Corner corner;
+    /** Authored window width, or zero to fit the content. A fixed width keeps a log steady. */
+    float width;
 };
 
 /** 24 pixels keep the stack clear of the viewport corner, as the other overlays do. */
 constexpr float kViewportMargin = 24.0F;
 /** 8 pixels separate two stacked overlays. */
 constexpr float kOverlayGap = 8.0F;
+/** Wide enough for a long key and a quoted string value side by side. */
+constexpr float kVariableLogWidth = 520.0F;
+/** A top-left window hangs from its top-left corner. */
+constexpr ImVec2 kTopLeftPivot{0.0F, 0.0F};
+/** A top-right window hangs from its top-right corner, so it grows leftwards. */
+constexpr ImVec2 kTopRightPivot{1.0F, 0.0F};
 /** Overlays carry no decoration, take no input, and are never saved. */
 constexpr ImGuiWindowFlags kOverlayFlags =
     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav
@@ -48,26 +66,56 @@ constexpr std::size_t kSwitchCount = kOverlayCount + kStatusLineCount;
 
 /** Every overlay, in Overlay order. The menu lists them and the corner stacks them in it. */
 constexpr std::array<Entry, kOverlayCount> kOverlays{
-    Entry{"Sunrise Card", "sunrise_card", "##sunrise_hud_card", &overlays::logo::draw, true},
+    Entry{"Sunrise Card",
+          "sunrise_card",
+          "##sunrise_hud_card",
+          &overlays::logo::draw,
+          true,
+          Corner::topLeft,
+          0.0F},
     Entry{"Startup Hint",
           "startup_hint",
           "##sunrise_hud_startup_hint",
           &overlays::startup_hint::draw,
-          true},
+          true,
+          Corner::topLeft,
+          0.0F},
     // Diagnostic overlays start off because an ordinary run does not need them on screen.
-    Entry{
-        "Current Status", "current_status", "##sunrise_hud_status", &overlays::status::draw, false},
-    Entry{"Session", "session", "##sunrise_hud_session", &overlays::session::draw, false},
+    Entry{"Current Status",
+          "current_status",
+          "##sunrise_hud_status",
+          &overlays::status::draw,
+          false,
+          Corner::topLeft,
+          0.0F},
+    Entry{"Session",
+          "session",
+          "##sunrise_hud_session",
+          &overlays::session::draw,
+          false,
+          Corner::topLeft,
+          0.0F},
     Entry{"Client Activity Messages",
           "sensor_events",
           "##sunrise_hud_sensor_events",
           &overlays::sensor_events::draw,
-          false},
+          false,
+          Corner::topLeft,
+          0.0F},
     Entry{"Mission Script",
           "mission_script",
           "##sunrise_hud_mission_script",
           &overlays::mission_script::draw,
-          false},
+          false,
+          Corner::topLeft,
+          0.0F},
+    Entry{"Mission Variables",
+          "mission_variables",
+          "##sunrise_hud_mission_variables",
+          &overlays::mission_variables::draw,
+          false,
+          Corner::topRight,
+          kVariableLogWidth},
 };
 
 /** One status line's identity and starting switch state. */
@@ -141,11 +189,18 @@ void save_switches() noexcept {
 /**
  * Draws one overlay at a fixed position.
  * @param entry Overlay to draw.
- * @param position Top-left corner, in final framebuffer pixels.
+ * @param position The corner the window hangs from, in final framebuffer pixels.
  * @return Size the window took, which is known only after its content is submitted.
  */
 [[nodiscard]] ImVec2 draw_overlay(const Entry& entry, const ImVec2& position) noexcept {
-    ImGui::SetNextWindowPos(position, ImGuiCond_Always);
+    ImGui::SetNextWindowPos(position,
+                            ImGuiCond_Always,
+                            entry.corner == Corner::topRight ? kTopRightPivot : kTopLeftPivot);
+    if (entry.width > 0.0F) {
+        // Pinning both bounds keeps the width fixed while the height still fits the content.
+        const float width = scaling::dpi::pixels(entry.width);
+        ImGui::SetNextWindowSizeConstraints({width, 0.0F}, {width, FLT_MAX});
+    }
     const bool submitContents = ImGui::Begin(entry.windowId, nullptr, kOverlayFlags);
     if (submitContents) {
         entry.draw();
@@ -214,7 +269,7 @@ void set_enabled(StatusLine line, bool on) noexcept {
     save_switches();
 }
 
-/** Draws every enabled overlay, stacked down the top-left corner. */
+/** Draws every enabled overlay, stacked down its own top corner. */
 bool draw(bool interfaceEnabled) noexcept {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     if (!interfaceEnabled || viewport == nullptr) {
@@ -222,19 +277,24 @@ bool draw(bool interfaceEnabled) noexcept {
     }
     const float margin = scaling::dpi::pixels(kViewportMargin);
     const float gap = scaling::dpi::pixels(kOverlayGap);
-    ImVec2 position{viewport->WorkPos.x + margin, viewport->WorkPos.y + margin};
-    // The startup hint sits beside whichever overlay owns the top row, or on the corner when
+    ImVec2 left{viewport->WorkPos.x + margin, viewport->WorkPos.y + margin};
+    ImVec2 right{viewport->WorkPos.x + viewport->WorkSize.x - margin, viewport->WorkPos.y + margin};
+    // The startup hint sits beside whichever overlay owns the top-left row, or on the corner when
     // none does. It is drawn after the stack, once that row's width is known, and never moves
     // the overlays stacked below.
-    ImVec2 hintPosition = position;
+    ImVec2 hintPosition = left;
+    bool leftDrawn = false;
     bool drawn = false;
     for (std::size_t index = 0; index < kOverlayCount; ++index) {
         if (!g_enabled[index] || static_cast<Overlay>(index) == Overlay::startupHint) {
             continue;
         }
+        const bool topRight = kOverlays[index].corner == Corner::topRight;
+        ImVec2& position = topRight ? right : left;
         const ImVec2 size = draw_overlay(kOverlays[index], position);
-        if (!drawn) {
+        if (!topRight && !leftDrawn) {
             hintPosition.x += size.x + gap;
+            leftDrawn = true;
         }
         position.y += size.y + gap;
         drawn = true;
