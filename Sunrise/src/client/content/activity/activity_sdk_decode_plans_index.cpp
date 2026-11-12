@@ -9,7 +9,6 @@ using FieldRow = generated::C80800109;
 
 /** The block's row count opens its body. */
 constexpr std::uint64_t kNativeBlockCountAt = kNativeBlockBodyAt;
-constexpr std::uint64_t kCodecHandleAt = kNativeBlockBodyAt + offsetof(CodecBlock, ownHandle);
 constexpr std::uint64_t kCodecSerializedAt =
     kNativeBlockBodyAt + offsetof(CodecBlock, serializedSize);
 constexpr std::uint64_t kCodecFieldsAt = kNativeBlockBodyAt + sizeof(CodecBlock);

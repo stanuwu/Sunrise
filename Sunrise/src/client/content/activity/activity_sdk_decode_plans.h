@@ -30,12 +30,12 @@ enum class Status : std::uint8_t {
 /** Optional cancellation probe polled between plans. */
 using CancelProbe = bool (*)(void* context) noexcept;
 
+class Image;
+
 /** Everything one build reads. The descriptors name the component and selection pairs. */
 struct Request final {
-    /** Executable file, hashed into the evidence; read for reflection when no module is given. */
-    std::wstring_view executablePath{};
-    /** Base of the running client module; the packed file carries no slot table on disk. */
-    const void* executableModule{};
+    /** Opened executable: reflection reads, and the file hashed into the evidence. */
+    const Image* image{};
     const middleware::content::packages::reader::Source* source{};
     std::span<const state::activity_sdk::format::SobjectRsatDescriptor> descriptors{};
     std::span<const std::byte> sdkBuildSha256{};
