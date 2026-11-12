@@ -194,7 +194,7 @@ namespace {
     server::gameplay::complete_host_session(
         binding.session,
         arrival,
-        push::activity::public_region(binding.session, binding.bindingGeneration, arrival));
+        push::activity::region_host(binding.session, binding.bindingGeneration, arrival));
     return true;
 }
 

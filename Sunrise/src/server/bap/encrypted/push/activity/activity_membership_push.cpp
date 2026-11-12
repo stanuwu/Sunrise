@@ -13,6 +13,7 @@
 #include "../../../../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../../../../middleware/encoding/byte_order.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
+#include "../../../../../state/activity/destination/activity_destination_public.h"
 #include "../../../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../../../state/activity_sdk/runtime.h"
 #include "../../../../gameplay/gameplay_advertisement.h"
@@ -288,7 +289,7 @@ make_wire_snapshot(const Session& session,
                 wire.localSlot,
                 candidate,
                 hostGeneration,
-                public_region(
+                region_host(
                     session.activity.source, session.activity.bindingGeneration, regions[entry]));
         } else {
             server::gameplay::build_directory_entry(
@@ -297,7 +298,7 @@ make_wire_snapshot(const Session& session,
                 wire.localSlot,
                 candidate,
                 hostGeneration,
-                public_region(
+                region_host(
                     session.activity.source, session.activity.bindingGeneration, regions[entry]));
         }
         if (!candidate.present) {
@@ -365,6 +366,54 @@ bool public_region(const state::activity::SessionBinding& source,
            && sdk::generated_world::region_is_public(view, region, isPublic) && isPublic;
 }
 
+namespace {
+
+/**
+ * @return True when a launch that is not its destination's free-roam activity authors an object
+ * in the region's bubble. Free roam runs the public host's own activity, so it shares the row.
+ */
+[[nodiscard]] bool mission_content_in_bubble(const state::activity::SessionBinding& source,
+                                             std::uint64_t bindingGeneration,
+                                             std::int32_t region) noexcept {
+    std::uint16_t freeRoam = 0;
+    if (!state::activity::destination::free_roam_activity(source.destination.activityIndex,
+                                                          freeRoam)
+        || static_cast<std::int16_t>(freeRoam) == source.destination.activityIndex) {
+        return false;
+    }
+    sdk::BoundView view{};
+    if (!resolve_activity(source, bindingGeneration, view)) {
+        return false;
+    }
+    const sdk::format::Scenario* const scenario = sdk::bound_scenario(view);
+    if (scenario == nullptr) {
+        return false;
+    }
+    const auto bubbles = view.catalog->bubbles();
+    const auto bubble = static_cast<std::uint32_t>(region)
+                        / middleware::content::packages::tables::kSliceSetIndexFactor;
+    const auto occurrences = sdk::scenario_occurrences(*view.catalog, *scenario);
+    return std::any_of(
+        occurrences.begin(), occurrences.end(), [&](const sdk::format::Occurrence& occurrence) {
+            return occurrence.bubbleIndex < bubbles.size()
+                   && bubbles[occurrence.bubbleIndex].bubbleOrdinal == bubble;
+        });
+}
+
+} // namespace
+
+server::gameplay::group::RegionHost region_host(const state::activity::SessionBinding& source,
+                                                std::uint64_t bindingGeneration,
+                                                std::int32_t region) noexcept {
+    using server::gameplay::group::RegionHost;
+    if (!public_region(source, bindingGeneration, region)) {
+        return RegionHost::source;
+    }
+    return mission_content_in_bubble(source, bindingGeneration, region)
+               ? RegionHost::missionPublic
+               : RegionHost::sharedPublic;
+}
+
 /** Publicity is authored per bubble, so a bubble's state zero answers for all 8 of its states. */
 bool region_publicity_mask(const Session& session, std::uint64_t& mask) noexcept {
     mask = 0;
@@ -394,7 +443,7 @@ server::gameplay::AdvertisementState region_advertisement(const Session& session
     return server::gameplay::advertisement_state(
         session.activity.source,
         region,
-        public_region(session.activity.source, session.activity.bindingGeneration, region));
+        region_host(session.activity.source, session.activity.bindingGeneration, region));
 }
 
 /** Appends one current membership svc9 notification and advances its local nonce. */

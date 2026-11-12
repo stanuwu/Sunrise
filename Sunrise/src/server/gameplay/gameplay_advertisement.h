@@ -44,7 +44,7 @@ void build_advertisement(
     std::uint8_t localMemberSlot,
     middleware::bap::activity_message::replicate_membership::CitizenAdvertisement& output,
     std::uint64_t& hostGeneration,
-    bool publicRegion = false) noexcept;
+    group::RegionHost host = group::RegionHost::source) noexcept;
 
 /**
  * Builds one further directory entry from the same source, without reporting an outcome.
@@ -61,12 +61,13 @@ void build_directory_entry(
     std::uint8_t localMemberSlot,
     middleware::bap::activity_message::replicate_membership::CitizenAdvertisement& output,
     std::uint64_t& hostGeneration,
-    bool publicRegion = false) noexcept;
+    group::RegionHost host = group::RegionHost::source) noexcept;
 
 /** Claims a missing host row and reports whether its advertisement is ready. */
-[[nodiscard]] AdvertisementState advertisement_state(const state::activity::SessionBinding& source,
-                                                     std::int32_t regionIndex,
-                                                     bool publicRegion = false) noexcept;
+[[nodiscard]] AdvertisementState
+advertisement_state(const state::activity::SessionBinding& source,
+                    std::int32_t regionIndex,
+                    group::RegionHost host = group::RegionHost::source) noexcept;
 
 /**
  * Claims the region's host row and completes a pending allocation at once.
@@ -76,7 +77,7 @@ void build_directory_entry(
  */
 void complete_host_session(const state::activity::SessionBinding& source,
                            std::int32_t regionIndex,
-                           bool publicRegion = false) noexcept;
+                           group::RegionHost host = group::RegionHost::source) noexcept;
 
 /** Starts the private activity's stable logical Bubble Host and completes its allocation. */
 [[nodiscard]] bool complete_private_host_session(const state::activity::SessionBinding& source,
