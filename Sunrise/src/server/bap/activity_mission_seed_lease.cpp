@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <limits>
 
+#include "../../core/logging/log.h"
 #include "../../middleware/content/packages/tables/scenario_reader.h"
+#include "../../state/activity/bubble_authority/runtime.h"
 #include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/activity/runtime.h"
 #include "../../state/activity/transactions/internal.h"
@@ -134,6 +136,62 @@ bool prepare_mission_seed_lease(const MissionSeedLease& current,
     output.configured = true;
     output.scriptSelected = true;
     return true;
+}
+
+ActivityMissionSeedLeaseStatus
+prepare_bubble_handoff(Session& recipient,
+                       const ActivityMissionSeedPlan& plan,
+                       const state::activity::membership::ClientPlacement& placement) noexcept {
+    namespace authority = state::activity::bubble_authority;
+    const std::uint64_t generation = recipient.activity.bindingGeneration;
+    MissionSeedLease& lease = recipient.activityMissionSeed;
+    BubbleHandoff& handoff = lease.bubbleHandoff;
+    if (lease.configured && lease.bindingGeneration == generation
+        && same_mission_seed_plan(lease.plan, plan)) {
+        return ActivityMissionSeedLeaseStatus::ready;
+    }
+    if (handoff.active(generation)) {
+        if (handoff.destination != plan.effectiveRegion) {
+            return ActivityMissionSeedLeaseStatus::refused;
+        }
+        return handoff.stage == BubbleHandoff::Stage::acknowledged
+                   ? ActivityMissionSeedLeaseStatus::ready
+                   : ActivityMissionSeedLeaseStatus::outputBusy;
+    }
+    // Only a client resident in a sibling state of the selected one holds the bubble it reloads.
+    // A public target publishes its owner's bubble and never simulates it.
+    const std::int32_t held = state::activity::membership::instantiated_region(placement);
+    if (recipient.activity.role != ActivityClientRole::privateCurrent || held < 0
+        || placement.currentRegion != held
+        || static_cast<std::uint32_t>(held) == plan.effectiveRegion
+        || (static_cast<std::uint32_t>(held) >> authority::kSliceSetToBubbleShift)
+               != (plan.effectiveRegion >> authority::kSliceSetToBubbleShift)) {
+        return ActivityMissionSeedLeaseStatus::ready;
+    }
+    authority::Grant grant{};
+    if (!authority::held_grant(recipient.activity.session.sessionId,
+                               generation,
+                               static_cast<std::uint8_t>(plan.effectiveRegion
+                                                         >> authority::kSliceSetToBubbleShift),
+                               grant)) {
+        return ActivityMissionSeedLeaseStatus::ready;
+    }
+    handoff = {.generation = generation,
+               .source = static_cast<std::uint32_t>(held),
+               .destination = plan.effectiveRegion,
+               .token = grant.token,
+               .stage = BubbleHandoff::Stage::requested};
+    // The release is owed now; nothing else would make a roster due for it.
+    recipient.activityKeepaliveDueTick = 0;
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=activity stage=bubble_handoff result=requested bubble=%u source=%u "
+                      "destination=%u token=%u",
+                      static_cast<unsigned>(grant.bubble),
+                      static_cast<unsigned>(held),
+                      static_cast<unsigned>(plan.effectiveRegion),
+                      static_cast<unsigned>(grant.token));
+    return ActivityMissionSeedLeaseStatus::outputBusy;
 }
 
 bool mission_seed_recipient(const Session& session,

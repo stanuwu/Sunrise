@@ -78,6 +78,8 @@ struct HandoverClaimInput final {
     std::uint64_t recipient{};
     /** Generation whose abdication last released the bubble, zero when none did. */
     std::uint64_t releasedBy{};
+    /** The client has loaded a state of the granted bubble. */
+    bool resident{};
     /** Entities that abdication released and no claim has delivered yet. */
     const middleware::bap::activity_message::entity_slots::EntitySlotMask* released{};
     /** Entities a purge earlier in the same body frees, or null when it carries none. */
@@ -100,15 +102,18 @@ struct HandoverClaim final {
 
 /**
  * A client granted a bubble another link released adopts the entities that link simulated there,
- * instead of leaving them frozen as replicas nobody runs. A link renewing its own release, a sole
- * link and a body without a grant claim nothing.
+ * instead of leaving them frozen as replicas nobody runs. A sole link renewing its own release
+ * takes those entities back once it has loaded the bubble, because the renewal's seed pass only
+ * creates missing placements. A shared link renewing its own release and a body without a grant
+ * claim nothing.
  * @param input The grant body's view of the bubble.
  * @return The claim, with `pending` false when none is owed.
  */
 [[nodiscard]] constexpr HandoverClaim handover_claim(const HandoverClaimInput& input) noexcept {
     HandoverClaim claim{};
-    if (!input.sharedBubbles || !input.granted || input.released == nullptr || input.releasedBy == 0
-        || input.releasedBy == input.recipient) {
+    const bool ownRelease = input.releasedBy == input.recipient;
+    if (!input.granted || input.released == nullptr || input.releasedBy == 0
+        || (input.sharedBubbles ? ownRelease : !(ownRelease && input.resident))) {
         return claim;
     }
     for (std::size_t index = 0; index < claim.slots.size(); ++index) {

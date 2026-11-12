@@ -25,6 +25,7 @@
 #include "../activity/host_runtime.h"
 #include "activity_authority_query_owner.h"
 #include "activity_authority_reset_owner.h"
+#include "activity_bubble_handoff.h"
 #include "activity_link_selection.h"
 #include "encrypted/activity_host_manager/activity_startup_reservations.h"
 #include "encrypted/push/activity/activity_roster_grant.h"
@@ -225,6 +226,8 @@ struct RosterPublication {
     std::int32_t stateLocalRegion{-1};
     /** Set when the staged body carried a bubble grant that State has not recorded yet. */
     bool hasGrant{};
+    /** Set when that grant releases the held token instead of issuing a new one. */
+    bool releasesBubble{};
     /** Set when this body carries a pending Activity Host state revision. */
     bool hasHostState{};
     /** Set when this body carries a not-yet-published SDK selected-state roster lease revision. */
@@ -306,6 +309,8 @@ struct SquadOverrideLease {
  * generation. */
 struct MissionSeedLease {
     ActivityMissionSeedPlan plan{};
+    /** Release of the held bubble that a selection inside it waits for. */
+    BubbleHandoff bubbleHandoff{};
     std::uint64_t bindingGeneration{};
     std::uint64_t revision{};
     std::uint64_t publishedRevision{};

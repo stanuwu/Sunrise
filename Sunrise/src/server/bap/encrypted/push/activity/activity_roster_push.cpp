@@ -506,21 +506,42 @@ bool append_roster_notification(
                                >= state::activity::bubble_authority::kSharedLinkCount;
     const std::int32_t pendingRegion =
         state::activity::membership::reported_region(session.activity.session.sessionId);
+    const bool regionReady = client_region_ready(session, refresh);
+    const std::int32_t heldRegion =
+        state::activity::membership::instantiated_region(client_placement(session, refresh));
     const GrantRequest grantRequest =
         grant_request({.sharedBubbles = sharedBubbles,
-                       .regionReady = client_region_ready(session, refresh),
-                       .heldRegion = state::activity::membership::instantiated_region(
-                           client_placement(session, refresh)),
+                       .regionReady = regionReady,
+                       .heldRegion = heldRegion,
                        .enteringBubble = enteringBubble,
                        .bodyRegion = static_cast<std::int32_t>(snapshot.region),
                        .pendingRegion = pendingRegion});
+    // The client has loaded the state this body publishes.
+    const bool resident = regionReady && heldRegion == static_cast<std::int32_t>(snapshot.region);
+    const auto bodyBubble = static_cast<std::uint8_t>(
+        snapshot.region >> state::activity::bubble_authority::kSliceSetToBubbleShift);
+    // A bubble released for a state selection stays released until the client has loaded the
+    // selected state, so the load pass cannot create placements the seed pass would repeat.
+    BubbleHandoff& handoff = session.activityMissionSeed.bubbleHandoff;
+    const std::uint64_t generation = session.activity.bindingGeneration;
+    if (handoff.active(generation) && handoff.stage == BubbleHandoff::Stage::acknowledged
+        && resident && static_cast<std::uint32_t>(heldRegion) == handoff.destination) {
+        handoff = {};
+    }
+    const bool handoffActive = handoff.active(generation);
     // Links that share a session also ask who released the bubble; a sole link keeps its rule.
     const std::uint64_t sessionId = session.activity.session.sessionId;
     // Read before the grant commits, which clears the bubble's releaser.
     std::uint64_t releaser = 0;
     HandoverSquadSense handedSquads{};
-    if (!peerLeave && !placedRetirementPending
-        && (sharedBubbles
+    state::activity::bubble_authority::EntitySlotMask released{};
+    if (!peerLeave && handoffActive && handoff.stage == BubbleHandoff::Stage::requested
+        && !placedRetirementPending && resident && handoff.source == snapshot.region) {
+        grant = {handoff.bubble(), handoff.token};
+        snapshot.hasGrant = true;
+        snapshot.grant = {.bubble = grant.bubble, .token = grant.token, .release = true};
+    } else if (!peerLeave && !handoffActive && !placedRetirementPending
+               && (sharedBubbles
                 ? state::activity::bubble_authority::select_shared_grant(
                       sessionId,
                       session.activity.bindingGeneration,
@@ -529,7 +550,14 @@ bool append_roster_notification(
                       enteringBubble,
                       grant)
                 : state::activity::bubble_authority::select_grant(
-                      sessionId, grantRequest.region, grant, grantRequest.renewReleased))) {
+                      sessionId, grantRequest.region, grant, grantRequest.renewReleased))
+               // A sole client renewing a bubble it stays in reclaims what it released, so that
+               // renewal waits for the loaded state. Entering a bubble keeps the retirement rule.
+               && (sharedBubbles || enteringBubble
+                   || session.activity.role != ActivityClientRole::privateCurrent
+                   || !state::activity::bubble_authority::snapshot_released_entities(
+                       sessionId, grant.bubble, released)
+                   || (resident && grant.bubble == bodyBubble))) {
         snapshot.hasGrant = true;
         snapshot.grant.bubble = grant.bubble;
         snapshot.grant.token = grant.token;
@@ -591,7 +619,9 @@ bool append_roster_notification(
             : static_cast<std::uint8_t>(
                   snapshot.region >> state::activity::bubble_authority::kSliceSetToBubbleShift);
     const bool hasRetirement = encoded
-                               && (placedRetirementPending || (snapshot.hasGrant && enteringBubble))
+                               && (placedRetirementPending
+                                   || (snapshot.hasGrant && !snapshot.grant.release
+                                       && enteringBubble))
                                && server::gameplay::squad_entity_retirement::prepare_retirement(
                                    session.activity.session,
                                    session.activity.bindingGeneration,
@@ -605,10 +635,10 @@ bool append_roster_notification(
         encoded = false;
     }
     // A private link granted a bubble another link released adopts what that link simulated
-    // there, which would otherwise stay frozen as replicas nobody runs.
+    // there, which would otherwise stay frozen as replicas nobody runs. A sole link takes back
+    // what it released itself once it has loaded the state it renews the bubble in.
     HandoverClaim handoverClaim{};
-    state::activity::bubble_authority::EntitySlotMask released{};
-    if (encoded && snapshot.hasGrant && sharedBubbles
+    if (encoded && snapshot.hasGrant && !snapshot.grant.release
         && session.activity.role == ActivityClientRole::privateCurrent
         && state::activity::bubble_authority::snapshot_released_entities(
             sessionId, grant.bubble, released)) {
@@ -618,6 +648,7 @@ bool append_roster_notification(
                             .bubble = grant.bubble,
                             .recipient = session.activity.bindingGeneration,
                             .releasedBy = releaser,
+                            .resident = resident && !enteringBubble && grant.bubble == bodyBubble,
                             .released = &released,
                             .purged = hasRetirement ? &entityRetirement.entities : nullptr,
                             .heldEpoch = session.activity.replicationEpoch});
@@ -775,6 +806,7 @@ bool append_roster_notification(
         session.activityRosterStaged.missionSeedRevision = missionSeed.revision;
         session.activityRosterStaged.scriptableOverride = scriptablePending;
         session.activityRosterStaged.hasGrant = snapshot.hasGrant;
+        session.activityRosterStaged.releasesBubble = snapshot.hasGrant && snapshot.grant.release;
         session.activityRosterStaged.hasHostState = ownsHostState;
         session.activityRosterStaged.estateRevision = hasHostState ? hostState.estateRevision : 0;
         session.activityRosterStaged.dialogueRevision =
@@ -880,11 +912,22 @@ namespace {
                && staged.handoverClaim.heldEpoch == session.activity.replicationEpoch);
 }
 
+/** A staged release is current while its handoff still waits for that exact release. */
+[[nodiscard]] bool staged_release_current(const Session& session) noexcept {
+    const auto& staged = session.activityRosterStaged;
+    const auto& handoff = session.activityMissionSeed.bubbleHandoff;
+    return !staged.staged || !staged.releasesBubble
+           || (staged.bindingGeneration == session.activity.bindingGeneration
+               && handoff.active(staged.bindingGeneration)
+               && handoff.stage == BubbleHandoff::Stage::requested
+               && handoff.bubble() == staged.grant.bubble && handoff.token == staged.grant.token);
+}
+
 } // namespace
 
 bool validate_staged_roster(const Session& session) noexcept {
     const auto& staged = session.activityRosterStaged;
-    return staged_claim_current(session)
+    return staged_claim_current(session) && staged_release_current(session)
            && (!staged.staged || !staged.entityRetirement.pending
                || (staged.bindingGeneration == session.activity.bindingGeneration
                    && staged.retirementPriorEpoch == session.activity.replicationEpoch
@@ -898,7 +941,7 @@ bool validate_staged_roster(const Session& session) noexcept {
 bool begin_staged_roster_publication(
     const Session& session, server::gameplay::entity_identities::PublicationLease& lease) noexcept {
     const auto& staged = session.activityRosterStaged;
-    return staged_claim_current(session)
+    return staged_claim_current(session) && staged_release_current(session)
            && (!staged.staged || !staged.entityRetirement.pending
                || (staged.bindingGeneration == session.activity.bindingGeneration
                    && staged.retirementPriorEpoch == session.activity.replicationEpoch
@@ -1074,10 +1117,20 @@ void commit_staged_roster(Session& session) noexcept {
             handed.bubble,
             std::span(handed.keys).first(handed.count)));
     }
-    if (session.activityRosterStaged.hasGrant) {
-        state::activity::bubble_authority::record_grant(session.activity.session.sessionId,
-                                                        session.activity.bindingGeneration,
-                                                        session.activityRosterStaged.grant);
+    if (const auto& staged = session.activityRosterStaged; staged.releasesBubble) {
+        // The client keeps the bubble until its message 33 abdicates it.
+        if (session.activityMissionSeed.bubbleHandoff.publish(
+                staged.bindingGeneration, staged.grant.bubble, staged.grant.token)) {
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::info,
+                              "ev=activity stage=bubble_handoff result=release_published "
+                              "bubble=%u token=%u",
+                              static_cast<unsigned>(staged.grant.bubble),
+                              static_cast<unsigned>(staged.grant.token));
+        }
+    } else if (staged.hasGrant) {
+        state::activity::bubble_authority::record_grant(
+            session.activity.session.sessionId, session.activity.bindingGeneration, staged.grant);
     }
     if (session.activityRosterStaged.hasHostState) {
         session.activityHostStateRevision = session.activityRosterStaged.hostStateRevision;

@@ -2694,6 +2694,7 @@
     <ClInclude Include="src\server\bap\activity_authority_query.h" />
     <ClInclude Include="src\server\bap\activity_authority_reset_owner.h" />
     <ClInclude Include="src\server\bap\activity_authority_reset.h" />
+    <ClInclude Include="src\server\bap\activity_bubble_handoff.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\activity_arrival.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\internal.h" />
     <ClInclude Include="src\server\bap\encrypted\push\snapshot\internal.h" />

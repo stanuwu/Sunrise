@@ -107,6 +107,8 @@ inline constexpr std::uint32_t kAbsentSpawnSetHash = kEmptyNameHash;
 struct Grant final {
     std::uint8_t bubble{};
     std::uint16_t token{};
+    /** Releases the bubble the client holds under `token` instead of granting it. */
+    bool release{};
 };
 
 /**

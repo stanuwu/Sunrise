@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../state/activity/membership/activity_membership_query.h"
 #include "internal.h"
 
 namespace sunrise::server::bap {
@@ -14,6 +15,21 @@ namespace sunrise::server::bap {
                                               std::uint64_t generation,
                                               std::int32_t heldRegion,
                                               MissionSeedLease& output) noexcept;
+
+/**
+ * Holds a selection that replaces the world inside the bubble a recipient's private client holds
+ * until that client has released the bubble. The first call requests the release and reports
+ * busy; the selection proceeds once the client's message 33 acknowledges it.
+ * @param recipient Recipient link; its handoff and keepalive schedule change.
+ * @param plan Selection being made.
+ * @param placement The recipient client's reported placement.
+ * @return Ready when no release is owed or it was acknowledged, busy while it is pending, refused
+ * when a pending release belongs to another selection.
+ */
+[[nodiscard]] ActivityMissionSeedLeaseStatus
+prepare_bubble_handoff(Session& recipient,
+                       const ActivityMissionSeedPlan& plan,
+                       const state::activity::membership::ClientPlacement& placement) noexcept;
 
 /** Matches a transport recipient to the complete shared activity identity. */
 [[nodiscard]] bool mission_seed_recipient(const Session& session,

@@ -54,6 +54,19 @@ void record_grant(std::uint64_t sessionId, std::uint64_t generation, const Grant
 void grant_holders(std::uint64_t sessionId, GrantHolders& output) noexcept;
 
 /**
+ * Reads the token one link holds a bubble under, without issuing or consuming a grant.
+ * @param sessionId Joined activity session.
+ * @param generation ActivityClient generation of the link.
+ * @param bubble Bubble to read.
+ * @param grant Gets the bubble and its held token, cleared when the link does not hold it.
+ * @return True when the link holds the bubble.
+ */
+[[nodiscard]] bool held_grant(std::uint64_t sessionId,
+                              std::uint64_t generation,
+                              std::uint8_t bubble,
+                              Grant& grant) noexcept;
+
+/**
  * Copies which link released each bubble last, until the bubble is granted again.
  * @param sessionId Joined activity session.
  * @param output Receives each bubble's releasing generation, zero while none is pending.

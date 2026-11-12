@@ -167,6 +167,13 @@ void submit_committed_authority_abdication(Session& session,
     }
     state::activity::bubble_authority::record_abdication(
         plan.sessionId, plan.authorityAbdication.bubble, &plan.authorityAbdication.entities);
+    if (session.activityMissionSeed.bubbleHandoff.acknowledge(session.activity.bindingGeneration,
+                                                              plan.authorityAbdication.bubble)) {
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::info,
+                          "ev=activity stage=bubble_handoff result=acknowledged bubble=%u",
+                          static_cast<unsigned>(plan.authorityAbdication.bubble));
+    }
     server::gameplay::squad_entity_retirement::observe_abdication(
         session.activity.session,
         session.activity.bindingGeneration,

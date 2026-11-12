@@ -403,10 +403,15 @@ bool consume_activity_keepalive(Session& session,
     // may owe nothing else, so the grant alone schedules the roster that carries it. A sole link
     // renews on its own region reports. The question is the one the roster asks, so a roster that
     // would refuse the grant is never scheduled for it. A refused body waits for a new revision.
+    // A requested bubble release rides the next roster; a state selection waits on it.
+    const auto& handoff = session.activityMissionSeed.bubbleHandoff;
+    const bool releaseDue = handoff.active(session.activity.bindingGeneration)
+                            && handoff.stage == BubbleHandoff::Stage::requested;
     const bool grantDue = rosterOpen && !hostRefused
-                          && activity_link_count_locked(session.activity.session)
-                                 >= state::activity::bubble_authority::kSharedLinkCount
-                          && owes_shared_grant(session, incidentClientReady);
+                          && (releaseDue
+                              || (activity_link_count_locked(session.activity.session)
+                                      >= state::activity::bubble_authority::kSharedLinkCount
+                                  && owes_shared_grant(session, incidentClientReady)));
     if (!active
         || (!keepaliveDue && !regionChanged && !hostStateDue && !estateDue && !scriptableDue
             && !incidentDue && !authorityResetDue && !authorityQueryDue && !hostTeleportDue
