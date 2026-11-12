@@ -70,20 +70,20 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
     if (!opcode104::parse_request(message, request)
         || queuezState.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || !state::synchronize_store_wallet(outcome.storeSyncRevision)) {
-        core::log::write(
-            core::log::Channel::server,
-            core::log::Level::warn,
-            "ev=store_sync stage=prepare result=refused source=ws104");
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=store_sync stage=prepare result=refused source=ws104");
         return refuse_web_action(message, output, written);
     }
     middleware::web_service::StatusResponse status{};
     status.value = queuezState.family4Active ? queuezState.family4Version + 1
                                              : middleware::web_service::kNoFamily4Publication;
-    if (!middleware::web_service::encode_response(message,
-                                                  middleware::web_service::ResponseShape::statusPairWithBool,
-                                                  status,
-                                                  output,
-                                                  written)) {
+    if (!middleware::web_service::encode_response(
+            message,
+            middleware::web_service::ResponseShape::statusPairWithBool,
+            status,
+            output,
+            written)) {
         return false;
     }
     outcome.hasStoreSync = true;
@@ -424,6 +424,26 @@ bool process(const ServiceRoute& route,
             // WS-701 promises no immediate QueueZ after-image, so State alone is delayed.
             if (emplace_transaction<state::PendingSettingsUpdate>(outcome, *settingsUpdate)
                 == nullptr) {
+                return refuse_web_action(message, output, written);
+            }
+        }
+        const state::PendingVendorReputation* reputation =
+            web_service::mutation_if<state::PendingVendorReputation>(webOutcome);
+        if (reputation != nullptr) {
+            if (!queuezState.family4Active || queuezState.family4RootSoid != reputation->accountSoid
+                || queuezState.family4Version == (std::numeric_limits<std::int32_t>::max)()
+                || emplace_transaction<state::PendingVendorReputation>(outcome, *reputation)
+                       == nullptr) {
+                return refuse_web_action(message, output, written);
+            }
+            // The next account image carries both the material debit and character progression.
+            middleware::web_service::StatusResponse status{};
+            status.value = queuezState.family4Version + 1;
+            middleware::web_service::ResponseShape shape{};
+            web_service::resolve_response_shape(message.opcode, shape);
+            if (!middleware::web_service::encode_response(
+                    message, shape, status, output, written)) {
+                clear_transaction(outcome);
                 return refuse_web_action(message, output, written);
             }
         }

@@ -107,9 +107,37 @@ constexpr const char* kProfileSerialNumbering =
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 6;
+constexpr int kSchemaVersion = 7;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
+
+/** The development save already has these counters. Preserve its rows during the upgrade. */
+constexpr const char* kCharacterObjectivesTable =
+    "CREATE TABLE IF NOT EXISTS character_objective_values ("
+    "character_soid INTEGER NOT NULL REFERENCES characters(soid) DEFERRABLE INITIALLY DEFERRED,"
+    "slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 32767),"
+    "value INTEGER NOT NULL CHECK (value BETWEEN 0 AND 2147483647),"
+    "PRIMARY KEY (character_soid,slot)) STRICT;";
+
+/** Version 2 and the objective-only version 3 both predate character appearance headers. */
+constexpr const char* kAddAppearanceColumns =
+    "ALTER TABLE characters ADD COLUMN appearance_header BLOB NOT NULL "
+    "DEFAULT (X'000000000000000000000000000000000000000000000000000000000000000000000000') "
+    "CHECK (length(appearance_header) = 36);"
+    "ALTER TABLE characters ADD COLUMN appearance_header_valid INTEGER "
+    "NOT NULL DEFAULT 0 CHECK (appearance_header_valid IN (0, 1));";
+
+/** Give characters without a captured header the starter appearance before retiring the flag. */
+constexpr const char* kNormalizeAppearanceHeader =
+    "UPDATE characters SET appearance_header=X'250005000100EA0201034602480349034A03FFFFFFFF1303"
+    "C7020000C59D1C8101000000' WHERE appearance_header_valid=0;"
+    "ALTER TABLE characters DROP COLUMN appearance_header_valid;";
+
+/** Finish the schema query before a migration alters the inspected table. */
+[[nodiscard]] bool schema_flag(const char* sql, bool& value) noexcept {
+    Statement query(sql);
+    return query.step() == SQLITE_ROW && query.column(0, value) && query.step() == SQLITE_DONE;
+}
 
 /**
  * Reads the open save's stamp.
@@ -349,10 +377,10 @@ bool open(std::string_view path,
                 && execute(kParkedItemsTable) && execute(kParkedPlacementColumn)
                 && execute(kItemObjectivesTable) && execute(kParkedObjectivesColumn)
                 && execute(kCharacterHelmetTiersTable) && execute(starterText.c_str())
-                && execute(kWalletSyncTable) && execute(defaultText.c_str())
-                && !settingsSchema.empty() && !settingsDefaults.empty()
-                && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
-                && transaction.commit();
+                && execute(kWalletSyncTable) && execute(kCharacterObjectivesTable)
+                && execute(defaultText.c_str()) && !settingsSchema.empty()
+                && !settingsDefaults.empty() && execute(preferenceSchema.c_str())
+                && execute(preferenceDefaults.c_str()) && transaction.commit();
         // The bundled schema stamps the save; it must name the version this build writes.
         int created = 0;
         ready = ready && read_stamp(created) && created == kSchemaVersion;
@@ -376,13 +404,7 @@ bool open(std::string_view path,
     }
     if (ready && version == 2) {
         Transaction transaction;
-        // ADD COLUMN refuses a function default such as zeroblob(), so the blob is a literal.
-        ready = transaction.ready()
-                && execute("ALTER TABLE characters ADD COLUMN appearance_header BLOB NOT NULL "
-                           "DEFAULT (X'000000000000000000000000000000000000000000000000000000000000"
-                           "000000000000') CHECK (length(appearance_header) = 36);"
-                           "ALTER TABLE characters ADD COLUMN appearance_header_valid INTEGER "
-                           "NOT NULL DEFAULT 0 CHECK (appearance_header_valid IN (0, 1));")
+        ready = transaction.ready() && execute(kAddAppearanceColumns)
                 && execute("PRAGMA user_version=3") && transaction.commit();
         if (ready) {
             version = 3;
@@ -390,16 +412,18 @@ bool open(std::string_view path,
     }
     if (ready && version == 3) {
         Transaction transaction;
-        // A character saved without a captured header gets the default characters' header. The
-        // starter SQL is idempotent, so it adds only the tables an older save lacks.
-        ready =
-            transaction.ready() && !characterStarter.empty()
-            && execute("UPDATE characters SET appearance_header=X'250005000100EA0201034602480349"
-                       "034A03FFFFFFFF1303C7020000C59D1C8101000000' WHERE "
-                       "appearance_header_valid=0;"
-                       "ALTER TABLE characters DROP COLUMN appearance_header_valid;")
-            && execute(starterText.c_str()) && execute("PRAGMA user_version=4")
-            && transaction.commit();
+        bool objectiveOnly = false;
+        ready = transaction.ready() && !characterStarter.empty()
+                && schema_flag("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND "
+                               "name='character_objective_values') AND NOT EXISTS(SELECT 1 FROM "
+                               "pragma_table_info('characters') WHERE name IN "
+                               "('appearance_header','appearance_header_valid')) AND NOT EXISTS("
+                               "SELECT 1 FROM sqlite_schema WHERE type='table' AND name IN "
+                               "('starter_character','starter_items'))",
+                               objectiveOnly)
+                && (!objectiveOnly || execute(kAddAppearanceColumns))
+                && execute(kNormalizeAppearanceHeader) && execute(starterText.c_str())
+                && execute("PRAGMA user_version=4") && transaction.commit();
         if (ready) {
             version = 4;
         }
@@ -414,6 +438,31 @@ bool open(std::string_view path,
     }
     if (ready && version == 5) {
         ready = migrate_investment_storage();
+        if (ready) {
+            version = 6;
+        }
+    }
+    if (ready && version == 6) {
+        // A vendor reputation branch save is stamped 6 without the version 6 storage tables.
+        bool branchSave = false;
+        ready = schema_flag("SELECT NOT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND "
+                            "name='item_objectives')",
+                            branchSave)
+                && (!branchSave || migrate_investment_storage());
+    }
+    if (ready && version == 6) {
+        Transaction transaction;
+        // Development version 4 kept the validity flag and predates the starter unlock rows.
+        bool legacyHeader = false;
+        ready = transaction.ready()
+                && schema_flag("SELECT EXISTS(SELECT 1 FROM pragma_table_info('characters') "
+                               "WHERE name='appearance_header_valid')",
+                               legacyHeader)
+                && (!legacyHeader
+                    || (!characterStarter.empty() && execute(kNormalizeAppearanceHeader)
+                        && execute(starterText.c_str())))
+                && execute(kCharacterObjectivesTable) && execute("PRAGMA user_version=7")
+                && transaction.commit();
     }
     if (!ready) {
         shutdown();

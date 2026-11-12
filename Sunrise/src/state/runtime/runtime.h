@@ -14,6 +14,7 @@
 #include "../build_data/vendors/definition.h"
 #include "../unlocks/definition.h"
 #include "state.h"
+#include "state_vendor_reputation_runtime.h"
 
 namespace sunrise::state::unlocks {
 struct Table;
@@ -363,6 +364,7 @@ struct PendingRecordRewardGrant {
     std::size_t beforeProfileItemCount{};
     std::size_t afterProfileItemCount{};
     std::size_t rewardCount{};
+    VendorRankRewardClaim vendorReward{};
     /** The rows are existing items a vendor moved, not acquisitions. */
     bool vendorTransfer{};
     /** A held pursuit or wrapper the grant consumes; it leaves the selected character with it. */

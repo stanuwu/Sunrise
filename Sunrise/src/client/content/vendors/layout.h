@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808074.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808075.h"
 #include "../../../middleware/content/packages/schema/generated/tag_classes_808078.h"
 
 namespace sunrise::client::content::vendors {
@@ -11,6 +13,21 @@ namespace generated = middleware::content::packages::schema::generated;
 
 /** Tag of the installed vendor index blob, which names every vendor definition. */
 inline constexpr std::uint32_t kIndexRootTag = 0x8131931DU;
+/** Installed faction table named by the build-86657 investment content. */
+inline constexpr std::uint32_t kFactionTableTag = 0x81327CD5U;
+/** The faction table's rows begin at this array descriptor. */
+inline constexpr std::size_t kFactionArrayDescriptor = offsetof(generated::C8080759b, table);
+/** One faction row holds its hash and progression index in the first eight bytes. */
+inline constexpr std::size_t kFactionRowStride = sizeof(generated::C808074ce);
+/** The installed faction table's row class. */
+inline constexpr std::uint32_t kFactionRowClass = generated::C808074ce::kClass;
+/** Faction definition hash at the start of a faction row. */
+inline constexpr std::size_t kFactionHashOffset = offsetof(generated::C808074ce, unk0);
+/** Progression definition index following the faction hash. */
+inline constexpr std::size_t kFactionProgressionIndexOffset = offsetof(generated::C808074ce, gap4);
+/** The last halfword before resetInterval selects the vendor's faction row. */
+inline constexpr std::size_t kVendorFactionIndexOffset =
+    offsetof(generated::SInvestmentVendor, resetInterval) - sizeof(std::uint16_t);
 
 /** Array descriptors of a vendor definition: category rows, sale rows and interactions. */
 inline constexpr std::size_t kInstalledArrayDescriptor =
@@ -19,6 +36,14 @@ inline constexpr std::size_t kSaleArrayDescriptor =
     offsetof(generated::SInvestmentVendor, itemList);
 inline constexpr std::size_t kInteractionArrayDescriptor =
     offsetof(generated::SInvestmentVendor, interactions);
+/** Direct availability expression and category selector of a vendor interaction. */
+inline constexpr std::size_t kInteractionConditionField = offsetof(generated::C80807857, h90b11fae);
+inline constexpr std::size_t kInteractionCategoryOffset = offsetof(generated::C80807857, gap38);
+/** Reply rows carry their own conditional reward expression. */
+inline constexpr std::size_t kInteractionReplyField = offsetof(generated::C80807857, replies);
+/** Sale admission and selection each have a list of conditions. */
+inline constexpr std::size_t kSaleAdmissionField = offsetof(generated::SVendorSale, array8);
+inline constexpr std::size_t kSaleSelectionField = offsetof(generated::SVendorSale, array120);
 /** A vendor definition's transfer rule array descriptor. */
 inline constexpr std::size_t kTransferArrayDescriptor =
     offsetof(generated::SInvestmentVendor, additionalPolicy96);

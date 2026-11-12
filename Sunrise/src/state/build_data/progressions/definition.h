@@ -41,6 +41,8 @@ struct Definition {
     std::uint16_t stepOffset{};
     std::uint8_t stepCount{};
     Scope scope{Scope::unreplicated};
+    /** Installed progression row +5 decides whether the final rank step repeats. */
+    bool repeatLastStep{};
     std::uint32_t definitionHash{};
 };
 

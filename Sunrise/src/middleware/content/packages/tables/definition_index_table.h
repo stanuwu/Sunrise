@@ -348,6 +348,9 @@ inline constexpr std::size_t kProgressionHashOffset =
 /** A progression definition names the object array holding its record here, in four bytes. */
 inline constexpr std::size_t kProgressionScopeOffset =
     offsetof(schema::generated::ProgressionRow, scope);
+/** The byte after the scope selector flags progressions that repeat their final step. */
+inline constexpr std::size_t kProgressionRepeatLastStepOffset =
+    kProgressionScopeOffset + sizeof(std::uint8_t);
 /** Rank steps a progression declares: the experience each rank costs, in rank order. */
 inline constexpr std::size_t kProgressionStepField =
     offsetof(schema::generated::ProgressionRow, steps);

@@ -480,8 +480,7 @@ prepare_acquisition_effects(GrantView view,
     if (flagged_perk(item)) {
         reason = "perk_acquisition";
         if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
-            || !requested.sockets.empty()
-            || item.questInitialization.scope != Quest::Scope::none) {
+            || !requested.sockets.empty() || item.questInitialization.scope != Quest::Scope::none) {
             return RewardPreparation::unresolvable;
         }
         prepared.kind = RecordRewardKind::accountUnlock;
@@ -568,11 +567,11 @@ prepare_acquisition_effects(GrantView view,
             return catalogs_settled() ? RewardPreparation::unresolvable
                                       : RewardPreparation::notReady;
         }
-        const RewardPreparation credited = credit_dawning_bounties(
-            working.characters[characterIndex],
-            DawningEvent::delivery,
-            spent.definitionHash,
-            nowSeconds);
+        const RewardPreparation credited =
+            credit_dawning_bounties(working.characters[characterIndex],
+                                    DawningEvent::delivery,
+                                    spent.definitionHash,
+                                    nowSeconds);
         if (credited != RewardPreparation::prepared) {
             return credited;
         }
@@ -748,8 +747,7 @@ RewardPreparation prepare_reward_grant(const RewardGrantRequest& request,
     if (spent != RewardPreparation::prepared) {
         return spent;
     }
-    const GrantView view{
-        working, characterIndex, {}, nextInstanceSoid, placed, request.nowSeconds};
+    const GrantView view{working, characterIndex, {}, nextInstanceSoid, placed, request.nowSeconds};
     const auto rows = prepare_reward_rows(view, rewards, mutation, reason);
     if (rows != RewardPreparation::prepared) {
         return rows;
@@ -780,6 +778,7 @@ RewardPreparation prepare_reward_grant(const RewardGrantRequest& request,
  */
 bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
                             unlocks::Table& after) noexcept {
+    const std::lock_guard lock(investment::store::g_mutex);
     if (!mutation.prepared || mutation.rewardCount > mutation.rewards.size()
         || !investment::store::read_unlocks(after, static_cast<int>(mutation.characterIndex))) {
         return false;
@@ -830,6 +829,15 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             auto& value = quest_value(after, reward.quest);
             value = build_data::items::initialized_value(reward.quest, value);
         }
+    }
+    const VendorRankRewardClaim& claim = mutation.vendorReward;
+    if (claim.beforeCredits != 0) {
+        if (claim.rankCreditRow >= after.characterObjectValues.size()
+            || !vendor_rank_reward_current(claim)
+            || after.characterObjectValues[claim.rankCreditRow] != claim.beforeCredits) {
+            return false;
+        }
+        after.characterObjectValues[claim.rankCreditRow] = claim.beforeCredits - 1;
     }
     for (const PreparedQuestStep* move : mutation.saved_value_moves()) {
         if (move->next.scope != Quest::Scope::none) {
@@ -1068,6 +1076,11 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation, bool* artifactBonu
             }
             ready = investment::store::write_unlock(
                 investment::store::Bank::accountFlags, flag.index, unlocks::kFlagSet);
+        }
+        if (ready && mutation.vendorReward.beforeCredits > 0) {
+            ready = investment::store::write_unlock(investment::store::Bank::characterObjectValues,
+                                                    mutation.vendorReward.rankCreditRow,
+                                                    mutation.vendorReward.beforeCredits - 1);
         }
         for (const PreparedQuestStep* move : mutation.saved_value_moves()) {
             const Quest& value = move->next;
