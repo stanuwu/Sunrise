@@ -131,12 +131,15 @@ void push_task_group(lua_State* state, std::uint32_t slotRow, std::int32_t group
 
 /**
  * @return The squad's whole membership in this attempt: its placed count, or more when more were
- * seen in the placed generation. Zero while it has no placement.
+ * seen in the placed generation. Zero while it has no placement. A population keeps its squad's
+ * catalog row, not the slot's, so it is found by the slot's ClientRef.
  */
-[[nodiscard]] std::int32_t squad_membership(const Impl& impl, std::uint32_t squadRow) noexcept {
+[[nodiscard]] std::int32_t squad_membership(const Impl& impl, const SlotDefinition& squad) noexcept {
     const auto found = std::find_if(
         impl.squadPopulations.begin(), impl.squadPopulations.end(), [&](const auto& population) {
-            return population.squadRow == squadRow
+            return population.registryKey == squad.registryKey
+                   && population.objectTag == squad.objectTag
+                   && population.slotIndex == squad.slotIndex
                    && population.attemptGeneration == impl.attempt.generation;
         });
     if (found == impl.squadPopulations.end()) {
@@ -315,9 +318,24 @@ int slot_select_combat_task(lua_State* state) {
                    && retained.objectiveRegistryKey == target.registryKey
                    && retained.objectiveSlotIndex == target.slotIndex;
         });
-    const std::int32_t members = squad_membership(*impl, squad.nativeRow);
-    if (authored == 0 || offer == impl->objectiveOffers.end() || members <= 0
-        || assignment_pending(state, *impl, squad.nativeRow)) {
+    const std::int32_t members = squad_membership(*impl, squad);
+    const bool pending = assignment_pending(state, *impl, squad.nativeRow);
+    const bool offered = offer != impl->objectiveOffers.end();
+    if (authored == 0 || !offered || members <= 0 || pending) {
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::debug,
+                          "ev=mission_script stage=objective_selection result=unready "
+                          "object=%08x registry=%08x slot=%u objective_slot=%u authored=%06x "
+                          "offer=%d offers=%zu members=%d pending=%d",
+                          squad.objectTag,
+                          squad.registryKey,
+                          squad.slotIndex,
+                          target.slotIndex,
+                          authored,
+                          offered ? 1 : 0,
+                          impl->objectiveOffers.size(),
+                          members,
+                          pending ? 1 : 0);
         lua_pushnil(state);
         lua_pushboolean(state, false);
         return 2;
