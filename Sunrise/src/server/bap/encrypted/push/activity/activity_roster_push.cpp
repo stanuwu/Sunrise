@@ -757,6 +757,51 @@ void note_client_entered(const Session& session) noexcept {
     }
 }
 
+/**
+ * @return True once the bubble the client's mission selection moves it into is valid on the link
+ * that hosts it: the private link itself, or else the public link the same client holds beside it.
+ */
+[[nodiscard]] bool destination_bubble_valid(const Session& privateLink) noexcept {
+    const MissionSeedLease& lease = privateLink.activityMissionSeed;
+    if (!lease.configured || lease.bindingGeneration != privateLink.activity.bindingGeneration
+        || mission_seed_plan_hosted(privateLink, lease.plan)) {
+        return true;
+    }
+    for (const Session& link : sessions()) {
+        if (mission_seed_public_link(link, privateLink) && mission_seed_plan_hosted(link, lease.plan)
+            && !link.activityRosterAwaitClientSync
+            && mission_seed_region_published(link, lease.plan.effectiveRegion)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Lets a host teleport run its spawn once the client can be placed: its private link has answered
+ * the arrival, and the bubble it arrived in is valid on the link that hosts it. Either link's
+ * roster may be the last of the two, so both ask. The membership body carrying the spawn state
+ * follows on the private link.
+ */
+void raise_teleport_spawn_when_valid(const Session& committed) noexcept {
+    Session* privateLink = nullptr;
+    for (Session& link : sessions()) {
+        if (link.activity.role != ActivityClientRole::privateCurrent) {
+            continue;
+        }
+        if (&link == &committed || mission_seed_public_link(committed, link)) {
+            privateLink = &link;
+            break;
+        }
+    }
+    if (privateLink != nullptr && !privateLink->activityRosterAwaitClientSync
+        && destination_bubble_valid(*privateLink)
+        && state::activity::membership::raise_host_teleport_spawn(
+            privateLink->activity.session.sessionId)) {
+        privateLink->activityTeleportSpawnOwed = true;
+    }
+}
+
 } // namespace
 
 /** Settles a staged roster body that reached the caller. */
@@ -780,14 +825,7 @@ void commit_staged_roster(Session& session) noexcept {
         if (answeredArrival) {
             note_client_entered(session);
         }
-        // This body lets the client spawn, so the teleport that moved it may now run its spawn.
-        // The membership body carrying that state follows this roster on the same link.
-        if (!session.activityRosterAwaitClientSync
-            && session.activity.role == ActivityClientRole::privateCurrent
-            && state::activity::membership::raise_host_teleport_spawn(
-                session.activity.session.sessionId)) {
-            session.activityTeleportSpawnOwed = true;
-        }
+        raise_teleport_spawn_when_valid(session);
     }
     if (session.activityRosterStaged.entityRetirement.pending) {
         server::gameplay::squad_entity_retirement::commit_retirement(
