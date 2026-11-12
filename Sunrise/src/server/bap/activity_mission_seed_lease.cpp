@@ -207,9 +207,13 @@ bool owner_scenario_wide(const Session& owner,
 
 bool publishes_on_public(const Session& owner,
                          const activity::host::ScriptableTarget& target) noexcept {
+    // Publicity belongs to the state, not the bubble: an alternate state of a public bubble, such
+    // as a cutscene, is private, and the client opens no public link while it stands there.
     const std::uint32_t bubble = target_bubble(target);
     return bubble < state::build_data::scenarios::kBubbleCapacity
-           && ((encrypted::push::activity::hosted_bubble_mask(owner) >> bubble) & 1U) == 0
+           && target.stateLocalRoster
+           && encrypted::push::activity::public_region(
+               owner.activity.session, owner.activity.bindingGeneration, target.stateLocalRegion)
            && !owner_scenario_wide(owner, target.objectTag, target.registryKey);
 }
 
