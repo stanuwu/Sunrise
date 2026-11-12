@@ -316,11 +316,12 @@ bool host_teleport_armed(std::uint64_t sessionId) noexcept {
     const std::size_t target = activity::transactions::find_session(state, sessionId);
     if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
         const MembershipState& membership = *selected_member(state.sessions[target]);
-        // Once the client names the region as its pending leg it is moving, and the arm still
-        // rides every body, so it must not keep forcing revisions.
+        // Once the client names the region as its pending or current leg it has the move, and
+        // the arm still rides every body, so it must not keep forcing revisions.
+        const std::int32_t region = membership.hostTeleport.sliceSetIndex;
         armed = membership.hasHostTeleport
                 && membership.hostTeleport.state != kHostTeleportSpawnState
-                && membership.region.index != membership.hostTeleport.sliceSetIndex;
+                && membership.region.index != region && membership.currentRegion.index != region;
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return armed;

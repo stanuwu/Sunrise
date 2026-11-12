@@ -760,6 +760,8 @@ void note_client_entered(const Session& session) noexcept {
 /**
  * @return True once the bubble the client's mission selection moves it into is valid on the link
  * that hosts it: the private link itself, or else the public link the same client holds beside it.
+ * The public link runs the bubble's free-roam activity and carries no mission selection, so it is
+ * valid once its own roster has answered the client standing in that bubble.
  */
 [[nodiscard]] bool destination_bubble_valid(const Session& privateLink) noexcept {
     const MissionSeedLease& lease = privateLink.activityMissionSeed;
@@ -769,8 +771,7 @@ void note_client_entered(const Session& session) noexcept {
     }
     for (const Session& link : sessions()) {
         if (mission_seed_public_link(link, privateLink) && mission_seed_plan_hosted(link, lease.plan)
-            && !link.activityRosterAwaitClientSync
-            && mission_seed_region_published(link, lease.plan.effectiveRegion)) {
+            && !link.activityRosterAwaitClientSync) {
             return true;
         }
     }
