@@ -431,6 +431,7 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.durableIntentSequence = 0;
     instance.durableHostOutputRevision = 0;
     instance.expectedScriptableRevision = 0;
+    instance.armedStateRevision = 0;
     instance.deliveryDeadline = 0;
     instance.firstIntentAttempt = 0;
     instance.pendingTimerEvent = {};
