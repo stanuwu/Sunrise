@@ -103,6 +103,7 @@ bool stage_service_outcome(Scratch& scratch,
     const auto* changeCharacter = transaction_if<ChangeCharacter>(outcome);
     const auto* selectCharacter = transaction_if<SelectCharacter>(outcome);
     const auto* equipment = transaction_if<EquipmentSwapTransaction>(outcome);
+    const auto* postmasterClaim = transaction_if<PostmasterClaimTransaction>(outcome);
     const auto* subclassSelection = transaction_if<SubclassSelectionTransaction>(outcome);
     const auto* itemState = transaction_if<ItemStateTransaction>(outcome);
     const auto* artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome);
@@ -154,6 +155,35 @@ bool stage_service_outcome(Scratch& scratch,
         }
         middleware::secure_channel::advance_nonce(nonce);
         after = changeCharacter->after;
+    } else if (postmasterClaim != nullptr) {
+        const auto& update = postmasterClaim->update;
+        // A claim moves existing rows, so it carries no acquisition presentation of its own.
+        if (!postmasterClaim->pending || !valid(update.after)
+            || update.characterSoid != postmasterClaim->pending->grant.characterSoid
+            || update.after.family4RootSoid != before.family4RootSoid
+            || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
+            || update.after.family4Version != before.family4Version + 1
+            || !push::append_record_reward_notification(scratch,
+                                                        before,
+                                                        update,
+                                                        postmasterClaim->pending->grant,
+                                                        {},
+                                                        key,
+                                                        nonce,
+                                                        response,
+                                                        written)) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=queuez stage=postmaster_claim result=fail");
+            return false;
+        }
+        middleware::secure_channel::advance_nonce(nonce);
+        after = update.after;
+        // The claim revision carries no presentation rows, so a running acquisition hold ends.
+        if (preserveAcquisitionPresentation) {
+            publication.updatesAcquisitionPresentationRows = true;
+            publication.acquisitionPresentationRowCount = 0;
+        }
     } else if (equipment != nullptr) {
         // Body processing already staged this exact after-image so the correlated opcode-403
         // response could promise its version. Reuse it here; staging a second revision would make
@@ -393,7 +423,7 @@ bool stage_service_outcome(Scratch& scratch,
             return true;
         }
     } else if (itemDismantle != nullptr) {
-        // The character after-image and the empty release descriptor must fit together or the
+        // The character after-image and any empty release descriptor must fit together or the
         // State removal is not committed.
         if (itemDismantle->pending == nullptr) {
             return false;
@@ -405,11 +435,12 @@ bool stage_service_outcome(Scratch& scratch,
             removedCount += static_cast<std::size_t>(before.family4Residents[index].objectSoid
                                                      == dismantle.dismantledInstanceSoid);
         }
-        if (!valid(dismantle.after) || removedCount != 1U
+        if (!valid(dismantle.after)
+            || removedCount != static_cast<std::size_t>(dismantle.dismantledInstanceSoid != 0)
             || dismantle.accountSoid != pending.accountSoid
             || dismantle.characterSoid != pending.characterSoid
             || dismantle.dismantledInstanceSoid != pending.dismantledInstanceSoid
-            || dismantle.updatesAccount != pending.profileChanged
+            || dismantle.updatesAccount != pending.updates_account()
             || dismantle.accountSoid != before.family4RootSoid || before.family4ResidentCount == 0
             || dismantle.accountDefinitionId != before.family4Residents.front().definitionId
             || dismantle.after.family4RootSoid != before.family4RootSoid

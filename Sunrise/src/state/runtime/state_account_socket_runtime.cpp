@@ -14,6 +14,7 @@
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state.h"
 #include "state_account_transaction_helpers.h"
@@ -96,12 +97,349 @@ void report_socket_plug(std::string_view stage,
     return authored_inventory::valid(sockets);
 }
 
+/**
+ * Multiplies each requirement by the target socket type's authored scalar for its currency.
+ * @return False before the scalars are published or when a scaled quantity overflows.
+ */
+[[nodiscard]] bool
+scale_socket_costs(std::uint16_t socketType,
+                   build_data::material_requirements::Definition& materialSet) noexcept {
+    for (std::size_t index = 0; index < materialSet.requirementCount; ++index) {
+        auto& requirement = materialSet.requirements[index];
+        std::uint32_t multiplier = 0;
+        if (!build_data::socket_currency_multiplier(
+                socketType, requirement.itemDefinitionIndex, multiplier)) {
+            return false;
+        }
+        const std::uint64_t scaled = std::uint64_t{requirement.quantity} * multiplier;
+        if (scaled > (std::numeric_limits<std::uint32_t>::max)()) {
+            return false;
+        }
+        requirement.quantity = static_cast<std::uint32_t>(scaled);
+    }
+    return true;
+}
+
+/**
+ * Reads the target's lanes as an authored block, materializing an item still on native defaults.
+ * @param reason Receives the refusal label on failure.
+ */
+[[nodiscard]] static bool read_current_sockets(const authored_inventory::Item& target,
+                                               const item_details::Definition& detail,
+                                               authored_inventory::Sockets& sockets,
+                                               const char*& reason) noexcept {
+    if (target.sockets.policy == authored_inventory::SocketPolicy::nativeDefaults) {
+        if (!materialize_native_sockets(detail, sockets)) {
+            reason = "native_sockets";
+            return false;
+        }
+        return true;
+    }
+    sockets = target.sockets;
+    if (sockets.policy != authored_inventory::SocketPolicy::authored
+        || sockets.plugCount != detail.ordinarySocketCount
+        || !authored_inventory::valid(sockets)) {
+        reason = "authored_sockets";
+        return false;
+    }
+    return true;
+}
+
+/** What the target, when it is a container, makes of the requested plug before any charge. */
+struct ContainerPlug {
+    SynthesizerPayout payout{};
+    OvenBake bake{};
+    /** A Synthesizer exchange, paid its payout once the insertion cost is charged. */
+    bool synthesizes{};
+    /** An oven bake, which charges its recipe's cost and is paid its cookie after it. */
+    bool bakes{};
+    /** The plug is an exchange: it never stays in the lane, which shows lanePlug instead. */
+    bool exchanges{};
+    /** Cost set the action charges: a bake's, otherwise the requested plug's own. */
+    std::uint16_t costSetIndex{build_data::items::kUnavailableMaterialRequirementSetIndex};
+    /** Unlock rows staged ahead of the cost: a burnt bake's debits or an upgrade's flag. */
+    AccountUnlockWrites unlockWrites{};
+    /** The plug the lane shows once the action lands; a rolled socket rolls its own. */
+    build_data::items::Definition lanePlug{};
+};
+
+/**
+ * Asks the Synthesizer, the oven and the Chalice, in that order, what each makes of the requested
+ * plug. Each answers only for its own item, and any other plug lands as requested.
+ * @param sockets The target's current lanes, native defaults materialized.
+ * @param reason Receives the refusing container's label.
+ * @return False when a container refuses the plug.
+ */
+[[nodiscard]] static bool stage_container_plug(const AccountState& snapshot,
+                                               std::size_t characterIndex,
+                                               const item_details::Definition& detail,
+                                               const authored_inventory::Sockets& sockets,
+                                               std::uint8_t socketLane,
+                                               const build_data::items::Definition& requested,
+                                               ContainerPlug& container,
+                                               const char*& reason) noexcept {
+    // A Synthesizer plug is an exchange, paid after its insertion cost is charged.
+    const SynthesizerExchange exchange = stage_synthesizer_payout(
+        snapshot, detail, socketLane, requested, container.payout, reason);
+    if (exchange == SynthesizerExchange::refused) {
+        return false;
+    }
+    // An oven plug that bakes charges its recipe's cost and is paid its cookie after it.
+    const OvenAction ovenAction =
+        stage_oven_bake(detail, sockets, socketLane, requested, container.bake, reason);
+    if (ovenAction == OvenAction::refused) {
+        return false;
+    }
+    // A Chalice plug must pass its checks, and an upgrade purchase sets its flag.
+    ChaliceUpgrade upgrade{};
+    const ChaliceAction chaliceAction = stage_chalice_plug(
+        snapshot, characterIndex, detail, sockets, socketLane, requested, upgrade, reason);
+    if (chaliceAction == ChaliceAction::refused) {
+        return false;
+    }
+    const bool upgrades = chaliceAction == ChaliceAction::upgraded;
+    container.synthesizes = exchange == SynthesizerExchange::paid;
+    container.bakes = ovenAction == OvenAction::baked;
+    container.exchanges = container.synthesizes || container.bakes || upgrades;
+    container.costSetIndex = requested.insertionMaterialRequirementSetIndex;
+    container.unlockWrites = upgrade.unlockWrites;
+    container.lanePlug = requested;
+    if (container.bakes) {
+        container.costSetIndex = container.bake.costSetIndex;
+        container.unlockWrites = container.bake.unlockWrites;
+        container.lanePlug = container.bake.lanePlug;
+    } else if (upgrades) {
+        container.lanePlug = upgrade.lanePlug;
+    } else if (container.synthesizes) {
+        container.lanePlug = container.payout.lanePlug;
+    }
+    return true;
+}
+
+/**
+ * Charges the action: its cost set, the container's payout and the requested plug's own stack when
+ * applying draws one down.
+ * @param container Its unlock rows receive the cost's debits, and its payout the rows it credits.
+ * @param charged The account the action began with; receives every charge and payout.
+ * @param materialSet Receives the scaled cost set, or stays empty for a free action.
+ * @param profileChanged Receives whether the account object changes.
+ * @param reason Receives the refusal label on failure.
+ */
+[[nodiscard]] static bool
+charge_socket_plug(const AccountState& snapshot,
+                   std::size_t characterIndex,
+                   const item_details::Definition& detail,
+                   std::uint8_t socketLane,
+                   const build_data::items::Definition& requested,
+                   std::int64_t nowSeconds,
+                   ContainerPlug& container,
+                   AccountState& charged,
+                   build_data::material_requirements::Definition& materialSet,
+                   bool& profileChanged,
+                   const char*& reason) noexcept {
+    const auto refuse = [&reason](const char* label) noexcept {
+        reason = label;
+        return false;
+    };
+    // Ownership matters only for a plug the account draws down, such as a shader stack. An
+    // ornament is a permanent unlock, so demanding a stack for one would refuse a held plug.
+    const bool consumesStack =
+        build_data::is_profile_action_source(requested.definitionIndex, requested.bucketId)
+        && build_data::is_consumed_on_apply(requested.definitionIndex, requested.bucketId)
+        && !(socketLane < detail.initialPlugIndices.size()
+             && detail.initialPlugIndices[socketLane] == requested.definitionIndex);
+    if (consumesStack && !holds_plug_source(snapshot, requested.definitionHash)) {
+        return refuse("plug_ownership");
+    }
+
+    if (container.costSetIndex != build_data::items::kUnavailableMaterialRequirementSetIndex
+        && (!build_data::find_material_requirement_set(container.costSetIndex, materialSet)
+            || materialSet.requirementSetIndex != container.costSetIndex
+            || !scale_socket_costs(detail.socketTypes[socketLane], materialSet)
+            || !apply_action_materials(
+                snapshot, materialSet, charged, profileChanged, container.unlockWrites))) {
+        return refuse("materials");
+    }
+    if (container.synthesizes
+        && !credit_profile_stack(snapshot,
+                                 charged,
+                                 characterIndex,
+                                 container.payout.itemIndex,
+                                 container.payout.quantity,
+                                 container.payout.changes,
+                                 container.payout.changeCount)) {
+        return refuse("synthesizer_payout");
+    }
+    if (container.bakes
+        && !pay_oven_bake(snapshot,
+                          charged,
+                          characterIndex,
+                          container.bake,
+                          container.unlockWrites,
+                          nowSeconds)) {
+        return refuse("oven_payout");
+    }
+
+    // Applying spends the plug's own stack; the insertion cost above is a separate charge. The
+    // row keeps its instance key until its last unit goes, and the key is released with it.
+    if (consumesStack && !spend_plug_source(charged, requested.definitionHash)) {
+        return refuse("plug_stack");
+    }
+    profileChanged = profileChanged || consumesStack || container.exchanges
+                     || container.unlockWrites.count != 0;
+    return true;
+}
+
+/**
+ * Rolls the result plug a rolled socket's apply or re-roll plug lands, and re-rolls the lane of a
+ * plug the result stands for.
+ * @param pinnedPlugHash The result an earlier staging rolled, or zero to roll afresh.
+ * @param sockets The target's lanes; a linked lane receives its plug.
+ * @param granted Receives the result plug.
+ * @param reason Receives the refusal label on failure.
+ */
+[[nodiscard]] static bool roll_lane_plug(const CharacterState& character,
+                                         const CharacterItemLocation& location,
+                                         std::uint64_t targetInstanceSoid,
+                                         const build_data::items::Definition& targetDefinition,
+                                         const item_details::Definition& detail,
+                                         std::uint8_t socketLane,
+                                         const build_data::items::Definition& requested,
+                                         std::uint32_t pinnedPlugHash,
+                                         authored_inventory::Sockets& sockets,
+                                         build_data::items::Definition& granted,
+                                         const char*& reason) noexcept {
+    const auto refuse = [&reason](const char* label) noexcept {
+        reason = label;
+        return false;
+    };
+    const std::uint32_t currentPlugHash = sockets.plugs[socketLane].value_or(0);
+    const bool reroll = is_rolled_result(currentPlugHash);
+    // A re-staging must land on the plug the first staging rolled, so the pinned roll is
+    // taken as long as it is still one the fresh roll could have produced.
+    RolledPlug rolled{};
+    if (pinnedPlugHash != 0) {
+        if (pinnedPlugHash == currentPlugHash || !pin_rolled_plug(pinnedPlugHash, detail, rolled)) {
+            return refuse("rolled_plug_pin");
+        }
+    } else {
+        const std::uint64_t seed = targetInstanceSoid
+                                   ^ (static_cast<std::uint64_t>(GetTickCount64()) << 8U)
+                                   ^ static_cast<std::uint64_t>(character.nextInventorySerial);
+        if (!roll_socket_plug(requested,
+                              detail,
+                              static_cast<std::uint8_t>(character.characterClass),
+                              currentPlugHash,
+                              seed,
+                              rolled)) {
+            return refuse("rolled_plug_roll");
+        }
+    }
+    if (!build_data::find_item_definition_hash(rolled.plugHash, granted)
+        || granted.definitionHash != rolled.plugHash) {
+        return refuse("rolled_plug_roll");
+    }
+    // A result standing for another plug re-rolls that plug's lane too, which is what moves
+    // the piece's stats.
+    if (rolled.linkedPerkHash != 0) {
+        build_data::items::Definition linkedDefinition{};
+        if (rolled.linkedLane == socketLane || rolled.linkedLane >= detail.ordinarySocketCount
+            || !build_data::find_item_definition_hash(rolled.linkedPerkHash, linkedDefinition)
+            || linkedDefinition.definitionHash != rolled.linkedPerkHash) {
+            return refuse("rolled_plug_link");
+        }
+        sockets.plugs[rolled.linkedLane] = rolled.linkedPerkHash;
+        report_socket_plug("rolled_plug_link",
+                           "ok",
+                           reroll ? "reroll" : "apply",
+                           character.soid,
+                           targetInstanceSoid,
+                           targetDefinition.definitionIndex,
+                           rolled.linkedLane,
+                           linkedDefinition.definitionIndex,
+                           targetDefinition.bucketId,
+                           linkedDefinition.bucketId,
+                           location.equipped,
+                           location.index);
+    }
+    report_socket_plug("rolled_plug",
+                       "ok",
+                       reroll ? "reroll" : "apply",
+                       character.soid,
+                       targetInstanceSoid,
+                       targetDefinition.definitionIndex,
+                       socketLane,
+                       granted.definitionIndex,
+                       targetDefinition.bucketId,
+                       granted.bucketId,
+                       location.equipped,
+                       location.index);
+    return true;
+}
+
+/**
+ * Checks that the changed account still resolves, with the target in the position it held and its
+ * lane showing the granted plug.
+ * @param reason Receives the refusal label on failure.
+ */
+[[nodiscard]] static bool resolves_with_plug(const AccountState& candidate,
+                                             std::size_t characterIndex,
+                                             const family4_loadout::ResolvedLoadout& beforeLoadout,
+                                             std::uint64_t targetInstanceSoid,
+                                             std::uint16_t targetDefinitionIndex,
+                                             std::uint8_t socketLane,
+                                             std::uint16_t grantedDefinitionIndex,
+                                             const char*& reason) noexcept {
+    const auto refuse = [&reason](const char* label) noexcept {
+        reason = label;
+        return false;
+    };
+    for (std::size_t index = 0; index < beforeLoadout.itemCount; ++index) {
+        const auto& resolved = beforeLoadout.items[index];
+        if (resolved.instance.instanceSoid == targetInstanceSoid
+            && resolved.instance.baseDefinitionIndex != targetDefinitionIndex) {
+            return refuse("before_definition");
+        }
+    }
+    family4_loadout::ResolvedLoadout afterLoadout{};
+    ResolvedPosition beforePosition{};
+    ResolvedPosition afterPosition{};
+    if (!account::valid(candidate)
+        || !family4_loadout::resolve(candidate, characterIndex, afterLoadout)
+        || !find_resolved_position(beforeLoadout, targetInstanceSoid, beforePosition)
+        || !find_resolved_position(afterLoadout, targetInstanceSoid, afterPosition)
+        || !same_position(beforePosition, afterPosition)) {
+        return refuse("candidate_or_position");
+    }
+    const family4_loadout::ResolvedItem* resolvedTarget = nullptr;
+    for (std::size_t index = 0; index < afterLoadout.itemCount; ++index) {
+        const auto& resolved = afterLoadout.items[index];
+        if (resolved.instance.instanceSoid != targetInstanceSoid) {
+            continue;
+        }
+        if (resolvedTarget != nullptr) {
+            return refuse("duplicate_target");
+        }
+        resolvedTarget = &resolved;
+    }
+    if (resolvedTarget == nullptr
+        || resolvedTarget->instance.baseDefinitionIndex != targetDefinitionIndex
+        || resolvedTarget->instance.ordinarySockets.state
+               != middleware::datagen::family4::instance::OrdinarySocketBlockState::present
+        || !resolvedTarget->instance.ordinarySockets.plugs[socketLane].has_value()
+        || *resolvedTarget->instance.ordinarySockets.plugs[socketLane] != grantedDefinitionIndex) {
+        return refuse("after_socket");
+    }
+    return true;
+}
+
 /** Stages the canonical socket-only after-image over one already validated account snapshot. */
 [[nodiscard]] bool stage_socket_plug(const AccountState& snapshot,
                                      std::size_t characterIndex,
                                      std::uint64_t targetInstanceSoid,
                                      std::uint8_t socketLane,
                                      std::uint16_t plugDefinitionIndex,
+                                     std::int64_t nowSeconds,
                                      PendingSocketPlug& mutation,
                                      std::uint32_t pinnedPlugHash) noexcept {
     mutation = {};
@@ -163,124 +501,70 @@ void report_socket_plug(std::string_view stage,
         return fail("catalyst_lane_requires_atomic_change");
     }
 
-    // Ownership matters only for a plug the account draws down, such as a shader stack. An
-    // ornament is a permanent unlock, so demanding a stack for one would refuse a held plug.
-    const bool consumesStack =
-        build_data::is_profile_action_source(plugDefinitionIndex, plugDefinition.bucketId)
-        && build_data::is_consumed_on_apply(plugDefinitionIndex, plugDefinition.bucketId)
-        && !(socketLane < detail.initialPlugIndices.size()
-             && detail.initialPlugIndices[socketLane] == plugDefinitionIndex);
-    if (consumesStack && !holds_plug_source(snapshot, plugDefinition.definitionHash)) {
-        return fail("plug_ownership");
+    const char* refusal = nullptr;
+    authored_inventory::Sockets authoredSockets{};
+    ContainerPlug container{};
+    if (!read_current_sockets(*target, detail, authoredSockets, refusal)
+        || !stage_container_plug(snapshot,
+                                 characterIndex,
+                                 detail,
+                                 authoredSockets,
+                                 socketLane,
+                                 plugDefinition,
+                                 container,
+                                 refusal)) {
+        return fail(refusal);
     }
 
     AccountState chargedAccount = snapshot;
     build_data::material_requirements::Definition materialSet{};
     bool profileChanged = false;
-    const std::uint16_t materialSetIndex = plugDefinition.insertionMaterialRequirementSetIndex;
-    if (materialSetIndex != build_data::items::kUnavailableMaterialRequirementSetIndex
-        && (!build_data::find_material_requirement_set(materialSetIndex, materialSet)
-            || materialSet.requirementSetIndex != materialSetIndex
-            || !apply_action_materials(snapshot, materialSet, chargedAccount, profileChanged))) {
-        return fail("materials");
+    if (!charge_socket_plug(snapshot,
+                            characterIndex,
+                            detail,
+                            socketLane,
+                            plugDefinition,
+                            nowSeconds,
+                            container,
+                            chargedAccount,
+                            materialSet,
+                            profileChanged,
+                            refusal)) {
+        return fail(refusal);
     }
 
-    // Applying spends the plug's own stack; the insertion cost above is a separate charge. The
-    // row keeps its instance key until its last unit goes, and the key is released with it.
-    if (consumesStack && !spend_plug_source(chargedAccount, plugDefinition.definitionHash)) {
-        return fail("plug_stack");
-    }
-    profileChanged = profileChanged || consumesStack;
-
-    authored_inventory::Sockets authoredSockets{};
-    if (target->sockets.policy == authored_inventory::SocketPolicy::nativeDefaults) {
-        if (!materialize_native_sockets(detail, authoredSockets)) {
-            return fail("native_sockets");
-        }
-    } else {
-        authoredSockets = target->sockets;
-        if (authoredSockets.policy != authored_inventory::SocketPolicy::authored
-            || authoredSockets.plugCount != detail.ordinarySocketCount
-            || !authored_inventory::valid(authoredSockets)) {
-            return fail("authored_sockets");
-        }
-    }
-    if (authoredSockets.plugs[socketLane].has_value()
+    // An exchange's plug never stays in the lane, so the lane's current plug does not refuse it.
+    if (!container.exchanges && authoredSockets.plugs[socketLane].has_value()
         && *authoredSockets.plugs[socketLane] == plugDefinition.definitionHash) {
         return fail("already_applied");
+    }
+    if (container.bakes) {
+        authoredSockets = container.bake.sockets;
     }
 
     // A rolled socket's apply or re-roll plug is an action: the lane receives a result plug from
     // the roll set. The requested plug still decides the pool check and the material charge.
-    build_data::items::Definition grantedDefinition = plugDefinition;
-    if (classify_rolled_plug(plugDefinition, targetDefinition, socketLane)
-        == RolledPlugAction::roll) {
-        const std::uint32_t currentPlugHash = authoredSockets.plugs[socketLane].value_or(0);
-        const bool reroll = is_rolled_result(currentPlugHash);
-        // A re-staging must land on the plug the first staging rolled, so the pinned roll is
-        // taken as long as it is still one the fresh roll could have produced.
-        RolledPlug rolled{};
-        if (pinnedPlugHash != 0) {
-            if (pinnedPlugHash == currentPlugHash
-                || !pin_rolled_plug(pinnedPlugHash, detail, rolled)) {
-                return fail("rolled_plug_pin");
-            }
-        } else {
-            const std::uint64_t seed = targetInstanceSoid
-                                       ^ (static_cast<std::uint64_t>(GetTickCount64()) << 8U)
-                                       ^ static_cast<std::uint64_t>(before.nextInventorySerial);
-            if (!roll_socket_plug(plugDefinition,
-                                  detail,
-                                  static_cast<std::uint8_t>(before.characterClass),
-                                  currentPlugHash,
-                                  seed,
-                                  rolled)) {
-                return fail("rolled_plug_roll");
-            }
-        }
-        if (!build_data::find_item_definition_hash(rolled.plugHash, grantedDefinition)
-            || grantedDefinition.definitionHash != rolled.plugHash) {
-            return fail("rolled_plug_roll");
-        }
-        // A result standing for another plug re-rolls that plug's lane too, which is what moves
-        // the piece's stats.
-        if (rolled.linkedPerkHash != 0) {
-            build_data::items::Definition linkedDefinition{};
-            if (rolled.linkedLane == socketLane || rolled.linkedLane >= detail.ordinarySocketCount
-                || !build_data::find_item_definition_hash(rolled.linkedPerkHash, linkedDefinition)
-                || linkedDefinition.definitionHash != rolled.linkedPerkHash) {
-                return fail("rolled_plug_link");
-            }
-            authoredSockets.plugs[rolled.linkedLane] = rolled.linkedPerkHash;
-            report_socket_plug("rolled_plug_link",
-                               "ok",
-                               reroll ? "reroll" : "apply",
-                               before.soid,
-                               targetInstanceSoid,
-                               targetDefinition.definitionIndex,
-                               rolled.linkedLane,
-                               linkedDefinition.definitionIndex,
-                               targetDefinition.bucketId,
-                               linkedDefinition.bucketId,
-                               location.equipped,
-                               location.index);
-        }
-        report_socket_plug("rolled_plug",
-                           "ok",
-                           reroll ? "reroll" : "apply",
-                           before.soid,
+    build_data::items::Definition grantedDefinition = container.lanePlug;
+    if (!container.exchanges
+        && classify_rolled_plug(plugDefinition, targetDefinition, socketLane)
+               == RolledPlugAction::roll
+        && !roll_lane_plug(before,
+                           location,
                            targetInstanceSoid,
-                           targetDefinition.definitionIndex,
+                           targetDefinition,
+                           detail,
                            socketLane,
-                           grantedDefinition.definitionIndex,
-                           targetDefinition.bucketId,
-                           grantedDefinition.bucketId,
-                           location.equipped,
-                           location.index);
+                           plugDefinition,
+                           pinnedPlugHash,
+                           authoredSockets,
+                           grantedDefinition,
+                           refusal)) {
+        return fail(refusal);
     }
     authoredSockets.plugs[socketLane] = grantedDefinition.definitionHash;
 
-    CharacterState after = before;
+    // A bake's payout can advance bounties, so the character starts from the charged account.
+    CharacterState after = chargedAccount.characters[characterIndex];
     authored_inventory::Item* changed = character_item_at(after, location);
     if (changed == nullptr || changed->instanceSoid != target->instanceSoid
         || changed->definitionHash != target->definitionHash || changed->level != target->level
@@ -289,45 +573,23 @@ void report_socket_plug(std::string_view stage,
         return fail("target_copy");
     }
     changed->sockets = authoredSockets;
+    // The client reloads held items' content only when a character row changes, and a bake can pay
+    // a cookie the profile did not hold, so the oven takes a new serial.
+    if (container.bakes && !next_character_serial(after, changed->mutationSerial)) {
+        return fail("target_serial");
+    }
 
     AccountState candidate = chargedAccount;
     candidate.characters[characterIndex] = after;
-    family4_loadout::ResolvedLoadout afterLoadout{};
-    ResolvedPosition beforePosition{};
-    ResolvedPosition afterPosition{};
-    const family4_loadout::ResolvedItem* resolvedTarget = nullptr;
-    for (std::size_t index = 0; index < beforeLoadout.itemCount; ++index) {
-        const auto& resolved = beforeLoadout.items[index];
-        if (resolved.instance.instanceSoid == targetInstanceSoid
-            && resolved.instance.baseDefinitionIndex != targetDefinition.definitionIndex) {
-            return fail("before_definition");
-        }
-    }
-    if (!account::valid(candidate)
-        || !family4_loadout::resolve(candidate, characterIndex, afterLoadout)
-        || !find_resolved_position(beforeLoadout, targetInstanceSoid, beforePosition)
-        || !find_resolved_position(afterLoadout, targetInstanceSoid, afterPosition)
-        || !same_position(beforePosition, afterPosition)) {
-        return fail("candidate_or_position");
-    }
-    for (std::size_t index = 0; index < afterLoadout.itemCount; ++index) {
-        const auto& resolved = afterLoadout.items[index];
-        if (resolved.instance.instanceSoid != targetInstanceSoid) {
-            continue;
-        }
-        if (resolvedTarget != nullptr) {
-            return fail("duplicate_target");
-        }
-        resolvedTarget = &resolved;
-    }
-    if (resolvedTarget == nullptr
-        || resolvedTarget->instance.baseDefinitionIndex != targetDefinition.definitionIndex
-        || resolvedTarget->instance.ordinarySockets.state
-               != middleware::datagen::family4::instance::OrdinarySocketBlockState::present
-        || !resolvedTarget->instance.ordinarySockets.plugs[socketLane].has_value()
-        || *resolvedTarget->instance.ordinarySockets.plugs[socketLane]
-               != grantedDefinition.definitionIndex) {
-        return fail("after_socket");
+    if (!resolves_with_plug(candidate,
+                            characterIndex,
+                            beforeLoadout,
+                            targetInstanceSoid,
+                            targetDefinition.definitionIndex,
+                            socketLane,
+                            grantedDefinition.definitionIndex,
+                            refusal)) {
+        return fail(refusal);
     }
 
     mutation.beforeCharacter = before;
@@ -343,15 +605,20 @@ void report_socket_plug(std::string_view stage,
     mutation.characterIndex = characterIndex;
     mutation.expectedProfileItemCount = snapshot.profileItemCount;
     mutation.afterProfileItemCount = chargedAccount.profileItemCount;
+    mutation.changes = container.bakes ? container.bake.changes : container.payout.changes;
+    mutation.changeCount =
+        container.bakes ? container.bake.changeCount : container.payout.changeCount;
+    mutation.unlockWrites = container.unlockWrites;
     mutation.itemIndex = location.index;
     mutation.targetDefinitionIndex = targetDefinition.definitionIndex;
     mutation.plugDefinitionIndex = grantedDefinition.definitionIndex;
     mutation.requestedPlugDefinitionIndex = plugDefinitionIndex;
-    mutation.materialRequirementSetIndex = materialSetIndex;
+    mutation.materialRequirementSetIndex = container.costSetIndex;
     mutation.socketLane = socketLane;
     mutation.targetBucketId = targetDefinition.bucketId;
     mutation.plugBucketId = grantedDefinition.bucketId;
     mutation.materialRequirementCount = materialSet.requirementCount;
+    mutation.nowSeconds = nowSeconds;
     mutation.profileChanged = profileChanged;
     mutation.targetEquipped = location.equipped;
     mutation.prepared = true;

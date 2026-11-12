@@ -55,43 +55,76 @@ bool decode(const NamedRecord& record, content::Definition& value) noexcept {
  * @return True for empty quest state or a supported first-step value, scope, and bank row.
  */
 bool encode(const items::Definition& value, ItemRecord& record) noexcept {
-    record = {
-        value.definitionHash,
-        value.definitionIndex,
-        value.bucketId,
-        value.tier,
-        value.insertionMaterialRequirementSetIndex,
-        value.enabledMaterialRequirementSetIndex,
-        value.plugCategoryHash,
-        value.rollSetIndex,
-        value.linkedPlugIndex,
-        value.questInitialization.value,
-        value.questInitialization.row,
-        static_cast<std::uint8_t>(value.questInitialization.scope),
-    };
+    record = {};
+    record.definitionHash = value.definitionHash;
+    record.definitionIndex = value.definitionIndex;
+    record.bucketId = value.bucketId;
+    record.tier = value.tier;
+    record.insertionMaterialRequirementSetIndex = value.insertionMaterialRequirementSetIndex;
+    record.enabledMaterialRequirementSetIndex = value.enabledMaterialRequirementSetIndex;
+    record.plugCategoryHash = value.plugCategoryHash;
+    record.rollSetIndex = value.rollSetIndex;
+    record.linkedPlugIndex = value.linkedPlugIndex;
+    record.questInitialValue = value.questInitialization.value;
+    record.questValueRow = value.questInitialization.row;
+    record.questValueScope = static_cast<std::uint8_t>(value.questInitialization.scope);
+    record.recoveryBucketId = value.recoveryBucketId;
+    record.quietAcquisition = static_cast<std::uint8_t>(value.quietAcquisition);
+    record.toastlessAcquisition = static_cast<std::uint8_t>(value.toastlessAcquisition);
+    record.stackUniqueLabel = value.stackUniqueLabel;
+    record.grantRestricted = static_cast<std::uint8_t>(value.grantRestricted);
+    record.quantityValueIndex = value.quantityValueIndex;
+    record.plugSetFlagIndex = value.plugSetFlagIndex;
+    record.presenceFlagCount = value.presenceFlagCount;
+    record.presenceFlags = value.presenceFlags;
+    record.consumesWholeStack = static_cast<std::uint8_t>(value.consumesWholeStack);
+    record.deletesOnAction = static_cast<std::uint8_t>(value.deletesOnAction);
     return items::valid(value.questInitialization);
 }
 
 /**
- * Cached quest state must fit the same bank limits as freshly read item metadata.
+ * Cached quest state must fit the same bank limits as freshly read item metadata. Presence-flag
+ * slots past the row's count must hold their zero default.
  * @param record Packed disk row.
  * @param value Receives the runtime item mapping; use only on success.
  * @return True for empty quest state or a supported first-step value, scope, and bank row.
  */
 bool decode(const ItemRecord& record, items::Definition& value) noexcept {
-    value = {record.definitionHash,
-             record.definitionIndex,
-             record.bucketId,
-             record.insertionMaterialRequirementSetIndex,
-             record.enabledMaterialRequirementSetIndex,
-             record.tier,
-             record.plugCategoryHash,
-             record.rollSetIndex,
-             record.linkedPlugIndex,
-             {record.questInitialValue,
-              record.questValueRow,
-              static_cast<items::QuestInitialization::Scope>(record.questValueScope)}};
-    return items::valid(value.questInitialization);
+    value = {};
+    value.definitionHash = record.definitionHash;
+    value.definitionIndex = record.definitionIndex;
+    value.bucketId = record.bucketId;
+    value.insertionMaterialRequirementSetIndex = record.insertionMaterialRequirementSetIndex;
+    value.enabledMaterialRequirementSetIndex = record.enabledMaterialRequirementSetIndex;
+    value.tier = record.tier;
+    value.plugCategoryHash = record.plugCategoryHash;
+    value.rollSetIndex = record.rollSetIndex;
+    value.linkedPlugIndex = record.linkedPlugIndex;
+    value.questInitialization.value = record.questInitialValue;
+    value.questInitialization.row = record.questValueRow;
+    value.questInitialization.scope =
+        static_cast<items::QuestInitialization::Scope>(record.questValueScope);
+    value.recoveryBucketId = record.recoveryBucketId;
+    value.quietAcquisition = record.quietAcquisition != 0;
+    value.toastlessAcquisition = record.toastlessAcquisition != 0;
+    value.stackUniqueLabel = record.stackUniqueLabel;
+    value.grantRestricted = record.grantRestricted != 0;
+    value.quantityValueIndex = record.quantityValueIndex;
+    value.plugSetFlagIndex = record.plugSetFlagIndex;
+    value.presenceFlags = record.presenceFlags;
+    value.presenceFlagCount = record.presenceFlagCount;
+    value.consumesWholeStack = record.consumesWholeStack != 0;
+    value.deletesOnAction = record.deletesOnAction != 0;
+    if (record.presenceFlagCount > items::kPresenceFlagCapacity) {
+        return false;
+    }
+    const auto unusedFlags = std::span(value.presenceFlags).subspan(value.presenceFlagCount);
+    return items::valid(value.questInitialization) && record.quietAcquisition <= 1
+           && record.toastlessAcquisition <= 1 && record.grantRestricted <= 1
+           && std::all_of(unusedFlags.begin(),
+                          unusedFlags.end(),
+                          [](std::uint16_t slot) { return slot == 0; })
+           && record.consumesWholeStack <= 1 && record.deletesOnAction <= 1;
 }
 
 /** Encodes one collectible ordinal and its optional item link. */
@@ -139,6 +172,7 @@ bool decode(const CollectibleRecord& record, collectibles::Definition& value) no
     for (std::size_t index = 0; index < record.materialRequirements.size(); ++index) {
         const MaterialRequirementRecord& requirement = record.materialRequirements[index];
         if (requirement.condition != material_requirements::kUnconditionalRequirement
+            || requirement.valueIndex != material_requirements::kUnavailableValueIndex
             || requirement.deleteOnAction > 1 || requirement.omitFromRequirements > 1) {
             return false;
         }
@@ -170,6 +204,7 @@ bool encode(const material_requirements::Definition& value,
             requirement.condition,
             static_cast<std::uint8_t>(requirement.deleteOnAction),
             static_cast<std::uint8_t>(requirement.omitFromRequirements),
+            requirement.valueIndex,
         };
     }
     return true;
@@ -197,8 +232,23 @@ bool decode(const MaterialRequirementSetRecord& record,
             requirement.condition,
             requirement.deleteOnAction != 0,
             requirement.omitFromRequirements != 0,
+            requirement.valueIndex,
         };
     }
+    return true;
+}
+
+/** Encodes one socket type's currency scalar. */
+bool encode(const material_requirements::CurrencyScalar& value,
+            CurrencyScalarRecord& record) noexcept {
+    record = {value.socketType, value.itemDefinitionIndex, value.multiplier};
+    return true;
+}
+
+/** Decodes one socket type's currency scalar; the domain check validates its order. */
+bool decode(const CurrencyScalarRecord& record,
+            material_requirements::CurrencyScalar& value) noexcept {
+    value = {record.socketType, record.itemDefinitionIndex, record.multiplier};
     return true;
 }
 
@@ -284,7 +334,7 @@ bool encode(const inventory::buckets::Descriptor& value, InventoryBucketRecord& 
         value.firstSlot,
         value.slotCount,
         value.equipmentSlot,
-        value.reserved,
+        value.policyFlags,
     };
     return true;
 }
@@ -297,7 +347,7 @@ bool decode(const InventoryBucketRecord& record, inventory::buckets::Descriptor&
         record.firstSlot,
         record.slotCount,
         record.equipmentSlot,
-        record.reserved,
+        record.policyFlags,
     };
     return true;
 }

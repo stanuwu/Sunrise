@@ -1,6 +1,7 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 5;
--- open() also creates parked_items; the version 5 upgrade runs the same statement.
+PRAGMA user_version = 6;
+-- open() also creates parked_items, item_objectives, character_helmet_tiers and
+-- eververse_wallet_sync.
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -43,8 +44,11 @@ CREATE TABLE items (
     melee_ability INTEGER NOT NULL,
     class_ability INTEGER NOT NULL,
     seen INTEGER NOT NULL CHECK(seen IN(0,1)),
+    placement INTEGER NOT NULL CHECK (placement IN (0, 1)),
     PRIMARY KEY (character_slot, location, position),
-    CHECK ((location = 0 AND position < 17) OR (location = 1 AND position < 135))
+    CHECK ((location = 0 AND position < 17 AND placement = 0)
+           OR (location = 1 AND position < 333)),
+    CHECK (placement = 0 OR quantity = 1)
 ) STRICT;
 
 CREATE TABLE sockets (
@@ -65,10 +69,11 @@ CREATE TABLE profile_items (
 
 CREATE TABLE character_stacks (
     character_slot INTEGER NOT NULL REFERENCES characters(slot),
-    position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 31),
+    position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 332),
     definition_hash INTEGER NOT NULL,
     quantity INTEGER NOT NULL CHECK (quantity > 0),
     mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    placement INTEGER NOT NULL CHECK (placement IN (0, 1)),
     PRIMARY KEY (character_slot, position)
 ) STRICT;
 
@@ -115,7 +120,6 @@ CREATE TABLE bootstrap (
 CREATE TABLE pending_rewards (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     character_slot INTEGER NOT NULL CHECK (character_slot BETWEEN 0 AND 2),
-    kind INTEGER NOT NULL CHECK (kind IN (0, 1)),
     definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
     quantity INTEGER NOT NULL CHECK (quantity > 0)
 ) STRICT;

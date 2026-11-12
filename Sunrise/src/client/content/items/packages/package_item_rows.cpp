@@ -1,7 +1,11 @@
 #include <array>
 #include <span>
+#include <vector>
 
+#include "../../../../core/logging/log.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_808077.h"
 #include "../../../../middleware/content/packages/tables/quest_initialization_reader.h"
+#include "../../../../middleware/content/packages/tables/reward_table.h"
 #include "../../../../state/build_data/items/catalysts/exotic_catalyst_builder.h"
 #include "../../../../state/build_data/items/details/item_detail_catalog.h"
 #include "../../../../state/build_data/runtime.h"
@@ -13,6 +17,8 @@ namespace {
 
 namespace build_details = state::build_data::items::details;
 namespace build_items = state::build_data::items;
+namespace pursuits = state::build_data::pursuits;
+namespace insertion_rules = state::build_data::items::insertion_rules;
 
 /** @return True when one extracted detail can join the currently published numeric domains. */
 [[nodiscard]] bool publishable_detail(const build_details::Definition& detail) noexcept {
@@ -33,12 +39,222 @@ namespace build_items = state::build_data::items;
     return true;
 }
 
+/** The plug-set flags read so far, and the items any set has offered yet. */
+struct PlugSetFlagScan {
+    std::vector<std::uint16_t>& flags;
+    std::vector<bool>& offered;
+    const SlotMap& accountFlags;
+};
+
+/** Keeps an item's flag while every set offering it requires the same one, else unmaps it. */
+void record_plug_set_flag(void* context,
+                          std::uint32_t itemDefinitionIndex,
+                          std::int16_t flagSlot) noexcept {
+    auto& scan = *static_cast<PlugSetFlagScan*>(context);
+    if (itemDefinitionIndex >= scan.flags.size()) {
+        return;
+    }
+    const std::uint16_t row = bank_index(scan.accountFlags, flagSlot);
+    std::uint16_t& flag = scan.flags[itemDefinitionIndex];
+    flag = !scan.offered[itemDefinitionIndex] || flag == row ? row : kUnmappedSlot;
+    scan.offered[itemDefinitionIndex] = true;
+}
+
+/**
+ * Resolves, per item, the account flag row the shared plug sets offering it require set, over
+ * rows already unmapped. A table that does not parse leaves every item unmapped, which refuses
+ * whatever needs the flag.
+ */
+void read_plug_set_flags(Storage& storage) noexcept {
+    const std::size_t itemCount = storage.plugSetFlagIndices.size();
+    std::vector<bool> offered(itemCount, false);
+    PlugSetFlagScan scan{storage.plugSetFlagIndices, offered, storage.slotMaps.accountFlag};
+    if (!tables::items::visit_plug_set_flags(
+            std::span<const std::byte>{storage.plugSetTable}, record_plug_set_flag, &scan)) {
+        storage.plugSetFlagIndices.assign(itemCount, kUnmappedSlot);
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         "ev=pkg stage=plug_set_flags result=fail");
+    }
+}
+
+// A catalog row keeps every presence flag the reader's row holds.
+static_assert(tables::items::kPresenceFlagCapacity == build_items::kPresenceFlagCapacity);
+
+// The condition reader walks a plug's rule rows as bare expression fields.
+static_assert(sizeof(generated::C808077e6) == tables::rewards::ConditionRow::kSize
+              && offsetof(generated::C808077e6, unlockExpression) == 0);
+
+/**
+ * Binds the insertion rules one plug declares. A list that does not read, bind or fit is kept as
+ * an unreadable row, which refuses the plug; a plug with no rules adds no row. A plug past the
+ * rule rows is counted, not kept, so the walk can refuse the whole list.
+ * @return False when a bank allocation failed, which retries the walk.
+ */
+[[nodiscard]] bool read_insertion_rules(Storage& storage, const tables::items::Row& item) noexcept {
+    std::size_t at = 0;
+    if (!tables::items::find_insertion_rules(std::span<const std::byte>{storage.definition}, at)) {
+        return true;
+    }
+    insertion_rules::Rule rule{};
+    rule.plugDefinitionIndex = item.definitionIndex;
+    std::size_t count = 0;
+    BankFailure failure = BankFailure::none;
+    rule.readable = storage.rewardBuild.conditions.read_list(
+        std::span<const std::byte>{storage.definition},
+        at,
+        rule.condition,
+        count,
+        failure,
+        generated::C808077e6::kClass);
+    if (failure == BankFailure::storage) {
+        return false;
+    }
+    if (rule.readable && count == 0) {
+        return true;
+    }
+    if (rule.readable) {
+        rule.conditionCount = static_cast<std::uint8_t>(count);
+        rule.requiredFlagIndex = bank_index(storage.slotMaps.accountFlag, item.insertionFlagSlot);
+    }
+    if (storage.insertionRuleCount < storage.insertionRules.size()) {
+        storage.insertionRules[storage.insertionRuleCount] = rule;
+    }
+    ++storage.insertionRuleCount;
+    return true;
+}
+
+/** Settles the insertion rules unsupported over a refusal the installed data decides. */
+void settle_insertion_rules_unsupported(const char* reason, std::size_t rules) noexcept {
+    state::build_data::settle_plug_insertion_rules_unsupported();
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::warn,
+                      "ev=pkg stage=insertion_rules result=unsupported reason=%s rules=%zu "
+                      "capacity=%zu",
+                      reason,
+                      rules,
+                      insertion_rules::kRuleCapacity);
+}
+
+/**
+ * Publishes the rules one walk read. More rule plugs than rows, no rule at all and rows the
+ * catalog refuses are the data's own, so each settles the domain; a failed cache write repeats
+ * the walk.
+ */
+void publish_insertion_rules(const Storage& storage) noexcept {
+    const std::size_t count = storage.insertionRuleCount;
+    if (count > storage.insertionRules.size()) {
+        settle_insertion_rules_unsupported("capacity", count);
+        return;
+    }
+    const auto rules = std::span(storage.insertionRules).first(count);
+    if (!state::build_data::valid_plug_insertion_rules(rules)) {
+        settle_insertion_rules_unsupported("rows", count);
+        return;
+    }
+    if (!state::build_data::publish_plug_insertion_rules(rules)) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         "ev=pkg stage=insertion_rules result=fail reason=publish");
+    }
+}
+
+/** What an item's quest set gives its catalog row and its pursuit contract. */
+struct QuestMembershipRead {
+    build_items::QuestInitialization initialization{};
+    pursuits::QuestStep step{};
+    /** False when the set owner's read failed and the catalog read that owner before. */
+    bool ownerRead{true};
+};
+
+/**
+ * Reads the quest set of the item in storage.definition from the item it names as the set's owner.
+ * @param table Located item index array within container.
+ * @param needInitialization Reads the first-step plan a catalog row carries.
+ * @param needStep Reads the item's step for its pursuit contract.
+ */
+[[nodiscard]] QuestMembershipRead read_quest_membership(const reader::Source& source,
+                                                        Storage& storage,
+                                                        std::span<const std::byte> container,
+                                                        const tables::Array& table,
+                                                        std::uint16_t itemIndex,
+                                                        std::uint32_t itemClass,
+                                                        bool needInitialization,
+                                                        bool needStep) noexcept {
+    QuestMembershipRead quest{};
+    const auto parentIndex = tables::items::quest_parent(storage.definition);
+    if ((needInitialization || needStep) && itemClass == tables::kItemDefinitionClass
+        && parentIndex < table.count) {
+        std::span<const std::byte> parent = storage.definition;
+        tables::IndexRow parentRow{};
+        std::uint32_t parentClass = itemClass;
+        const bool parentIndexed =
+            parentIndex == itemIndex || tables::index_row(container, table, parentIndex, parentRow);
+        const bool parentReady = parentIndexed
+                                 && (parentIndex == itemIndex
+                                     || reader::read_tag(source,
+                                                         storage.scratch,
+                                                         parentRow.targetTag,
+                                                         storage.questParentDefinition,
+                                                         parentClass));
+        // Like an item's own row, an owner the catalog read before is retried after a failed
+        // read; one it lacks leaves the set unsupported.
+        state::build_data::items::Definition cataloged{};
+        quest.ownerRead = parentReady || !parentIndexed
+                          || !state::build_data::find_item_definition_index(parentIndex, cataloged);
+        if (parentIndex != itemIndex) {
+            parent = storage.questParentDefinition;
+        }
+        const bool parentUsable = parentReady && parentClass == tables::kItemDefinitionClass;
+        if (needInitialization && parentUsable) {
+            quest.initialization =
+                tables::items::read_quest_initialization(storage.definition,
+                                                         itemIndex,
+                                                         parent,
+                                                         static_cast<std::size_t>(table.count),
+                                                         storage.questValueMap);
+        }
+        if (needStep && parentUsable) {
+            quest.step = tables::items::read_quest_step(storage.definition,
+                                                        itemIndex,
+                                                        parent,
+                                                        static_cast<std::size_t>(table.count),
+                                                        storage.questValueMap);
+        } else if (needStep) {
+            quest.step.membership = pursuits::QuestMembership::unsupported;
+        }
+    } else if (parentIndex != tables::items::kUnavailableQuestParent) {
+        quest.step.membership = pursuits::QuestMembership::unsupported;
+    }
+    return quest;
+}
+
+/** Records one read row's pursuit outcome: no contract, its contract, or a read to retry. */
+void record_pursuit_outcome(Storage& storage,
+                            const tables::items::Row& item,
+                            std::uint32_t itemClass,
+                            const QuestMembershipRead& quest) noexcept {
+    if (itemClass != tables::kItemDefinitionClass) {
+        storage.pursuitBuild.unread(item.definitionIndex);
+    } else if (!quest.ownerRead
+               || !storage.pursuitBuild.item(
+                   item, quest.step, storage.questValueMap, storage.rewardBuild.conditions)) {
+        storage.pursuitBuild.read_failed(item.definitionIndex);
+    }
+}
+
 } // namespace
 
 /** @return True when the catalyst catalog is published or cannot exist on this executable. */
 bool exotic_catalysts_settled() noexcept {
     return state::build_data::exotic_catalysts_ready()
            || state::build_data::exotic_catalysts_unsupported();
+}
+
+/** @return True when the plug insertion rules are published or can never be. */
+bool plug_insertion_rules_settled() noexcept {
+    return state::build_data::plug_insertion_rules_ready()
+           || state::build_data::plug_insertion_rules_unsupported();
 }
 
 /**
@@ -55,6 +271,14 @@ bool build_item_rows(const reader::Source& source,
                      const tables::Array& table,
                      std::size_t& rowCount,
                      const char*& reason) noexcept {
+    // Contracts are checked against the objective table and bind their reward rows through the
+    // reward condition tables, so a walk without either would be wasted.
+    const bool pursuitStorageReady = !pursuit_catalog_settled()
+                                     && state::build_data::objective_definitions_ready()
+                                     && storage.rewardBuild.conditions.loaded();
+    if (pursuitStorageReady) {
+        storage.pursuitBuild.begin();
+    }
     const bool needRewards = !reward_definitions_settled();
     const bool rewardStorageReady =
         needRewards && storage.rewardBuild.begin_items(static_cast<std::size_t>(table.count));
@@ -63,12 +287,21 @@ bool build_item_rows(const reader::Source& source,
     const bool needSocketPlugs = !state::build_data::socket_plug_rules_ready();
     const bool needCatalysts = !exotic_catalysts_settled();
     const bool needBuckets = !state::build_data::inventory_bucket_descriptors_ready();
+    // Insertion rules bind through the reward condition tables, which load before this walk. A
+    // refused reward graph that left those tables unloaded can never bind a rule.
+    if (!plug_insertion_rules_settled() && !storage.rewardBuild.conditions.loaded()
+        && state::build_data::reward_definitions_unsupported()) {
+        settle_insertion_rules_unsupported("condition_tables", 0);
+    }
+    const bool needInsertionRules =
+        !plug_insertion_rules_settled() && storage.rewardBuild.conditions.loaded();
     const bool retainDetails = needDetails || needCatalysts;
     const bool needSocketRows = needSocketPlugs || needCatalysts;
     const bool needDetailRows = needDetails || needSocketRows;
     // Bucket equipment slots are derived from this same complete item walk, so a partial retry
     // must still revisit the table even when definitions and detail domains already published.
-    const bool needRows = needDefinitions || needDetailRows || needBuckets || rewardStorageReady;
+    const bool needRows = needDefinitions || needDetailRows || needBuckets || rewardStorageReady
+                          || pursuitStorageReady || needInsertionRules;
     bool published = !needRows;
     if (retainDetails && storage.details.size() != kDetailCapacity) {
         storage.details.assign(kDetailCapacity, build_details::Definition{});
@@ -90,6 +323,15 @@ bool build_item_rows(const reader::Source& source,
     // The fixed request bitset bounds this to the installed 16-bit item-table domain.
     storage.detailRequests.reset();
     storage.specialPlugCategories.fill(0);
+    storage.plugSetFlagIndices.assign(static_cast<std::size_t>(table.count), kUnmappedSlot);
+    if (needDefinitions) {
+        read_plug_set_flags(storage);
+    }
+    storage.insertionRuleCount = 0;
+    if (needInsertionRules) {
+        storage.insertionRules.assign(insertion_rules::kRuleCapacity, insertion_rules::Rule{});
+    }
+    bool insertionRulesRead = needInsertionRules;
     std::size_t detailCount = 0;
     // One malformed entry is omitted on its own so the rest of the table still publishes. An
     // entry can fail either at its index row or at the definition the row points to, and neither
@@ -98,6 +340,9 @@ bool build_item_rows(const reader::Source& source,
     for (; needRows && index < table.count && rowCount < storage.rows.size(); ++index) {
         tables::IndexRow row{};
         if (!tables::index_row(container, table, index, row)) {
+            if (pursuitStorageReady) {
+                storage.pursuitBuild.unread(static_cast<std::uint16_t>(index));
+            }
             continue;
         }
         tables::items::Row item{};
@@ -106,60 +351,74 @@ bool build_item_rows(const reader::Source& source,
         std::uint32_t itemClass = 0;
         if (!reader::read_tag(
                 source, storage.scratch, row.targetTag, storage.definition, itemClass)) {
-            // The published catalog read this row before, so its reward waits for a retry; a row
-            // the catalog lacks stays pruned from both.
+            // The published catalog read this row before, so its reward, contract and insertion
+            // rules wait for a retry. A row the catalog lacks stays out of all three as well.
             state::build_data::items::Definition cataloged{};
-            if (rewardStorageReady
-                && state::build_data::find_item_definition_index(item.definitionIndex, cataloged)) {
+            const bool retryable =
+                state::build_data::find_item_definition_index(item.definitionIndex, cataloged);
+            insertionRulesRead = insertionRulesRead && !retryable;
+            if (rewardStorageReady && retryable) {
                 storage.rewardBuild.item_unread(item.definitionIndex);
+            }
+            if (pursuitStorageReady && retryable) {
+                storage.pursuitBuild.read_failed(item.definitionIndex);
+            } else if (pursuitStorageReady) {
+                storage.pursuitBuild.unread(item.definitionIndex);
             }
             continue;
         }
         if (!tables::items::read_definition(std::span<const std::byte>{storage.definition}, item)) {
+            if (pursuitStorageReady) {
+                storage.pursuitBuild.unread(item.definitionIndex);
+            }
             continue;
         }
         if (rewardStorageReady && itemClass == tables::kItemDefinitionClass) {
             storage.rewardBuild.item(item.definitionIndex, item.definitionHash, storage.definition);
         }
+        if (insertionRulesRead && itemClass == tables::kItemDefinitionClass) {
+            insertionRulesRead = read_insertion_rules(storage, item);
+        }
         const std::uint32_t plugCategoryHash =
             corrected_plug_category(item.definitionHash, item.plugCategoryHash);
-        build_items::QuestInitialization quest{};
-        const auto parentIndex = tables::items::quest_parent(storage.definition);
-        if (needDefinitions && itemClass == tables::kItemDefinitionClass
-            && parentIndex < table.count) {
-            std::span<const std::byte> parent = storage.definition;
-            tables::IndexRow parentRow{};
-            std::uint32_t parentClass = itemClass;
-            const bool parentReady = parentIndex == item.definitionIndex
-                                     || (tables::index_row(container, table, parentIndex, parentRow)
-                                         && reader::read_tag(source,
-                                                             storage.scratch,
-                                                             parentRow.targetTag,
-                                                             storage.questParentDefinition,
-                                                             parentClass));
-            if (parentIndex != item.definitionIndex) {
-                parent = storage.questParentDefinition;
-            }
-            if (parentReady && parentClass == tables::kItemDefinitionClass) {
-                quest =
-                    tables::items::read_quest_initialization(storage.definition,
-                                                             item.definitionIndex,
-                                                             parent,
-                                                             static_cast<std::size_t>(table.count),
-                                                             storage.questValueMap);
-            }
+        const QuestMembershipRead quest = read_quest_membership(source,
+                                                                storage,
+                                                                container,
+                                                                table,
+                                                                item.definitionIndex,
+                                                                itemClass,
+                                                                needDefinitions,
+                                                                pursuitStorageReady);
+        if (pursuitStorageReady) {
+            record_pursuit_outcome(storage, item, itemClass, quest);
         }
-        storage.rows[rowCount++] =
-            state::build_data::items::Definition{item.definitionHash,
-                                                 item.definitionIndex,
-                                                 item.bucketId,
-                                                 item.insertionMaterialRequirementSetIndex,
-                                                 item.enabledMaterialRequirementSetIndex,
-                                                 item.tier,
-                                                 plugCategoryHash,
-                                                 item.rollSetIndex,
-                                                 item.linkedPlugIndex,
-                                                 quest};
+        build_items::Definition& definition = storage.rows[rowCount++];
+        definition = {};
+        definition.definitionHash = item.definitionHash;
+        definition.definitionIndex = item.definitionIndex;
+        definition.bucketId = item.bucketId;
+        definition.insertionMaterialRequirementSetIndex =
+            item.insertionMaterialRequirementSetIndex;
+        definition.enabledMaterialRequirementSetIndex = item.enabledMaterialRequirementSetIndex;
+        definition.tier = item.tier;
+        definition.plugCategoryHash = plugCategoryHash;
+        definition.rollSetIndex = item.rollSetIndex;
+        definition.linkedPlugIndex = item.linkedPlugIndex;
+        definition.questInitialization = quest.initialization;
+        definition.recoveryBucketId = item.recoveryBucketId;
+        definition.quietAcquisition = item.quietAcquisition;
+        definition.toastlessAcquisition = item.toastlessAcquisition;
+        definition.stackUniqueLabel = item.stackUniqueLabel;
+        // The list holds one entry per catalog row, and a table position can pass that capacity.
+        definition.grantRestricted = item.definitionIndex < storage.restrictedGrants.size()
+                                     && storage.restrictedGrants[item.definitionIndex];
+        definition.quantityValueIndex =
+            bank_index(storage.slotMaps.accountValue, item.quantityValueSlot);
+        definition.plugSetFlagIndex = storage.plugSetFlagIndices[item.definitionIndex];
+        definition.presenceFlags = item.presenceFlags;
+        definition.presenceFlagCount = item.presenceFlagCount;
+        definition.consumesWholeStack = item.consumesWholeStack;
+        definition.deletesOnAction = item.deletesOnAction;
         if (needSocketRows) {
             storage.specialPlugCategories[item.definitionIndex] =
                 special_plug_category(plugCategoryHash);
@@ -191,6 +450,15 @@ bool build_item_rows(const reader::Source& source,
         !needRewards
         || (rewardStorageReady && state::build_data::item_definitions_ready()
             && storage.rewardBuild.publish(state::build_data::item_definition_count()));
+    // Pursuit contracts settle on their own and never block the other item domains.
+    if (pursuitStorageReady) {
+        storage.pursuitBuild.publish();
+    }
+    // Insertion rules settle on their own too. A plug whose rules failed to read keeps its
+    // unreadable row; only a failed item read or allocation leaves the rules for another pass.
+    if (published && insertionRulesRead) {
+        publish_insertion_rules(storage);
+    }
     if (!published) {
         reason = !detailStorageReady ? "detail_storage"
                  : !requestsFit      ? "detail_capacity"
@@ -315,6 +583,9 @@ bool build_item_rows(const reader::Source& source,
         }
     }
     // Named last; later stages overwrite the reason as they start.
+    if (published && !plug_insertion_rules_settled()) {
+        reason = "insertion_rules";
+    }
     if (published && !rewardsPublished) {
         reason = "rewards";
     }

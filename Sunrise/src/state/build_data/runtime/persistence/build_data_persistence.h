@@ -12,17 +12,21 @@
 #include "../../bounties/definition.h"
 #include "../../cache/records/domains.h"
 #include "../../collectibles/collectible_catalog.h"
+#include "../../combat/definition.h"
 #include "../../constants/definition.h"
 #include "../../definition.h"
 #include "../../hash_names/definition.h"
 #include "../../inventory/buckets/definition.h"
 #include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
+#include "../../items/insertion_rules/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/definition.h"
+#include "../../objectives/definition.h"
 #include "../../progressions/definition.h"
+#include "../../pursuits/definition.h"
 #include "../../records/definition.h"
 #include "../../scenarios/definition.h"
 #include "../../season_pass/definition.h"
@@ -69,6 +73,7 @@ struct Context {
     std::vector<items::Definition> itemScratch{};
     std::vector<collectibles::Definition> collectibleScratch{};
     std::vector<material_requirements::Definition> materialRequirementSetScratch{};
+    std::vector<material_requirements::CurrencyScalar> currencyScalarScratch{};
     std::vector<items::details::Definition> itemDetailScratch{};
     std::vector<items::socket_plugs::Rule> socketPlugRuleScratch{};
     std::vector<items::socket_plugs::Pool> socketPlugPoolScratch{};
@@ -88,7 +93,13 @@ struct Context {
     std::vector<rewards::Instruction> rewardInstructionScratch{};
     std::vector<rewards::Modifier> rewardModifierScratch{};
     std::vector<rewards::SocketOverride> rewardSocketScratch{};
+    std::vector<objectives::Row> objectiveScratch{};
+    std::vector<unlocks::Instruction> objectiveInstructionScratch{};
+    std::vector<pursuits::Definition> pursuitScratch{};
     std::vector<starter_sets::Definition> starterSetScratch{};
+    std::vector<items::insertion_rules::Rule> plugInsertionRuleScratch{};
+    std::vector<combat::EnemyRace> enemyRaceScratch{};
+    std::vector<combat::LabelGroup> labelGroupScratch{};
     std::vector<records::Definition> recordScratch{};
     std::vector<records::Objective> recordObjectiveScratch{};
     std::vector<records::Interval> recordIntervalScratch{};
@@ -105,6 +116,7 @@ struct Context {
     std::vector<vendors::Definition> vendorDefinitionScratch{};
     std::vector<vendors::SaleRow> vendorSaleRowScratch{};
     std::vector<vendors::InstalledRow> vendorInstalledRowScratch{};
+    std::vector<vendors::TransferRule> vendorTransferRuleScratch{};
     std::vector<gameplay::entity_position_profiles::Row> positionProfileScratch{};
     std::vector<gameplay::entity_object_types::Row> objectTypeScratch{};
     gameplay::entity_position_profiles::Fingerprint positionFingerprint{};

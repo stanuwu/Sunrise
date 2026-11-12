@@ -9,15 +9,19 @@
 #include "../../abilities/definition.h"
 #include "../../bounties/definition.h"
 #include "../../collectibles/collectible_catalog.h"
+#include "../../combat/definition.h"
 #include "../../hash_names/definition.h"
 #include "../../inventory/buckets/definition.h"
 #include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
+#include "../../items/insertion_rules/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/definition.h"
+#include "../../objectives/definition.h"
 #include "../../progressions/definition.h"
+#include "../../pursuits/definition.h"
 #include "../../records/definition.h"
 #include "../../rewards/definition.h"
 #include "../../scenarios/definition.h"
@@ -37,6 +41,7 @@ struct DomainCounts {
     std::size_t items{};
     std::size_t collectibles{};
     std::size_t materialRequirementSets{};
+    std::size_t currencyScalars{};
     std::size_t itemDetails{};
     std::size_t socketPlugRules{};
     std::size_t socketPlugPools{};
@@ -60,6 +65,7 @@ struct DomainCounts {
     std::size_t vendorDefinitions{};
     std::size_t vendorSaleRows{};
     std::size_t vendorInstalledRows{};
+    std::size_t vendorTransferRules{};
     std::size_t positionProfiles{};
     std::size_t objectTypes{};
     std::size_t recordObjectives{};
@@ -74,7 +80,13 @@ struct DomainCounts {
     std::size_t rewardInstructions{};
     std::size_t rewardModifiers{};
     std::size_t rewardSockets{};
+    std::size_t objectives{};
+    std::size_t objectiveInstructions{};
+    std::size_t pursuits{};
     std::size_t starterSets{};
+    std::size_t plugInsertionRules{};
+    std::size_t enemyRaces{};
+    std::size_t labelGroups{};
 };
 
 /** Fixed caller storage used while decoding the cache domains. */
@@ -85,6 +97,7 @@ struct MutableDomains {
     std::span<items::Definition> items;
     std::span<collectibles::Definition> collectibles;
     std::span<material_requirements::Definition> materialRequirementSets;
+    std::span<material_requirements::CurrencyScalar> currencyScalars;
     std::span<items::details::Definition> itemDetails;
     std::span<items::socket_plugs::Rule> socketPlugRules;
     std::span<items::socket_plugs::Pool> socketPlugPools;
@@ -108,6 +121,7 @@ struct MutableDomains {
     std::span<vendors::Definition> vendorDefinitions;
     std::span<vendors::SaleRow> vendorSaleRows;
     std::span<vendors::InstalledRow> vendorInstalledRows;
+    std::span<vendors::TransferRule> vendorTransferRules;
     std::span<gameplay::entity_position_profiles::Row> positionProfiles;
     gameplay::entity_position_profiles::Fingerprint* positionFingerprint{};
     std::span<gameplay::entity_object_types::Row> objectTypes;
@@ -123,7 +137,13 @@ struct MutableDomains {
     std::span<rewards::Instruction> rewardInstructions;
     std::span<rewards::Modifier> rewardModifiers;
     std::span<rewards::SocketOverride> rewardSockets;
+    std::span<objectives::Row> objectives;
+    std::span<unlocks::Instruction> objectiveInstructions;
+    std::span<pursuits::Definition> pursuits;
     std::span<starter_sets::Definition> starterSets;
+    std::span<items::insertion_rules::Rule> plugInsertionRules;
+    std::span<combat::EnemyRace> enemyRaces;
+    std::span<combat::LabelGroup> labelGroups;
 };
 
 /** Read-only complete views used for the checks and for cache encoding. */
@@ -133,6 +153,7 @@ struct Domains {
     std::span<const items::Definition> items;
     std::span<const collectibles::Definition> collectibles;
     std::span<const material_requirements::Definition> materialRequirementSets;
+    std::span<const material_requirements::CurrencyScalar> currencyScalars;
     std::span<const items::details::Definition> itemDetails;
     std::span<const items::socket_plugs::Rule> socketPlugRules;
     std::span<const items::socket_plugs::Pool> socketPlugPools;
@@ -156,6 +177,7 @@ struct Domains {
     std::span<const vendors::Definition> vendorDefinitions;
     std::span<const vendors::SaleRow> vendorSaleRows;
     std::span<const vendors::InstalledRow> vendorInstalledRows;
+    std::span<const vendors::TransferRule> vendorTransferRules;
     std::span<const gameplay::entity_position_profiles::Row> positionProfiles;
     gameplay::entity_position_profiles::Fingerprint positionFingerprint{};
     std::span<const gameplay::entity_object_types::Row> objectTypes;
@@ -171,7 +193,16 @@ struct Domains {
     std::span<const rewards::Instruction> rewardInstructions;
     std::span<const rewards::Modifier> rewardModifiers;
     std::span<const rewards::SocketOverride> rewardSockets;
+    /** An empty table records a build whose pursuit catalog is unsupported. */
+    std::span<const objectives::Row> objectives;
+    std::span<const unlocks::Instruction> objectiveInstructions;
+    std::span<const pursuits::Definition> pursuits;
     std::span<const starter_sets::Definition> starterSets;
+    /** An empty list records a build whose insertion rules are unsupported. */
+    std::span<const items::insertion_rules::Rule> plugInsertionRules;
+    /** An empty table records a build whose combat taxonomy is unsupported. */
+    std::span<const combat::EnemyRace> enemyRaces;
+    std::span<const combat::LabelGroup> labelGroups;
 };
 
 } // namespace sunrise::state::build_data::cache::records

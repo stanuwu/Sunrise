@@ -9,6 +9,7 @@
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/account/account_state.h"
+#include "../../../../state/build_data/objectives/definition.h"
 #include "../../../../state/build_data/rewards/definition.h"
 
 namespace sunrise::client::content::items::packages {
@@ -38,12 +39,35 @@ public:
                             std::vector<state::build_data::rewards::Instruction>& bank,
                             state::build_data::rewards::Range& range,
                             BankFailure& failure) const noexcept;
-    /** Expands a list of expressions into one program where every expression must hold. */
+    /**
+     * Expands a list of expressions into one program where every expression must hold.
+     * @param rowClass Element class of the list, whose rows each hold one expression.
+     */
     [[nodiscard]] bool read_list(std::span<const std::byte> blob,
                                  std::size_t at,
                                  std::span<state::build_data::rewards::Instruction> output,
                                  std::size_t& count,
-                                 BankFailure& failure) const noexcept;
+                                 BankFailure& failure,
+                                 std::uint32_t rowClass) const noexcept;
+    /**
+     * Expands the shared expression a row index names.
+     * @param index Row of the shared expression table.
+     */
+    [[nodiscard]] bool read_index(std::uint16_t index,
+                                  std::span<state::build_data::rewards::Instruction> output,
+                                  std::size_t& count,
+                                  BankFailure& failure) const noexcept;
+    /**
+     * Names the value slot an expression reads from the held item.
+     * @param at Offset of the expression field.
+     * @param mode Receives which held instances the client reads the slot from.
+     * @return The slot when the expression is one read of an item-held value, otherwise
+     *         objectives::kNoItemValueSlot.
+     */
+    [[nodiscard]] std::uint16_t
+    item_value_slot(std::span<const std::byte> blob,
+                    std::size_t at,
+                    state::build_data::objectives::ItemValueMode& mode) const noexcept;
 
 private:
     [[nodiscard]] bool append_expression(std::span<const std::byte> blob,
@@ -69,12 +93,15 @@ private:
 /** Reward metadata collected alongside the existing item-definition walk. */
 class RewardBuild {
 public:
+    /** The pass's condition tables, loaded before the pools and every domain that binds a row. */
     RewardConditions conditions;
-    /** Reads every reward pool; unreadable entries are skipped, a full bank refuses the load. */
+    /**
+     * Reads every reward pool through the loaded conditions; unreadable entries are skipped, a
+     * full bank refuses the load.
+     */
     [[nodiscard]] bool load(const middleware::content::packages::reader::Source& source,
                             middleware::content::packages::reader::Scratch& scratch,
-                            std::span<const std::byte> root,
-                            const SlotMaps& maps) noexcept;
+                            std::span<const std::byte> root) noexcept;
     /** Sizes the dense item rows before the item walk. */
     [[nodiscard]] bool begin_items(std::size_t count) noexcept;
     /** Records one item's wrapper and acquisition flag; an unreadable item stays unavailable. */

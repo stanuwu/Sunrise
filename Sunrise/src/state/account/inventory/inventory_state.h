@@ -6,6 +6,7 @@
 #include <optional>
 #include <string_view>
 
+#include "../../build_data/inventory/buckets/definition.h"
 #include "item_state.h"
 
 namespace sunrise::state::account::inventory {
@@ -59,11 +60,13 @@ inline constexpr std::size_t kProfileActionSourceCapacity = 100;
 /** Runtime-owned SOIDs for profile stacks use a namespace separate from created item instances. */
 inline constexpr std::uint64_t kFirstProfileItemInstanceSoid = 0x5000000000000001ULL;
 /**
- * 151 native rows minus the 16 equipped rows leaves 135 unequipped item rows.
+ * Unequipped instances can occupy every character row not reserved for equipped items. This sets
+ * most of an account's size, which kAccountStateSizeLimit bounds.
  */
-inline constexpr std::size_t kCharacterItemCapacity = 135;
-/** Runtime-owned non-instanced character stacks. */
-inline constexpr std::size_t kCharacterStackCapacity = 32;
+inline constexpr std::size_t kCharacterItemCapacity =
+    build_data::inventory::buckets::kCharacterSlotCapacity - kEquipmentSlotCount;
+/** Stacks share those unequipped rows with instances; encoding enforces each bucket span. */
+inline constexpr std::size_t kCharacterStackCapacity = kCharacterItemCapacity;
 
 /**
  * Definition hash of the real, non-equippable "Emotes" collection item. The Client opens its own
@@ -105,6 +108,9 @@ struct ProfileItem {
     bool seen{};
 };
 
+/** Which of its item's buckets a saved row occupies: the authored one, or the recovery one. */
+enum class ItemPlacement : std::uint8_t { authored, recovery };
+
 /** One authored equipment item without native table or wire-layout fields. */
 struct Item {
     std::uint64_t instanceSoid{};
@@ -132,6 +138,10 @@ struct Item {
     std::uint8_t classAbilityEntry{2};
     /** The client has dismissed this item's new-item marker. */
     bool seen{};
+    /** Overflow and FIFO transfers leave an instance in its recovery bucket. */
+    ItemPlacement placement{ItemPlacement::authored};
+    /** Absent until the instance has pursuit values to publish; an absent tail publishes none. */
+    std::optional<ItemObjectives> objectives;
 };
 
 /** Ordered unequipped items placed into their native character-inventory bucket ranges. */
@@ -144,6 +154,8 @@ struct CharacterStack {
     std::uint32_t definitionHash{};
     std::int32_t quantity{};
     std::int32_t mutationSerial{};
+    /** Overflow and FIFO transfers leave a stack in its recovery bucket. */
+    ItemPlacement placement{ItemPlacement::authored};
 };
 
 struct CharacterStacks {

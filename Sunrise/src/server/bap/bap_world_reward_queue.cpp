@@ -1,9 +1,9 @@
 #include <limits>
 #include <memory>
 #include <new>
-#include <span>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
 #include "../../middleware/crypto/random_bytes.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/investment/store_internal.h"
@@ -20,80 +20,76 @@ enum class WorldRewardSettlement : std::uint8_t { granted, retired, kept };
 
 /**
  * Grants and retires one earned reward in one transaction, or retires one State rules out.
- * A quest item starts its quest through the acquisition path; any other item resolves through
- * its reward row.
- * @param request Oldest saved reward of the selected character.
+ * The item resolves through its reward row, which also starts a placed quest item's quest.
+ * @param request Saved reward of the selected character.
  * @return Granted, retired as ungrantable, or kept for a later attempt.
  */
 WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noexcept {
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
+        report_reward_refusal("world_settle", request.itemDefinitionIndex, "transaction");
         return WorldRewardSettlement::kept;
     }
-    bool committed = false;
-    bool unresolvable = false;
-    const char* reason = nullptr;
-    if (request.kind == WorldRewardKind::item) {
-        if (state::item_grant_route(request.itemDefinitionIndex) == state::ItemGrantRoute::quest) {
-            if (request.quantity != 1) {
-                unresolvable = true;
-                reason = "instance_quantity";
-            } else {
-                state::PendingItemAcquisition acquisition;
-                committed = state::prepare_item_acquisition_for_item(request.itemDefinitionIndex,
-                                                                     acquisition)
-                            && state::commit_item_acquisition(acquisition);
-            }
-        } else {
-            const std::unique_ptr<state::PendingRecordRewardGrant> grant(
-                new (std::nothrow) state::PendingRecordRewardGrant);
-            std::uint64_t seed = 0;
-            const bool seeded =
-                middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)));
-            reason = seeded ? "reward_allocation" : "random_source";
-            auto preparation = state::RewardPreparation::deferred;
-            if (seeded && grant) {
-                preparation =
-                    state::prepare_item_reward(request.itemDefinitionIndex,
-                                               static_cast<std::uint32_t>(request.quantity),
-                                               seed,
-                                               *grant,
-                                               &reason);
-            }
-            unresolvable = preparation == state::RewardPreparation::unresolvable;
-            committed = preparation == state::RewardPreparation::prepared;
-            if (committed) {
-                reason = "inventory_commit";
-                committed = state::commit_record_reward(*grant);
-            }
-            if (!committed && !unresolvable) {
-                report_reward_refusal("world_settle", request.itemDefinitionIndex, reason);
-            }
-        }
-    } else {
-        state::PendingProfileItemAcquisition acquisition;
-        committed = state::prepare_profile_item_acquisition_for_item(
-                        request.itemDefinitionIndex, request.quantity, acquisition)
-                    && state::commit_profile_item_acquisition(acquisition);
+    const std::unique_ptr<state::PendingRecordRewardGrant> grant(
+        new (std::nothrow) state::PendingRecordRewardGrant);
+    std::uint64_t seed = 0;
+    const bool seeded = middleware::crypto::random::draw_seed(seed);
+    const char* reason = seeded ? "reward_allocation" : "random_source";
+    auto preparation = state::RewardPreparation::notReady;
+    if (seeded && grant) {
+        preparation = state::prepare_item_reward(request.itemDefinitionIndex,
+                                                 static_cast<std::uint32_t>(request.quantity),
+                                                 seed,
+                                                 core::runtime::server_clock_seconds(),
+                                                 *grant,
+                                                 &reason);
     }
+    const bool unresolvable = preparation == state::RewardPreparation::unresolvable;
+    bool committed = preparation == state::RewardPreparation::prepared;
     if (unresolvable) {
         return retire_world_reward(transaction, request, reason) ? WorldRewardSettlement::retired
                                                                  : WorldRewardSettlement::kept;
     }
-    if (!committed || !complete_world_reward(request.id) || !transaction.commit()) {
+    if (committed) {
+        reason = "inventory_commit";
+        committed = state::commit_record_reward(*grant);
+    }
+    // The grant and the row's deletion share the savepoint, so a failed deletion undoes the grant.
+    if (committed) {
+        reason = "queue_commit";
+        committed = complete_world_reward(request.id) && transaction.commit();
+    }
+    if (!committed) {
+        report_reward_refusal("world_settle", request.itemDefinitionIndex, reason);
         return WorldRewardSettlement::kept;
     }
     return WorldRewardSettlement::granted;
 }
 
+/**
+ * Settles each saved reward of the selected character in turn. A reward that must wait stays saved
+ * and steps aside, so later rewards still take their turn.
+ * @return True when any reward was granted.
+ */
+bool settle_saved_world_rewards() noexcept {
+    bool granted = false;
+    WorldRewardRequest request;
+    std::uint64_t afterId = 0;
+    while (current_world_reward(request, afterId, nullptr)) {
+        const WorldRewardSettlement settlement = commit_world_reward(request);
+        granted = granted || settlement == WorldRewardSettlement::granted;
+        if (settlement == WorldRewardSettlement::kept) {
+            afterId = request.id;
+        }
+    }
+    return granted;
+}
+
 /** Saves the reward under its stable definition hash and earning character. */
-bool enqueue_world_reward(std::uint16_t definitionIndex,
-                          std::int32_t quantity,
-                          WorldRewardKind kind) noexcept {
+bool enqueue_world_reward(std::uint16_t definitionIndex, std::int32_t quantity) noexcept {
     state::build_data::items::Definition definition;
     if (!state::build_data::find_item_definition_index(definitionIndex, definition)
-        || !state::investment::store::enqueue_reward(
-            definition.definitionHash, quantity, static_cast<std::uint8_t>(kind))) {
+        || !state::investment::store::enqueue_reward(definition.definitionHash, quantity)) {
         return false;
     }
     if (!has_active_family4_peer()) {
@@ -116,29 +112,34 @@ void report_reward_refusal(const char* stage, std::uint16_t index, const char* r
 
 /** Saves one item reward before its pickup presentation is queued. */
 bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept {
-    return enqueue_world_reward(itemDefinitionIndex, 1, WorldRewardKind::item);
+    return enqueue_world_reward(itemDefinitionIndex, 1);
 }
 
-/** Saves a profile material reward before its pickup presentation is queued. */
+/** Saves a positive quantity of one item before its pickup presentation is queued. */
 bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,
                                         std::int32_t quantity) noexcept {
-    return quantity > 0
-           && enqueue_world_reward(itemDefinitionIndex, quantity, WorldRewardKind::profileItem);
+    return quantity > 0 && enqueue_world_reward(itemDefinitionIndex, quantity);
 }
 
 /**
- * Restores the selected character's oldest reward, retiring rows that can never be granted.
+ * Restores the selected character's next reward, retiring rows that can never be granted.
  * @param request Receives the reward; cleared when none is ready.
- * @return False when the queue is empty or the item table is not published yet.
+ * @return False when no reward follows afterId or the item table is not published yet.
  */
-bool current_world_reward(WorldRewardRequest& request) noexcept {
+bool current_world_reward(WorldRewardRequest& request,
+                          std::uint64_t afterId,
+                          bool* exhausted) noexcept {
+    if (exhausted != nullptr) {
+        *exhausted = false;
+    }
     state::investment::store::PendingReward saved;
-    while (state::investment::store::next_reward(saved)) {
+    bool interrupted = false;
+    bool readFailed = false;
+    while (state::investment::store::next_reward(saved, afterId, readFailed)) {
         request = {};
         request.id = saved.id;
         request.definitionHash = saved.definitionHash;
         request.quantity = saved.quantity;
-        request.kind = static_cast<WorldRewardKind>(saved.kind);
         const bool itemsPublished = state::build_data::item_definitions_ready();
         state::build_data::items::Definition definition;
         const char* verdict = "reward_quantity";
@@ -149,15 +150,29 @@ bool current_world_reward(WorldRewardRequest& request) noexcept {
             }
         } else if (!itemsPublished || !state::build_data::item_definitions_ready()) {
             // An unpublished item table proves nothing; retry later.
+            interrupted = true;
             break;
         } else {
             request.itemDefinitionIndex = kUnresolvedItemIndex;
             verdict = "item_definition";
         }
         state::investment::store::Transaction transaction;
-        if (!transaction.ready() || !retire_world_reward(transaction, request, verdict)) {
+        if (!transaction.ready()) {
+            report_reward_refusal("world_retire", request.itemDefinitionIndex, "transaction");
+            interrupted = true;
             break;
         }
+        if (!retire_world_reward(transaction, request, verdict)) {
+            interrupted = true;
+            break;
+        }
+    }
+    if (readFailed) {
+        report_reward_refusal("world_read", kUnresolvedItemIndex, "store_read");
+        interrupted = true;
+    }
+    if (exhausted != nullptr) {
+        *exhausted = !interrupted;
     }
     request = {};
     return false;
@@ -181,39 +196,26 @@ bool retire_world_reward(state::investment::store::Transaction& transaction,
     core::log::writef(core::log::Channel::server,
                       core::log::Level::warn,
                       "ev=reward stage=world_retire id=%llu hash=0x%08X index=%u quantity=%d "
-                      "kind=%u result=%s reason=%s",
+                      "result=%s reason=%s",
                       static_cast<unsigned long long>(request.id),
                       static_cast<unsigned>(request.definitionHash),
                       static_cast<unsigned>(request.itemDefinitionIndex),
                       static_cast<int>(request.quantity),
-                      static_cast<unsigned>(request.kind),
                       retired ? "retired" : "kept",
                       reason != nullptr ? reason : "unknown");
     return retired;
 }
 
-/** A retired reward lets the next one take its turn; any other failed grant stays saved. */
+/** A granted reward reaches every peer through the account image. */
 void settle_world_reward() noexcept {
-    WorldRewardRequest request;
-    while (current_world_reward(request)) {
-        const WorldRewardSettlement settlement = commit_world_reward(request);
-        if (settlement == WorldRewardSettlement::granted) {
-            arm_account_resync_everywhere();
-        }
-        if (settlement != WorldRewardSettlement::retired) {
-            return;
-        }
+    if (settle_saved_world_rewards()) {
+        arm_account_resync_everywhere();
     }
 }
 
-/** Shutdown grants or retires rewards until one must wait; other characters' rewards stay saved. */
+/** Shutdown grants or retires every reward it can; other characters' rewards stay saved. */
 void drain_world_rewards() noexcept {
-    WorldRewardRequest request;
-    while (current_world_reward(request)) {
-        if (commit_world_reward(request) == WorldRewardSettlement::kept) {
-            break;
-        }
-    }
+    settle_saved_world_rewards();
 }
 
 } // namespace sunrise::server::bap

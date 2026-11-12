@@ -93,7 +93,9 @@ bool prepare(Scratch& scratch,
                    reservation.rawWriteOffset + family4_datagen::account::layout::kObjectSize);
     std::size_t compressedExtent = reservation.compressedWriteOffset;
     const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-    if (!family4_datagen::account::encode(account, accountBytes, publicOnly)) {
+    family4_datagen::account::StateFields accountFields{};
+    if (!read_account_state_fields(account, accountFields)
+        || !family4_datagen::account::encode(account, accountFields, accountBytes, publicOnly)) {
         return report_failure("account_object");
     }
     // Only the account object drops the selection; the character object stays resident.

@@ -13,8 +13,10 @@
 #include "../schema/generated/tag_classes_80805a.h"
 #include "../schema/generated/tag_classes_80805b.h"
 #include "../schema/generated/tag_classes_80805c.h"
+#include "../schema/generated/tag_classes_80805d.h"
 #include "../schema/generated/tag_classes_808074.h"
 #include "../schema/generated/tag_classes_808077.h"
+#include "../schema/generated/tag_classes_808078.h"
 #include "../schema/generated/tag_classes_80807a.h"
 #include "../schema/generated/tag_classes_80807b.h"
 #include "../schema/generated/tag_classes_80807c.h"
@@ -183,6 +185,13 @@ inline constexpr std::uint32_t kUnlockOpcodeCeiling = 28;
 inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
 /** The opcode that tests a flag. */
 inline constexpr std::uint32_t kUnlockReadFlagOpcode = 1;
+/** The unary opcodes: logical NOT, negation, hash and bitwise complement each pop one operand. */
+inline constexpr std::uint32_t kUnlockNotOpcode = 2;
+inline constexpr std::uint32_t kUnlockNegateOpcode = 22;
+inline constexpr std::uint32_t kUnlockHashOpcode = 23;
+inline constexpr std::uint32_t kUnlockBitNotOpcode = 28;
+/** The opcode that joins two operands by logical AND. */
+inline constexpr std::uint32_t kUnlockAndOpcode = 4;
 /** The opcode that pushes a literal. */
 inline constexpr std::uint32_t kUnlockLiteralOpcode = 11;
 /** The opcode that expands a shared expression row. Its operand is the row index. */
@@ -218,6 +227,12 @@ inline constexpr std::size_t kCharacterFlagMapDescriptor =
 /** Array descriptor of the character object's value mapping table, sized to that bank. */
 inline constexpr std::size_t kCharacterValueMapDescriptor =
     offsetof(schema::generated::C80807c80, h1c76a86c);
+/**
+ * Array descriptor of the fourth value mapping table. Its rows are the values every character's
+ * block in the account object holds; the shipped build maps 33.
+ */
+inline constexpr std::size_t kCharacterBlockValueMapDescriptor =
+    offsetof(schema::generated::C80807c80, hD4a626c1);
 /** Investment root slot of the unlock flag mapping tables. */
 inline constexpr std::size_t kUnlockFlagMapTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, slot111UnlockFlagMaps));
@@ -327,6 +342,9 @@ inline constexpr std::size_t kProgressionTableSlot =
 inline constexpr std::uint32_t kProgressionTableClass = schema::generated::ProgressionRow::kClass;
 /** One progression definition is 88 inline bytes. */
 inline constexpr std::size_t kProgressionRowStride = sizeof(schema::generated::ProgressionRow);
+/** A progression definition opens with its definition hash. */
+inline constexpr std::size_t kProgressionHashOffset =
+    offsetof(schema::generated::ProgressionRow, unk0);
 /** A progression definition names the object array holding its record here, in four bytes. */
 inline constexpr std::size_t kProgressionScopeOffset =
     offsetof(schema::generated::ProgressionRow, scope);
@@ -489,6 +507,36 @@ inline constexpr std::size_t kStarterSetTableSlot =
 /** The investment root holds the shared reusable/randomized plug-set table at this slot. */
 inline constexpr std::size_t kPlugSetTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, slot51PlugSets));
+/** The investment root holds the items ordinary grants refuse at this slot. */
+inline constexpr std::size_t kRestrictedGrantTableSlot =
+    root_slot(offsetof(schema::generated::InvestmentRoot, unk3b8));
+// Unnamed in the generated root; the shipped slot 59 tag is a C80807879 whose list names one item.
+static_assert(kRestrictedGrantTableSlot == 59);
+/** The investment root holds the actor class race table at this slot. */
+inline constexpr std::size_t kEnemyRaceTableSlot =
+    root_slot(offsetof(schema::generated::InvestmentRoot, unk1a8));
+// Unnamed in the generated root; the shipped slot 26 tag is a C80807bbb table of 66 class rows.
+static_assert(kEnemyRaceTableSlot == 26);
+/** Element class of the actor class race rows. */
+inline constexpr std::uint32_t kEnemyRaceRowClass = schema::generated::C80807bc0::kClass;
+/** The race table holds its rows in this array. */
+inline constexpr std::size_t kEnemyRaceArrayDescriptor =
+    offsetof(schema::generated::C80807bbb, table);
+/** A row holds the class name hash, then the race ordinal in a word the schema leaves unnamed. */
+inline constexpr std::size_t kEnemyRaceClassOffset = offsetof(schema::generated::C80807bc0, unk0);
+inline constexpr std::size_t kEnemyRaceOrdinalOffset = offsetof(schema::generated::C80807bc0, gap4);
+inline constexpr std::size_t kEnemyRaceRowStride = sizeof(schema::generated::C80807bc0);
+/** Class of the restricted-grant list tag, and element class of its rows. */
+inline constexpr std::uint32_t kRestrictedGrantTableClass = schema::generated::C80807879::kClass;
+inline constexpr std::uint32_t kRestrictedGrantElementClass = schema::generated::C8080787c::kClass;
+/** The list tag holds its rows in this array, after its size word. */
+inline constexpr std::size_t kRestrictedGrantArrayDescriptor =
+    offsetof(schema::generated::C80807879, constants.trackedItems);
+static_assert(offsetof(schema::generated::C80807879, constants) == reader::layout::kSizeWordSize);
+/** Each row holds the item-table index first; nothing the client reads follows it. */
+inline constexpr std::size_t kRestrictedGrantStride = sizeof(schema::generated::C8080787c);
+inline constexpr std::size_t kRestrictedGrantItemIndexOffset =
+    offsetof(schema::generated::C8080787c, gap0);
 /** The investment root holds the dense ordinary socket-type table at this slot. */
 inline constexpr std::size_t kSocketTypeTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, slot94SocketTypes));
@@ -498,6 +546,27 @@ inline constexpr std::size_t kSocketTypeRowStride = sizeof(schema::generated::So
 /** One socket type points to its acquired-state rule array from this row offset. */
 inline constexpr std::size_t kSocketTypeAcquisitionDescriptor =
     offsetof(schema::generated::SocketTypeRow, h0db6e645);
+/**
+ * One socket type's currency scalars: each row multiplies one currency's quantity in the costs
+ * of a plug inserted into that socket type. The shipped rows name Glimmer on shader and
+ * projection sockets and the four Synths on the higher synthesis sockets.
+ */
+inline constexpr std::size_t kSocketTypeCurrencyScalarDescriptor =
+    offsetof(schema::generated::SocketTypeRow, h321354a2);
+inline constexpr std::uint32_t kSocketTypeCurrencyScalarClass =
+    schema::generated::C80805d86::kClass;
+inline constexpr std::size_t kSocketTypeCurrencyScalarStride = sizeof(schema::generated::C80805d86);
+/** A scalar row opens with the currency's item index; the next 16 bits are zero in every row. */
+inline constexpr std::size_t kCurrencyScalarItemIndexOffset =
+    offsetof(schema::generated::C80805d86, gap0);
+inline constexpr std::size_t kCurrencyScalarReservedOffset =
+    kCurrencyScalarItemIndexOffset + sizeof(std::uint16_t);
+/** The multiplier is a float; every shipped value is a whole number of at least one. */
+inline constexpr std::size_t kCurrencyScalarValueOffset =
+    offsetof(schema::generated::C80805d86, unk4);
+static_assert(kCurrencyScalarItemIndexOffset == 0
+              && kCurrencyScalarReservedOffset + sizeof(std::uint16_t)
+                     == kCurrencyScalarValueOffset);
 /** Acquired-state and item-completion arrays carry this postfix expression-row class. */
 inline constexpr std::uint32_t kInvestmentExpressionRowClass =
     schema::generated::InvestmentExpressionRow::kClass;
@@ -506,15 +575,55 @@ inline constexpr std::uint32_t kObjectiveReferenceArrayClass =
     schema::generated::ObjectiveReferenceArray::kClass;
 /** Class word of an item's plug block; on a catalyst it follows the one-row objective array. */
 inline constexpr std::uint32_t kPlugBlockClass = schema::generated::PlugBlock::kClass;
+/** Signed 64-bit offset to an item's objective block, relative to the field. */
+inline constexpr std::size_t kItemObjectiveBlockOffset =
+    offsetof(schema::generated::ItemDefinition, objectiveItemBlock);
+/** This block holds objective indices, completion flags and the item that owns the quest set. */
+inline constexpr std::uint32_t kItemObjectiveBlockClass =
+    schema::generated::ItemObjectiveBlock::kClass;
+/** A 16-bit item-table index, not a definition hash. */
+inline constexpr std::size_t kObjectiveParentItemOffset =
+    offsetof(schema::generated::ItemObjectiveBlock, parentItemIndex);
+/** Unlock block offset, relative to the field; zero means absent. */
+inline constexpr std::size_t kItemUnlockBlockOffset =
+    offsetof(schema::generated::ItemDefinition, unlockItemBlock);
+/** This block's first array names the flags supplied by item presence. */
+inline constexpr std::uint32_t kItemUnlockBlockClass = schema::generated::ItemUnlockBlock::kClass;
+/** Presence-flag entries hold unlock slot indices, not saved bank rows. */
+inline constexpr std::uint32_t kItemPresenceFlagClass = schema::generated::ItemPresenceFlag::kClass;
+inline constexpr std::size_t kItemPresenceFlagDescriptor =
+    offsetof(schema::generated::ItemUnlockBlock, presenceFlags);
+/** Each presence-flag entry occupies one 16-bit slot. */
+inline constexpr std::size_t kItemPresenceFlagStride = sizeof(schema::generated::ItemPresenceFlag);
+inline constexpr std::size_t kItemPresenceFlagSlotOffset =
+    offsetof(schema::generated::ItemPresenceFlag, unlockSlot);
+/** Objective array entries are 16-bit table indices. */
+inline constexpr std::size_t kObjectiveArrayDescriptor =
+    offsetof(schema::generated::ItemObjectiveBlock, objectives);
+inline constexpr std::size_t kObjectiveReferenceStride =
+    sizeof(schema::generated::ObjectiveReferenceArray);
 /** The investment root holds the dense objective definition table at this slot. */
 inline constexpr std::size_t kObjectiveTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, slot58Objectives));
 /** Installed objective table and row layout. */
 inline constexpr std::uint32_t kObjectiveTableClass = schema::generated::ObjectiveTable::kClass;
 inline constexpr std::uint32_t kObjectiveRowClass = schema::generated::ObjectiveRow::kClass;
+/** The objective table holds its rows in this array. */
+inline constexpr std::size_t kObjectiveRowArrayDescriptor =
+    offsetof(schema::generated::ObjectiveTable, table);
 inline constexpr std::size_t kObjectiveRowStride = sizeof(schema::generated::ObjectiveRow);
 inline constexpr std::size_t kObjectiveCompletionValueOffset =
     offsetof(schema::generated::ObjectiveRow, completionValue);
+/** An objective row's optional and counts-down flags, the two words before its completion value. */
+inline constexpr std::size_t kObjectiveOptionalOffset =
+    offsetof(schema::generated::ObjectiveRow, gap28);
+inline constexpr std::size_t kObjectiveCountsDownOffset =
+    kObjectiveOptionalOffset + sizeof(std::uint32_t);
+static_assert(kObjectiveCountsDownOffset + sizeof(std::uint32_t)
+              == kObjectiveCompletionValueOffset);
+/** Expression whose value the native evaluator subtracts from an objective's completion value. */
+inline constexpr std::size_t kObjectiveTargetAdjustmentField =
+    offsetof(schema::generated::ObjectiveRow, hA32e809c);
 /** The investment root holds the socket entry list table at this slot. */
 inline constexpr std::size_t kSocketEntryListTableSlot =
     root_slot(offsetof(schema::generated::InvestmentRoot, slot97SocketEntryLists));
@@ -574,6 +683,15 @@ inline constexpr std::size_t kBucketSlotCountOffset =
     offsetof(schema::generated::G80807c6290, slotCount);
 inline constexpr std::size_t kBucketArraySelectorOffset =
     offsetof(schema::generated::G80807c6290, arraySelector);
+/**
+ * Acquisition policies in the two bytes after the inventory-array selector, unnamed in the
+ * generated layout. Shipped rows hold only 0 or 1: six buckets set the first, among them the
+ * 21-row recovery bucket most items name, and the five-row bucket 37 alone sets the second.
+ */
+inline constexpr std::size_t kBucketFifoOffset = kBucketArraySelectorOffset + 1;
+inline constexpr std::size_t kBucketNoTransferOnEvictionOffset = kBucketArraySelectorOffset + 2;
+// Pins the offsets the unnamed bytes above were measured at against a regenerated layout.
+static_assert(kBucketFifoOffset == 25 && kBucketNoTransferOnEvictionOffset == 26);
 
 /** Installed tags carrying the sobject definition table. The first one that reads is used. */
 inline constexpr std::uint32_t kSobjectTablePrimaryTag = 0x81327CD4U;

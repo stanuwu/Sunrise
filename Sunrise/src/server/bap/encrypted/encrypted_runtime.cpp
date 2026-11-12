@@ -37,9 +37,6 @@
 namespace sunrise::server::bap::encrypted {
 namespace {
 
-/** Delay before the Family-4 copy of an artifact change, so its Family-5 refresh lands first. */
-constexpr std::uint64_t kArtifactFamily4RefreshDelayMs = 100;
-
 /** Traces one decoded service frame and the reply it produced. */
 void report_service_traffic(const middleware::bap::RequestFrame& frame,
                             const ServiceRoute& route,
@@ -202,6 +199,26 @@ void submit_committed_authority_reset(Session& session,
                              {line.data(), static_cast<std::size_t>(count)});
         }
     }
+}
+
+/**
+ * A redemption or an opened wrapper removes a held row like a dismantle does, which moves the rows
+ * pinned for an earlier acquisition's presentation.
+ */
+[[nodiscard]] bool consumes_held_item(const ServiceOutcome& outcome) noexcept {
+    const auto* grant = transaction_if<RecordRewardGrantTransaction>(outcome);
+    return grant != nullptr && grant->pending != nullptr
+           && grant->pending->redeemedInstanceSoid != 0;
+}
+
+/**
+ * @return True when a socket reply carries the account without the character, as a Chalice or
+ *         Synthesizer exchange does. A bake's reply carries both.
+ */
+[[nodiscard]] bool socket_reply_omits_character(const ServiceOutcome& outcome) noexcept {
+    const auto* socket = transaction_if<SocketPlugTransaction>(outcome);
+    return socket != nullptr && socket->pending != nullptr && socket->pending->profileChanged
+           && !socket->pending->updates_character();
 }
 
 } // namespace
@@ -396,7 +413,8 @@ bool consume(Session& session,
         const auto acquisitionPresentationRows =
             std::span(session.acquisitionPresentationRows)
                 .first(session.acquisitionPresentationRowCount);
-        const bool preserveAcquisitionPresentation = now < session.acquisitionPresentationUntilTick;
+        const bool preserveAcquisitionPresentation =
+            now < session.acquisitionPresentationUntilTick && !consumes_held_item(outcome);
         handled = queuez::stage_service_outcome(scratch,
                                                 session.queuez,
                                                 outcome,
@@ -438,8 +456,10 @@ bool consume(Session& session,
     }
     const bool artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome) != nullptr;
     const bool mutatesAccount =
-        outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasArtifactReset
+        outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasStoreSync
+        || outcome.hasArtifactReset
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
+        || transaction_if<PostmasterClaimTransaction>(outcome) != nullptr
         || transaction_if<SubclassSelectionTransaction>(outcome) != nullptr
         || transaction_if<SocketPlugTransaction>(outcome) != nullptr
         || transaction_if<ItemStateTransaction>(outcome) != nullptr || artifactPurchase
@@ -449,21 +469,26 @@ bool consume(Session& session,
         || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr
         || transaction_if<state::PendingSettingsUpdate>(outcome) != nullptr;
+    // A grant with no reward row, such as a turn-in that pays only XP, shows no flyout to hold.
+    const auto* rewardGrant = transaction_if<RecordRewardGrantTransaction>(outcome);
     const bool presentsAcquisition =
         transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
-        || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
+        || (rewardGrant != nullptr && rewardGrant->pending != nullptr
+            && rewardGrant->pending->rewardCount != 0)
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr;
     if (mutatesAccount && session.accountHandle != state::kLocalAccount) {
         handled = false;
     }
     const bool invalidatesAcquisitionPresentation =
         outcome.hasChangeCharacter || outcome.hasSelectCharacter || outcome.hasArtifactReset
-        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
-    const bool hasPrecommittedAccountAction =
-        outcome.hasRecordClaim || outcome.hasSelectCharacter || outcome.hasArtifactReset;
+        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr
+        || consumes_held_item(outcome);
+    const bool hasPrecommittedAccountAction = outcome.hasRecordClaim || outcome.hasSelectCharacter
+                                              || outcome.hasStoreSync || outcome.hasArtifactReset;
     // Commit consumes pending payloads, so retain the connection fields first.
     const ConnectionFields connection = connection_fields(outcome);
+    const bool socketReplyOmitsCharacter = socket_reply_omits_character(outcome);
     if (handled && processesBody) {
         // State changes become visible only after every requested frame and caller byte fit.
         // A refused commit sends nothing, so the frame's own reason is the only record of why.
@@ -483,6 +508,13 @@ bool consume(Session& session,
                 frame.serviceId, "commit", fits ? commitReason : "frame_capacity");
         }
         if (handled) {
+            if (outcome.hasStoreSync) {
+                core::log::writef(core::log::Channel::server,
+                                  core::log::Level::info,
+                                  "ev=store_sync stage=commit result=ok revision=%u service=%u",
+                                  outcome.storeSyncRevision,
+                                  static_cast<unsigned>(frame.serviceId));
+            }
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
             written = framedSize;
             if (outcome.nativePresence) {
@@ -598,11 +630,11 @@ bool consume(Session& session,
             }
             if (artifactPurchase || outcome.hasArtifactReset) {
                 // Artifact overrides live in Family 5, so they need their own refresh. A record
-                // claim does not: its Family-4 replacement rearms the client rebuild.
-                session.artifactRefreshArmed = true;
-                session.artifactFamily4RefreshDueTick =
-                    GetTickCount64() + kArtifactFamily4RefreshDelayMs;
-                session.artifactFamily4RefreshArmed = true;
+                // claim does not: its Family-4 replacement rearms the client rebuild. The flags a
+                // held item supplies are checked where the account mutation is published.
+                bap::arm_artifact_refresh(session);
+            } else if (socketReplyOmitsCharacter) {
+                bap::arm_unlock_character_refresh(session);
             }
             if (outcome.hasArtifactReset) {
                 session.artifactResetRefresh = outcome.artifactReset;

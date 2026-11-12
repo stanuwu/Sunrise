@@ -12,6 +12,11 @@ enum class ObjectiveAdvance : std::uint8_t {
     completed,
 };
 
+/** @return True when the advance moved the record's progress. */
+[[nodiscard]] constexpr bool progress_moved(ObjectiveAdvance advance) noexcept {
+    return advance == ObjectiveAdvance::advanced || advance == ObjectiveAdvance::completed;
+}
+
 /** Why one exact lore chapter grant did not change the banks. */
 enum class GrantOutcome : std::uint8_t {
     granted,
@@ -53,12 +58,28 @@ void republish() noexcept;
 void revoke(std::uint16_t recordIndex) noexcept;
 
 /**
- * Redeems the next completed step of a record that scores per step.
+ * Redeems the next earned step of a record that scores per step. A record with a completion flag
+ * sets it once its last step is redeemed.
  * @param recordIndex Native record row.
  * @param definitionHash Authored hash the claim named, checked against the row.
- * @return False when the row is not an interval record or every step is redeemed.
+ * @return False when the row is not an interval record, every step is redeemed, or the next step
+ *         is not earned.
  */
 [[nodiscard]] bool claim_interval(std::uint16_t recordIndex, std::uint32_t definitionHash) noexcept;
+
+/**
+ * @param recordIndex Native record row.
+ * @return True when the record has a completion flag and its next interval claim redeems its
+ *         last step, which sets that flag.
+ */
+[[nodiscard]] bool interval_claim_completes(std::uint16_t recordIndex) noexcept;
+
+/**
+ * Adds one to the progress every step of an interval record reads.
+ * @param definitionHash Authored record definition hash.
+ * @return Completed when a step becomes earned; already held at the last step or once claimed.
+ */
+[[nodiscard]] ObjectiveAdvance advance_interval(std::uint32_t definitionHash) noexcept;
 
 /**
  * Marks one lore chapter collected.

@@ -390,6 +390,36 @@ bool stage_subclass_selection(const SessionState& before,
     return staged;
 }
 
+/** Removes the one item-instance resident with this SOID, keeping the remaining order stable. */
+[[nodiscard]] static bool release_item_resident(SessionState& state, std::uint64_t soid) noexcept {
+    std::uint32_t definition = 0;
+    if (!middleware::datagen::object_id(
+            kAccountFamilyType, middleware::datagen::kItemInstanceSlot, definition)
+        || state.family4ResidentCount > state.family4Residents.size()) {
+        return false;
+    }
+    std::size_t found = state.family4ResidentCount;
+    for (std::size_t index = 0; index < state.family4ResidentCount; ++index) {
+        const auto& resident = state.family4Residents[index];
+        if (resident.objectSoid != soid) {
+            continue;
+        }
+        if (resident.definitionId != definition || found != state.family4ResidentCount) {
+            return false;
+        }
+        found = index;
+    }
+    if (found == state.family4ResidentCount) {
+        return false;
+    }
+    std::move(state.family4Residents.begin() + static_cast<std::ptrdiff_t>(found) + 1,
+              state.family4Residents.begin()
+                  + static_cast<std::ptrdiff_t>(state.family4ResidentCount),
+              state.family4Residents.begin() + static_cast<std::ptrdiff_t>(found));
+    state.family4Residents[--state.family4ResidentCount] = {};
+    return true;
+}
+
 /** Stages the character upsert and appended resident required by one new item instance. */
 bool stage_item_acquisition(const SessionState& before,
                             std::uint64_t accountSoid,
@@ -478,23 +508,27 @@ bool stage_record_reward_grant(const SessionState& before,
                                const state::PendingRecordRewardGrant& pending,
                                RecordRewardGrant& grant) noexcept {
     grant = {};
-    if (!pending.prepared || pending.rewardCount > pending.rewards.size()) {
+    state::GrantedResidents residents{};
+    if (!pending.prepared || pending.rewardCount > pending.rewards.size()
+        || !state::granted_residents(pending, residents)) {
         return false;
     }
-    std::array<std::uint64_t, state::kRecordRewardGrantCapacity> residents{};
-    std::size_t count = 0;
-    for (std::size_t i = 0; i < pending.rewardCount; ++i) {
-        const auto& reward = pending.rewards[i];
-        if (reward.kind == state::RecordRewardKind::characterInstance
-            || reward.appendedProfileResident) {
-            residents[count++] = reward.instanceSoid;
+    SessionState retained = before;
+    for (const std::uint64_t soid : std::span(residents.released).first(residents.releasedCount)) {
+        if (!release_item_resident(retained, soid)) {
+            return false;
         }
     }
-    return stage_record_reward_grant(before,
-                                     pending.accountSoid,
-                                     pending.characterSoid,
-                                     std::span(residents).first(count),
-                                     grant);
+    if (!stage_record_reward_grant(retained,
+                                   pending.accountSoid,
+                                   pending.characterSoid,
+                                   std::span(residents.soids).first(residents.count),
+                                   grant)) {
+        return false;
+    }
+    grant.releasedResidents = residents.released;
+    grant.releasedResidentCount = residents.releasedCount;
+    return true;
 }
 
 /**
@@ -670,7 +704,7 @@ bool stage_item_dismantle(const SessionState& before,
     std::uint32_t itemInstanceDefinitionId = 0;
     if (!valid(before) || !before.family4Active || before.family4RootSoid == 0 || accountSoid == 0
         || accountSoid != before.family4RootSoid || characterSoid == 0
-        || dismantledInstanceSoid == 0 || before.family4ResidentCount == 0
+        || before.family4ResidentCount == 0
         || before.family4ResidentCount > before.family4Residents.size()
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || !middleware::datagen::object_id(
@@ -684,7 +718,6 @@ bool stage_item_dismantle(const SessionState& before,
 
     bool accountResident = false;
     bool characterResident = false;
-    std::size_t dismantledResidentIndex = before.family4Residents.size();
     for (std::size_t index = 0; index < before.family4ResidentCount; ++index) {
         const ResidentObject& object = before.family4Residents[index];
         accountResident =
@@ -693,28 +726,18 @@ bool stage_item_dismantle(const SessionState& before,
         characterResident =
             characterResident
             || (object.definitionId == characterDefinitionId && object.objectSoid == characterSoid);
-        if (object.objectSoid != dismantledInstanceSoid) {
-            continue;
-        }
-        if (object.definitionId != itemInstanceDefinitionId
-            || dismantledResidentIndex != before.family4Residents.size()) {
-            return false;
-        }
-        dismantledResidentIndex = index;
     }
-    if (!accountResident || !characterResident
-        || dismantledResidentIndex >= before.family4ResidentCount) {
+    if (!accountResident || !characterResident) {
         return false;
     }
 
     dismantle.after = before;
     ++dismantle.after.family4Version;
-    for (std::size_t index = dismantledResidentIndex + 1U; index < before.family4ResidentCount;
-         ++index) {
-        dismantle.after.family4Residents[index - 1U] = before.family4Residents[index];
+    // A stack has no instance, so its discard releases no resident.
+    if (dismantledInstanceSoid != 0
+        && !release_item_resident(dismantle.after, dismantledInstanceSoid)) {
+        return false;
     }
-    --dismantle.after.family4ResidentCount;
-    dismantle.after.family4Residents[dismantle.after.family4ResidentCount] = {};
     dismantle.accountDefinitionId = accountDefinitionId;
     dismantle.characterDefinitionId = characterDefinitionId;
     dismantle.itemInstanceDefinitionId = itemInstanceDefinitionId;
@@ -729,15 +752,13 @@ bool stage_item_dismantle(const SessionState& before,
             line.data(),
             line.size(),
             "ev=dismantle stage=queuez_version result=fail root=0x%llX before=%d after=%d "
-            "residents_before=%u residents_after=%u resident_index=%zu character=0x%llX "
-            "instance=0x%llX account_definition=%u character_definition=%u "
-            "item_definition=%u account_update=%u",
+            "residents_before=%u residents_after=%u character=0x%llX instance=0x%llX "
+            "account_definition=%u character_definition=%u item_definition=%u account_update=%u",
             static_cast<unsigned long long>(before.family4RootSoid),
             before.family4Version,
             dismantle.after.family4Version,
             static_cast<unsigned>(before.family4ResidentCount),
             static_cast<unsigned>(dismantle.after.family4ResidentCount),
-            dismantledResidentIndex,
             static_cast<unsigned long long>(characterSoid),
             static_cast<unsigned long long>(dismantledInstanceSoid),
             accountDefinitionId,

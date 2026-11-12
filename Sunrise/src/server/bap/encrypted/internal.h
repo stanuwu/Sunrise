@@ -65,6 +65,12 @@ struct EquipmentSwapTransaction {
     queuez::EquipmentSwap update{};
 };
 
+/** Postmaster claim and its promised Family-4 revision. */
+struct PostmasterClaimTransaction {
+    std::unique_ptr<state::PendingPostmasterClaim> pending{};
+    queuez::RecordRewardGrant update{};
+};
+
 /** Socket mutation and the exact QueueZ after-image promised by its response. */
 
 struct SocketPlugTransaction {
@@ -165,6 +171,11 @@ struct ServiceOutcome {
 
     bool hasArtifactReset{};
 
+    /** A Store wallet sync committed a new generation, which the account object publishes. */
+    bool hasStoreSync{};
+
+    std::uint32_t storeSyncRevision{};
+
     state::ArtifactResetResult artifactReset{};
 
     middleware::queuez::Subscription subscription{};
@@ -195,6 +206,7 @@ struct ServiceOutcome {
                                      std::unique_ptr<queuez::SelectCharacter>,
 
                                      std::unique_ptr<EquipmentSwapTransaction>,
+                                     std::unique_ptr<PostmasterClaimTransaction>,
 
                                      std::unique_ptr<SubclassSelectionTransaction>,
 
@@ -394,6 +406,20 @@ process(const ServiceRoute& route,
         ServiceOutcome& outcome,
 
         std::span<const state::account::inventory::PresentedItemRow> presentation = {}) noexcept;
+
+/**
+ * Emplaces an opcode-2400 claim transaction and stages its Queuez after-image.
+ * @param claim Prepared claim, which the caller then moves into the returned transaction.
+ * @return The staged transaction, or null with nothing left in the outcome.
+ */
+
+[[nodiscard]] SeasonPassRewardTransaction*
+
+stage_season_pass_reward(const queuez::SessionState& queuezState,
+
+                         const state::PendingSeasonPassReward& claim,
+
+                         ServiceOutcome& outcome) noexcept;
 
 } // namespace body
 
@@ -656,6 +682,46 @@ append_select_character_notification(Scratch& scratch,
 
     std::size_t& written) noexcept;
 
+/** Appends the selected character's current object as one upsert above the peer version. */
+
+[[nodiscard]] bool append_selected_character_refresh_notification(
+
+    Scratch& scratch,
+
+    const queuez::EquipmentSwap& update,
+
+    std::uint64_t accountSoid,
+
+    std::size_t characterIndex,
+
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+
+    std::span<const std::byte, state::kAesKeySize> key,
+
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+
+    std::span<std::byte> response,
+
+    std::size_t& written) noexcept;
+
+/** Appends the current account and selected-character objects as one upsert. */
+
+[[nodiscard]] bool append_account_refresh_notification(
+
+    Scratch& scratch,
+
+    const queuez::EquipmentSwap& update,
+
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+
+    std::span<const std::byte, state::kAesKeySize> key,
+
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+
+    std::span<std::byte> response,
+
+    std::size_t& written) noexcept;
+
 /** Appends the selected-character upsert carrying one artifact ownership transition. */
 
 [[nodiscard]] bool append_artifact_purchase_notification(
@@ -734,6 +800,31 @@ append_artifact_item_refresh_notification(Scratch& scratch,
                                           std::span<std::byte> response,
 
                                           std::size_t& written) noexcept;
+
+/**
+ * Appends one held item's resident and the selected character's object after an edit changed the
+ * item's own values, with the account object too when the edit changed its rows.
+ */
+
+[[nodiscard]] bool append_item_values_refresh_notification(
+
+    Scratch& scratch,
+
+    const queuez::EquipmentSwap& update,
+
+    std::uint64_t instanceSoid,
+
+    bool accountRows,
+
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+
+    std::span<const std::byte, state::kAesKeySize> key,
+
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+
+    std::span<std::byte> response,
+
+    std::size_t& written) noexcept;
 
 /**
  * Appends the same-character Family-0 appearance upsert paired with one equipment swap.
@@ -909,7 +1000,7 @@ append_profile_item_acquisition_notification(Scratch& scratch,
 
     queuez::SessionState& after) noexcept;
 
-/** Appends a Family-4 character upsert followed by one empty item-instance release. */
+/** Appends a Family-4 character upsert followed by any empty item-instance release. */
 
 [[nodiscard]] bool
 

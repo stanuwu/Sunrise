@@ -7,6 +7,7 @@
 #include <cstring>
 #include <span>
 
+#include "../../../middleware/studio/studio_mapping.h"
 #include "studio_object_protocol.h"
 #include "studio_pose_link.h"
 #include "studio_protocol.h"
@@ -27,12 +28,13 @@ std::uint64_t g_nextConnect{};
 
 /** Only the core diagnostic lock may call the object mapping helpers. */
 void disconnect_object() noexcept {
-    close_editor_view(g_mapping, g_view);
+    middleware::studio::close_editor_view(g_mapping, g_view);
 }
 
 /** @return True only when an editor created the matching object protocol. */
 [[nodiscard]] bool connect_object() noexcept {
-    g_view = open_editor_view<wire::SharedObject>(wire::kMappingFormat, g_mapping);
+    g_view =
+        middleware::studio::open_editor_view<wire::SharedObject>(wire::kMappingFormat, g_mapping);
     if (g_view == nullptr) {
         return false;
     }
@@ -40,7 +42,8 @@ void disconnect_object() noexcept {
     if (g_view->magic == wire::kMagic) {
         g_view->clientVersion = wire::kVersion;
     }
-    if (!editor_header_ok(*g_view, wire::kMagic, wire::kVersion, wire::kMappingBytes)) {
+    if (!middleware::studio::editor_header_ok(
+            *g_view, wire::kMagic, wire::kVersion, wire::kMappingBytes)) {
         disconnect_object();
         return false;
     }
@@ -137,7 +140,7 @@ void poll_object_link() noexcept {
     if (g_view == nullptr) {
         return;
     }
-    if (!editor_alive(g_view->heartbeat, now, kHeartbeatTimeout)) {
+    if (!middleware::studio::editor_alive(g_view->heartbeat, now, kHeartbeatTimeout)) {
         disconnect_object();
         return;
     }

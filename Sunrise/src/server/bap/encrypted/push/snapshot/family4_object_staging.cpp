@@ -5,6 +5,7 @@
 #include "../../../../../middleware/datagen/family4/instance/instance_encoder.h"
 #include "../../../../../middleware/datagen/family4/instance/layout.h"
 #include "../../../../../state/build_data/runtime.h"
+#include "../../../../../state/runtime/runtime.h"
 #include "internal.h"
 
 namespace sunrise::server::bap::encrypted::push::snapshot {
@@ -22,6 +23,13 @@ bool report_failure(const char* step) noexcept {
                          {line.data(), static_cast<std::size_t>(written)});
     }
     return false;
+}
+
+/** Reads the account-object fields State holds outside the account copy. */
+bool read_account_state_fields(const state::AccountState& account,
+                               family4_datagen::account::StateFields& fields) noexcept {
+    state::synthesizer_tier_values(account, fields.characterValueRow, fields.characterValues);
+    return state::read_store_wallet_sync(fields.storeSyncRevision);
 }
 
 /** Compresses one raw object and advances the shared sealed-buffer extent. */

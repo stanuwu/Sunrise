@@ -6,6 +6,7 @@
 #include <span>
 
 #include "../../../middleware/content/packages/schema/generated/tag_classes_808078.h"
+#include "../../unlocks/unlocks_expression.h"
 
 namespace sunrise::state::build_data::vendors {
 
@@ -62,6 +63,18 @@ struct IndexEntry {
     std::uint16_t index{};
 };
 
+/** Transfer rules across every definition. The shipped total is 21 and the Vault declares 15. */
+inline constexpr std::size_t kTransferRuleCapacity = 256;
+/** A rule with this destination returns the item to its authored bucket. */
+inline constexpr std::uint8_t kAuthoredDestination = 0xFFU;
+
+/** Accepted source bucket and destination; FF selects the item's authored bucket. */
+struct TransferRule {
+    std::uint8_t sourceBucket{};
+    std::uint8_t destinationBucket{};
+};
+static_assert(sizeof(TransferRule) == 2);
+
 /** One extracted vendor definition and the flat-bank ranges its rows occupy. */
 struct Definition {
     std::uint32_t definitionHash{};
@@ -83,6 +96,8 @@ struct Definition {
     std::uint32_t saleRowOffset{};
     /** First row of this definition's range in the flat installed bank. */
     std::uint32_t installedRowOffset{};
+    /** First row of this definition's range in the flat transfer bank. */
+    std::uint32_t transferRuleOffset{};
     /** Raw `resetInterval`. Its unit, epoch and scope are open, so it is not converted. */
     std::uint32_t resetIntervalRaw{};
     /** Raw `resetPhase`, paired with the interval and equally open. */
@@ -92,6 +107,8 @@ struct Definition {
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t interactionCount{};
+    /** Zero when the transfer array is unreadable; that disables transfer alone, not sales. */
+    std::uint16_t transferRuleCount{};
 };
 
 /** A cost entry naming no item carries this. */
@@ -129,6 +146,13 @@ enum class PriceState : std::uint8_t {
     unreadable,
 };
 
+/**
+ * Instructions one sale row's availability conditions expand to, joined by AND. The Store's
+ * ownership gate expands to two. A longer list is kept as an unreadable row, which refuses the
+ * purchase; the vendor log line counts those rows. 8 bytes each, so 1 MiB across a full bank.
+ */
+inline constexpr std::size_t kAvailabilityCapacity = 8;
+
 /** One sale row of one vendor definition. */
 struct SaleRow {
     /** The row's vendor category. The catalog bounds it by the category count. */
@@ -143,6 +167,12 @@ struct SaleRow {
     std::uint8_t costCount{};
     /** Whether `costs` is the price. Only a plain row is charged. */
     PriceState priceState{PriceState::plain};
+    /** Conditions that must all hold for the row to be bought, bound to the saved banks. */
+    std::array<unlocks::Instruction, kAvailabilityCapacity> availability{};
+    /** Entries of `availability` in use. Zero when the row is always available. */
+    std::uint8_t availabilityCount{};
+    /** True when the conditions did not read, bind or fit, which refuses the row. */
+    bool availabilityUnreadable{};
 };
 
 /** @return The static cost entries of one sale row; the catalog bounds the count on install. */

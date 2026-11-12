@@ -74,6 +74,9 @@ void clear(records::MutableDomains output) noexcept {
     std::fill(output.materialRequirementSets.begin(),
               output.materialRequirementSets.end(),
               material_requirements::Definition{});
+    std::fill(output.currencyScalars.begin(),
+              output.currencyScalars.end(),
+              material_requirements::CurrencyScalar{});
     std::fill(output.itemDetails.begin(), output.itemDetails.end(), items::details::Definition{});
     std::fill(
         output.socketPlugRules.begin(), output.socketPlugRules.end(), items::socket_plugs::Rule{});
@@ -112,6 +115,9 @@ void clear(records::MutableDomains output) noexcept {
     std::fill(output.vendorInstalledRows.begin(),
               output.vendorInstalledRows.end(),
               vendors::InstalledRow{});
+    std::fill(output.vendorTransferRules.begin(),
+              output.vendorTransferRules.end(),
+              vendors::TransferRule{});
     std::fill(output.recordObjectives.begin(),
               output.recordObjectives.end(),
               build_data::records::Objective{});
@@ -131,7 +137,17 @@ void clear(records::MutableDomains output) noexcept {
         output.rewardInstructions.begin(), output.rewardInstructions.end(), rewards::Instruction{});
     std::fill(output.rewardModifiers.begin(), output.rewardModifiers.end(), rewards::Modifier{});
     std::fill(output.rewardSockets.begin(), output.rewardSockets.end(), rewards::SocketOverride{});
+    std::fill(output.objectives.begin(), output.objectives.end(), objectives::Row{});
+    std::fill(output.objectiveInstructions.begin(),
+              output.objectiveInstructions.end(),
+              unlocks::Instruction{});
+    std::fill(output.pursuits.begin(), output.pursuits.end(), pursuits::Definition{});
     std::fill(output.starterSets.begin(), output.starterSets.end(), starter_sets::Definition{});
+    std::fill(output.plugInsertionRules.begin(),
+              output.plugInsertionRules.end(),
+              items::insertion_rules::Rule{});
+    std::fill(output.enemyRaces.begin(), output.enemyRaces.end(), combat::EnemyRace{});
+    std::fill(output.labelGroups.begin(), output.labelGroups.end(), combat::LabelGroup{});
 }
 
 /** Computes the exact file size for every record array. */
@@ -142,6 +158,7 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.collectibles, sizeof(records::CollectibleRecord), size)
            && add_records(
                counts.materialRequirementSets, sizeof(records::MaterialRequirementSetRecord), size)
+           && add_records(counts.currencyScalars, sizeof(records::CurrencyScalarRecord), size)
            && add_records(counts.itemDetails, sizeof(records::ItemDetailRecord), size)
            && add_records(counts.socketPlugRules, sizeof(records::SocketPlugRuleRecord), size)
            && add_records(counts.socketPlugPools, sizeof(records::SocketPlugPoolRecord), size)
@@ -166,6 +183,8 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.vendorSaleRows, sizeof(records::VendorSaleRowRecord), size)
            && add_records(
                counts.vendorInstalledRows, sizeof(records::VendorInstalledRowRecord), size)
+           && add_records(
+               counts.vendorTransferRules, sizeof(records::VendorTransferRuleRecord), size)
            && add_records(counts.positionProfiles, sizeof(records::PositionProfileRecord), size)
            && add_records(counts.objectTypes, sizeof(records::ObjectTypeRecord), size)
            && add_records(counts.recordObjectives, sizeof(records::RecordObjectiveRecord), size)
@@ -180,7 +199,15 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.rewardInstructions, sizeof(records::RewardInstructionRecord), size)
            && add_records(counts.rewardModifiers, sizeof(records::RewardModifierRecord), size)
            && add_records(counts.rewardSockets, sizeof(records::RewardSocketOverrideRecord), size)
-           && add_records(counts.starterSets, sizeof(records::StarterSetRecord), size);
+           && add_records(counts.objectives, sizeof(records::ObjectiveRecord), size)
+           && add_records(
+               counts.objectiveInstructions, sizeof(records::RewardInstructionRecord), size)
+           && add_records(counts.pursuits, sizeof(records::PursuitRecord), size)
+           && add_records(counts.starterSets, sizeof(records::StarterSetRecord), size)
+           && add_records(
+               counts.plugInsertionRules, sizeof(records::PlugInsertionRuleRecord), size)
+           && add_records(counts.enemyRaces, sizeof(records::EnemyRaceRecord), size)
+           && add_records(counts.labelGroups, sizeof(records::LabelGroupRecord), size);
 }
 
 /** Reads every payload array and checks the decoded domains as one transaction. */
@@ -204,6 +231,9 @@ bool read_payload(HANDLE file,
         valid
         && read_domain<records::MaterialRequirementSetRecord>(
             file, output.materialRequirementSets.first(counts.materialRequirementSets), checksum);
+    valid = valid
+            && read_domain<records::CurrencyScalarRecord>(
+                file, output.currencyScalars.first(counts.currencyScalars), checksum);
     valid = valid
             && read_domain<records::ItemDetailRecord>(
                 file, output.itemDetails.first(counts.itemDetails), checksum);
@@ -274,6 +304,9 @@ bool read_payload(HANDLE file,
             && read_domain<records::VendorInstalledRowRecord>(
                 file, output.vendorInstalledRows.first(counts.vendorInstalledRows), checksum);
     valid = valid
+            && read_domain<records::VendorTransferRuleRecord>(
+                file, output.vendorTransferRules.first(counts.vendorTransferRules), checksum);
+    valid = valid
             && read_domain<records::PositionProfileRecord>(
                 file, output.positionProfiles.first(counts.positionProfiles), checksum);
     valid = valid
@@ -316,8 +349,26 @@ bool read_payload(HANDLE file,
             && read_domain<records::RewardSocketOverrideRecord>(
                 file, output.rewardSockets.first(counts.rewardSockets), checksum);
     valid = valid
+            && read_domain<records::ObjectiveRecord>(
+                file, output.objectives.first(counts.objectives), checksum);
+    valid = valid
+            && read_domain<records::RewardInstructionRecord>(
+                file, output.objectiveInstructions.first(counts.objectiveInstructions), checksum);
+    valid = valid
+            && read_domain<records::PursuitRecord>(
+                file, output.pursuits.first(counts.pursuits), checksum);
+    valid = valid
             && read_domain<records::StarterSetRecord>(
                 file, output.starterSets.first(counts.starterSets), checksum);
+    valid = valid
+            && read_domain<records::PlugInsertionRuleRecord>(
+                file, output.plugInsertionRules.first(counts.plugInsertionRules), checksum);
+    valid = valid
+            && read_domain<records::EnemyRaceRecord>(
+                file, output.enemyRaces.first(counts.enemyRaces), checksum);
+    valid = valid
+            && read_domain<records::LabelGroupRecord>(
+                file, output.labelGroups.first(counts.labelGroups), checksum);
 
     if (!valid) {
         return false;
@@ -330,6 +381,7 @@ bool read_payload(HANDLE file,
             output.items.first(counts.items),
             output.collectibles.first(counts.collectibles),
             output.materialRequirementSets.first(counts.materialRequirementSets),
+            output.currencyScalars.first(counts.currencyScalars),
             output.itemDetails.first(counts.itemDetails),
             output.socketPlugRules.first(counts.socketPlugRules),
             output.socketPlugPools.first(counts.socketPlugPools),
@@ -353,6 +405,7 @@ bool read_payload(HANDLE file,
             output.vendorDefinitions.first(counts.vendorDefinitions),
             output.vendorSaleRows.first(counts.vendorSaleRows),
             output.vendorInstalledRows.first(counts.vendorInstalledRows),
+            output.vendorTransferRules.first(counts.vendorTransferRules),
             output.positionProfiles.first(counts.positionProfiles),
             fingerprint,
             output.objectTypes.first(counts.objectTypes),
@@ -368,7 +421,13 @@ bool read_payload(HANDLE file,
             output.rewardInstructions.first(counts.rewardInstructions),
             output.rewardModifiers.first(counts.rewardModifiers),
             output.rewardSockets.first(counts.rewardSockets),
+            output.objectives.first(counts.objectives),
+            output.objectiveInstructions.first(counts.objectiveInstructions),
+            output.pursuits.first(counts.pursuits),
             output.starterSets.first(counts.starterSets),
+            output.plugInsertionRules.first(counts.plugInsertionRules),
+            output.enemyRaces.first(counts.enemyRaces),
+            output.labelGroups.first(counts.labelGroups),
         });
 }
 

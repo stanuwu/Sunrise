@@ -16,4 +16,9 @@ bool publish_sobject_definitions(std::span<const sobjects::Definition> definitio
            && transaction.finish(sobjects::replace(definitions), sobjects::clear);
 }
 
+/** Finds one incident target by its wire index. */
+bool find_sobject_definition(std::uint16_t targetIndex, sobjects::Definition& definition) noexcept {
+    return sobjects::find(targetIndex, definition);
+}
+
 } // namespace sunrise::state::build_data

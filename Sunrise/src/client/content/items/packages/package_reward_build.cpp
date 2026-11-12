@@ -9,6 +9,7 @@
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../middleware/content/packages/tables/field_reader.h"
 #include "../../../../middleware/content/packages/tables/reward_table.h"
+#include "../../../../middleware/content/packages/tables/unlock_expression.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_expression.h"
 #include "internal.h"
@@ -515,19 +516,20 @@ bool RewardConditions::read(std::span<const std::byte> blob,
  * @param output Receives the program; it bounds the expanded length.
  * @param count Receives the program length; zero for an empty list.
  * @param failure Receives storage when a bank allocation failed.
+ * @param rowClass Element class of the list; each row is one expression field.
  * @return False for an unreadable, empty or oversized expression.
  */
 bool RewardConditions::read_list(std::span<const std::byte> blob,
                                  std::size_t at,
                                  std::span<domain::Instruction> output,
                                  std::size_t& count,
-                                 BankFailure& failure) const noexcept {
+                                 BankFailure& failure,
+                                 std::uint32_t rowClass) const noexcept {
     count = 0;
     failure = BankFailure::none;
     tables::Array rows{};
     std::vector<domain::Instruction> instructions;
-    if (!tables::read_array(
-            blob, at, layout::ConditionRow::kClass, layout::ConditionRow::kSize, rows)) {
+    if (!tables::read_array(blob, at, rowClass, layout::ConditionRow::kSize, rows)) {
         return false;
     }
     for (std::size_t i = 0; i < rows.count; ++i) {
@@ -561,6 +563,75 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
     return true;
 }
 
+/**
+ * Expands the shared expression a row index names.
+ * @param index Row of the shared expression table.
+ * @param output Receives the program; it bounds the expanded length.
+ * @param count Receives the program length.
+ * @param failure Receives storage when a bank allocation failed.
+ * @return False for a row outside the table or an unreadable, empty or oversized expression.
+ */
+bool RewardConditions::read_index(std::uint16_t index,
+                                  std::span<domain::Instruction> output,
+                                  std::size_t& count,
+                                  BankFailure& failure) const noexcept {
+    count = 0;
+    failure = BankFailure::none;
+    std::vector<domain::Instruction> instructions;
+    domain::Range expression{};
+    if (!loaded_ || index >= expressionRows_.count
+        || !read(expressions_,
+                 expressionRows_.dataOffset + index * layout::ExpressionPoolRow::kSize
+                     + layout::ExpressionPoolRow::kExpression,
+                 instructions,
+                 expression,
+                 failure)
+        || expression.count == 0 || expression.count > output.size()) {
+        return false;
+    }
+    std::copy(instructions.begin(), instructions.end(), output.begin());
+    count = instructions.size();
+    return true;
+}
+
+/**
+ * Names the value slot an expression reads from the held item.
+ * @param at Offset of the expression field.
+ * @param mode Receives which held instances the client reads the slot from.
+ * @return The slot when the expression is one read of an item-held value, otherwise
+ *         objectives::kNoItemValueSlot.
+ */
+std::uint16_t RewardConditions::item_value_slot(
+    std::span<const std::byte> blob,
+    std::size_t at,
+    state::build_data::objectives::ItemValueMode& mode) const noexcept {
+    using Mode = state::build_data::objectives::ItemValueMode;
+    constexpr std::uint16_t kNone = state::build_data::objectives::kNoItemValueSlot;
+    mode = Mode::context;
+    tables::Array rows{};
+    std::uint32_t slot = 0;
+    std::uint8_t kind = 0;
+    std::uint8_t flags = 0;
+    if (!loaded_ || !tables::find_array_at(blob, at, rows)
+        || !tables::expression_lone_operand(blob, rows, tables::kUnlockReadValueOpcode, slot)
+        || slot >= valueRows_.count || slot >= kNone) {
+        return kNone;
+    }
+    const std::span<const std::byte> bindings{values_};
+    const std::size_t binding = valueRows_.dataOffset + slot * layout::SlotRow::kSize;
+    if (!tables::read(bindings, binding + layout::SlotRow::kValueKind, kind)
+        || !tables::read(bindings, binding + layout::SlotRow::kValueFlags, flags)
+        || kind != layout::SlotRow::kItemValueKind
+        || (flags != 0 && flags != layout::SlotRow::kItemValueIgnoredFlag
+            && flags != layout::SlotRow::kItemValueMaximumFlag)) {
+        return kNone;
+    }
+    if (flags == layout::SlotRow::kItemValueMaximumFlag) {
+        mode = Mode::maximum;
+    }
+    return static_cast<std::uint16_t>(slot);
+}
+
 /** Reads a socket override array; false when unreadable or wider than the output. */
 bool read_reward_sockets(std::span<const std::byte> blob,
                          std::size_t at,
@@ -589,15 +660,14 @@ bool read_reward_sockets(std::span<const std::byte> blob,
 }
 
 /**
- * Loads the condition tables, then every reward pool and its entries.
+ * Loads every reward pool and its entries, which bind through the loaded condition tables.
  * An unreadable entry or pool is skipped; a full bank or a refused schema settles the domain.
- * @param maps Unlock slot maps the conditions bind through.
- * @return False when a table or bank refused; conditions that loaded still serve the season pass.
+ * @return False when the conditions are not loaded or a table or bank refused; conditions that
+ *         loaded still serve the season pass.
  */
 bool RewardBuild::load(const reader::Source& source,
                        reader::Scratch& scratch,
-                       std::span<const std::byte> root,
-                       const SlotMaps& maps) noexcept {
+                       std::span<const std::byte> root) noexcept {
     loaded_ = false;
     supplementalMissing_ = false;
     pools_.clear();
@@ -608,8 +678,7 @@ bool RewardBuild::load(const reader::Source& source,
     std::vector<std::byte> blob;
     tables::Array rows{};
     std::uint32_t supplementalTag = 0;
-    // Conditions load first; the season pass binds through them even if the pools are refused.
-    if (!conditions.load(source, scratch, root, maps)) {
+    if (!conditions.loaded()) {
         return false;
     }
     if (!tables::slot_tag(root, layout::RootSlots::kSupplementalRewards, supplementalTag)) {

@@ -59,8 +59,12 @@ inline constexpr std::size_t kCharacterValueCapacity = 256;
 inline constexpr std::size_t kProfileUnlockFlagCapacity = 512;
 /** Opaque records separate the per-character blocks from the profile unlock bank. */
 inline constexpr std::size_t kUnlockProfilePaddingSize = 2'424;
-/** Opaque records follow the profile unlock bank to the end of the object. */
-inline constexpr std::size_t kProfileFlagsTailPaddingSize = 21'384;
+/** Reserved bytes separate the profile unlock bank from the Store sync revision. */
+inline constexpr std::size_t kProfileFlagsStoreSyncPaddingSize = 12;
+/** Opaque records follow the Store sync state to the end of the object. */
+inline constexpr std::size_t kStoreSyncTailPaddingSize = 21'367;
+/** Store sync state of an account whose wallet sync has committed. */
+inline constexpr std::int8_t kStoreSyncStateSynced = 3;
 /** The complete native Family-4 account object occupies 96,280 bytes. */
 inline constexpr std::size_t kObjectSize = 96'280;
 /** The account key starts the native Family-4 account object. */
@@ -99,6 +103,10 @@ inline constexpr std::size_t kObjectiveValuesOffset = 42'040;
 inline constexpr std::size_t kCharacterUnlocksOffset = 66'840;
 /** The profile unlock bank follows the opaque records after the per-character blocks. */
 inline constexpr std::size_t kProfileUnlockFlagsOffset = 74'384;
+/** The client compares this generation to finish a Store wallet sync. */
+inline constexpr std::size_t kStoreSyncRevisionOffset = 74'908;
+/** The client reads the Store sync state as a signed byte. */
+inline constexpr std::size_t kStoreSyncStateOffset = 74'912;
 
 #pragma pack(push, 1)
 
@@ -162,7 +170,10 @@ struct Object {
     std::array<CharacterUnlockBlock, kUnlockCharacterCapacity> characterUnlocks{};
     std::array<std::byte, kUnlockProfilePaddingSize> unlockProfilePadding{};
     std::array<std::uint8_t, kProfileUnlockFlagCapacity> profileUnlockFlags{};
-    std::array<std::byte, kProfileFlagsTailPaddingSize> profileFlagsTailPadding{};
+    std::array<std::byte, kProfileFlagsStoreSyncPaddingSize> profileFlagsStoreSyncPadding{};
+    std::uint32_t storeSyncRevision{};
+    std::int8_t storeSyncState{};
+    std::array<std::byte, kStoreSyncTailPaddingSize> storeSyncTailPadding{};
 };
 
 #pragma pack(pop)
@@ -190,6 +201,8 @@ static_assert(offsetof(Object, acquiredFlags) == kAcquiredFlagsOffset);
 static_assert(offsetof(Object, objectiveValues) == kObjectiveValuesOffset);
 static_assert(offsetof(Object, characterUnlocks) == kCharacterUnlocksOffset);
 static_assert(offsetof(Object, profileUnlockFlags) == kProfileUnlockFlagsOffset);
+static_assert(offsetof(Object, storeSyncRevision) == kStoreSyncRevisionOffset);
+static_assert(offsetof(Object, storeSyncState) == kStoreSyncStateOffset);
 static_assert(sizeof(CharacterUnlockBlock)
               == kCharacterFlagCapacity + kCharacterValueCapacity * sizeof(std::int32_t));
 static_assert(sizeof(ProfileInventoryChangeRecord)

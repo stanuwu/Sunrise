@@ -1,5 +1,6 @@
 /** Vendor, bounty, exchange and quest actions the web service prepares from one request. */
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -10,6 +11,8 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
+#include "../../middleware/crypto/random_bytes.h"
 #include "../../middleware/web_service/messages/opcode1820.h"
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
 #include "../../middleware/web_service/messages/opcode904/opcode904_codec.h"
@@ -52,6 +55,8 @@ constexpr std::size_t kExchangePayoutCapacity = 2;
 // Every credited stack is announced to the account's change ring, so a kind that paid more than
 // the mutation can announce would pay out silently. Raising one raises the other.
 static_assert(kExchangePayoutCapacity <= state::kProfileStackChangeCapacity);
+/** Bright Dust, charged one for one for a restricted price. No package field names it. */
+constexpr std::uint32_t kBrightDustHash = 0xA7EE4765U;
 
 } // namespace
 
@@ -447,8 +452,11 @@ bool grant_item_definition(
                                 0);
         return false;
     }
-    if (!state::prepare_item_acquisition(
-            collectibleIndex, definition.definitionHash, price, *mutation)) {
+    if (!state::prepare_item_acquisition(collectibleIndex,
+                                         definition.definitionHash,
+                                         price,
+                                         core::runtime::server_clock_seconds(),
+                                         *mutation)) {
         clear_mutation(outcome);
         report_item_acquisition(
             message, "state", collectibleIndex, itemDefinitionIndex, definition.definitionHash, 0);
@@ -637,6 +645,64 @@ constexpr std::uint32_t kAbsentNameHash = 0x811C9DC5U;
 }
 
 /**
+ * Grants a vendor row's item through the reward graph, spending the row's price in the same grant.
+ * The seed is drawn in this layer.
+ * @param price The row's cost entries.
+ * @param outcome Receives the prepared reward grant.
+ * @param reason Receives a static reason when nothing is prepared.
+ * @return True when the grant is prepared.
+ */
+[[nodiscard]] bool
+prepare_vendor_reward_grant(std::uint16_t itemDefinitionIndex,
+                            std::span<const state::build_data::vendors::SaleCost> price,
+                            Outcome& outcome,
+                            const char*& reason) noexcept {
+    auto* grant = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+    std::uint64_t seed = 0;
+    reason = grant == nullptr ? "storage" : "random_source";
+    if (grant != nullptr && middleware::crypto::random::draw_seed(seed)
+        && state::prepare_vendor_reward(itemDefinitionIndex,
+                                        price,
+                                        seed,
+                                        core::runtime::server_clock_seconds(),
+                                        *grant,
+                                        &reason)
+               == state::RewardPreparation::prepared) {
+        return true;
+    }
+    clear_mutation(outcome);
+    return false;
+}
+
+/**
+ * Charges every restricted cost entry in Bright Dust instead, one unit for one. The server can
+ * never credit an item the client refuses to grant, and the installed restricted-grant list names
+ * one item, Silver, which only the platform sells.
+ * @param price The row's cost entries.
+ * @param charged Receives the entries to charge, in declared order.
+ * @return False when a restricted entry has no installed Bright Dust to charge instead.
+ */
+[[nodiscard]] bool
+reprice_restricted_costs(std::span<const state::build_data::vendors::SaleCost> price,
+                         std::span<state::build_data::vendors::SaleCost> charged) noexcept {
+    std::copy(price.begin(), price.end(), charged.begin());
+    state::build_data::items::Definition brightDust{};
+    for (state::build_data::vendors::SaleCost& cost : charged.first(price.size())) {
+        state::build_data::items::Definition item{};
+        if (!state::build_data::find_item_definition_index(cost.itemIndex, item)
+            || !item.grantRestricted) {
+            continue;
+        }
+        if (brightDust.definitionHash == 0
+            && !state::build_data::find_item_definition_hash(kBrightDustHash, brightDust)) {
+            return false;
+        }
+        cost.itemIndex = brightDust.definitionIndex;
+    }
+    return true;
+}
+
+/**
  * Settles one resolved vendor row, in the order a row's behaviours are tried.
  * A row is a bounty roll, an exchange or a grant. The row does not say which, so each is tried in
  * turn and the first that claims the row owns it. Both vendor opcodes end here.
@@ -670,7 +736,22 @@ void settle_vendor_row(const middleware::web_service::Message& message,
                         itemDefinitionIndex);
         return;
     }
-    const std::span<const vendor_domain::SaleCost> price = vendor_domain::cost_entries(row);
+    // A row is sold only while its availability conditions hold for the selected character.
+    bool available = false;
+    const char* unavailable = "unavailable";
+    if (!state::vendor_row_available(row, available, &unavailable) || !available) {
+        report_purchase(opcode, "fail", unavailable, vendorIndex, rowIndex, itemDefinitionIndex);
+        return;
+    }
+    const std::span<const vendor_domain::SaleCost> declared = vendor_domain::cost_entries(row);
+    std::array<vendor_domain::SaleCost, vendor_domain::kSaleCostCapacity> charged{};
+    if (!reprice_restricted_costs(declared, charged)) {
+        report_purchase(
+            opcode, "fail", "bright_dust_missing", vendorIndex, rowIndex, itemDefinitionIndex);
+        return;
+    }
+    const std::span<const vendor_domain::SaleCost> price =
+        std::span(charged).first(declared.size());
     std::uint16_t rolledBounty = kUnavailableDefinitionIndex;
     if (roll_vendor_bounty(vendorIndex, categoryIndex, rolledBounty)) {
         report_purchase(opcode,
@@ -715,6 +796,18 @@ void settle_vendor_row(const middleware::web_service::Message& message,
         return;
     case Substitution::none:
         break;
+    }
+    // A row whose item the graph flags on acquisition, or that lands in the lane Dawning deliveries
+    // use, resolves through the reward graph: the acquisition below sets no flag and adds an
+    // instance instead.
+    if (state::vendor_reward_item(granted)) {
+        const char* reason = nullptr;
+        const bool prepared = prepare_vendor_reward_grant(granted, price, outcome, reason);
+        if (reason == nullptr) {
+            reason = prepared ? "reward_graph" : "vendor_reward";
+        }
+        report_purchase(opcode, prepared ? "ok" : "fail", reason, vendorIndex, rowIndex, granted);
+        return;
     }
     std::uint16_t collectibleIndex = state::build_data::collectibles::kNoCollectibleIndex;
     const bool collected = find_collectible_for_item(granted, collectibleIndex);

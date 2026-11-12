@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "../../../../state/account/inventory/occupied_bucket.h"
 #include "../../../../state/build_data/runtime.h"
 #include "subclass_socket_selection.h"
 
@@ -19,6 +20,8 @@ namespace build_socket_lists = state::build_data::socket_entry_lists;
 
 /** Native instanced inventory rows always carry exactly one item. */
 constexpr std::int32_t kInstancedQuantity = 1;
+
+static_assert(authored_inventory::kItemObjectiveLaneCount == instance::layout::kTailValueCount);
 
 /**
  * Finds the installed item index for one authored plug hash.
@@ -148,8 +151,11 @@ bool resolve_item(const authored_inventory::Item& authored,
                 authored.definitionHash, itemDetail.equipmentSlot, nativeEquipmentSlot)
             && (requireEquipmentSlot || itemDetail.equipmentSlot.has_value()))
         || static_cast<std::size_t>(nativeEquipmentSlot) >= build_details::kEquipmentSlotCount
-        || !state::build_data::find_inventory_bucket_descriptor(itemDetail.bucketId, bucket)
+        || !authored_inventory::find_occupied_bucket(itemDefinition, authored.placement, bucket)
         || bucket.arraySelector != build_buckets::ArraySelector::character
+        // Equipment never sits in a recovery bucket.
+        || (requireEquipmentSlot
+            && authored.placement != authored_inventory::ItemPlacement::authored)
         || !state::build_data::find_socket_entry_list(itemDetail.socketEntryListIndex, socketList)
         || static_cast<std::size_t>(itemDefinition.definitionIndex) >= itemDefinitionCount
         || static_cast<std::size_t>(socketList.definitionIndex) >= socketEntryListCount
@@ -193,6 +199,7 @@ bool resolve_item(const authored_inventory::Item& authored,
     candidate.item.instance.socketEntryListIndex = socketList.definitionIndex;
     candidate.item.instance.socketEntryCount = socketList.entryCount;
     candidate.item.instance.socketEntryContentsResolved = true;
+    candidate.item.instance.tailValues = authored.objectives;
     resolve_socket_states(socketList,
                           authored,
                           character.characterClass,

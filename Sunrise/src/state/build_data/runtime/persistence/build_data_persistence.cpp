@@ -11,15 +11,19 @@
 #include "../../cache/internal.h"
 #include "../../cache/records/validation.h"
 #include "../../collectibles/collectible_catalog.h"
+#include "../../combat/combat_catalog.h"
 #include "../../constants/investment_constant_catalog.h"
 #include "../../hash_names/hash_name_catalog.h"
 #include "../../inventory/buckets/inventory_bucket_catalog.h"
 #include "../../items/catalysts/exotic_catalyst_catalog.h"
 #include "../../items/details/item_detail_catalog.h"
+#include "../../items/insertion_rules/insertion_rule_catalog.h"
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/node_catalog.h"
+#include "../../objectives/objective_catalog.h"
 #include "../../progressions/progression_catalog.h"
+#include "../../pursuits/pursuit_catalog.h"
 #include "../../records/record_catalog.h"
 #include "../../rewards/reward_catalog.h"
 #include "../../runtime.h"
@@ -56,7 +60,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
     return {value.lightStatRow,
             value.weaponPowerStatRow,
             value.characterStatRows,
-            value.extracted ? std::uint8_t{1} : std::uint8_t{0}};
+            value.extracted ? std::uint8_t{1} : std::uint8_t{0},
+            value.synthesizerTierValueRow};
 }
 
 /**
@@ -77,6 +82,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && collectibles::snapshot(scratch.collectibles, counts.collectibles)
            && material_requirements::snapshot(scratch.materialRequirementSets,
                                               counts.materialRequirementSets)
+           && material_requirements::snapshot_currency_scalars(scratch.currencyScalars,
+                                                               counts.currencyScalars)
            && items::details::snapshot(scratch.itemDetails, counts.itemDetails)
            && items::socket_plugs::snapshot(scratch.socketPlugRules,
                                             counts.socketPlugRules,
@@ -100,7 +107,14 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && rewards::snapshot(scratch.rewardInstructions, counts.rewardInstructions)
            && rewards::snapshot(scratch.rewardModifiers, counts.rewardModifiers)
            && rewards::snapshot(scratch.rewardSockets, counts.rewardSockets)
+           && objectives::snapshot(scratch.objectives, counts.objectives)
+           && objectives::snapshot(scratch.objectiveInstructions, counts.objectiveInstructions)
+           && pursuits::snapshot(scratch.pursuits, counts.pursuits)
            && starter_sets::snapshot(scratch.starterSets, counts.starterSets)
+           && items::insertion_rules::snapshot(scratch.plugInsertionRules,
+                                               counts.plugInsertionRules)
+           && combat::snapshot(scratch.enemyRaces, counts.enemyRaces)
+           && combat::snapshot(scratch.labelGroups, counts.labelGroups)
            && records::snapshot(scratch.records, counts.records)
            && records::snapshot_objectives(scratch.recordObjectives, counts.recordObjectives)
            && records::snapshot_intervals(scratch.recordIntervals, counts.recordIntervals)
@@ -118,6 +132,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && vendors::snapshot_sale_rows(scratch.vendorSaleRows, counts.vendorSaleRows)
            && vendors::snapshot_installed_rows(scratch.vendorInstalledRows,
                                                counts.vendorInstalledRows)
+           && vendors::snapshot_transfer_rules(scratch.vendorTransferRules,
+                                               counts.vendorTransferRules)
            && gameplay::entity_position_profiles::snapshot(
                scratch.positionProfiles, counts.positionProfiles, *scratch.positionFingerprint)
            && gameplay::entity_object_types::snapshot(
@@ -132,16 +148,23 @@ to_record(const constants::InvestmentConstants& value) noexcept {
  */
 [[nodiscard]] bool required_domains_ready(const Context& state) noexcept {
     constants::InvestmentConstants published{};
-    // A refused reward graph is settled; the cache then carries no reward rows.
+    // A refused reward graph is settled; the cache then carries no reward rows. Unsupported
+    // insertion rules and an unsupported combat taxonomy are settled the same way.
     return runtime::named::ready() && item_definitions_ready() && configured_item_details_ready()
            && collectible_definitions_ready() && socket_plug_rules_ready()
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && season_pass_ready() && repeatable_bounties_ready()
-           && starter_sets_ready() && (reward_definitions_ready() || state.rewardsUnsupported)
+           && starter_sets_ready()
+           && (plug_insertion_rules_ready() || plug_insertion_rules_unsupported())
+           && (combat_taxonomy_ready() || combat_taxonomy_unsupported())
+           && (reward_definitions_ready() || state.rewardsUnsupported)
            && record_definitions_ready() && node_definitions_ready() && sobject_definitions_ready()
            && scenario_layouts_ready() && spawn_sets_ready() && hash_names_ready()
-           && vendor_catalog_ready() && gameplay::entity_position_profiles::available()
+           && vendor_catalog_ready()
+           && (pursuit_catalog_unsupported()
+               || (objective_definitions_ready() && pursuit_definitions_ready()))
+           && gameplay::entity_position_profiles::available()
            && gameplay::entity_object_types::available() && constants::find(published);
 }
 
@@ -167,6 +190,9 @@ cache::records::MutableDomains scratch_domains(Context& state, std::size_t named
     const auto materialRequirementSets = ensure_scratch<material_requirements::Definition,
                                                         material_requirements::kDefinitionCapacity>(
         state.materialRequirementSetScratch);
+    const auto currencyScalars =
+        ensure_scratch<material_requirements::CurrencyScalar,
+                       material_requirements::kCurrencyScalarCapacity>(state.currencyScalarScratch);
     const auto itemDetails =
         ensure_scratch<build_data::items::details::Definition,
                        build_data::items::details::kDefinitionCapacity>(state.itemDetailScratch);
@@ -233,6 +259,9 @@ cache::records::MutableDomains scratch_domains(Context& state, std::size_t named
     const auto vendorInstalledRows =
         ensure_scratch<vendors::InstalledRow, vendors::kInstalledRowCapacity>(
             state.vendorInstalledRowScratch);
+    const auto vendorTransferRules =
+        ensure_scratch<vendors::TransferRule, vendors::kTransferRuleCapacity>(
+            state.vendorTransferRuleScratch);
     const auto progressionSteps = ensure_scratch<progressions::Step, progressions::kStepCapacity>(
         state.progressionStepScratch);
     const auto seasonPassRewards =
@@ -249,6 +278,7 @@ cache::records::MutableDomains scratch_domains(Context& state, std::size_t named
         items,
         collectibles,
         materialRequirementSets,
+        currencyScalars,
         itemDetails,
         socketPlugRules,
         socketPlugPools,
@@ -272,6 +302,7 @@ cache::records::MutableDomains scratch_domains(Context& state, std::size_t named
         vendorDefinitions,
         vendorSaleRows,
         vendorInstalledRows,
+        vendorTransferRules,
         positionProfiles,
         &state.positionFingerprint,
         ensure_scratch<gameplay::entity_object_types::Row,
@@ -290,8 +321,16 @@ cache::records::MutableDomains scratch_domains(Context& state, std::size_t named
         ensure_scratch<rewards::Modifier, rewards::kModifierCapacity>(state.rewardModifierScratch),
         ensure_scratch<rewards::SocketOverride, rewards::kSocketOverrideCapacity>(
             state.rewardSocketScratch),
+        ensure_scratch<objectives::Row, objectives::kDefinitionCapacity>(state.objectiveScratch),
+        ensure_scratch<unlocks::Instruction, objectives::kInstructionCapacity>(
+            state.objectiveInstructionScratch),
+        ensure_scratch<pursuits::Definition, pursuits::kDefinitionCapacity>(state.pursuitScratch),
         ensure_scratch<starter_sets::Definition, starter_sets::kClassCount>(
             state.starterSetScratch),
+        ensure_scratch<items::insertion_rules::Rule, items::insertion_rules::kRuleCapacity>(
+            state.plugInsertionRuleScratch),
+        ensure_scratch<combat::EnemyRace, combat::kEnemyRaceCapacity>(state.enemyRaceScratch),
+        ensure_scratch<combat::LabelGroup, combat::kLabelGroupCapacity>(state.labelGroupScratch),
     };
 }
 
@@ -309,6 +348,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.itemScratch);
     release_bank(state.collectibleScratch);
     release_bank(state.materialRequirementSetScratch);
+    release_bank(state.currencyScalarScratch);
     release_bank(state.itemDetailScratch);
     release_bank(state.socketPlugRuleScratch);
     release_bank(state.socketPlugPoolScratch);
@@ -328,7 +368,13 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.rewardInstructionScratch);
     release_bank(state.rewardModifierScratch);
     release_bank(state.rewardSocketScratch);
+    release_bank(state.objectiveScratch);
+    release_bank(state.objectiveInstructionScratch);
+    release_bank(state.pursuitScratch);
     release_bank(state.starterSetScratch);
+    release_bank(state.plugInsertionRuleScratch);
+    release_bank(state.enemyRaceScratch);
+    release_bank(state.labelGroupScratch);
     release_bank(state.recordScratch);
     release_bank(state.recordObjectiveScratch);
     release_bank(state.recordIntervalScratch);
@@ -345,6 +391,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.vendorDefinitionScratch);
     release_bank(state.vendorSaleRowScratch);
     release_bank(state.vendorInstalledRowScratch);
+    release_bank(state.vendorTransferRuleScratch);
     release_bank(state.positionProfileScratch);
     release_bank(state.objectTypeScratch);
     state.positionFingerprint = {};
@@ -385,6 +432,8 @@ cache::records::Domains occupied_domains(Context& state,
                                                               counts.collectibles},
         std::span<const material_requirements::Definition>{
             state.materialRequirementSetScratch.data(), counts.materialRequirementSets},
+        std::span<const material_requirements::CurrencyScalar>{state.currencyScalarScratch.data(),
+                                                               counts.currencyScalars},
         itemDetails,
         socketPlugRules,
         socketPlugPools,
@@ -417,6 +466,8 @@ cache::records::Domains occupied_domains(Context& state,
         std::span<const vendors::SaleRow>{state.vendorSaleRowScratch.data(), counts.vendorSaleRows},
         std::span<const vendors::InstalledRow>{state.vendorInstalledRowScratch.data(),
                                                counts.vendorInstalledRows},
+        std::span<const vendors::TransferRule>{state.vendorTransferRuleScratch.data(),
+                                               counts.vendorTransferRules},
         std::span<const gameplay::entity_position_profiles::Row>{
             state.positionProfileScratch.data(), counts.positionProfiles},
         state.positionFingerprint,
@@ -441,8 +492,16 @@ cache::records::Domains occupied_domains(Context& state,
                                            counts.rewardModifiers},
         std::span<const rewards::SocketOverride>{state.rewardSocketScratch.data(),
                                                  counts.rewardSockets},
+        std::span<const objectives::Row>{state.objectiveScratch.data(), counts.objectives},
+        std::span<const unlocks::Instruction>{state.objectiveInstructionScratch.data(),
+                                              counts.objectiveInstructions},
+        std::span<const pursuits::Definition>{state.pursuitScratch.data(), counts.pursuits},
         std::span<const starter_sets::Definition>{state.starterSetScratch.data(),
                                                   counts.starterSets},
+        std::span<const items::insertion_rules::Rule>{state.plugInsertionRuleScratch.data(),
+                                                      counts.plugInsertionRules},
+        std::span<const combat::EnemyRace>{state.enemyRaceScratch.data(), counts.enemyRaces},
+        std::span<const combat::LabelGroup>{state.labelGroupScratch.data(), counts.labelGroups},
     };
 }
 

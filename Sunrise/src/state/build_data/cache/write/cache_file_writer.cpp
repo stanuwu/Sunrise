@@ -20,6 +20,7 @@ namespace {
     return domains.named.size() <= kMaximumCount && domains.items.size() <= kMaximumCount
            && domains.collectibles.size() <= kMaximumCount
            && domains.materialRequirementSets.size() <= kMaximumCount
+           && domains.currencyScalars.size() <= kMaximumCount
            && domains.itemDetails.size() <= kMaximumCount
            && domains.socketPlugRules.size() <= kMaximumCount
            && domains.socketPlugPools.size() <= kMaximumCount
@@ -41,6 +42,7 @@ namespace {
            && domains.vendorDefinitions.size() <= kMaximumCount
            && domains.vendorSaleRows.size() <= kMaximumCount
            && domains.vendorInstalledRows.size() <= kMaximumCount
+           && domains.vendorTransferRules.size() <= kMaximumCount
            && domains.positionProfiles.size() <= kMaximumCount
            && domains.objectTypes.size() <= kMaximumCount
            && domains.recordObjectives.size() <= kMaximumCount
@@ -55,7 +57,13 @@ namespace {
            && domains.rewardInstructions.size() <= kMaximumCount
            && domains.rewardModifiers.size() <= kMaximumCount
            && domains.rewardSockets.size() <= kMaximumCount
-           && domains.starterSets.size() <= kMaximumCount;
+           && domains.objectives.size() <= kMaximumCount
+           && domains.objectiveInstructions.size() <= kMaximumCount
+           && domains.pursuits.size() <= kMaximumCount
+           && domains.starterSets.size() <= kMaximumCount
+           && domains.plugInsertionRules.size() <= kMaximumCount
+           && domains.enemyRaces.size() <= kMaximumCount
+           && domains.labelGroups.size() <= kMaximumCount;
 }
 
 /** @return True when the requested final-name rule is one of the declared values. */

@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../runtime/host_environment.h"
 #include "path.h"
 
 namespace sunrise::core::path {
@@ -41,8 +42,6 @@ constexpr DWORD kAlphabeticHexadecimalOffset = 10;
 constexpr std::size_t kMaximumEntriesPerSweep = 64;
 /** 8 removals spread stale-file cleanup across later writes. */
 constexpr std::size_t kMaximumRemovalsPerSweep = 8;
-/** A zero-duration wait observes process state without blocking a write. */
-constexpr DWORD kNonBlockingWaitMilliseconds = 0;
 /** Windows FILETIME stores 10 million 100-nanosecond ticks per second. */
 constexpr ULONGLONG kFileTimeTicksPerSecond = 10'000'000ULL;
 /** One hour keeps recent ownership transitions outside crash-residue cleanup. */
@@ -148,21 +147,6 @@ parse_owner(std::wstring_view finalName, std::wstring_view candidate, DWORD& pro
     const ULONGLONG writtenTicks = file_time_ticks(lastWrite);
     const ULONGLONG currentTicks = file_time_ticks(now);
     return currentTicks >= writtenTicks && currentTicks - writtenTicks >= kMinimumStaleAgeTicks;
-}
-
-/**
- * Confirms an owner has stopped without guessing through access failures.
- * @param processId Process id parsed from the temporary name.
- * @return True only when Windows reports no process or a signaled process object.
- */
-[[nodiscard]] bool owner_stopped(DWORD processId) noexcept {
-    const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, processId);
-    if (process == nullptr) {
-        return GetLastError() == ERROR_INVALID_PARAMETER;
-    }
-    const DWORD waitResult = WaitForSingleObject(process, kNonBlockingWaitMilliseconds);
-    (void)CloseHandle(process);
-    return waitResult == WAIT_OBJECT_0;
 }
 
 /**
@@ -327,7 +311,8 @@ void remove_stale_siblings(const wchar_t* finalPath) noexcept {
         DWORD ownerProcessId = 0;
         if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0
             || !parse_owner(finalName, candidateName, ownerProcessId)
-            || !old_enough(entry.ftLastWriteTime, now) || !owner_stopped(ownerProcessId)) {
+            || !old_enough(entry.ftLastWriteTime, now)
+            || !runtime::process_stopped(ownerProcessId)) {
             continue;
         }
 

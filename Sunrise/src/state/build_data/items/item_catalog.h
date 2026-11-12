@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -16,6 +17,14 @@ inline constexpr std::uint8_t kUnresolvedBucketId = 0xFF;
 inline constexpr std::uint16_t kUnavailableMaterialRequirementSetIndex = 0xFFFFU;
 /** An item-index field naming no row carries all bits set. */
 inline constexpr std::uint16_t kUnavailableLinkedPlugIndex = 0xFFFFU;
+/** The stack-unique label is the FNV-1 hash of its string; this is the hash of the empty one. */
+inline constexpr std::uint32_t kNoStackUniqueLabel = 0x811C9DC5U;
+/** All bits set mark an item that names no account value row. */
+inline constexpr std::uint16_t kUnavailableValueIndex = 0xFFFFU;
+/** All bits set mark an item that names no account flag row. */
+inline constexpr std::uint16_t kUnavailableFlagIndex = 0xFFFFU;
+/** The shipped build lists at most 8 presence flags on one item. */
+inline constexpr std::size_t kPresenceFlagCapacity = 8;
 
 /** One installed-build item identity, used to look up authored definition hashes. */
 struct Definition {
@@ -39,7 +48,39 @@ struct Definition {
     std::uint16_t linkedPlugIndex{kUnavailableLinkedPlugIndex};
     /** Empty unless this item is the first member of a supported quest set. */
     QuestInitialization questInitialization{};
+    /** Bucket that receives what the item's own bucket cannot hold, or kUnresolvedBucketId. */
+    std::uint8_t recoveryBucketId{kUnresolvedBucketId};
+    /** Acquisition records carry the policy bit that skips the toast and the acquired count. */
+    bool quietAcquisition{};
+    /** Acquisition records carry the policy bit that skips only the toast. */
+    bool toastlessAcquisition{};
+    /** Rows sharing a label never coexist as separate stacks, or kNoStackUniqueLabel. */
+    std::uint32_t stackUniqueLabel{kNoStackUniqueLabel};
+    /** The installed restricted-grant list names this item; ordinary grants refuse it. */
+    bool grantRestricted{};
+    /** Account value row a plug's quantity expression reads alone, as an oven ingredient does. */
+    std::uint16_t quantityValueIndex{kUnavailableValueIndex};
+    /**
+     * Account flag row every shared plug set offering this plug requires set, as a recipe its
+     * discovery; unavailable when the sets require none or disagree.
+     */
+    std::uint16_t plugSetFlagIndex{kUnavailableFlagIndex};
+    /** Unlock flag slots the item supplies while it is held, in the order it lists them. */
+    std::array<std::uint16_t, kPresenceFlagCapacity> presenceFlags{};
+    std::uint8_t presenceFlagCount{};
+    /** The item's action removes the whole stack rather than one unit. */
+    bool consumesWholeStack{};
+    /** The item's action deletes the copy it acts on. */
+    bool deletesOnAction{};
 };
+
+/**
+ * Says whether the item sits in the native pursuit bucket, as held quest steps and bounties do.
+ * The vendor gate's pursuit test is a separate rule that reads the item's detail shape.
+ */
+[[nodiscard]] constexpr bool pursuit_bucket_item(const Definition& definition) noexcept {
+    return definition.bucketId == kPursuitBucketId;
+}
 
 /** Roll-set ordinals outside the rolled ladder. */
 inline constexpr std::uint16_t kNoRollSet = 0;

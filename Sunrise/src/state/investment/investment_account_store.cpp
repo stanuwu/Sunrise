@@ -5,9 +5,17 @@
 namespace sunrise::state::investment::store {
 namespace {
 
-/** Reads characters in stable slot order and overlays only process-local session fields. */
+// character_helmet_tiers has one column per role, read and written here in GambitPrimeRole order.
+static_assert(kGambitPrimeRoleCount == 4);
+
+/**
+ * Reads characters in stable slot order and overlays only process-local session fields. A
+ * character with no helmet row has earned no tier.
+ */
 bool read_characters(AccountState& output) noexcept {
-    Statement rows("SELECT * FROM characters ORDER BY slot");
+    Statement rows("SELECT c.*,COALESCE(h.reaper,0),COALESCE(h.invader,0),"
+                   "COALESCE(h.collector,0),COALESCE(h.sentry,0) FROM characters c "
+                   "LEFT JOIN character_helmet_tiers h ON h.character_slot=c.slot ORDER BY c.slot");
     int result = rows.step();
     while (result == SQLITE_ROW) {
         std::size_t slot = 0;
@@ -25,7 +33,11 @@ bool read_characters(AccountState& output) noexcept {
                           character.equippedTitleRecordIndex,
                           character.acquiredSubclassAbilityMask,
                           character.nextInventorySerial,
-                          character.appearanceHeader)
+                          character.appearanceHeader,
+                          character.gambitPrimeHelmetTiers[0],
+                          character.gambitPrimeHelmetTiers[1],
+                          character.gambitPrimeHelmetTiers[2],
+                          character.gambitPrimeHelmetTiers[3])
             || slot != output.characterCount || slot >= output.characters.size()) {
             return false;
         }
@@ -80,6 +92,13 @@ bool write_characters(const AccountState& value) noexcept {
                         character.acquiredSubclassAbilityMask,
                         character.nextInventorySerial,
                         character.appearanceHeader)) {
+            return false;
+        }
+    }
+    Statement helmets("INSERT INTO character_helmet_tiers VALUES (?,?,?,?,?)");
+    for (std::size_t slot = 0; slot < value.characterCount; ++slot) {
+        const auto& tiers = value.characters[slot].gambitPrimeHelmetTiers;
+        if (!helmets.write(slot, tiers[0], tiers[1], tiers[2], tiers[3])) {
             return false;
         }
     }
@@ -189,6 +208,40 @@ AccountState account() noexcept {
     return output;
 }
 
+/** Reads only the keys and classes, in slot order, and overlays the session selection. */
+bool read_account_identity(AccountIdentity& output) noexcept {
+    output = {};
+    Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
+    }
+    Statement account("SELECT soid FROM account WHERE id=1");
+    if (account.step() != SQLITE_ROW || !account.columns(output.primarySoid)
+        || account.step() != SQLITE_DONE) {
+        output = {};
+        return false;
+    }
+    Statement rows("SELECT slot,soid,class FROM characters ORDER BY slot");
+    int result = rows.step();
+    while (result == SQLITE_ROW) {
+        std::size_t slot = 0;
+        CharacterIdentity character;
+        if (!rows.columns(slot, character.soid, character.characterClass)
+            || slot != output.characterCount || slot >= output.characters.size()) {
+            output = {};
+            return false;
+        }
+        character.selected = g_session.selected[slot];
+        output.characters[output.characterCount++] = character;
+        result = rows.step();
+    }
+    if (result != SQLITE_DONE || !transaction.commit()) {
+        output = {};
+        return false;
+    }
+    return true;
+}
+
 /** The session overlay changes only after every durable account row commits. */
 bool write_account(const AccountState& value) noexcept {
     if (!account::valid(value)) {
@@ -196,7 +249,8 @@ bool write_account(const AccountState& value) noexcept {
     }
     Transaction transaction;
     if (!transaction.ready()
-        || !execute("DELETE FROM items; DELETE FROM character_stacks; DELETE FROM characters;"
+        || !execute("DELETE FROM items; DELETE FROM character_stacks;"
+                    "DELETE FROM character_helmet_tiers; DELETE FROM characters;"
                     "DELETE FROM profile_items; DELETE FROM dismantle_rewards;")) {
         return false;
     }
@@ -292,6 +346,42 @@ bool remove_character_rows(std::size_t slot) noexcept {
         }
     }
     return transaction.commit();
+}
+
+/** Reads the saved account's Store wallet sync revision; one that never synced reads zero. */
+bool read_store_wallet_sync(std::uint32_t& revision) noexcept {
+    revision = 0;
+    Transaction transaction;
+    Statement row("SELECT revision FROM eververse_wallet_sync "
+                  "WHERE account_soid=(SELECT soid FROM account WHERE id=1)");
+    if (!transaction.ready()) {
+        return false;
+    }
+    const int result = row.step();
+    if (result == SQLITE_ROW
+        && (!row.column(0, revision) || revision == 0 || row.step() != SQLITE_DONE)) {
+        return false;
+    }
+    return (result == SQLITE_ROW || result == SQLITE_DONE) && transaction.commit();
+}
+
+/** Advances the saved account's Store wallet sync revision by one. */
+bool advance_store_wallet_sync(std::uint32_t& revision) noexcept {
+    revision = 0;
+    Transaction transaction;
+    std::uint32_t before = 0;
+    if (!transaction.ready() || !read_store_wallet_sync(before)
+        || before == (std::numeric_limits<std::uint32_t>::max)()) {
+        return false;
+    }
+    Statement row("INSERT INTO eververse_wallet_sync(account_soid,revision) "
+                  "SELECT soid,? FROM account WHERE id=1 "
+                  "ON CONFLICT(account_soid) DO UPDATE SET revision=excluded.revision");
+    if (!row.write(before + 1U) || !transaction.commit()) {
+        return false;
+    }
+    revision = before + 1U;
+    return true;
 }
 
 /** A sign-in timestamp belongs only to the current connection lifetime. */

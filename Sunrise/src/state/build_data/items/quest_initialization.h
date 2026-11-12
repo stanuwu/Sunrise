@@ -24,19 +24,28 @@ struct QuestInitialization {
 };
 
 /**
+ * @param scope Saved bank a quest value lives in.
+ * @param row Row within that bank.
+ * @return True when the scope names a bank and the row is within its capacity.
+ */
+[[nodiscard]] constexpr bool valid_bank_row(QuestInitialization::Scope scope,
+                                            std::uint16_t row) noexcept {
+    using Scope = QuestInitialization::Scope;
+    return (scope == Scope::account && row < unlocks::kObjectiveValueCapacity)
+           || (scope == Scope::character && row < unlocks::kCharacterObjectValueCapacity);
+}
+
+/**
  * An empty plan is valid; a nonempty plan must fit its saved bank.
  * @param quest First-step value, row, and scope from item metadata.
  * @return True for an empty plan or a supported value within its bank's capacity.
  */
 [[nodiscard]] constexpr bool valid(const QuestInitialization& quest) noexcept {
-    using Scope = QuestInitialization::Scope;
-    if (quest.scope == Scope::none) {
+    if (quest.scope == QuestInitialization::Scope::none) {
         return quest.row == 0 && quest.value == kUnsetQuestValue;
     }
     return quest.value != kUnsetQuestValue && quest.value != kInvalidQuestInitialValue
-           && ((quest.scope == Scope::account && quest.row < unlocks::kObjectiveValueCapacity)
-               || (quest.scope == Scope::character
-                   && quest.row < unlocks::kCharacterObjectValueCapacity));
+           && valid_bank_row(quest.scope, quest.row);
 }
 
 /**

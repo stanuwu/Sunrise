@@ -150,9 +150,25 @@ struct SlotRow {
     static constexpr std::uint32_t kValueClass = generated::UnlockValueBinding::kClass;
     static constexpr std::size_t kSize = kUnlockSlotRowStride;
     static constexpr std::size_t kHash = offsetof(generated::UnlockFlagBinding, unlockHash);
+    /** Value rows only, unnamed in gap4: the kind of value the slot reads, then its flags. */
+    static constexpr std::size_t kValueKind = offsetof(generated::UnlockValueBinding, gap4);
+    static constexpr std::size_t kValueFlags = kValueKind + 1;
+    /**
+     * With an item in context, the client reads a slot of this kind from the item's instance
+     * record instead of the bank, provided its flags are none, kItemValueIgnoredFlag alone or
+     * kItemValueMaximumFlag alone.
+     */
+    static constexpr std::uint8_t kItemValueKind = 4;
+    static constexpr std::uint8_t kItemValueIgnoredFlag = 0x04;
+    /**
+     * The client reads the slot's largest value across the character's held instances that carry
+     * it. The shipped build sets it on 386 item-value slots, which 317 pursuits read.
+     */
+    static constexpr std::uint8_t kItemValueMaximumFlag = 0x02;
 };
 // Flag and value slot rows share the hash offset.
 static_assert(SlotRow::kHash == offsetof(generated::UnlockValueBinding, unlockHash));
+static_assert(SlotRow::kValueKind == 4);
 
 /** Shared expression pool and its rows; each row holds one expression field. */
 struct ExpressionPoolRow {

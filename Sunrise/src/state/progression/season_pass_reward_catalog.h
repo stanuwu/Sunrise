@@ -8,11 +8,14 @@ namespace sunrise::state::progression::season_pass {
 
 /** Account progression used by the installed Season of Arrivals pass. */
 inline constexpr std::uint16_t kProgressionDefinitionIndex = 40;
-/** Repeating HUD bar paired with the Arrivals progression. */
+/** Repeating HUD bar paired with the Arrivals progression; it takes the XP past the last rank. */
 inline constexpr std::uint16_t kHudProgressionDefinitionIndex = 41;
 
 /** Acquisition flag of a direct perk reward, or build_data::rewards::kAbsent for an item or
  * package. */
 [[nodiscard]] std::uint16_t progress_flag(const build_data::season_pass::Reward& reward) noexcept;
+
+/** @return True for a row the earned-perk walk grants, so the player never claims it. */
+[[nodiscard]] bool automatic_row(const build_data::season_pass::Reward& reward) noexcept;
 
 } // namespace sunrise::state::progression::season_pass

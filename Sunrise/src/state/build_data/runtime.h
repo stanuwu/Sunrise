@@ -11,17 +11,21 @@
 #include "abilities/definition.h"
 #include "bounties/definition.h"
 #include "collectibles/collectible_catalog.h"
+#include "combat/definition.h"
 #include "constants/definition.h"
 #include "definition.h"
 #include "hash_names/definition.h"
 #include "inventory/buckets/definition.h"
 #include "items/catalysts/definition.h"
 #include "items/details/definition.h"
+#include "items/insertion_rules/definition.h"
 #include "items/item_catalog.h"
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "nodes/definition.h"
+#include "objectives/definition.h"
 #include "progressions/definition.h"
+#include "pursuits/definition.h"
 #include "records/definition.h"
 #include "rewards/definition.h"
 #include "scenarios/definition.h"
@@ -47,6 +51,9 @@ void invalidate_cache() noexcept;
  * @param contentHash Leading bytes of the combined installed and mod fingerprint.
  */
 void bind_content(std::uint64_t contentHash) noexcept;
+
+/** @return The content hash bound at boot, or zero when the host has no content manifest. */
+[[nodiscard]] std::uint64_t content_hash() noexcept;
 
 /**
  * Loads the one build-data cache next to the module, when there is one.
@@ -158,14 +165,27 @@ find_collectible_item_definition_index(std::uint16_t collectibleIndex,
 /** @return True when every installed material-requirement set is available by native ordinal. */
 [[nodiscard]] bool material_requirement_sets_ready() noexcept;
 
-/** Publishes the complete dense native material-requirement table. */
+/**
+ * Publishes the complete dense native material-requirement table with the socket-type currency
+ * scalars that multiply it for an inserted plug.
+ */
 [[nodiscard]] bool publish_material_requirement_sets(
-    std::span<const material_requirements::Definition> definitions) noexcept;
+    std::span<const material_requirements::Definition> definitions,
+    std::span<const material_requirements::CurrencyScalar> scalars) noexcept;
 
 /** Resolves one authored material-requirement set without embedding any prices in code. */
 [[nodiscard]] bool
 find_material_requirement_set(std::uint16_t requirementSetIndex,
                               material_requirements::Definition& definition) noexcept;
+
+/**
+ * Resolves what a socket type multiplies one currency's quantity by when a plug is inserted.
+ * @param multiplier Receives the authored scalar, or 1 when the socket type names none.
+ * @return False until the material domain is published.
+ */
+[[nodiscard]] bool socket_currency_multiplier(std::uint16_t socketType,
+                                              std::uint16_t itemDefinitionIndex,
+                                              std::uint32_t& multiplier) noexcept;
 
 /** @return True when a complete configured-detail domain, empty or not, is published. */
 [[nodiscard]] bool configured_item_details_ready() noexcept;
@@ -223,6 +243,74 @@ publish_socket_plug_rules(std::span<const items::socket_plugs::Rule> rules,
 
 /** @return True when one plug definition occurs in any installed ordinary-socket plug pool. */
 [[nodiscard]] bool is_socket_plug_pooled(std::uint16_t plugDefinitionIndex) noexcept;
+
+/** @return True when the actor class races and combat label groups are in State. */
+[[nodiscard]] bool combat_taxonomy_ready() noexcept;
+
+/**
+ * @return True once the installed data has settled that no taxonomy can be read, so no kill
+ *         objective advances. A cache records that settlement as an empty race table.
+ */
+[[nodiscard]] bool combat_taxonomy_unsupported() noexcept;
+
+/** Checks rows against the rules publish_combat_taxonomy applies to both tables. */
+[[nodiscard]] bool valid_combat_taxonomy(std::span<const combat::EnemyRace> races,
+                                         std::span<const combat::LabelGroup> groups) noexcept;
+
+/**
+ * Publishes the race of every installed actor class and every combat label group membership.
+ * @param races Rows in strictly ascending class order.
+ * @param groups Rows in strictly ascending group, then label, order.
+ * @return True when the rows pass the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool publish_combat_taxonomy(std::span<const combat::EnemyRace> races,
+                                           std::span<const combat::LabelGroup> groups) noexcept;
+
+/** Records that the installed data supports no combat taxonomy; a clear forgets it. */
+void settle_combat_taxonomy_unsupported() noexcept;
+
+/**
+ * Reads the race of one actor class, the class a kill incident names its victim by.
+ * @param race Receives the ordinal of the installed race enumeration.
+ * @return False when the race table does not name the class.
+ */
+[[nodiscard]] bool find_enemy_race(std::uint32_t classHash, std::uint8_t& race) noexcept;
+
+/** @return True when the installed label table puts the label in the named group. */
+[[nodiscard]] bool label_in_group(std::uint32_t groupHash, std::uint32_t labelHash) noexcept;
+
+/** @return True when the plugs' insertion rules are in State. */
+[[nodiscard]] bool plug_insertion_rules_ready() noexcept;
+
+/**
+ * @return True once the installed data has settled that no rule list can be published, so every
+ *         plug whose rules would be checked is refused. A cache records that settlement as an
+ *         empty rule list.
+ */
+[[nodiscard]] bool plug_insertion_rules_unsupported() noexcept;
+
+/** Checks rows against the rules publish_plug_insertion_rules applies to the whole list. */
+[[nodiscard]] bool
+valid_plug_insertion_rules(std::span<const items::insertion_rules::Rule> rules) noexcept;
+
+/**
+ * Publishes the insertion rules of every plug that declares any, bound to the saved banks.
+ * @param rules Rows in strictly ascending plug order.
+ * @return True when the rows pass the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool
+publish_plug_insertion_rules(std::span<const items::insertion_rules::Rule> rules) noexcept;
+
+/** Records that the installed data supports no insertion rule list; a clear forgets it. */
+void settle_plug_insertion_rules_unsupported() noexcept;
+
+/**
+ * Reads the insertion rules one plug declares.
+ * @return False when the plug declares none, and for every plug while the rules are not ready,
+ *         so a caller checks plug_insertion_rules_ready first.
+ */
+[[nodiscard]] bool find_plug_insertion_rule(std::uint16_t plugDefinitionIndex,
+                                            items::insertion_rules::Rule& rule) noexcept;
 
 /** @return True when the build-scoped exotic catalyst catalog is ready. */
 [[nodiscard]] bool exotic_catalysts_ready() noexcept;
@@ -338,6 +426,10 @@ void set_exotic_catalyst_completion_enabled(bool enabled) noexcept;
 [[nodiscard]] bool
 publish_sobject_definitions(std::span<const sobjects::Definition> definitions) noexcept;
 
+/** Finds one incident target by its wire index. @return False when no row holds that index. */
+[[nodiscard]] bool find_sobject_definition(std::uint16_t targetIndex,
+                                           sobjects::Definition& definition) noexcept;
+
 /** @return True when the whole presentation node table is in State. */
 [[nodiscard]] bool node_definitions_ready() noexcept;
 
@@ -386,6 +478,15 @@ publish_node_definitions(std::span<const nodes::Definition> definitions) noexcep
 [[nodiscard]] bool
 publish_progression_definitions(std::span<const progressions::Definition> definitions,
                                 std::span<const progressions::Step> steps) noexcept;
+
+/**
+ * Finds one progression by its definition hash.
+ * @param definitionHash Native progression definition hash.
+ * @param definition Receives the row.
+ * @return True when the table is ready and a row carries the hash.
+ */
+[[nodiscard]] bool find_progression_definition_hash(std::uint32_t definitionHash,
+                                                    progressions::Definition& definition) noexcept;
 
 /**
  * Reads what each rank of one progression costs, in rank order.
@@ -459,6 +560,77 @@ void settle_reward_definitions_unsupported() noexcept;
 [[nodiscard]] bool read_reward_definitions(void* context,
                                            bool (*consume)(void*, rewards::View) noexcept) noexcept;
 
+/** @return True when the objective table read from the installed packages is in State. */
+[[nodiscard]] bool objective_definitions_ready() noexcept;
+
+/** Checks an objective table against the rules publish_objective_definitions applies. */
+[[nodiscard]] bool valid_objective_definitions(objectives::View definitions) noexcept;
+
+/**
+ * Publishes the whole objective table, which the cache keeps with the pursuit contracts.
+ * @param definitions Dense rows in native objective-index order and their instruction bank.
+ * @return True when the table passes the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool publish_objective_definitions(objectives::View definitions) noexcept;
+
+/**
+ * Reads one objective row.
+ * @param index Native objective-table index.
+ * @param output Receives a copy of the row and its programs.
+ * @return True when the table holds that row.
+ */
+[[nodiscard]] bool find_objective_definition(std::uint16_t index,
+                                             objectives::Definition& output) noexcept;
+
+/**
+ * Reads one objective row's fixed fields without copying its programs.
+ * @param index Native objective-table index.
+ * @param output Receives the row; its ranges only say how long each program is.
+ * @return True when the table holds that row.
+ */
+[[nodiscard]] bool find_objective_row(std::uint16_t index, objectives::Row& output) noexcept;
+
+/** @return True when the pursuit contracts are in State. */
+[[nodiscard]] bool pursuit_definitions_ready() noexcept;
+
+/**
+ * @return True once the installed data has settled that neither the objective table nor any
+ *         contract can be read. A cache records that settlement as an empty objective table.
+ */
+[[nodiscard]] bool pursuit_catalog_unsupported() noexcept;
+
+/** @return A generation that changes after every publication, settlement or clear. */
+[[nodiscard]] std::uint64_t pursuit_definitions_revision() noexcept;
+
+/**
+ * Checks contracts against the published item and objective tables, as
+ * publish_pursuit_definitions does. Returns false while either table is unpublished.
+ */
+[[nodiscard]] bool valid_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept;
+
+/**
+ * Publishes every pursuit contract.
+ * Requires the item and objective tables, which every contract is checked against.
+ * @param rows Contracts in ascending item-index order.
+ * @return True when every contract passes the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool publish_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept;
+
+/**
+ * Records that the installed data supports no pursuit catalog, and withdraws the objective table
+ * that only pursuit contracts read.
+ */
+void settle_pursuit_catalog_unsupported() noexcept;
+
+/**
+ * Reads one pursuit contract.
+ * @param index Native item-definition index.
+ * @param output Receives a copy of the contract.
+ * @return True when the item has a published contract.
+ */
+[[nodiscard]] bool find_pursuit_definition(std::uint16_t index,
+                                           pursuits::Definition& output) noexcept;
+
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;
 
@@ -480,6 +652,12 @@ publish_repeatable_bounties(std::span<const bounties::Definition> definitions) n
 [[nodiscard]] bool repeatable_bounty_pool(const bounties::ItemType& itemType,
                                           std::span<std::uint16_t> output,
                                           std::size_t& count) noexcept;
+
+/**
+ * @param itemIndex Native item-definition index.
+ * @return True when the table is ready and a repeatable vendor's pool holds the item.
+ */
+[[nodiscard]] bool in_repeatable_bounty_pool(std::uint16_t itemIndex) noexcept;
 
 /** Sale rows the seasonal artifact offers. The shipped artifact declares 26. */
 inline constexpr std::size_t kArtifactSaleRowCapacity = 32;
@@ -803,13 +981,27 @@ find_nearest_spawn_point(std::string_view stem,
  * @param definitions Extracted definitions in ascending index order, which may be empty.
  * @param saleRows Complete flat sale bank in definition then row order.
  * @param installedRows Complete flat installed bank in definition then row order.
+ * @param transferRules Complete flat transfer bank in definition then row order.
  * @return True when the rows pass the checks and any needed cache write succeeds.
  */
 [[nodiscard]] bool
 publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
                        std::span<const vendors::Definition> definitions,
                        std::span<const vendors::SaleRow> saleRows,
-                       std::span<const vendors::InstalledRow> installedRows) noexcept;
+                       std::span<const vendors::InstalledRow> installedRows,
+                       std::span<const vendors::TransferRule> transferRules) noexcept;
+
+/**
+ * Finds where one vendor transfers an item held in one source bucket.
+ * The first installed rule naming this source bucket decides.
+ * @param vendorIndex Vendor index row the request carries.
+ * @param sourceBucket Native bucket id the item is held in.
+ * @param destination Receives the rule's destination bucket, or `vendors::kAuthoredDestination`.
+ * @return True when the vendor is held and one of its rules names the source bucket.
+ */
+[[nodiscard]] bool find_vendor_transfer_destination(std::uint16_t vendorIndex,
+                                                    std::uint8_t sourceBucket,
+                                                    std::uint8_t& destination) noexcept;
 
 /**
  * An unsupported catalyst build finishes without writing an incomplete cache.

@@ -44,46 +44,6 @@ void name_row(account_layout::ProfileInventoryChangeRecord& record,
 }
 
 /**
- * Names every row an exchange credited, so each gain is drawn and repeats accumulate.
- *
- * @param accountObject Encoded account object being upserted.
- * @param mutation Prepared exchange carrying the rows it credited.
- * @return Null on success, or the reason the ring could not be written.
- */
-[[nodiscard]] const char*
-write_exchange_changes(account_layout::Object& accountObject,
-                       const state::PendingProfileItemAcquisition& mutation) noexcept {
-    if (mutation.changeCount > accountObject.profileInventoryChanges.records.size()
-        || !ring_is_empty(accountObject)) {
-        return "exchange_inventory_change_state";
-    }
-    for (std::size_t change = 0; change < mutation.changeCount; ++change) {
-        const state::ProfileStackChange& announced = mutation.changes[change];
-        std::size_t matchedRows = 0;
-        for (const auto& row : accountObject.profileItems) {
-            if (row.mutationSerial != announced.mutationSerial) {
-                continue;
-            }
-            if (row.quantity != announced.afterQuantity) {
-                return "exchange_change_quantity";
-            }
-            ++matchedRows;
-        }
-        if (matchedRows != 1) {
-            return "exchange_change_row";
-        }
-        name_row(accountObject.profileInventoryChanges.records[change],
-                 change,
-                 announced.mutationSerial);
-    }
-    accountObject.profileInventoryChanges.writeSlot =
-        static_cast<std::uint16_t>(mutation.changeCount);
-    accountObject.profileInventoryChanges.nextSequence =
-        static_cast<std::uint16_t>(mutation.changeCount);
-    return nullptr;
-}
-
-/**
  * Names the one row an ordinary acquisition added to or grew.
  *
  * @param accountObject Encoded account object being upserted.
@@ -119,6 +79,38 @@ write_acquisition_change(account_layout::Object& accountObject,
 
 } // namespace
 
+/** Names every row an exchange credited, so each gain is drawn and repeats accumulate. */
+const char* write_exchange_changes(account_layout::Object& accountObject,
+                                   std::span<const state::ProfileStackChange> changes) noexcept {
+    if (changes.size() > accountObject.profileInventoryChanges.records.size()
+        || !ring_is_empty(accountObject)) {
+        return "exchange_inventory_change_state";
+    }
+    for (std::size_t change = 0; change < changes.size(); ++change) {
+        const state::ProfileStackChange& announced = changes[change];
+        std::size_t matchedRows = 0;
+        for (const auto& row : accountObject.profileItems) {
+            if (row.mutationSerial != announced.mutationSerial) {
+                continue;
+            }
+            if (row.quantity != announced.afterQuantity) {
+                return "exchange_change_quantity";
+            }
+            ++matchedRows;
+        }
+        if (matchedRows != 1) {
+            return "exchange_change_row";
+        }
+        name_row(accountObject.profileInventoryChanges.records[change],
+                 change,
+                 announced.mutationSerial);
+    }
+    accountObject.profileInventoryChanges.writeSlot = static_cast<std::uint16_t>(changes.size());
+    accountObject.profileInventoryChanges.nextSequence =
+        static_cast<std::uint16_t>(changes.size());
+    return nullptr;
+}
+
 /** Builds a single full account-object upsert from an uncommitted profile-stack after-image. */
 bool prepare_profile_item_acquisition(Scratch& scratch,
                                       const queuez::ProfileItemAcquisition& acquisition,
@@ -150,7 +142,9 @@ bool prepare_profile_item_acquisition(Scratch& scratch,
         return report_failure("profile_acquire_account_storage");
     }
     const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-    if (!family4_datagen::account::encode(account, accountBytes)) {
+    family4_datagen::account::StateFields accountFields{};
+    if (!read_account_state_fields(account, accountFields)
+        || !family4_datagen::account::encode(account, accountFields, accountBytes)) {
         return report_failure("profile_acquire_account_encode");
     }
 
@@ -160,8 +154,10 @@ bool prepare_profile_item_acquisition(Scratch& scratch,
     // An exchange names every row it credited; an ordinary acquisition names the one row it added
     // to or grew. Both write the same kind of record, which is what the observer draws.
     const char* const ringFailure =
-        mutation.changeCount != 0 ? write_exchange_changes(accountObject, mutation)
-                                  : write_acquisition_change(accountObject, mutation, acquiredRow);
+        mutation.changeCount != 0
+            ? write_exchange_changes(accountObject,
+                                     std::span(mutation.changes).first(mutation.changeCount))
+            : write_acquisition_change(accountObject, mutation, acquiredRow);
     if (ringFailure != nullptr) {
         clear_after(scratch, reservation);
         return report_failure(ringFailure);
@@ -346,8 +342,10 @@ bool prepare_seasonal_experience_presentation(
     }
     const auto accountBytes =
         rawStorage.first(middleware::datagen::family4::account::layout::kObjectSize);
+    middleware::datagen::family4::account::StateFields accountFields{};
     // Publish cumulative account XP before the transient delta row triggers the HUD.
-    if (!middleware::datagen::family4::account::encode(account, accountBytes)
+    if (!read_account_state_fields(account, accountFields)
+        || !middleware::datagen::family4::account::encode(account, accountFields, accountBytes)
         || !append_object(scratch,
                           accountBytes,
                           before.family4Residents.front().definitionId,
@@ -553,7 +551,9 @@ bool prepare_item_acquisition(
             return report_failure("acquire_account_storage");
         }
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes, afterUnlocks)
+        family4_datagen::account::StateFields accountFields{};
+        if (!read_account_state_fields(account, accountFields)
+            || !family4_datagen::account::encode(account, accountFields, accountBytes, afterUnlocks)
             || !append_object(scratch,
                               accountBytes,
                               acquisition.accountDefinitionId,
@@ -589,7 +589,7 @@ bool prepare_item_acquisition(
     return true;
 }
 
-/** Builds character removal, instance release, and any profile-reward pickup descriptors. */
+/** Builds character removal, any instance release, and any changed profile descriptors. */
 bool prepare_item_dismantle(Scratch& scratch,
                             const queuez::ItemDismantle& dismantle,
                             const state::PendingItemDismantle& mutation,
@@ -600,15 +600,20 @@ bool prepare_item_dismantle(Scratch& scratch,
         return report_failure("dismantle_reservation");
     }
 
+    // A stack releases no resident and credits nothing, whichever list held it. A profile resident
+    // releases its instance and credits nothing either.
+    const bool releasesInstance = mutation.dismantledInstanceSoid != 0;
+    const bool creditsPayout = releasesInstance && !mutation.profileResident;
     state::AccountState account{};
-    if (!mutation.prepared || mutation.characterSoid == 0 || mutation.dismantledInstanceSoid == 0
+    if (!mutation.prepared || mutation.characterSoid == 0
         || mutation.dismantledItem.instanceSoid != mutation.dismantledInstanceSoid
         || mutation.accountSoid != dismantle.accountSoid
         || mutation.characterSoid != dismantle.characterSoid
         || mutation.dismantledInstanceSoid != dismantle.dismantledInstanceSoid
-        || mutation.profileChanged != dismantle.updatesAccount
+        || mutation.updates_account() != dismantle.updatesAccount
         || mutation.rewardCount > state::kDismantleRewardCapacity
-        || mutation.profileChanged != (mutation.rewardCount != 0)
+        || (creditsPayout ? mutation.profileChanged != (mutation.rewardCount != 0)
+                          : mutation.rewardCount != 0)
         || dismantle.accountDefinitionId == 0 || dismantle.characterDefinitionId == 0
         || dismantle.itemInstanceDefinitionId == 0
         || !state::preview_item_dismantle(mutation, account)
@@ -659,23 +664,30 @@ bool prepare_item_dismantle(Scratch& scratch,
                        compressedExtent)) {
         return report_failure("dismantle_character_object");
     }
-    // Queuez represents a release with the ordinary object key and an empty payload. The
-    // encoding selector is not read for empty descriptors; oodle matches the surrounding objects.
-    staged.objects[1] = middleware::queuez::Object{
-        dismantle.itemInstanceDefinitionId,
-        dismantle.dismantledInstanceSoid,
-        middleware::queuez::Encoding::oodle,
-        {},
-    };
-
-    std::size_t objectCount = 2;
+    std::size_t objectCount = 1;
+    if (releasesInstance) {
+        // Queuez represents a release with the ordinary object key and an empty payload. The
+        // encoding selector is not read for empty descriptors; oodle matches the surrounding
+        // objects.
+        staged.objects[objectCount++] = middleware::queuez::Object{
+            dismantle.itemInstanceDefinitionId,
+            dismantle.dismantledInstanceSoid,
+            middleware::queuez::Encoding::oodle,
+            {},
+        };
+    }
     if (dismantle.updatesAccount) {
         if (family4_datagen::account::layout::kObjectSize > rawStorage.size()) {
             clear_after(scratch, reservation);
             return report_failure("dismantle_account_storage");
         }
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
-        if (!family4_datagen::account::encode(account, accountBytes)) {
+        // The account object carries any acquisition flag the dismantle sets.
+        state::unlocks::Table unlocks{};
+        family4_datagen::account::StateFields accountFields{};
+        if (!state::preview_dismantle_unlocks(mutation, unlocks)
+            || !read_account_state_fields(account, accountFields)
+            || !family4_datagen::account::encode(account, accountFields, accountBytes, unlocks)) {
             clear_after(scratch, reservation);
             return report_failure("dismantle_account_encode");
         }
@@ -687,7 +699,6 @@ bool prepare_item_dismantle(Scratch& scratch,
             || !std::all_of(accountObject.profileInventoryChanges.records.cbegin(),
                             accountObject.profileInventoryChanges.records.cend(),
                             kChangeRecordIsZero)
-            || mutation.rewardCount == 0
             || mutation.rewardCount > accountObject.profileInventoryChanges.records.size()) {
             clear_after(scratch, reservation);
             return report_failure("dismantle_account_change_state");
@@ -725,7 +736,7 @@ bool prepare_item_dismantle(Scratch& scratch,
                            accountBytes,
                            dismantle.accountDefinitionId,
                            dismantle.accountSoid,
-                           staged.objects[2],
+                           staged.objects[objectCount++],
                            compressedExtent)) {
             clear_after(scratch, reservation);
             return report_failure("dismantle_account_object");
@@ -733,7 +744,6 @@ bool prepare_item_dismantle(Scratch& scratch,
         staged.rawClearSize =
             (std::max)(staged.rawClearSize,
                        reservation.rawWriteOffset + family4_datagen::account::layout::kObjectSize);
-        objectCount = 3;
     }
     staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);
     staged.family = middleware::queuez::Family{

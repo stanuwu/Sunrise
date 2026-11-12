@@ -290,18 +290,20 @@ void grant_random_moon_loot() noexcept {
     grant_random_world_loot(kMoonWeapons, kMoonTitanArmour, kMoonHunterArmour, kMoonWarlockArmour);
 }
 
-/** Identifies the shared generic target as a Dreaming City cat-statue interaction. */
-[[nodiscard]] bool is_dreaming_city_cat(bool definitionFound,
-                                        const state::build_data::sobjects::Definition& definition,
+/**
+ * Identifies a Dreaming City cat-statue gift. The gift reports the shared generic target alone; an
+ * orb pickup reports the same target with the objects it involved.
+ */
+[[nodiscard]] bool is_dreaming_city_cat(const reward_mail::Event& incident,
+                                        bool primaryFound,
+                                        const state::build_data::sobjects::Definition& primary,
                                         std::string_view packageName) noexcept {
-    // Name hash and lane the cat statue's world object carries.
-    constexpr std::uint32_t kCatNameHash = 0x7A0FD954U;
-    constexpr std::uint32_t kCatLane4 = 0x0011FFFFU;
-    if (!definitionFound || definition.typeCode != 2 || definition.nameHash != kCatNameHash
-        || definition.lane4 != kCatLane4) {
-        return false;
-    }
-    return packageName == kDreamingCityPackage;
+    // Name hash and lane every generic interaction object carries.
+    constexpr std::uint32_t kGenericNameHash = 0x7A0FD954U;
+    constexpr std::uint32_t kGenericLane4 = 0x0011FFFFU;
+    return primaryFound && primary.typeCode == 2 && primary.nameHash == kGenericNameHash
+           && primary.lane4 == kGenericLane4 && incident.extraTargetCount == 0
+           && packageName == kDreamingCityPackage;
 }
 
 /**
@@ -463,7 +465,7 @@ static void stage_incident_grants(const reward_mail::Event& incident) noexcept {
     // incident names the object; the shared generic target names the interaction only.
     if (isCorruptedEgg) {
         grant_random_dreaming_city_loot();
-    } else if (is_dreaming_city_cat(primaryFound, primary, packageName)) {
+    } else if (is_dreaming_city_cat(incident, primaryFound, primary, packageName)) {
         grant_random_dreaming_city_loot();
         // Objective slot counting the cat statues fed.
         constexpr std::uint16_t kRememberYourMannersFlag = 9448U;
@@ -478,6 +480,22 @@ static void stage_incident_grants(const reward_mail::Event& incident) noexcept {
             bap::arm_account_resync_everywhere();
         }
     }
+}
+
+/** @return The package bytes in use, bounded by their fixed storage. */
+std::string_view LiveDestination::package_name() const noexcept {
+    const std::size_t length = (std::min)(static_cast<std::size_t>(selection.packageNameLength),
+                                          selection.packageName.size());
+    return {reinterpret_cast<const char*>(selection.packageName.data()), length};
+}
+
+/** Reads the destination of the session the client last reported a region on. */
+LiveDestination live_destination() noexcept {
+    LiveDestination live{};
+    live.sessionId =
+        state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
+    static_cast<void>(state::activity::destination::snapshot(live.sessionId, live.selection));
+    return live;
 }
 
 /** Commits collectible progress and every reward one event earns, together. */
@@ -508,13 +526,10 @@ void apply_incident_grants(const message::incident::Incident& incident) noexcept
     event.payloadLength = incident.payloadLength;
     // An incident can arrive on the private activity while its object belongs to the public
     // region, so the grant follows the instantiated region, not the delivering session.
-    const std::uint64_t destinationSession =
-        state::activity::membership::live_region_session(state::activity::kAbsentSessionId);
-    state::activity::destination::DestinationSelection destination{};
-    static_cast<void>(state::activity::destination::snapshot(destinationSession, destination));
-    event.packageLength = static_cast<std::uint8_t>((std::min)(
-        static_cast<std::size_t>(destination.packageNameLength), destination.packageName.size()));
-    std::memcpy(event.package.data(), destination.packageName.data(), event.packageLength);
+    const LiveDestination destination = live_destination();
+    const std::string_view packageName = destination.package_name();
+    event.packageLength = static_cast<std::uint8_t>(packageName.size());
+    std::memcpy(event.package.data(), packageName.data(), event.packageLength);
     if (state::local_account_access()) {
         commit_incident_grants(event);
         return;

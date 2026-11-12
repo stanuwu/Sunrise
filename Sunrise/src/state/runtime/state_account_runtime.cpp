@@ -242,8 +242,12 @@ bool set_selected_character(std::uint64_t characterSoid, bool& moved, bool& perk
         return false;
     }
     // Publish only after the whole account still meets its identity rules.
+    const auto previousSelection = investment::store::g_session.selected;
     for (std::size_t index = 0; index < candidate.characters.size(); ++index) {
         investment::store::g_session.selected[index] = candidate.characters[index].selected;
+    }
+    if (investment::store::g_session.selected != previousSelection) {
+        ++investment::store::g_session.revision;
     }
     investment::store::g_mutex.unlock();
     moved = changes;
@@ -332,6 +336,9 @@ bool prepare_equipment_swap(std::uint64_t requestedInstanceSoid,
     }
 
     const authored_inventory::Item& requested = before.inventory.values[inventoryIndex];
+    if (requested.placement != authored_inventory::ItemPlacement::authored) {
+        return false;
+    }
     std::uint8_t requestedNativeSlot = 0;
     std::size_t equipmentSlotIndex = authored_inventory::kEquipmentSlotCount;
     ResolvedPosition requestedPosition{};
@@ -580,6 +587,11 @@ AccountState bound_account_snapshot() noexcept {
     return output;
 }
 
+/** Reads the account and character keys; the store call holds its own lock. */
+bool account_identity(AccountIdentity& output) noexcept {
+    return investment::store::read_account_identity(output);
+}
+
 /** Grants each character the other 2 subclasses of its equipped subclass's class. */
 bool ensure_character_subclasses() noexcept {
     // Index of the subclass slot in the authored equipment array.
@@ -659,6 +671,16 @@ bool ensure_character_subclasses() noexcept {
     }
     investment::store::g_mutex.unlock();
     return true;
+}
+
+/** Advances the saved Store wallet sync generation. */
+bool synchronize_store_wallet(std::uint32_t& revision) noexcept {
+    return investment::store::advance_store_wallet_sync(revision);
+}
+
+/** Reads the saved Store wallet sync generation. */
+bool read_store_wallet_sync(std::uint32_t& revision) noexcept {
+    return investment::store::read_store_wallet_sync(revision);
 }
 
 } // namespace sunrise::state

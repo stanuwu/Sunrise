@@ -6,12 +6,16 @@
 
 #include "../../abilities/ability_bucket_catalog.h"
 #include "../../bounties/bounty_catalog.h"
+#include "../../combat/combat_catalog.h"
 #include "../../hash_names/hash_name_catalog.h"
 #include "../../inventory/buckets/inventory_bucket_catalog.h"
+#include "../../items/insertion_rules/insertion_rule_catalog.h"
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/node_catalog.h"
+#include "../../objectives/objective_catalog.h"
 #include "../../progressions/progression_catalog.h"
+#include "../../pursuits/pursuit_catalog.h"
 #include "../../records/record_catalog.h"
 #include "../../rewards/reward_catalog.h"
 #include "../../scenarios/scenario_catalog.h"
@@ -144,6 +148,7 @@ bool counts_fit(const DomainCounts& counts, MutableDomains domains) noexcept {
     return counts.named <= domains.named.size() && counts.items <= domains.items.size()
            && counts.collectibles <= domains.collectibles.size()
            && counts.materialRequirementSets <= domains.materialRequirementSets.size()
+           && counts.currencyScalars <= domains.currencyScalars.size()
            && counts.itemDetails <= domains.itemDetails.size()
            && counts.socketPlugRules <= domains.socketPlugRules.size()
            && counts.socketPlugPools <= domains.socketPlugPools.size()
@@ -166,6 +171,7 @@ bool counts_fit(const DomainCounts& counts, MutableDomains domains) noexcept {
            && counts.vendorDefinitions <= domains.vendorDefinitions.size()
            && counts.vendorSaleRows <= domains.vendorSaleRows.size()
            && counts.vendorInstalledRows <= domains.vendorInstalledRows.size()
+           && counts.vendorTransferRules <= domains.vendorTransferRules.size()
            && counts.positionProfiles <= domains.positionProfiles.size()
            && counts.objectTypes <= domains.objectTypes.size()
            && counts.recordObjectives <= domains.recordObjectives.size()
@@ -180,7 +186,13 @@ bool counts_fit(const DomainCounts& counts, MutableDomains domains) noexcept {
            && counts.rewardInstructions <= domains.rewardInstructions.size()
            && counts.rewardModifiers <= domains.rewardModifiers.size()
            && counts.rewardSockets <= domains.rewardSockets.size()
-           && counts.starterSets <= domains.starterSets.size();
+           && counts.objectives <= domains.objectives.size()
+           && counts.objectiveInstructions <= domains.objectiveInstructions.size()
+           && counts.pursuits <= domains.pursuits.size()
+           && counts.starterSets <= domains.starterSets.size()
+           && counts.plugInsertionRules <= domains.plugInsertionRules.size()
+           && counts.enemyRaces <= domains.enemyRaces.size()
+           && counts.labelGroups <= domains.labelGroups.size();
 }
 
 /** Sorts every filled domain before the checks, so the written file is always the same. */
@@ -235,7 +247,10 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
     if (!gameplay::entity_object_types::validate(domains.objectTypes)
         || !gameplay::entity_position_profiles::validate(domains.positionProfiles)
         || domains.constants.extracted != 1U
-        || domains.constants.weaponPowerStatRow >= constants::kStatRowCount || domains.named.empty()
+        || domains.constants.weaponPowerStatRow >= constants::kStatRowCount
+        || (domains.constants.synthesizerTierValueRow != constants::kUnboundValueRow
+            && domains.constants.synthesizerTierValueRow >= constants::kCharacterValueRowCount)
+        || domains.named.empty()
         || domains.items.empty() || domains.collectibles.empty()
         || domains.materialRequirementSets.empty() || domains.socketPlugRules.empty()
         || domains.socketPlugPools.empty() || domains.inventoryBuckets.empty()
@@ -255,7 +270,7 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
                                    domains.rewardInstructions,
                                    domains.rewardModifiers,
                                    domains.rewardSockets}))
-        || !material_requirements::valid(domains.materialRequirementSets)
+        || !material_requirements::valid(domains.materialRequirementSets, domains.currencyScalars)
         || !strictly_ordered(domains.materialRequirementSets, material_requirement_less)
         || !inventory::buckets::valid(domains.inventoryBuckets)
         || !strictly_ordered(domains.inventoryBuckets, bucket_less)
@@ -272,6 +287,13 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         || !bounties::valid(domains.bounties)
         // An empty table is complete: an installed table with another layout publishes none.
         || !starter_sets::valid(domains.starterSets)
+        // An empty rule list marks an unsupported insertion-rule domain.
+        || (!domains.plugInsertionRules.empty()
+            && !items::insertion_rules::valid(domains.plugInsertionRules))
+        // An empty race table marks an unsupported taxonomy, with no label groups either.
+        || (domains.enemyRaces.empty()
+                ? !domains.labelGroups.empty()
+                : !(combat::valid(domains.enemyRaces) && combat::valid(domains.labelGroups)))
         || !build_data::records::valid(domains.records,
                                        domains.recordObjectives,
                                        domains.recordIntervals,
@@ -285,16 +307,35 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
                 : !spawn_sets::valid(domains.spawnStems, domains.spawnNameHashes))
         || !spawn_sets::valid_points(domains.spawnPoints, domains.spawnStems)
         // An empty catalog is complete. With no index there is no vendor domain, so the
-        // definitions and both row banks must be empty too.
+        // definitions and every row bank must be empty too.
         || (domains.vendorIndex.empty()
                 ? !(domains.vendorDefinitions.empty() && domains.vendorSaleRows.empty()
-                    && domains.vendorInstalledRows.empty())
+                    && domains.vendorInstalledRows.empty() && domains.vendorTransferRules.empty())
                 : !vendors::valid(domains.vendorIndex,
                                   domains.vendorDefinitions,
                                   domains.vendorSaleRows,
-                                  domains.vendorInstalledRows))
-        || !hash_names::valid(domains.hashNames)) {
+                                  domains.vendorInstalledRows,
+                                  domains.vendorTransferRules))
+        || !hash_names::valid(domains.hashNames)
+        // An empty objective table marks an unsupported catalog, with no bank and no contracts.
+        || (domains.objectives.empty()
+                ? !(domains.objectiveInstructions.empty() && domains.pursuits.empty())
+                : !objectives::valid({domains.objectives, domains.objectiveInstructions}))
+        || !pursuits::valid(domains.pursuits, domains.objectives.size())) {
         return false;
+    }
+    for (const pursuits::Definition& contract : domains.pursuits) {
+        if (contract.definitionIndex >= domains.items.size()
+            || domains.items[contract.definitionIndex].definitionHash != contract.definitionHash
+            || (contract.questStep.successorIndex != pursuits::kAbsent
+                && contract.questStep.successorIndex >= domains.items.size())) {
+            return false;
+        }
+        for (std::size_t row = 0; row < contract.rewardCount; ++row) {
+            if (contract.rewards[row].itemIndex >= domains.items.size()) {
+                return false;
+            }
+        }
     }
     // Reward rows are dense by item index, so each must name its item or be unavailable.
     const bool rewardsCached = !domains.rewardItems.empty();
@@ -323,6 +364,11 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
             }
         }
     }
+    for (const items::insertion_rules::Rule& rule : domains.plugInsertionRules) {
+        if (rule.plugDefinitionIndex >= domains.items.size()) {
+            return false;
+        }
+    }
     for (const material_requirements::Definition& definition : domains.materialRequirementSets) {
         for (std::size_t index = 0; index < definition.requirementCount; ++index) {
             const std::uint16_t itemIndex = definition.requirements[index].itemDefinitionIndex;
@@ -330,6 +376,13 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
                 || domains.items[itemIndex].definitionIndex != itemIndex) {
                 return false;
             }
+        }
+    }
+    for (const material_requirements::CurrencyScalar& scalar : domains.currencyScalars) {
+        if (static_cast<std::size_t>(scalar.itemDefinitionIndex) >= domains.items.size()
+            || domains.items[scalar.itemDefinitionIndex].definitionIndex
+                   != scalar.itemDefinitionIndex) {
+            return false;
         }
     }
     for (std::size_t index = 0; index < domains.socketEntryLists.size(); ++index) {

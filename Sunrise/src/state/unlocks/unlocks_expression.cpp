@@ -273,12 +273,14 @@ bool valid(const Instruction& instruction) noexcept {
 }
 
 /**
- * Evaluates one expression program.
- * @param result Receives whether the final value is nonzero; cleared on any refusal.
+ * Evaluates one expression program to its final value.
+ * @param result Receives the final value; cleared on any refusal.
  * @return False for an empty program, a refused step, or a final stack other than one value.
  */
-bool evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& result) noexcept {
-    result = false;
+bool evaluate(std::span<const Instruction> program,
+              const Inputs& inputs,
+              std::int32_t& result) noexcept {
+    result = 0;
     if (program.empty() || inputs.flag == nullptr || inputs.value == nullptr) {
         return false;
     }
@@ -292,8 +294,19 @@ bool evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& 
     if (stack.depth() != 1 || !stack.pop(final)) {
         return false;
     }
-    result = final != 0;
+    result = final;
     return true;
+}
+
+/**
+ * Evaluates one condition program, which holds when its final value is nonzero.
+ * @param result Receives whether the final value is nonzero; cleared on any refusal.
+ */
+bool evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& result) noexcept {
+    std::int32_t value = 0;
+    const bool evaluated = evaluate(program, inputs, value);
+    result = evaluated && value != 0;
+    return evaluated;
 }
 
 } // namespace sunrise::state::unlocks

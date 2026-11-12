@@ -43,6 +43,19 @@ bool mutate(void* context, void (*apply)(void*, Table&) noexcept) noexcept {
     return store::write_unlocks(table) && transaction.commit();
 }
 
+/** An unchanged pass skips the save, which reads every bank again to find the changed rows. */
+bool mutate_if_changed(void* context, bool (*apply)(void*, Table&) noexcept) noexcept {
+    if (apply == nullptr) {
+        return false;
+    }
+    store::Transaction transaction;
+    Table table;
+    if (!transaction.ready() || !store::read_unlocks(table)) {
+        return false;
+    }
+    return (!apply(context, table) || store::write_unlocks(table)) && transaction.commit();
+}
+
 /** Reads one saved accountFlags entry. */
 bool account_flag_set(std::uint16_t index) noexcept {
     std::int32_t value = 0;

@@ -45,6 +45,9 @@ bool build_progressions(const reader::Source& source,
                       scope <= static_cast<std::uint8_t>(domain::Scope::character)
                           ? static_cast<domain::Scope>(scope)
                           : domain::Scope::unreplicated};
+        std::memcpy(&definition.definitionHash,
+                    table.data() + at + tables::kProgressionHashOffset,
+                    sizeof definition.definitionHash);
         tables::Array ladder{};
         if (!tables::find_optional_array_at(table, at + tables::kProgressionStepField, ladder)) {
             count = 0;

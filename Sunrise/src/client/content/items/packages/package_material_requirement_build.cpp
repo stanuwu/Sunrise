@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/material_requirements/material_requirement_catalog.h"
@@ -18,21 +20,24 @@ constexpr std::size_t kRequirementArrayBytes =
 /**
  * Reports the requirement-set extraction result once per build.
  * @param sets Sets read from the table.
+ * @param scalars Socket-type currency scalars read with them.
  * @param conditionalRows Rows carrying a condition, counted for the same line.
  * @param valid True when the table passed its checks.
  * @param published True when the table reached the catalog, which sets the level.
  */
 void report_material_requirements(std::size_t sets,
+                                  std::size_t scalars,
                                   std::size_t conditionalRows,
                                   bool valid,
                                   bool published) noexcept {
     std::array<char, 160> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
-                                      "ev=pkg stage=materials result=%s sets=%zu conditional=%zu "
-                                      "valid=%u",
+                                      "ev=pkg stage=materials result=%s sets=%zu scalars=%zu "
+                                      "conditional=%zu valid=%u",
                                       published ? "ok" : "fail",
                                       sets,
+                                      scalars,
                                       conditionalRows,
                                       static_cast<unsigned>(valid));
     if (written > 0) {
@@ -45,8 +50,8 @@ void report_material_requirements(std::size_t sets,
 /**
  * Names the row that stopped the requirement-set build.
  * @param reason Short key naming the failing step.
- * @param set Requirement set being read, or zero before one was picked.
- * @param row Requirement row being read, or zero before one was picked.
+ * @param set Requirement set or socket type being read, or zero before one was picked.
+ * @param row Requirement or scalar row being read, or zero before one was picked.
  */
 void report_material_requirement_failure(const char* reason,
                                          std::size_t set,
@@ -64,6 +69,78 @@ void report_material_requirement_failure(const char* reason,
                          core::log::Level::warn,
                          {line.data(), static_cast<std::size_t>(written)});
     }
+}
+
+/**
+ * Reads every socket type's currency scalars in socket-type order, each type's rows sorted by
+ * currency. The definition buffer is reused: the requirement sets are already decoded.
+ * @param itemDefinitionCount Item count each currency is checked against.
+ * @param scalarCount Receives the rows written to pass storage.
+ * @return False when the table or a row is unreadable, or a multiplier is not a whole number.
+ */
+[[nodiscard]] bool read_currency_scalars(const reader::Source& source,
+                                         Storage& storage,
+                                         std::span<const std::byte> root,
+                                         std::uint64_t itemDefinitionCount,
+                                         std::size_t& scalarCount) noexcept {
+    scalarCount = 0;
+    std::uint32_t tableTag = 0;
+    tables::Array types{};
+    if (!tables::slot_tag(root, tables::kSocketTypeTableSlot, tableTag) || tableTag == 0
+        || !reader::read_tag(source, storage.scratch, tableTag, storage.definition)
+        || !tables::read_array(std::span<const std::byte>{storage.definition},
+                               offsetof(generated::C80807ab5, table),
+                               tables::kSocketTypeTableClass,
+                               tables::kSocketTypeRowStride,
+                               types)
+        || types.count > (std::numeric_limits<std::uint16_t>::max)()) {
+        report_material_requirement_failure("socket_types", 0, 0);
+        return false;
+    }
+    const std::span<const std::byte> table{storage.definition};
+    for (std::size_t type = 0; type < types.count; ++type) {
+        tables::Array scalars{};
+        if (!tables::read_array(table,
+                                types.dataOffset + type * tables::kSocketTypeRowStride
+                                    + tables::kSocketTypeCurrencyScalarDescriptor,
+                                tables::kSocketTypeCurrencyScalarClass,
+                                tables::kSocketTypeCurrencyScalarStride,
+                                scalars)) {
+            report_material_requirement_failure("scalar_array", type, 0);
+            return false;
+        }
+        const std::size_t first = scalarCount;
+        for (std::size_t row = 0; row < scalars.count; ++row) {
+            const std::size_t at =
+                scalars.dataOffset + row * tables::kSocketTypeCurrencyScalarStride;
+            std::uint16_t itemIndex = 0;
+            std::uint16_t reserved = 0;
+            float value = 0.0F;
+            std::memcpy(&itemIndex,
+                        table.data() + at + tables::kCurrencyScalarItemIndexOffset,
+                        sizeof itemIndex);
+            std::memcpy(&reserved,
+                        table.data() + at + tables::kCurrencyScalarReservedOffset,
+                        sizeof reserved);
+            std::memcpy(
+                &value, table.data() + at + tables::kCurrencyScalarValueOffset, sizeof value);
+            if (scalarCount >= storage.currencyScalarRows.size() || itemIndex >= itemDefinitionCount
+                || reserved != 0 || !std::isfinite(value) || value < 1.0F
+                || std::floor(value) != value
+                || static_cast<double>(value) > (std::numeric_limits<std::uint32_t>::max)()) {
+                report_material_requirement_failure("scalar_row", type, row);
+                return false;
+            }
+            storage.currencyScalarRows[scalarCount++] = {
+                static_cast<std::uint16_t>(type), itemIndex, static_cast<std::uint32_t>(value)};
+        }
+        std::sort(storage.currencyScalarRows.begin() + static_cast<std::ptrdiff_t>(first),
+                  storage.currencyScalarRows.begin() + static_cast<std::ptrdiff_t>(scalarCount),
+                  [](const auto& left, const auto& right) {
+                      return left.itemDefinitionIndex < right.itemDefinitionIndex;
+                  });
+    }
+    return true;
 }
 
 } // namespace
@@ -188,17 +265,26 @@ bool build_material_requirements(const reader::Source& source,
             }
             requirement.itemDefinitionIndex = itemIndex;
             requirement.condition = condition;
+            if (condition != domain::kUnconditionalRequirement) {
+                requirement.valueIndex = bank_index(storage.slotMaps.accountValue, condition);
+            }
             requirement.deleteOnAction = deleted != 0;
             requirement.omitFromRequirements = omitted != 0;
             conditionalRows += condition != domain::kUnconditionalRequirement ? 1U : 0U;
         }
     }
+    std::size_t scalarCount = 0;
+    if (!read_currency_scalars(source, storage, root, itemDefinitionCount, scalarCount)) {
+        return false;
+    }
     const auto definitions =
         std::span(storage.materialRequirementRows).first(static_cast<std::size_t>(sets.count));
-    const bool valid = domain::valid(definitions);
+    const auto scalars = std::span(storage.currencyScalarRows).first(scalarCount);
+    const bool valid = domain::valid(definitions, scalars);
     const bool published =
-        valid && state::build_data::publish_material_requirement_sets(definitions);
-    report_material_requirements(definitions.size(), conditionalRows, valid, published);
+        valid && state::build_data::publish_material_requirement_sets(definitions, scalars);
+    report_material_requirements(
+        definitions.size(), scalars.size(), conditionalRows, valid, published);
     return published;
 }
 

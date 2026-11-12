@@ -16,27 +16,28 @@ int selected() noexcept {
 } // namespace
 
 /** Reward ownership and quantities are committed before presentation is attempted. */
-bool enqueue_reward(std::uint32_t definitionHash,
-                    std::int32_t quantity,
-                    std::uint8_t kind) noexcept {
+bool enqueue_reward(std::uint32_t definitionHash, std::int32_t quantity) noexcept {
     const std::lock_guard lock(g_mutex);
     const int owner = selected();
     if (owner < 0) {
         return false;
     }
-    Statement row("INSERT INTO pending_rewards(character_slot,kind,definition_hash,quantity) "
-                  "VALUES (?,?,?,?)");
-    return row.write(owner, kind, definitionHash, quantity);
+    Statement row("INSERT INTO pending_rewards(character_slot,definition_hash,quantity) "
+                  "VALUES (?,?,?)");
+    return row.write(owner, definitionHash, quantity);
 }
 
-/** Other characters' earned rewards remain queued when the player changes character. */
-bool next_reward(PendingReward& output) noexcept {
+/** Other characters' earned rewards remain queued; only a clean SQL step proves no row follows. */
+bool next_reward(PendingReward& output, std::uint64_t afterId, bool& readFailed) noexcept {
     const std::lock_guard lock(g_mutex);
     output = {};
-    Statement row("SELECT id,definition_hash,quantity,kind FROM pending_rewards "
-                  "WHERE character_slot=? ORDER BY id LIMIT 1");
-    return row.parameters(selected()) && row.step() == SQLITE_ROW
-           && row.columns(output.id, output.definitionHash, output.quantity, output.kind);
+    Statement row("SELECT id,definition_hash,quantity FROM pending_rewards "
+                  "WHERE character_slot=? AND id>? ORDER BY id LIMIT 1");
+    const int step = row.parameters(selected(), afterId) ? row.step() : SQLITE_ERROR;
+    const bool found =
+        step == SQLITE_ROW && row.columns(output.id, output.definitionHash, output.quantity);
+    readFailed = !found && step != SQLITE_DONE;
+    return found;
 }
 
 /** The inventory grant and deletion of this reward must share one outer transaction. */

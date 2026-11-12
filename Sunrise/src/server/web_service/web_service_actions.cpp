@@ -2,10 +2,14 @@
 
 #include <array>
 #include <cstdio>
+#include <span>
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
+#include "../../middleware/crypto/random_bytes.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
+#include "../../middleware/web_service/messages/opcode2002.h"
 #include "../../middleware/web_service/messages/opcode402.h"
 #include "../../middleware/web_service/messages/opcode403.h"
 #include "../../middleware/web_service/messages/opcode406.h"
@@ -252,6 +256,7 @@ void mutate_socket_plug(const middleware::web_service::Message& message,
     if (!state::prepare_socket_plug(request.instanceSoid,
                                     static_cast<std::uint8_t>(request.socketIndex),
                                     request.plugDefinitionIndex,
+                                    core::runtime::server_clock_seconds(),
                                     *mutation)) {
         clear_mutation(outcome);
         core::log::write(core::log::Channel::server,
@@ -285,6 +290,7 @@ void mutate_equipped_socket_plug(const middleware::web_service::Message& message
     if (!state::prepare_equipped_socket_plug(request.targetInstanceSoid,
                                              static_cast<std::uint8_t>(replacement.socketIndex),
                                              replacement.plugDefinitionIndex,
+                                             core::runtime::server_clock_seconds(),
                                              *mutation)) {
         clear_mutation(outcome);
         core::log::write(core::log::Channel::server,
@@ -338,7 +344,47 @@ void report_item_dismantle(const middleware::web_service::Message& message,
     write_warning(line, count);
 }
 
-/** Prepares the exact fixed-width opcode-402 Character-inventory removal request. */
+/**
+ * Redeems a completed pursuit through the shared reward grant. The seed is drawn in this layer.
+ * @return True when the pursuit is redeemed or its refusal is reported, which settles the request.
+ *         False when it is not redeemable, so the request removes it as an ordinary item.
+ */
+[[nodiscard]] bool redeem_pursuit(const middleware::web_service::Message& message,
+                                  std::uint64_t instanceSoid,
+                                  const state::build_data::items::Definition& definition,
+                                  Outcome& outcome) noexcept {
+    auto* grant = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+    std::uint64_t seed = 0;
+    const char* reason = grant == nullptr ? "storage" : "random_source";
+    auto result = state::PursuitRedemption::refused;
+    if (grant != nullptr && middleware::crypto::random::draw_seed(seed)) {
+        result = state::prepare_pursuit_redemption(instanceSoid,
+                                                   definition.definitionHash,
+                                                   core::runtime::server_clock_seconds(),
+                                                   seed,
+                                                   *grant,
+                                                   &reason);
+    }
+    if (result == state::PursuitRedemption::prepared) {
+        return true;
+    }
+    clear_mutation(outcome);
+    if (result == state::PursuitRedemption::notRedeemable) {
+        return false;
+    }
+    report_item_dismantle(message,
+                          reason != nullptr ? reason : "pursuit_redemption",
+                          instanceSoid,
+                          definition.definitionIndex,
+                          definition.definitionHash,
+                          middleware::web_service::messages::opcode402::kSingleQuantity);
+    return true;
+}
+
+/**
+ * Prepares the exact fixed-width opcode-402 removal of an instance or of a stack's discard. A
+ * completed pursuit is redeemed instead.
+ */
 void dismantle_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     middleware::web_service::messages::opcode402::Request request{};
     if (!middleware::web_service::messages::opcode402::parse_request(message, request)) {
@@ -358,6 +404,11 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
             message, "definition", instanceSoid, definitionIndex, 0, kSingleQuantity);
         return;
     }
+    state::build_data::pursuits::Definition contract{};
+    if (instanceSoid != 0 && state::build_data::find_pursuit_definition(definitionIndex, contract)
+        && redeem_pursuit(message, instanceSoid, definition, outcome)) {
+        return;
+    }
     auto* mutation = emplace_mutation<state::PendingItemDismantle>(outcome);
     if (mutation == nullptr) {
         report_item_dismantle(message,
@@ -366,6 +417,18 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
                               definitionIndex,
                               definition.definitionHash,
                               kSingleQuantity);
+        return;
+    }
+    if (instanceSoid == 0) {
+        if (!state::prepare_stack_discard(definition.definitionHash, request.quantity, *mutation)) {
+            clear_mutation(outcome);
+            report_item_dismantle(message,
+                                  "state",
+                                  instanceSoid,
+                                  definitionIndex,
+                                  definition.definitionHash,
+                                  static_cast<std::uint32_t>(request.quantity));
+        }
         return;
     }
     if (!state::prepare_item_dismantle(instanceSoid, *mutation)) {
@@ -389,6 +452,36 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
                               kSingleQuantity);
         return;
     }
+}
+
+/** Opens one held engram through the shared reward grant. The seed is drawn in this layer. */
+void open_stored_wrapper(const middleware::web_service::Message& message,
+                         Outcome& outcome) noexcept {
+    namespace opcode2002 = middleware::web_service::messages::opcode2002;
+    opcode2002::Request request{};
+    const char* reason = "payload_bits";
+    if (opcode2002::parse_request(message, request)) {
+        auto* grant = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+        std::uint64_t seed = 0;
+        reason = grant == nullptr ? "storage" : "random_source";
+        if (grant != nullptr && middleware::crypto::random::draw_seed(seed)
+            && state::prepare_wrapper_opening(request.instanceSoid,
+                                              seed,
+                                              core::runtime::server_clock_seconds(),
+                                              *grant,
+                                              &reason)
+                   == state::RewardPreparation::prepared) {
+            return;
+        }
+        clear_mutation(outcome);
+    }
+    std::array<char, core::log::kLineCapacity> line{};
+    const int count = std::snprintf(line.data(),
+                                    line.size(),
+                                    "ev=ws2002 stage=prepare result=fail reason=%s instance=0x%llX",
+                                    reason != nullptr ? reason : "wrapper_opening",
+                                    static_cast<unsigned long long>(request.instanceSoid));
+    write_warning(line, count);
 }
 
 } // namespace sunrise::server::web_service

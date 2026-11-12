@@ -4,6 +4,8 @@
 #include <optional>
 #include <span>
 
+#include "../../../../../middleware/datagen/family4/account/account_encoder.h"
+#include "../../../../../middleware/datagen/family4/account/layout.h"
 #include "../../../../../middleware/datagen/family4/loadout/definition.h"
 #include "../../../../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../../../../../state/account/account_state.h"
@@ -79,8 +81,40 @@ inline constexpr auto kChangeRecordIsZero = [](const auto& record) noexcept {
  * Local to one incremental upsert; an ordinary snapshot encodes it empty.
  */
 inline constexpr std::uint8_t kChangeKind = 1;
+/**
+ * The client checks vendor-transfer room under this kind, and its observer presents a row moved
+ * under it without counting a new acquisition.
+ */
+inline constexpr std::uint8_t kVendorTransferChangeKind = 0xD;
 /** Clear policy bits leave the record enabled; the observer skips any other pair. */
 inline constexpr std::uint16_t kChangeFlags = 0;
+/**
+ * The client's record writer sets this on a new row whose collectible it has not yet acquired; its
+ * observer then adds the collectible to its list of newly acquired ones.
+ */
+inline constexpr std::uint16_t kNewCollectibleChangeFlag = 0x10;
+/** The client's record writer sets this for a quiet item; observers skip its toast and count. */
+inline constexpr std::uint16_t kQuietChangeFlag = 0x8;
+/** The client's record writer sets this for a toastless item; only the toast is skipped. */
+inline constexpr std::uint16_t kToastlessChangeFlag = 0x100;
+
+/** @return The policy bits the client's record writer derives from one item's definition. */
+[[nodiscard]] inline std::uint16_t
+change_flags(const state::build_data::items::Definition& item) noexcept {
+    const unsigned flags = kChangeFlags | (item.quietAcquisition ? kQuietChangeFlag : 0U)
+                           | (item.toastlessAcquisition ? kToastlessChangeFlag : 0U);
+    return static_cast<std::uint16_t>(flags);
+}
+
+/**
+ * Names every row an exchange credited, so each gain is drawn and repeats accumulate.
+ * @param accountObject Encoded account object being upserted, whose ring is still empty.
+ * @param changes Rows the exchange credited.
+ * @return Null on success, or the reason the ring could not be written.
+ */
+[[nodiscard]] const char*
+write_exchange_changes(middleware::datagen::family4::account::layout::Object& accountObject,
+                       std::span<const state::ProfileStackChange> changes) noexcept;
 
 /** Pins feed-referenced item identities to their published character rows. */
 [[nodiscard]] bool apply_acquisition_presentation(
@@ -195,11 +229,30 @@ prepare_item_state(Scratch& scratch,
                    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
                    Prepared& prepared) noexcept;
 
+/**
+ * Builds the selected character's current object as one upsert above the peer version.
+ * @param characterIndex The selected character's slot in the account.
+ */
+[[nodiscard]] bool prepare_selected_character_refresh(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t accountSoid,
+    std::size_t characterIndex,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    Prepared& prepared) noexcept;
+
 /** Builds the selected-character upsert for one uncommitted artifact purchase. */
 [[nodiscard]] bool prepare_artifact_purchase(
     Scratch& scratch,
     const queuez::EquipmentSwap& update,
     const state::PendingArtifactPurchase& mutation,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    Prepared& prepared) noexcept;
+
+/** Builds only the current account and selected-character objects as one upsert. */
+[[nodiscard]] bool prepare_account_refresh(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
     Prepared& prepared) noexcept;
 
@@ -215,9 +268,23 @@ prepare_item_state(Scratch& scratch,
                                                  Prepared& prepared) noexcept;
 
 /**
- * Builds the Family-4 item-instance upsert for one prepared ordinary-socket selection.
- * The character object is unchanged because item identity, placement and mutation generation are
- * preserved; the socket block lives entirely in the resident instance object.
+ * Builds one held item's resident and the selected character's object behind it, after an edit
+ * changed the item's own values. The values travel in the resident and the row's new serial in
+ * the character object.
+ * @param accountRows The edit also changed a row the account object publishes, which then follows.
+ */
+[[nodiscard]] bool prepare_item_values_refresh(
+    Scratch& scratch,
+    const queuez::EquipmentSwap& update,
+    std::uint64_t instanceSoid,
+    bool accountRows,
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+    Prepared& prepared) noexcept;
+
+/**
+ * Builds the Family-4 item-instance upsert for one prepared ordinary-socket selection, with the
+ * account it charged or paid. The character follows only when a row took a new serial, as the
+ * oven's does after a bake; any other selection keeps item identity, placement and serial.
  */
 [[nodiscard]] bool prepare_socket_plug(Scratch& scratch,
                                        const queuez::SocketPlug& socketPlug,
@@ -277,11 +344,12 @@ prepare_profile_item_acquisition(Scratch& scratch,
 
 /**
  * Builds one Family-4 increment containing the changed character and released item instance.
+ * A stack discard releases nothing, and a changed profile adds the account object.
  * @param scratch Object and compression storage owned by the lock.
  * @param dismantle Exact queuez after-image promised by the correlated response.
  * @param mutation Checked State after-image that remains uncommitted while output is staged.
- * @param prepared Gets the character upsert followed by the empty release descriptor.
- * @return True when the character after-image and two-operation update fit atomically.
+ * @param prepared Gets the character upsert followed by any empty release descriptor.
+ * @return True when the character after-image and the whole update fit atomically.
  */
 [[nodiscard]] bool prepare_item_dismantle(Scratch& scratch,
                                           const queuez::ItemDismantle& dismantle,
@@ -317,6 +385,16 @@ resolve(const state::AccountState& account, std::size_t characterIndex, Resolved
 
 /** Logs which step of preparation failed. @return Always false. */
 [[nodiscard]] bool report_failure(const char* step) noexcept;
+
+/**
+ * Reads the account-object fields State holds outside the account copy, for the account encoder.
+ * @param account Account view the object is encoded from.
+ * @param fields Receives each character's published value and the Store wallet sync generation.
+ * @return False when the saved generation cannot be read.
+ */
+[[nodiscard]] bool
+read_account_state_fields(const state::AccountState& account,
+                          middleware::datagen::family4::account::StateFields& fields) noexcept;
 
 /**
  * Compresses one raw object and advances the shared sealed-buffer extent.

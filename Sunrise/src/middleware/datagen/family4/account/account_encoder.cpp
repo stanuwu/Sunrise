@@ -24,6 +24,10 @@ constexpr std::byte kSeenMessageByte{0xFF};
 /** A native inventory bucket id is 1 byte, so this covers every bucket. */
 constexpr std::size_t kBucketIdentityCapacity = 256;
 
+// A bound row from State addresses a character's value block.
+static_assert(layout::kCharacterValueCapacity
+              == state::build_data::constants::kCharacterValueRowCount);
+
 /** Places one profile item in the next free row of its inventory bucket. */
 [[nodiscard]] bool place_profile_item(const state::account::inventory::ProfileItem& item,
                                       std::array<std::uint16_t, kBucketIdentityCapacity>& taken,
@@ -72,6 +76,7 @@ constexpr std::size_t kBucketIdentityCapacity = 256;
 
 /** Encodes a sentinel-correct account object from live State. */
 bool encode_with_unlocks(const state::AccountState& state,
+                         const StateFields& fields,
                          std::span<std::byte> output,
                          const state::unlocks::Table* preparedUnlocks,
                          bool publicOnly) noexcept {
@@ -91,12 +96,12 @@ bool encode_with_unlocks(const state::AccountState& state,
         return false;
     }
 
+    state::unlocks::Table liveUnlocks;
+    if (!publicOnly && preparedUnlocks == nullptr && !state::unlocks::snapshot(liveUnlocks)) {
+        return false;
+    }
+    const auto& unlocks = preparedUnlocks != nullptr ? *preparedUnlocks : liveUnlocks;
     if (!publicOnly) {
-        state::unlocks::Table liveUnlocks;
-        if (preparedUnlocks == nullptr && !state::unlocks::snapshot(liveUnlocks)) {
-            return false;
-        }
-        const auto& unlocks = preparedUnlocks != nullptr ? *preparedUnlocks : liveUnlocks;
         object.acquiredFlags = unlocks.accountFlags;
         object.profileUnlockFlags = unlocks.profileFlags;
         object.objectiveValues = unlocks.objectiveValues;
@@ -107,6 +112,10 @@ bool encode_with_unlocks(const state::AccountState& state,
                 return false;
             }
             object.characterUnlocks[index].flags = character.characterFlags;
+            if (fields.characterValueRow != state::build_data::constants::kUnboundValueRow) {
+                object.characterUnlocks[index].values[fields.characterValueRow] =
+                    fields.characterValues[index];
+            }
         }
     }
     object.publicityExpiries.fill(kSuppressedPublicityDeadline);
@@ -122,8 +131,8 @@ bool encode_with_unlocks(const state::AccountState& state,
             entry.definitionIndex = kEmptyDefinitionIndex;
         }
     } else {
-        if (!progression::key_bank(state::build_data::progressions::Scope::account,
-                                   object.progressions)) {
+        if (!progression::key_bank(
+                state::build_data::progressions::Scope::account, object.progressions, unlocks)) {
             return false;
         }
         // Profile rows are sentinelled above, so placement only has to claim its own slots.
@@ -137,6 +146,12 @@ bool encode_with_unlocks(const state::AccountState& state,
             }
         }
         object.profileItemCount = static_cast<std::uint32_t>(state.profileItemCount);
+
+        // A committed wallet sync advances this generation; ordinary inventory updates keep it.
+        object.storeSyncRevision = fields.storeSyncRevision;
+        if (object.storeSyncRevision != 0) {
+            object.storeSyncState = layout::kStoreSyncStateSynced;
+        }
     }
 
     // Publish only after every fallible conversion succeeds.
@@ -148,15 +163,17 @@ bool encode_with_unlocks(const state::AccountState& state,
 } // namespace
 
 bool encode(const state::AccountState& state,
+            const StateFields& fields,
             std::span<std::byte> output,
             bool publicOnly) noexcept {
-    return encode_with_unlocks(state, output, nullptr, publicOnly);
+    return encode_with_unlocks(state, fields, output, nullptr, publicOnly);
 }
 
 bool encode(const state::AccountState& state,
+            const StateFields& fields,
             std::span<std::byte> output,
             const state::unlocks::Table& unlocks) noexcept {
-    return encode_with_unlocks(state, output, &unlocks, false);
+    return encode_with_unlocks(state, fields, output, &unlocks, false);
 }
 
 } // namespace sunrise::middleware::datagen::family4::account

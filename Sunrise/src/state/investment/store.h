@@ -10,6 +10,7 @@
 #include "../account/account_state.h"
 #include "../entitlements/definition.h"
 #include "../unlocks/definition.h"
+#include "../unlocks/unlocks_expression.h"
 #include "investment.h"
 
 namespace sunrise::state::investment::store {
@@ -25,6 +26,33 @@ enum class Bank : int {
     accountProgressions,
     characterProgressions
 };
+
+/**
+ * Names the saved bank a bound flag or value instruction reads.
+ * @param source The instruction's bank.
+ * @param flag True for a flag instruction, false for a value instruction.
+ * @param bank Receives the saved bank.
+ * @return False for a source no saved bank answers: none, a class flag, an external read, or a
+ *         profile value.
+ */
+[[nodiscard]] constexpr bool saved_bank(unlocks::Bank source, bool flag, Bank& bank) noexcept {
+    switch (source) {
+    case unlocks::Bank::account:
+        bank = flag ? Bank::accountFlags : Bank::objectiveValues;
+        return true;
+    case unlocks::Bank::profile:
+        bank = Bank::profileFlags;
+        return flag;
+    case unlocks::Bank::character:
+        bank = flag ? Bank::characterObjectFlags : Bank::characterObjectValues;
+        return true;
+    case unlocks::Bank::none:
+    case unlocks::Bank::characterClass:
+    case unlocks::Bank::external:
+        break;
+    }
+    return false;
+}
 
 [[nodiscard]] bool initialize(void* module) noexcept;
 [[nodiscard]] bool validate() noexcept;
@@ -50,8 +78,11 @@ void shutdown() noexcept;
  * @return False when the copy failed; the file handle then stays open and unchanged.
  */
 [[nodiscard]] bool use_session_copy() noexcept;
+/** @return A count that moves on every committed write and selection change. */
+[[nodiscard]] std::uint64_t revision() noexcept;
 [[nodiscard]] bool read_account(AccountState& output) noexcept;
 [[nodiscard]] AccountState account() noexcept;
+[[nodiscard]] bool read_account_identity(AccountIdentity& output) noexcept;
 [[nodiscard]] bool write_account(const AccountState& value) noexcept;
 [[nodiscard]] bool read_settings(account::settings::AccountSettings& output) noexcept;
 [[nodiscard]] bool write_settings(const account::settings::AccountSettings& value) noexcept;
@@ -63,6 +94,16 @@ void set_sign_in_time(std::uint64_t seconds) noexcept;
 [[nodiscard]] bool read_unlock(Bank bank, std::uint16_t slot, std::int32_t& value) noexcept;
 [[nodiscard]] bool write_unlock(Bank bank, std::uint16_t slot, std::int32_t value) noexcept;
 [[nodiscard]] bool read_entitlements(entitlements::Table& output) noexcept;
+/**
+ * Reads the generation a Store wallet sync last committed.
+ * @param revision Receives the revision, or zero when the account never synced.
+ */
+[[nodiscard]] bool read_store_wallet_sync(std::uint32_t& revision) noexcept;
+/**
+ * Advances the Store wallet sync generation.
+ * @param revision Receives the new revision; zero on failure.
+ */
+[[nodiscard]] bool advance_store_wallet_sync(std::uint32_t& revision) noexcept;
 [[nodiscard]] bool bootstrap_completed(std::string_view name) noexcept;
 [[nodiscard]] bool complete_bootstrap(std::string_view name) noexcept;
 
@@ -103,11 +144,15 @@ struct PendingReward {
     std::uint64_t id{};
     std::uint32_t definitionHash{};
     std::int32_t quantity{};
-    std::uint8_t kind{};
 };
+[[nodiscard]] bool enqueue_reward(std::uint32_t definitionHash, std::int32_t quantity) noexcept;
+/**
+ * Reads the selected character's oldest saved reward after one row.
+ * @param afterId Row id to read past; zero starts at the oldest reward.
+ * @param readFailed Receives true when no row was returned because the read failed.
+ */
 [[nodiscard]] bool
-enqueue_reward(std::uint32_t definitionHash, std::int32_t quantity, std::uint8_t kind) noexcept;
-[[nodiscard]] bool next_reward(PendingReward& output) noexcept;
+next_reward(PendingReward& output, std::uint64_t afterId, bool& readFailed) noexcept;
 [[nodiscard]] bool complete_reward(std::uint64_t id) noexcept;
 
 /** Which account list a parked row came from; the values are the parked_items kind column. */

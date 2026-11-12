@@ -30,6 +30,7 @@
 #include "encrypted/push/activity/activity_roster_grant.h"
 #include "encrypted/queuez/definition.h"
 #include "encrypted/queuez/public_subscriptions.h"
+#include "investment_operations.h"
 #include "nat_relay_service.h"
 #include "runtime.h"
 
@@ -380,22 +381,26 @@ struct ReplicationEpochPublication {
 /** Logs one refused reward stage with its native index and a specific reason. */
 void report_reward_refusal(const char* stage, std::uint16_t index, const char* reason) noexcept;
 
-/** Which inventory one world reward lands in. */
-enum class WorldRewardKind : std::uint8_t {
-    item,
-    profileItem,
-};
-
 /** One reward earned in world, held until a Family-4 peer can publish it. */
 struct WorldRewardRequest {
     std::uint64_t id{};
     std::uint32_t definitionHash{};
     std::int32_t quantity{};
     std::uint16_t itemDefinitionIndex{};
-    WorldRewardKind kind{};
 };
 /** The changed character projections still owed after their source state commits. */
 enum class CharacterRefreshScope : std::uint8_t { none, records, recordsAndRoster };
+
+/** What one world reward pass reads; while it is unchanged, the pass repeats its refusals. */
+struct WorldRewardGate {
+    std::uint64_t revision{};
+    bool catalogsSettled{};
+    [[nodiscard]] bool operator==(const WorldRewardGate&) const noexcept = default;
+};
+
+/** Item-values refreshes one peer can owe: one for every unequipped row of a character. */
+inline constexpr std::size_t kItemValuesRefreshCapacity =
+    state::account::inventory::kCharacterItemCapacity;
 
 /** Mutable transport state owned by one BAP connection. */
 struct Session {
@@ -404,6 +409,8 @@ struct Session {
     nat_relay::State relay{};
     state::AccountHandle accountHandle{state::kInvalidAccount};
     std::uint64_t acquisitionPresentationUntilTick{};
+    /** Gate the last world reward pass ran under. */
+    WorldRewardGate worldRewardGate{};
     std::array<encrypted::queuez::AcquisitionPresentationRow,
                encrypted::queuez::kAcquisitionPresentationRowCapacity>
         acquisitionPresentationRows{};
@@ -411,9 +418,11 @@ struct Session {
     std::int32_t pendingSeasonalExperienceAmount{};
     std::uint32_t pendingSeasonalExperienceMutationSerial{};
     bool authenticated{};
-    /** Owes one family-five snapshot for the unlock overrides an artifact change moved. */
+    /** Owes one family-five snapshot for the overrides an artifact change or a held item moved. */
     bool artifactRefreshArmed{};
+    /** Owes one Family-4 copy of the selected character once the due tick has passed. */
     bool artifactFamily4RefreshArmed{};
+    /** Tick count after which the owed Family-4 character copy may go out. */
     std::uint64_t artifactFamily4RefreshDueTick{};
     state::ArtifactResetResult artifactResetRefresh{};
     std::size_t artifactResetRefreshCursor{};
@@ -558,6 +567,23 @@ struct Session {
     /** True while another peer's account mutation still needs a full local refresh. */
     bool accountResyncArmed{};
     /**
+     * Held items whose own values changed outside this peer's requests, oldest first and each
+     * once. Each is owed one item-values refresh; a published account resync carries them all.
+     */
+    std::array<std::uint64_t, kItemValuesRefreshCapacity> itemValuesRefreshSoids{};
+    std::size_t itemValuesRefreshCount{};
+    /** Set when State refused every saved world reward, or none was saved, under the gate. */
+    bool worldRewardsAwaitChange{};
+    /** A finished automatic pursuit sweep stays current until saved state or contracts change. */
+    std::uint64_t pursuitInvestmentRevision{};
+    std::uint64_t pursuitDefinitionsRevision{};
+    /** Selected character's inventory row the next sweep resumes at. */
+    std::size_t pursuitCompletionCursor{};
+    /** Family-4 version a refused automatic publication was reported under. */
+    std::int32_t pursuitPublicationVersion{};
+    bool pursuitCompletionScanned{};
+    bool pursuitPublicationFailureReported{};
+    /**
      * Tick count after which the owed ability-icon refresh may go out. A subclass selection
      * invalidates the published ability buckets and the rebuild runs off the Client
      * content-extraction pump, so the inline refresh can carry empty ones; this one re-derives.
@@ -600,27 +626,61 @@ unique_activity_link_locked(const state::activity::SessionBinding& binding,
 session_scenario_layout(const Session& session,
                         state::build_data::scenarios::Definition& output) noexcept;
 
-/** Commits saved world rewards with no presentation until one must wait. */
+/** Commits every saved world reward that can settle with no presentation; the rest stay saved. */
 void drain_world_rewards() noexcept;
 
 /** Arms every other Family-4 peer after the origin publishes a complete account mutation. */
 void arm_account_resync_elsewhere(Session& origin) noexcept;
 
+/**
+ * Settles what one committed account publication owes beyond its own frame: every other peer's
+ * resync, and the origin's Family-5 refresh when the profile's held items supply other presence
+ * flags than Family 5 last set.
+ */
+void publish_account_mutation(Session& origin) noexcept;
+
 /** Arms every Family-4 peer, including the origin, for a full account resync. */
 void arm_account_resync_everywhere() noexcept;
+
+/**
+ * Queues one item-values refresh per item on every Family-4 peer, for values changed outside any
+ * peer's request. An item already queued is not queued again, and a peer with an armed resync
+ * queues nothing. A peer whose queue is full resyncs the account instead.
+ * @param instanceSoids Held items of the selected character whose own values changed.
+ */
+void arm_item_values_refresh_everywhere(std::span<const std::uint64_t> instanceSoids) noexcept;
 
 /** Holds this peer's full Family-4 refreshes until its acquisition flyout has finished. */
 void arm_acquisition_presentation_hold(Session& session) noexcept;
 
-/** Queues one character item for normal acquisition feedback. */
+/**
+ * Schedules this peer's Family-5 refresh, for the overrides an artifact change or a held item
+ * moved, then the delayed Family-4 character copy the client rebuilds its unlock state on.
+ */
+void arm_artifact_refresh(Session& session) noexcept;
+
+/**
+ * Schedules the Family-4 character copy alone, after the same delay, for an account published
+ * without its character. The client rebuilds what its sockets offer only on a character update.
+ */
+void arm_unlock_character_refresh(Session& session) noexcept;
+
+/** Queues one item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;
 
-/** Queues one profile material for normal acquisition feedback. */
+/** Queues a positive quantity of one item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,
                                                       std::int32_t quantity) noexcept;
 
-/** Reads the oldest saved world reward that can still be granted, retiring rows that cannot. */
-[[nodiscard]] bool current_world_reward(WorldRewardRequest& request) noexcept;
+/**
+ * Reads the oldest grantable saved world reward after one row, retiring rows that never can be.
+ * @param request Receives the reward.
+ * @param afterId Row id to read past; zero starts at the oldest reward.
+ * @param exhausted On a false return, set when every saved row after afterId was read.
+ * @return False when no grantable reward follows that row.
+ */
+[[nodiscard]] bool
+current_world_reward(WorldRewardRequest& request, std::uint64_t afterId, bool* exhausted) noexcept;
 
 /** Removes the world reward returned by current_world_reward. */
 [[nodiscard]] bool complete_world_reward(std::uint64_t id) noexcept;
@@ -630,11 +690,67 @@ void arm_acquisition_presentation_hold(Session& session) noexcept;
                                        const WorldRewardRequest& request,
                                        const char* reason) noexcept;
 
-/** Grants the oldest saved reward with no flyout, retiring rewards that can never be granted. */
+/** Grants every saved reward that can settle with no flyout, retiring those never grantable. */
 void settle_world_reward() noexcept;
+
+/** Arms every subscribed peer's social roster, whose member record carries Power, for a re-push. */
+void arm_social_roster_repush_everywhere() noexcept;
 
 /** Queues one transient XP item update so the native HUD presents a seasonal XP gain. */
 [[nodiscard]] bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept;
+
+/** One change to an editor operation's receipt. */
+struct InvestmentTransition {
+    InvestmentReceiptState state{};
+    InvestmentWait wait{};
+    /** Static label, required for a refusal and for a committed operation left unpublished. */
+    const char* reason{""};
+    /** Quantity one grant step published. A grant still queued leaves the rest to later polls. */
+    std::uint32_t grantedQuantity{};
+};
+
+/** @return A refusal carrying one static label. */
+[[nodiscard]] inline InvestmentTransition refused_transition(const char* reason) noexcept {
+    return {.state = InvestmentReceiptState::refused, .reason = reason};
+}
+
+/** @return A deferral waiting on one condition. */
+[[nodiscard]] inline InvestmentTransition deferred_transition(InvestmentWait wait) noexcept {
+    return {.state = InvestmentReceiptState::deferred, .wait = wait};
+}
+
+/**
+ * Maps the refusal of a State edit that reports only a label. A typed result decides for itself.
+ * @param reason State's label. A null label refuses as `transaction`.
+ * @return A catalog wait for `not_ready`, otherwise a refusal carrying the label.
+ */
+[[nodiscard]] InvestmentTransition state_refusal_transition(const char* reason) noexcept;
+
+/**
+ * Checks an operation against the live account, the catalogs and its kind's rules, without
+ * drawing.
+ * @return Queued when it may run now, deferred while a catalog loads, or refused with a label.
+ */
+[[nodiscard]] InvestmentTransition
+check_investment_operation(const InvestmentOperation& operation) noexcept;
+
+/**
+ * Copies the oldest pending operation submitted against one account. A grant's quantity is
+ * reduced by what its earlier steps already published. Caller owns the session lock.
+ * @return False when that account has no pending operation.
+ */
+[[nodiscard]] bool next_investment_operation_locked(std::uint64_t accountSoid,
+                                                    InvestmentOperation& operation) noexcept;
+
+/**
+ * Applies a transition to a pending receipt, accumulating a grant's steps. A finished receipt is
+ * left unchanged. Caller owns the session lock.
+ */
+void record_investment_transition_locked(std::uint64_t operationId,
+                                         const InvestmentTransition& transition) noexcept;
+
+/** Forgets every retained operation and receipt. Caller owns the session lock. */
+void release_investment_operations_locked() noexcept;
 
 /**
  * Finds one unambiguous registry identity in a committed connection-local roster map.
@@ -698,6 +814,10 @@ namespace encrypted {
                                     std::span<std::byte> response,
                                     std::size_t& written,
                                     bool& touchesScratch) noexcept;
+
+/** @return The peer's retained acquisition rows, or empty once its presentation hold expires. */
+[[nodiscard]] std::span<const queuez::AcquisitionPresentationRow>
+active_acquisition_presentation_rows(const Session& session) noexcept;
 
 } // namespace encrypted
 

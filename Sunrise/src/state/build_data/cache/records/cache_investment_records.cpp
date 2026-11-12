@@ -8,14 +8,6 @@ namespace {
 /** Cache padding fields are always written as zero. */
 constexpr unsigned int kReservedFieldValue = 0;
 
-/** A condition slot past a pass row's count holds what a default instruction encodes to. */
-bool unused_condition(const RewardInstructionRecord& record) noexcept {
-    const rewards::Instruction unused{};
-    return record.opcode == static_cast<std::uint8_t>(unused.opcode)
-           && record.bank == static_cast<std::uint8_t>(unused.bank)
-           && record.reserved == kReservedFieldValue && record.operand == unused.operand;
-}
-
 /** A socket slot past a pass row's count holds what a default override encodes to. */
 bool unused_socket(const RewardSocketOverrideRecord& record) noexcept {
     const rewards::SocketOverride unused{};
@@ -25,6 +17,14 @@ bool unused_socket(const RewardSocketOverrideRecord& record) noexcept {
 }
 
 } // namespace
+
+/** A condition slot past a row's count holds what a default instruction encodes to. */
+bool unused_condition(const RewardInstructionRecord& record) noexcept {
+    const rewards::Instruction unused{};
+    return record.opcode == static_cast<std::uint8_t>(unused.opcode)
+           && record.bank == static_cast<std::uint8_t>(unused.bank)
+           && record.reserved == kReservedFieldValue && record.operand == unused.operand;
+}
 
 /** Flattens the 12 buckets into 3 parallel arrays with no per-bucket padding. */
 bool encode(const abilities::Definition& value, AbilityBucketRecord& record) noexcept {
@@ -83,6 +83,7 @@ bool encode(const progressions::Definition& value, ProgressionRecord& record) no
         value.stepOffset,
         value.stepCount,
         static_cast<std::uint8_t>(value.scope),
+        value.definitionHash,
     };
     return true;
 }
@@ -92,7 +93,8 @@ bool decode(const ProgressionRecord& record, progressions::Definition& value) no
     value = {record.definitionIndex,
              record.stepOffset,
              record.stepCount,
-             static_cast<progressions::Scope>(record.scope)};
+             static_cast<progressions::Scope>(record.scope),
+             record.definitionHash};
     return true;
 }
 
@@ -203,6 +205,47 @@ bool decode(const StarterSetRecord& record, starter_sets::Definition& value) noe
         return false;
     }
     value = {record.characterClass, record.itemCount, record.itemIndices};
+    return true;
+}
+
+/** Encodes one plug's insertion rules with its padding zeroed. */
+bool encode(const items::insertion_rules::Rule& value, PlugInsertionRuleRecord& record) noexcept {
+    record = {};
+    record.plugDefinitionIndex = value.plugDefinitionIndex;
+    record.requiredFlagIndex = value.requiredFlagIndex;
+    record.conditionCount = value.conditionCount;
+    record.readable = static_cast<std::uint8_t>(value.readable);
+    if (record.conditionCount > record.condition.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < record.condition.size(); ++i) {
+        if (!encode(value.condition[i], record.condition[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** Decodes one plug's insertion rules after checking its padding and unused slots. */
+bool decode(const PlugInsertionRuleRecord& record, items::insertion_rules::Rule& value) noexcept {
+    value = {};
+    if (record.reserved != decltype(record.reserved){} || record.readable > 1
+        || record.conditionCount > record.condition.size()) {
+        return false;
+    }
+    const auto unused = std::span(record.condition).subspan(record.conditionCount);
+    if (!std::all_of(unused.begin(), unused.end(), unused_condition)) {
+        return false;
+    }
+    value.plugDefinitionIndex = record.plugDefinitionIndex;
+    value.requiredFlagIndex = record.requiredFlagIndex;
+    value.conditionCount = record.conditionCount;
+    value.readable = record.readable != 0;
+    for (std::size_t i = 0; i < value.conditionCount; ++i) {
+        if (!decode(record.condition[i], value.condition[i])) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -370,6 +413,36 @@ bool encode(const sobjects::Definition& value, SObjectDefinitionRecord& record) 
 /** Decodes one incident-target definition. */
 bool decode(const SObjectDefinitionRecord& record, sobjects::Definition& value) noexcept {
     value = {record.nameHash, record.lane4, record.typeCode};
+    return true;
+}
+
+/** Encodes one actor class race with its padding zeroed. */
+bool encode(const combat::EnemyRace& value, EnemyRaceRecord& record) noexcept {
+    record = {};
+    record.classHash = value.classHash;
+    record.race = value.race;
+    return true;
+}
+
+/** Decodes one actor class race after checking its padding. */
+bool decode(const EnemyRaceRecord& record, combat::EnemyRace& value) noexcept {
+    value = {};
+    if (record.reserved != decltype(record.reserved){}) {
+        return false;
+    }
+    value = {record.classHash, record.race};
+    return true;
+}
+
+/** Encodes one combat label group membership. */
+bool encode(const combat::LabelGroup& value, LabelGroupRecord& record) noexcept {
+    record = {value.groupHash, value.labelHash};
+    return true;
+}
+
+/** Decodes one combat label group membership. */
+bool decode(const LabelGroupRecord& record, combat::LabelGroup& value) noexcept {
+    value = {record.groupHash, record.labelHash};
     return true;
 }
 

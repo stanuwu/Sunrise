@@ -1,3 +1,5 @@
+#include <bit>
+
 #include "store_internal.h"
 
 namespace sunrise::state::investment::store {
@@ -32,7 +34,8 @@ bool read_items(AccountState& output) noexcept {
                           item.superAbilityEntry,
                           item.meleeAbilityEntry,
                           item.classAbilityEntry,
-                          item.seen)
+                          item.seen,
+                          item.placement)
             || owner >= output.characterCount) {
             return false;
         }
@@ -50,6 +53,23 @@ bool read_items(AccountState& output) noexcept {
     return result == SQLITE_DONE;
 }
 
+/** @return The item already read at one saved owner, location and position, or null. */
+account::inventory::Item*
+saved_item(AccountState& output, std::size_t owner, int location, std::size_t position) noexcept {
+    if (owner >= output.characterCount) {
+        return nullptr;
+    }
+    auto& character = output.characters[owner];
+    if (location == kEquipmentLocation && position < character.equipment.slots.size()
+        && character.equipment.slots[position]) {
+        return &*character.equipment.slots[position];
+    }
+    if (location == kInventoryLocation && position < character.inventory.count) {
+        return &character.inventory.values[position];
+    }
+    return nullptr;
+}
+
 /** Socket joins keep empty lanes distinct from the native-default socket policy. */
 bool read_sockets(AccountState& output) noexcept {
     Statement rows("SELECT i.character_slot,i.location,i.position,s.lane,s.plug_hash "
@@ -61,23 +81,38 @@ bool read_sockets(AccountState& output) noexcept {
         std::size_t position = 0;
         std::size_t lane = 0;
         std::uint32_t hash = 0;
-        if (!rows.columns(owner, location, position, lane, hash)
-            || owner >= output.characterCount) {
+        if (!rows.columns(owner, location, position, lane, hash)) {
             return false;
         }
-        auto& character = output.characters[owner];
-        account::inventory::Item* item = nullptr;
-        if (location == kEquipmentLocation && position < character.equipment.slots.size()
-            && character.equipment.slots[position]) {
-            item = &*character.equipment.slots[position];
-        } else if (location == kInventoryLocation && position < character.inventory.count) {
-            item = &character.inventory.values[position];
-        }
+        account::inventory::Item* item = saved_item(output, owner, location, position);
         if (item == nullptr || lane >= item->sockets.plugCount
             || lane >= item->sockets.plugs.size()) {
             return false;
         }
         item->sockets.plugs[lane] = hash;
+        result = rows.step();
+    }
+    return result == SQLITE_DONE;
+}
+
+/** An item without a saved row keeps no per-instance values. */
+bool read_objectives(AccountState& output) noexcept {
+    Statement rows("SELECT i.character_slot,i.location,i.position,o.lanes "
+                   "FROM item_objectives o JOIN items i USING(instance_soid)");
+    int result = rows.step();
+    while (result == SQLITE_ROW) {
+        std::size_t owner = 0;
+        int location = 0;
+        std::size_t position = 0;
+        ObjectiveBlob lanes{};
+        if (!rows.columns(owner, location, position, lanes)) {
+            return false;
+        }
+        account::inventory::Item* item = saved_item(output, owner, location, position);
+        if (item == nullptr) {
+            return false;
+        }
+        item->objectives = std::bit_cast<account::inventory::ItemObjectives>(lanes);
         result = rows.step();
     }
     return result == SQLITE_DONE;
@@ -113,7 +148,12 @@ bool read_stacks(AccountState& output) noexcept {
         std::size_t owner = 0;
         std::size_t position = 0;
         account::inventory::CharacterStack item;
-        if (!rows.columns(owner, position, item.definitionHash, item.quantity, item.mutationSerial)
+        if (!rows.columns(owner,
+                          position,
+                          item.definitionHash,
+                          item.quantity,
+                          item.mutationSerial,
+                          item.placement)
             || owner >= output.characterCount) {
             return false;
         }
@@ -127,9 +167,10 @@ bool read_stacks(AccountState& output) noexcept {
     return result == SQLITE_DONE;
 }
 
-/** All socket and ability fields belong to the item instance being saved. */
+/** All socket, ability and per-instance values belong to the item instance being saved. */
 bool write_item(Statement& items,
                 Statement& sockets,
+                Statement& objectives,
                 std::size_t owner,
                 int location,
                 std::size_t position,
@@ -150,7 +191,8 @@ bool write_item(Statement& items,
                      item.superAbilityEntry,
                      item.meleeAbilityEntry,
                      item.classAbilityEntry,
-                     item.seen)) {
+                     item.seen,
+                     item.placement)) {
         return false;
     }
     for (std::size_t lane = 0; lane < item.sockets.plugCount; ++lane) {
@@ -159,33 +201,38 @@ bool write_item(Statement& items,
             return false;
         }
     }
-    return true;
+    return !item.objectives
+           || objectives.write(item.instanceSoid, std::bit_cast<ObjectiveBlob>(*item.objectives));
 }
 
 } // namespace
 
 /** The caller owns the database transaction and the empty account output. */
 bool read_inventory(AccountState& output) noexcept {
-    return read_items(output) && read_sockets(output) && read_profile(output)
-           && read_stacks(output);
+    return read_items(output) && read_sockets(output) && read_objectives(output)
+           && read_profile(output) && read_stacks(output);
 }
 
 /** Inventory rows are replaced inside the account's transaction. */
 bool write_inventory(const AccountState& value) noexcept {
-    Statement items("INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    Statement items("INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     Statement sockets("INSERT INTO sockets VALUES (?,?,?)");
-    Statement stacks("INSERT INTO character_stacks VALUES (?,?,?,?,?)");
+    Statement objectives("INSERT INTO item_objectives VALUES (?,?)");
+    Statement stacks("INSERT INTO character_stacks VALUES (?,?,?,?,?,?)");
     for (std::size_t owner = 0; owner < value.characterCount; ++owner) {
         const auto& character = value.characters[owner];
         for (std::size_t position = 0; position < character.equipment.slots.size(); ++position) {
             const auto& item = character.equipment.slots[position];
-            if (item && !write_item(items, sockets, owner, kEquipmentLocation, position, *item)) {
+            if (item
+                && !write_item(
+                    items, sockets, objectives, owner, kEquipmentLocation, position, *item)) {
                 return false;
             }
         }
         for (std::size_t position = 0; position < character.inventory.count; ++position) {
             if (!write_item(items,
                             sockets,
+                            objectives,
                             owner,
                             kInventoryLocation,
                             position,
@@ -195,8 +242,12 @@ bool write_inventory(const AccountState& value) noexcept {
         }
         for (std::size_t position = 0; position < character.stacks.count; ++position) {
             const auto& item = character.stacks.values[position];
-            if (!stacks.write(
-                    owner, position, item.definitionHash, item.quantity, item.mutationSerial)) {
+            if (!stacks.write(owner,
+                              position,
+                              item.definitionHash,
+                              item.quantity,
+                              item.mutationSerial,
+                              item.placement)) {
                 return false;
             }
         }

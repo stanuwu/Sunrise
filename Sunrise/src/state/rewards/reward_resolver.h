@@ -38,6 +38,11 @@ struct Context {
                             const Context& context,
                             bool& result) noexcept;
 
+/** Evaluates a bound numeric expression against the same saved banks as reward conditions. */
+[[nodiscard]] bool evaluate(std::span<const build_data::rewards::Instruction> program,
+                            const Context& context,
+                            std::int32_t& value) noexcept;
+
 /** Ineligible: the saved unlocks left nothing to draw. Exceeded: this draw outgrew a bound. */
 enum class Resolution : std::uint8_t { resolved, ineligible, exceeded, refused };
 
@@ -46,5 +51,10 @@ enum class Resolution : std::uint8_t { resolved, ineligible, exceeded, refused }
                                  std::uint16_t itemIndex,
                                  std::uint32_t quantity,
                                  Result& result) noexcept;
+
+/** Plans opening one held stored wrapper without changing State; refuses any other item. */
+[[nodiscard]] Resolution open(const Context& context,
+                              std::uint16_t itemIndex,
+                              Result& result) noexcept;
 
 } // namespace sunrise::state::reward_resolution

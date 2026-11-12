@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <span>
+
 #include "codec.h"
 
 namespace sunrise::state::build_data::cache::records {
@@ -36,12 +39,14 @@ bool encode(const vendors::Definition& value, VendorDefinitionRecord& record) no
     record.interactionRowClass = value.interactionRowClass;
     record.saleRowOffset = value.saleRowOffset;
     record.installedRowOffset = value.installedRowOffset;
+    record.transferRuleOffset = value.transferRuleOffset;
     record.resetIntervalRaw = value.resetIntervalRaw;
     record.resetPhaseRaw = value.resetPhaseRaw;
     record.index = value.index;
     record.installedCount = value.installedCount;
     record.saleCount = value.saleCount;
     record.interactionCount = value.interactionCount;
+    record.transferRuleCount = value.transferRuleCount;
     return true;
 }
 
@@ -65,12 +70,14 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
     value.interactionRowClass = record.interactionRowClass;
     value.saleRowOffset = record.saleRowOffset;
     value.installedRowOffset = record.installedRowOffset;
+    value.transferRuleOffset = record.transferRuleOffset;
     value.resetIntervalRaw = record.resetIntervalRaw;
     value.resetPhaseRaw = record.resetPhaseRaw;
     value.index = record.index;
     value.installedCount = record.installedCount;
     value.saleCount = record.saleCount;
     value.interactionCount = record.interactionCount;
+    value.transferRuleCount = record.transferRuleCount;
     return true;
 }
 
@@ -89,15 +96,36 @@ bool encode(const vendors::SaleRow& value, VendorSaleRowRecord& record) noexcept
         record.costs[cost].itemIndex = value.costs[cost].itemIndex;
         record.costs[cost].quantity = value.costs[cost].quantity;
     }
+    record.availabilityCount = value.availabilityCount;
+    record.availabilityUnreadable = static_cast<std::uint8_t>(value.availabilityUnreadable);
+    if (record.availabilityCount > record.availability.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < record.availability.size(); ++i) {
+        if (!encode(value.availability[i], record.availability[i])) {
+            return false;
+        }
+    }
     return true;
 }
 
 /** Decodes one vendor sale row. */
 bool decode(const VendorSaleRowRecord& record, vendors::SaleRow& value) noexcept {
     value = {};
-    if (record.reserved != decltype(record.reserved){} || record.costCount > record.costs.size()
-        || record.priceState > static_cast<std::uint8_t>(vendors::PriceState::unreadable)) {
+    if (record.costCount > record.costs.size()
+        || record.priceState > static_cast<std::uint8_t>(vendors::PriceState::unreadable)
+        || record.availabilityCount > record.availability.size()
+        || record.availabilityUnreadable > 1) {
         return false;
+    }
+    const auto unused = std::span(record.availability).subspan(record.availabilityCount);
+    if (!std::all_of(unused.begin(), unused.end(), unused_condition)) {
+        return false;
+    }
+    for (std::size_t i = 0; i < record.availabilityCount; ++i) {
+        if (!decode(record.availability[i], value.availability[i])) {
+            return false;
+        }
     }
     for (std::size_t cost = 0; cost < record.costs.size(); ++cost) {
         const VendorSaleCostRecord& stored = record.costs[cost];
@@ -117,6 +145,8 @@ bool decode(const VendorSaleRowRecord& record, vendors::SaleRow& value) noexcept
     value.categoryIndex = record.categoryIndex;
     value.costCount = record.costCount;
     value.priceState = static_cast<vendors::PriceState>(record.priceState);
+    value.availabilityCount = record.availabilityCount;
+    value.availabilityUnreadable = record.availabilityUnreadable != 0;
     return true;
 }
 
@@ -129,6 +159,18 @@ bool encode(const vendors::InstalledRow& value, VendorInstalledRowRecord& record
 /** Decodes one vendor category row. */
 bool decode(const VendorInstalledRowRecord& record, vendors::InstalledRow& value) noexcept {
     value = {record.definitionHash};
+    return true;
+}
+
+/** Encodes one vendor transfer rule. */
+bool encode(const vendors::TransferRule& value, VendorTransferRuleRecord& record) noexcept {
+    record = {value.sourceBucket, value.destinationBucket};
+    return true;
+}
+
+/** Decodes one vendor transfer rule. */
+bool decode(const VendorTransferRuleRecord& record, vendors::TransferRule& value) noexcept {
+    value = {record.sourceBucket, record.destinationBucket};
     return true;
 }
 

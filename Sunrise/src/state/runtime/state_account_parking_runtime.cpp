@@ -134,6 +134,7 @@ void take_uninstalled(AccountState& account, std::vector<store::ParkedRow>& park
                 row.item.definitionHash = stack.definitionHash;
                 row.item.quantity = stack.quantity;
                 row.item.mutationSerial = stack.mutationSerial;
+                row.item.placement = stack.placement;
                 parked.push_back(row);
             });
     }
@@ -197,10 +198,11 @@ void take_uninstalled(AccountState& account, std::vector<store::ParkedRow>& park
             return false;
         }
         auto& stacks = account.characters[static_cast<std::size_t>(row.characterSlot)].stacks;
-        // A stack list holds each definition once, so a returning stack joins a matching one.
+        // A returning stack joins the stack of its definition in the bucket it left.
         for (std::size_t index = 0; index < stacks.count; ++index) {
             auto& stack = stacks.values[index];
-            if (stack.definitionHash == row.item.definitionHash) {
+            if (stack.definitionHash == row.item.definitionHash
+                && stack.placement == row.item.placement) {
                 if (stack.quantity
                     > (std::numeric_limits<std::int32_t>::max)() - row.item.quantity) {
                     return false;
@@ -212,8 +214,10 @@ void take_uninstalled(AccountState& account, std::vector<store::ParkedRow>& park
         if (stacks.count >= stacks.values.size()) {
             return false;
         }
-        stacks.values[stacks.count++] = {
-            row.item.definitionHash, row.item.quantity, row.item.mutationSerial};
+        stacks.values[stacks.count++] = {row.item.definitionHash,
+                                         row.item.quantity,
+                                         row.item.mutationSerial,
+                                         row.item.placement};
         return true;
     }
     case store::ParkedKind::profile:

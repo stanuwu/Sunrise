@@ -74,15 +74,18 @@ using Quest = build_data::items::QuestInitialization;
  * @param definitionHash Item definition to grant.
  * @param profileChanged Whether the charge changed profile inventory.
  * @param source Grant identity and material requirements for commit checks.
+ * @param objectives Per-instance values the new item starts with, if any.
  * @param mutation Receives a pending grant; use only on success.
  * @return False when the item, inventory, mapping, or saved quest state is invalid.
  */
-[[nodiscard]] bool finalize_item_acquisition(const AccountState& account,
-                                             const AccountState& chargedAccount,
-                                             std::uint32_t definitionHash,
-                                             bool profileChanged,
-                                             const GrantSource& source,
-                                             PendingItemAcquisition& mutation) noexcept {
+[[nodiscard]] bool
+finalize_item_acquisition(const AccountState& account,
+                          const AccountState& chargedAccount,
+                          std::uint32_t definitionHash,
+                          bool profileChanged,
+                          const GrantSource& source,
+                          const std::optional<authored_inventory::ItemObjectives>& objectives,
+                          PendingItemAcquisition& mutation) noexcept {
     const std::size_t characterIndex = selected_character_index(account);
     if (characterIndex >= account.characterCount) {
         return false;
@@ -109,6 +112,7 @@ using Quest = build_data::items::QuestInitialization;
     acquired.quantity = 1;
     acquired.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
     acquired.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
+    acquired.objectives = objectives;
     after.inventory.values[inventoryIndex] = acquired;
     ++after.inventory.count;
 
@@ -142,7 +146,6 @@ using Quest = build_data::items::QuestInitialization;
     mutation.equipmentSlot = equipmentSlot;
     mutation.materialRequirementCount = source.materialRequirementCount;
     mutation.profileChanged = profileChanged;
-    mutation.directGrant = source.direct;
     build_data::items::Definition definition{};
     if (!build_data::find_item_definition_hash(definitionHash, definition)
         || !build_data::items::valid(definition.questInitialization)) {
@@ -156,6 +159,25 @@ using Quest = build_data::items::QuestInitialization;
         return false;
     }
     mutation.prepared = true;
+    return true;
+}
+
+/** The deadline is the acquisition time plus the contract's lifetime. */
+bool acquired_objectives(std::uint16_t definitionIndex,
+                         std::int64_t nowSeconds,
+                         std::optional<authored_inventory::ItemObjectives>& objectives) noexcept {
+    objectives.reset();
+    build_data::pursuits::Definition contract{};
+    if (!build_data::find_pursuit_definition(definitionIndex, contract)
+        || contract.lifetimeSeconds <= 0) {
+        return true;
+    }
+    const std::int64_t deadline = nowSeconds + contract.lifetimeSeconds;
+    if (deadline > (std::numeric_limits<std::int32_t>::max)()) {
+        return false;
+    }
+    objectives.emplace();
+    (*objectives)[authored_inventory::kItemExpiryLane] = static_cast<std::int32_t>(deadline);
     return true;
 }
 
@@ -184,12 +206,14 @@ charge_acquisition(const AccountState& account,
  * @param collectibleIndex Collections row, or kNoCollectibleIndex for an item-only grant.
  * @param definitionHash Item definition to grant.
  * @param price A vendor row's cost, spent in place of the collectible's materials; or absent.
+ * @param nowSeconds Server time in Unix seconds; a bounty's lifetime runs from it.
  * @param mutation Receives a pending grant; prepared is set only on success.
  * @return False when identity, costs, capacity, or saved state prevent the grant.
  */
 bool prepare_item_acquisition(std::uint16_t collectibleIndex,
                               std::uint32_t definitionHash,
                               std::optional<std::span<const build_data::vendors::SaleCost>> price,
+                              std::int64_t nowSeconds,
                               PendingItemAcquisition& mutation) noexcept {
     const std::lock_guard lock(investment::store::g_mutex);
     mutation = {};
@@ -199,7 +223,9 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
     // A vendor row may name an item with no collectible, so the collectible steps are skipped
     // rather than faked. The item is still validated, just by its own hash.
     const bool hasCollectible = collectibleIndex != build_data::collectibles::kNoCollectibleIndex;
-    if (definitionHash == authored_inventory::kNoDefinitionHash || !account::valid(account)
+    // An ingredient pickup arrives only through the reward grant, which credits its balance.
+    if (definitionHash == authored_inventory::kNoDefinitionHash
+        || is_ingredient_pickup(definitionHash) || !account::valid(account)
         || !valid_profile_inventory(account)) {
         return false;
     }
@@ -217,6 +243,10 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
         return false;
     }
 
+    std::optional<authored_inventory::ItemObjectives> objectives;
+    if (!acquired_objectives(grantedDefinition.definitionIndex, nowSeconds, objectives)) {
+        return false;
+    }
     AccountState chargedAccount = account;
     bool profileChanged = false;
     if (!charge_acquisition(account,
@@ -236,29 +266,8 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
         {.materialRequirementSetHash = collectible.materialRequirementSetHash,
          .collectibleIndex = collectibleIndex,
          .materialRequirementCount = collectible.materialRequirementCount},
+        objectives,
         mutation);
-}
-
-/**
- * Direct grants share quest-state checks but do not charge Collections materials.
- * @param itemDefinitionIndex Item-table row to grant to the selected character.
- * @param mutation Receives a pending grant; prepared is set only on success.
- * @return False when the item, inventory, mapping, or saved quest state is invalid.
- */
-bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
-                                       PendingItemAcquisition& mutation) noexcept {
-    const std::lock_guard lock(investment::store::g_mutex);
-    mutation = {};
-    const AccountState account = bound_account_snapshot();
-    build_data::items::Definition grantedDefinition{};
-    if (!account::valid(account) || !valid_profile_inventory(account)
-        || !build_data::find_item_definition_index(itemDefinitionIndex, grantedDefinition)
-        || grantedDefinition.definitionHash == authored_inventory::kNoDefinitionHash) {
-        return false;
-    }
-
-    return finalize_item_acquisition(
-        account, account, grantedDefinition.definitionHash, false, {.direct = true}, mutation);
 }
 
 /**
@@ -291,7 +300,7 @@ bool reserve_selected_character_inventory_serial(std::int32_t& mutationSerial) n
 namespace runtime::detail {
 
 /**
- * Checks that a prepared insertion still agrees with its Collections row or direct grant.
+ * Checks that a prepared insertion still agrees with its Collections row.
  * @return False when the mutation's shape, its cost fields, or its item no longer hold.
  */
 [[nodiscard]] static bool
@@ -312,18 +321,6 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         || mutation.afterProfileItemCount > authored_inventory::kProfileItemCapacity) {
         return false;
     }
-    if (mutation.directGrant) {
-        build_data::items::Definition definition{};
-        return mutation.collectibleIndex == 0 && mutation.materialRequirementSetHash == 0
-               && mutation.materialRequirementCount == 0
-               && same_profile_views(mutation.beforeProfileItems,
-                                     mutation.expectedProfileItemCount,
-                                     mutation.afterProfileItems,
-                                     mutation.afterProfileItemCount)
-               && build_data::find_item_definition_hash(mutation.acquiredDefinitionHash,
-                                                        definition);
-    }
-
     if (mutation.collectibleIndex == build_data::collectibles::kNoCollectibleIndex) {
         // The guard is that prepare and commit agree. Without a collectible they agree on there
         // being none, which means both cost fields must still be clear.
@@ -547,7 +544,6 @@ finalize_profile_item_acquisition(const AccountState& account,
     mutation.materialRequirementCount = source.materialRequirementCount;
     mutation.actionSource = actionSource;
     mutation.appended = appended;
-    mutation.directGrant = source.direct;
     mutation.prepared = true;
     if (valid_profile_mutation_shape(mutation)) {
         return true;
@@ -611,31 +607,6 @@ bool prepare_profile_item_acquisition(
          .collectibleIndex = collectibleIndex,
          .materialRequirementCount = collectible.materialRequirementCount},
         mutation);
-}
-
-/** Prepares one direct profile-stack grant, with no Collections row or material charge. */
-bool prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
-                                               std::int32_t quantity,
-                                               PendingProfileItemAcquisition& mutation) noexcept {
-    mutation = {};
-    const AccountState account = bound_account_snapshot();
-    build_data::items::Definition item{};
-    item_details::Definition detail{};
-    if (quantity <= 0 || !account::valid(account) || !valid_profile_inventory(account)
-        || !resolve_profile_item(itemDefinitionIndex, item, detail)) {
-        return false;
-    }
-    const bool actionSource =
-        build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
-
-    return finalize_profile_item_acquisition(account,
-                                             account,
-                                             item.definitionHash,
-                                             detail,
-                                             actionSource,
-                                             quantity,
-                                             {.direct = true},
-                                             mutation);
 }
 
 /** Produces the exact account after-image while the captured profile view is still current. */

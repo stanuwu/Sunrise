@@ -70,6 +70,7 @@ bool payload_checksum(records::Domains domains, std::uint64_t& checksum) noexcep
            && checksum_domain<records::CollectibleRecord>(domains.collectibles, checksum)
            && checksum_domain<records::MaterialRequirementSetRecord>(
                domains.materialRequirementSets, checksum)
+           && checksum_domain<records::CurrencyScalarRecord>(domains.currencyScalars, checksum)
            && checksum_domain<records::ItemDetailRecord>(domains.itemDetails, checksum)
            && checksum_domain<records::SocketPlugRuleRecord>(domains.socketPlugRules, checksum)
            && checksum_domain<records::SocketPlugPoolRecord>(domains.socketPlugPools, checksum)
@@ -94,6 +95,8 @@ bool payload_checksum(records::Domains domains, std::uint64_t& checksum) noexcep
            && checksum_domain<records::VendorSaleRowRecord>(domains.vendorSaleRows, checksum)
            && checksum_domain<records::VendorInstalledRowRecord>(domains.vendorInstalledRows,
                                                                  checksum)
+           && checksum_domain<records::VendorTransferRuleRecord>(domains.vendorTransferRules,
+                                                                 checksum)
            && checksum_domain<records::PositionProfileRecord>(domains.positionProfiles, checksum)
            && checksum_domain<records::ObjectTypeRecord>(domains.objectTypes, checksum)
            && checksum_domain<records::RecordObjectiveRecord>(domains.recordObjectives, checksum)
@@ -109,7 +112,15 @@ bool payload_checksum(records::Domains domains, std::uint64_t& checksum) noexcep
                                                                 checksum)
            && checksum_domain<records::RewardModifierRecord>(domains.rewardModifiers, checksum)
            && checksum_domain<records::RewardSocketOverrideRecord>(domains.rewardSockets, checksum)
-           && checksum_domain<records::StarterSetRecord>(domains.starterSets, checksum);
+           && checksum_domain<records::ObjectiveRecord>(domains.objectives, checksum)
+           && checksum_domain<records::RewardInstructionRecord>(domains.objectiveInstructions,
+                                                                checksum)
+           && checksum_domain<records::PursuitRecord>(domains.pursuits, checksum)
+           && checksum_domain<records::StarterSetRecord>(domains.starterSets, checksum)
+           && checksum_domain<records::PlugInsertionRuleRecord>(domains.plugInsertionRules,
+                                                                checksum)
+           && checksum_domain<records::EnemyRaceRecord>(domains.enemyRaces, checksum)
+           && checksum_domain<records::LabelGroupRecord>(domains.labelGroups, checksum);
 }
 
 /** Writes every array in the same order used by the payload checksum. */
@@ -119,6 +130,7 @@ bool write_payload(HANDLE file, records::Domains domains) noexcept {
            && write_domain<records::CollectibleRecord>(file, domains.collectibles)
            && write_domain<records::MaterialRequirementSetRecord>(file,
                                                                   domains.materialRequirementSets)
+           && write_domain<records::CurrencyScalarRecord>(file, domains.currencyScalars)
            && write_domain<records::ItemDetailRecord>(file, domains.itemDetails)
            && write_domain<records::SocketPlugRuleRecord>(file, domains.socketPlugRules)
            && write_domain<records::SocketPlugPoolRecord>(file, domains.socketPlugPools)
@@ -142,6 +154,7 @@ bool write_payload(HANDLE file, records::Domains domains) noexcept {
            && write_domain<records::VendorDefinitionRecord>(file, domains.vendorDefinitions)
            && write_domain<records::VendorSaleRowRecord>(file, domains.vendorSaleRows)
            && write_domain<records::VendorInstalledRowRecord>(file, domains.vendorInstalledRows)
+           && write_domain<records::VendorTransferRuleRecord>(file, domains.vendorTransferRules)
            && write_domain<records::PositionProfileRecord>(file, domains.positionProfiles)
            && write_domain<records::ObjectTypeRecord>(file, domains.objectTypes)
            && write_domain<records::RecordObjectiveRecord>(file, domains.recordObjectives)
@@ -156,7 +169,13 @@ bool write_payload(HANDLE file, records::Domains domains) noexcept {
            && write_domain<records::RewardInstructionRecord>(file, domains.rewardInstructions)
            && write_domain<records::RewardModifierRecord>(file, domains.rewardModifiers)
            && write_domain<records::RewardSocketOverrideRecord>(file, domains.rewardSockets)
-           && write_domain<records::StarterSetRecord>(file, domains.starterSets);
+           && write_domain<records::ObjectiveRecord>(file, domains.objectives)
+           && write_domain<records::RewardInstructionRecord>(file, domains.objectiveInstructions)
+           && write_domain<records::PursuitRecord>(file, domains.pursuits)
+           && write_domain<records::StarterSetRecord>(file, domains.starterSets)
+           && write_domain<records::PlugInsertionRuleRecord>(file, domains.plugInsertionRules)
+           && write_domain<records::EnemyRaceRecord>(file, domains.enemyRaces)
+           && write_domain<records::LabelGroupRecord>(file, domains.labelGroups);
 }
 
 } // namespace sunrise::state::build_data::cache::writer

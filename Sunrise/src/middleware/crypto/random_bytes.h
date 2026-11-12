@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 
 namespace sunrise::middleware::crypto::random {
@@ -12,5 +13,10 @@ namespace sunrise::middleware::crypto::random {
  * @return True when Windows produced every byte.
  */
 [[nodiscard]] bool fill(std::span<std::byte> output) noexcept;
+
+/** Draws one 64-bit seed from system randomness. @return False when Windows refused. */
+[[nodiscard]] inline bool draw_seed(std::uint64_t& seed) noexcept {
+    return fill(std::as_writable_bytes(std::span(&seed, 1)));
+}
 
 } // namespace sunrise::middleware::crypto::random

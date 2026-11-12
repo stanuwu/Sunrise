@@ -191,6 +191,18 @@ inline const build_data::scriptables::Snapshot* GeneratedWorldView::snapshot() c
                                     std::int32_t effectiveRegion,
                                     bool& isPublic) noexcept;
 
+/**
+ * Reads the name of the bubble one effective region belongs to.
+ * A bubble's name is unique only inside its scenario.
+ * @param view Exact generated-world binding for the selected activity.
+ * @param effectiveRegion Package slice-set index plus state ordinal.
+ * @param nameHash Receives the owning bubble's name hash, or zero.
+ * @return True when exactly one state owns the effective region and its bubble is named.
+ */
+[[nodiscard]] bool region_bubble_name(const GeneratedWorldView& view,
+                                      std::int32_t effectiveRegion,
+                                      std::uint32_t& nameHash) noexcept;
+
 /** Resolves the exact live-content shard selected by one canonical activity SDK view. */
 [[nodiscard]] BindStatus resolve(const activity_sdk::BoundView& activitySdkView,
                                  GeneratedWorldView& output) noexcept;

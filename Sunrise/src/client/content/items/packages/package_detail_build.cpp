@@ -4,6 +4,9 @@
 #include <optional>
 
 #include "../../../../middleware/content/packages/schema/generated/tag_classes_808075.h"
+#include "../../../../middleware/content/packages/schema/generated/tag_classes_80807c.h"
+#include "../../../../middleware/content/packages/tables/field_reader.h"
+#include "../../../../middleware/content/packages/tables/reward_table.h"
 #include "../../../../state/account/account_state.h"
 #include "../../../../state/runtime/runtime.h"
 #include "internal.h"
@@ -253,6 +256,68 @@ bool read_investment_constants(const reader::Source& source,
     }
     output.extracted = output.weaponPowerStatRow < state::build_data::constants::kStatRowCount;
     return output.extracted;
+}
+
+/** Finds the character value-block row holding one unlock value: its slot by hash, then its row. */
+bool read_character_value_row(const reader::Source& source,
+                              reader::Scratch& scratch,
+                              std::span<const std::byte> root,
+                              std::vector<std::byte>& blob,
+                              std::uint32_t valueHash,
+                              std::uint16_t& row) noexcept {
+    using Binding = generated::UnlockValueBinding;
+    using MapRow = generated::UnlockValueMapRow;
+    row = state::build_data::constants::kUnboundValueRow;
+    std::uint32_t tag = 0;
+    tables::Array bindings{};
+    if (!tables::slot_tag(root, tables::rewards::RootSlots::kValueSlots, tag) || tag == 0
+        || !reader::read_tag(source, scratch, tag, blob)
+        || !tables::read_array(blob,
+                               offsetof(generated::UnlockValueTable, table),
+                               Binding::kClass,
+                               sizeof(Binding),
+                               bindings)) {
+        return false;
+    }
+    std::size_t slot = 0;
+    std::uint32_t hash = 0;
+    for (; slot < bindings.count; ++slot) {
+        if (!tables::read(blob,
+                          bindings.dataOffset + slot * sizeof(Binding)
+                              + offsetof(Binding, unlockHash),
+                          hash)) {
+            return false;
+        }
+        if (hash == valueHash) {
+            break;
+        }
+    }
+    tables::Array rows{};
+    if (slot == bindings.count || !tables::slot_tag(root, tables::kUnlockValueMapTableSlot, tag)
+        || tag == 0 || !reader::read_tag(source, scratch, tag, blob)
+        || !tables::read_array(blob,
+                               tables::kCharacterBlockValueMapDescriptor,
+                               MapRow::kClass,
+                               sizeof(MapRow),
+                               rows)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < rows.count
+                                && index < state::build_data::constants::kCharacterValueRowCount;
+         ++index) {
+        std::int16_t destination = 0;
+        if (!tables::read(blob,
+                          rows.dataOffset + index * sizeof(MapRow)
+                              + offsetof(MapRow, destinationSlot),
+                          destination)) {
+            return false;
+        }
+        if (destination >= 0 && static_cast<std::size_t>(destination) == slot) {
+            row = static_cast<std::uint16_t>(index);
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace sunrise::client::content::items::packages

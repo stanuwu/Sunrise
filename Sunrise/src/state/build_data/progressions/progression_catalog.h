@@ -40,6 +40,14 @@ void clear() noexcept;
 steps(std::uint16_t definitionIndex, std::span<Step> output, std::size_t& count) noexcept;
 
 /**
+ * Finds one progression by its definition hash.
+ * @param definitionHash Native progression definition hash.
+ * @param output Receives the row; reset when no row carries the hash.
+ * @return True when the domain holds a row with that hash.
+ */
+[[nodiscard]] bool find(std::uint32_t definitionHash, Definition& output) noexcept;
+
+/**
  * Copies the whole flat step bank.
  * @param output Caller-owned fixed row storage.
  * @param count Receives the copied row count, or zero when output is too small.

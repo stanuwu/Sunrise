@@ -12,15 +12,19 @@
 #include "bounties/bounty_catalog.h"
 #include "cache/internal.h"
 #include "collectibles/collectible_catalog.h"
+#include "combat/combat_catalog.h"
 #include "constants/investment_constant_catalog.h"
 #include "hash_names/hash_name_catalog.h"
 #include "inventory/buckets/inventory_bucket_catalog.h"
 #include "items/catalysts/exotic_catalyst_catalog.h"
 #include "items/details/item_detail_catalog.h"
+#include "items/insertion_rules/insertion_rule_catalog.h"
 #include "items/socket_plugs/socket_plug_catalog.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "nodes/node_catalog.h"
+#include "objectives/objective_catalog.h"
 #include "progressions/progression_catalog.h"
+#include "pursuits/pursuit_catalog.h"
 #include "records/record_catalog.h"
 #include "rewards/reward_catalog.h"
 #include "runtime.h"
@@ -50,6 +54,11 @@ std::uint64_t g_contentHash{};
 
 void bind_content(std::uint64_t contentHash) noexcept {
     g_contentHash = contentHash;
+}
+
+/** @return The content hash bound at boot, or zero when none was. */
+std::uint64_t content_hash() noexcept {
+    return g_contentHash;
 }
 
 /** Loads one full cache, or leaves every domain ready for first-boot extraction. */
@@ -116,6 +125,28 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     const bool catalystCatalogAvailable = !domains.exoticCatalysts.empty();
     const bool catalystsReplaced =
         !catalystCatalogAvailable || items::catalysts::replace(domains.exoticCatalysts);
+    // A cache with no objective table records a build whose pursuit catalog is unsupported.
+    bool pursuitsReplaced = true;
+    if (domains.objectives.empty()) {
+        pursuits::settle_unsupported();
+    } else {
+        pursuitsReplaced = objectives::replace({domains.objectives, domains.objectiveInstructions})
+                           && pursuits::replace(domains.pursuits, domains.objectives.size());
+    }
+    // A cache with no insertion rules records a build whose rule list is unsupported.
+    bool insertionRulesReplaced = true;
+    if (domains.plugInsertionRules.empty()) {
+        items::insertion_rules::settle_unsupported();
+    } else {
+        insertionRulesReplaced = items::insertion_rules::replace(domains.plugInsertionRules);
+    }
+    // A cache with no race table records a build whose combat taxonomy is unsupported.
+    bool combatReplaced = true;
+    if (domains.enemyRaces.empty()) {
+        combat::settle_unsupported();
+    } else {
+        combatReplaced = combat::replace(domains.enemyRaces, domains.labelGroups);
+    }
     // A checked cache with no reward pools records a refused reward graph.
     const bool rewardsCached = !domains.rewardPools.empty();
     const constants::InvestmentConstants cachedConstants{
@@ -123,6 +154,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         domains.constants.lightStatRow,
         domains.constants.weaponPowerStatRow,
         domains.constants.characterStatRows,
+        domains.constants.synthesizerTierValueRow,
     };
     if (!constants::replace(cachedConstants) || !content::replace(domains.named) || !content::seal()
         || !items::replace(domains.items) || !collectibles::replace(domains.collectibles)
@@ -133,7 +165,8 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
                                   domains.rewardInstructions,
                                   domains.rewardModifiers,
                                   domains.rewardSockets}))
-        || !material_requirements::replace(domains.materialRequirementSets)
+        || !pursuitsReplaced || !insertionRulesReplaced || !combatReplaced
+        || !material_requirements::replace(domains.materialRequirementSets, domains.currencyScalars)
         || !inventory::buckets::replace(domains.inventoryBuckets)
         || !socket_entry_lists::replace(domains.socketEntryLists)
         // The per-entry tables are what the subclass selection reads. Without them a cache hit
@@ -166,7 +199,8 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
             && !vendors::replace(domains.vendorIndex,
                                  domains.vendorDefinitions,
                                  domains.vendorSaleRows,
-                                 domains.vendorInstalledRows))
+                                 domains.vendorInstalledRows,
+                                 domains.vendorTransferRules))
         || !hash_names::replace(domains.hashNames)
         || !gameplay::entity_position_profiles::restore(domains.positionProfiles,
                                                         domains.positionFingerprint)

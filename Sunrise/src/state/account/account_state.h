@@ -135,6 +135,26 @@ class_ability_bucket(CharacterClass characterClass) noexcept {
     }
 }
 
+/** Gambit Prime roles, in the order the reward tables list them. */
+enum class GambitPrimeRole : std::uint8_t {
+    reaper,
+    invader,
+    collector,
+    sentry,
+};
+
+/** Number of Gambit Prime roles. */
+inline constexpr std::size_t kGambitPrimeRoleCount =
+    static_cast<std::size_t>(GambitPrimeRole::sentry) + 1;
+
+/** The highest Gambit Prime helmet tier a character has earned in one role. */
+enum class GambitPrimeHelmetTier : std::uint8_t {
+    none,
+    illicit,
+    outlawed,
+    notorious,
+};
+
 /** Authored state for one playable character slot. */
 struct CharacterState {
     std::uint64_t soid{};
@@ -176,6 +196,8 @@ struct CharacterState {
     std::uint32_t nextInventorySerial{};
     /** Appearance header the save holds for this character. It fits only its own `race`. */
     AppearanceHeader appearanceHeader{};
+    /** Each role's helmet tier earned from Gambit Prime role bounties; a bounty pays the next. */
+    std::array<GambitPrimeHelmetTier, kGambitPrimeRoleCount> gambitPrimeHelmetTiers{};
 };
 
 /** Call-local account snapshot shared by backend object families. */
@@ -197,6 +219,24 @@ struct AccountState {
     account::settings::AccountSettings settings;
 };
 
+/** Request chains hold several accounts by value, so a capacity cannot grow one past 256 KiB. */
+inline constexpr std::size_t kAccountStateSizeLimit = std::size_t{256} * 1024;
+static_assert(sizeof(AccountState) <= kAccountStateSizeLimit);
+
+/** One character's key, class and selection, read without the rest of its saved state. */
+struct CharacterIdentity {
+    std::uint64_t soid{};
+    CharacterClass characterClass{CharacterClass::titan};
+    bool selected{};
+};
+
+/** The account key and its characters' identities, read without inventory or settings. */
+struct AccountIdentity {
+    std::uint64_t primarySoid{};
+    std::array<CharacterIdentity, kCharacterCapacity> characters{};
+    std::size_t characterCount{};
+};
+
 namespace account {
 
 [[nodiscard]] bool valid(const AccountState& state) noexcept;
@@ -205,6 +245,15 @@ namespace account {
 [[nodiscard]] bool valid_public(const AccountState& state) noexcept;
 
 [[nodiscard]] std::uint64_t selected_character_soid(const AccountState& state) noexcept;
+
+/** @return The selected character's nonzero SOID, or zero when none is selected. */
+[[nodiscard]] std::uint64_t selected_character_soid(const AccountIdentity& identity) noexcept;
+
+/** @return The selected character, or null when none is selected. */
+[[nodiscard]] const CharacterState* selected_character(const AccountState& state) noexcept;
+
+/** @return The selected character's identity, or null when none is selected. */
+[[nodiscard]] const CharacterIdentity* selected_character(const AccountIdentity& identity) noexcept;
 
 /**
  * Reports the character the family-zero banner pair names.

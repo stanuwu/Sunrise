@@ -24,6 +24,7 @@
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/build_data/season_pass/definition.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "package_pursuit_build.h"
 #include "package_reward_build.h"
 
 namespace sunrise::client::content::items::packages {
@@ -68,6 +69,11 @@ static_assert(kUnmappedSlot == state::build_data::records::kUnavailableValueInde
 static_assert(kUnmappedSlot == state::build_data::season_pass::kUnavailableFlagIndex);
 static_assert(kUnmappedSlot
               == state::build_data::items::catalysts::kUnavailableCompletionFlagIndex);
+static_assert(kUnmappedSlot == state::build_data::items::kUnavailableValueIndex);
+static_assert(kUnmappedSlot == state::build_data::items::kUnavailableFlagIndex);
+static_assert(kUnmappedSlot == state::build_data::items::insertion_rules::kUnavailableFlagIndex);
+static_assert(kUnmappedSlot == state::build_data::material_requirements::kUnavailableValueIndex);
+static_assert(kUnmappedSlot == state::build_data::constants::kUnboundValueRow);
 
 /** Bank index per unlock slot, indexed by slot. The first mapping row of a slot wins. */
 using SlotMap = std::array<std::uint16_t, kSlotSpace>;
@@ -88,6 +94,8 @@ struct Storage {
     SlotMaps slotMaps{};
     /** Reward pools, wrappers and condition tables read alongside the item walk. */
     RewardBuild rewardBuild{};
+    /** Pursuit completion contracts, collected during the same item walk. */
+    PursuitBuild pursuitBuild{};
     /** Node rows held until the value slot and owned records are resolved. */
     std::array<state::build_data::nodes::Definition, state::build_data::nodes::kDefinitionCapacity>
         nodeRows{};
@@ -124,6 +132,14 @@ struct Storage {
     std::vector<std::byte> questValueMap{};
     /** Shared reusable/randomized plug-set table read from investment-root slot 51. */
     std::vector<std::byte> plugSetTable{};
+    /** Account flag row the plug sets offering each item require set, by item-table index. */
+    std::vector<std::uint16_t> plugSetFlagIndices{};
+    /** Insertion rules of the plugs walked so far, in item-table order. */
+    std::vector<state::build_data::items::insertion_rules::Rule> insertionRules{};
+    /** Plugs that declared rules so far. A plug past the rule rows is counted, not kept. */
+    std::size_t insertionRuleCount{};
+    /** Item rows the installed restricted-grant list names, by item-table index. */
+    std::vector<bool> restrictedGrants{};
     /** Dense item-indexed catalyst completion expressions for this package pass. */
     std::vector<state::build_data::items::catalysts::CompletionCondition>
         catalystCompletionConditions{};
@@ -174,6 +190,10 @@ struct Storage {
     std::array<state::build_data::material_requirements::Definition,
                state::build_data::material_requirements::kDefinitionCapacity>
         materialRequirementRows{};
+    /** Socket-type currency scalars, published with the requirement sets they multiply. */
+    std::array<state::build_data::material_requirements::CurrencyScalar,
+               state::build_data::material_requirements::kCurrencyScalarCapacity>
+        currencyScalarRows{};
     std::array<state::build_data::items::Definition, state::build_data::items::kDefinitionCapacity>
         rows{};
     /** Incident-target rows held until the sobject table is published. */
@@ -209,6 +229,15 @@ struct Storage {
 
 /** @return True when the reward graph is published or can never be. */
 [[nodiscard]] bool reward_definitions_settled() noexcept;
+
+/** @return True when the pursuit contracts are published or can never be. */
+[[nodiscard]] bool pursuit_catalog_settled() noexcept;
+
+/** @return True when the plug insertion rules are published or can never be. */
+[[nodiscard]] bool plug_insertion_rules_settled() noexcept;
+
+/** @return True when the combat taxonomy is published or can never be. */
+[[nodiscard]] bool combat_taxonomy_settled() noexcept;
 
 /** Adds one native definition index to the deduplicated request set. */
 void request(std::uint16_t definitionIndex, DetailRequests& requested) noexcept;
@@ -263,6 +292,35 @@ read_investment_constants(const reader::Source& source,
                           std::span<const std::byte> root,
                           std::vector<std::byte>& blob,
                           state::build_data::constants::InvestmentConstants& output) noexcept;
+
+/**
+ * Finds the row of each character's value block in the account object that holds one unlock
+ * value: the value table names the value's slot by hash, and the fourth value map names the row
+ * by slot.
+ * @param blob Scratch storage for the value table and the value maps.
+ * @param row Receives the row, or the unbound row on failure.
+ * @return False when a table does not read or no row holds the value.
+ */
+[[nodiscard]] bool read_character_value_row(const reader::Source& source,
+                                            reader::Scratch& scratch,
+                                            std::span<const std::byte> root,
+                                            std::vector<std::byte>& blob,
+                                            std::uint32_t valueHash,
+                                            std::uint16_t& row) noexcept;
+
+/**
+ * Reads and publishes the race of every actor class and the members of every combat label group.
+ * @param source Package source.
+ * @param scratch Reader scratch.
+ * @param root Investment root bytes.
+ * @param blob Scratch storage for each table blob.
+ * @return False when a table does not read or the publish fails, which a later slice retries, or
+ *         when the installed data refuses a table, which settles the taxonomy unsupported.
+ */
+[[nodiscard]] bool build_combat_taxonomy(const reader::Source& source,
+                                         reader::Scratch& scratch,
+                                         std::span<const std::byte> root,
+                                         std::vector<std::byte>& blob) noexcept;
 
 /**
  * Reads and publishes the new-character table: per class, the items a new character gets.
@@ -523,7 +581,10 @@ void report(std::size_t published, const char* reason) noexcept;
                                    std::size_t& rowCount,
                                    const char*& reason) noexcept;
 
-/** Reads and publishes every native material-requirement set from investment-root slot 96. */
+/**
+ * Reads and publishes every native material-requirement set from investment-root slot 96, with
+ * the currency scalars the socket-type table declares for them.
+ */
 [[nodiscard]] bool build_material_requirements(const reader::Source& source,
                                                Storage& storage,
                                                std::span<const std::byte> root,

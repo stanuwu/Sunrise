@@ -9,16 +9,20 @@
 #include "../../../gameplay/external/entity_position_profiles.h"
 #include "../../abilities/definition.h"
 #include "../../collectibles/collectible_catalog.h"
+#include "../../combat/definition.h"
 #include "../../constants/definition.h"
 #include "../../definition.h"
 #include "../../hash_names/definition.h"
 #include "../../items/catalysts/definition.h"
 #include "../../items/details/definition.h"
+#include "../../items/insertion_rules/definition.h"
 #include "../../items/item_catalog.h"
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/definition.h"
+#include "../../objectives/definition.h"
 #include "../../progressions/definition.h"
+#include "../../pursuits/definition.h"
 #include "../../records/definition.h"
 #include "../../rewards/definition.h"
 #include "../../scenarios/definition.h"
@@ -33,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 77;
+inline constexpr std::uint32_t kCacheFormatVersion = 93;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -61,6 +65,8 @@ struct InvestmentConstants {
     std::array<std::uint8_t, constants::kCharacterStatRowCount> characterStatRows{};
     /** One when the constants blob was read, zero when the domain has never been extracted. */
     std::uint8_t extracted{};
+    /** Row of each character's value block that holds the Synthesizer tier, or unbound. */
+    std::uint16_t synthesizerTierValueRow{constants::kUnboundValueRow};
 };
 
 /** Fixed header preceding every record array. */
@@ -75,6 +81,7 @@ struct Header {
     std::uint32_t itemCount{};
     std::uint32_t collectibleCount{};
     std::uint32_t materialRequirementSetCount{};
+    std::uint32_t currencyScalarCount{};
     std::uint32_t itemDetailCount{};
     std::uint32_t socketPlugRuleCount{};
     std::uint32_t socketPlugPoolCount{};
@@ -98,6 +105,7 @@ struct Header {
     std::uint32_t vendorDefinitionCount{};
     std::uint32_t vendorSaleRowCount{};
     std::uint32_t vendorInstalledRowCount{};
+    std::uint32_t vendorTransferRuleCount{};
     std::uint32_t positionProfileCount{};
     std::uint32_t objectTypeCount{};
     std::uint32_t recordObjectiveCount{};
@@ -112,7 +120,13 @@ struct Header {
     std::uint32_t rewardInstructionCount{};
     std::uint32_t rewardModifierCount{};
     std::uint32_t rewardSocketCount{};
+    std::uint32_t objectiveCount{};
+    std::uint32_t objectiveInstructionCount{};
+    std::uint32_t pursuitCount{};
     std::uint32_t starterSetCount{};
+    std::uint32_t plugInsertionRuleCount{};
+    std::uint32_t enemyRaceCount{};
+    std::uint32_t labelGroupCount{};
     gameplay::entity_position_profiles::Fingerprint positionFingerprint{};
     InvestmentConstants constants{};
     std::uint64_t payloadChecksum{};
@@ -162,6 +176,22 @@ struct ItemRecord {
     std::int32_t questInitialValue{};
     std::uint16_t questValueRow{};
     std::uint8_t questValueScope{};
+    std::uint8_t recoveryBucketId{items::kUnresolvedBucketId};
+    /** 0 or 1. */
+    std::uint8_t quietAcquisition{};
+    /** 0 or 1. */
+    std::uint8_t toastlessAcquisition{};
+    std::uint32_t stackUniqueLabel{items::kNoStackUniqueLabel};
+    /** 0 or 1. */
+    std::uint8_t grantRestricted{};
+    std::uint16_t quantityValueIndex{items::kUnavailableValueIndex};
+    std::uint16_t plugSetFlagIndex{items::kUnavailableFlagIndex};
+    std::uint8_t presenceFlagCount{};
+    std::array<std::uint16_t, items::kPresenceFlagCapacity> presenceFlags{};
+    /** 0 or 1. */
+    std::uint8_t consumesWholeStack{};
+    /** 0 or 1. */
+    std::uint8_t deletesOnAction{};
 };
 
 /** Disk form of one material charged by a native Collections acquisition. */
@@ -171,6 +201,8 @@ struct MaterialRequirementRecord {
     std::uint16_t condition{material_requirements::kUnconditionalRequirement};
     std::uint8_t deleteOnAction{};
     std::uint8_t omitFromRequirements{};
+    /** Account value row a value-slot row counts; a Collections row has none. */
+    std::uint16_t valueIndex{material_requirements::kUnavailableValueIndex};
 };
 
 /** Disk form of one native collectible ordinal, item link, and installed acquisition cost. */
@@ -199,6 +231,13 @@ struct MaterialRequirementSetRecord {
     std::uint8_t reserved{};
     std::array<MaterialRequirementRecord, material_requirements::kRequirementCapacity>
         requirements{};
+};
+
+/** Disk form of one socket type's currency scalar. */
+struct CurrencyScalarRecord {
+    std::uint16_t socketType{};
+    std::uint16_t itemDefinitionIndex{material_requirements::kUnavailableItemDefinitionIndex};
+    std::uint32_t multiplier{};
 };
 
 /** Disk form of the supported item fields instance generation uses. */
@@ -279,7 +318,7 @@ struct InventoryBucketRecord {
     std::uint16_t firstSlot{};
     std::uint16_t slotCount{};
     std::int8_t equipmentSlot{inventory::buckets::kUnavailableEquipmentSlot};
-    std::uint8_t reserved{};
+    std::uint8_t policyFlags{};
 };
 
 /** Disk form of the buckets one subclass publishes under one ability selection. */
@@ -304,6 +343,7 @@ struct ProgressionRecord {
     std::uint16_t stepOffset{};
     std::uint8_t stepCount{};
     std::uint8_t scope{};
+    std::uint32_t definitionHash{};
 };
 
 /** Disk form of one progression rank step. */
@@ -342,6 +382,32 @@ struct SeasonPassRewardRecord {
     std::uint8_t conditionCount{};
     /** Must be zero, so the packed reward row always matches. */
     std::array<std::uint8_t, 3> reserved{};
+};
+
+/** Disk form of one plug's bound insertion rules. */
+struct PlugInsertionRuleRecord {
+    std::uint16_t plugDefinitionIndex{};
+    std::uint16_t requiredFlagIndex{items::insertion_rules::kUnavailableFlagIndex};
+    std::array<RewardInstructionRecord, items::insertion_rules::kConditionCapacity> condition{};
+    std::uint8_t conditionCount{};
+    /** 0 or 1. */
+    std::uint8_t readable{};
+    /** Must be zero, so the packed rule row always matches. */
+    std::array<std::uint8_t, 2> reserved{};
+};
+
+/** Disk form of one actor class's race. */
+struct EnemyRaceRecord {
+    std::uint32_t classHash{};
+    std::uint8_t race{};
+    /** Must be zero, so the packed race row always matches. */
+    std::array<std::uint8_t, 3> reserved{};
+};
+
+/** Disk form of one combat label's membership in one group. */
+struct LabelGroupRecord {
+    std::uint32_t groupHash{};
+    std::uint32_t labelHash{};
 };
 
 /** Disk form of one repeatable bounty and the item-type its pool is keyed by. */
@@ -567,12 +633,14 @@ struct VendorDefinitionRecord {
     std::uint32_t interactionRowClass{};
     std::uint32_t saleRowOffset{};
     std::uint32_t installedRowOffset{};
+    std::uint32_t transferRuleOffset{};
     std::uint32_t resetIntervalRaw{};
     std::uint32_t resetPhaseRaw{};
     std::uint16_t index{};
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t interactionCount{};
+    std::uint16_t transferRuleCount{};
 };
 
 /** Disk form of one cost entry of a vendor sale row. */
@@ -589,16 +657,24 @@ struct VendorSaleRowRecord {
     std::array<VendorSaleCostRecord, vendors::kSaleCostCapacity> costs{};
     std::uint16_t itemIndex{};
     std::uint16_t secondaryItemIndex{};
+    std::array<RewardInstructionRecord, vendors::kAvailabilityCapacity> availability{};
     std::uint8_t costCount{};
     /** `vendors::PriceState`, stored as its underlying value. */
     std::uint8_t priceState{};
-    /** Must be zero, so the packed sale row always matches. */
-    std::array<std::uint8_t, 2> reserved{};
+    std::uint8_t availabilityCount{};
+    /** 0 or 1. */
+    std::uint8_t availabilityUnreadable{};
 };
 
 /** Disk form of one vendor category row. */
 struct VendorInstalledRowRecord {
     std::uint32_t definitionHash{};
+};
+
+/** Disk form of one vendor transfer rule. */
+struct VendorTransferRuleRecord {
+    std::uint8_t sourceBucket{};
+    std::uint8_t destinationBucket{};
 };
 
 /** Disk form of one roster group object and its slots. */
@@ -661,6 +737,69 @@ struct RewardModifierRecord {
     float value{};
 };
 
+/** Disk form of one objective row. Both programs are ranges of the objective instruction bank. */
+struct ObjectiveRecord {
+    std::uint32_t definitionHash{};
+    std::int32_t completionValue{};
+    std::uint16_t definitionIndex{};
+    std::uint8_t optional{};
+    std::uint8_t countsDown{};
+    std::uint8_t adjustmentReadable{};
+    std::uint8_t readable{};
+    RewardRangeRecord targetAdjustment{};
+    RewardRangeRecord expression{};
+    std::uint16_t itemValueSlot{objectives::kNoItemValueSlot};
+    std::uint8_t itemValueMode{};
+};
+
+/** Disk form of one reward row a pursuit shows. Condition slots past conditionCount are zero. */
+struct PursuitRewardRecord {
+    std::int32_t quantity{};
+    std::uint16_t itemIndex{pursuits::kAbsent};
+    std::uint16_t conditionIndex{pursuits::kAbsent};
+    std::array<RewardInstructionRecord, pursuits::kRewardConditionCapacity> condition{};
+    std::uint8_t conditionCount{};
+    /** 0 or 1. */
+    std::uint8_t conditionUnreadable{};
+};
+
+/** Disk form of one value completing a pursuit sets. */
+struct PursuitCompletionValueRecord {
+    std::uint8_t declared{};
+    std::uint8_t scope{};
+    std::uint16_t row{};
+};
+
+/**
+ * Disk form of one pursuit contract. Objective and item-value slots past their counts are zero,
+ * and reward rows past rewardCount keep their defaults.
+ */
+struct PursuitRecord {
+    std::uint32_t definitionHash{};
+    std::int32_t lifetimeSeconds{};
+    std::uint16_t definitionIndex{};
+    std::uint8_t readable{};
+    std::uint8_t requireAllObjectives{};
+    std::uint8_t requireNonOptionalCompletion{};
+    std::uint8_t objectiveCount{};
+    std::array<std::uint16_t, pursuits::kObjectiveCapacity> objectives{};
+    std::uint8_t itemValueSlotCount{};
+    std::array<std::uint16_t, pursuits::kItemValueCapacity> itemValueSlots{};
+    std::uint8_t rewardsReadable{};
+    std::uint8_t rewardCount{};
+    std::array<PursuitRewardRecord, pursuits::kRewardPreviewCapacity> rewards{};
+    std::uint8_t questMembership{};
+    std::uint8_t questScope{};
+    std::uint16_t questRow{};
+    std::int32_t questValue{};
+    std::uint16_t questSuccessorIndex{pursuits::kAbsent};
+    std::int32_t questSuccessorValue{};
+    std::uint8_t suppressCompletion{};
+    std::uint8_t automaticCompletion{};
+    PursuitCompletionValueRecord completionValue{};
+    PursuitCompletionValueRecord completionContextValue{};
+};
+
 #pragma pack(pop)
 
 static_assert(sizeof(RewardSelectionRecord) == 2 * sizeof(std::uint32_t));
@@ -678,12 +817,28 @@ static_assert(sizeof(RewardSocketOverrideRecord)
               == 4 * sizeof(std::uint16_t) + sizeof(std::uint32_t));
 static_assert(sizeof(RewardInstructionRecord)
               == 2 * sizeof(std::uint8_t) + sizeof(std::uint16_t) + sizeof(std::uint32_t));
+static_assert(sizeof(ObjectiveRecord)
+              == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 5 * sizeof(std::uint8_t)
+                     + 2 * sizeof(RewardRangeRecord));
+static_assert(sizeof(PursuitRewardRecord)
+              == sizeof(std::int32_t) + 2 * sizeof(std::uint16_t)
+                     + pursuits::kRewardConditionCapacity * sizeof(RewardInstructionRecord)
+                     + 2 * sizeof(std::uint8_t));
+static_assert(sizeof(PursuitCompletionValueRecord)
+              == 2 * sizeof(std::uint8_t) + sizeof(std::uint16_t));
+static_assert(sizeof(PursuitRecord)
+              == 4 * sizeof(std::uint32_t) + 3 * sizeof(std::uint16_t) + 11 * sizeof(std::uint8_t)
+                     + (pursuits::kObjectiveCapacity + pursuits::kItemValueCapacity)
+                           * sizeof(std::uint16_t)
+                     + pursuits::kRewardPreviewCapacity * sizeof(PursuitRewardRecord)
+                     + 2 * sizeof(PursuitCompletionValueRecord));
 
 static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
-              == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
+              == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t)
+                     + sizeof(std::uint16_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 45 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 53 * sizeof(std::uint32_t) + 3 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)
                      + sizeof(gameplay::entity_position_profiles::Fingerprint));
 static_assert(sizeof(SpawnPointRecord)
@@ -691,12 +846,15 @@ static_assert(sizeof(SpawnPointRecord)
                      + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorIndexRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorDefinitionRecord)
-              == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));
+              == 15 * sizeof(std::uint32_t) + 5 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorSaleCostRecord) == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorSaleRowRecord)
               == sizeof(std::int32_t) + vendors::kSaleCostCapacity * sizeof(VendorSaleCostRecord)
-                     + 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t));
+                     + 2 * sizeof(std::uint16_t)
+                     + vendors::kAvailabilityCapacity * sizeof(RewardInstructionRecord)
+                     + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorInstalledRowRecord) == sizeof(std::uint32_t));
+static_assert(sizeof(VendorTransferRuleRecord) == 2 * sizeof(std::uint8_t));
 static_assert(sizeof(HashNameRecord)
               == hash_names::kNameLength + sizeof(std::uint32_t) + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(ScenarioRecord)
@@ -721,12 +879,19 @@ static_assert(sizeof(RosterGroupRecord)
               == 2 * sizeof(std::uint32_t) + sizeof(std::uint16_t)
                      + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
-static_assert(sizeof(ProgressionRecord) == 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+static_assert(sizeof(ProgressionRecord)
+              == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(ProgressionStepRecord) == sizeof(std::int32_t));
 static_assert(sizeof(SeasonPassRewardRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
                      + rewards::kSocketsPerItem * sizeof(RewardSocketOverrideRecord)
                      + season_pass::kConditionCapacity * sizeof(RewardInstructionRecord));
+static_assert(sizeof(EnemyRaceRecord) == sizeof(std::uint32_t) + 4 * sizeof(std::uint8_t));
+static_assert(sizeof(LabelGroupRecord) == 2 * sizeof(std::uint32_t));
+static_assert(sizeof(PlugInsertionRuleRecord)
+              == 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t)
+                     + items::insertion_rules::kConditionCapacity
+                           * sizeof(RewardInstructionRecord));
 static_assert(sizeof(BountyRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(StarterSetRecord)
               == 2 * sizeof(std::uint8_t) + starter_sets::kItemCapacity * sizeof(std::uint16_t));
@@ -750,9 +915,11 @@ static_assert(sizeof(NamedRecord)
               == content::kDefinitionNameCapacity + 2 * sizeof(std::uint16_t)
                      + 2 * sizeof(std::uint32_t));
 static_assert(sizeof(ItemRecord)
-              == 3 * sizeof(std::uint32_t) + 6 * sizeof(std::uint16_t) + 3 * sizeof(std::uint8_t));
+              == 4 * sizeof(std::uint32_t)
+                     + (8 + items::kPresenceFlagCapacity) * sizeof(std::uint16_t)
+                     + 10 * sizeof(std::uint8_t));
 static_assert(sizeof(MaterialRequirementRecord)
-              == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+              == sizeof(std::uint32_t) + 3 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(CollectibleRecord)
               == 2 * sizeof(std::uint32_t) + 5 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t)
                      + collectibles::kMaterialRequirementCapacity
@@ -761,6 +928,7 @@ static_assert(sizeof(MaterialRequirementSetRecord)
               == sizeof(std::uint32_t) + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t)
                      + material_requirements::kRequirementCapacity
                            * sizeof(MaterialRequirementRecord));
+static_assert(sizeof(CurrencyScalarRecord) == 2 * sizeof(std::uint16_t) + sizeof(std::uint32_t));
 static_assert(sizeof(ItemDetailRecord)
               == 7 * sizeof(std::uint16_t) + 8 * sizeof(std::uint8_t) + sizeof(std::int32_t)
                      + sizeof(std::uint32_t)

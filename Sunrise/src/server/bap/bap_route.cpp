@@ -52,11 +52,11 @@ std::atomic<InvestmentSliceConsumer> g_investmentSliceConsumer{};
 /** Lifetime of the native item-acquisition flyout, which the hold must outlast. */
 constexpr std::uint64_t kAcquisitionPresentationHoldMs = 8'000;
 
-/** Arms every other active peer after one shared-account transaction is published. */
-void publish_account_mutation(Session& origin) noexcept {
-    origin.accountMutationPublished = false;
-    arm_account_resync_elsewhere(origin);
-}
+/**
+ * Delay before the owed Family-4 character copy. Beside a Family-5 refresh it lets that refresh
+ * land first. The copy owed for an account published without its character waits the same time.
+ */
+constexpr std::uint64_t kArtifactFamily4RefreshDelayMs = 100;
 
 /** @param id Nonzero connection id. @return Matching open session, or null. */
 [[nodiscard]] Session* session_for(std::uint32_t id) noexcept {
@@ -450,6 +450,16 @@ void arm_account_resync_elsewhere(Session& origin) noexcept {
     }
 }
 
+/** Arms every other active peer, and the origin's Family-5 refresh when a held item owes one. */
+void publish_account_mutation(Session& origin) noexcept {
+    origin.accountMutationPublished = false;
+    arm_account_resync_elsewhere(origin);
+    // An armed refresh is built from the saved profile when it is sent, so it needs no second look.
+    if (!origin.artifactRefreshArmed && state::presence_flags_pending()) {
+        arm_artifact_refresh(origin);
+    }
+}
+
 /** Arms every active peer to re-read the account, including the origin. */
 void arm_account_resync_everywhere() noexcept {
     for (auto& peer : g_sessions) {
@@ -458,6 +468,34 @@ void arm_account_resync_everywhere() noexcept {
             continue;
         }
         peer.accountResyncArmed = true;
+    }
+}
+
+/** Queues each item once on every active peer; a full queue resyncs that peer instead. */
+void arm_item_values_refresh_everywhere(std::span<const std::uint64_t> instanceSoids) noexcept {
+    for (auto& peer : g_sessions) {
+        // An armed resync is built from the saved account when it is sent, so it carries the items.
+        if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active
+            || peer.accountResyncArmed) {
+            continue;
+        }
+        for (const std::uint64_t instanceSoid : instanceSoids) {
+            const auto queued =
+                std::span(peer.itemValuesRefreshSoids).first(peer.itemValuesRefreshCount);
+            if (std::find(queued.begin(), queued.end(), instanceSoid) != queued.end()) {
+                continue;
+            }
+            if (queued.size() == peer.itemValuesRefreshSoids.size()) {
+                peer.accountResyncArmed = true;
+                core::log::writef(core::log::Channel::server,
+                                  core::log::Level::warn,
+                                  "ev=queuez stage=item_values_refresh result=fail "
+                                  "reason=queue_full instance=0x%llX",
+                                  static_cast<unsigned long long>(instanceSoid));
+                break;
+            }
+            peer.itemValuesRefreshSoids[peer.itemValuesRefreshCount++] = instanceSoid;
+        }
     }
 }
 
@@ -472,6 +510,27 @@ void arm_acquisition_presentation_hold(Session& session) noexcept {
         (std::max)(session.acquisitionPresentationUntilTick, now + kAcquisitionPresentationHoldMs);
 }
 
+/** Schedules this peer's Family-5 refresh, then its delayed Family-4 character copy. */
+void arm_artifact_refresh(Session& session) noexcept {
+    session.artifactRefreshArmed = true;
+    arm_unlock_character_refresh(session);
+}
+
+/** Schedules this peer's Family-4 character copy alone, after the same delay. */
+void arm_unlock_character_refresh(Session& session) noexcept {
+    session.artifactFamily4RefreshDueTick = GetTickCount64() + kArtifactFamily4RefreshDelayMs;
+    session.artifactFamily4RefreshArmed = true;
+}
+
+/** The family-two member record carries Power, which includes the artifact bonus. */
+void arm_social_roster_repush_everywhere() noexcept {
+    for (auto& peer : g_sessions) {
+        if (peer.socialRosterRepushRoot != 0) {
+            peer.socialRosterRepushArmed = true;
+        }
+    }
+}
+
 /**
  * Grants seasonal XP and queues its HUD notification on the first peer that can show it.
  * @param amount Positive XP to grant.
@@ -482,13 +541,8 @@ bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
     if (amount <= 0 || !state::grant_seasonal_experience(amount)) {
         return false;
     }
-    // The family-two member record carries Power, which includes the artifact bonus.
     if (state::artifact_power_bonus() != previousBonus) {
-        for (auto& peer : g_sessions) {
-            if (peer.socialRosterRepushRoot != 0) {
-                peer.socialRosterRepushArmed = true;
-            }
-        }
+        arm_social_roster_repush_everywhere();
     }
     for (auto& peer : g_sessions) {
         if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active
@@ -815,6 +869,7 @@ bool session_channel(std::uint32_t connectionId,
 void shutdown() noexcept {
     const std::lock_guard lock(g_lock);
     drain_world_rewards();
+    release_investment_operations_locked();
     for (auto& session : g_sessions) {
         const state::ScopedAccount accountScope(session.accountHandle);
         const state::activity::ScopedMemberContext memberScope(session.activity.session.sessionId,

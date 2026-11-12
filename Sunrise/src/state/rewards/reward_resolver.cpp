@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "../build_data/runtime.h"
+#include "../investment/store.h"
 #include "../unlocks/unlocks_expression.h"
 
 namespace sunrise::state::reward_resolution {
@@ -35,6 +36,31 @@ bool refuse(const Context& context, const char* reason) noexcept {
 }
 
 /**
+ * Reads one row from the caller's copy of the saved banks.
+ * @param bank A bank investment::store::saved_bank names for an instruction.
+ * @param index A row the instruction's validation placed inside that bank.
+ * @return The row's value; a flag row reads its stored byte.
+ */
+std::int32_t saved_row(const unlocks::Table& banks,
+                       investment::store::Bank bank,
+                       std::uint32_t index) noexcept {
+    switch (bank) {
+    case investment::store::Bank::accountFlags:
+        return banks.accountFlags[index];
+    case investment::store::Bank::profileFlags:
+        return banks.profileFlags[index];
+    case investment::store::Bank::objectiveValues:
+        return banks.objectiveValues[index];
+    case investment::store::Bank::characterObjectFlags:
+        return banks.characterObjectFlags[index];
+    case investment::store::Bank::characterObjectValues:
+        return banks.characterObjectValues[index];
+    default:
+        return 0;
+    }
+}
+
+/**
  * Reads one validated flag from the caller's unlock banks or selected character.
  * A flag this draw already acquired reads as set before any bank is saved.
  * @param raw The ConditionInputs of the evaluation.
@@ -45,23 +71,18 @@ bool read_flag(const void* raw, const unlocks::Instruction& instruction, bool& s
     const auto& inputs = *static_cast<const ConditionInputs*>(raw);
     const auto& context = inputs.context;
     const auto index = instruction.operand;
-    switch (instruction.bank) {
-    case unlocks::Bank::account:
-        set = (inputs.acquiredFlags != nullptr && (*inputs.acquiredFlags)[index])
-              || context.unlocks.accountFlags[index] == unlocks::kFlagSet;
-        return true;
-    case unlocks::Bank::profile:
-        set = context.unlocks.profileFlags[index] == unlocks::kFlagSet;
-        return true;
-    case unlocks::Bank::character:
-        set = context.unlocks.characterObjectFlags[index] == unlocks::kFlagSet;
-        return true;
-    case unlocks::Bank::characterClass:
+    if (instruction.bank == unlocks::Bank::characterClass) {
         set = index == static_cast<std::uint32_t>(context.characterClass);
         return true;
-    default:
+    }
+    investment::store::Bank bank{};
+    if (!investment::store::saved_bank(instruction.bank, true, bank)) {
         return false;
     }
+    const bool acquired = bank == investment::store::Bank::accountFlags
+                          && inputs.acquiredFlags != nullptr && (*inputs.acquiredFlags)[index];
+    set = acquired || saved_row(context.unlocks, bank, index) == unlocks::kFlagSet;
+    return true;
 }
 
 /**
@@ -74,33 +95,23 @@ bool read_value(const void* raw,
                 const unlocks::Instruction& instruction,
                 std::int32_t& value) noexcept {
     const auto& context = static_cast<const ConditionInputs*>(raw)->context;
-    switch (instruction.bank) {
-    case unlocks::Bank::account:
-        value = context.unlocks.objectiveValues[instruction.operand];
-        return true;
-    case unlocks::Bank::character:
-        value = context.unlocks.characterObjectValues[instruction.operand];
-        return true;
-    default:
+    investment::store::Bank bank{};
+    if (!investment::store::saved_bank(instruction.bank, false, bank)) {
         return false;
     }
+    value = saved_row(context.unlocks, bank, instruction.operand);
+    return true;
 }
 
 /**
- * Evaluates one bound condition program.
- * An empty program is unconditional; external identities are not in the saved banks.
- * @param result Receives whether the condition holds.
+ * Evaluates one bound program to its final value; external identities are not in the saved banks.
  * @param acquiredFlags Flags this draw acquired so far, or null outside a draw.
  * @return False for a malformed program or an external read; the refusal names which.
  */
-bool condition(std::span<const definitions::Instruction> program,
-               const Context& context,
-               bool& result,
-               const AcquiredFlags* acquiredFlags = nullptr) noexcept {
-    result = program.empty();
-    if (program.empty()) {
-        return true;
-    }
+bool evaluate_program(std::span<const definitions::Instruction> program,
+                      const Context& context,
+                      std::int32_t& result,
+                      const AcquiredFlags* acquiredFlags = nullptr) noexcept {
     for (const auto& instruction : program) {
         if (!unlocks::valid(instruction)) {
             return refuse(context, "condition_shape");
@@ -114,6 +125,27 @@ bool condition(std::span<const definitions::Instruction> program,
     const ConditionInputs conditionInputs{context, acquiredFlags};
     const unlocks::Inputs inputs{read_flag, read_value, &conditionInputs};
     return unlocks::evaluate(program, inputs, result) || refuse(context, "condition_shape");
+}
+
+/**
+ * Evaluates one bound condition program. An empty program is unconditional, and any other holds
+ * when it evaluates to nonzero.
+ * @param result Receives whether the condition holds.
+ */
+bool condition(std::span<const definitions::Instruction> program,
+               const Context& context,
+               bool& result,
+               const AcquiredFlags* acquiredFlags = nullptr) noexcept {
+    result = program.empty();
+    if (result) {
+        return true;
+    }
+    std::int32_t value = 0;
+    if (!evaluate_program(program, context, value, acquiredFlags)) {
+        return false;
+    }
+    result = value != 0;
+    return true;
 }
 
 /** Evaluates the condition one bank range names; a range outside the bank is refused. */
@@ -449,9 +481,13 @@ struct Resolver {
     }
 };
 
+/** Acquiring an item grants it whole; opening draws a held stored wrapper's contents. */
+enum class Plan : std::uint8_t { acquire, open };
+
 /**
  * Resolves one item against the published graph: a stored item grants itself, and an automatic
- * wrapper opens into its draws and its own acquisition flag.
+ * wrapper opens into its draws and its own acquisition flag. Opening a stored wrapper draws the
+ * same way; its flag was set when it was acquired.
  * @param result Receives the grants; cleared and left empty on failure.
  * @param failure Receives ineligible, exceeded or refused when the resolution fails.
  * @return False when nothing could be granted.
@@ -460,6 +496,7 @@ bool resolve_item(definitions::View data,
                   const Context& context,
                   std::uint16_t itemIndex,
                   std::uint32_t quantity,
+                  Plan plan,
                   Result& result,
                   Resolution& failure) noexcept {
     result = {};
@@ -470,10 +507,14 @@ bool resolve_item(definitions::View data,
     if (item.definitionHash == 0) {
         return refuse(context, "item_unavailable");
     }
+    const bool wrapper = item.poolIndex != definitions::kAbsent;
+    const bool automatic = wrapper && (item.flags & definitions::kOpenOnAcquisition) != 0;
+    if (plan == Plan::open && (!wrapper || automatic)) {
+        return refuse(context, "stored_wrapper");
+    }
     Result staged{};
     // Stored engrams retain their wrapper until an opening transaction.
-    if (item.poolIndex == definitions::kAbsent
-        || (item.flags & definitions::kOpenOnAcquisition) == 0) {
+    if (plan == Plan::acquire && !automatic) {
         staged.grants[0].itemIndex = itemIndex;
         staged.grants[0].quantity = static_cast<std::int32_t>(quantity);
         staged.count = 1;
@@ -504,7 +545,7 @@ bool resolve_item(definitions::View data,
                 excludedByUnlocks && !leafDrawn ? Resolution::ineligible : Resolution::refused;
             return refuse(context, "empty_reward");
         }
-        if (!resolver.acquire_flag(item, true)) {
+        if (automatic && !resolver.acquire_flag(item, true)) {
             return false;
         }
     }
@@ -515,12 +556,57 @@ bool resolve_item(definitions::View data,
     return true;
 }
 
+/**
+ * Plans one item under the reward catalog's read lock.
+ * @return Resolved, or why not; refused also covers an unpublished graph.
+ */
+Resolution plan_item(const Context& context,
+                     std::uint16_t itemIndex,
+                     std::uint32_t quantity,
+                     Plan plan,
+                     Result& result) noexcept {
+    struct Request {
+        const Context& context;
+        std::uint16_t item;
+        std::uint32_t quantity;
+        Plan plan;
+        Result& result;
+        Resolution failure;
+    } request{context, itemIndex, quantity, plan, result, Resolution::refused};
+    result = {};
+    if (context.refusal != nullptr) {
+        *context.refusal = "reward_item";
+    }
+    if (build_data::read_reward_definitions(
+            &request, [](void* raw, definitions::View data) noexcept {
+                auto& value = *static_cast<Request*>(raw);
+                return resolve_item(data,
+                                    value.context,
+                                    value.item,
+                                    value.quantity,
+                                    value.plan,
+                                    value.result,
+                                    value.failure);
+            })) {
+        return Resolution::resolved;
+    }
+    return request.failure;
+}
+
 } // namespace
 
 bool eligible(std::span<const definitions::Instruction> instructions,
               const Context& context,
               bool& result) noexcept {
     return condition(instructions, context, result);
+}
+
+/** Shares the condition evaluator's checks, so an external read refuses the program. */
+bool evaluate(std::span<const definitions::Instruction> program,
+              const Context& context,
+              std::int32_t& value) noexcept {
+    value = 0;
+    return evaluate_program(program, context, value);
 }
 
 /**
@@ -532,26 +618,12 @@ Resolution resolve(const Context& context,
                    std::uint16_t itemIndex,
                    std::uint32_t quantity,
                    Result& result) noexcept {
-    struct Request {
-        const Context& context;
-        std::uint16_t item;
-        std::uint32_t quantity;
-        Result& result;
-        Resolution failure;
-    } request{context, itemIndex, quantity, result, Resolution::refused};
-    result = {};
-    if (context.refusal != nullptr) {
-        *context.refusal = "reward_item";
-    }
-    if (build_data::read_reward_definitions(
-            &request, [](void* raw, definitions::View data) noexcept {
-                auto& value = *static_cast<Request*>(raw);
-                return resolve_item(
-                    data, value.context, value.item, value.quantity, value.result, value.failure);
-            })) {
-        return Resolution::resolved;
-    }
-    return request.failure;
+    return plan_item(context, itemIndex, quantity, Plan::acquire, result);
+}
+
+/** Draws once, as an automatic wrapper does when it is acquired. */
+Resolution open(const Context& context, std::uint16_t itemIndex, Result& result) noexcept {
+    return plan_item(context, itemIndex, 1, Plan::open, result);
 }
 
 } // namespace sunrise::state::reward_resolution

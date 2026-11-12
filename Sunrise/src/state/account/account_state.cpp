@@ -12,6 +12,26 @@ inline constexpr std::size_t kIdentityCapacity =
     1 + inventory::kProfileItemCapacity
     + kCharacterCapacity * (1 + inventory::kEquipmentSlotCount + inventory::kCharacterItemCapacity);
 
+/** @return The first selected character in either account view, or null. */
+template <typename Account>
+[[nodiscard]] auto first_selected(const Account& account) noexcept
+    -> decltype(account.characters.data()) {
+    const std::size_t count = (std::min)(account.characterCount, account.characters.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        if (account.characters[index].selected) {
+            return &account.characters[index];
+        }
+    }
+    return nullptr;
+}
+
+/** @return The selected character's SOID in either account view, or zero. */
+template <typename Account>
+[[nodiscard]] std::uint64_t first_selected_soid(const Account& account) noexcept {
+    const auto* selected = first_selected(account);
+    return selected != nullptr ? selected->soid : 0;
+}
+
 /** @return True when a profile row carries no authored or runtime-owned value. */
 [[nodiscard]] bool empty_profile_item(const inventory::ProfileItem& item) noexcept {
     return item.instanceSoid == 0 && item.definitionHash == 0 && item.quantity == 0
@@ -114,6 +134,11 @@ constexpr std::uint8_t kDismantleClassMaskBits =
             || (character.selected && selected) || character.race > CharacterRace::exo
             || character.gender > CharacterGender::female
             || character.characterClass > CharacterClass::warlock
+            || std::any_of(character.gambitPrimeHelmetTiers.begin(),
+                           character.gambitPrimeHelmetTiers.end(),
+                           [](GambitPrimeHelmetTier tier) {
+                               return tier > GambitPrimeHelmetTier::notorious;
+                           })
             || !std::isfinite(character.appearanceValue) || !inventory::valid(character.equipment)
             || !inventory::valid(character.inventory) || !inventory::valid(character.stacks)) {
             return false;
@@ -159,13 +184,22 @@ bool valid_public(const AccountState& state) noexcept {
  * @return The selected character's nonzero SOID, or zero when none is selected.
  */
 std::uint64_t selected_character_soid(const AccountState& state) noexcept {
-    const std::size_t count = (std::min)(state.characterCount, state.characters.size());
-    for (std::size_t index = 0; index < count; ++index) {
-        if (state.characters[index].selected) {
-            return state.characters[index].soid;
-        }
-    }
-    return 0;
+    return first_selected_soid(state);
+}
+
+/** Finds the selected character's SOID in an identity read. */
+std::uint64_t selected_character_soid(const AccountIdentity& identity) noexcept {
+    return first_selected_soid(identity);
+}
+
+/** Finds the selected character through each character's own selected flag. */
+const CharacterState* selected_character(const AccountState& state) noexcept {
+    return first_selected(state);
+}
+
+/** Finds the selected character in an identity read. */
+const CharacterIdentity* selected_character(const AccountIdentity& identity) noexcept {
+    return first_selected(identity);
 }
 
 /**

@@ -27,6 +27,10 @@ namespace sunrise::state::build_data::cache::records {
                           MaterialRequirementSetRecord& record) noexcept;
 [[nodiscard]] bool decode(const MaterialRequirementSetRecord& record,
                           material_requirements::Definition& value) noexcept;
+[[nodiscard]] bool encode(const material_requirements::CurrencyScalar& value,
+                          CurrencyScalarRecord& record) noexcept;
+[[nodiscard]] bool decode(const CurrencyScalarRecord& record,
+                          material_requirements::CurrencyScalar& value) noexcept;
 
 [[nodiscard]] bool encode(const items::details::Definition& value,
                           ItemDetailRecord& record) noexcept;
@@ -101,6 +105,15 @@ namespace sunrise::state::build_data::cache::records {
 [[nodiscard]] bool encode(const starter_sets::Definition& value, StarterSetRecord& record) noexcept;
 [[nodiscard]] bool decode(const StarterSetRecord& record, starter_sets::Definition& value) noexcept;
 
+[[nodiscard]] bool encode(const items::insertion_rules::Rule& value,
+                          PlugInsertionRuleRecord& record) noexcept;
+[[nodiscard]] bool decode(const PlugInsertionRuleRecord& record,
+                          items::insertion_rules::Rule& value) noexcept;
+[[nodiscard]] bool encode(const combat::EnemyRace& value, EnemyRaceRecord& record) noexcept;
+[[nodiscard]] bool decode(const EnemyRaceRecord& record, combat::EnemyRace& value) noexcept;
+[[nodiscard]] bool encode(const combat::LabelGroup& value, LabelGroupRecord& record) noexcept;
+[[nodiscard]] bool decode(const LabelGroupRecord& record, combat::LabelGroup& value) noexcept;
+
 [[nodiscard]] bool encode(const build_data::records::Objective& value,
                           RecordObjectiveRecord& record) noexcept;
 [[nodiscard]] bool decode(const RecordObjectiveRecord& record,
@@ -163,6 +176,11 @@ namespace sunrise::state::build_data::cache::records {
 [[nodiscard]] bool decode(const VendorInstalledRowRecord& record,
                           vendors::InstalledRow& value) noexcept;
 
+[[nodiscard]] bool encode(const vendors::TransferRule& value,
+                          VendorTransferRuleRecord& record) noexcept;
+[[nodiscard]] bool decode(const VendorTransferRuleRecord& record,
+                          vendors::TransferRule& value) noexcept;
+
 [[nodiscard]] bool encode(const rewards::Pool& value, RewardPoolRecord& record) noexcept;
 [[nodiscard]] bool decode(const RewardPoolRecord& record, rewards::Pool& value) noexcept;
 [[nodiscard]] bool encode(const rewards::Entry& value, RewardEntryRecord& record) noexcept;
@@ -173,11 +191,18 @@ namespace sunrise::state::build_data::cache::records {
                           RewardInstructionRecord& record) noexcept;
 [[nodiscard]] bool decode(const RewardInstructionRecord& record,
                           rewards::Instruction& value) noexcept;
+/** @return True when a condition slot past its row's count holds a default instruction. */
+[[nodiscard]] bool unused_condition(const RewardInstructionRecord& record) noexcept;
 [[nodiscard]] bool encode(const rewards::Modifier& value, RewardModifierRecord& record) noexcept;
 [[nodiscard]] bool decode(const RewardModifierRecord& record, rewards::Modifier& value) noexcept;
 [[nodiscard]] bool encode(const rewards::SocketOverride& value,
                           RewardSocketOverrideRecord& record) noexcept;
 [[nodiscard]] bool decode(const RewardSocketOverrideRecord& record,
                           rewards::SocketOverride& value) noexcept;
+
+[[nodiscard]] bool encode(const objectives::Row& value, ObjectiveRecord& record) noexcept;
+[[nodiscard]] bool decode(const ObjectiveRecord& record, objectives::Row& value) noexcept;
+[[nodiscard]] bool encode(const pursuits::Definition& value, PursuitRecord& record) noexcept;
+[[nodiscard]] bool decode(const PursuitRecord& record, pursuits::Definition& value) noexcept;
 
 } // namespace sunrise::state::build_data::cache::records

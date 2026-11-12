@@ -2,11 +2,14 @@
 
 #include <array>
 #include <span>
+#include <vector>
 
 #include "../../../../core/filesystem/path.h"
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
+#include "../../../../middleware/content/packages/tables/field_reader.h"
+#include "../../../../state/account/inventory/synthesizer_tier.h"
 #include "../../../../state/build_data/activities/activity_catalog.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../activity/activity_catalog_build.h"
@@ -17,6 +20,7 @@
 #include "../../vendors/vendor_build.h"
 #include "build.h"
 #include "internal.h"
+#include "package_objective_build.h"
 #include "package_reward_build.h"
 #include "package_socket_plug_build.h"
 
@@ -41,7 +45,50 @@ namespace {
            && state::build_data::node_definitions_ready()
            && state::build_data::sobject_definitions_ready()
            && state::build_data::investment_constants_ready()
-           && state::build_data::starter_sets_ready() && exotic_catalysts_settled();
+           && state::build_data::starter_sets_ready() && exotic_catalysts_settled()
+           && pursuit_catalog_settled() && plug_insertion_rules_settled()
+           && combat_taxonomy_settled();
+}
+
+/**
+ * Reads the items the client's grant refuses: one row per item, its item-table index first.
+ * @return False when the installed list cannot be read; a later pass retries it.
+ */
+[[nodiscard]] bool read_restricted_grants(const reader::Source& source, Storage& storage) noexcept {
+    std::uint32_t tag = 0;
+    std::uint32_t tableClass = 0;
+    std::vector<std::byte> blob{};
+    tables::Array rows{};
+    if (!tables::slot_tag(
+            std::span<const std::byte>{storage.root}, tables::kRestrictedGrantTableSlot, tag)) {
+        return false;
+    }
+    storage.restrictedGrants.assign(state::build_data::items::kDefinitionCapacity, false);
+    // A build without the list restricts nothing.
+    if (tag == 0) {
+        return true;
+    }
+    if (!reader::read_tag(source, storage.scratch, tag, blob, tableClass)
+        || tableClass != tables::kRestrictedGrantTableClass
+        || !tables::read_array(std::span<const std::byte>{blob},
+                               tables::kRestrictedGrantArrayDescriptor,
+                               tables::kRestrictedGrantElementClass,
+                               tables::kRestrictedGrantStride,
+                               rows)) {
+        return false;
+    }
+    for (std::size_t row = 0; row < rows.count; ++row) {
+        const std::size_t at = rows.dataOffset + row * tables::kRestrictedGrantStride;
+        std::uint16_t itemIndex = 0;
+        if (!tables::read(std::span<const std::byte>{blob},
+                          at + tables::kRestrictedGrantItemIndexOffset,
+                          itemIndex)
+            || itemIndex >= storage.restrictedGrants.size()) {
+            return false;
+        }
+        storage.restrictedGrants[itemIndex] = true;
+    }
+    return true;
 }
 
 } // namespace
@@ -76,7 +123,8 @@ bool build() noexcept {
         return false;
     }
     // The destination layouts and the spawn sets share this pass's directory, keys, and block
-    // storage. Both are independent of the item table, so a failure here leaves it alone.
+    // storage. Both are independent of the item table, so a failure here leaves it alone. The
+    // vendor catalog binds its availability conditions through the root below.
     {
         const reader::Source packageSource{directory.chars.data(), &keys};
         // Process-local launcher data is extracted even when persistent build data was loaded.
@@ -85,13 +133,12 @@ bool build() noexcept {
         (void)content::scenarios::build(packageSource, storage.scratch);
         (void)content::spawn_sets::build(packageSource, storage.scratch);
         (void)content::hash_names::build(packageSource, storage.scratch);
-        (void)content::vendors::build(packageSource, storage.scratch);
         if (ready()) {
             SecureZeroMemory(&keys, sizeof keys);
             return true;
         }
     }
-    if (root_domains_ready()) {
+    if (root_domains_ready() && state::build_data::vendor_catalog_ready()) {
         SecureZeroMemory(&keys, sizeof keys);
         return ready();
     }
@@ -124,19 +171,48 @@ bool build() noexcept {
             }
             // The same root names the bucket and socket-list tables.
             storage.root = storage.child;
-            // Quest, record, node, season and catalyst reads share these unlock maps.
+            // Quest, record, node, season, catalyst, pursuit, material, plug-rule and vendor reads
+            // share these maps.
             if (!state::build_data::item_definitions_ready()
+                || !state::build_data::vendor_catalog_ready() || !plug_insertion_rules_settled()
+                || !state::build_data::material_requirement_sets_ready()
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
                 || !state::build_data::season_pass_ready() || !reward_definitions_settled()
-                || !exotic_catalysts_settled()) {
+                || !exotic_catalysts_settled() || !pursuit_catalog_settled()) {
                 reason = "unlock_maps";
                 if (!read_unlock_slot_maps(
                         source, storage, std::span<const std::byte>{storage.root})) {
                     continue;
                 }
             }
-            if (!state::build_data::socket_plug_rules_ready()) {
+            // Objective programs, sale rows, reward pools, pass rows, plug insertion rules and
+            // pursuit reward rows bind through the condition tables, so one load serves the pass.
+            RewardConditions& conditions = storage.rewardBuild.conditions;
+            if (!pursuit_catalog_settled() || !state::build_data::vendor_catalog_ready()
+                || !reward_definitions_settled() || !state::build_data::season_pass_ready()
+                || !plug_insertion_rules_settled()) {
+                (void)conditions.load(source,
+                                      storage.scratch,
+                                      std::span<const std::byte>{storage.root},
+                                      storage.slotMaps);
+            }
+            // The objective table settles or retries on its own, so it never holds up the others.
+            if (!pursuit_catalog_settled()) {
+                (void)build_objectives(source,
+                                       storage.scratch,
+                                       std::span<const std::byte>{storage.root},
+                                       conditions);
+            }
+            // Sale rows bind their availability through the condition tables. A refused reward
+            // graph still publishes the catalog: a row whose conditions cannot bind is not sold.
+            if (!state::build_data::vendor_catalog_ready()
+                && (conditions.loaded() || state::build_data::reward_definitions_unsupported())) {
+                (void)content::vendors::build(source, storage.scratch, conditions);
+            }
+            // Item rows read the flags the plug sets gate their members on.
+            if (!state::build_data::socket_plug_rules_ready()
+                || !state::build_data::item_definitions_ready()) {
                 std::uint32_t plugSetTag = 0;
                 tables::Array plugSets{};
                 reason = "plug_sets";
@@ -187,16 +263,16 @@ bool build() noexcept {
                         std::span(storage.progressionSteps).first(storage.progressionStepCount));
                 }
             }
-            // Pass rows bind through the reward condition tables, which load before the pools.
-            if (!reward_definitions_settled() || !state::build_data::season_pass_ready()) {
-                (void)storage.rewardBuild.load(
-                    source, storage.scratch, storage.root, storage.slotMaps);
+            // The pools are read again while any domain that binds through the condition tables
+            // is open.
+            if (!reward_definitions_settled() || !state::build_data::season_pass_ready()
+                || !plug_insertion_rules_settled() || !pursuit_catalog_settled()) {
+                (void)storage.rewardBuild.load(source, storage.scratch, storage.root);
             }
             // A refused reward graph still publishes the pass. A row whose condition cannot bind
             // stays unavailable, and every claim refuses without the graph.
             if (!state::build_data::season_pass_ready()
-                && (storage.rewardBuild.conditions.loaded()
-                    || state::build_data::reward_definitions_unsupported())
+                && (conditions.loaded() || state::build_data::reward_definitions_unsupported())
                 && build_season_pass(source, storage, std::span<const std::byte>{storage.root})
                 && !state::build_data::publish_season_pass(
                     std::span(storage.seasonPassRewards).first(storage.seasonPassRewardCount))) {
@@ -230,14 +306,38 @@ bool build() noexcept {
                                               std::span<const std::byte>{storage.root},
                                               storage.child,
                                               extracted)) {
+                    // An unbound row leaves the Synthesizer tier unpublished, not the constants.
+                    if (!read_character_value_row(
+                            source,
+                            storage.scratch,
+                            std::span<const std::byte>{storage.root},
+                            storage.child,
+                            state::account::inventory::kSynthesizerTierValueHash,
+                            extracted.synthesizerTierValueRow)) {
+                        core::log::write(core::log::Channel::client,
+                                         core::log::Level::warn,
+                                         "ev=pkg stage=synthesizer_tier_row result=unbound");
+                    }
                     (void)state::build_data::publish_investment_constants(extracted);
                 }
+            }
+            if (!combat_taxonomy_settled()) {
+                (void)build_combat_taxonomy(source,
+                                            storage.scratch,
+                                            std::span<const std::byte>{storage.root},
+                                            storage.child);
             }
             if (!state::build_data::starter_sets_ready()) {
                 (void)build_starter_sets(source,
                                          storage.scratch,
                                          std::span<const std::byte>{storage.root},
                                          storage.child);
+            }
+            // Only item rows carry the list, so a pass that has them published skips the read.
+            reason = "restricted_grants";
+            if (!state::build_data::item_definitions_ready()
+                && !read_restricted_grants(source, storage)) {
+                continue;
             }
             reason = "slot";
             if (!tables::slot_tag(

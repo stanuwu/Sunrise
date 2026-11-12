@@ -391,20 +391,124 @@ bool new_bap_session(BapState& output) noexcept {
     return true;
 }
 
-/** Copies one complete evaluated content state with build-derived catalyst overrides. */
+namespace {
+
+using FlagSet = std::bitset<unlocks::kUnlockFlagCapacity>;
+
+/**
+ * @return The presence flags the Synthesizer Motes the profile holds supply. Other held items list
+ *         flags too, but Family-5 has room for a Synthesizer's worth, not for every held item's.
+ */
+[[nodiscard]] FlagSet held_presence_flags(const AccountState& account) noexcept {
+    FlagSet flags{};
+    for (const auto& item : std::span(account.profileItems).first(account.profileItemCount)) {
+        build_data::items::Definition definition{};
+        if (item.quantity <= 0 || !runtime::detail::synthesizer_mote(item.definitionHash)
+            || !build_data::find_item_definition_hash(item.definitionHash, definition)) {
+            continue;
+        }
+        for (const std::uint16_t slot :
+             std::span(definition.presenceFlags).first(definition.presenceFlagCount)) {
+            flags.set(slot);
+        }
+    }
+    return flags;
+}
+
+/**
+ * Sets each presence flag a held item supplies, and overrides as false each one an earlier
+ * snapshot set that no held item supplies now.
+ * @return False when the overrides do not fit; family is then unchanged.
+ */
+[[nodiscard]] bool project_presence_flags(const FlagSet& held,
+                                          const FlagSet& published,
+                                          Family5State& family) noexcept {
+    Family5State candidate = family;
+    const FlagSet overridden = held | published;
+    for (std::size_t slot = 0; slot < overridden.size(); ++slot) {
+        if (!overridden[slot]) {
+            continue;
+        }
+        const std::uint8_t value = held[slot] ? unlocks::kFlagSet : kFlagOverrideFalse;
+        const auto flags = std::span(candidate.flags).first(candidate.flagCount);
+        const auto row = std::find_if(flags.begin(), flags.end(), [slot](const auto& flag) {
+            return flag.slot == slot;
+        });
+        if (row != flags.end()) {
+            row->value = value;
+            continue;
+        }
+        if (candidate.flagCount == candidate.flags.size()) {
+            return false;
+        }
+        candidate.flags[candidate.flagCount++] = {static_cast<std::uint16_t>(slot), value};
+    }
+    family = candidate;
+    return true;
+}
+
+} // namespace
+
+/**
+ * Copies one complete evaluated content state with build-derived catalyst overrides and the
+ * flags the profile's held items supply.
+ */
 bool investment_snapshot(InvestmentState& output) noexcept {
-    investment::store::g_mutex.lock();
+    namespace store = investment::store;
+    const std::unique_ptr<AccountState> account(new (std::nothrow) AccountState{});
     InvestmentState snapshot;
-    const bool loaded = investment::store::read_family5(snapshot.family5);
-    investment::store::g_mutex.unlock();
-    if (!loaded || !build_data::complete_exotic_catalyst_investment(snapshot.family5)) {
-        core::log::write(core::log::Channel::state,
-                         core::log::Level::warn,
-                         "ev=investment stage=snapshot result=fail reason=catalyst");
+    FlagSet published{};
+    const char* failure = nullptr;
+    {
+        const std::lock_guard lock(store::g_mutex);
+        if (!account) {
+            failure = "account_allocation";
+        } else if (!store::read_family5(snapshot.family5)) {
+            failure = "catalyst";
+        } else if (!store::read_account(*account)) {
+            failure = "account_read";
+        }
+        published = store::g_session.presenceFlagsPublished;
+    }
+    if (failure == nullptr && !build_data::complete_exotic_catalyst_investment(snapshot.family5)) {
+        failure = "catalyst";
+    }
+    if (failure != nullptr) {
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=investment stage=snapshot result=fail reason=%s",
+                          failure);
         return false;
+    }
+    const FlagSet held = held_presence_flags(*account);
+    if (!project_presence_flags(held, published, snapshot.family5)) {
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=investment stage=snapshot result=degraded reason=presence_flags "
+                          "held=%zu published=%zu flags=%zu",
+                          held.count(),
+                          published.count(),
+                          snapshot.family5.flagCount);
+        // A flag set earlier is cleared with an explicit false override, which did not fit.
+        if (published.any()) {
+            return false;
+        }
+    } else {
+        const std::lock_guard lock(store::g_mutex);
+        store::g_session.presenceFlagsSet = held;
+        store::g_session.presenceFlagsPublished |= held;
     }
     output = snapshot;
     return true;
+}
+
+/** Compares the flags the profile's held items supply with the ones Family-5 last set. */
+bool presence_flags_pending() noexcept {
+    namespace store = investment::store;
+    const std::unique_ptr<AccountState> account(new (std::nothrow) AccountState{});
+    const std::lock_guard lock(store::g_mutex);
+    return account && store::read_account(*account)
+           && held_presence_flags(*account) != store::g_session.presenceFlagsSet;
 }
 
 /**

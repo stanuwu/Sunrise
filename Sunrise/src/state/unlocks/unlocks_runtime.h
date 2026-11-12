@@ -27,6 +27,15 @@ void clear() noexcept;
  */
 bool mutate(void* context, void (*apply)(void*, Table&) noexcept) noexcept;
 
+/**
+ * Runs one write over the live banks under the exclusive lock, saving them only when it reports
+ * a change. The callback must not re-enter this module.
+ * @param context Passed through untouched.
+ * @param apply Called once with the live banks; returns whether it changed them.
+ * @return False when the banks do not read or a change does not save.
+ */
+bool mutate_if_changed(void* context, bool (*apply)(void*, Table&) noexcept) noexcept;
+
 /** @param index Account flag bank row. @return True when the flag is set. */
 [[nodiscard]] bool account_flag_set(std::uint16_t index) noexcept;
 

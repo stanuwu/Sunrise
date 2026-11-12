@@ -4,7 +4,6 @@
 #include <type_traits>
 
 #include "../../../../state/build_data/runtime.h"
-#include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../../definitions.h"
 
 namespace sunrise::middleware::datagen::family4::progression {
@@ -20,7 +19,8 @@ static_assert(std::is_same_v<layout::Values, state::unlocks::ProgressionLanes>);
 
 /** Keys one object's progression bank and fills each keyed row from the authored lanes. */
 bool key_bank(state::build_data::progressions::Scope scope,
-              std::span<layout::Entry> bank) noexcept {
+              std::span<layout::Entry> bank,
+              const state::unlocks::Table& unlocks) noexcept {
     for (layout::Entry& entry : bank) {
         entry = layout::Entry{};
         entry.definitionIndex = kEmptyDefinitionIndex;
@@ -30,13 +30,9 @@ bool key_bank(state::build_data::progressions::Scope scope,
     if (!state::build_data::find_progression_slots(scope, slots, count) || count > bank.size()) {
         return false;
     }
-    state::unlocks::Table table;
-    if (!state::unlocks::snapshot(table)) {
-        return false;
-    }
     const auto& lanes = scope == state::build_data::progressions::Scope::account
-                            ? table.accountProgressions
-                            : table.characterProgressions;
+                            ? unlocks.accountProgressions
+                            : unlocks.characterProgressions;
     for (std::size_t slot = 0; slot < count; ++slot) {
         // The definition catalog is dense, so every key it hands out addresses the authored bank.
         bank[slot].definitionIndex = slots[slot];

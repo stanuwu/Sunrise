@@ -26,6 +26,7 @@ namespace {
         header.itemCount,
         header.collectibleCount,
         header.materialRequirementSetCount,
+        header.currencyScalarCount,
         header.itemDetailCount,
         header.socketPlugRuleCount,
         header.socketPlugPoolCount,
@@ -49,6 +50,7 @@ namespace {
         header.vendorDefinitionCount,
         header.vendorSaleRowCount,
         header.vendorInstalledRowCount,
+        header.vendorTransferRuleCount,
         header.positionProfileCount,
         header.objectTypeCount,
         header.recordObjectiveCount,
@@ -63,7 +65,13 @@ namespace {
         header.rewardInstructionCount,
         header.rewardModifierCount,
         header.rewardSocketCount,
+        header.objectiveCount,
+        header.objectiveInstructionCount,
+        header.pursuitCount,
         header.starterSetCount,
+        header.plugInsertionRuleCount,
+        header.enemyRaceCount,
+        header.labelGroupCount,
     };
 }
 

@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/server_clock.h"
 #include "../../middleware/crypto/random_bytes.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode1821.h"
@@ -104,15 +105,47 @@ prepare_record_reward(const middleware::web_service::Message& message,
             message, "storage", recordIndex, rewards[0].itemDefinitionIndex, rewards[0].quantity);
         return RecordRewardPreparation::failed;
     }
+    const char* reason = nullptr;
     if (state::prepare_record_reward_grant(
-            std::span(rewards).first(rewardCount), recordIndex, *grant)
+            std::span(rewards).first(rewardCount),
+            recordIndex,
+            core::runtime::server_clock_seconds(),
+            *grant,
+            &reason)
         != state::RewardPreparation::prepared) {
         clear_mutation(outcome);
-        report_record_reward(
-            message, "state", recordIndex, rewards[0].itemDefinitionIndex, rewards[0].quantity);
+        report_record_reward(message,
+                             reason != nullptr ? reason : "state",
+                             recordIndex,
+                             rewards[0].itemDefinitionIndex,
+                             rewards[0].quantity);
         return RecordRewardPreparation::failed;
     }
     return RecordRewardPreparation::prepared;
+}
+
+/** The seed is drawn in this layer, and State replays the claim rules under its own lock. */
+bool prepare_season_pass_claim(std::uint16_t rewardIndex,
+                               state::PendingSeasonPassReward& claim,
+                               const char*& reason) noexcept {
+    std::uint64_t seed = 0;
+    reason = "random_source";
+    if (!middleware::crypto::random::draw_seed(seed)) {
+        return false;
+    }
+    reason = nullptr;
+    if (!state::prepare_season_pass_reward(
+            rewardIndex, seed, core::runtime::server_clock_seconds(), claim, &reason)) {
+        reason = reason != nullptr ? reason : "reward_preparation";
+        return false;
+    }
+    // Stage the claim before the reply and account push are encoded from the transaction's banks.
+    reason = "claim_rejected";
+    if (!state::claim_season_pass_reward(rewardIndex)) {
+        return false;
+    }
+    reason = nullptr;
+    return true;
 }
 
 /**
@@ -168,20 +201,10 @@ void claim_season_pass_reward(const middleware::web_service::Message& message,
     if (grant == nullptr) {
         return fail("storage");
     }
-    std::uint64_t seed = 0;
-    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
-        clear_mutation(outcome);
-        return fail("random_source");
-    }
     const char* reason = nullptr;
-    if (!state::prepare_season_pass_reward(request.rewardIndex, seed, *grant, &reason)) {
+    if (!prepare_season_pass_claim(request.rewardIndex, *grant, reason)) {
         clear_mutation(outcome);
-        return fail(reason != nullptr ? reason : "reward_preparation");
-    }
-    // Stage the claim before encoding the reply and account push from the transaction's banks.
-    if (!state::claim_season_pass_reward(request.rewardIndex)) {
-        clear_mutation(outcome);
-        return fail("claim_rejected");
+        return fail(reason);
     }
 }
 
@@ -199,18 +222,31 @@ void claim_record(const middleware::web_service::Message& message, Outcome& outc
             message, "record_definition", request.recordIndex, records::kUnavailableFlagIndex, 0);
         return;
     }
-    if (definition.completionFlagIndex == records::kUnavailableFlagIndex) {
-        // Interval Triumphs intentionally carry no completion flag. Their repeated redemption
-        // count is projected through the second reserved objective-value slot instead.
+    if (definition.intervalCount != 0
+        || definition.completionFlagIndex == records::kUnavailableFlagIndex) {
+        // An interval Triumph is claimed one step at a time; its redemption count is projected
+        // through the second reserved objective-value slot. A flag, if it has one, follows the
+        // last step, which also pays the record's rewards as a one-step claim does.
+        const bool completesRecord =
+            state::unlocks::records::interval_claim_completes(request.recordIndex);
+        const RecordRewardPreparation reward =
+            completesRecord ? prepare_record_reward(message, request.recordIndex, outcome)
+                            : RecordRewardPreparation::absent;
+        if (reward == RecordRewardPreparation::failed) {
+            return;
+        }
         if (state::unlocks::records::claim_interval(request.recordIndex,
                                                     definition.definitionHash)) {
             outcome.hasRecordClaim = true;
             return;
         }
+        if (reward == RecordRewardPreparation::prepared) {
+            clear_mutation(outcome);
+        }
         report_record_claim(message,
                             "interval_or_flag_unavailable",
                             request.recordIndex,
-                            records::kUnavailableFlagIndex,
+                            definition.completionFlagIndex,
                             definition.scoreValue);
         return;
     }

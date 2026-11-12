@@ -10,12 +10,14 @@
 #include <cstdio>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <utility>
 
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state.h"
 #include "state_account_transaction_helpers.h"
@@ -447,10 +449,12 @@ apply_dismantle_rewards(const AccountState& before,
  *
  * Surviving authored entries keep their mutation generation unless installed row placement moves
  * them. Generation capacity is checked for every move before any survivor is changed.
+ * @param paysRewards False stages an editor removal, which credits no dismantle materials.
  */
 [[nodiscard]] bool stage_item_dismantle(const AccountState& account,
                                         std::size_t characterIndex,
                                         std::uint64_t instanceSoid,
+                                        bool paysRewards,
                                         PendingItemDismantle& mutation) noexcept {
     mutation = {};
     if (instanceSoid == 0 || !account::valid(account) || characterIndex >= account.characterCount
@@ -561,20 +565,22 @@ apply_dismantle_rewards(const AccountState& before,
         return false;
     }
 
-    AccountState rewarded{};
     std::array<DismantleReward, kDismantleRewardCapacity> rewards{};
     std::size_t rewardCount = 0;
-    if (!apply_dismantle_rewards(candidate,
-                                 dismantledItem,
-                                 dismantledDefinition,
-                                 dismantledDetail,
-                                 dismantledSlot,
-                                 rewarded,
-                                 rewards,
-                                 rewardCount)) {
-        return false;
+    if (paysRewards) {
+        AccountState rewarded{};
+        if (!apply_dismantle_rewards(candidate,
+                                     dismantledItem,
+                                     dismantledDefinition,
+                                     dismantledDetail,
+                                     dismantledSlot,
+                                     rewarded,
+                                     rewards,
+                                     rewardCount)) {
+            return false;
+        }
+        candidate = rewarded;
     }
-    candidate = rewarded;
 
     mutation.beforeCharacter = before;
     mutation.afterCharacter = after;
@@ -595,6 +601,140 @@ apply_dismantle_rewards(const AccountState& before,
     mutation.inventoryRow = dismantledRow;
     mutation.equipmentSlot = dismantledSlot;
     mutation.profileChanged = rewardCount != 0;
+    mutation.paysRewards = paysRewards;
+    mutation.prepared = true;
+    return true;
+}
+
+/**
+ * Builds the one canonical stack discard for an exact account snapshot: the whole row when the
+ * item's action consumes the entire stack, otherwise one unit. A surviving row keeps its serial,
+ * which holds its grid cell. The discard names only an item and a quantity, so a row in the item's
+ * authored placement is taken first, a character stack before a profile row, and a recovery-bucket
+ * row only when neither holds it.
+ */
+[[nodiscard]] bool stage_stack_discard(const AccountState& account,
+                                       std::size_t characterIndex,
+                                       std::uint32_t definitionHash,
+                                       std::int32_t heldQuantity,
+                                       PendingItemDismantle& mutation) noexcept {
+    mutation = {};
+    if (!account::valid(account) || characterIndex >= account.characterCount
+        || !account.characters[characterIndex].selected) {
+        return false;
+    }
+    build_data::items::Definition item{};
+    if (!build_data::find_item_definition_hash(definitionHash, item)) {
+        return false;
+    }
+    const bool removesRow = heldQuantity == 1 || item.consumesWholeStack;
+    const auto holds = [definitionHash, heldQuantity](const auto& row) noexcept {
+        return row.definitionHash == definitionHash && row.quantity == heldQuantity;
+    };
+    const CharacterState& before = account.characters[characterIndex];
+    AccountState candidate = account;
+    CharacterState& after = candidate.characters[characterIndex];
+    const auto stacks = std::span(before.stacks.values).first(before.stacks.count);
+    const auto find_stack = [&](authored_inventory::ItemPlacement placement) noexcept {
+        return std::find_if(stacks.begin(), stacks.end(), [&](const auto& held) noexcept {
+            return held.placement == placement && holds(held);
+        });
+    };
+    const auto rows = std::span(account.profileItems).first(account.profileItemCount);
+    auto stack = find_stack(authored_inventory::ItemPlacement::authored);
+    auto row = rows.end();
+    if (stack == stacks.end()) {
+        // A profile row with an instance is an action source, which only its instance names.
+        row = std::find_if(rows.begin(), rows.end(), [&holds](const auto& held) noexcept {
+            return held.instanceSoid == 0 && holds(held);
+        });
+        if (row == rows.end()) {
+            stack = find_stack(authored_inventory::ItemPlacement::recovery);
+        }
+    }
+    const bool profile = row != rows.end();
+    if (!profile && stack == stacks.end()) {
+        return false;
+    }
+    const std::size_t index =
+        static_cast<std::size_t>(profile ? row - rows.begin() : stack - stacks.begin());
+    if (profile) {
+        if (!removesRow) {
+            --candidate.profileItems[index].quantity;
+        } else if (!erase_profile_row(candidate, index)) {
+            return false;
+        }
+    } else if (!removesRow) {
+        --after.stacks.values[index].quantity;
+    } else if (!erase_character_row(after, kStackRowBase + index)) {
+        return false;
+    }
+
+    mutation.beforeCharacter = before;
+    mutation.afterCharacter = after;
+    mutation.beforeProfileItems = account.profileItems;
+    mutation.afterProfileItems = candidate.profileItems;
+    mutation.dismantledItem.definitionHash = definitionHash;
+    mutation.dismantledItem.quantity = heldQuantity;
+    mutation.accountSoid = account.primarySoid;
+    mutation.characterSoid = before.soid;
+    mutation.characterIndex = characterIndex;
+    mutation.expectedInventoryCount = before.inventory.count;
+    mutation.expectedProfileItemCount = account.profileItemCount;
+    mutation.afterProfileItemCount = candidate.profileItemCount;
+    mutation.inventoryIndex = index;
+    mutation.profileChanged = profile;
+    mutation.paysRewards = false;
+    mutation.prepared = true;
+    return true;
+}
+
+/**
+ * Builds the one canonical removal of an instanced profile row, such as a held gift, for an exact
+ * account snapshot. Only a single-unit row is removed, and it credits no dismantle materials.
+ */
+[[nodiscard]] bool stage_profile_resident_discard(const AccountState& account,
+                                                  std::size_t characterIndex,
+                                                  std::uint64_t instanceSoid,
+                                                  PendingItemDismantle& mutation) noexcept {
+    mutation = {};
+    if (instanceSoid == 0 || !account::valid(account) || characterIndex >= account.characterCount
+        || !account.characters[characterIndex].selected) {
+        return false;
+    }
+    const auto rows = std::span(account.profileItems).first(account.profileItemCount);
+    const auto names = [instanceSoid](const auto& item) noexcept {
+        return item.instanceSoid == instanceSoid;
+    };
+    const auto row = std::find_if(rows.begin(), rows.end(), names);
+    if (row == rows.end() || row->quantity != 1) {
+        return false;
+    }
+    const auto index = static_cast<std::size_t>(row - rows.begin());
+    AccountState candidate = account;
+    if (!erase_profile_row(candidate, index)) {
+        return false;
+    }
+    const CharacterState& character = account.characters[characterIndex];
+    mutation.beforeCharacter = character;
+    mutation.afterCharacter = character;
+    mutation.beforeProfileItems = account.profileItems;
+    mutation.afterProfileItems = candidate.profileItems;
+    mutation.dismantledItem.instanceSoid = instanceSoid;
+    mutation.dismantledItem.definitionHash = row->definitionHash;
+    mutation.dismantledItem.quantity = row->quantity;
+    mutation.dismantledItem.mutationSerial = row->mutationSerial;
+    mutation.accountSoid = account.primarySoid;
+    mutation.characterSoid = character.soid;
+    mutation.dismantledInstanceSoid = instanceSoid;
+    mutation.characterIndex = characterIndex;
+    mutation.expectedInventoryCount = character.inventory.count;
+    mutation.expectedProfileItemCount = account.profileItemCount;
+    mutation.afterProfileItemCount = candidate.profileItemCount;
+    mutation.inventoryIndex = index;
+    mutation.profileChanged = true;
+    mutation.profileResident = true;
+    mutation.paysRewards = false;
     mutation.prepared = true;
     return true;
 }
@@ -621,6 +761,7 @@ apply_dismantle_rewards(const AccountState& before,
         || left.movedInventoryItemCount != right.movedInventoryItemCount
         || left.rewardCount != right.rewardCount || left.inventoryRow != right.inventoryRow
         || left.equipmentSlot != right.equipmentSlot || left.profileChanged != right.profileChanged
+        || left.profileResident != right.profileResident || left.paysRewards != right.paysRewards
         || !same_stationary_item(left.dismantledItem, right.dismantledItem)
         || !same_character(left.beforeCharacter, right.beforeCharacter)
         || !same_character(left.afterCharacter, right.afterCharacter)
@@ -647,8 +788,37 @@ apply_dismantle_rewards(const AccountState& before,
                                               const PendingItemDismantle& mutation,
                                               AccountState& after) noexcept {
     after = {};
+    if (mutation.dismantledInstanceSoid == 0) {
+        // Staging the same discard again over the current view must reproduce it exactly.
+        PendingItemDismantle canonical{};
+        if (!stage_stack_discard(current,
+                                 mutation.characterIndex,
+                                 mutation.dismantledItem.definitionHash,
+                                 mutation.dismantledItem.quantity,
+                                 canonical)
+            || !same_dismantle_transition(canonical, mutation)) {
+            return false;
+        }
+        after = current;
+        after.characters[mutation.characterIndex] = mutation.afterCharacter;
+        after.profileItems = mutation.afterProfileItems;
+        after.profileItemCount = mutation.afterProfileItemCount;
+        return account::valid(after) && valid_profile_inventory(after);
+    }
+    if (mutation.profileResident) {
+        PendingItemDismantle canonical{};
+        if (!stage_profile_resident_discard(
+                current, mutation.characterIndex, mutation.dismantledInstanceSoid, canonical)
+            || !same_dismantle_transition(canonical, mutation)) {
+            return false;
+        }
+        after = current;
+        after.profileItems = mutation.afterProfileItems;
+        after.profileItemCount = mutation.afterProfileItemCount;
+        return account::valid(after) && valid_profile_inventory(after)
+               && !identity_uses_soid(after, mutation.dismantledInstanceSoid);
+    }
     if (!mutation.prepared || mutation.accountSoid == 0 || mutation.characterSoid == 0
-        || mutation.dismantledInstanceSoid == 0
         || mutation.dismantledItem.instanceSoid != mutation.dismantledInstanceSoid
         || mutation.dismantledItem.definitionHash == authored_inventory::kNoDefinitionHash
         || mutation.characterIndex >= current.characterCount || mutation.expectedInventoryCount == 0
@@ -703,8 +873,11 @@ apply_dismantle_rewards(const AccountState& before,
     }
 
     PendingItemDismantle canonical{};
-    if (!stage_item_dismantle(
-            current, mutation.characterIndex, mutation.dismantledInstanceSoid, canonical)
+    if (!stage_item_dismantle(current,
+                              mutation.characterIndex,
+                              mutation.dismantledInstanceSoid,
+                              mutation.paysRewards,
+                              canonical)
         || !same_dismantle_transition(canonical, mutation)) {
         return false;
     }

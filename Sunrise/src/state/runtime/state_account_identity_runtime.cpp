@@ -48,8 +48,9 @@ constexpr std::uint64_t kFirstGeneratedItemSoid = 0x4000000000000001ULL;
 
 /** Finds a fresh deterministic item-instance SOID without sharing any other identity key. */
 [[nodiscard]] bool next_item_instance_soid(const AccountState& account,
-                                           std::uint64_t& output) noexcept {
-    std::uint64_t candidate = kFirstGeneratedItemSoid;
+                                           std::uint64_t& output,
+                                           std::uint64_t minimum) noexcept {
+    std::uint64_t candidate = (std::max)(kFirstGeneratedItemSoid, minimum);
     for (std::size_t characterIndex = 0; characterIndex < account.characterCount;
          ++characterIndex) {
         const CharacterState& character = account.characters[characterIndex];

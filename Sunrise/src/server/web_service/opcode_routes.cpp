@@ -26,8 +26,8 @@ constexpr auto kStatusPairBoolOpcodes = std::to_array<std::uint16_t>({104, 901})
 
 /** Opcodes whose response definition hands its status value to the Client's Family-4 wait. */
 constexpr auto kFamily4VersionOpcodes = std::to_array<std::uint16_t>({
-    105, 106, 402, 403, 404, 405, 406, 501,  502,  503,  504,  505,  601,  701,  702,
-    801, 802, 804, 901, 903, 904, 905, 1801, 1802, 1820, 1821, 1901, 2002, 2400,
+    104, 105, 106, 402, 403, 404, 405,  406,  501,  502,  503,  504,  505,  601,  701,
+    702, 801, 802, 804, 901, 903, 904,  905,  1801, 1802, 1820, 1821, 1901, 2002, 2400,
 });
 
 template <std::size_t Size>

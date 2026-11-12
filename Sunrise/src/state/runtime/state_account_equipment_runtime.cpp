@@ -278,14 +278,15 @@ finalize_equipment_transition(const AccountState& account,
     return left.instanceSoid == right.instanceSoid && left.definitionHash == right.definitionHash
            && left.level == right.level && left.quantity == right.quantity
            && left.flags == right.flags && left.seen == right.seen
-           && left.sockets.policy == right.sockets.policy
+           && left.placement == right.placement && left.sockets.policy == right.sockets.policy
            && left.sockets.plugCount == right.sockets.plugCount
            && left.sockets.plugs == right.sockets.plugs
            && left.movementAbilityEntry == right.movementAbilityEntry
            && left.grenadeAbilityEntry == right.grenadeAbilityEntry
            && left.superAbilityEntry == right.superAbilityEntry
            && left.meleeAbilityEntry == right.meleeAbilityEntry
-           && left.classAbilityEntry == right.classAbilityEntry;
+           && left.classAbilityEntry == right.classAbilityEntry
+           && left.objectives == right.objectives;
 }
 
 /** Records one checked native item-state transition. */
@@ -343,6 +344,7 @@ void report_item_state(std::string_view stage,
         || left.contentBypass != right.contentBypass
         || left.equippedTitleRecordIndex != right.equippedTitleRecordIndex
         || left.nextInventorySerial != right.nextInventorySerial
+        || left.gambitPrimeHelmetTiers != right.gambitPrimeHelmetTiers
         || left.inventory.count != right.inventory.count
         || left.stacks.count != right.stacks.count) {
         return false;
@@ -365,7 +367,8 @@ void report_item_state(std::string_view stage,
         const auto& rightStack = right.stacks.values[index];
         if (leftStack.definitionHash != rightStack.definitionHash
             || leftStack.quantity != rightStack.quantity
-            || leftStack.mutationSerial != rightStack.mutationSerial) {
+            || leftStack.mutationSerial != rightStack.mutationSerial
+            || leftStack.placement != rightStack.placement) {
             return false;
         }
     }
@@ -407,7 +410,9 @@ void report_item_state(std::string_view stage,
         if (character.inventory.values[index].instanceSoid != instanceSoid) {
             continue;
         }
-        if (found) {
+        if (found
+            || character.inventory.values[index].placement
+                   != authored_inventory::ItemPlacement::authored) {
             return false;
         }
         found = true;
@@ -426,7 +431,9 @@ character_item_at(const CharacterState& character, const CharacterItemLocation& 
         }
         return &*character.equipment.slots[location.index];
     }
-    if (location.index >= character.inventory.count) {
+    if (location.index >= character.inventory.count
+        || character.inventory.values[location.index].placement
+               != authored_inventory::ItemPlacement::authored) {
         return nullptr;
     }
     return &character.inventory.values[location.index];
@@ -442,7 +449,9 @@ character_item_at(CharacterState& character, const CharacterItemLocation& locati
         }
         return &*character.equipment.slots[location.index];
     }
-    if (location.index >= character.inventory.count) {
+    if (location.index >= character.inventory.count
+        || character.inventory.values[location.index].placement
+               != authored_inventory::ItemPlacement::authored) {
         return nullptr;
     }
     return &character.inventory.values[location.index];

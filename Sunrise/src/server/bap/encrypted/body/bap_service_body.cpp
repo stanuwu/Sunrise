@@ -13,6 +13,7 @@
 #include "../../../../middleware/bap/family_unsubscription.h"
 #include "../../../../middleware/bap/user_message/user_message_response.h"
 #include "../../../../middleware/encoding/byte_order.h"
+#include "../../../../middleware/web_service/messages/opcode104.h"
 #include "../../../../middleware/web_service/messages/opcode505/opcode505_codec.h"
 #include "../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../state/runtime/runtime.h"
@@ -55,7 +56,62 @@ std::atomic<std::uint64_t> g_translatedIdentity{0};
            || claimed == identity;
 }
 
+/**
+ * Answers one opcode-104 Store wallet sync with the revision that publishes its new generation.
+ * @return False only when the reply does not encode; a refused sync answers with a refusal.
+ */
+[[nodiscard]] bool synchronize_store(const middleware::web_service::Message& message,
+                                     const queuez::SessionState& queuezState,
+                                     std::span<std::byte> output,
+                                     std::size_t& written,
+                                     ServiceOutcome& outcome) noexcept {
+    namespace opcode104 = middleware::web_service::messages::opcode104;
+    opcode104::Request request{};
+    if (!opcode104::parse_request(message, request)
+        || queuezState.family4Version == (std::numeric_limits<std::int32_t>::max)()
+        || !state::synchronize_store_wallet(outcome.storeSyncRevision)) {
+        core::log::write(
+            core::log::Channel::server,
+            core::log::Level::warn,
+            "ev=store_sync stage=prepare result=refused source=ws104");
+        return refuse_web_action(message, output, written);
+    }
+    middleware::web_service::StatusResponse status{};
+    status.value = queuezState.family4Active ? queuezState.family4Version + 1
+                                             : middleware::web_service::kNoFamily4Publication;
+    if (!middleware::web_service::encode_response(message,
+                                                  middleware::web_service::ResponseShape::statusPairWithBool,
+                                                  status,
+                                                  output,
+                                                  written)) {
+        return false;
+    }
+    outcome.hasStoreSync = true;
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=store_sync stage=prepare result=ok source=ws104 revision=%u "
+                      "family4_version=%d",
+                      outcome.storeSyncRevision,
+                      status.value);
+    return true;
+}
+
 } // namespace
+
+/** A client claim and an editor claim stage the same after-image. */
+SeasonPassRewardTransaction* stage_season_pass_reward(const queuez::SessionState& queuezState,
+                                                      const state::PendingSeasonPassReward& claim,
+                                                      ServiceOutcome& outcome) noexcept {
+    auto* transaction = emplace_transaction<SeasonPassRewardTransaction>(outcome);
+    if (transaction == nullptr) {
+        return nullptr;
+    }
+    if (!queuez::stage_record_reward_grant(queuezState, claim.grant, transaction->update)) {
+        clear_transaction(outcome);
+        return nullptr;
+    }
+    return transaction;
+}
 
 /**
  * Processes the body for one authenticated service route.
@@ -83,6 +139,17 @@ bool process(const ServiceRoute& route,
     switch (route.bodyCodec) {
     case BodyCodec::empty:
         written = 0;
+        // Service 22 answers the purchased-offers refresh. Its empty reply alone does not end the
+        // client's pending Store sync, so a new account generation is published with it.
+        if (route.response == middleware::bap::ResponseService::purchasedOffers) {
+            outcome.hasStoreSync = state::synchronize_store_wallet(outcome.storeSyncRevision);
+            if (!outcome.hasStoreSync) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=store_sync stage=prepare result=refused "
+                                 "source=purchased_offers");
+            }
+        }
         return true;
     case BodyCodec::registerRelayClient:
         outcome.hasRelayRegistration = true;
@@ -209,8 +276,11 @@ bool process(const ServiceRoute& route,
         return middleware::bap::user_message::encode_minimal_response(output, written);
     case BodyCodec::webService: {
         middleware::web_service::Message message;
-        if (middleware::web_service::parse_request(requestBody, message)
-            && message.opcode == middleware::web_service::messages::opcode505::kOpcode) {
+        const bool parsed = middleware::web_service::parse_request(requestBody, message);
+        if (parsed && message.opcode == middleware::web_service::messages::opcode104::kOpcode) {
+            return synchronize_store(message, queuezState, output, written, outcome);
+        }
+        if (parsed && message.opcode == middleware::web_service::messages::opcode505::kOpcode) {
             auto* changeCharacter = emplace_transaction<queuez::ChangeCharacter>(outcome);
             if (!middleware::web_service::messages::opcode505::parse_request(message)
                 || changeCharacter == nullptr
@@ -285,6 +355,8 @@ bool process(const ServiceRoute& route,
         outcome.subscription = webOutcome.subscription;
         const auto* equipmentSwap =
             web_service::mutation_if<state::PendingEquipmentSwap>(webOutcome);
+        const auto* postmasterClaim =
+            web_service::mutation_if<state::PendingPostmasterClaim>(webOutcome);
         const auto* subclassSelection =
             web_service::mutation_if<state::PendingSubclassSelection>(webOutcome);
         const auto* socketPlug = web_service::mutation_if<state::PendingSocketPlug>(webOutcome);
@@ -354,6 +426,34 @@ bool process(const ServiceRoute& route,
                 == nullptr) {
                 return refuse_web_action(message, output, written);
             }
+        }
+        if (postmasterClaim != nullptr) {
+            auto* transaction = emplace_transaction<PostmasterClaimTransaction>(outcome);
+            if (transaction == nullptr
+                || !queuez::stage_record_reward_grant(
+                    queuezState, postmasterClaim->grant, transaction->update)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=ws405 stage=queuez_preflight result=fail");
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            middleware::web_service::StatusResponse status{};
+            status.value = transaction->update.after.family4Version;
+            if (!middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPair,
+                    status,
+                    output,
+                    written)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=ws405 stage=response result=fail");
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            transaction->pending =
+                web_service::take_mutation<state::PendingPostmasterClaim>(webOutcome);
         }
         if (equipmentSwap != nullptr) {
             // Promise the Family-4 revision carrying this optimistic equip.
@@ -544,14 +644,14 @@ bool process(const ServiceRoute& route,
                 web_service::take_mutation<state::PendingProfileItemAcquisition>(webOutcome);
         }
         if (itemDismantle != nullptr) {
-            // Promise the revision carrying the character update and resident release.
+            // Promise the revision carrying the character update and any resident release.
             auto* transaction = emplace_transaction<ItemDismantleTransaction>(outcome);
             if (transaction == nullptr
                 || !queuez::stage_item_dismantle(queuezState,
                                                  itemDismantle->accountSoid,
                                                  itemDismantle->characterSoid,
                                                  itemDismantle->dismantledInstanceSoid,
-                                                 itemDismantle->profileChanged,
+                                                 itemDismantle->updates_account(),
                                                  transaction->update)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
@@ -582,9 +682,10 @@ bool process(const ServiceRoute& route,
                                 && queuez::stage_record_reward_grant(
                                     queuezState, *recordRewardGrant, transaction->update);
             if (!staged) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::warn,
-                                 "ev=ws1801 stage=reward_preflight result=fail");
+                core::log::writef(core::log::Channel::server,
+                                  core::log::Level::warn,
+                                  "ev=ws%u stage=reward_preflight result=fail",
+                                  static_cast<unsigned>(message.opcode));
                 clear_transaction(outcome);
                 return refuse_web_action(message, output, written);
             }
@@ -596,9 +697,10 @@ bool process(const ServiceRoute& route,
                     status,
                     output,
                     written)) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::warn,
-                                 "ev=ws1801 stage=reward_response result=fail");
+                core::log::writef(core::log::Channel::server,
+                                  core::log::Level::warn,
+                                  "ev=ws%u stage=reward_response result=fail",
+                                  static_cast<unsigned>(message.opcode));
                 clear_transaction(outcome);
                 return refuse_web_action(message, output, written);
             }
@@ -606,25 +708,15 @@ bool process(const ServiceRoute& route,
                 web_service::take_mutation<state::PendingRecordRewardGrant>(webOutcome);
         }
         if (seasonPassReward != nullptr) {
-            auto* transaction = emplace_transaction<SeasonPassRewardTransaction>(outcome);
+            auto* transaction = stage_season_pass_reward(queuezState, *seasonPassReward, outcome);
             if (transaction == nullptr) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
                                  "ev=ws2400 stage=reward_preflight result=fail");
                 return refuse_web_action(message, output, written);
             }
-            const bool staged = queuez::stage_record_reward_grant(
-                queuezState, seasonPassReward->grant, transaction->update);
-            const auto stagedVersion = transaction->update.after.family4Version;
-            if (!staged) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::warn,
-                                 "ev=ws2400 stage=reward_preflight result=fail");
-                clear_transaction(outcome);
-                return refuse_web_action(message, output, written);
-            }
             middleware::web_service::StatusResponse status{};
-            status.value = stagedVersion;
+            status.value = transaction->update.after.family4Version;
             if (!middleware::web_service::encode_response(
                     message,
                     middleware::web_service::ResponseShape::statusPair,
