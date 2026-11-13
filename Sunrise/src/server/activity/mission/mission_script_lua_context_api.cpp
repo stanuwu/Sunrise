@@ -24,6 +24,8 @@
 namespace sunrise::server::activity::mission::lua_vm::detail {
 namespace {
 
+namespace scriptable_auth = middleware::bap::activity_message::scriptable_auth;
+
 // Table entries of the context members this file implements.
 constexpr const api::MemberSpec& kActivateObjects =
     api::member(api::Receiver::context, "activate_objects");
@@ -106,8 +108,7 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
         timedInPlace = lua_toboolean(state, -1) != 0;
         lua_pop(state, 1);
         if (capturePlate || timedRemaining < 0 || timedTotal < timedRemaining
-            || timedTotal > middleware::bap::activity_message::scriptable_auth::
-                       kType68MaximumClockSeconds) {
+            || timedTotal > scriptable_auth::kType68MaximumClockSeconds) {
             return luaL_error(state,
                               "timed needs 0 <= remaining <= total <= one year, without "
                               "capture_plate");
@@ -342,7 +343,6 @@ void set_integer_field(lua_State* state, const char* name, lua_Integer value) {
  */
 [[nodiscard]] int context_public_event_schedule(lua_State* state) {
     namespace store = ::sunrise::state::build_data::public_event_schedule;
-    namespace sched = ::sunrise::server::activity::mission::public_event_schedule;
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
     refuse_unknown_arguments(state, kPublicEventSchedule);
     const lua_Integer site = checked_integer_argument(
@@ -353,14 +353,14 @@ void set_integer_field(lua_State* state, const char* name, lua_Integer value) {
     if (site <= 0 || static_cast<std::uint64_t>(site) > UINT32_MAX) {
         return luaL_error(state, "schedule site must be a positive uint32");
     }
-    sched::SiteResult result{};
+    public_event_schedule::SiteResult result{};
     const auto table = store::snapshot();
-    if (!sched::for_site(*table, static_cast<std::uint32_t>(site), now, result)) {
+    if (!public_event_schedule::for_site(*table, static_cast<std::uint32_t>(site), now, result)) {
         lua_pushnil(state);
         return 1;
     }
     constexpr auto fields = std::span(api::kPublicEventScheduleFields);
-    const sched::Occurrence& at = result.occurrence;
+    const auto& at = result.occurrence;
     lua_createtable(state, 0, static_cast<int>(fields.size()));
     lua_pushstring(state, at.active ? "active" : "incoming");
     lua_setfield(state, -2, api::find_field(fields, "state").name.data());
@@ -376,7 +376,7 @@ void set_integer_field(lua_State* state, const char* name, lua_Integer value) {
                       static_cast<lua_Integer>(result.row) + 1);
     lua_pushboolean(state, result.selected ? 1 : 0);
     lua_setfield(state, -2, api::find_field(fields, "selected").name.data());
-    if (result.picked != sched::kNoEntry) {
+    if (result.picked != public_event_schedule::kNoEntry) {
         const auto& entry = table->entries[result.picked];
         set_integer_field(state, api::find_field(fields, "site").name.data(), entry.site);
         if (entry.node != store::kNoNode) {

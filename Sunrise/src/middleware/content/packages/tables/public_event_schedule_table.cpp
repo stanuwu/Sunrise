@@ -7,7 +7,6 @@ namespace {
 namespace store = state::build_data::public_event_schedule;
 using records::block_rows;
 using records::EntryRecord;
-using records::read;
 using records::RowRecord;
 using records::seconds;
 } // namespace
