@@ -25,6 +25,8 @@ inline constexpr std::uint32_t kAbsentRuntimeRow = 0xFFFFFFFFU;
 inline constexpr std::uint8_t kNestedType = 1;
 /** Field type 34 carries its schema handle and reads through the selected-schema reader. */
 inline constexpr std::uint8_t kSelectedType = 34;
+/** Field type 24 reads a six-bit universal type selector, then that type's arm. */
+inline constexpr std::uint8_t kVariantType = 24;
 /** Field types 12 and 35 are raw 64-bit words, read and written whole. */
 inline constexpr std::uint8_t kRaw64AliasType = 12;
 inline constexpr std::uint8_t kRaw64Type = 35;
@@ -148,6 +150,8 @@ struct RuntimeSchemaResolver final {
     bool (*recordPresence)(const void*, std::uint32_t, bool) noexcept {};
     std::uint32_t firstFieldBit{};
     std::uint8_t (*canonicalType)(const void*, std::uint8_t) noexcept {};
+    /** SObject mode one: a set default bit ends a command, and a target reference replaces the
+     * 16-bit target. */
     bool nativeCommandEmptyShortcut{};
 };
 
