@@ -279,9 +279,11 @@ static_assert(std::string_view(optional_key(kRunAtoms, "temperaments", api::Valu
                      == kChannelsKey);
 constexpr const api::MemberSpec& kStartCarrier = api::slot_member("start_carrier");
 constexpr const api::MemberSpec& kCancelCarrier = api::slot_member("cancel_carrier");
-// start_carrier reads its temperaments with the same reader.
+// start_carrier reads its temperaments and channels with the same readers.
 static_assert(std::string_view(optional_key(kStartCarrier, "temperaments", api::ValueKind::list))
-              == kTemperamentsKey);
+                  == kTemperamentsKey
+              && std::string_view(optional_key(kStartCarrier, "channels", api::ValueKind::list))
+                     == kChannelsKey);
 // The fields of one channel row.
 constexpr std::span<const api::ValueSpec> kChannelFields =
     api::find_argument(kActorControls, "channels").element.front().fields;
@@ -644,6 +646,7 @@ void push_atom_kinds(lua_State* state) {
     lua_pop(state, 1);
     read_cargo(state, actor, definition);
     static_cast<void>(read_temperaments(state, definition.controls));
+    static_cast<void>(read_channels(state, definition.controls));
     Intent intent{};
     intent.kind = IntentKind::startCarrier;
     intent.firstRow = actor.nativeRow;

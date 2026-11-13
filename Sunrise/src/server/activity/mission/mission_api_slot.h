@@ -526,6 +526,13 @@ inline constexpr ValueSpec kStartCarrierArguments[]{
      .bound = kTemperamentBound,
      .element = kTemperament,
      .note = "held for the whole flight, from the actor's creation"},
+    {.name = "channels",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("none"),
+     .bound = kActorChannelBound,
+     .element = kActorChannel,
+     .note = "held for the whole flight beside the door channel, one value per channel"},
 };
 inline constexpr ValueSpec kAtom[]{{.kind = ValueKind::atom, .ref = "atom_kinds"}};
 inline constexpr ValueSpec kRunAtomsArguments[]{
