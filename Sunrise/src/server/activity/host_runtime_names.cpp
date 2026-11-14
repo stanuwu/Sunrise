@@ -73,6 +73,8 @@ const char* event_name(EventKind kind) noexcept {
         return "squad slot count rose";
     case EventKind::entityDied:
         return "squad alive count fell";
+    case EventKind::squadMemberLost:
+        return "squad member lost";
     case EventKind::sceneFinished:
         return "authored scene finished";
     case EventKind::objectiveProgress:

@@ -222,6 +222,7 @@ struct SquadPublishedLevels final {
     SquadObjectiveCosts objectiveCosts{};
     std::array<std::int32_t, host::kSquadSlotCapacity> slotCounts{};
     std::int32_t aliveCount{};
+    std::int32_t alertLevel{};
     std::uint8_t slotCountLength{};
     bool removalFlag{};
     bool operator==(const SquadPublishedLevels&) const = default;
@@ -243,6 +244,8 @@ struct SquadObservation final {
     std::int32_t aliveCount{};
     /** Last spawn generation the squad Sense echoed from its placement Auth. */
     std::int32_t spawnGeneration{};
+    /** Last alert level the squad Sense reported. */
+    std::int32_t alertLevel{};
     std::uint16_t slotIndex{};
     std::uint8_t slotCountLength{};
     bool removalFlag{};

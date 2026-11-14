@@ -106,6 +106,7 @@ mission_input_allowed(host::EventKind kind, bool selectedSource, bool currentMem
            || event.kind == host::EventKind::squadProvoked
            || event.kind == host::EventKind::entitySpawned
            || event.kind == host::EventKind::entityDied
+           || event.kind == host::EventKind::squadMemberLost
            || event.kind == host::EventKind::sceneFinished
            || event.kind == host::EventKind::sceneOutput
            || event.kind == host::EventKind::objectiveProgress

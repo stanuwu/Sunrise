@@ -38,6 +38,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "entitySpawned";
     case host::EventKind::entityDied:
         return "entityDied";
+    case host::EventKind::squadMemberLost:
+        return "squadMemberLost";
     case host::EventKind::sceneFinished:
         return "sceneFinished";
     case host::EventKind::sceneOutput:

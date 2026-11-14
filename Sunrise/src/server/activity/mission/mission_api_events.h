@@ -56,6 +56,7 @@ enum class FieldGroupId : std::uint8_t {
     squadRemoval,
     triggerLevel,
     hopOn,
+    squadMemberLoss,
     count,
 };
 
@@ -242,6 +243,10 @@ inline constexpr MemberSpec kSquadStateFields[]{
     field("objective_revision",
           kInteger,
           "objective revision the squad echoed with its costs; 0 before any"),
+    field("alert_level",
+          kInteger,
+          "from the members' threat levels: 0 never alerted, 2 alerted, 3 in combat, 1 alerted "
+          "before with no member alerted now"),
     field("task_costs", kTaskCosts),
 };
 inline constexpr MemberSpec kEntitySpawnedFields[]{
@@ -362,6 +367,13 @@ inline constexpr MemberSpec kSenseGenerationFields[]{
 };
 inline constexpr MemberSpec kSquadRemovalFields[]{
     field("removal_flag", kBoolean, "false when the report did not carry it")};
+inline constexpr MemberSpec kSquadMemberLossFields[]{
+    field("member_slot", kInteger),
+    field("lost_count",
+          kInteger,
+          "members this slot has lost since its placement; a new spawn generation clears it"),
+    field("previous_lost_count", kInteger),
+};
 inline constexpr MemberSpec kTriggerLevelFields[]{
     field("available", kBoolean, "the report carried a complete occupancy level"),
     field("continuity", kContinuity),
@@ -414,6 +426,7 @@ inline constexpr std::array<FieldGroup, static_cast<std::size_t>(FieldGroupId::c
         {"squad_removal", kSquadRemovalFields},
         {"trigger_level", kTriggerLevelFields},
         {"hop_on", kHopOnFields},
+        {"squad_member_loss", kSquadMemberLossFields},
     }};
 
 /** @return The address of one field group, for an event's group list. */
@@ -478,6 +491,12 @@ inline constexpr const FieldGroup* kEntityDiedGroups[]{group(G::common),
                                                        group(G::senseGeneration),
                                                        group(G::squadAlive),
                                                        group(G::squadRemoval)};
+inline constexpr const FieldGroup* kSquadMemberLostGroups[]{group(G::common),
+                                                            group(G::missionSequence),
+                                                            group(G::slotIdentity),
+                                                            group(G::senseGeneration),
+                                                            group(G::squadMemberLoss),
+                                                            group(G::squadRemoval)};
 inline constexpr const FieldGroup* kSceneFinishedGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::sceneFinished)};
 inline constexpr const FieldGroup* kObjectiveProgressGroups[]{group(G::common),
@@ -699,6 +718,12 @@ inline constexpr EventSpec kEvents[]{
      "SunriseCarrierStateEvent",
      kCarrierGroups,
      "one or more carrier flights moved on; state:operation reads each"},
+    {45,
+     "SQUAD_MEMBER_LOST",
+     "on_event_squad_member_lost",
+     "SunriseSquadMemberLostEvent",
+     kSquadMemberLostGroups,
+     "a member slot's lost count rose; the client raises it as it tears down one of its actors"},
 };
 
 // --- Program table -----------------------------------------------------------------------------

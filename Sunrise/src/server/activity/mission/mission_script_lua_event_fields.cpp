@@ -398,6 +398,7 @@ constexpr EventBinding kSquadState[]{
     {"initial_observation", nullptr, &boolean_field<&E::initialObservation>},
     {"population_available", nullptr, &boolean_field<&E::squadPopulationAvailable>},
     {"objective_revision", nullptr, &integer_field<&E::squadObjectiveRevision>},
+    {"alert_level", nullptr, &integer_field<&E::squadAlertLevel>},
     {"task_costs",
      nullptr,
      [](lua_State* state, const E& event) {
@@ -414,6 +415,11 @@ constexpr EventBinding kEntitySpawned[]{
     {"member_slot", nullptr, &integer_field<&E::squadSlotOrdinal>},
     {"count", nullptr, &integer_field<&E::squadSlotValue>},
     {"previous_count", nullptr, &integer_field<&E::squadPreviousSlotValue>},
+};
+constexpr EventBinding kSquadMemberLoss[]{
+    {"member_slot", nullptr, &integer_field<&E::squadSlotOrdinal>},
+    {"lost_count", nullptr, &integer_field<&E::squadSlotValue>},
+    {"previous_lost_count", nullptr, &integer_field<&E::squadPreviousSlotValue>},
 };
 constexpr EventBinding kSceneFinished[]{
     {"activation_token", nullptr, &integer_field<&E::sceneActivationToken>}};
@@ -653,6 +659,7 @@ constexpr std::array<EventBindings, static_cast<std::size_t>(G::count)> kGroupBi
     kSquadRemoval,
     kTriggerLevel,
     kHopOn,
+    kSquadMemberLoss,
 }};
 static_assert([]() consteval {
     for (std::size_t index = 0; index < kGroupBindings.size(); ++index) {

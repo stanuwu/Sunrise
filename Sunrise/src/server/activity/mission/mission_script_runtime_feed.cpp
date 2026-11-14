@@ -75,6 +75,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::squadProvoked:
     case host::EventKind::entitySpawned:
     case host::EventKind::entityDied:
+    case host::EventKind::squadMemberLost:
     case host::EventKind::sceneFinished:
     case host::EventKind::sceneOutput:
     case host::EventKind::objectiveProgress:

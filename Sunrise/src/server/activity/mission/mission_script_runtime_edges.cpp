@@ -25,10 +25,12 @@
 namespace sunrise::server::activity::mission {
 namespace {
 
-/** Root ordinal of the squad removal flag. The rest of the root is inert on this build. */
+/** Root ordinal of the squad removal flag. */
 constexpr std::uint16_t kSquadRemovalOrdinal = 8;
 /** Root ordinal 0 echoes the spawn generation the squad's placement Auth carries. */
 constexpr std::uint16_t kSquadSpawnGenerationOrdinal = 0;
+/** Root ordinal of the squad's alert level, which its members' threat levels set. */
+constexpr std::uint16_t kSquadAlertLevelOrdinal = 7;
 /** Root ordinals of the type-20 damage Sense body: health, shield, then the echoed revision. */
 constexpr std::uint16_t kDamageHealthOrdinal = 0;
 constexpr std::uint16_t kDamageShieldOrdinal = 1;
@@ -641,6 +643,7 @@ namespace {
 struct SquadLevels final {
     std::array<std::int32_t, host::kSquadSlotCapacity> counts{};
     std::int32_t alive{};
+    std::int32_t alertLevel{};
     std::uint8_t countLength{};
     bool removal{};
     bool costsChanged{};
@@ -660,6 +663,12 @@ struct SquadLevels final {
     levels.alive = row.aliveCount;
     levels.hasAlive = read_squad_alive(body, root, levels.alive);
     levels.removal = sense_flag(body, root, kSquadRemovalOrdinal);
+    levels.alertLevel = row.alertLevel;
+    const sense_values::DecodedValue* const alert =
+        sense_value(body, root, kSquadAlertLevelOrdinal);
+    if (alert != nullptr && alert->present) {
+        levels.alertLevel = static_cast<std::int32_t>(alert->signedValue);
+    }
     levels.counts = row.slotCounts;
     levels.countLength = row.slotCountLength;
     std::array<std::int32_t, host::kSquadSlotCapacity> incomingCounts{};
@@ -668,7 +677,9 @@ struct SquadLevels final {
         levels.counts = incomingCounts;
         levels.countLength = incomingLength;
     }
-    levels.reported = levels.hasAlive || levels.costsChanged || incomingLength != 0;
+    // The alert level can move without any other level, so its change alone is a report.
+    levels.reported = levels.hasAlive || levels.costsChanged || incomingLength != 0
+                      || levels.alertLevel != row.alertLevel;
     return levels;
 }
 
@@ -693,6 +704,7 @@ void retain_squad_identity(SquadObservation& row,
 
 void store_squad_levels(SquadObservation& row, const SquadLevels& levels) noexcept {
     row.aliveCount = levels.alive;
+    row.alertLevel = levels.alertLevel;
     row.removalFlag = levels.removal;
     row.slotCounts = levels.counts;
     row.slotCountLength = levels.countLength;
@@ -703,6 +715,7 @@ void store_squad_levels(SquadObservation& row, const SquadLevels& levels) noexce
     return {.objectiveCosts = row.objectiveCosts,
             .slotCounts = row.slotCounts,
             .aliveCount = row.aliveCount,
+            .alertLevel = row.alertLevel,
             .slotCountLength = row.slotCountLength,
             .removalFlag = row.removalFlag};
 }
@@ -968,6 +981,7 @@ void push_squad_edges(RuntimeInstance& instance,
         const std::int32_t previousAlive = first ? 0 : published.aliveCount;
         const bool changed = first || squad->objectiveCosts != published.objectiveCosts
                              || published.aliveCount != levels.alive
+                             || published.alertLevel != levels.alertLevel
                              || published.removalFlag != levels.removal
                              || published.slotCountLength != levels.countLength
                              || published.slotCounts != levels.counts;
@@ -983,6 +997,7 @@ void push_squad_edges(RuntimeInstance& instance,
         state.squadPreviousAliveCount = previousAlive;
         state.squadPopulationAvailable = squad->populationKnown;
         state.squadRemovalFlag = levels.removal;
+        state.squadAlertLevel = levels.alertLevel;
         state.squadSlotCounts = levels.counts;
         state.squadSlotCountLength = levels.countLength;
         state.initialObservation = first;
@@ -995,7 +1010,9 @@ void push_squad_edges(RuntimeInstance& instance,
         }
 
         // A replacement source starts from its own levels, so only a rise after the first sighting
-        // is a spawn.
+        // raises an edge. A slot's count is the client's lost counter: tearing down one of the
+        // slot's actors raises it and a new spawn generation clears it. The rise still raises
+        // entitySpawned, and raises squadMemberLost, which reads it as the loss it is.
         for (std::uint8_t slot = 0; !first && slot < levels.countLength; ++slot) {
             const std::int32_t previous =
                 slot < published.slotCountLength ? published.slotCounts[slot] : 0;
@@ -1007,8 +1024,12 @@ void push_squad_edges(RuntimeInstance& instance,
             spawned.squadSlotValue = levels.counts[slot];
             spawned.squadPreviousSlotValue = previous;
             spawned.kind = host::EventKind::entitySpawned;
+            host::Event lost = spawned;
+            lost.squadRemovalFlag = levels.removal;
+            lost.kind = host::EventKind::squadMemberLost;
             if (instance.programStatus == ProgramStatus::loaded) {
                 push_script_event(instance, spawned);
+                push_script_event(instance, lost);
             }
         }
         if (!first && levels.alive < published.aliveCount) {

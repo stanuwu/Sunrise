@@ -156,11 +156,13 @@ enum class EventKind : std::uint8_t {
     hopOnState = 43,
     /** State moved one or more carrier flights on. */
     carrierState = 44,
+    /** One squad member slot's lost count rose; derived from one msg 6 body. */
+    squadMemberLost = 45,
 };
 
 /** Kinds are numbered without gaps, so the last one plus one is the count. */
 inline constexpr std::size_t kEventKindCount =
-    static_cast<std::size_t>(EventKind::carrierState) + 1U;
+    static_cast<std::size_t>(EventKind::squadMemberLost) + 1U;
 
 /**
  * Terminal delivery outcome of one script-requested effect.
@@ -722,16 +724,21 @@ struct Event final {
     std::int32_t squadAliveCount{};
     /** Alive count this observation replaced, for entityDied events. */
     std::int32_t squadPreviousAliveCount{};
-    /** New count of the one slot that rose, for entitySpawned events. */
+    /** New count of the one slot that rose, for entitySpawned and squadMemberLost events. */
     std::int32_t squadSlotValue{};
     /** Count that slot held before it rose. */
     std::int32_t squadPreviousSlotValue{};
     /** Live entries in squadSlotCounts, from the list's four-bit length. */
     std::uint8_t squadSlotCountLength{};
-    /** Index into squadSlotCounts that rose, for entitySpawned events. */
+    /** Index into squadSlotCounts that rose, for entitySpawned and squadMemberLost events. */
     std::uint8_t squadSlotOrdinal{};
     /** Client flag written on its actor death or removal path. The meaning is unproved. */
     bool squadRemovalFlag{};
+    /**
+     * Squad Sense alert level, set from its members' threat levels: 0 never alerted, 2 alerted,
+     * 3 in combat, 1 alerted before with no member alerted now.
+     */
+    std::int32_t squadAlertLevel{};
     /** Msg-6 record counter plus one; not a squad or actor lifetime identity. */
     std::uint32_t senseGenerationPlusOne{};
     bool hasSenseGeneration{};
