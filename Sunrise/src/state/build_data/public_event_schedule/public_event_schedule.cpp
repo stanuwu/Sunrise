@@ -1,12 +1,11 @@
-#include <atomic>
-#include <memory>
+#include <mutex>
 
 #include "definition.h"
 
 namespace sunrise::state::build_data::public_event_schedule {
 namespace {
-const SnapshotView g_empty = std::make_shared<const Table>();
-std::atomic<SnapshotView> g_snapshot{g_empty};
+std::mutex g_mutex;
+Table g_table{};
 
 /** Checks the external decoded table before publishing an immutable copy. */
 [[nodiscard]] bool consistent(const Table& value) noexcept {
@@ -28,16 +27,23 @@ bool publish(const Table& value) noexcept {
     if (!consistent(value)) {
         return false;
     }
-    SnapshotView expected = g_empty;
-    return g_snapshot.compare_exchange_strong(expected, std::make_shared<const Table>(value));
+    const std::lock_guard lock(g_mutex);
+    if (g_table.rowCount != 0) {
+        return false;
+    }
+    g_table = value;
+    return true;
 }
 
 bool ready() noexcept {
-    return g_snapshot.load(std::memory_order_acquire) != g_empty;
+    const std::lock_guard lock(g_mutex);
+    return g_table.rowCount != 0;
 }
 
-SnapshotView snapshot() noexcept {
-    return g_snapshot.load(std::memory_order_acquire);
+const Table* snapshot() noexcept {
+    static constexpr Table empty{};
+    const std::lock_guard lock(g_mutex);
+    return g_table.rowCount != 0 ? &g_table : &empty;
 }
 
 } // namespace sunrise::state::build_data::public_event_schedule

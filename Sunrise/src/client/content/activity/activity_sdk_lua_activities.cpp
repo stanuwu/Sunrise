@@ -119,10 +119,7 @@ std::string append_unique_key(std::string& output,
         // one in the Lua table.
         const std::string base = key;
         for (unsigned ordinal = 2; !used.insert(key).second; ++ordinal) {
-            std::array<char, kOrdinalSuffixBytes> tail{};
-            const int tailLength = std::snprintf(tail.data(), tail.size(), "_%u", ordinal);
-            key = base;
-            key.append(tail.data(), static_cast<std::size_t>(tailLength));
+            key = base + "_" + std::to_string(ordinal);
         }
     }
     output.append("    ");

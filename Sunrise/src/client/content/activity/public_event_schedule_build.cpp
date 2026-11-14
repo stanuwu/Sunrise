@@ -26,8 +26,7 @@ bool build_public_event_schedule(const packages::reader::Source& source,
         return false;
     }
     std::vector<std::byte> globals, payload;
-    // The table is a few tens of kilobytes; it stays off the worker's stack.
-    static store::Table table{};
+    store::Table table{};
     for (std::size_t i = 0; i < candidateCount; ++i) {
         std::uint32_t tag{};
         if (!packages::reader::read_tag(source, scratch, candidates[i], globals)

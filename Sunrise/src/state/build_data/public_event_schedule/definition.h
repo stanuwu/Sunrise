@@ -3,7 +3,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <span>
 
 namespace sunrise::state::build_data::public_event_schedule {
@@ -79,9 +78,6 @@ struct Table {
     }
 };
 
-/** Owns an immutable table for the full lifetime of a reader. */
-using SnapshotView = std::shared_ptr<const Table>;
-
 /** Seconds in the client's 365-day slot rotation; periods cannot exceed it. */
 inline constexpr std::int64_t kRotationSeconds = 31536000;
 
@@ -89,6 +85,6 @@ inline constexpr std::int64_t kRotationSeconds = 31536000;
 [[nodiscard]] bool publish(const Table& value) noexcept;
 /** @return True once a table was published. */
 [[nodiscard]] bool ready() noexcept;
-/** @return An owned immutable table, empty before the first publication. */
-[[nodiscard]] SnapshotView snapshot() noexcept;
+/** @return A process-lifetime view, empty until the first successful publication. */
+[[nodiscard]] const Table* snapshot() noexcept;
 } // namespace sunrise::state::build_data::public_event_schedule
