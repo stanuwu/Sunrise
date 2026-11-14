@@ -12,8 +12,11 @@ inline constexpr std::size_t kBucketCapacity = 12;
 inline constexpr std::size_t kBucketHashCapacity = 16;
 /** The flat overflow bank holds 32 hashes no bucket category claims. */
 inline constexpr std::size_t kOverflowCapacity = 32;
-/** A subclass publishes up to 32 sandbox perks, which its active socket entries declare. */
-inline constexpr std::size_t kPerkCapacity = 32;
+/**
+ * A subclass publishes up to 16 sandbox perks, a third of the character perk bank, so the equipped
+ * items always keep the rest. No shipped subclass declares more than 13 under one selection.
+ */
+inline constexpr std::size_t kPerkCapacity = 16;
 /**
  * One row per subclass and selection in use: 3 characters by 3 owned subclasses by 2 rows, the
  * default selection and the remembered picks, which are kept per subclass item.

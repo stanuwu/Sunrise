@@ -9,6 +9,8 @@ namespace buckets = state::build_data::abilities;
 /** The authored equipment slot that holds the subclass. */
 constexpr std::size_t kSubclassSlot =
     static_cast<std::size_t>(state::account::inventory::EquipmentSlot::subclass);
+/** A subclass row's sandbox perks take at most a third of the character perk bank. */
+static_assert(3 * buckets::kPerkCapacity == layout::kIndexBankCapacity);
 
 /** @param item Authored subclass item. @return Its 5 selected socket entries. */
 [[nodiscard]] buckets::Selection
@@ -59,11 +61,9 @@ bool apply_ability_buckets(const state::CharacterState& character,
         for (std::size_t entry = 0; entry < published.overflowCount; ++entry) {
             appearance.overflowHashes[entry] = published.overflow[entry];
         }
-        // The subclass's sandbox perks go first in the character perk bank. apply_perk_banks adds
-        // the equipped items' sandbox perks after them.
-        for (std::size_t entry = 0;
-             entry < published.perkCount && entry < appearance.indexBank.size();
-             ++entry) {
+        // The bank is in equipment slot order and the subclass is slot 0, so its sandbox perks go
+        // first. apply_perk_banks adds the equipped items' sandbox perks after them.
+        for (std::size_t entry = 0; entry < published.perkCount; ++entry) {
             appearance.indexBank[entry] = published.perks[entry];
         }
         return true;
