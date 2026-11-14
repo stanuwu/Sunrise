@@ -29,7 +29,6 @@ constexpr std::array kToggleKeys{
     KeyName{"f10", VK_F10},
     KeyName{"f11", VK_F11},
     KeyName{"f12", VK_F12},
-    KeyName{"minus", VK_OEM_MINUS},
 };
 
 } // namespace

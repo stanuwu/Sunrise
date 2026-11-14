@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include <array>
+#include <atomic>
 #include <span>
 #include <vector>
 
@@ -28,6 +29,9 @@
 
 namespace sunrise::client::content::items::packages {
 namespace {
+
+/** The optional schedule is published or all candidates in the sealed catalog are unsupported. */
+std::atomic_bool g_scheduleSettled{};
 
 /** @return True when every item and investment-root domain is published. */
 [[nodiscard]] bool root_domains_ready() noexcept {
@@ -100,7 +104,7 @@ bool ready() noexcept {
     return root_domains_ready() && state::build_data::scenario_layouts_ready()
            && state::build_data::spawn_sets_ready() && state::build_data::hash_names_ready()
            && state::build_data::vendor_catalog_ready() && state::build_data::vendors::gates_ready()
-           && content::activity::entity_position_profiles::ready()
+           && g_scheduleSettled.load() && content::activity::entity_position_profiles::ready()
            && (state::build_data::activities::ready()
                || state::build_data::activities::extraction_failed());
 }
@@ -131,7 +135,10 @@ bool build() noexcept {
         const reader::Source packageSource{directory.chars.data(), &keys};
         // Process-local launcher data is extracted even when persistent build data was loaded.
         (void)content::activity::build_catalog(packageSource, storage.scratch);
-        (void)content::activity::build_public_event_schedule(packageSource, storage.scratch);
+        if (!g_scheduleSettled.load()
+            && content::activity::build_public_event_schedule(packageSource, storage.scratch)) {
+            g_scheduleSettled.store(true);
+        }
         (void)content::activity::entity_position_profiles::build(packageSource, storage.scratch);
         (void)content::scenarios::build(packageSource, storage.scratch);
         (void)content::spawn_sets::build(packageSource, storage.scratch);

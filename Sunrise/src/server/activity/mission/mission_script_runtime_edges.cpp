@@ -24,8 +24,8 @@
 
 namespace sunrise::server::activity::mission {
 namespace {
-/** Byte capacity of this module's bounded diagnostic/name buffer. */
-constexpr std::size_t kObjectTraceBytes = 224;
+/** Capacity of one formatted object-state message, including its terminator. */
+constexpr std::size_t kObjectTraceBytes = 128;
 
 /** Root ordinal of the squad removal flag. */
 constexpr std::uint16_t kSquadRemovalOrdinal = 8;
@@ -542,46 +542,45 @@ void push_object_state_edge(RuntimeInstance& instance,
     static_cast<void>(update_object_interaction(
         slot->level, observation_values(observation, sense), observation.key.schemaRow));
     const ObjectInteractionLevel& level = slot->level;
-    const bool stateChanged =
-        level.generationKnown && level.generation > 0 && level.stateKnown
-        && (!before.stateKnown || before.generation != level.generation
-            || before.present != level.present || before.interactionOpen != level.interactionOpen
-            || before.ownerKnown != level.ownerKnown || before.hasOwner != level.hasOwner
-            || before.ownerKey != level.ownerKey || before.plateKnown != level.plateKnown
-            || before.plateOwner != level.plateOwner
-            || before.plateCapturing != level.plateCapturing
-            || before.plateOccupants != level.plateOccupants
-            || before.plateProgress != level.plateProgress);
-    if (!stateChanged) {
+    if (!level.generationKnown || level.generation <= 0 || !level.stateKnown) {
+        return;
+    }
+    const bool objectChanged =
+        !before.stateKnown || before.generation != level.generation
+        || before.present != level.present || before.interactionOpen != level.interactionOpen
+        || before.ownerKnown != level.ownerKnown || before.hasOwner != level.hasOwner
+        || before.ownerKey != level.ownerKey;
+    const bool plateChanged = before.plateKnown != level.plateKnown
+                              || before.plateOwner != level.plateOwner
+                              || before.plateCapturing != level.plateCapturing
+                              || before.plateOccupants != level.plateOccupants
+                              || before.plateProgress != level.plateProgress;
+    if (!objectChanged && !plateChanged) {
         return;
     }
     host::Event event = shared_edge_event(instance, observation);
     copy_object_level(before, level, event);
     event.kind = host::EventKind::objectState;
-    std::array<char, kObjectTraceBytes> details{};
-    const int written = std::snprintf(details.data(),
-                                      details.size(),
-                                      "registry=%08X slot=%u generation=%d present=%u "
-                                      "interaction_open=%u owner_known=%u has_owner=%u "
-                                      "plate=%u plate_owner=%d plate_capturing=%d "
-                                      "plate_occupants=%u",
-                                      observation.key.registryKey,
-                                      static_cast<unsigned>(observation.key.slotIndex),
-                                      level.generation,
-                                      level.present ? 1U : 0U,
-                                      level.interactionOpen ? 1U : 0U,
-                                      level.ownerKnown ? 1U : 0U,
-                                      level.hasOwner ? 1U : 0U,
-                                      level.plateKnown ? 1U : 0U,
-                                      level.plateOwner,
-                                      level.plateCapturing,
-                                      level.plateOccupants);
-    if (written > 0 && static_cast<std::size_t>(written) < details.size()) {
-        log_line(core::log::Level::debug,
-                 &instance,
-                 "object",
-                 "changed",
-                 {details.data(), static_cast<std::size_t>(written)});
+    if (objectChanged) {
+        std::array<char, kObjectTraceBytes> details{};
+        const int written = std::snprintf(details.data(),
+                                          details.size(),
+                                          "registry=%08X slot=%u generation=%d present=%u "
+                                          "interaction_open=%u owner_known=%u has_owner=%u",
+                                          observation.key.registryKey,
+                                          static_cast<unsigned>(observation.key.slotIndex),
+                                          level.generation,
+                                          level.present ? 1U : 0U,
+                                          level.interactionOpen ? 1U : 0U,
+                                          level.ownerKnown ? 1U : 0U,
+                                          level.hasOwner ? 1U : 0U);
+        if (written > 0 && static_cast<std::size_t>(written) < details.size()) {
+            log_line(core::log::Level::debug,
+                     &instance,
+                     "object",
+                     "changed",
+                     {details.data(), static_cast<std::size_t>(written)});
+        }
     }
     push_script_event(instance, event);
 }

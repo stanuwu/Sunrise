@@ -8,7 +8,8 @@ namespace sunrise::client::content::activity {
  * it to state::build_data::public_event_schedule.
  * @param source Installed package directory with borrowed block keys.
  * @param scratch Reader-owned block storage.
- * @return True once the table is published, now or earlier.
+ * @return True once published or the complete named catalog has no supported schedule.
+ * A package read failure leaves the pass pending.
  */
 [[nodiscard]] bool
 build_public_event_schedule(const middleware::content::packages::reader::Source& source,
