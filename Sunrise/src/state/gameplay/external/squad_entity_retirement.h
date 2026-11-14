@@ -14,6 +14,11 @@ using CellBubbles = std::array<std::int16_t, 256>;
 /** A spawned actor names its source: its squad, or the combatant that binds it to one. */
 inline constexpr std::uint8_t kSquadSourceType = 1;
 inline constexpr std::uint8_t kCombatantSourceType = 2;
+/**
+ * An authored object entry names its own type-4 slot as its source. The host policy for it: only
+ * an entry whose Auth the host retains, because a mission wrote it, is eligible.
+ */
+inline constexpr std::uint8_t kObjectSourceType = 4;
 /** Native map-prop types exclude actors, players, weapons and interactive objects. */
 inline constexpr std::array<std::uint8_t, 5> kRetirablePropTypes{1, 2, 3, 7, 8};
 /** Retirement eligibility comes from an explicit host policy for an exact class. */

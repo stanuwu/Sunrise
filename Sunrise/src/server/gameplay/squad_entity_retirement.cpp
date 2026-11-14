@@ -23,6 +23,8 @@ namespace identities = state::gameplay::entity_identity;
 static_assert(policy::kSquadSourceType == state::activity_sdk::format::kSquadSlotType);
 static_assert(policy::kCombatantSourceType
               == middleware::bap::activity_message::scriptable_auth::kType2SlotType);
+static_assert(policy::kObjectSourceType == state::activity_sdk::format::kObjectSlotType);
+using middleware::bap::activity_message::entity_slots::has_slot;
 SRWLOCK g_lock{SRWLOCK_INIT};
 policy::Store g_store;
 policy::Store g_propStore;
@@ -134,7 +136,7 @@ void report_released(const policy::Mask& mask,
     constexpr std::size_t kMaximumReportedSlots = 64;
     std::size_t shown = 0;
     for (std::size_t slot = 0; slot < rows.size() && shown < kMaximumReportedSlots; ++slot) {
-        if ((std::to_integer<unsigned>(mask[slot / 8]) & (1U << (slot % 8))) == 0) {
+        if (!has_slot(mask, slot)) {
             continue;
         }
         ++shown;
@@ -239,6 +241,45 @@ void report_hierarchy_gaps(std::span<const identities::Identity> rows) noexcept 
     }
 }
 
+/** @return True when the host retains Auth a mission wrote to the exact type-4 slot. */
+bool mission_written(std::span<const activity::host::ScriptablePin> pins,
+                     const identities::ActorSourceReference& source) {
+    return std::ranges::any_of(pins, [&](const activity::host::ScriptablePin& pin) {
+        return pin.slotType == source.type && pin.registryKey == source.key
+               && pin.slotIndex == source.index;
+    });
+}
+
+/**
+ * Host policy for authored object entries. An entry is eligible only when the host retains Auth a
+ * mission wrote to its exact type-4 slot: every later roster carries that Auth, and the client
+ * rebuilds the entry from it once it is back in the bubble. A stock package object has no retained
+ * Auth and stays with the client. One eligibility per exact source and class.
+ */
+void add_mission_objects(std::uint8_t bubble,
+                         const policy::Mask& mask,
+                         std::span<const identities::Identity> rows,
+                         std::span<const activity::host::ScriptablePin> pins,
+                         std::vector<policy::Eligibility>& eligible) {
+    for (std::size_t slot = 0; slot < rows.size(); ++slot) {
+        const auto& row = rows[slot];
+        const auto& source = row.actorSource;
+        if (!has_slot(mask, slot) || !row.present || row.anchorPresent || !row.metadata.hasRsat
+            || !source.known || !source.present || source.type != policy::kObjectSourceType
+            || !mission_written(pins, source)) {
+            continue;
+        }
+        policy::Eligibility entry{};
+        entry.squad = {source.key, source.index, source.type};
+        entry.rsatTag = row.metadata.rsatTag;
+        entry.bubble = bubble;
+        entry.enabled = true;
+        if (std::find(eligible.begin(), eligible.end(), entry) == eligible.end()) {
+            eligible.push_back(entry);
+        }
+    }
+}
+
 /** Logs the complete selected count and a bounded prefix of slot indices. */
 void report(const char* stage,
             bool result,
@@ -271,7 +312,7 @@ void report(const char* stage,
     std::size_t length = static_cast<std::size_t>(prefix), shown = 0;
     if (mask) {
         for (std::size_t slot = 0; slot < identities::kSlotCapacity && shown < 32; ++slot) {
-            if ((std::to_integer<unsigned>((*mask)[slot / 8]) & (1U << (slot % 8))) == 0) {
+            if (!has_slot(*mask, slot)) {
                 continue;
             }
             const int count = std::snprintf(
@@ -609,11 +650,15 @@ void follow_squad(const state::activity::SessionBinding& binding,
     }
     ReleaseSRWLockExclusive(&g_lock);
 }
-/** Only package-mapped, positively authored trees enter a captured release. */
+/**
+ * Only package-mapped, positively authored trees enter a captured release. An abandonment also
+ * captures the mission's objects; an abdication hands the bubble to a peer that keeps them.
+ */
 void observe_abdication(const state::activity::SessionBinding& binding,
                         std::uint64_t generation,
                         std::uint8_t bubble,
-                        const state::activity::bubble_authority::EntitySlotMask& mask) noexcept {
+                        const state::activity::bubble_authority::EntitySlotMask& mask,
+                        bool abandoned) noexcept {
     identities::Source source{};
     std::vector<identities::Identity> rows;
     if (!snapshot(binding, generation, source, rows)) {
@@ -638,6 +683,19 @@ void observe_abdication(const state::activity::SessionBinding& binding,
             cells[i] = owner;
         }
     }
+    // Read before the store lock, so the host lock is never taken under it.
+    std::vector<activity::host::ScriptablePin> pins;
+    std::size_t pinCount = 0;
+    try {
+        if (abandoned) {
+            pins.resize(activity::host::kScriptablePinCapacity);
+            if (!activity::host::scriptable_auth_pins(binding, pins, pinCount)) {
+                report("capture_pins", false, bubble);
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        report("capture_pins", false, bubble);
+    }
     AcquireSRWLockExclusive(&g_lock);
     bool accepted = false;
     try {
@@ -648,6 +706,7 @@ void observe_abdication(const state::activity::SessionBinding& binding,
                 eligible.push_back(row.eligibility);
             }
         }
+        add_mission_objects(bubble, mask, rows, std::span(pins).first(pinCount), eligible);
         accepted = g_store.capture(source, bubble, mask, rows, eligible, cells);
     } catch (...) {}
     ReleaseSRWLockExclusive(&g_lock);

@@ -4,9 +4,7 @@
 
 namespace sunrise::state::gameplay::squad_entity_retirement {
 namespace {
-bool bit(const Mask& mask, std::size_t slot) {
-    return (std::to_integer<unsigned>(mask[slot / 8]) & (1U << (slot % 8))) != 0;
-}
+using middleware::bap::activity_message::entity_slots::has_slot;
 void set(Mask& mask, std::size_t slot) {
     mask[slot / 8] |= std::byte(1U << (slot % 8));
 }
@@ -26,10 +24,13 @@ bool same(const identities::Identity& a, const identities::Identity& b) {
 bool actor_source(std::uint8_t type) {
     return type == kSquadSourceType || type == kCombatantSourceType;
 }
-bool actor(const identities::Identity& row, const Eligibility& eligibility) {
+/** An entity of the eligible class from its exact source: an actor, or an authored object entry. */
+bool sourced(const identities::Identity& row, const Eligibility& eligibility) {
+    const auto type = row.actorSource.type;
     return row.known && row.present && !row.conflicted && row.type == 0 && row.metadata.hasRsat
            && row.metadata.rsatTag == eligibility.rsatTag && !row.metadata.hasPlayerBroadcast
-           && row.actorSource.known && row.actorSource.present && actor_source(row.actorSource.type)
+           && row.actorSource.known && row.actorSource.present
+           && (actor_source(type) || type == kObjectSourceType)
            && row.actorSource.key == eligibility.squad.key
            && row.actorSource.type == eligibility.squad.type
            && row.actorSource.index == eligibility.squad.index;
@@ -50,12 +51,12 @@ bool prop(const identities::Identity& row) {
 bool root_matches(const identities::Identity& row, const Eligibility& eligibility) {
     return eligibility.placedProp ? prop(row) && row.metadata.rsatTag == eligibility.rsatTag
                                         && row.metadata.objectType == eligibility.objectType
-                                  : actor(row, eligibility);
+                                  : sourced(row, eligibility);
 }
 /**
- * A child released under a squad actor leaves with it: its weapon, a shield, or a hop-on on it.
- * The client's release is its own dependency closure; a player's object or another squad's member
- * never belongs to the tree.
+ * A child released under a retired root leaves with it, such as an actor's weapon, shield or
+ * hop-on. The client's release is its own dependency closure; a player's object or another squad's
+ * member never belongs to the tree.
  */
 bool dependent(const identities::Identity& row, const Eligibility& eligibility) {
     if (row.type != 0 || !row.metadata.hasRsat || row.metadata.hasPlayerBroadcast
@@ -98,7 +99,7 @@ bool closure(identities::Token root,
     output = {};
     if (root.slot >= rows.size() || rows[root.slot].token != root
         || !root_matches(rows[root.slot], eligibility) || rows[root.slot].anchorPresent
-        || !bit(released, root.slot)) {
+        || !has_slot(released, root.slot)) {
         return false;
     }
     set(output, root.slot);
@@ -106,8 +107,8 @@ bool closure(identities::Token root,
     while (changed) {
         changed = false;
         for (const auto& row : rows) {
-            if (!row.present || !row.anchorPresent || !bit(output, row.anchor.slot)
-                || bit(output, row.token.slot)) {
+            if (!row.present || !row.anchorPresent || !has_slot(output, row.anchor.slot)
+                || has_slot(output, row.token.slot)) {
                 continue;
             }
             const bool squad =
@@ -115,8 +116,8 @@ bool closure(identities::Token root,
             const bool eligible =
                 eligibility.placedProp
                     ? prop(row)
-                    : actor(row, eligibility) || dependent(row, eligibility) || squad;
-            if (!bit(released, row.token.slot) || !eligible) {
+                    : sourced(row, eligibility) || dependent(row, eligibility) || squad;
+            if (!has_slot(released, row.token.slot) || !eligible) {
                 return false;
             }
             set(output, row.token.slot);
@@ -144,7 +145,7 @@ bool Store::capture(const identities::Source& source,
         next.bubble = bubble;
         next.requireComplete = requireComplete;
         for (const auto& row : rows) {
-            if (!row.present || row.anchorPresent || !bit(released, row.token.slot)) {
+            if (!row.present || row.anchorPresent || !has_slot(released, row.token.slot)) {
                 continue;
             }
             const Eligibility* selected = nullptr;
@@ -182,7 +183,7 @@ bool Store::capture(const identities::Source& source,
             }
             bool valid = true;
             for (std::size_t slot = 0; slot < rows.size(); ++slot) {
-                if (bit(group.entities, slot)) {
+                if (has_slot(group.entities, slot)) {
                     const auto& member = rows[slot];
                     if (member.cell >= cells.size() || cells[member.cell] != bubble) {
                         valid = false;

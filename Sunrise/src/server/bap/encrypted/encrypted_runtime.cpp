@@ -181,7 +181,8 @@ void submit_committed_authority_abdication(Session& session,
         session.activity.session,
         session.activity.bindingGeneration,
         plan.authorityAbdication.bubble,
-        plan.authorityAbdication.entities);
+        plan.authorityAbdication.entities,
+        plan.authorityAbdication.abandoned);
 }
 
 /** Applies one reset acknowledgement only after its authenticated service frame commits. */

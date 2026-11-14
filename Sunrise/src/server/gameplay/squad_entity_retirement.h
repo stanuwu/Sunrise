@@ -33,11 +33,13 @@ void cancel_placed_transition(const state::activity::SessionBinding&,
 /**
  * An authenticated abdication (msg 33) or abandonment (msg 26) freezes exact identities before a
  * later purge can retire them.
+ * @param abandoned The release is an abandonment, which also captures the mission's objects.
  */
 void observe_abdication(const state::activity::SessionBinding&,
                         std::uint64_t generation,
                         std::uint8_t bubble,
-                        const state::activity::bubble_authority::EntitySlotMask&) noexcept;
+                        const state::activity::bubble_authority::EntitySlotMask&,
+                        bool abandoned) noexcept;
 /** Returned slots cannot remain eligible for an earlier release. */
 void returned_slots(const state::activity::SessionBinding&,
                     std::uint64_t generation,
