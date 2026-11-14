@@ -62,6 +62,8 @@ inline constexpr ValueSpec kVolume[]{
     {.kind = ValueKind::handle, .ref = "slot", .slot = type_gate(slot_auth::kType60SlotType)}};
 inline constexpr ValueSpec kFilterObject[]{
     {.kind = ValueKind::handle, .ref = "slot", .slot = type_gate(slot_format::kObjectSlotType)}};
+inline constexpr ValueSpec kFilterSquad[]{
+    {.kind = ValueKind::handle, .ref = "slot", .slot = type_gate(slot_format::kSquadSlotType)}};
 inline constexpr ValueSpec kObjectFilterArguments[]{
     {.name = "players",
      .kind = ValueKind::boolean,
@@ -85,6 +87,12 @@ inline constexpr ValueSpec kObjectFilterArguments[]{
      .optional = true,
      .slot = type_gate(slot_format::kSquadSlotType),
      .note = "adds a test: this squad"},
+    {.name = "squads",
+     .kind = ValueKind::list,
+     .optional = true,
+     .bound = between(1, static_cast<std::int64_t>(slot_auth::kType34PredicateCapacity)),
+     .element = kFilterSquad,
+     .note = "adds one test per squad"},
     {.name = "inside",
      .kind = ValueKind::handle,
      .ref = "slot",
