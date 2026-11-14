@@ -48,9 +48,8 @@ constexpr std::size_t kBeforeDestinationAbsentFieldCount = 3;
 constexpr std::size_t kAfterSpawnReferenceAbsentFieldCount = 4;
 /** The destination request revision is a 31-bit counter the client echoes at +600. */
 constexpr std::uint8_t kDestinationRevisionWidth = 31;
-/** A spawn rule is a type-66 slot; `.12` is the second of the two spawn references. */
+/** A spawn rule is a type-66 slot. */
 constexpr std::uint8_t kSpawnRuleSlotType = 66;
-constexpr std::size_t kSpawnRuleReferenceIndex = 1;
 
 /** @return True when the guard itself can name a prior positive generation. */
 [[nodiscard]] constexpr bool valid_guard(const GenerationGuard& guard) noexcept {
@@ -150,7 +149,9 @@ constexpr std::size_t kSpawnRuleReferenceIndex = 1;
         if (!writer.write(1, kPresenceWidth)) {
             return false;
         }
-        if (index == kSpawnRuleReferenceIndex && preset.spawnRule.has_value()) {
+        // The point resolver reads both references and falls back to the package rule for an
+        // unset one, so a set rule fills both.
+        if (preset.spawnRule.has_value()) {
             if (!auth_fields::write_client_ref(writer,
                                                preset.spawnRule->registryKey,
                                                kSpawnRuleSlotType,

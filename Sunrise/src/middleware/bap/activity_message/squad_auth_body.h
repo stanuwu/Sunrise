@@ -31,7 +31,7 @@ inline constexpr std::size_t kRequestedCountBitCount = 32;
 inline constexpr std::size_t kNameHashBitCount = 32;
 /**
  * Spawn references `.11` and `.12`, each one nested ClientRef after a presence bit.
- * The unset form keeps the package's authored rule; only `.12` may carry a set spawn rule.
+ * The unset form keeps the package's authored rule; a set spawn rule fills both.
  */
 inline constexpr std::size_t kSpawnReferenceBitCount = 55;
 inline constexpr std::size_t kSpawnReferenceCount = 2;
@@ -95,8 +95,7 @@ struct Preset final {
     std::array<std::int8_t, 4> authoredProfile{};
     /** Sent as `.10` with `.17` equal to the generation; absent leaves both fields out. */
     std::optional<Destination> destination{};
-    /** Sent as `.12`, the rule reference the point resolver reads at +0xA0; absent keeps the
-     * package rule. */
+    /** Sent as both spawn references the point resolver reads; absent keeps the package rule. */
     std::optional<SpawnRule> spawnRule{};
 };
 
