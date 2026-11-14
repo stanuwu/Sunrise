@@ -137,6 +137,7 @@ namespace {
            && left.activityFlagKey == right.activityFlagKey
            && left.sequenceChoice == right.sequenceChoice
            && left.sequenceRetain == right.sequenceRetain
+           && left.objectInPlace == right.objectInPlace
            && left.authBitCount == right.authBitCount
            && left.effectiveRegion == right.effectiveRegion
            && left.objectLocationRow == right.objectLocationRow

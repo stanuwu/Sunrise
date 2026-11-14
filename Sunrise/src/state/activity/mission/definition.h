@@ -306,6 +306,8 @@ struct TypedIntent final {
     std::int32_t sequenceChoice{-1};
     /** The sequence keeps running and only changes its choice. */
     bool sequenceRetain{};
+    /** An object body keeps the committed generation and updates the live entity. */
+    bool objectInPlace{};
     float deviceValue{};
     std::uint16_t authBitCount{};
     std::uint16_t slotIndex{};

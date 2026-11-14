@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -189,6 +191,53 @@ void append_listed_slots(lua_State* state,
         }
     }
     lua_pop(state, 1);
+}
+
+constexpr const char* kTimerKey = optional_key(kInteractable, "timer", api::ValueKind::table);
+constexpr const char* kTimerElapsedKey =
+    table_field_key(kInteractable, "timer", "elapsed", api::ValueKind::number);
+constexpr const char* kTimerRemainingKey =
+    table_field_key(kInteractable, "timer", "remaining", api::ValueKind::number);
+constexpr const char* kTimerActiveKey =
+    table_field_key(kInteractable, "timer", "active", api::ValueKind::boolean);
+
+/** Reads one field of the timer table on the stack top, in seconds, as activity ticks. */
+[[nodiscard]] std::uint64_t timer_ticks(lua_State* state, const char* name) {
+    // Bounded so the tick product stays exact in a double.
+    constexpr double kMaximumSeconds = (std::numeric_limits<std::int32_t>::max)();
+    lua_getfield(state, -1, name);
+    if (lua_type(state, -1) != LUA_TNUMBER) {
+        return static_cast<std::uint64_t>(luaL_error(state, "timer.%s must be a number", name));
+    }
+    const double seconds = lua_tonumber(state, -1);
+    lua_pop(state, 1);
+    if (!std::isfinite(seconds) || seconds < 0.0 || seconds > kMaximumSeconds) {
+        return static_cast<std::uint64_t>(
+            luaL_error(state, "timer.%s must be finite seconds, at least 0", name));
+    }
+    return static_cast<std::uint64_t>(seconds * static_cast<double>(auth_fields::kTicksPerSecond));
+}
+
+/** @return The optional stopped timer record of a set_interactable_object call. */
+[[nodiscard]] std::optional<middleware::bap::activity_message::interactable_object::Timer>
+timer_argument(lua_State* state) {
+    if (push_argument(state, kTimerKey) == LUA_TNIL) {
+        lua_pop(state, 1);
+        return std::nullopt;
+    }
+    if (!lua_istable(state, -1)) {
+        raise_lua_error(state, "timer must be a table");
+    }
+    middleware::bap::activity_message::interactable_object::Timer timer{};
+    timer.elapsedTicks = timer_ticks(state, kTimerElapsedKey);
+    timer.remainingTicks = timer_ticks(state, kTimerRemainingKey);
+    lua_getfield(state, -1, kTimerActiveKey);
+    if (!lua_isboolean(state, -1)) {
+        raise_lua_error(state, "timer.active must be a boolean");
+    }
+    timer.active = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 2);
+    return timer;
 }
 
 } // namespace
@@ -416,7 +465,10 @@ void append_listed_slots(lua_State* state,
         state, slot, damage::kAuthSchema, damage::kBits, body, IntentKind::watchDamage);
 }
 
-/** Spawns authored entry zero and subscribes to accepted native player use. */
+/**
+ * Spawns authored entry zero and subscribes to accepted native player use. With respawn false the
+ * body keeps the entry's generation, so its records reach the entity where it is.
+ */
 [[nodiscard]] int slot_set_interactable_object(lua_State* state) {
     namespace object = middleware::bap::activity_message::interactable_object;
     const auto* const handle =
@@ -426,24 +478,27 @@ void append_listed_slots(lua_State* state,
     if (!current_slot(state, *handle, slot) || !exact_object_slot(slot)) {
         return luaL_error(state, "interaction requires an exact authored object");
     }
-    const bool trackOwner =
+    object::Options options{};
+    options.trackOwner =
         optional_boolean_argument(state, boolean_option(kInteractable, "track_owner"));
-    std::array<std::byte, object::kOwnerBytes> body{};
+    options.active = optional_boolean_argument(state, boolean_option(kInteractable, "active"));
+    options.used = optional_boolean_argument(state, boolean_option(kInteractable, "used"));
+    options.usable = optional_boolean_argument(state, boolean_option(kInteractable, "usable"));
+    options.timer = timer_argument(state);
+    const bool respawn = optional_boolean_argument(state, boolean_option(kInteractable, "respawn"));
+    std::array<std::byte, object::kMaximumBytes> body{};
     std::size_t written = 0;
-    if (!object::encode(kUncommittedCounter,
-                        body,
-                        written,
-                        trackOwner,
-                        optional_boolean_argument(state, boolean_option(kInteractable, "active")),
-                        optional_boolean_argument(state, boolean_option(kInteractable, "used")))) {
+    if (!object::encode(kUncommittedCounter, body, written, options)) {
         return luaL_error(state, "interactable object encoder failed");
     }
     return queue_slot_auth(state,
                            slot,
                            object::kSchema,
-                           trackOwner ? object::kOwnerBits : object::kBits,
+                           object::bit_count(options),
                            std::span(body).first(written),
-                           IntentKind::setInteractableObject);
+                           IntentKind::setInteractableObject,
+                           false,
+                           !respawn);
 }
 
 /** Arms or disarms the authored Ghost-link scan. The Host stamps the generation this body needs. */

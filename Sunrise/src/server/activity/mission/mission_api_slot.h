@@ -303,6 +303,11 @@ inline constexpr ValueSpec kMusicSectionArguments[]{
      .optional = true,
      .fallback = default_boolean(true)},
 };
+inline constexpr ValueSpec kObjectTimerFields[]{
+    {.name = "elapsed", .kind = ValueKind::number, .note = "seconds, finite, at least 0"},
+    {.name = "remaining", .kind = ValueKind::number, .note = "seconds, finite, at least 0"},
+    {.name = "active", .kind = ValueKind::boolean, .note = "a timer completes only while active"},
+};
 inline constexpr ValueSpec kInteractableArguments[]{
     {.name = "track_owner",
      .kind = ValueKind::boolean,
@@ -313,6 +318,21 @@ inline constexpr ValueSpec kInteractableArguments[]{
      .kind = ValueKind::boolean,
      .optional = true,
      .fallback = default_boolean(false)},
+    {.name = "usable",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(true),
+     .note = "false keeps the entry in place but lets no player use it"},
+    {.name = "respawn",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(true),
+     .note = "false keeps the entry's generation, so the body updates the entity where it is"},
+    {.name = "timer",
+     .kind = ValueKind::table,
+     .optional = true,
+     .fields = kObjectTimerFields,
+     .note = "a stopped timer for the object's timer component; remaining 0 completes it"},
 };
 inline constexpr ValueSpec kActiveTrueArguments[]{kActiveArgument};
 inline constexpr ValueSpec kGhostLevelFields[]{

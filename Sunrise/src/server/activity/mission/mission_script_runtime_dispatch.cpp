@@ -1190,7 +1190,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         }
         const host::ScriptableOverrideKind kind =
             intent.kind == lua_vm::IntentKind::setInteractableObject
-                ? host::ScriptableOverrideKind::interactableObject
+                ? (intent.objectInPlace ? host::ScriptableOverrideKind::interactableObjectInPlace
+                                        : host::ScriptableOverrideKind::interactableObject)
             : intent.kind == lua_vm::IntentKind::setGhostLink
                 ? host::ScriptableOverrideKind::ghostLink
             : intent.kind == lua_vm::IntentKind::watchDamage

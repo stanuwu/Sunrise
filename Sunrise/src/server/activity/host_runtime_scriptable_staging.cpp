@@ -188,6 +188,10 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
         nextCounter = pending.generation > guard->type2AtomGeneration
                       && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr
+               && pending.kind == ScriptableOverrideKind::interactableObjectInPlace) {
+        nextCounter = guard->type4.hasLast
+                      && pending.generation == static_cast<std::uint64_t>(guard->type4.last);
+    } else if (guard != nullptr
                && (pending.kind == ScriptableOverrideKind::object
                    || pending.kind == ScriptableOverrideKind::interactableObject)) {
         nextCounter =
@@ -273,7 +277,8 @@ void advance_staged_guard(ScriptableGuard* guard,
     } else if (pending.kind == ScriptableOverrideKind::combatantSequence) {
         guard->type2AtomGeneration = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::object
-               || pending.kind == ScriptableOverrideKind::interactableObject) {
+               || pending.kind == ScriptableOverrideKind::interactableObject
+               || pending.kind == ScriptableOverrideKind::interactableObjectInPlace) {
         guard->type4.last = static_cast<std::int32_t>(pending.generation);
         guard->type4.hasLast = true;
     } else if (pending.kind == ScriptableOverrideKind::damageWatch) {

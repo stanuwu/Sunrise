@@ -188,7 +188,8 @@ void register_actor_sequence_metatables(lua_State* state);
                                   std::size_t bitCount,
                                   std::span<const std::byte> body,
                                   IntentKind kind = IntentKind::applySlotAuth,
-                                  bool active = false);
+                                  bool active = false,
+                                  bool objectInPlace = false);
 void push_atom_kinds(lua_State* state);
 
 /** Reads one integer field from a generated declaration table. */

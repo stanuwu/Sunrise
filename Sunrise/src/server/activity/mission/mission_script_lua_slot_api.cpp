@@ -60,7 +60,8 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
                                   std::size_t bitCount,
                                   std::span<const std::byte> body,
                                   IntentKind kind,
-                                  bool active) {
+                                  bool active,
+                                  bool objectInPlace) {
     Impl* const impl = impl_from_state(state);
     std::array<std::byte, 32> sdkBuildSha256{};
     if (!decode_sdk_build_sha256(std::string_view(impl->identity.sdkBuildId.data()),
@@ -71,6 +72,7 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
     Intent intent{};
     intent.kind = kind;
     intent.active = active;
+    intent.objectInPlace = objectInPlace;
     intent.sdkBuildSha256 = sdkBuildSha256;
     intent.firstRow = slot.nativeRow;
     if (kind == IntentKind::runActorProgram && active) {

@@ -13,7 +13,8 @@ namespace sunrise::server::activity::host::counter_auth {
     namespace auth = middleware::bap::activity_message::scriptable_auth;
     namespace damage = middleware::bap::activity_message::damage_monitor;
     namespace ghost = middleware::bap::activity_message::ghost_link;
-    return (kind == ScriptableOverrideKind::interactableObject
+    return ((kind == ScriptableOverrideKind::interactableObject
+             || kind == ScriptableOverrideKind::interactableObjectInPlace)
             && target.slotType == auth::kType4SlotType && target.authSchema == auth::kType4Schema)
            || ((kind == ScriptableOverrideKind::combatantControls
                 || kind == ScriptableOverrideKind::combatantDelivery)
@@ -58,7 +59,8 @@ namespace sunrise::server::activity::host::counter_auth {
                                  std::size_t& written) noexcept {
     namespace fields = middleware::bap::activity_message::auth_fields;
     namespace patch = middleware::bap::activity_message::mission_auth_patch;
-    const bool object = request.kind == ScriptableOverrideKind::interactableObject;
+    const bool inPlace = request.kind == ScriptableOverrideKind::interactableObjectInPlace;
+    const bool object = request.kind == ScriptableOverrideKind::interactableObject || inPlace;
     const std::size_t offset = object ? 0 : fields::kClientRefBits;
     std::uint32_t previous = 0;
     // Ghost link is compatible but keeps its own encoder, so it must not take the damage offset.
@@ -70,10 +72,11 @@ namespace sunrise::server::activity::host::counter_auth {
     const auto committed =
         object ? static_cast<std::uint32_t>((std::max)(guard.type4.last, 0)) : guard.damageRevision;
     const auto last = (std::max)(previous, committed);
-    if (last >= fields::kMaximumCounter) {
+    // An in-place body needs a live entry to update.
+    if (last >= fields::kMaximumCounter || (inPlace && last == 0)) {
         return false;
     }
-    const auto next = last + 1;
+    const auto next = inPlace ? last : last + 1;
     const auto body = std::span(request.authBody).first(request.authByteCount);
     middleware::encoding::bits::Writer writer(pending.body);
     if (!patch::copy_field(writer, body, {0, offset, true})

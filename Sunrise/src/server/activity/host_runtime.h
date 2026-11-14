@@ -284,6 +284,11 @@ enum class ScriptableOverrideKind : std::uint8_t {
     combatantControls,
     /** Type-2 `.7` passenger manifest merged into the live actor under a Host-owned revision. */
     combatantDelivery,
+    /**
+     * Type-4 records under the committed generation: the client applies them to the live entity,
+     * since it respawns an entry only for a newer generation.
+     */
+    interactableObjectInPlace,
 };
 
 /** The client stalls one frame short of the duration, so this reported fraction is the bar's end.
@@ -326,6 +331,7 @@ inline constexpr float kGhostLinkFinishFraction = 0.99F;
     case ScriptableOverrideKind::authoredSceneEvent:
     case ScriptableOverrideKind::authoredSceneStop:
     case ScriptableOverrideKind::interactableObject:
+    case ScriptableOverrideKind::interactableObjectInPlace:
     case ScriptableOverrideKind::ghostLink:
         return true;
     }
