@@ -59,6 +59,13 @@ bool apply_ability_buckets(const state::CharacterState& character,
         for (std::size_t entry = 0; entry < published.overflowCount; ++entry) {
             appearance.overflowHashes[entry] = published.overflow[entry];
         }
+        // The subclass's sandbox perks go first in the character perk bank. apply_perk_banks adds
+        // the equipped items' sandbox perks after them.
+        for (std::size_t entry = 0;
+             entry < published.perkCount && entry < appearance.indexBank.size();
+             ++entry) {
+            appearance.indexBank[entry] = published.perks[entry];
+        }
         return true;
     }
     // A character with no subclass equipped publishes empty buckets, which is what the client

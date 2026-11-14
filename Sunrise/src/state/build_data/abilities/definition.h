@@ -12,6 +12,8 @@ inline constexpr std::size_t kBucketCapacity = 12;
 inline constexpr std::size_t kBucketHashCapacity = 16;
 /** The flat overflow bank holds 32 hashes no bucket category claims. */
 inline constexpr std::size_t kOverflowCapacity = 32;
+/** A subclass publishes up to 32 sandbox perks, which its active socket entries declare. */
+inline constexpr std::size_t kPerkCapacity = 32;
 /**
  * One row per subclass and selection in use: 3 characters by 3 owned subclasses by 2 rows, the
  * default selection and the remembered picks, which are kept per subclass item.
@@ -50,8 +52,11 @@ struct Definition {
     std::uint16_t socketEntryListIndex{};
     Selection selection{};
     std::uint8_t overflowCount{};
+    std::uint8_t perkCount{};
     std::array<Bucket, kBucketCapacity> buckets{};
     std::array<std::uint32_t, kOverflowCapacity> overflow{};
+    /** Sandbox perks the active socket entries declare, in entry order. */
+    std::array<std::uint16_t, kPerkCapacity> perks{};
 };
 
 } // namespace sunrise::state::build_data::abilities
