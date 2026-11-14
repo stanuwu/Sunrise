@@ -43,8 +43,8 @@ bool read_characters(AccountState& output) noexcept {
         }
         character.selected = g_session.selected[slot];
         character.currentActivityIndex = g_session.activities[slot];
-        character.occupiedActivityIndex =
-            slot == g_session.occupiedSlot ? g_session.occupiedActivity : kNoActivityIndex;
+        character.previousActivityIndex =
+            slot == g_session.previousSlot ? g_session.previousActivity : kNoActivityIndex;
         character.signInSeconds = g_session.signInSeconds;
         output.characters[output.characterCount++] = character;
         result = rows.step();
@@ -117,6 +117,17 @@ bool write_characters(const AccountState& value) noexcept {
         }
     }
     return true;
+}
+
+/**
+ * Records the activity a character leaves as its previous one, the way the client's fireteam keeps
+ * the replaced current activity as its previous activity.
+ * @param slot Character that changes activity.
+ * @param leftActivity Activity it leaves; none for a character with no earlier activity.
+ */
+void remember_previous_activity(std::size_t slot, std::uint16_t leftActivity) noexcept {
+    g_session.previousSlot = slot;
+    g_session.previousActivity = leftActivity;
 }
 
 } // namespace
@@ -417,6 +428,13 @@ bool enter_activity(std::uint16_t activityIndex) noexcept {
         || (g_session.occupiedSlot == slot && g_session.occupiedActivity == activityIndex)) {
         return false;
     }
+    // An onward link usually closes before the next one opens, and that close already recorded
+    // the activity left. Orbit launches reach no link here, so they record nothing.
+    if (g_session.occupiedSlot == slot) {
+        remember_previous_activity(slot, g_session.occupiedActivity);
+    } else if (g_session.previousSlot != slot) {
+        remember_previous_activity(slot, kNoActivityIndex);
+    }
     g_session.occupiedSlot = slot;
     g_session.occupiedActivity = activityIndex;
     account::profiles::local_changed();
@@ -430,6 +448,7 @@ bool leave_activity(std::uint16_t activityIndex) noexcept {
         || g_session.occupiedActivity != activityIndex) {
         return false;
     }
+    remember_previous_activity(g_session.occupiedSlot, activityIndex);
     g_session.occupiedSlot = kCharacterCapacity;
     g_session.occupiedActivity = kNoActivityIndex;
     account::profiles::local_changed();

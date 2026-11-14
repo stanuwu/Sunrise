@@ -177,11 +177,12 @@ struct CharacterState {
      */
     std::uint16_t currentActivityIndex{};
     /**
-     * Activity the character is in, family-4 `+45892`; none in orbit. The client's next launch
-     * leaves from it, and an onward link keeps its seamless transition only when it names the
-     * activity the client is leaving. Session only.
+     * Activity the character was in before its current one, family-4 `+45892`; none after
+     * orbit. The client seeds its fireteam's previous activity from it and takes it as a
+     * launch's from side, so an onward link stays seamless only when it names the activity
+     * being left. Session only.
      */
-    std::uint16_t occupiedActivityIndex{kNoActivityIndex};
+    std::uint16_t previousActivityIndex{kNoActivityIndex};
     /** Server policy that arms content checks only with the matching family-5 flag. */
     bool contentBypass{};
     /** Native DestinyRecordDefinition row of the equipped earned title. */

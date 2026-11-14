@@ -184,8 +184,8 @@ bool encode_with_unlocks(const state::CharacterState& state,
                 state.appearanceHeader.data(),
                 state.appearanceHeader.size());
     object.lastOrbitedDestination = state.lastOrbitedDestination;
-    object.previousActivityIndex = state.occupiedActivityIndex;
-    // Absent, the client's transition classifier takes the orbit as its from side.
+    object.previousActivityIndex = state.previousActivityIndex;
+    // Absent, the client's transition classifier takes the previous activity as its from side.
     object.activityOverrideIndex = kAbsentActivityIndex;
     object.currentActivityIndex = state.currentActivityIndex;
     object.previewMirrors.fill(state.previewAvailable ? kNativeTrue : kNativeFalse);

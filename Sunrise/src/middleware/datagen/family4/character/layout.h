@@ -205,9 +205,9 @@ struct Object {
     std::array<std::int32_t, kObjectiveValueCapacity> objectiveValues{};
     std::array<std::byte, kValuesActivityPaddingSize> valuesActivityPadding{};
     /**
-     * The activity a launch leaves from. The client seeds the session's previous activity from
-     * it, and keeps an onward link's seamless transition only when it names the activity being
-     * left. 0xFFFF means none; 0 is the orbit.
+     * The activity before the character's current one. The client seeds its fireteam's previous
+     * activity from it and takes it as a launch's from side, so an onward link keeps its seamless
+     * transition only when it names the activity being left. 0xFFFF means none; 0 is the orbit.
      */
     std::uint16_t previousActivityIndex{};
     /**

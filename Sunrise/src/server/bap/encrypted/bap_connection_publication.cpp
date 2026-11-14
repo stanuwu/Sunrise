@@ -48,7 +48,8 @@ void release_host_generations(AdvertisementRetains& retains) noexcept {
 
 /**
  * Moves the account's selected character into or out of a private link's activity, and owes
- * every peer the changed character record. The client reads it as its next launch's from side.
+ * every peer the changed character record. The activity it leaves becomes the record's previous
+ * activity, which the client reads as its next launch's from side.
  * @param session Link whose binding is about to publish or close.
  * @param entered True when the link now holds its activity, false when it closes.
  */
