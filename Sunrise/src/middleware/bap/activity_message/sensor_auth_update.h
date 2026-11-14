@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 
 #include "../../content/packages/schema/generated/tag_classes_808062.h"
+#include "../../content/packages/schema/generated/tag_layout_808094_1.h"
 #include "../../encoding/bit_writer.h"
 #include "activity_patch_epoch_parser.h"
 #include "definition.h"
@@ -91,6 +93,52 @@ valid_authored_scene_dependencies(const AuthoredSceneDependencies& value) noexce
 inline constexpr std::size_t kAuthOverrideByteCapacity = (53'150U + 7U) / 8U;
 /** Highest lifetime state inside the client's jump table. */
 inline constexpr std::uint8_t kMaximumLifetimeState = 10;
+/** Activity flags one participation record lists, the size of the client's flag array. */
+inline constexpr std::size_t kActivityFlagCapacity =
+    std::tuple_size_v<decltype(generated::C808094e1::unk4)>;
+
+/** One requested flag change; `raised` false lowers the key. A zero key is no change. */
+struct ActivityFlagChange final {
+    std::uint32_t key{};
+    bool raised{};
+    bool operator==(const ActivityFlagChange&) const = default;
+};
+
+/**
+ * Raised activity flags, in the order each was raised. Every participation record lists them,
+ * and the client's activity-flag conditions test the interacting player's list.
+ */
+struct ActivityFlags final {
+    std::array<std::uint32_t, kActivityFlagCapacity> keys{};
+    std::uint8_t count{};
+    bool operator==(const ActivityFlags&) const = default;
+};
+
+/** Applies one change. @return False for a zero key or a new key that does not fit. */
+[[nodiscard]] inline bool apply_activity_flag(ActivityFlags& flags,
+                                              const ActivityFlagChange& change) noexcept {
+    if (change.key == 0 || flags.count > flags.keys.size()) {
+        return false;
+    }
+    const auto raised = std::span(flags.keys).first(flags.count);
+    const auto found = std::find(raised.begin(), raised.end(), change.key);
+    if (found != raised.end()) {
+        if (!change.raised) {
+            std::copy(found + 1, raised.end(), found);
+            flags.keys[--flags.count] = 0;
+        }
+        return true;
+    }
+    if (!change.raised) {
+        return true;
+    }
+    if (flags.count == flags.keys.size()) {
+        return false;
+    }
+    flags.keys[flags.count++] = change.key;
+    return true;
+}
+
 /** The lifetime field stores its value plus one in four bits. */
 inline constexpr std::uint8_t kLifetimeWidth = 4;
 inline constexpr std::uint32_t kLifetimeBias = 1;
@@ -228,6 +276,8 @@ struct Snapshot final {
     std::uint32_t spawnSetHash{};
     std::uint32_t spawnSliceSet{};
     std::uint8_t lifetime{};
+    /** Flags every participation record lists. */
+    ActivityFlags activityFlags{};
     bool hasGrant{};
     bool hasRegion{};
     bool hasSpawnOverride{};

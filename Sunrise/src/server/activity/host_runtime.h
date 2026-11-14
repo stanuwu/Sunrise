@@ -920,6 +920,8 @@ struct InstanceSnapshot final {
     std::uint64_t senseObservationRevision{};
     std::uint64_t senseObservationSourceGeneration{};
     std::uint8_t lifetimeState{kDefaultLifetimeState};
+    /** Committed activity flags; every later msg 5 lists them in each participation record. */
+    middleware::bap::activity_message::sensor_auth_update::ActivityFlags activityFlags{};
     OutputStatus outputStatus{OutputStatus::idle};
     OutputKind outputKind{OutputKind::none};
     bool outputPending{};
@@ -1009,6 +1011,7 @@ struct AuthState final {
     /** Newest retained dialogue pulse; a link's roster carries the pulses past its own cursor. */
     std::uint64_t dialogueRevision{};
     std::uint8_t lifetimeState{kDefaultLifetimeState};
+    middleware::bap::activity_message::sensor_auth_update::ActivityFlags activityFlags{};
     /** The adapter refused this revision's body. The next revision clears it. */
     bool refused{};
 };
@@ -1048,6 +1051,8 @@ struct PendingScriptableOverride final {
     ScriptableOverrideKind kind{ScriptableOverrideKind::type23};
     /** Activity lifetime state for a lifetime request; ignored by every other kind. */
     std::uint8_t lifetimeState{kDefaultLifetimeState};
+    /** A lifetime request's flag change; a zero key changes no flag. */
+    middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange activityFlag{};
     bool sdkCompiled{};
 };
 
@@ -1384,6 +1389,17 @@ request_lifetime_override(const state::activity::SessionBinding& binding,
                           std::uint8_t lifetimeState,
                           std::uint64_t expectedActivityClientGeneration,
                           const ScriptableOutputReservation* reservation = nullptr) noexcept;
+
+/**
+ * Queues one activity flag change through the lifetime output; the committed lifetime is kept.
+ * @return False for a zero key, a new raised flag the full list cannot hold, or without an
+ * authorizing generation.
+ */
+[[nodiscard]] bool request_activity_flag_override(
+    const state::activity::SessionBinding& binding,
+    const middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange& change,
+    std::uint64_t expectedActivityClientGeneration,
+    const ScriptableOutputReservation* reservation = nullptr) noexcept;
 
 /** Queues one exact SDK-compiled Auth body for a generation-bound ClientRef. */
 [[nodiscard]] bool

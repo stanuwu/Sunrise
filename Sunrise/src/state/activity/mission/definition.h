@@ -225,6 +225,8 @@ enum class IntentKind : std::uint8_t {
     cancelCarrier,
     /** A carrier step that reserves one cargo squad unless its reservation is still unused. */
     reserveCarrierCargo,
+    /** Raises or lowers one activity flag; `active` false lowers it. */
+    setActivityFlag,
 };
 
 /** Actor sequence values belong to one combatant and one SDK/client generation. */
@@ -299,6 +301,7 @@ struct TypedIntent final {
     std::int32_t objectLocationRow{-1};
     std::int32_t entryIndex{};
     std::int32_t actorCommandValue{};
+    std::uint32_t activityFlagKey{};
     float deviceValue{};
     std::uint16_t authBitCount{};
     std::uint16_t slotIndex{};

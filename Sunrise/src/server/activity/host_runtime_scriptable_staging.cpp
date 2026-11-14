@@ -331,6 +331,12 @@ void note_scriptable_transport_staged(const state::activity::SessionBinding& bin
         if (pending.kind == ScriptableOverrideKind::lifetime) {
             // Latch the state so every later msg 5 keeps reporting it.
             instance->view.lifetimeState = pending.lifetimeState;
+            // Enqueue refused any change the committed list could not hold.
+            if (pending.activityFlag.key != 0) {
+                static_cast<void>(
+                    middleware::bap::activity_message::sensor_auth_update::apply_activity_flag(
+                        instance->view.activityFlags, pending.activityFlag));
+            }
         }
         instance->view.lastOutputAttemptTick = GetTickCount64();
         Event event{};

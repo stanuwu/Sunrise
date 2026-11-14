@@ -1226,6 +1226,17 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             instance, now, reservation, status, "lifetime_enqueued", "lifetime_refused");
         return;
     }
+    case lua_vm::IntentKind::setActivityFlag: {
+        host::ScriptableOutputReservation reservation{};
+        if (!reserve_or_refuse(instance, reservation, "activity_flag_refused")) {
+            return;
+        }
+        const devices::Status status = lifetimes::set_activity_flag_reserved(
+            instance.view, {intent.activityFlagKey, intent.active}, reservation);
+        finish_reserved(
+            instance, now, reservation, status, "activity_flag_enqueued", "activity_flag_refused");
+        return;
+    }
     case lua_vm::IntentKind::stopAuthoredScene:
     case lua_vm::IntentKind::signalAuthoredScene:
     case lua_vm::IntentKind::activateAuthoredScene: {

@@ -636,6 +636,23 @@ bool request_lifetime_override(const state::activity::SessionBinding& binding,
     return enqueue_request(request, reservation);
 }
 
+/** Queues one activity flag change through the lifetime output slot. */
+bool request_activity_flag_override(
+    const state::activity::SessionBinding& binding,
+    const middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange& change,
+    std::uint64_t expectedActivityClientGeneration,
+    const ScriptableOutputReservation* reservation) noexcept {
+    if (change.key == 0 || expectedActivityClientGeneration == 0) {
+        return false;
+    }
+    ScriptableRequest request{};
+    request.binding = binding;
+    request.expectedActivityClientGeneration = expectedActivityClientGeneration;
+    request.kind = ScriptableOverrideKind::lifetime;
+    request.activityFlag = change;
+    return enqueue_request(request, reservation);
+}
+
 /** Queues one exact SDK-compiled Auth body for a generation-bound ClientRef. */
 bool request_sdk_auth_override(
     const state::activity::SessionBinding& binding,

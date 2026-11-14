@@ -330,6 +330,7 @@ struct TailAuthOverride final {
     std::size_t& destinationLength,
     const middleware::bap::activity_message::patch_epoch::PatchEpoch* epoch = nullptr,
     std::uint8_t lifetimeState = 3,
+    const message::ActivityFlags& activityFlags = {},
     const message::AuthOverride* authOverride = nullptr,
     std::uint16_t rosterGroupIndex = 0,
     std::uint16_t rosterSlotOffset = 0,

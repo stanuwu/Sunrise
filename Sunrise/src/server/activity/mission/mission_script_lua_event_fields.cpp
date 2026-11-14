@@ -133,6 +133,8 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "slot.assign_combat_objective";
     case ActionKind::setLifetime:
         return "lifetime.set";
+    case ActionKind::setActivityFlag:
+        return "mission.set_activity_flag";
     case ActionKind::restartCheckpoint:
         return "mission.restart_checkpoint";
     case ActionKind::fireTrigger:

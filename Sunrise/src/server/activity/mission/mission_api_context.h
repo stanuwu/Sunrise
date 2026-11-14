@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 #include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../state/activity/membership/definition.h"
@@ -59,6 +60,13 @@ inline constexpr ValueSpec kSlotLookupArguments[]{
     {.name = "selector", .kind = ValueKind::selector, .ref = "mission.Slot"}};
 inline constexpr ValueSpec kHoldSpawnArguments[]{
     {.name = "active", .kind = ValueKind::boolean, .note = "true holds the spawn, false releases"},
+};
+inline constexpr ValueSpec kActivityFlagArguments[]{
+    {.name = "key",
+     .kind = ValueKind::integer,
+     .bound = between(1, (std::numeric_limits<std::uint32_t>::max)()),
+     .note = "the id an activity_flag condition tests"},
+    {.name = "raised", .kind = ValueKind::boolean, .note = "false lowers the flag"},
 };
 inline constexpr ValueSpec kSendIncidentArguments[]{
     {.name = "target",
@@ -200,6 +208,13 @@ inline constexpr MemberSpec kContextMembers[]{
      .returns = kRequestKey,
      .effect = "mission.send_incident",
      .note = "sends one msg-19 activity incident to the client, as the activity host would"},
+    {.name = "set_activity_flag",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .arguments = kActivityFlagArguments,
+     .returns = kRequestKey,
+     .effect = "mission.set_activity_flag",
+     .note = "raises or lowers one id every participation record lists"},
     {.name = "select_state",
      .kind = MemberKind::request,
      .call = CallForm::positional,

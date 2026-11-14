@@ -268,6 +268,23 @@ bool request_activity_lifetime_override(
     return queued;
 }
 
+/** Queues one activity flag change under the same gate a lifetime change passes. */
+bool request_activity_flag_override(
+    const state::activity::SessionBinding& binding,
+    const middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange& change,
+    std::int32_t expectedRegion,
+    std::uint64_t expectedGeneration,
+    const activity::host::ScriptableOutputReservation* reservation) noexcept {
+    const std::lock_guard lock(session_lock());
+    std::size_t linkCount = 0;
+    const Session* const session =
+        activity_link_for_generation_locked(binding, expectedGeneration, linkCount);
+    return session != nullptr
+           && lifetime_available_locked(*session, expectedRegion, expectedGeneration)
+           && activity::host::request_activity_flag_override(
+               binding, change, expectedGeneration, reservation);
+}
+
 /** Queues a generated type-23 update while its exact state is live. */
 bool request_activity_state_local_type23_override(
     const state::activity::SessionBinding& binding,

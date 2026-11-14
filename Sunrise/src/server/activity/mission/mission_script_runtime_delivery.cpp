@@ -470,6 +470,9 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
     case lua_vm::IntentKind::setLifetime:
         result = "lifetime_staged";
         break;
+    case lua_vm::IntentKind::setActivityFlag:
+        result = "activity_flag_staged";
+        break;
     case lua_vm::IntentKind::restartCheckpoint:
         result = "checkpoint_staged";
         break;

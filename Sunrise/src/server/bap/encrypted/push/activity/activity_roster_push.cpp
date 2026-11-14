@@ -435,6 +435,13 @@ bool append_roster_notification(
             scriptablePending,
             server::activity::host::OutputStatus::ambiguousLinks);
     }
+    // The committed flags, with a pending flag change applied as this body will commit it.
+    message::ActivityFlags activityFlags =
+        hasHostState ? hostState.activityFlags : message::ActivityFlags{};
+    if (lifetimePending && scriptablePending.activityFlag.key != 0) {
+        static_cast<void>(
+            message::apply_activity_flag(activityFlags, scriptablePending.activityFlag));
+    }
     message::Snapshot snapshot{};
     std::array<char, kDestinationCapacity> destination{};
     std::size_t destinationLength = 0;
@@ -460,6 +467,7 @@ bool append_roster_notification(
             : clientLoading ? server::activity::host::kLoadingLifetimeState
             : hasHostState  ? hostState.lifetimeState
                             : server::activity::host::kDefaultLifetimeState,
+            activityFlags,
             bodyPending ? &authOverride : nullptr,
             scriptablePending.target.rosterGroupIndex,
             scriptablePending.target.rosterSlotOffset,

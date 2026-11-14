@@ -77,6 +77,8 @@ struct ScriptableRequest final {
     ScriptableOverrideKind kind{ScriptableOverrideKind::type23};
     /** Activity lifetime state for a lifetime request; ignored by every other kind. */
     std::uint8_t lifetimeState{kDefaultLifetimeState};
+    /** A lifetime request's flag change; a zero key changes no flag. */
+    middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange activityFlag{};
     bool snap{};
     bool active{};
 };

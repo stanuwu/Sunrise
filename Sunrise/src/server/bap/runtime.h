@@ -325,6 +325,14 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     std::uint64_t expectedGeneration,
     const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
 
+/** Queues one activity flag change while the requested client generation owns the binding. */
+[[nodiscard]] bool request_activity_flag_override(
+    const state::activity::SessionBinding& binding,
+    const middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange& change,
+    std::int32_t expectedRegion,
+    std::uint64_t expectedGeneration,
+    const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
+
 /** Queues a generated type-23 update while its exact mission-seed state is live. */
 [[nodiscard]] bool request_activity_state_local_type23_override(
     const state::activity::SessionBinding& binding,

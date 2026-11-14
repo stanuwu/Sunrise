@@ -186,8 +186,8 @@ namespace detail {
            && left.dialogueCue == right.dialogueCue && left.bitCount == right.bitCount
            && left.byteCount == right.byteCount && left.channel == right.channel
            && left.channelValue == right.channelValue && left.channelHash == right.channelHash
-           && left.lifetimeState == right.lifetimeState && left.body == right.body
-           && left.sdkCompiled == right.sdkCompiled
+           && left.lifetimeState == right.lifetimeState && left.activityFlag == right.activityFlag
+           && left.body == right.body && left.sdkCompiled == right.sdkCompiled
            && (!left.target.stateLocalRoster
                || same_group(left.stateLocalRosterGroup, right.stateLocalRosterGroup));
 }
@@ -268,8 +268,15 @@ retained_sequence_combatant(const Instance& instance, const ScriptableRequest& r
         && instance->view.scriptableRevision + 1 == reservation->revision;
     const bool burst = request.burstMember && request.expectedRevision != 0
                        && tail_eligible(request.kind) && instance != nullptr;
-    if ((request.kind == ScriptableOverrideKind::combatantSequence
-         && (instance == nullptr || retained_sequence_combatant(*instance, request) == nullptr))
+    // Only one control is in flight, so the committed list is the one this change lands on.
+    auto activityFlags =
+        instance != nullptr ? instance->view.activityFlags : scene::ActivityFlags{};
+    const bool activityFlagFits =
+        request.activityFlag.key == 0
+        || scene::apply_activity_flag(activityFlags, request.activityFlag);
+    if (!activityFlagFits
+        || (request.kind == ScriptableOverrideKind::combatantSequence
+            && (instance == nullptr || retained_sequence_combatant(*instance, request) == nullptr))
         || (!burst && has_queued_control(request.binding))
         || (!burst && instance != nullptr && instance->view.outputPending)
         || (!burst && reservation != nullptr && !ownsReservation)
@@ -376,7 +383,10 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
     auto patchFields = middleware::bap::activity_message::mission_auth_patch::kAllFields;
     bool encoded = untargeted || guard != nullptr;
     if (encoded && request.kind == ScriptableOverrideKind::lifetime) {
-        pending.lifetimeState = request.lifetimeState;
+        // A flag change keeps the lifetime every earlier output on this slot committed.
+        pending.lifetimeState =
+            request.activityFlag.key != 0 ? instance->view.lifetimeState : request.lifetimeState;
+        pending.activityFlag = request.activityFlag;
     } else if (encoded && request.kind == ScriptableOverrideKind::squad) {
         std::uint32_t generation = 0;
         encoded = request.requestedCountLength <= request.requestedCounts.size();

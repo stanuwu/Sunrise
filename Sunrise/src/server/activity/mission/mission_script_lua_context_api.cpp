@@ -31,6 +31,8 @@ constexpr const api::MemberSpec& kRestartCheckpoint =
 constexpr const api::MemberSpec& kHoldSpawn = api::member(api::Receiver::context, "hold_spawn");
 constexpr const api::MemberSpec& kSendIncident =
     api::member(api::Receiver::context, "send_incident");
+constexpr const api::MemberSpec& kActivityFlag =
+    api::member(api::Receiver::context, "set_activity_flag");
 constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::context, "select_state");
 
 /**
@@ -194,6 +196,31 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
     }
     Intent intent{};
     intent.kind = IntentKind::holdSpawn;
+    intent.active = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    return queue_intent(state, active_frame(state), intent);
+}
+
+/**
+ * Raises or lowers one activity flag, the id list every participation record carries.
+ * @param state Lua call holding the context, a `key` and `raised`.
+ * @return One RequestKey.
+ */
+[[nodiscard]] int context_set_activity_flag(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    refuse_unknown_arguments(state, kActivityFlag);
+    const lua_Integer key = checked_integer_argument(
+        state, required_key(kActivityFlag, "key", api::ValueKind::integer));
+    if (key <= 0 || key > (std::numeric_limits<std::uint32_t>::max)()) {
+        return luaL_error(state, "activity flag key is zero or out of range");
+    }
+    Intent intent{};
+    intent.kind = IntentKind::setActivityFlag;
+    intent.activityFlagKey = static_cast<std::uint32_t>(key);
+    lua_getfield(state, 2, required_key(kActivityFlag, "raised", api::ValueKind::boolean));
+    if (!lua_isboolean(state, -1)) {
+        return luaL_argerror(state, 2, "set_activity_flag requires a raised boolean");
+    }
     intent.active = lua_toboolean(state, -1) != 0;
     lua_pop(state, 1);
     return queue_intent(state, active_frame(state), intent);
@@ -503,6 +530,7 @@ constexpr std::array<ContextBinding, std::size(api::kContextMembers)> kContextBi
     {"slot", &context_slot},
     {"hold_spawn", &context_hold_spawn},
     {"send_incident", &context_send_incident},
+    {"set_activity_flag", &context_set_activity_flag},
     {"select_state", &context_select_state},
     {"restart_checkpoint", &context_restart_checkpoint},
     {"set_phase", &context_set_phase},

@@ -217,6 +217,7 @@ build_roster_snapshot(Session& session,
                       std::size_t& destinationLength,
                       const middleware::bap::activity_message::patch_epoch::PatchEpoch* epoch,
                       std::uint8_t lifetimeState,
+                      const message::ActivityFlags& activityFlags,
                       const message::AuthOverride* authOverride,
                       std::uint16_t rosterGroupIndex,
                       std::uint16_t rosterSlotOffset,
@@ -548,6 +549,7 @@ build_roster_snapshot(Session& session,
     // carries matches nothing.
     snapshot.playerKey = published_player_key(session);
     snapshot.lifetime = lifetimeState;
+    snapshot.activityFlags = activityFlags;
     // Each player owns its committed region readiness; a local writeback cannot ready peers.
     // A program that opens on a cutscene holds the spawn too, so no body exists to place.
     snapshot.awaitClientSync =

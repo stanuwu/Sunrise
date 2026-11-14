@@ -611,6 +611,7 @@ bool auth_state(const state::activity::SessionBinding& binding,
         output.estateRevision = instance->view.scriptableEstateRevision;
         output.dialogueRevision = instance->view.dialogueRevision;
         output.lifetimeState = instance->view.lifetimeState;
+        output.activityFlags = instance->view.activityFlags;
         output.refused = link_refused(instance->view, sourceGeneration);
     }
     ReleaseSRWLockShared(&g_lock);

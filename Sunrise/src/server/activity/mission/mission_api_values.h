@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
+#include "../../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../../middleware/bap/activity_message/squad_auth_body.h"
 #include "../../../state/activity_sdk/format.h"
 #include "mission_api_types.h"
@@ -109,8 +110,12 @@ struct BoundedLane final {
  * Every lane whose array size is proved. The bound is the array the client indexes, never the
  * width of the wire lane; a lane with no proved array size is absent from this table.
  */
-inline constexpr std::array<BoundedLane, 7> kBoundedLanes{{
+inline constexpr std::array<BoundedLane, 8> kBoundedLanes{{
     {"gameplay_switches", BoundedLaneKind::count, 50},
+    {"activity_flags",
+     BoundedLaneKind::count,
+     static_cast<std::uint16_t>(
+         middleware::bap::activity_message::sensor_auth_update::kActivityFlagCapacity)},
     {"nav_nodes", BoundedLaneKind::count, 96},
     {"nav_node_links", BoundedLaneKind::count, 16},
     {"type8_field_1_0", BoundedLaneKind::count, 32},
