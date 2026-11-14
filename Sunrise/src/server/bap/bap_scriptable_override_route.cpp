@@ -399,14 +399,15 @@ bool request_activity_state_local_type31_override(
     return queued;
 }
 
-/** Queues one sequence restart from an exact published SDK mission seed. */
+/** Queues one sequence start or choice change from an exact published SDK mission seed. */
 bool request_activity_state_local_sequence_override(
     const state::activity::SessionBinding& binding,
     const activity::host::ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::int32_t expectedRegion,
     std::uint64_t expectedGeneration,
-    const activity::host::ScriptableOutputReservation* reservation) noexcept {
+    const activity::host::ScriptableOutputReservation* reservation,
+    const middleware::bap::activity_message::scriptable_auth::Type5Selection& selection) noexcept {
     const std::lock_guard lock(session_lock());
     std::size_t linkCount = 0;
     const Session* const session =
@@ -421,7 +422,7 @@ bool request_activity_state_local_sequence_override(
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType5SlotType
         && target.authSchema == middleware::bap::activity_message::scriptable_auth::kType5Schema
         && activity::host::request_state_local_sequence_override(
-            binding, target, stateLocalRosterGroup, expectedGeneration, reservation);
+            binding, target, stateLocalRosterGroup, expectedGeneration, reservation, selection);
     return queued;
 }
 

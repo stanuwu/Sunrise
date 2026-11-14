@@ -1053,6 +1053,8 @@ struct PendingScriptableOverride final {
     std::uint8_t lifetimeState{kDefaultLifetimeState};
     /** A lifetime request's flag change; a zero key changes no flag. */
     middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange activityFlag{};
+    /** A sequence body that repeats the committed revision to change its choices in place. */
+    bool sequenceRetain{};
     bool sdkCompiled{};
 };
 
@@ -1301,13 +1303,15 @@ actor_squad_binding_status(const state::activity::SessionBinding& binding,
     const ScriptableOutputReservation* reservation = nullptr,
     bool enabled = true) noexcept;
 
-/** Queues one authored sequence restart from the exact generated mission group. */
+/** Queues one authored sequence start or choice change from the exact generated mission group. */
 [[nodiscard]] bool request_state_local_sequence_override(
     const state::activity::SessionBinding& binding,
     const ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::uint64_t expectedActivityClientGeneration,
-    const ScriptableOutputReservation* reservation = nullptr) noexcept;
+    const ScriptableOutputReservation* reservation = nullptr,
+    const middleware::bap::activity_message::scriptable_auth::Type5Selection& selection =
+        {}) noexcept;
 
 /** Queues one authored cinematic start or stop from the exact generated mission group. */
 [[nodiscard]] bool request_state_local_cinematic_override(

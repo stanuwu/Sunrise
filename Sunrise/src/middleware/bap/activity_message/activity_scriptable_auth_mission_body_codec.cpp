@@ -121,21 +121,25 @@ bool next_type5_revision(const Type5RevisionGuard& guard, std::uint8_t& next) no
     return next != kSequenceInactiveRevision;
 }
 
-/** Encodes the canonical sequence body: one revision and 129 unset ClientRefs. */
+/** Encodes the sequence body: one revision, the choice mask and 129 unset ClientRefs. */
 bool encode_type5(const Type5Preset& preset,
                   const Type5RevisionGuard& guard,
                   std::span<std::byte> output,
                   std::size_t& written) noexcept {
     written = 0;
-    if (preset.revision == kSequenceInactiveRevision
-        || (guard.hasLast && preset.revision <= guard.last) || output.size() < kType5ByteCount) {
+    // A retained body repeats the committed revision; any other must be newer.
+    const bool revisionValid = preset.selection.retain
+                                   ? guard.hasLast && preset.revision == guard.last
+                                   : !guard.hasLast || preset.revision > guard.last;
+    if (preset.revision == kSequenceInactiveRevision || !revisionValid
+        || output.size() < kType5ByteCount) {
         return false;
     }
     bits::Writer writer(output.first(kType5ByteCount));
     bool encoded = writer.write(0, kWideIntegerWidth) && writer.write(0, kWideIntegerWidth)
                    && writer.write(preset.revision, 8U);
-    for (std::size_t index = 0; encoded && index < 4U; ++index) {
-        encoded = writer.write(0, kSigned32Width);
+    for (const std::uint32_t lane : preset.selection.choices) {
+        encoded = encoded && writer.write(lane, kSigned32Width);
     }
     for (std::size_t index = 0; encoded && index < kSequenceReferenceCount; ++index) {
         encoded = write_absent_client_ref(writer);

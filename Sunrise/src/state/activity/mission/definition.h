@@ -302,6 +302,10 @@ struct TypedIntent final {
     std::int32_t entryIndex{};
     std::int32_t actorCommandValue{};
     std::uint32_t activityFlagKey{};
+    /** A sequence's choice bit, or -1 for none. */
+    std::int32_t sequenceChoice{-1};
+    /** The sequence keeps running and only changes its choice. */
+    bool sequenceRetain{};
     float deviceValue{};
     std::uint16_t authBitCount{};
     std::uint16_t slotIndex{};

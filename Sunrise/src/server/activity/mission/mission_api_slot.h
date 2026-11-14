@@ -564,6 +564,18 @@ inline constexpr ValueSpec kActorSequenceArguments[]{
      .scope = Scope::receiver,
      .note = "a playable sequence of this actor"},
 };
+inline constexpr ValueSpec kSequenceArguments[]{
+    {.name = "choice",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .bound = between(0, static_cast<std::int64_t>(slot_auth::kType5ChoiceCount) - 1),
+     .note = "the k-th name across the sequence's choices; each plays its highest set bit"},
+    {.name = "restart",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(true),
+     .note = "false keeps the running sequence and moves it to `choice` through its transitions"},
+};
 inline constexpr ValueSpec kActorSequencesHandle[]{
     {.kind = ValueKind::handle, .ref = "actor_sequences"}};
 inline constexpr ValueSpec kDialogueCueArguments[]{
@@ -842,6 +854,7 @@ inline constexpr MemberSpec kSlotMembers[]{
      .kind = MemberKind::request,
      .call = CallForm::named,
      .gate = exact_class_gate(slot_format::kSequenceSlotType),
+     .arguments = kSequenceArguments,
      .returns = kRequestKey,
      .effect = "slot.play_sequence",
      .note = "plays the authored sequence; chosen for every other slot"},

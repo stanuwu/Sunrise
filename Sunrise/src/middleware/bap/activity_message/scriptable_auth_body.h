@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <variant>
 
@@ -786,9 +787,35 @@ struct Type5RevisionGuard final {
     bool hasLast{};
 };
 
-/** One authored sequence restart. */
+/**
+ * A sequence body's choice mask, four 32-bit lanes. Bit k is the k-th name across the sequence's
+ * choices in table order; each choice plays the highest set bit inside its own range.
+ */
+using Type5Choices = std::array<std::uint32_t, 4>;
+/** Choice bits one lane of the mask holds. */
+inline constexpr std::size_t kType5ChoiceLaneBits = std::numeric_limits<std::uint32_t>::digits;
+/** Choice bits the whole mask holds. */
+inline constexpr std::size_t kType5ChoiceCount =
+    std::tuple_size_v<Type5Choices> * kType5ChoiceLaneBits;
+
+/** @return The mask that selects exactly one choice bit, which must be below the count. */
+[[nodiscard]] constexpr Type5Choices type5_choice_mask(std::size_t choice) noexcept {
+    Type5Choices choices{};
+    choices[choice / kType5ChoiceLaneBits] = std::uint32_t{1} << (choice % kType5ChoiceLaneBits);
+    return choices;
+}
+
+/** What a script asks of a sequence: its choices, and whether the running one keeps going. */
+struct Type5Selection final {
+    Type5Choices choices{};
+    /** Keeps the committed revision, so the live sequence re-evaluates its choices in place. */
+    bool retain{};
+};
+
+/** One authored sequence start, or a choice change on the running one. */
 struct Type5Preset final {
     std::uint8_t revision{1};
+    Type5Selection selection{};
 };
 
 /** Last committed cinematic generation. */

@@ -399,7 +399,8 @@ bool request_state_local_sequence_override(
     const ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::uint64_t expectedActivityClientGeneration,
-    const ScriptableOutputReservation* reservation) noexcept {
+    const ScriptableOutputReservation* reservation,
+    const auth::Type5Selection& selection) noexcept {
     if (target.slotType != auth::kType5SlotType || target.authSchema != auth::kType5Schema
         || !valid_state_local_group(target, stateLocalRosterGroup)
         || expectedActivityClientGeneration == 0) {
@@ -411,6 +412,7 @@ bool request_state_local_sequence_override(
     request.stateLocalRosterGroup = stateLocalRosterGroup;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = ScriptableOverrideKind::sequence;
+    request.sequenceSelection = selection;
     return enqueue_request(request, reservation);
 }
 

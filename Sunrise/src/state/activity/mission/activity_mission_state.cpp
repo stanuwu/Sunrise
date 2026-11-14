@@ -135,6 +135,8 @@ namespace {
            && left.actorCommandSelector == right.actorCommandSelector
            && left.actorCommandValue == right.actorCommandValue
            && left.activityFlagKey == right.activityFlagKey
+           && left.sequenceChoice == right.sequenceChoice
+           && left.sequenceRetain == right.sequenceRetain
            && left.authBitCount == right.authBitCount
            && left.effectiveRegion == right.effectiveRegion
            && left.objectLocationRow == right.objectLocationRow

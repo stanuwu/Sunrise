@@ -265,6 +265,18 @@ void finish_reserved_scene(RuntimeInstance& instance,
     return squadRow < squads.size() ? squads[squadRow].slotIndex : format::kAbsentIndex;
 }
 
+/** @return The choice mask and in-place flag a play_sequence intent asks for. */
+[[nodiscard]] scriptable_auth::Type5Selection
+sequence_selection(const lua_vm::Intent& intent) noexcept {
+    scriptable_auth::Type5Selection selection{};
+    if (intent.sequenceChoice >= 0) {
+        selection.choices =
+            scriptable_auth::type5_choice_mask(static_cast<std::size_t>(intent.sequenceChoice));
+    }
+    selection.retain = intent.sequenceRetain;
+    return selection;
+}
+
 /** @return The catalog slot row an intent's output names, or the absent index. */
 [[nodiscard]] std::uint32_t intent_slot_row(const sdk::BoundView& view,
                                             const lua_vm::Intent& intent) noexcept {
@@ -989,7 +1001,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         const scenes::SceneStatus status = deliver_through_holder(
             instance, intent, kSceneWalk, carrier, [&](const sdk::BoundView& view) noexcept {
                 return sequence
-                           ? scenes::play_sequence_slot_reserved(view, intent.firstRow, reservation)
+                           ? scenes::play_sequence_slot_reserved(
+                                 view, intent.firstRow, reservation, sequence_selection(intent))
                            : scenes::set_cinematic_slot_active_reserved(
                                  view, intent.firstRow, intent.active, reservation);
             });

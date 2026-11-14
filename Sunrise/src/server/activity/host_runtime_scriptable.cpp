@@ -187,7 +187,8 @@ namespace detail {
            && left.byteCount == right.byteCount && left.channel == right.channel
            && left.channelValue == right.channelValue && left.channelHash == right.channelHash
            && left.lifetimeState == right.lifetimeState && left.activityFlag == right.activityFlag
-           && left.body == right.body && left.sdkCompiled == right.sdkCompiled
+           && left.sequenceRetain == right.sequenceRetain && left.body == right.body
+           && left.sdkCompiled == right.sdkCompiled
            && (!left.target.stateLocalRoster
                || same_group(left.stateLocalRosterGroup, right.stateLocalRosterGroup));
 }
@@ -532,10 +533,14 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
         pending.generation = static_cast<std::uint64_t>(generation);
     } else if (encoded && request.kind == ScriptableOverrideKind::sequence) {
         pending.bitCount = static_cast<std::uint16_t>(auth::kType5BitCount);
-        std::uint8_t revision = 0;
-        encoded = auth::next_type5_revision(candidate.type5, revision)
-                  && auth::encode_type5({revision}, candidate.type5, pending.body, written);
+        const auth::Type5Selection& selection = request.sequenceSelection;
+        std::uint8_t revision = candidate.type5.last;
+        encoded =
+            (selection.retain ? candidate.type5.hasLast
+                              : auth::next_type5_revision(candidate.type5, revision))
+            && auth::encode_type5({revision, selection}, candidate.type5, pending.body, written);
         pending.generation = revision;
+        pending.sequenceRetain = selection.retain;
     } else if (encoded && request.kind == ScriptableOverrideKind::cinematic) {
         pending.bitCount = static_cast<std::uint16_t>(auth::kType6BitCount);
         std::uint32_t generation = 0;

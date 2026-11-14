@@ -479,10 +479,12 @@ SceneStatus set_cinematic_active(const sdk::BoundView& view,
 }
 
 /** Plays one sequence slot against an already-reserved Host output revision. */
-SceneStatus play_sequence_reserved(const sdk::BoundView& view,
-                                   std::uint32_t occurrenceRow,
-                                   std::uint32_t slotRow,
-                                   const host::ScriptableOutputReservation& reservation) noexcept {
+SceneStatus play_sequence_reserved(
+    const sdk::BoundView& view,
+    std::uint32_t occurrenceRow,
+    std::uint32_t slotRow,
+    const host::ScriptableOutputReservation& reservation,
+    const middleware::bap::activity_message::scriptable_auth::Type5Selection& selection) noexcept {
     PreparedScene prepared{};
     const SceneStatus status = prepare_typed_behavior(view,
                                                       occurrenceRow,
@@ -501,7 +503,8 @@ SceneStatus play_sequence_reserved(const sdk::BoundView& view,
                prepared.rosterGroup,
                prepared.effectiveRegion,
                prepared.activityClientGeneration,
-               &reservation)
+               &reservation,
+               selection)
                ? SceneStatus::queued
                : SceneStatus::refused;
 }
@@ -585,14 +588,15 @@ reset_objectives_slot_reserved(const sdk::BoundView& view,
                : found;
 }
 
-SceneStatus
-play_sequence_slot_reserved(const sdk::BoundView& view,
-                            std::uint32_t slotRow,
-                            const host::ScriptableOutputReservation& reservation) noexcept {
+SceneStatus play_sequence_slot_reserved(
+    const sdk::BoundView& view,
+    std::uint32_t slotRow,
+    const host::ScriptableOutputReservation& reservation,
+    const middleware::bap::activity_message::scriptable_auth::Type5Selection& selection) noexcept {
     std::uint32_t occurrenceRow = 0;
     const SceneStatus found = current_behavior_occurrence(view, slotRow, occurrenceRow);
     return found == SceneStatus::ready
-               ? play_sequence_reserved(view, occurrenceRow, slotRow, reservation)
+               ? play_sequence_reserved(view, occurrenceRow, slotRow, reservation, selection)
                : found;
 }
 

@@ -378,14 +378,16 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     const activity::host::ScriptableOutputReservation* reservation = nullptr,
     bool enabled = true) noexcept;
 
-/** Queues one authored sequence restart only while its exact mission-seed state is live. */
+/** Queues one authored sequence start or choice change while its mission-seed state is live. */
 [[nodiscard]] bool request_activity_state_local_sequence_override(
     const state::activity::SessionBinding& binding,
     const activity::host::ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::int32_t expectedRegion,
     std::uint64_t expectedGeneration,
-    const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
+    const activity::host::ScriptableOutputReservation* reservation = nullptr,
+    const middleware::bap::activity_message::scriptable_auth::Type5Selection& selection =
+        {}) noexcept;
 
 /** Queues one authored cinematic start or stop while its mission-seed state is live. */
 [[nodiscard]] bool request_activity_state_local_cinematic_override(

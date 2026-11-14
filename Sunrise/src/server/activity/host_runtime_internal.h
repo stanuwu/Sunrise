@@ -79,6 +79,8 @@ struct ScriptableRequest final {
     std::uint8_t lifetimeState{kDefaultLifetimeState};
     /** A lifetime request's flag change; a zero key changes no flag. */
     middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange activityFlag{};
+    /** A sequence request's choices; a retained one keeps the running sequence. */
+    middleware::bap::activity_message::scriptable_auth::Type5Selection sequenceSelection{};
     bool snap{};
     bool active{};
 };

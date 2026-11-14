@@ -178,7 +178,9 @@ reset_objectives_slot_reserved(const state::activity_sdk::BoundView& view,
 play_sequence_reserved(const state::activity_sdk::BoundView& view,
                        std::uint32_t occurrenceRow,
                        std::uint32_t slotRow,
-                       const host::ScriptableOutputReservation& reservation) noexcept;
+                       const host::ScriptableOutputReservation& reservation,
+                       const middleware::bap::activity_message::scriptable_auth::Type5Selection&
+                           selection = {}) noexcept;
 
 [[nodiscard]] SceneStatus
 set_cinematic_active_reserved(const state::activity_sdk::BoundView& view,
@@ -188,10 +190,12 @@ set_cinematic_active_reserved(const state::activity_sdk::BoundView& view,
                               const host::ScriptableOutputReservation& reservation) noexcept;
 
 /** Lua-slot variant: resolves the unique occurrence in the currently published mission state. */
-[[nodiscard]] SceneStatus
-play_sequence_slot_reserved(const state::activity_sdk::BoundView& view,
-                            std::uint32_t slotRow,
-                            const host::ScriptableOutputReservation& reservation) noexcept;
+[[nodiscard]] SceneStatus play_sequence_slot_reserved(
+    const state::activity_sdk::BoundView& view,
+    std::uint32_t slotRow,
+    const host::ScriptableOutputReservation& reservation,
+    const middleware::bap::activity_message::scriptable_auth::Type5Selection& selection =
+        {}) noexcept;
 [[nodiscard]] SceneStatus
 set_cinematic_slot_active_reserved(const state::activity_sdk::BoundView& view,
                                    std::uint32_t slotRow,

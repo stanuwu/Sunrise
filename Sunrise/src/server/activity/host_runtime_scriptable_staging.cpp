@@ -198,7 +198,10 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
                       && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::sequence) {
         std::uint8_t next = 0;
-        nextCounter = auth::next_type5_revision(guard->type5, next) && next == pending.generation;
+        nextCounter =
+            pending.sequenceRetain
+                ? guard->type5.hasLast && guard->type5.last == pending.generation
+                : auth::next_type5_revision(guard->type5, next) && next == pending.generation;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::cinematic) {
         std::uint32_t next = 0;
         nextCounter = auth::next_type6_generation(guard->type6, next) && next == pending.generation;
