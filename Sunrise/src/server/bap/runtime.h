@@ -469,6 +469,8 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     std::optional<middleware::bap::activity_message::squad_auth::Destination> destination =
         std::nullopt,
     std::optional<middleware::bap::activity_message::squad_auth::SpawnRule> spawnRule =
+        std::nullopt,
+    std::optional<middleware::bap::activity_message::squad_auth::Temperaments> temperaments =
         std::nullopt) noexcept;
 
 /** Cancels one exact typed override revision while excluding activity-link publication. */

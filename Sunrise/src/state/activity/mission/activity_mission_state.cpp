@@ -135,10 +135,12 @@ namespace {
            && left.actorCommandSelector == right.actorCommandSelector
            && left.actorCommandValue == right.actorCommandValue
            && left.activityFlagKey == right.activityFlagKey
+           && left.squadTemperaments == right.squadTemperaments
+           && left.squadTemperamentCount == right.squadTemperamentCount
+           && left.squadTemperamentsSet == right.squadTemperamentsSet
            && left.sequenceChoice == right.sequenceChoice
            && left.sequenceRetain == right.sequenceRetain
-           && left.objectInPlace == right.objectInPlace
-           && left.authBitCount == right.authBitCount
+           && left.objectInPlace == right.objectInPlace && left.authBitCount == right.authBitCount
            && left.effectiveRegion == right.effectiveRegion
            && left.objectLocationRow == right.objectLocationRow
            && left.retirePlacedProps == right.retirePlacedProps && left.slotIndex == right.slotIndex

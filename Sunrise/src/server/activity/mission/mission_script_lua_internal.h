@@ -21,6 +21,11 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
 
 int context_cohort(lua_State* state);
 void register_population_metatables(lua_State* state);
+/**
+ * Reads a squad's temperament list from argument table field `key` into the intent.
+ * @return False when the call gave none, so the squad keeps its last list.
+ */
+[[nodiscard]] bool read_squad_temperaments(lua_State* state, const char* key, Intent& intent);
 
 // Every mission API entry point, grouped by the translation unit that defines it. The names,
 // handles, re-read helpers and surface matchers live in the headers included above.

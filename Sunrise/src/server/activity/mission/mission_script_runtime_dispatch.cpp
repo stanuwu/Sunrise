@@ -880,7 +880,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                                               std::nullopt,
                                               intent.squadRetireOnReturn,
                                               std::nullopt,
-                                              spawnRule);
+                                              spawnRule,
+                                              squads::intent_temperaments(intent));
             });
         if (status == squads::Status::queued) {
             await_host_commit(instance, now, "squad_enqueued", carrier);

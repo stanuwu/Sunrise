@@ -1117,7 +1117,10 @@ inline constexpr std::size_t kScriptablePinCapacity = kScriptableGuardCapacity;
                                         std::span<ScriptablePin> output,
                                         std::size_t& count) noexcept;
 
-/** Queues a native objective decision after both SDK slot identities are validated. */
+/**
+ * Queues a native objective decision after both SDK slot identities are validated.
+ * @param temperaments Replaces the squad's temperament list in the same update; none keeps it.
+ */
 [[nodiscard]] bool
 request_squad_objective(const state::activity::SessionBinding& binding,
                         const ScriptableTarget& target,
@@ -1125,7 +1128,9 @@ request_squad_objective(const state::activity::SessionBinding& binding,
                         const state::activity::mission::TypedIntent& decision,
                         std::uint16_t objectiveIndex,
                         std::uint64_t expectedActivityClientGeneration,
-                        const ScriptableOutputReservation& reservation) noexcept;
+                        const ScriptableOutputReservation& reservation,
+                        std::optional<middleware::bap::activity_message::squad_auth::Temperaments>
+                            temperaments) noexcept;
 
 /** Names the gate that declined one ingress submission. */
 enum class IngressRefusal : std::uint8_t {
@@ -1395,6 +1400,8 @@ actor_squad_binding_status(const state::activity::SessionBinding& binding,
     std::optional<middleware::bap::activity_message::squad_auth::Destination> destination =
         std::nullopt,
     std::optional<middleware::bap::activity_message::squad_auth::SpawnRule> spawnRule =
+        std::nullopt,
+    std::optional<middleware::bap::activity_message::squad_auth::Temperaments> temperaments =
         std::nullopt) noexcept;
 
 /** Queues one generation-bound activity lifetime state through the serialized output slot. */

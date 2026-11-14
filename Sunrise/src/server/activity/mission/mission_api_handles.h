@@ -5,6 +5,7 @@
 
 #include "../../../middleware/bap/activity_message/scene_events_auth.h"
 #include "../../../middleware/content/packages/tables/authored_squad_reader.h"
+#include "../../../state/activity/mission/definition.h"
 #include "mission_api_types.h"
 #include "mission_api_values.h"
 
@@ -22,6 +23,8 @@ inline constexpr ValueSpec kSquadAnchors[]{
      .ref = "squad_anchors",
      .optional = true,
      .note = "spawn points as world rows; a live SDK view; nil when the world is stale"}};
+inline constexpr ValueSpec kSquadTemperament[]{
+    {.kind = ValueKind::integer, .bound = uint32_range(), .note = "a generated temperament"}};
 inline constexpr ValueSpec kPlaceArguments[]{
     {.name = "counts",
      .kind = ValueKind::handle,
@@ -46,6 +49,14 @@ inline constexpr ValueSpec kPlaceArguments[]{
      .optional = true,
      .slot = type_gate(middleware::content::packages::tables::kAuthoredSquadRuleSlotType),
      .note = "replaces the authored spawn rule"},
+    {.name = "temperaments",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("the squad's last list"),
+     .bound =
+         at_most(static_cast<std::int64_t>(state::activity::mission::kSquadTemperamentCapacity)),
+     .element = kSquadTemperament,
+     .note = "distinct; every member merges them; empty clears them"},
 };
 inline constexpr ValueSpec kActorCommandArguments[]{
     {.name = "command",

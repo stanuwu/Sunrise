@@ -2,6 +2,7 @@
 
 #include "../../middleware/bap/activity_message/squad_objective_auth.h"
 #include "activity_sdk_device_internal.h"
+#include "activity_sdk_squad_runtime.h"
 
 namespace sunrise::server::activity::activity_sdk_devices {
 
@@ -61,7 +62,8 @@ assign_combat_objective_reserved(const state::activity_sdk::BoundView& view,
                decision,
                objectiveSlot.target.slotIndex,
                prepared.activityClientGeneration,
-               reservation)
+               reservation,
+               activity_sdk_squads::intent_temperaments(decision))
                ? Status::queued
                : Status::refused;
 }

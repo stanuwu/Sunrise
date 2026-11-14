@@ -61,6 +61,7 @@ struct ScriptableRequest final {
     std::optional<std::uint32_t> nameHash{};
     std::optional<middleware::bap::activity_message::squad_auth::Destination> squadDestination{};
     std::optional<middleware::bap::activity_message::squad_auth::SpawnRule> squadSpawnRule{};
+    std::optional<middleware::bap::activity_message::squad_auth::Temperaments> squadTemperaments{};
     std::uint64_t expectedActivityClientGeneration{};
     /** Exact reserved revision, or zero for an ordinary operator request. */
     std::uint64_t expectedRevision{};

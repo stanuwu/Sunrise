@@ -5,6 +5,7 @@
 #include <span>
 
 #include "../../middleware/bap/activity_message/squad_auth_body.h"
+#include "../../state/activity/mission/definition.h"
 #include "../../state/activity_sdk/runtime.h"
 
 namespace sunrise::server::activity::host {
@@ -60,17 +61,22 @@ availability(const state::activity_sdk::BoundView& view,
                            std::optional<std::uint32_t> destinationSquadRow = std::nullopt,
                            std::optional<std::uint32_t> spawnRuleSlotRow = std::nullopt) noexcept;
 
-/** Queues only through the exact unarmed Host revision owned by Mission State. */
-[[nodiscard]] Status
-place_reserved(const state::activity_sdk::BoundView& view,
-               std::uint32_t squadRow,
-               std::span<const std::int32_t> requestedCounts,
-               middleware::bap::activity_message::squad_auth::Mode mode,
-               const host::ScriptableOutputReservation& reservation,
-               std::optional<std::uint32_t> nameHash = std::nullopt,
-               bool retireOnReturn = false,
-               std::optional<std::uint32_t> destinationSquadRow = std::nullopt,
-               std::optional<std::uint32_t> spawnRuleSlotRow = std::nullopt) noexcept;
+/**
+ * Queues only through the exact unarmed Host revision owned by Mission State.
+ * @param temperaments The squad's temperament list; absent keeps the one it last received.
+ */
+[[nodiscard]] Status place_reserved(
+    const state::activity_sdk::BoundView& view,
+    std::uint32_t squadRow,
+    std::span<const std::int32_t> requestedCounts,
+    middleware::bap::activity_message::squad_auth::Mode mode,
+    const host::ScriptableOutputReservation& reservation,
+    std::optional<std::uint32_t> nameHash = std::nullopt,
+    bool retireOnReturn = false,
+    std::optional<std::uint32_t> destinationSquadRow = std::nullopt,
+    std::optional<std::uint32_t> spawnRuleSlotRow = std::nullopt,
+    std::optional<middleware::bap::activity_message::squad_auth::Temperaments> temperaments =
+        std::nullopt) noexcept;
 
 /**
  * Reads the bubble a squad's authored occurrence belongs to, which names the client that can
@@ -85,5 +91,22 @@ place_reserved(const state::activity_sdk::BoundView& view,
 
 /** @return Stable concise text for one squad runtime result. */
 [[nodiscard]] const char* status_name(Status status) noexcept;
+
+/** @return The temperament list a script gave a squad, or none to keep the squad's last one. */
+[[nodiscard]] inline std::optional<middleware::bap::activity_message::squad_auth::Temperaments>
+intent_temperaments(const state::activity::mission::TypedIntent& intent) noexcept {
+    namespace squad_auth = middleware::bap::activity_message::squad_auth;
+    static_assert(state::activity::mission::kSquadTemperamentCapacity
+                  == squad_auth::kTemperamentCapacity);
+    if (!intent.squadTemperamentsSet) {
+        return std::nullopt;
+    }
+    squad_auth::Temperaments temperaments{};
+    temperaments.count = intent.squadTemperamentCount;
+    for (std::size_t index = 0; index < intent.squadTemperamentCount; ++index) {
+        temperaments.ids[index].value = intent.squadTemperaments[index];
+    }
+    return temperaments;
+}
 
 } // namespace sunrise::server::activity::activity_sdk_squads

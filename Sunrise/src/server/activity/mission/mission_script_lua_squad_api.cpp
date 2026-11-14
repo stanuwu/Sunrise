@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 #include "../../../middleware/content/packages/tables/authored_squad_reader.h"
@@ -104,10 +105,43 @@ static_assert(bound_to<SquadDefinition>(api::kSquadMembers, kSquadBindings));
     return queue_intent(state, active_frame(state), intent);
 }
 
+/** Reads a squad's temperament list: distinct ids, at most the schema's six. */
+bool read_squad_temperaments(lua_State* state, const char* key, Intent& intent) {
+    lua_getfield(state, 2, key);
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return false;
+    }
+    luaL_checktype(state, -1, LUA_TTABLE);
+    const std::size_t count = lua_rawlen(state, -1);
+    if (count > intent.squadTemperaments.size()) {
+        static_cast<void>(luaL_error(state,
+                                     "a squad holds at most %d temperaments",
+                                     static_cast<int>(intent.squadTemperaments.size())));
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        lua_rawgeti(state, -1, static_cast<lua_Integer>(index + 1));
+        const lua_Integer value = luaL_checkinteger(state, -1);
+        if (value <= 0 || value > (std::numeric_limits<std::uint32_t>::max)()) {
+            static_cast<void>(luaL_error(state, "temperament is zero or outside a 32-bit range"));
+        }
+        const auto id = static_cast<std::uint32_t>(value);
+        const auto listed = intent.squadTemperaments.begin() + static_cast<std::ptrdiff_t>(index);
+        if (std::find(intent.squadTemperaments.begin(), listed, id) != listed) {
+            static_cast<void>(luaL_error(state, "squad temperaments must be distinct"));
+        }
+        intent.squadTemperaments[index] = id;
+        lua_pop(state, 1);
+    }
+    intent.squadTemperamentCount = static_cast<std::uint8_t>(count);
+    lua_pop(state, 1);
+    return true;
+}
+
 /**
- * Stages one squad placement: squad:place{counts, mode, retire_on_return, spawn_rule}.
- * Every parameter is optional; the counts and mode carry their own bounds. A spawn rule is a
- * type-66 slot that replaces the package rule.
+ * Stages one squad placement: squad:place{counts, mode, retire_on_return, spawn_rule,
+ * temperaments}. Every parameter is optional; the counts and mode carry their own bounds. A spawn
+ * rule is a type-66 slot that replaces the package rule.
  */
 [[nodiscard]] int squad_place(lua_State* state) {
     const auto* const handle =
@@ -158,6 +192,8 @@ static_assert(bound_to<SquadDefinition>(api::kSquadMembers, kSquadBindings));
     lua_pop(state, 1);
     intent.squadRetireOnReturn =
         optional_boolean_argument(state, boolean_option(kPlace, "retire_on_return"));
+    intent.squadTemperamentsSet = read_squad_temperaments(
+        state, optional_key(kPlace, "temperaments", api::ValueKind::list), intent);
     return queue_intent(state, frame, intent);
 }
 

@@ -326,7 +326,9 @@ bool request_activity_squad_override(
     std::array<std::int8_t, 4> authoredProfile,
     state::gameplay::squad_entity_retirement::Eligibility squadRetirement,
     std::optional<middleware::bap::activity_message::squad_auth::Destination> destination,
-    std::optional<middleware::bap::activity_message::squad_auth::SpawnRule> spawnRule) noexcept {
+    std::optional<middleware::bap::activity_message::squad_auth::SpawnRule> spawnRule,
+    std::optional<middleware::bap::activity_message::squad_auth::Temperaments>
+        temperaments) noexcept {
     const std::lock_guard lock(session_lock());
     std::size_t linkCount = 0;
     const Session* const session =
@@ -348,7 +350,8 @@ bool request_activity_squad_override(
                                                                   authoredProfile,
                                                                   squadRetirement,
                                                                   destination,
-                                                                  spawnRule);
+                                                                  spawnRule,
+                                                                  temperaments);
     return queued;
 }
 

@@ -412,7 +412,8 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
                                         request.nameHash,
                                         request.squadAuthoredProfile,
                                         request.squadDestination,
-                                        request.squadSpawnRule},
+                                        request.squadSpawnRule,
+                                        request.squadTemperaments},
                                        candidate.squad,
                                        pending.body,
                                        written,
@@ -440,7 +441,8 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
                                       request.objectiveIndex,
                                       request.entryIndex,
                                       request.objectiveReserved,
-                                      request.objectiveRefreshAwareness};
+                                      request.objectiveRefreshAwareness,
+                                      request.squadTemperaments};
         encoded = encoded
                   && objective::next_request(previous,
                                              request.expectedObjectiveRevision,

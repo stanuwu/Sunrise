@@ -496,7 +496,8 @@ retirement_eligibility(const sdk::BoundView& view,
                            std::optional<std::uint32_t> nameHash,
                            bool retireOnReturn,
                            std::optional<std::uint32_t> destinationSquadRow,
-                           std::optional<std::uint32_t> spawnRuleSlotRow) noexcept {
+                           std::optional<std::uint32_t> spawnRuleSlotRow,
+                           std::optional<squad_auth::Temperaments> temperaments) noexcept {
     PreparedSquad prepared{};
     const Status status = prepare(view, squadRow, requestedCounts, mode, prepared);
     if (status != Status::ready) {
@@ -528,7 +529,8 @@ retirement_eligibility(const sdk::BoundView& view,
             retirement_eligibility(
                 view, squadRow, requestedCounts, prepared.target, retireOnReturn),
             destination,
-            spawnRule)) {
+            spawnRule,
+            temperaments)) {
         return Status::queued;
     }
     return Status::refused;
@@ -585,7 +587,8 @@ Status place(const sdk::BoundView& view,
                  nameHash,
                  retireOnReturn,
                  destinationSquadRow,
-                 spawnRuleSlotRow);
+                 spawnRuleSlotRow,
+                 std::nullopt);
 }
 
 /** Queues one preflighted squad only through an exact unarmed Host revision. */
@@ -597,7 +600,8 @@ Status place_reserved(const sdk::BoundView& view,
                       std::optional<std::uint32_t> nameHash,
                       bool retireOnReturn,
                       std::optional<std::uint32_t> destinationSquadRow,
-                      std::optional<std::uint32_t> spawnRuleSlotRow) noexcept {
+                      std::optional<std::uint32_t> spawnRuleSlotRow,
+                      std::optional<squad_auth::Temperaments> temperaments) noexcept {
     return queue(view,
                  squadRow,
                  requestedCounts,
@@ -606,7 +610,8 @@ Status place_reserved(const sdk::BoundView& view,
                  nameHash,
                  retireOnReturn,
                  destinationSquadRow,
-                 spawnRuleSlotRow);
+                 spawnRuleSlotRow,
+                 temperaments);
 }
 
 /** Reads the squad's authored bubble without resolving a link or a roster target. */

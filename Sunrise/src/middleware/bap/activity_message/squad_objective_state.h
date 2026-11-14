@@ -17,6 +17,7 @@ struct State final {
 
 /** Root field ordinals are fixed by the squad Auth schema. */
 inline constexpr std::size_t kObjectiveField = 0;
+inline constexpr std::size_t kTemperamentField = 2;
 inline constexpr std::size_t kSpawnGenerationField = 6;
 inline constexpr std::size_t kRevisionField = 13;
 inline constexpr std::size_t kAwarenessRevisionField = 14;
@@ -118,12 +119,17 @@ read_state(std::span<const std::byte> body, std::size_t bits, State& output) noe
     return request.revision != 0;
 }
 
-/** @return The fields a request sets; mode joins them only to change the reservation. */
+/**
+ * @return The fields a request sets; mode joins them only to change the reservation, and the
+ * temperament list only when the request carries one.
+ */
 [[nodiscard]] constexpr mission_auth_patch::FieldSet patch_fields(const Request& request,
                                                                   const State& previous) noexcept {
     return kObjectiveFields
            | (request.reserved != previous.reserved ? mission_auth_patch::field_bit(kModeField)
-                                                    : mission_auth_patch::FieldSet{});
+                                                    : mission_auth_patch::FieldSet{})
+           | (request.temperaments.has_value() ? mission_auth_patch::field_bit(kTemperamentField)
+                                               : mission_auth_patch::FieldSet{});
 }
 
 } // namespace sunrise::middleware::bap::activity_message::squad_objective

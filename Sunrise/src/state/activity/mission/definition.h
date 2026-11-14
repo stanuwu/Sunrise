@@ -24,6 +24,8 @@ inline constexpr std::size_t kIntentBurstCapacity = 63;
 inline constexpr std::size_t kMissionSeedOmitCapacity = 32;
 /** Squad Auth accepts at most fifteen authored member counts. */
 inline constexpr std::size_t kSquadMemberCapacity = 15;
+/** Squad Auth `.2` holds at most six temperaments. */
+inline constexpr std::size_t kSquadTemperamentCapacity = 6;
 /** A compiled Slot Auth body must fit the widest bounded msg-5 table. */
 inline constexpr std::size_t kMaximumAuthBodyByteCount = (53'150U + 7U) / 8U;
 /** Zero is reserved as the absent durable intent sequence. */
@@ -302,6 +304,10 @@ struct TypedIntent final {
     std::int32_t entryIndex{};
     std::int32_t actorCommandValue{};
     std::uint32_t activityFlagKey{};
+    /** A squad placement's temperament list, sent only when set; unset keeps the squad's last. */
+    std::array<std::uint32_t, kSquadTemperamentCapacity> squadTemperaments{};
+    std::uint8_t squadTemperamentCount{};
+    bool squadTemperamentsSet{};
     /** A sequence's choice bit, or -1 for none. */
     std::int32_t sequenceChoice{-1};
     /** The sequence keeps running and only changes its choice. */

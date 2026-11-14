@@ -164,7 +164,8 @@ bool request_squad_objective(const state::activity::SessionBinding& binding,
                              const state::activity::mission::TypedIntent& decision,
                              std::uint16_t objectiveIndex,
                              std::uint64_t expectedActivityClientGeneration,
-                             const ScriptableOutputReservation& reservation) noexcept {
+                             const ScriptableOutputReservation& reservation,
+                             std::optional<squad::Temperaments> temperaments) noexcept {
     namespace objective = middleware::bap::activity_message::squad_objective;
     if (target.slotType != squad::kSlotType || target.authSchema != objective::kSchema
         || objectiveIndex > scene::kMaximumSlotIndex
@@ -190,6 +191,7 @@ bool request_squad_objective(const state::activity::SessionBinding& binding,
     request.objectivePreserveReservation = decision.objectivePreserveReservation;
     request.objectiveReserved = decision.objectiveReserved;
     request.objectiveRefreshAwareness = decision.objectiveRefreshAwareness;
+    request.squadTemperaments = temperaments;
     request.kind = ScriptableOverrideKind::squadObjective;
     return enqueue_request(request, &reservation);
 }
@@ -584,7 +586,8 @@ bool request_squad_override(const state::activity::SessionBinding& binding,
                             std::array<std::int8_t, 4> authoredProfile,
                             state::gameplay::squad_entity_retirement::Eligibility squadRetirement,
                             std::optional<squad::Destination> destination,
-                            std::optional<squad::SpawnRule> spawnRule) noexcept {
+                            std::optional<squad::SpawnRule> spawnRule,
+                            std::optional<squad::Temperaments> temperaments) noexcept {
     if (squadRetirement.enabled
         && (squadRetirement.squad.key != target.registryKey
             || squadRetirement.squad.index != target.slotIndex
@@ -617,6 +620,7 @@ bool request_squad_override(const state::activity::SessionBinding& binding,
     request.nameHash = nameHash;
     request.squadDestination = destination;
     request.squadSpawnRule = spawnRule;
+    request.squadTemperaments = temperaments;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.squadMode = mode;
     request.kind = ScriptableOverrideKind::squad;

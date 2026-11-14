@@ -35,8 +35,8 @@ constexpr std::uint8_t kNameHashWidth = 32;
 /** Logical active one becomes wire two after the schema bias; logical zero becomes one. */
 constexpr std::uint32_t kActiveWireValue = 2;
 constexpr std::uint32_t kInactiveWireValue = 1;
-/** Fields zero through two precede the requested-count block. */
-constexpr std::size_t kLeadingAbsentFieldCount = 3;
+/** Fields zero and one precede the temperament list. */
+constexpr std::size_t kLeadingAbsentFieldCount = 2;
 /** One unused dynamic field separates requested counts from generation. */
 constexpr std::size_t kAfterCountsAbsentFieldCount = 1;
 /**
@@ -88,12 +88,16 @@ constexpr std::uint8_t kSpawnRuleSlotType = 66;
             || preset.spawnRule->slotIndex > auth_fields::kMaximumClientRefIndex)) {
         return false;
     }
-    return true;
+    return !preset.temperaments.has_value() || valid_temperaments(*preset.temperaments);
 }
 
 /** @return Exact number of meaningful schema bits for one validated preset. */
 [[nodiscard]] constexpr std::size_t body_bit_count(const Preset& preset) noexcept {
-    return exact_body_bit_count(preset.requestedCounts.size(), preset.destination.has_value());
+    return exact_body_bit_count(preset.requestedCounts.size(),
+                                preset.destination.has_value(),
+                                preset.temperaments.has_value()
+                                    ? std::optional<std::size_t>{preset.temperaments->count}
+                                    : std::nullopt);
 }
 
 /** Writes a repeated absent-field presence marker. */
@@ -108,7 +112,8 @@ constexpr std::uint8_t kSpawnRuleSlotType = 66;
 
 /** Writes the root fields in schema order and leaves every unrelated optional field absent. */
 [[nodiscard]] bool write_body(bits::Writer& writer, const Preset& preset) noexcept {
-    if (!write_absent(writer, kLeadingAbsentFieldCount) || !writer.write(1, kPresenceWidth)
+    if (!write_absent(writer, kLeadingAbsentFieldCount)
+        || !write_temperaments(writer, preset.temperaments) || !writer.write(1, kPresenceWidth)
         || !writer.write(preset.requestedCounts.size(), kRequestedCountLengthWidth)) {
         return false;
     }

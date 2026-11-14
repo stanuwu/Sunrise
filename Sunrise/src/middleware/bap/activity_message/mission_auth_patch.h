@@ -47,6 +47,8 @@ enum class Kind : std::uint8_t {
     fixed,
     /** A 4-bit count of 32-bit values. */
     counted32,
+    /** Squad field .2: a 3-bit count of 32-bit temperament ids. */
+    temperaments,
     /** A field this composer does not carry; a present one refuses the body. */
     refused,
     /** Combatant field .6: the program header, then a kind-specific body. */
@@ -66,7 +68,7 @@ struct FieldRule final {
 inline constexpr std::array<FieldRule, kSquadFieldCount> kSquadRules{{
     {Kind::fixed, true, fields::kClientRefBits}, // .0 objective ClientRef
     {Kind::fixed, true, fields::kClientRefBits}, // .1
-    {Kind::refused, true, 0},                    // .2
+    {Kind::temperaments, true, 0},               // .2 temperaments
     {Kind::counted32, true, 0},                  // .3 requested counts
     {Kind::counted32, true, 0},                  // .4
     {Kind::fixed, true, 13},                     // .5 authored profile
@@ -197,6 +199,13 @@ struct Layout final {
             case Kind::counted32:
                 skipped = reader.read(kCountWidth, count) && count <= kMaximumCount
                           && reader.skip(32 * count);
+                break;
+            case Kind::temperaments:
+                skipped =
+                    reader.read(static_cast<std::uint8_t>(squad_auth::kTemperamentCountBitCount),
+                                count)
+                    && count <= squad_auth::kTemperamentCapacity
+                    && reader.skip(squad_auth::kTemperamentIdBitCount * count);
                 break;
             case Kind::program:
                 skipped = skip_program(reader);

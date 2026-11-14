@@ -14,6 +14,7 @@
 #include "../../../middleware/bap/activity_message/volume_toggle_auth.h"
 #include "../../../state/activity/mission/definition.h"
 #include "../../../state/activity_sdk/format.h"
+#include "mission_api_handles.h"
 #include "mission_api_types.h"
 #include "mission_api_values.h"
 
@@ -398,6 +399,14 @@ inline constexpr ValueSpec kCombatObjectiveArguments[]{
      .kind = ValueKind::boolean,
      .optional = true,
      .fallback = default_boolean(false)},
+    {.name = "temperaments",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("the squad's last list"),
+     .bound =
+         at_most(static_cast<std::int64_t>(state::activity::mission::kSquadTemperamentCapacity)),
+     .element = kSquadTemperament,
+     .note = "replaces the squad's list without a new spawn; living members merge it"},
 };
 inline constexpr ValueSpec kTaskGroupElement[]{{.kind = ValueKind::missionRow,
                                                 .ref = "mission.TaskGroup",
