@@ -16,6 +16,15 @@ namespace scene = middleware::bap::activity_message::sensor_auth_update;
 namespace squad = middleware::bap::activity_message::squad_auth;
 using namespace detail;
 
+/** @return True when a retirement names this exact target, a known class and a real bubble. */
+[[nodiscard]] bool
+retirement_names_target(const state::gameplay::squad_entity_retirement::Eligibility& retirement,
+                        const ScriptableTarget& target) noexcept {
+    return retirement.squad.key == target.registryKey && retirement.squad.index == target.slotIndex
+           && retirement.squad.type == target.slotType && retirement.rsatTag != 0
+           && retirement.bubble < state::activity::defaults::kBubbleCapacity;
+}
+
 } // namespace
 
 namespace detail {
@@ -311,10 +320,12 @@ bool request_state_local_type2_squad_binding(
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation,
-    bool spawn) noexcept {
+    bool spawn,
+    state::gameplay::squad_entity_retirement::Eligibility retirement) noexcept {
     if (target.slotType != auth::kType2SlotType || target.authSchema != auth::kType2Schema
         || !valid_state_local_group(target, stateLocalRosterGroup)
-        || expectedActivityClientGeneration == 0) {
+        || expectedActivityClientGeneration == 0
+        || (retirement.enabled && !retirement_names_target(retirement, target))) {
         return false;
     }
     ScriptableRequest request{};
@@ -324,6 +335,7 @@ bool request_state_local_type2_squad_binding(
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = ScriptableOverrideKind::combatantBinding;
     request.active = spawn;
+    request.squadRetirement = retirement;
     return enqueue_request(request, reservation);
 }
 
@@ -589,10 +601,7 @@ bool request_squad_override(const state::activity::SessionBinding& binding,
                             std::optional<squad::SpawnRule> spawnRule,
                             std::optional<squad::Temperaments> temperaments) noexcept {
     if (squadRetirement.enabled
-        && (squadRetirement.squad.key != target.registryKey
-            || squadRetirement.squad.index != target.slotIndex
-            || squadRetirement.squad.type != target.slotType || squadRetirement.rsatTag == 0
-            || squadRetirement.bubble >= 64
+        && (!retirement_names_target(squadRetirement, target)
             || !std::ranges::any_of(requestedCounts, [](auto count) { return count > 0; }))) {
         return false;
     }

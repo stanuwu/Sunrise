@@ -7,9 +7,11 @@
 #include "../../middleware/bap/activity_message/squad_auth_body.h"
 #include "../../state/activity/mission/definition.h"
 #include "../../state/activity_sdk/runtime.h"
+#include "../../state/gameplay/external/squad_entity_retirement.h"
 
 namespace sunrise::server::activity::host {
 struct ScriptableOutputReservation;
+struct ScriptableTarget;
 }
 
 namespace sunrise::server::activity::activity_sdk_squads {
@@ -91,6 +93,19 @@ availability(const state::activity_sdk::BoundView& view,
 
 /** @return Stable concise text for one squad runtime result. */
 [[nodiscard]] const char* status_name(Status status) noexcept;
+
+/**
+ * The host retires the actors a client gives up on a bubble leave when their delivery opts in.
+ * @param source The squad, or the combatant its member binds to.
+ * @param counts One requested count per member slot of the squad at `squadRow`.
+ * @return Eligibility naming `source`, enabled only for one exact actor class.
+ */
+[[nodiscard]] state::gameplay::squad_entity_retirement::Eligibility
+retirement_eligibility(const state::activity_sdk::BoundView& view,
+                       std::uint32_t squadRow,
+                       std::span<const std::int32_t> counts,
+                       const host::ScriptableTarget& source,
+                       bool enabled) noexcept;
 
 /** @return The temperament list a script gave a squad, or none to keep the squad's last one. */
 [[nodiscard]] inline std::optional<middleware::bap::activity_message::squad_auth::Temperaments>

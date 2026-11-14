@@ -919,7 +919,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         const devices::Status status = deliver_through_holder(
             instance, intent, kDeviceWalk, carrier, [&](const sdk::BoundView& view) noexcept {
                 return devices::bind_combatant_to_squad_reserved(
-                    view, intent.firstRow, reservation, intent.active);
+                    view, intent.firstRow, reservation, intent.active, intent.squadRetireOnReturn);
             });
         finish_reserved(instance,
                         now,

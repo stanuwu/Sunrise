@@ -22,10 +22,14 @@ bool same(const identities::Identity& a, const identities::Identity& b) {
            && a.anchorKnown && b.anchorKnown && a.anchorPresent == b.anchorPresent
            && (!a.anchorPresent || a.anchor == b.anchor);
 }
+/** @return True for the slot types a spawned actor names as its source. */
+bool actor_source(std::uint8_t type) {
+    return type == kSquadSourceType || type == kCombatantSourceType;
+}
 bool actor(const identities::Identity& row, const Eligibility& eligibility) {
     return row.known && row.present && !row.conflicted && row.type == 0 && row.metadata.hasRsat
            && row.metadata.rsatTag == eligibility.rsatTag && !row.metadata.hasPlayerBroadcast
-           && row.actorSource.known && row.actorSource.present && row.actorSource.type == 1
+           && row.actorSource.known && row.actorSource.present && actor_source(row.actorSource.type)
            && row.actorSource.key == eligibility.squad.key
            && row.actorSource.type == eligibility.squad.type
            && row.actorSource.index == eligibility.squad.index;
@@ -48,19 +52,21 @@ bool root_matches(const identities::Identity& row, const Eligibility& eligibilit
                                         && row.metadata.objectType == eligibility.objectType
                                   : actor(row, eligibility);
 }
-/** Only an anchored weapon may use its parent tree when its own source was not reported. */
-bool weapon(const identities::Identity& row, const Eligibility& eligibility) {
-    /** Native object-type 14 is the weapon class. */
-    constexpr std::uint8_t kWeaponObjectType = 14;
-    if (row.type != 0 || !row.metadata.hasRsat || !row.metadata.hasObjectType
-        || row.metadata.objectType != kWeaponObjectType || row.metadata.hasPlayerBroadcast
+/**
+ * A child released under a squad actor leaves with it: its weapon, a shield, or a hop-on on it.
+ * The client's release is its own dependency closure; a player's object or another squad's member
+ * never belongs to the tree.
+ */
+bool dependent(const identities::Identity& row, const Eligibility& eligibility) {
+    if (row.type != 0 || !row.metadata.hasRsat || row.metadata.hasPlayerBroadcast
         || !row.anchorKnown || !row.anchorPresent) {
         return false;
     }
-    return !row.actorSource.known || !row.actorSource.present
-           || (row.actorSource.type == eligibility.squad.type
-               && row.actorSource.key == eligibility.squad.key
-               && row.actorSource.index == eligibility.squad.index);
+    // Another squad's or combatant's actor never joins; a weapon or hop-on (another source) does.
+    const auto& source = row.actorSource;
+    return !source.known || !source.present || !actor_source(source.type)
+           || (source.type == eligibility.squad.type && source.key == eligibility.squad.key
+               && source.index == eligibility.squad.index);
 }
 /** Every live anchor must resolve before a root's complete child set is trustworthy. */
 bool hierarchy(std::span<const identities::Identity> rows) {
@@ -106,9 +112,10 @@ bool closure(identities::Token root,
             }
             const bool squad =
                 row.type == 1 && row.metadata.hasSquad && row.metadata.squad == eligibility.squad;
-            const bool eligible = eligibility.placedProp ? prop(row)
-                                                         : actor(row, eligibility)
-                                                               || weapon(row, eligibility) || squad;
+            const bool eligible =
+                eligibility.placedProp
+                    ? prop(row)
+                    : actor(row, eligibility) || dependent(row, eligibility) || squad;
             if (!bit(released, row.token.slot) || !eligible) {
                 return false;
             }
@@ -163,12 +170,7 @@ bool Store::capture(const identities::Source& source,
                 }
                 continue;
             }
-            if (!selected->placedProp
-                && std::count_if(rows.begin(), rows.end(), [&](const auto& candidate) {
-                       return !candidate.anchorPresent && actor(candidate, *selected);
-                   }) != 1) {
-                continue;
-            }
+            // Each member is its own tree, so a squad of several retires member by member.
             Release::Group group;
             group.root = row.token;
             group.eligibility = *selected;
@@ -296,12 +298,7 @@ bool Store::prepare(const identities::Source& source,
             return false;
         }
         for (const auto& group : release.groups) {
-            if (!group.eligibility.placedProp
-                && std::count_if(rows.begin(), rows.end(), [&](const auto& row) {
-                       return !row.anchorPresent && actor(row, group.eligibility);
-                   }) != 1) {
-                continue;
-            }
+            // A member the client already rebuilt is a new root outside every captured tree.
             Mask current{};
             if (!closure(group.root, group.eligibility, group.entities, rows, current)
                 || current != group.entities) {

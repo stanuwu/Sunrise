@@ -372,16 +372,24 @@ struct PreparedSquad final {
     return Status::ready;
 }
 
-/** Opt-in needs one exact actor class for every positively requested member. */
+} // namespace
+
+/**
+ * Opt-in needs one exact actor class for every positively requested member. The source is the
+ * squad, or the combatant its member binds to: a bound actor's identity names the combatant.
+ */
 state::gameplay::squad_entity_retirement::Eligibility
 retirement_eligibility(const sdk::BoundView& view,
                        std::uint32_t squadRow,
                        std::span<const std::int32_t> counts,
-                       const host::ScriptableTarget& target,
+                       const host::ScriptableTarget& source,
                        bool enabled) noexcept {
-    state::gameplay::squad_entity_retirement::Eligibility result{};
-    result.squad = {target.registryKey, target.slotIndex, target.slotType};
-    if (!enabled || !view.catalog || target.slotType != format::kSquadSlotType) {
+    namespace retirement = state::gameplay::squad_entity_retirement;
+    retirement::Eligibility result{};
+    result.squad = {source.registryKey, source.slotIndex, source.slotType};
+    if (!enabled || !view.catalog
+        || (source.slotType != retirement::kSquadSourceType
+            && source.slotType != retirement::kCombatantSourceType)) {
         return result;
     }
     const auto& catalog = *view.catalog;
@@ -423,6 +431,8 @@ retirement_eligibility(const sdk::BoundView& view,
     result.enabled = true;
     return result;
 }
+
+namespace {
 
 /** The destination is another type-1 squad of the same object, sent as its wire slot. */
 [[nodiscard]] Status resolve_destination(const sdk::Catalog& catalog,

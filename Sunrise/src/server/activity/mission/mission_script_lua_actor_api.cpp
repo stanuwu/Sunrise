@@ -158,6 +158,8 @@ bool exact_actor_path(const SlotDefinition& path, const SlotDefinition& actor) n
     intent.kind = IntentKind::bindCombatantToSquad;
     intent.firstRow = definition.nativeRow;
     intent.active = optional_boolean_argument(state, boolean_option(kBindCombatant, "spawn"));
+    intent.squadRetireOnReturn =
+        optional_boolean_argument(state, boolean_option(kBindCombatant, "retire_on_return"));
     return queue_intent(state, frame, intent);
 }
 

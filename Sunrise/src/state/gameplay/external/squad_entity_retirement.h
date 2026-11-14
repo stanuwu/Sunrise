@@ -10,6 +10,9 @@ namespace sunrise::state::gameplay::squad_entity_retirement {
 namespace identities = entity_identity;
 using Mask = activity::bubble_authority::EntitySlotMask;
 using CellBubbles = std::array<std::int16_t, 256>;
+/** A spawned actor names its source: its squad, or the combatant that binds it to one. */
+inline constexpr std::uint8_t kSquadSourceType = 1;
+inline constexpr std::uint8_t kCombatantSourceType = 2;
 /** Native map-prop types exclude actors, players, weapons and interactive objects. */
 inline constexpr std::array<std::uint8_t, 5> kRetirablePropTypes{1, 2, 3, 7, 8};
 /** Retirement eligibility comes from an explicit host policy for an exact class. */

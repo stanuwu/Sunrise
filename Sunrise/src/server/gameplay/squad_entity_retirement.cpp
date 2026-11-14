@@ -20,6 +20,9 @@ namespace sunrise::server::gameplay::squad_entity_retirement {
 namespace {
 namespace policy = state::gameplay::squad_entity_retirement;
 namespace identities = state::gameplay::entity_identity;
+static_assert(policy::kSquadSourceType == state::activity_sdk::format::kSquadSlotType);
+static_assert(policy::kCombatantSourceType
+              == middleware::bap::activity_message::scriptable_auth::kType2SlotType);
 SRWLOCK g_lock{SRWLOCK_INIT};
 policy::Store g_store;
 policy::Store g_propStore;
@@ -30,6 +33,31 @@ struct Target final {
     policy::Eligibility eligibility{};
 };
 std::vector<Target> g_targets;
+/** @return True for the deliveries that choose their actors' retirement. */
+bool chooses_retirement(const activity::host::PendingScriptableOverride& pending) {
+    using Kind = activity::host::ScriptableOverrideKind;
+    return (pending.kind == Kind::squad && pending.target.slotType == policy::kSquadSourceType)
+           || (pending.kind == Kind::combatantBinding
+               && pending.target.slotType == policy::kCombatantSourceType);
+}
+/**
+ * The retirement choice a delivery stands for. A placement or a combatant binding makes it; any
+ * other write to the same slot, such as an objective update, carries the choice already made in
+ * this session.
+ */
+policy::Eligibility delivered_choice(const state::activity::SessionBinding& binding,
+                                     const activity::host::PendingScriptableOverride& pending) {
+    if (chooses_retirement(pending)) {
+        return pending.squadRetirement;
+    }
+    const auto placed = std::find_if(g_targets.begin(), g_targets.end(), [&](const Target& row) {
+        return row.session == binding.sessionId && row.revision == binding.createdRevision
+               && row.eligibility.squad.key == pending.target.registryKey
+               && row.eligibility.squad.index == pending.target.slotIndex
+               && row.eligibility.squad.type == pending.target.slotType;
+    });
+    return placed != g_targets.end() ? placed->eligibility : policy::Eligibility{};
+}
 struct PropTransition final {
     identities::Source source{};
     std::uint64_t transition{};
@@ -482,28 +510,32 @@ void cancel_placed_transition(const state::activity::SessionBinding& binding,
     });
     ReleaseSRWLockExclusive(&g_lock);
 }
-/** Delivered squad choices replace eligibility for their exact authored target. */
+/**
+ * Delivered squad choices replace eligibility for their exact authored target. An objective update
+ * keeps the placement's choice, so a squad tasked after it is placed is still retired on a leave.
+ */
 void record_delivered_target(const state::activity::SessionBinding& binding,
                              std::uint64_t generation,
                              std::uint64_t ownerGeneration,
                              const activity::host::PendingScriptableOverride& pending) noexcept {
-    if (!generation || pending.target.slotType != 1
+    if (!generation
+        || (pending.target.slotType != policy::kSquadSourceType
+            && pending.target.slotType != policy::kCombatantSourceType)
         || pending.expectedActivityClientGeneration != ownerGeneration) {
         return;
     }
     AcquireSRWLockExclusive(&g_lock);
     try {
-        const auto& selected = pending.squadRetirement;
+        const auto selected = delivered_choice(binding, pending);
         const auto prior = std::find_if(g_targets.begin(), g_targets.end(), [&](const Target& row) {
             return row.session == binding.sessionId && row.revision == binding.createdRevision
                    && row.generation == generation
                    && row.eligibility.squad.key == pending.target.registryKey
                    && row.eligibility.squad.index == pending.target.slotIndex;
         });
-        const bool enabled = pending.kind == activity::host::ScriptableOverrideKind::squad
-                             && selected.enabled && selected.squad.key == pending.target.registryKey
+        const bool enabled = selected.enabled && selected.squad.key == pending.target.registryKey
                              && selected.squad.index == pending.target.slotIndex
-                             && selected.squad.type == 1;
+                             && selected.squad.type == pending.target.slotType;
         const bool unchanged =
             prior != g_targets.end() && enabled && prior->eligibility == selected;
         if (!unchanged) {

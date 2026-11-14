@@ -456,7 +456,12 @@ inline constexpr ValueSpec kBindCombatantArguments[]{
      .kind = ValueKind::boolean,
      .optional = true,
      .fallback = default_boolean(false),
-     .note = "starts a new actor life in the same body, for a combatant whose actor is gone"}};
+     .note = "starts a new actor life in the same body, for a combatant whose actor is gone"},
+    {.name = "retire_on_return",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "the host retires the bound actor when the client gives it up on a bubble leave"}};
 inline constexpr ValueSpec kActorPathArguments[]{
     {.name = "path",
      .kind = ValueKind::handle,

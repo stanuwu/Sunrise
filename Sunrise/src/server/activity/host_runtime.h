@@ -1281,6 +1281,7 @@ actor_squad_binding_status(const state::activity::SessionBinding& binding,
 /**
  * Queues squad-member binding for one exact generated type-2 combatant slot.
  * @param spawn The body also carries the next spawn revision, so the combatant takes a new actor.
+ * @param retirement Enabled to retire the bound actor when a client gives it up on a leave.
  */
 [[nodiscard]] bool request_state_local_type2_squad_binding(
     const state::activity::SessionBinding& binding,
@@ -1288,7 +1289,8 @@ actor_squad_binding_status(const state::activity::SessionBinding& binding,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation = nullptr,
-    bool spawn = false) noexcept;
+    bool spawn = false,
+    state::gameplay::squad_entity_retirement::Eligibility retirement = {}) noexcept;
 
 /** Queues a generation-bound type-23 update from an exact generated roster group. */
 [[nodiscard]] bool request_state_local_type23_override(

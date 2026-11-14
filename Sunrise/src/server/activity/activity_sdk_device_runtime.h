@@ -151,12 +151,14 @@ set_objects_active_reserved(const state::activity_sdk::BoundView& view,
 /**
  * Arms one generated combatant for its scene's squad member spawn.
  * @param spawn Also starts a new actor life in the same body (a new spawn revision).
+ * @param retireOnReturn The host retires the bound actor when a client gives it up on a leave.
  */
 [[nodiscard]] Status
 bind_combatant_to_squad_reserved(const state::activity_sdk::BoundView& view,
                                  std::uint32_t slotRow,
                                  const host::ScriptableOutputReservation& reservation,
-                                 bool spawn = false) noexcept;
+                                 bool spawn = false,
+                                 bool retireOnReturn = false) noexcept;
 
 /** Checks one exact SDK device request without changing Activity Host output state. */
 [[nodiscard]] Status
