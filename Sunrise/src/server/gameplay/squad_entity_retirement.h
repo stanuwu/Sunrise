@@ -30,7 +30,10 @@ begin_placed_transition(const state::activity_sdk::BoundView&,
 void cancel_placed_transition(const state::activity::SessionBinding&,
                               std::uint64_t generation,
                               std::uint64_t transition = 0) noexcept;
-/** The authenticated abdication freezes exact identities before a later renewal can retire them. */
+/**
+ * An authenticated abdication (msg 33) or abandonment (msg 26) freezes exact identities before a
+ * later purge can retire them.
+ */
 void observe_abdication(const state::activity::SessionBinding&,
                         std::uint64_t generation,
                         std::uint8_t bubble,

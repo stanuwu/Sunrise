@@ -586,6 +586,7 @@ bool process(const ActivityClientBinding& binding,
     case IngressAdapter::authorityResetAcknowledgement:
         return prepare_authority_reset_acknowledgement(
             binding, rosterDecode, adapter, request, plan, hasTransaction);
+    case IngressAdapter::authorityAbandon:
     case IngressAdapter::authorityAbdicate:
         return prepare_authority_abdication(
             binding, rosterDecode, adapter, request, plan, hasTransaction);

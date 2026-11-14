@@ -507,7 +507,10 @@ bool prepare_authority_abdication(const ActivityClientBinding& binding,
                                   ActivityPlan& plan,
                                   bool& hasTransaction) noexcept {
     service::entity_authority::Release release{};
-    const bool parsed = service::entity_authority::parse_abdicate(request.payload, release);
+    const bool abandoned = adapter == IngressAdapter::authorityAbandon;
+    const bool parsed = abandoned
+                            ? service::entity_authority::parse_abandon(request.payload, release)
+                            : service::entity_authority::parse_abdicate(request.payload, release);
     if (!frame_only(binding, rosterDecode, adapter, request)) {
         return false;
     }
@@ -518,6 +521,7 @@ bool prepare_authority_abdication(const ActivityClientBinding& binding,
     plan.authorityAbdication.sourceGeneration = binding.bindingGeneration;
     plan.authorityAbdication.entities = release.mask;
     plan.authorityAbdication.bubble = release.selector;
+    plan.authorityAbdication.abandoned = abandoned;
     plan.authorityAbdication.pending = true;
     plan.delivery = Delivery::none;
     plan.mutationDomain = MutationDomain::authorityAbdication;
