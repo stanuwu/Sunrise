@@ -37,6 +37,8 @@ bool encode(const abilities::Definition& value, AbilityBucketRecord& record) noe
     record.classEntry = value.selection.classEntry;
     record.overflowCount = value.overflowCount;
     record.overflow = value.overflow;
+    record.perkCount = value.perkCount;
+    record.perks = value.perks;
     for (std::size_t bucket = 0; bucket < abilities::kBucketCapacity; ++bucket) {
         record.bucketKinds[bucket] = value.buckets[bucket].kind;
         record.bucketHashCounts[bucket] = value.buckets[bucket].hashCount;
@@ -51,7 +53,8 @@ bool encode(const abilities::Definition& value, AbilityBucketRecord& record) noe
 /** Rebuilds the 12 buckets from the flat disk arrays. */
 bool decode(const AbilityBucketRecord& record, abilities::Definition& value) noexcept {
     value = {};
-    if (record.overflowCount > abilities::kOverflowCapacity) {
+    if (record.overflowCount > abilities::kOverflowCapacity
+        || record.perkCount > abilities::kPerkCapacity) {
         return false;
     }
     value.socketEntryListIndex = record.socketEntryListIndex;
@@ -62,6 +65,8 @@ bool decode(const AbilityBucketRecord& record, abilities::Definition& value) noe
     value.selection.classEntry = record.classEntry;
     value.overflowCount = record.overflowCount;
     value.overflow = record.overflow;
+    value.perkCount = record.perkCount;
+    value.perks = record.perks;
     for (std::size_t bucket = 0; bucket < abilities::kBucketCapacity; ++bucket) {
         if (record.bucketHashCounts[bucket] > abilities::kBucketHashCapacity) {
             return false;

@@ -65,4 +65,17 @@ struct PoolRecord {
                                             std::uint8_t subgroup,
                                             std::span<PoolRecord> output) noexcept;
 
+/**
+ * Reads the sandbox perks one entry's active pool variant declares.
+ * @param blob Whole pool bytes.
+ * @param entry Entry naming the pool.
+ * @param subgroup Pool subgroup ordinal.
+ * @param output Sandbox perk index storage.
+ * @return The number of sandbox perks read.
+ */
+[[nodiscard]] std::size_t read_pool_perks(std::span<const std::byte> blob,
+                                          const Entry& entry,
+                                          std::uint8_t subgroup,
+                                          std::span<std::uint16_t> output) noexcept;
+
 } // namespace sunrise::middleware::content::packages::tables::abilities
