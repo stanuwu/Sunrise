@@ -19,8 +19,6 @@
 namespace sunrise::middleware::datagen::family4::character {
 namespace {
 
-/** Every bit set is the native absent activity index. 0 is the orbit activity, not absent. */
-constexpr std::uint16_t kAbsentActivityIndex = (std::numeric_limits<std::uint16_t>::max)();
 /** Every set bit marks all default per-character messages as already seen. */
 constexpr std::byte kSeenMessageByte{0xFF};
 /** Native stack insertion treats -1 as an unused row; 0 is a real selector. */
@@ -185,8 +183,7 @@ bool encode_with_unlocks(const state::CharacterState& state,
                 state.appearanceHeader.size());
     object.lastOrbitedDestination = state.lastOrbitedDestination;
     object.previousActivityIndex = state.previousActivityIndex;
-    // Absent, the client's transition classifier takes the previous activity as its from side.
-    object.activityOverrideIndex = kAbsentActivityIndex;
+    object.activityOverrideIndex = state.activityOverrideIndex;
     object.currentActivityIndex = state.currentActivityIndex;
     object.previewMirrors.fill(state.previewAvailable ? kNativeTrue : kNativeFalse);
     object.contentBypass = state.contentBypass ? kNativeTrue : kNativeFalse;

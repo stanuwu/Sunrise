@@ -183,6 +183,12 @@ struct CharacterState {
      * being left. Session only.
      */
     std::uint16_t previousActivityIndex{kNoActivityIndex};
+    /**
+     * Activity the character occupies, family-4 `+45894`; none outside one. A launch's from side
+     * reads it before the previous activity, and an onward link stays seamless only when the
+     * from side names the activity being left at the launch commit. Session only.
+     */
+    std::uint16_t activityOverrideIndex{kNoActivityIndex};
     /** Server policy that arms content checks only with the matching family-5 flag. */
     bool contentBypass{};
     /** Native DestinyRecordDefinition row of the equipped earned title. */

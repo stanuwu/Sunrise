@@ -45,6 +45,8 @@ bool read_characters(AccountState& output) noexcept {
         character.currentActivityIndex = g_session.activities[slot];
         character.previousActivityIndex =
             slot == g_session.previousSlot ? g_session.previousActivity : kNoActivityIndex;
+        character.activityOverrideIndex =
+            slot == g_session.occupiedSlot ? g_session.occupiedActivity : kNoActivityIndex;
         character.signInSeconds = g_session.signInSeconds;
         output.characters[output.characterCount++] = character;
         result = rows.step();
