@@ -216,7 +216,7 @@ Status set_objects_active_reserved(const sdk::BoundView& view,
                     static_cast<std::int16_t>(squad.slotIndex)};
     }
     // One push carries the run: the first row that resolves owns the revision and later rows
-    // answer under it. A row the client's state lacks, or from a second object, is dropped.
+    // answer under it. A row with no target, or from a second object, is dropped.
     Status skipped = Status::ready;
     bool head = false;
     host::ScriptableTarget group{};

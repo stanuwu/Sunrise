@@ -544,7 +544,10 @@ set_cinematic_active_reserved(const sdk::BoundView& view,
                : SceneStatus::refused;
 }
 
-/** Finds the occurrence a slot currently belongs to. @return `invalidView` on a stale view. */
+/**
+ * Finds the occurrence a slot currently belongs to: the live or seed state's, else its own state's
+ * in a bubble the client is not in. @return `invalidView` on a stale view.
+ */
 [[nodiscard]] static SceneStatus current_behavior_occurrence(
     const sdk::BoundView& view, std::uint32_t slotRow, std::uint32_t& occurrenceRow) noexcept {
     occurrenceRow = sdk::format::kAbsentIndex;
@@ -562,13 +565,20 @@ set_cinematic_active_reserved(const sdk::BoundView& view,
     if (live != SceneStatus::ready) {
         return live;
     }
-    const auto selected = behavior_scope::select(occurrences,
+    auto selected = behavior_scope::select(occurrences,
+                                           view.catalog->states(),
+                                           view.catalog->bubbles(),
+                                           view.scenarioRow,
+                                           slots[slotRow].objectIndex,
+                                           snapshot.plan.stateRow,
+                                           link.effectiveRegion);
+    if (selected.row == sdk::format::kAbsentIndex) {
+        selected = behavior_scope::select_unheld(occurrences,
                                                  view.catalog->states(),
-                                                 view.catalog->bubbles(),
                                                  view.scenarioRow,
                                                  slots[slotRow].objectIndex,
-                                                 snapshot.plan.stateRow,
                                                  link.effectiveRegion);
+    }
     if (selected.ambiguous) {
         return SceneStatus::ambiguousTarget;
     }

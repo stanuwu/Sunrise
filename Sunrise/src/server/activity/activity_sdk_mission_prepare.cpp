@@ -113,10 +113,15 @@ plan_from(const sdk::MissionSeedSummary& summary) noexcept {
 
 namespace {
 
-/** Checks the exact enabled and published mission-seed lease for one scene state. */
+/**
+ * Checks the exact enabled and published mission-seed lease for one scene state.
+ * @param unheld The client's bubble does not place the object, so the occurrence's own state takes
+ * the write.
+ */
 [[nodiscard]] SceneStatus scene_lease_status(const sdk::BoundView& view,
                                              const server::bap::ActivityLinkView& link,
-                                             std::uint32_t stateRow) noexcept {
+                                             std::uint32_t stateRow,
+                                             bool unheld) noexcept {
     server::bap::ActivityMissionSeedLeaseView lease{};
     switch (server::bap::activity_mission_seed_lease(
         view.binding, view.scenarioRow, link.activityClientGeneration, lease)) {
@@ -140,7 +145,7 @@ namespace {
     if (!lease.configured || lease.revision == 0 || lease.plan.scenarioRow != view.scenarioRow) {
         return SceneStatus::missionSeedUnavailable;
     }
-    if (lease.plan.stateRow != stateRow
+    if (lease.plan.stateRow != stateRow && !unheld
         && !behavior_scope::live_state(view.catalog->states(),
                                        view.catalog->bubbles(),
                                        view.scenarioRow,
@@ -158,7 +163,9 @@ namespace {
 }
 
 /**
- * Checks the state's lease, then routes one validated slot to its live state-local target.
+ * Checks the state's lease, then routes one validated slot to its state-local target: in the
+ * client's region, or in the occurrence's own state when the client's bubble does not place the
+ * object.
  * @param expectedSlotType Slot type the routed target must carry.
  * @param expectedAuthSchema Auth schema the routed target must carry.
  * @param output Receives the target and its route; other fields are left as they are.
@@ -173,10 +180,25 @@ namespace {
                                          std::uint32_t expectedSlotType,
                                          std::uint32_t expectedAuthSchema,
                                          PreparedScene& output) noexcept {
-    const SceneStatus lease = scene_lease_status(view, link, occurrence.stateIndex);
+    // An object the client's bubble does not place takes the write in this occurrence's own state,
+    // and the client applies it when it next holds that bubble.
+    const behavior_scope::Selection outside =
+        behavior_scope::select_unheld(view.catalog->occurrences(),
+                                      view.catalog->states(),
+                                      view.scenarioRow,
+                                      occurrence.objectIndex,
+                                      link.effectiveRegion);
+    if (outside.ambiguous) {
+        return SceneStatus::ambiguousTarget;
+    }
+    const bool unheld = outside.row != sdk::format::kAbsentIndex;
+    const SceneStatus lease = scene_lease_status(view, link, occurrence.stateIndex, unheld);
     if (lease != SceneStatus::ready) {
         return lease;
     }
+    const std::int32_t region =
+        unheld ? behavior_scope::state_region(view.catalog->states()[occurrence.stateIndex])
+               : link.effectiveRegion;
     sdk_route::SourceIdentity source{};
     source.scenarioTag = scenario.tag;
     source.objectTag = object.objectTag;
@@ -187,7 +209,7 @@ namespace {
     source.slotIndex = static_cast<std::uint16_t>(slot.slotIndex);
     source.slotType = static_cast<std::uint8_t>(slot.slotType);
     sdk_route::Resolution resolved{};
-    switch (sdk_route::resolve(view, source, link.effectiveRegion, resolved)) {
+    switch (sdk_route::resolve(view, source, region, resolved)) {
     case sdk_route::Status::ready:
         break;
     case sdk_route::Status::invalidView:
@@ -200,7 +222,7 @@ namespace {
         return SceneStatus::ambiguousTarget;
     }
     if (resolved.scenarioRow != view.scenarioRow || resolved.stateRow != occurrence.stateIndex
-        || resolved.region != link.effectiveRegion || !resolved.target.stateLocalRoster
+        || resolved.region != region || !resolved.target.stateLocalRoster
         || resolved.target.slotType != expectedSlotType
         || resolved.target.authSchema != expectedAuthSchema) {
         return SceneStatus::invalidSlot;
@@ -210,7 +232,7 @@ namespace {
     output.activityClientGeneration = link.activityClientGeneration;
     output.scenarioRow = resolved.scenarioRow;
     output.stateRow = resolved.stateRow;
-    output.effectiveRegion = resolved.region;
+    output.effectiveRegion = link.effectiveRegion;
     return SceneStatus::ready;
 }
 

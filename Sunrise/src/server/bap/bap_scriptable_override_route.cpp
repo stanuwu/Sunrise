@@ -7,7 +7,9 @@
 #include <span>
 
 #include "../../state/build_data/runtime.h"
+#include "../activity/activity_sdk_behavior_scope.h"
 #include "../activity/host_runtime.h"
+#include "activity_mission_seed_lease.h"
 #include "internal.h"
 #include "runtime.h"
 
@@ -127,6 +129,20 @@ valid_canonical_sdk_auth_target(const activity::host::ScriptableTarget& target) 
     return occurrences != 0;
 }
 
+/**
+ * @return True when this link carries a state-local target from its client's region: the target is
+ * in that region, or in another bubble whose content this link publishes. The client applies a
+ * write there when it next holds that bubble. A public state's content goes out on a public link,
+ * which publishes only the bubble the client is in.
+ */
+[[nodiscard]] bool carries_state_local_target(const Session& session,
+                                              const activity::host::ScriptableTarget& target,
+                                              std::int32_t clientRegion) noexcept {
+    return target.stateLocalRegion == clientRegion
+           || (activity::behavior_scope::other_bubble(target.stateLocalRegion, clientRegion)
+               && !publishes_on_public(session, target));
+}
+
 /** Checks one canonical type-23 request while the BAP lock owns ActivityClient state. */
 [[nodiscard]] bool canonical_type23_available_locked(const Session& session,
                                                      const activity::host::ScriptableTarget& target,
@@ -159,7 +175,8 @@ state_local_type23_available_locked(const Session& session,
     const std::int32_t region = selected_region_index_locked(session);
     return expectedRegion >= 0 && expectedGeneration != 0
            && session.activity.role == ActivityClientRole::privateCurrent
-           && region == expectedRegion && target.stateLocalRegion == expectedRegion
+           && region == expectedRegion
+           && carries_state_local_target(session, target, expectedRegion)
            && session.activity.bindingGeneration == expectedGeneration
            && valid_state_local_type23_target(target, stateLocalRosterGroup);
 }
@@ -188,7 +205,8 @@ state_local_sdk_auth_available_locked(const Session& session,
     const std::int32_t region = selected_region_index_locked(session);
     return expectedRegion >= 0 && expectedGeneration != 0
            && session.activity.role == ActivityClientRole::privateCurrent
-           && region == expectedRegion && target.stateLocalRegion == expectedRegion
+           && region == expectedRegion
+           && carries_state_local_target(session, target, expectedRegion)
            && session.activity.bindingGeneration == expectedGeneration
            && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup);
 }
@@ -391,7 +409,7 @@ bool request_activity_state_local_type31_override(
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
         && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && target.stateLocalRegion == expectedRegion
+        && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_type31_target(target, stateLocalRosterGroup)
         && activity::host::request_state_local_type31_override(
@@ -416,7 +434,7 @@ bool request_activity_state_local_sequence_override(
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
         && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && target.stateLocalRegion == expectedRegion
+        && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType5SlotType
@@ -443,7 +461,7 @@ bool request_activity_state_local_cinematic_override(
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
         && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && target.stateLocalRegion == expectedRegion
+        && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType6SlotType
@@ -470,7 +488,7 @@ bool request_activity_state_local_performance_override(
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
         && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && target.stateLocalRegion == expectedRegion
+        && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType42SlotType
@@ -500,7 +518,7 @@ bool request_activity_state_local_authored_scene_override(
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
         && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && target.stateLocalRegion == expectedRegion
+        && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_authored_scene_target(target, stateLocalRosterGroup)
         && activity::host::request_state_local_authored_scene_override(binding,
@@ -534,7 +552,7 @@ bool request_activity_state_local_dialogue_override(
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
         && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && target.stateLocalRegion == expectedRegion
+        && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType53SlotType
@@ -566,7 +584,7 @@ bool request_activity_state_local_objective_reset(
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
         && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && target.stateLocalRegion == expectedRegion
+        && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType3SlotType
@@ -592,7 +610,7 @@ bool request_activity_state_local_task_override(
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
         && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && target.stateLocalRegion == expectedRegion
+        && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType38SlotType

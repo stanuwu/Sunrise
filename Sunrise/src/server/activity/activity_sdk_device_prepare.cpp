@@ -14,6 +14,7 @@
 #include "../../middleware/bap/activity_message/volume_toggle_auth.h"
 #include "../../middleware/content/packages/tables/region_reader.h"
 #include "../../state/activity/runtime.h"
+#include "activity_sdk_behavior_scope.h"
 #include "activity_sdk_device_internal.h"
 
 namespace sunrise::server::activity::activity_sdk_devices::detail {
@@ -69,6 +70,16 @@ namespace {
     return matches == 1;
 }
 
+/** Where the destination's canonical roster rows carry one object. */
+enum class CanonicalRow : std::uint8_t {
+    /** No canonical row carries it, so its group is generated. */
+    none,
+    /** A row registered in the client's bubble carries it. */
+    active,
+    /** Only rows of other bubbles carry it. */
+    inactive,
+};
+
 /** Resolves a materialized occurrence group to at most one canonical roster row. */
 [[nodiscard]] Status canonical_target(const sdk::BoundView& view,
                                       const format::Scenario& scenario,
@@ -76,9 +87,9 @@ namespace {
                                       const layouts::RosterGroup& generatedGroup,
                                       std::int32_t effectiveRegion,
                                       host::ScriptableTarget& output,
-                                      bool& found) noexcept {
+                                      CanonicalRow& row) noexcept {
     output = {};
-    found = false;
+    row = CanonicalRow::none;
     if (view.binding.destination.packageNameLength == 0
         || view.binding.destination.packageNameLength
                > view.binding.destination.packageName.size()) {
@@ -116,6 +127,8 @@ namespace {
                 // lanes. That is one target; only a distinct active table is ambiguous.
                 activeMatches = 2;
             }
+        } else {
+            row = CanonicalRow::inactive;
         }
         return true;
     };
@@ -149,7 +162,7 @@ namespace {
     output.rosterSlotOffset = slotOffset;
     output.slotIndex = static_cast<std::uint16_t>(slot.slotIndex);
     output.slotType = static_cast<std::uint8_t>(slot.slotType);
-    found = true;
+    row = CanonicalRow::active;
     return Status::ready;
 }
 
@@ -198,7 +211,10 @@ namespace {
     return Status::invalidView;
 }
 
-/** Resolves one SDK slot through a published canonical group or its exact live occurrence. */
+/**
+ * Resolves one SDK slot through a published canonical group or its exact occurrence: the one in
+ * the client's region, else the one outside the client's bubble.
+ */
 [[nodiscard]] Status
 prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& output) noexcept {
     output = {};
@@ -238,7 +254,7 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
         return Status::invalidSlot;
     }
 
-    bool canonical = false;
+    CanonicalRow canonical = CanonicalRow::none;
     const Status canonicalStatus = canonical_target(view,
                                                     *scenario,
                                                     slot,
@@ -250,13 +266,14 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
         output = {};
         return canonicalStatus;
     }
-    if (canonical) {
+    if (canonical == CanonicalRow::active) {
         return finish_prepared(view, link, output);
     }
 
+    const auto scenarioOccurrences = sdk::scenario_occurrences(catalog, *scenario);
     const format::Occurrence* selected = nullptr;
     std::uint32_t selectedState = format::kAbsentIndex;
-    for (const format::Occurrence& occurrence : sdk::scenario_occurrences(catalog, *scenario)) {
+    for (const format::Occurrence& occurrence : scenarioOccurrences) {
         if (occurrence.scenarioIndex != view.scenarioRow || &occurrence < occurrences.data()
             || &occurrence >= occurrences.data() + occurrences.size()) {
             return Status::invalidView;
@@ -289,7 +306,18 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
         }
     }
     if (selected == nullptr) {
-        return Status::targetUnavailable;
+        // A bubble the client is not in takes the write in the object's own state, and the client
+        // applies it when it next holds that bubble. The roster installs a canonical row's Auth
+        // only while the row is registered in the client's bubble, so such an object waits.
+        const behavior_scope::Selection unheld = behavior_scope::select_unheld(
+            scenarioOccurrences, states, view.scenarioRow, slot.objectIndex, link.effectiveRegion);
+        if (canonical == CanonicalRow::inactive || unheld.row == format::kAbsentIndex) {
+            return Status::targetUnavailable;
+        }
+        if (unheld.ambiguous) {
+            return Status::ambiguousTarget;
+        }
+        selected = &scenarioOccurrences[unheld.row];
     }
     if (selected->stateIndex >= states.size() || selected->bubbleIndex >= bubbles.size()
         || selected->objectIndex >= objects.size()) {
@@ -310,7 +338,7 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
     output.target.rosterSlotOffset = slotOffset;
     output.target.slotIndex = static_cast<std::uint16_t>(slot.slotIndex);
     output.target.sdkObjectIndex = selected->objectIndex;
-    output.target.stateLocalRegion = link.effectiveRegion;
+    output.target.stateLocalRegion = behavior_scope::state_region(state);
     output.target.slotType = static_cast<std::uint8_t>(slot.slotType);
     output.target.stateLocalRoster = true;
     output.stateRow = selected->stateIndex;

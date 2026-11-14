@@ -81,4 +81,53 @@ struct Selection final {
     return result;
 }
 
+/** @return The region a state's content lives in: its slice set plus its state ordinal. */
+[[nodiscard]] constexpr std::int32_t state_region(const format::State& state) noexcept {
+    return static_cast<std::int32_t>(state.sliceSetIndex + state.stateOrdinal);
+}
+
+/** @return True when both regions are set and lie in different bubbles. */
+[[nodiscard]] constexpr bool other_bubble(std::int32_t region, std::int32_t clientRegion) noexcept {
+    namespace tables = middleware::content::packages::tables;
+    return region >= 0 && clientRegion >= 0
+           && static_cast<std::uint32_t>(region) / tables::kSliceSetIndexFactor
+                  != static_cast<std::uint32_t>(clientRegion) / tables::kSliceSetIndexFactor;
+}
+
+/**
+ * Selects the occurrence of an object the client's bubble does not place. The client applies a
+ * bubble's retained Auth when it next holds that bubble, so a write goes to the occurrence's own
+ * state. One object has one registry key in every bubble, so an object the client's bubble places
+ * has no such occurrence. When occurrences name two states the result is ambiguous and names the
+ * first.
+ */
+[[nodiscard]] inline Selection select_unheld(std::span<const format::Occurrence> occurrences,
+                                             std::span<const format::State> states,
+                                             std::uint32_t scenario,
+                                             std::uint32_t object,
+                                             std::int32_t clientRegion) noexcept {
+    namespace tables = middleware::content::packages::tables;
+    Selection result{};
+    for (std::uint32_t index = 0; index < occurrences.size(); ++index) {
+        const format::Occurrence& occurrence = occurrences[index];
+        if (occurrence.scenarioIndex != scenario || occurrence.objectIndex != object
+            || occurrence.stateIndex >= states.size()
+            || states[occurrence.stateIndex].scenarioIndex != scenario
+            || occurrence.bubbleIndex != states[occurrence.stateIndex].bubbleIndex
+            || states[occurrence.stateIndex].stateOrdinal >= tables::kSliceSetIndexFactor) {
+            continue;
+        }
+        const format::State& state = states[occurrence.stateIndex];
+        if (!other_bubble(state_region(state), clientRegion)) {
+            return {};
+        }
+        if (result.row == format::kAbsentIndex) {
+            result.row = index;
+        } else if (occurrences[result.row].stateIndex != occurrence.stateIndex) {
+            result.ambiguous = true;
+        }
+    }
+    return result;
+}
+
 } // namespace sunrise::server::activity::behavior_scope

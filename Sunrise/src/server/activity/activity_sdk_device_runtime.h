@@ -132,8 +132,9 @@ play_combatant_sequence_reserved(const state::activity_sdk::BoundView& view,
 
 /**
  * Instantiates or removes package-authored type-4 entries, one push for the whole run.
- * A row is dropped, not refused, when the client's state does not hold it, or when it names a
- * second object. Only the first row's group reaches the roster, so a stranger discards the push.
+ * A row is dropped, not refused, when it has no target, as when the client's bubble places it only
+ * in another state, or when it names a second object. Only the first row's group reaches the
+ * roster, so a stranger discards the push.
  * @param extraRows Slot rows that share the reservation, so one push carries the whole run.
  * @param locationSlotRow Type-1 squad every entry spawns at, or none for the package transform.
  * @return `queued` when at least one row resolved, else why the last one did not.
