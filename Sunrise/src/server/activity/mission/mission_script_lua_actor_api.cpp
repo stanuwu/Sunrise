@@ -141,8 +141,8 @@ bool exact_actor_path(const SlotDefinition& path, const SlotDefinition& actor) n
 }
 
 /**
- * Arms one exact combatant for its scene's squad member spawn.
- * @param state Lua call holding the slot and empty argument table.
+ * Arms one exact combatant for its scene's squad member spawn; with spawn, in a new actor life.
+ * @param state Lua call holding the slot and argument table.
  * @return One request handle after the intent is retained.
  */
 [[nodiscard]] int slot_bind_combatant_to_squad(lua_State* state) {
@@ -157,6 +157,7 @@ bool exact_actor_path(const SlotDefinition& path, const SlotDefinition& actor) n
     Intent intent{};
     intent.kind = IntentKind::bindCombatantToSquad;
     intent.firstRow = definition.nativeRow;
+    intent.active = optional_boolean_argument(state, boolean_option(kBindCombatant, "spawn"));
     return queue_intent(state, frame, intent);
 }
 

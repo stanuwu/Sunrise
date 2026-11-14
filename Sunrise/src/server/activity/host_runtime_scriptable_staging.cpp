@@ -165,8 +165,11 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::combatantBinding) {
         auth::Type2ChannelState candidate = guard->type2;
         std::uint32_t revision = 0;
-        nextCounter =
-            auth::next_type2_revision(candidate, revision) && revision == pending.generation;
+        nextCounter = auth::next_type2_revision(candidate, revision)
+                      && revision == pending.generation
+                      && (pending.actorSpawnGeneration == 0
+                          || (pending.actorSpawnGeneration > guard->type2SpawnGeneration
+                              && pending.actorSpawnGeneration <= squad::kMaximumGeneration));
         candidate.revision = revision;
         candidate.actorBinding = auth::Type2ActorBinding::squadMember;
     } else if (guard != nullptr
@@ -256,6 +259,9 @@ void advance_staged_guard(ScriptableGuard* guard,
     } else if (pending.kind == ScriptableOverrideKind::combatantBinding) {
         guard->type2.revision = static_cast<std::uint32_t>(pending.generation);
         guard->type2.actorBinding = auth::Type2ActorBinding::squadMember;
+        if (pending.actorSpawnGeneration != 0) {
+            guard->type2SpawnGeneration = pending.actorSpawnGeneration;
+        }
     } else if (pending.kind == ScriptableOverrideKind::combatantProgram
                || pending.kind == ScriptableOverrideKind::combatantRetirement) {
         guard->type2AtomGeneration = static_cast<std::uint32_t>(pending.generation);

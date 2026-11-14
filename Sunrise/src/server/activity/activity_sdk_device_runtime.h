@@ -147,11 +147,15 @@ set_objects_active_reserved(const state::activity_sdk::BoundView& view,
                             std::optional<std::uint32_t> locationSlotRow,
                             const host::ScriptableOutputReservation& reservation) noexcept;
 
-/** Arms one generated combatant for its scene's squad member spawn. */
+/**
+ * Arms one generated combatant for its scene's squad member spawn.
+ * @param spawn Also starts a new actor life in the same body (a new spawn revision).
+ */
 [[nodiscard]] Status
 bind_combatant_to_squad_reserved(const state::activity_sdk::BoundView& view,
                                  std::uint32_t slotRow,
-                                 const host::ScriptableOutputReservation& reservation) noexcept;
+                                 const host::ScriptableOutputReservation& reservation,
+                                 bool spawn = false) noexcept;
 
 /** Checks one exact SDK device request without changing Activity Host output state. */
 [[nodiscard]] Status

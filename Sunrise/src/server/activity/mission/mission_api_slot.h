@@ -422,6 +422,12 @@ inline constexpr ValueSpec kSpawnArgument{
     .optional = true,
     .fallback = default_boolean(false),
     .note = "creates the actor from its single authored source first"};
+inline constexpr ValueSpec kBindCombatantArguments[]{
+    {.name = "spawn",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "starts a new actor life in the same body, for a combatant whose actor is gone"}};
 inline constexpr ValueSpec kActorPathArguments[]{
     {.name = "path",
      .kind = ValueKind::handle,
@@ -803,6 +809,7 @@ inline constexpr MemberSpec kSlotMembers[]{
      .kind = MemberKind::request,
      .call = CallForm::named,
      .gate = kExactCombatant,
+     .arguments = kBindCombatantArguments,
      .returns = kRequestKey,
      .note = "arms the actor for its scene's squad spawn"},
     {.name = "run_atoms",

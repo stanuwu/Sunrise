@@ -82,6 +82,7 @@ struct ScriptableRequest final {
     /** A sequence request's choices; a retained one keeps the running sequence. */
     middleware::bap::activity_message::scriptable_auth::Type5Selection sequenceSelection{};
     bool snap{};
+    /** The kind's on input: an object or cinematic turns on, a program or binding spawns. */
     bool active{};
 };
 

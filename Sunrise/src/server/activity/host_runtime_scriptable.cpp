@@ -456,7 +456,9 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
         }
     } else if (encoded && request.kind == ScriptableOverrideKind::combatantChannel) {
         std::uint32_t revision = 0;
-        encoded = auth::next_type2_revision(candidate.type2, revision);
+        encoded = auth::next_type2_revision(candidate.type2, revision)
+                  && actor_program::committed_spawn_generation(
+                      *instance, request.target, candidate, candidate.type2.spawnGeneration);
         candidate.type2.revision = revision;
         encoded =
             encoded && auth::set_type2_channel(candidate.type2, request.channelHash, request.value)
@@ -470,10 +472,18 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
         pending.channelValue = request.value;
         pending.generation = revision;
     } else if (encoded && request.kind == ScriptableOverrideKind::combatantBinding) {
+        // A spawning binding carries the next spawn revision itself: one spawn edge, with the
+        // combatant already waiting for its squad member, so it never makes an actor of its own.
         std::uint32_t revision = 0;
-        encoded = auth::next_type2_revision(candidate.type2, revision);
+        std::uint32_t spawn = 0;
+        encoded = auth::next_type2_revision(candidate.type2, revision)
+                  && actor_program::committed_spawn_generation(
+                      *instance, request.target, candidate, spawn)
+                  && (!request.active || spawn < squad::kMaximumGeneration);
         candidate.type2.revision = revision;
+        candidate.type2.spawnGeneration = request.active ? spawn + 1U : spawn;
         candidate.type2.actorBinding = auth::Type2ActorBinding::squadMember;
+        pending.actorSpawnGeneration = request.active ? spawn + 1U : 0U;
         encoded =
             encoded
             && auth::encode_type2_channels(candidate.type2, pending.body, written, writtenBits);

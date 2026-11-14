@@ -388,10 +388,10 @@ Status bind_combatant_to_squad(const sdk::BoundView& view, std::uint32_t slotRow
 }
 
 /** Resolves and queues squad binding for one exact generated combatant slot. */
-Status
-bind_combatant_to_squad_reserved(const sdk::BoundView& view,
-                                 std::uint32_t slotRow,
-                                 const host::ScriptableOutputReservation& reservation) noexcept {
+Status bind_combatant_to_squad_reserved(const sdk::BoundView& view,
+                                        std::uint32_t slotRow,
+                                        const host::ScriptableOutputReservation& reservation,
+                                        bool spawn) noexcept {
     PreparedDevice prepared{};
     const Status status = prepare_combatant(view, slotRow, prepared);
     if (status != Status::ready) {
@@ -404,7 +404,8 @@ bind_combatant_to_squad_reserved(const sdk::BoundView& view,
                                                          prepared.target,
                                                          prepared.generatedRosterGroup,
                                                          prepared.activityClientGeneration,
-                                                         &reservation)
+                                                         &reservation,
+                                                         spawn)
                ? Status::queued
                : Status::refused;
 }

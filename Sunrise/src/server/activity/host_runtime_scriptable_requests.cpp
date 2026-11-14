@@ -308,7 +308,8 @@ bool request_state_local_type2_squad_binding(
     const ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::uint64_t expectedActivityClientGeneration,
-    const ScriptableOutputReservation* reservation) noexcept {
+    const ScriptableOutputReservation* reservation,
+    bool spawn) noexcept {
     if (target.slotType != auth::kType2SlotType || target.authSchema != auth::kType2Schema
         || !valid_state_local_group(target, stateLocalRosterGroup)
         || expectedActivityClientGeneration == 0) {
@@ -320,6 +321,7 @@ bool request_state_local_type2_squad_binding(
     request.stateLocalRosterGroup = stateLocalRosterGroup;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = ScriptableOverrideKind::combatantBinding;
+    request.active = spawn;
     return enqueue_request(request, reservation);
 }
 

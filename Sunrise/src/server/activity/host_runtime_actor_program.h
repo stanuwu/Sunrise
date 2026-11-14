@@ -28,6 +28,29 @@ retained(const detail::Instance& instance, const ScriptableTarget& target) noexc
     return nullptr;
 }
 
+/**
+ * Reads the actor's last spawn revision: the committed one, or the delivered body's if later.
+ * @return False when the delivered body does not decode.
+ */
+[[nodiscard]] inline bool committed_spawn_generation(const detail::Instance& instance,
+                                                     const ScriptableTarget& target,
+                                                     const detail::ScriptableGuard& guard,
+                                                     std::uint32_t& output) noexcept {
+    namespace auth = middleware::bap::activity_message::scriptable_auth;
+    output = guard.type2SpawnGeneration;
+    const auto* previous = retained(instance, target);
+    if (previous == nullptr) {
+        return true;
+    }
+    auth::Type2ProgramLayout layout{};
+    if (!auth::inspect_type2_program(
+            std::span(previous->body).first(previous->byteCount), previous->bitCount, layout)) {
+        return false;
+    }
+    output = (std::max)(output, layout.spawnGeneration);
+    return true;
+}
+
 /** Creation needs a transported reservation with an active, authored squad candidate. */
 [[nodiscard]] inline bool source_ready(const detail::Instance& instance,
                                        const ScriptableTarget& target) noexcept {

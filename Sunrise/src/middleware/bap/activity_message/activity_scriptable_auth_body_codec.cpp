@@ -163,6 +163,7 @@ constexpr std::uint8_t kType2AtomFieldMaximum = 0x3F;
 [[nodiscard]] bool valid_type2_body(const Type2Body& body) noexcept {
     const Type2ChannelState& state = body.channels;
     if (state.revision == 0 || state.revision > kMaximumRevision
+        || state.spawnGeneration > kMaximumRevision
         || !valid_type2_actor_binding(state.actorBinding) || state.count > state.channels.size()
         || state.temperamentCount > state.temperaments.size()) {
         return false;
@@ -205,6 +206,7 @@ constexpr std::uint8_t kType2AtomFieldMaximum = 0x3F;
 /** @return Meaningful width of one complete type-2 root. */
 [[nodiscard]] std::size_t type2_body_bit_count(const Type2Body& body) noexcept {
     std::size_t bitCount = kType2ChannelBaseBitCount
+                           + (body.channels.spawnGeneration != 0 ? kType2SpawnRevisionBitCount : 0U)
                            + body.channels.temperamentCount * kSigned32Width
                            + body.channels.count * kType2ChannelRowBitCount;
     if (body.atoms.generation != 0) {
@@ -216,10 +218,17 @@ constexpr std::uint8_t kType2AtomFieldMaximum = 0x3F;
     return bitCount;
 }
 
-/** Writes the whole root: `.0`, `.4` and `.7` absent, the control block, then the atom program. */
+/**
+ * Writes the whole root: `.0` when a spawn revision is set, `.4` and `.7` absent, the control
+ * block, then the atom program.
+ */
 [[nodiscard]] bool write_type2_root(bits::Writer& writer, const Type2Body& body) noexcept {
     const Type2ChannelState& state = body.channels;
-    bool encoded = writer.write(0, kBoolWidth) && writer.write(0, 2U)
+    const bool spawned = state.spawnGeneration != 0;
+    bool encoded = writer.write(spawned ? 1U : 0U, kBoolWidth)
+                   && (!spawned
+                       || writer.write(state.spawnGeneration, kType2SpawnRevisionBitCount))
+                   && writer.write(0, 2U)
                    && writer.write(type2_actor_binding_wire(state.actorBinding), 3U)
                    && writer.write(kEnabled, kBoolWidth) && writer.write(0, kBoolWidth)
                    && writer.write(1, kBoolWidth) && writer.write(state.revision, 31U)
@@ -523,8 +532,8 @@ bool encode_type2_channels(const Type2ChannelState& state,
 }
 
 /**
- * Writes the complete type-2 root. `.0`, `.4` and `.7` stay absent, `.5` always writes, and `.6`
- * writes only for a nonzero atom generation.
+ * Writes the complete type-2 root. `.0` writes only for a nonzero spawn revision, `.4` and `.7`
+ * stay absent, `.5` always writes, and `.6` writes only for a nonzero atom generation.
  * @param body Control block and atom program to encode together.
  * @param output Caller storage, left unchanged when the body is refused.
  * @param written Receives the encoded byte count.

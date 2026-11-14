@@ -26,11 +26,13 @@ inline constexpr std::uint32_t kType2SenseSchema = generated::C80807da2::kClass;
 inline constexpr std::uint32_t kType2Schema = generated::C80807da1::kClass;
 inline constexpr std::size_t kType2ChannelCapacity = 16;
 inline constexpr std::size_t kType2TemperamentCapacity = 6;
-/** Fixed bits around the variable 64-bit channel rows. */
+/** Fixed bits around the variable 64-bit channel rows, with `.0` absent. */
 inline constexpr std::size_t kType2ChannelBaseBitCount = 149;
 inline constexpr std::size_t kType2ChannelRowBitCount = 64;
+/** A present `.0` adds its 31-bit spawn revision after the presence bit. */
+inline constexpr std::size_t kType2SpawnRevisionBitCount = 31;
 inline constexpr std::size_t kType2MaximumChannelBitCount =
-    kType2ChannelBaseBitCount + kType2TemperamentCapacity * 32U
+    kType2ChannelBaseBitCount + kType2SpawnRevisionBitCount + kType2TemperamentCapacity * 32U
     + kType2ChannelCapacity * kType2ChannelRowBitCount;
 /** Buffer the channel set needs at the full temperament and channel counts. */
 inline constexpr std::size_t kType2MaximumChannelByteCount = (kType2MaximumChannelBitCount + 7) / 8;
@@ -60,6 +62,11 @@ struct Type2ChannelState final {
     std::array<TemperamentId, kType2TemperamentCapacity> temperaments{};
     std::array<Type2Channel, kType2ChannelCapacity> channels{};
     std::uint32_t revision{};
+    /**
+     * `.0`, the actor's spawn revision. The client takes any change as a spawn edge and reads an
+     * absent `.0` as zero, so a body sent after a spawn must repeat it; zero leaves it absent.
+     */
+    std::uint32_t spawnGeneration{};
     std::uint8_t temperamentCount{};
     std::uint8_t count{};
     Type2ActorBinding actorBinding{Type2ActorBinding::selfOwned};
@@ -175,9 +182,9 @@ inline constexpr std::size_t kType2MaximumBodyByteCount = (kType2MaximumBodyBitC
 /** Squad references one `.7` passenger manifest carries at most. */
 inline constexpr std::size_t kType2ManifestCapacity = 8;
 
-/** Full Auth also permits spawn generation, eight keyed rows and eight manifest references. */
+/** Full Auth also permits eight keyed rows and eight manifest references. */
 inline constexpr std::size_t kType2FullMaximumBitCount =
-    kType2MaximumBodyBitCount + 31U + (1U + 8U * (1U + 32U + 1U + 31U) + 1U + 32U)
+    kType2MaximumBodyBitCount + (1U + 8U * (1U + 32U + 1U + 31U) + 1U + 32U)
     + (4U + kType2ManifestCapacity * 55U + 31U);
 inline constexpr std::size_t kType2FullMaximumByteCount = (kType2FullMaximumBitCount + 7U) / 8U;
 
