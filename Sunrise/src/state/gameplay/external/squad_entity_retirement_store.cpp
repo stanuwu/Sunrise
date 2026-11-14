@@ -466,6 +466,13 @@ bool Store::pending(const identities::Source& source, std::uint8_t bubble) const
         return release.source == source && release.bubble == bubble && !release.groups.empty();
     });
 }
+std::optional<std::uint8_t> Store::pending_bubble(const identities::Source& source,
+                                                  std::uint8_t excluded) const noexcept {
+    const auto release = std::find_if(releases_.begin(), releases_.end(), [&](const Release& row) {
+        return row.source == source && row.bubble != excluded && !row.groups.empty();
+    });
+    return release != releases_.end() ? std::optional(release->bubble) : std::nullopt;
+}
 /** Cancelling a transition invalidates every outstanding plan for its captured source. */
 void Store::invalidate_source(const identities::Source& source, std::uint8_t bubble) noexcept {
     std::erase_if(releases_, [&](const Release& release) {

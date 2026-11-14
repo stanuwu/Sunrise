@@ -10,6 +10,7 @@
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../gameplay/gameplay_advertisement.h"
 #include "../../../../gameplay/group/group_host_sessions.h"
+#include "../../../../gameplay/squad_entity_retirement.h"
 #include "../../../internal.h"
 #include "activity_arrival.h"
 #include "activity_roster_device_publication.h"
@@ -235,6 +236,15 @@ struct RefreshReport final {
  */
 [[nodiscard]] state::activity::membership::ClientPlacement
 client_placement(const Session& session, const RefreshReport* refresh) noexcept;
+
+/**
+ * Prepares the purge of what a sole link released in a bubble its client has left.
+ * @param heldRegion Region the client holds a slice set in; a negative one prepares nothing.
+ */
+[[nodiscard]] bool prepare_departed_purge_locked(
+    const Session& session,
+    std::int32_t heldRegion,
+    server::gameplay::squad_entity_retirement::RetirementPlan& output) noexcept;
 
 /**
  * Tests whether the client holds the region it reported and no host move is waiting.

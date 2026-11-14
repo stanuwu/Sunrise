@@ -394,6 +394,14 @@ bool consume_activity_keepalive(Session& session,
                             && retirement.pending;
         }
     }
+    // A release in a bubble the client has left makes a roster due; the roster asks the same.
+    if (retirementReady && !placedPending && !retirementDue) {
+        server::gameplay::squad_entity_retirement::RetirementPlan retirement{};
+        retirementDue = prepare_departed_purge_locked(
+            session,
+            state::activity::membership::instantiated_region(client_placement(session, nullptr)),
+            retirement);
+    }
     const bool missionAllocationDue =
         rosterOpen && !hostRefused && mission_entity_allocation_owed(session, false);
     // A public link carries the mission content its private link places in public bubbles.

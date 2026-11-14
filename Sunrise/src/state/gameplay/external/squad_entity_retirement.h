@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <optional>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -59,6 +60,9 @@ public:
                                RetirementPlan&) const noexcept;
     [[nodiscard]] bool commit(const RetirementPlan&) noexcept;
     [[nodiscard]] bool pending(const identities::Source&, std::uint8_t bubble) const noexcept;
+    /** @return A bubble other than `excluded` with a pending release of the exact source. */
+    [[nodiscard]] std::optional<std::uint8_t> pending_bubble(const identities::Source&,
+                                                             std::uint8_t excluded) const noexcept;
     void invalidate_source(const identities::Source&, std::uint8_t bubble) noexcept;
     void returned_slots(std::uint64_t session, std::uint64_t generation, const Mask&) noexcept;
     void invalidate_target(std::uint64_t session,

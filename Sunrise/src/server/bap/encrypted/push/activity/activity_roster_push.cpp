@@ -253,6 +253,23 @@ bool build_roster_decode_map(const message::Roster& roster,
     return true;
 }
 
+/** Without a second link the client's bubble is its own, so its departed release is owed. */
+bool prepare_departed_purge_locked(
+    const Session& session,
+    std::int32_t heldRegion,
+    server::gameplay::squad_entity_retirement::RetirementPlan& output) noexcept {
+    output = {};
+    return heldRegion >= 0
+           && activity_link_count_locked(session.activity.session)
+                  < state::activity::bubble_authority::kSharedLinkCount
+           && server::gameplay::squad_entity_retirement::prepare_departed_retirement(
+               session.activity.session,
+               session.activity.bindingGeneration,
+               static_cast<std::uint8_t>(
+                   heldRegion >> state::activity::bubble_authority::kSliceSetToBubbleShift),
+               output);
+}
+
 /** Appends one `sensor_auth_update` svc9 notification carrying the destination's roster. */
 bool append_roster_notification(
     Session& session,
@@ -626,21 +643,28 @@ bool append_roster_notification(
             ? grant.bubble
             : static_cast<std::uint8_t>(
                   snapshot.region >> state::activity::bubble_authority::kSliceSetToBubbleShift);
-    const bool hasRetirement = encoded
-                               && (placedRetirementPending
-                                   || (snapshot.hasGrant && !snapshot.grant.release
-                                       && enteringBubble))
-                               && server::gameplay::squad_entity_retirement::prepare_retirement(
-                                   session.activity.session,
-                                   session.activity.bindingGeneration,
-                                   retirementBubble,
-                                   entityRetirement);
+    // Only a client entering the bubble it renews retires there. A switch report's body renews the
+    // bubble behind the player, whose release is a departed one.
+    const bool entersRenewedBubble = snapshot.hasGrant && !snapshot.grant.release && enteringBubble
+                                     && grant.bubble == session.activityRosterRegionBubble;
+    bool hasRetirement = encoded && (placedRetirementPending || entersRenewedBubble)
+                         && server::gameplay::squad_entity_retirement::prepare_retirement(
+                             session.activity.session,
+                             session.activity.bindingGeneration,
+                             retirementBubble,
+                             entityRetirement);
+    const bool retirementCarried = allowEntityRetirement && epochCurrent;
     // A retirement-bearing roster waits until the keepalive can advance the shared epoch first.
-    if (hasRetirement && (!allowEntityRetirement || !epochCurrent)) {
+    if (hasRetirement && !retirementCarried) {
         encoded = false;
     }
     if (placedRetirementPending && allowEntityRetirement && !hasRetirement && !solicited) {
         encoded = false;
+    }
+    // A sole client's release in a bubble it has left rides the first body that can carry its
+    // purge, whatever that body grants. A body that cannot carry it leaves it owed.
+    if (encoded && !hasRetirement && !placedRetirementPending && retirementCarried) {
+        hasRetirement = prepare_departed_purge_locked(session, heldRegion, entityRetirement);
     }
     // A private link granted a bubble another link released adopts what that link simulated
     // there, which would otherwise stay frozen as replicas nobody runs. A sole link takes back
@@ -665,7 +689,8 @@ bool append_roster_notification(
     // is. The repeat check knows only this host's own history, and a slice-set teardown clears
     // the client's mirror without telling us, which is exactly when it asks again.
     const bool suppressible = encoded && !solicited && !snapshot.hasGrant && !ownsHostState
-                              && !ownsPending && !missionSeedPending && !placedRetirementPending;
+                              && !ownsPending && !missionSeedPending && !placedRetirementPending
+                              && !hasRetirement;
     // Which terms held is in the log line, because a repeat that one of them forced reaches the
     // client as a fresh apply.
     const std::uint8_t forced = static_cast<std::uint8_t>(

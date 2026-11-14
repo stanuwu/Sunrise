@@ -92,12 +92,10 @@ policy::CellBubbles cell_bubbles(const state::activity::SessionBinding& binding)
     return cells;
 }
 /** Exactly one admitted current view must own the ActivityClient generation. */
-bool snapshot(const state::activity::SessionBinding& binding,
-              std::uint64_t generation,
-              identities::Source& source,
-              std::vector<identities::Identity>& rows) noexcept {
+bool current_source(const state::activity::SessionBinding& binding,
+                    std::uint64_t generation,
+                    identities::Source& source) noexcept {
     source = {};
-    rows.clear();
     if (!generation || !state::activity::binding_matches(binding)) {
         return false;
     }
@@ -114,7 +112,15 @@ bool snapshot(const state::activity::SessionBinding& binding,
             ++matches;
         }
     }
-    return matches == 1
+    return matches == 1;
+}
+/** Copies the identity rows of the one view that owns the ActivityClient generation. */
+bool snapshot(const state::activity::SessionBinding& binding,
+              std::uint64_t generation,
+              identities::Source& source,
+              std::vector<identities::Identity>& rows) noexcept {
+    rows.clear();
+    return current_source(binding, generation, source)
            && entity_identities::snapshot_source(source, rows) == identities::Result::unchanged
            && state::gameplay::entity_object_types::enrich_snapshot(rows);
 }
@@ -676,6 +682,40 @@ bool prepare_retirement(const state::activity::SessionBinding& binding,
         refuse_placed_transition(source, bubble);
     }
     report("prepare", ready, bubble, &output.entities, core::log::Level::debug);
+    return ready;
+}
+/**
+ * Without an activity link the client destroys a departed bubble's records itself. With one, the
+ * host purges the trees it chose to retire as soon as the client is out of that bubble.
+ */
+bool prepare_departed_retirement(const state::activity::SessionBinding& binding,
+                                 std::uint64_t generation,
+                                 std::uint8_t heldBubble,
+                                 RetirementPlan& output) noexcept {
+    output = {};
+    identities::Source source{};
+    if (!current_source(binding, generation, source)) {
+        return false;
+    }
+    AcquireSRWLockShared(&g_lock);
+    const auto bubble = g_store.pending_bubble(source, heldBubble);
+    ReleaseSRWLockShared(&g_lock);
+    std::vector<identities::Identity> rows;
+    if (!bubble || !snapshot(binding, generation, source, rows)) {
+        return false;
+    }
+    AcquireSRWLockShared(&g_lock);
+    const bool ready = g_store.prepare(source, *bubble, rows, output);
+    ReleaseSRWLockShared(&g_lock);
+    report("departed", ready, *bubble, &output.entities, core::log::Level::debug);
+    // A captured tree that changed with no gap left to fill can never be retired whole, and a
+    // release kept for it would be prepared again on every keepalive.
+    if (!ready && !has_hierarchy_gap(rows)) {
+        AcquireSRWLockExclusive(&g_lock);
+        g_store.invalidate_source(source, *bubble);
+        ReleaseSRWLockExclusive(&g_lock);
+        report("departed_dropped", false, *bubble);
+    }
     return ready;
 }
 /** The exact identity view remains pinned until its transport response has been copied. */

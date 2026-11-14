@@ -44,6 +44,14 @@ void returned_slots(const state::activity::SessionBinding&,
                                       std::uint64_t generation,
                                       std::uint8_t bubble,
                                       RetirementPlan&) noexcept;
+/**
+ * Prepares the purge of what this link released in a bubble its client has left.
+ * @param heldBubble Bubble the client holds a slice set in; its release waits for a renewal.
+ */
+[[nodiscard]] bool prepare_departed_retirement(const state::activity::SessionBinding&,
+                                               std::uint64_t generation,
+                                               std::uint8_t heldBubble,
+                                               RetirementPlan&) noexcept;
 /** Publication must revalidate the exact staged source, mask, and revision. */
 [[nodiscard]] bool validate_retirement(const state::activity::SessionBinding&,
                                        std::uint64_t generation,
