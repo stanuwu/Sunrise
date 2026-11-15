@@ -71,6 +71,25 @@ summary_entries(const domain::Selection& selection) noexcept {
 }
 
 /**
+ * Files the sandbox perks one active entry's pool declares.
+ * A pool can declare sandbox perks and no record, so they do not depend on the record read.
+ * @param walk Subclass walk state.
+ * @param entry Entry naming the pool.
+ * @param output Row receiving the sandbox perks. Those past its capacity are dropped.
+ */
+void file_perks(const Walk& walk, const pool::Entry& entry, domain::Definition& output) noexcept {
+    if (entry.poolTag == 0
+        || !reader::read_tag(*walk.source, *walk.scratch, entry.poolTag, *walk.blob)) {
+        return;
+    }
+    output.perkCount += static_cast<std::uint8_t>(
+        pool::read_pool_perks(std::span<const std::byte>{*walk.blob},
+                              entry,
+                              0,
+                              std::span{output.perks}.subspan(output.perkCount)));
+}
+
+/**
  * Follows one entry's selector chain to the bucket it lands in.
  * A record either names its destination bucket or links on to another entry, subgroup and element.
  * @param walk Subclass walk state.
@@ -267,6 +286,7 @@ bool build_ability_buckets(const reader::Source& source,
         bucket = {};
     }
     output.overflowCount = 0;
+    output.perkCount = 0;
     if (!assign_kinds(walk, output)) {
         return false;
     }
@@ -286,6 +306,7 @@ bool build_ability_buckets(const reader::Source& source,
         for (std::size_t entry = 0; entry < count; ++entry) {
             file_hash(records[entry], output);
         }
+        file_perks(walk, walk.entries[entryIndex], output);
     }
     return true;
 }

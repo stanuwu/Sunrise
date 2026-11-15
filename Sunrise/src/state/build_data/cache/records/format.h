@@ -37,7 +37,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 94;
+inline constexpr std::uint32_t kCacheFormatVersion = 95;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -335,6 +335,8 @@ struct AbilityBucketRecord {
     std::array<std::uint32_t, abilities::kBucketCapacity * abilities::kBucketHashCapacity>
         bucketHashes{};
     std::array<std::uint32_t, abilities::kOverflowCapacity> overflow{};
+    std::uint8_t perkCount{};
+    std::array<std::uint16_t, abilities::kPerkCapacity> perks{};
 };
 
 /** Disk form of one progression definition, the object array it routes to, and its step range. */
@@ -910,7 +912,8 @@ static_assert(sizeof(NodeDefinitionRecord)
                      + nodes::kChildCapacity * sizeof(std::uint16_t));
 static_assert(sizeof(SObjectDefinitionRecord) == 2 * sizeof(std::uint32_t) + sizeof(std::int32_t));
 static_assert(sizeof(AbilityBucketRecord)
-              == sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
+              == sizeof(std::uint16_t) + 7 * sizeof(std::uint8_t)
+                     + abilities::kPerkCapacity * sizeof(std::uint16_t)
                      + 2 * abilities::kBucketCapacity * sizeof(std::uint8_t)
                      + (abilities::kBucketCapacity * abilities::kBucketHashCapacity
                         + abilities::kOverflowCapacity)
