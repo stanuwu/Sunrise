@@ -176,15 +176,25 @@ scene_population_sources(RuntimeInstance& instance,
         }
         receiptJoin = &receipt;
     }
-    if (intent.kind == lua_vm::IntentKind::setHopOn) {
+    // A request whose report echoes a Host-owned counter is kept under the counter it staged.
+    const bool hopOn = intent.kind == lua_vm::IntentKind::setHopOn;
+    const bool program = intent.kind == lua_vm::IntentKind::runActorProgram
+                         || intent.kind == lua_vm::IntentKind::retireActor;
+    const bool delivery = intent.kind == lua_vm::IntentKind::deliverPassengers;
+    if (hopOn || program || delivery) {
         host::PendingScriptableOverride staged{};
         if (!host::staged_scriptable_override(
-                instance.view.binding, instance.expectedScriptableRevision, staged)
-            || staged.kind != host::ScriptableOverrideKind::hopOn) {
-            fault_instance(instance, "staged hop-on body has no Host revision");
+                instance.view.binding, instance.expectedScriptableRevision, staged)) {
+            fault_instance(instance, "staged request has no Host counter");
             return false;
         }
-        record_hop_on_request(instance, staged.target, staged.generation, intent.requestKey);
+        record_staged_request(instance,
+                              staged.target,
+                              hopOn     ? StagedCounter::hopOn
+                              : program ? StagedCounter::actorProgram
+                                        : StagedCounter::actorDelivery,
+                              staged.generation,
+                              intent.requestKey);
     }
     mission_state::Snapshot snapshot{};
     const mission_state::Status status =

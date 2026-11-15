@@ -206,19 +206,34 @@ struct GhostObservation final {
     bool used{};
 };
 
-/** Requests reports on one sensor still pair with; a report of an older one names none. */
-constexpr std::size_t kHopOnRequestDepth = 4;
+/** The Host-owned counter of a slot that a request is staged under and its report echoes. */
+enum class StagedCounter : std::uint8_t {
+    /** A hop-on sensor's revision. */
+    hopOn,
+    /** An actor's program revision. */
+    actorProgram,
+    /** An actor's passenger manifest revision. */
+    actorDelivery,
+};
 
-/** The requests staged on one hop-on sensor, by the revision the Host gave each; newest last. */
-struct HopOnRequests final {
-    std::array<std::uint64_t, kHopOnRequestDepth> requestKeys{};
-    std::array<std::uint64_t, kHopOnRequestDepth> revisions{};
+/** Requests reports on one counter still pair with; a report of an older one names none. */
+constexpr std::size_t kStagedRequestDepth = 4;
+
+/** The requests staged on one counter of one slot, by the revision the Host gave each. */
+struct StagedRequests final {
+    std::array<std::uint64_t, kStagedRequestDepth> requestKeys{};
+    std::array<std::uint64_t, kStagedRequestDepth> revisions{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
+    StagedCounter counter{};
+    /** Entries in use, oldest first. */
     std::uint8_t count{};
     bool used{};
 };
+/** Every watched hop-on sensor, and every named actor with its program and manifest counters. */
+constexpr std::size_t kStagedRequestCapacity =
+    kEffectObservationCapacity + 2 * kActorPathObservationCapacity;
 
 /** Last hop-on sensor level seen for one type-26 slot. */
 struct EffectObservation final {
@@ -382,7 +397,7 @@ struct RuntimeInstance final {
     bool squadShadowAtCapacity{};
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
     std::array<EffectObservation, kEffectObservationCapacity> effectObservations{};
-    std::array<HopOnRequests, kEffectObservationCapacity> hopOnRequests{};
+    std::array<StagedRequests, kStagedRequestCapacity> stagedRequests{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
     std::array<CombatantDamageObservation, kSquadObservationCapacity> combatantDamageObservations{};
     /** Damage levels replicated by authored entities, kept apart from the Type-2 Sense rows. */
@@ -649,11 +664,17 @@ void observe_carrier_actor(RuntimeInstance& instance,
                            const ActorPathLevel& level) noexcept;
 /** Moves carrier flights on between deliveries and raises carrier_state when one changed. */
 void advance_carriers(RuntimeInstance& instance) noexcept;
-/** Keeps the request a hop-on sensor's staged revision belongs to, so its report can name it. */
-void record_hop_on_request(RuntimeInstance& instance,
-                           const host::ScriptableTarget& sensor,
+/** Keeps the request a slot's staged revision belongs to, so the report echoing it names it. */
+void record_staged_request(RuntimeInstance& instance,
+                           const host::ScriptableTarget& target,
+                           StagedCounter counter,
                            std::uint64_t revision,
                            std::uint64_t requestKey) noexcept;
+/** @return The request staged under one reported revision, or zero when none is kept. */
+[[nodiscard]] std::uint64_t staged_request_key(const RuntimeInstance& instance,
+                                               const host::SenseObservationKey& key,
+                                               StagedCounter counter,
+                                               std::int64_t revision) noexcept;
 /** Raises one event per type-26 mission effect whose revision or attachment changed. */
 void push_effect_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;

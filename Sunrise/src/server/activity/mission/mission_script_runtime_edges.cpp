@@ -335,6 +335,14 @@ void push_actor_path_edges(RuntimeInstance& instance,
         event.actorDeliveryState = slot->level.deliveryState;
         event.actorDeliveryKnown = (slot->level.seen & kActorSeenDelivery) == kActorSeenDelivery;
         event.actorSuppressed = slot->level.suppressed;
+        event.actorProgramRequestKey = staged_request_key(
+            instance, observation.key, StagedCounter::actorProgram, slot->level.revision);
+        if (event.actorDeliveryKnown) {
+            event.actorDeliveryRequestKey = staged_request_key(instance,
+                                                               observation.key,
+                                                               StagedCounter::actorDelivery,
+                                                               slot->level.deliveryRevision);
+        }
         std::array<char, 160> details{};
         const int written =
             std::snprintf(details.data(),
@@ -567,17 +575,35 @@ void push_ghost_edges(RuntimeInstance& instance,
  * Raises one event per hop-on sensor whose applied request or attachment changed. Every client
  * applies the sensor's body itself, so only the link that simulates it reports it.
  */
-void record_hop_on_request(RuntimeInstance& instance,
-                           const host::ScriptableTarget& sensor,
+void record_staged_request(RuntimeInstance& instance,
+                           const host::ScriptableTarget& target,
+                           StagedCounter counter,
                            std::uint64_t revision,
                            std::uint64_t requestKey) noexcept {
-    host::SenseObservationKey key{};
-    key.registryKey = sensor.registryKey;
-    key.objectTag = sensor.objectTag;
-    key.slotIndex = sensor.slotIndex;
-    HopOnRequests* const row = find_slot_row(instance.hopOnRequests, key);
+    StagedRequests* row = nullptr;
+    StagedRequests* spare = nullptr;
+    for (StagedRequests& candidate : instance.stagedRequests) {
+        if (candidate.used && candidate.registryKey == target.registryKey
+            && candidate.objectTag == target.objectTag && candidate.slotIndex == target.slotIndex
+            && candidate.counter == counter) {
+            row = &candidate;
+            break;
+        }
+        if (!candidate.used && spare == nullptr) {
+            spare = &candidate;
+        }
+    }
+    if (row == nullptr && spare != nullptr) {
+        *spare = {};
+        spare->registryKey = target.registryKey;
+        spare->objectTag = target.objectTag;
+        spare->slotIndex = target.slotIndex;
+        spare->counter = counter;
+        spare->used = true;
+        row = spare;
+    }
     if (row == nullptr) {
-        log_line(core::log::Level::warn, &instance, "hop_on", "request_capacity");
+        log_line(core::log::Level::warn, &instance, "staged_request", "capacity");
         return;
     }
     if (row->count == row->revisions.size()) {
@@ -588,6 +614,25 @@ void record_hop_on_request(RuntimeInstance& instance,
     row->revisions[row->count] = revision;
     row->requestKeys[row->count] = requestKey;
     ++row->count;
+}
+
+std::uint64_t staged_request_key(const RuntimeInstance& instance,
+                                 const host::SenseObservationKey& key,
+                                 StagedCounter counter,
+                                 std::int64_t revision) noexcept {
+    for (const StagedRequests& requests : instance.stagedRequests) {
+        if (!requests.used || requests.registryKey != key.registryKey
+            || requests.objectTag != key.objectTag || requests.slotIndex != key.slotIndex
+            || requests.counter != counter) {
+            continue;
+        }
+        for (std::uint8_t index = 0; index < requests.count; ++index) {
+            if (revision > 0 && requests.revisions[index] == static_cast<std::uint64_t>(revision)) {
+                return requests.requestKeys[index];
+            }
+        }
+    }
+    return 0;
 }
 
 void push_effect_edges(RuntimeInstance& instance,
@@ -613,18 +658,8 @@ void push_effect_edges(RuntimeInstance& instance,
         event.kind = host::EventKind::hopOnState;
         event.hopOnRevision = slot->level.revision;
         event.hopOnAttached = slot->level.attached;
-        for (const HopOnRequests& requests : instance.hopOnRequests) {
-            if (!requests.used || requests.registryKey != observation.key.registryKey
-                || requests.objectTag != observation.key.objectTag
-                || requests.slotIndex != observation.key.slotIndex) {
-                continue;
-            }
-            for (std::uint8_t index = 0; index < requests.count; ++index) {
-                if (requests.revisions[index] == static_cast<std::uint64_t>(slot->level.revision)) {
-                    event.hopOnRequestKey = requests.requestKeys[index];
-                }
-            }
-        }
+        event.hopOnRequestKey = staged_request_key(
+            instance, observation.key, StagedCounter::hopOn, slot->level.revision);
         push_script_event(instance, event);
     }
 }

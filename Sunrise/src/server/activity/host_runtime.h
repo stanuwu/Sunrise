@@ -702,6 +702,9 @@ struct Event final {
     /** The request whose staged revision the sensor applied; zero when none is known. */
     std::uint64_t hopOnRequestKey{};
     bool hopOnAttached{};
+    /** The program and manifest requests the actor's levels echo; zero when none is known. */
+    std::uint64_t actorProgramRequestKey{};
+    std::uint64_t actorDeliveryRequestKey{};
     /** Named actor level, for actorPathState events. */
     std::int32_t actorGeneration{};
     std::int32_t actorPathRevision{};

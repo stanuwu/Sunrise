@@ -467,6 +467,24 @@ constexpr EventBinding kActorPath[]{
      &present_integer<&E::actorDeliveryRevision, &E::actorDeliveryKnown>},
     {"delivery_state", nullptr, &present_integer<&E::actorDeliveryState, &E::actorDeliveryKnown>},
     {"suppressed", nullptr, &boolean_field<&E::actorSuppressed>},
+    {"request_key",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         if (event.actorProgramRequestKey != 0) {
+             push_request_key(state, event.actorProgramRequestKey);
+         } else {
+             lua_pushnil(state);
+         }
+     }},
+    {"delivery_request_key",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         if (event.actorDeliveryRequestKey != 0) {
+             push_request_key(state, event.actorDeliveryRequestKey);
+         } else {
+             lua_pushnil(state);
+         }
+     }},
 };
 constexpr EventBinding kDevice[]{
     {"position", nullptr, &device_value<kPosition>},

@@ -291,6 +291,14 @@ inline constexpr MemberSpec kActorPathFields[]{
     field("delivery_revision", kOptionalInteger, "nil until the delivery is known"),
     field("delivery_state", kOptionalInteger, "nil until the delivery is known"),
     field("suppressed", kBoolean),
+    field("request_key",
+          kRequestKey,
+          "the run_atoms or retire_actor request whose program revision this report echoes; nil "
+          "when it echoes none of the last few"),
+    field("delivery_request_key",
+          kRequestKey,
+          "the deliver_passengers request whose manifest revision this report echoes; nil when it "
+          "echoes none of the last few"),
 };
 inline constexpr std::string_view kNotCarried = "nil when this report did not carry it";
 inline constexpr MemberSpec kDeviceFields[]{
