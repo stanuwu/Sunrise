@@ -154,13 +154,15 @@ constexpr std::int8_t kFilterModeInside = 1;
  * Appends one direct predicate per slot an optional object-filter list names.
  * @param key The list argument; absent adds nothing.
  * @param slotType The authored slot type every entry must name.
- * @param refusal Raised for an empty list or an entry of another type.
+ * @param empty Raised for an empty list.
+ * @param refusal Raised for an entry of another type.
  * @param capacityError Raised when an entry exceeds the type-34 capacity.
  */
 void append_listed_slots(lua_State* state,
                          scriptable_auth::Type34Body& body,
                          const char* key,
                          std::uint32_t slotType,
+                         const char* empty,
                          const char* refusal,
                          const char* capacityError) {
     lua_getfield(state, 2, key);
@@ -168,7 +170,7 @@ void append_listed_slots(lua_State* state,
         luaL_checktype(state, -1, LUA_TTABLE);
         const std::size_t count = lua_rawlen(state, -1);
         if (count == 0) {
-            raise_lua_error(state, refusal);
+            raise_lua_error(state, empty);
         }
         for (std::size_t index = 1; index <= count; ++index) {
             lua_rawgeti(state, -1, static_cast<lua_Integer>(index));
@@ -391,6 +393,7 @@ timer_argument(lua_State* state) {
                         body,
                         optional_key(kObjectFilter, "targets", api::ValueKind::list),
                         auth::kType4SlotType,
+                        "targets must name at least one object",
                         "targets must name authored type-4 objects",
                         kCapacityError);
     // A squad reference selects the boss a shield or tether hop-on hosts on.
@@ -410,6 +413,7 @@ timer_argument(lua_State* state) {
                         body,
                         optional_key(kObjectFilter, "squads", api::ValueKind::list),
                         format::kSquadSlotType,
+                        "squads must name at least one squad",
                         "squads must name authored type-1 squads",
                         kCapacityError);
     auth::Type2LaneClientRef inside{};

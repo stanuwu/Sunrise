@@ -366,6 +366,7 @@ int slot_select_combat_task(lua_State* state) {
     if (selected == objective::kNoTaskGroup) {
         selected = cheapest_group(*impl, target.nativeRow, *offer, counters, members, allowed);
     }
+    // With no qualifying group this unassigns the squad's current one.
     if (selected != offer->taskGroup) {
         // Fenced on the costs' revision, so a newer cost pass is never overwritten.
         Intent intent{};

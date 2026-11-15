@@ -1008,7 +1008,8 @@ void note_client_entered(const Session& session) noexcept {
 /**
  * @return True once the bubble the client's mission selection moves it into is valid on the link
  * that hosts it: the private link itself, or else the public link the same client holds beside it,
- * once its roster has answered the client standing in that bubble and carried the selection.
+ * once its roster has answered the client's arrival and, where its own world also hosts the
+ * bubble, carried the selection.
  */
 [[nodiscard]] bool destination_bubble_valid(const Session& privateLink) noexcept {
     const MissionSeedLease& lease = privateLink.activityMissionSeed;
