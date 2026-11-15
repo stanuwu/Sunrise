@@ -391,14 +391,15 @@ bool mission_seed_plan_hosted(const Session& session,
 namespace {
 
 /**
- * Reads whether a client stands in an alternate state of a bubble its private link does not host,
- * with that link's own receipt of the plan. The client opens no public link in such a state, so
- * no other receipt of it can arrive.
+ * Reads whether a client stands in a private state of a bubble its private link does not host,
+ * with that link's own receipt of the plan. The client opens no public link in a state its world
+ * authors private, so no other receipt of it can arrive.
  */
 [[nodiscard]] bool mission_seed_alternate_state_held(const Session& recipient,
                                                      const ActivityMissionSeedPlan& plan) noexcept {
     const auto& lease = recipient.activityMissionSeed;
-    return plan.stateOrdinal != 0 && recipient.activity.role == ActivityClientRole::privateCurrent
+    return recipient.activity.role == ActivityClientRole::privateCurrent
+           && !owner_state_public(recipient, static_cast<std::int32_t>(plan.effectiveRegion))
            && lease.configured && lease.revision != 0
            && lease.bindingGeneration == recipient.activity.bindingGeneration
            && lease.revision == lease.publishedRevision && !lease.regionArrivalPending

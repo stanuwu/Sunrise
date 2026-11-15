@@ -494,7 +494,11 @@ server::gameplay::group::RegionHost region_host(const state::activity::SessionBi
                : RegionHost::sharedPublic;
 }
 
-/** Publicity is authored per bubble, so a bubble's state zero answers for all 8 of its states. */
+/**
+ * Publicity is authored per bubble, so a bubble's state zero answers for all 8 of its states. The
+ * wire carries one bit per bubble, so this mask keeps the bubble rule; content routing reads the
+ * owning state's flag, since the client opens no public link in a private alternate state.
+ */
 bool region_publicity_mask(const Session& session, std::uint64_t& mask) noexcept {
     mask = 0;
     sdk::BoundView view{};
