@@ -25,6 +25,17 @@ void register_population_metatables(lua_State* state);
  * Reads a squad's temperament list from argument table field `key` into the intent.
  * @return False when the call gave none, so the squad keeps its last list.
  */
+/**
+ * Reads an optional temperament list: distinct, nonzero ids, at most an actor's capacity.
+ * @return False when the call gave no list.
+ */
+[[nodiscard]] bool read_temperament_list(
+    lua_State* state,
+    const char* key,
+    std::array<std::uint32_t,
+               middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity>&
+        output,
+    std::uint8_t& count);
 [[nodiscard]] bool read_squad_temperaments(lua_State* state, const char* key, Intent& intent);
 
 // Every mission API entry point, grouped by the translation unit that defines it. The names,

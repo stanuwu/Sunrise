@@ -317,30 +317,16 @@ void parse_atom(lua_State* state,
 /** Reads the temperaments list into the controls. @return False when the call gave none. */
 [[nodiscard]] bool read_temperaments(lua_State* state,
                                      scriptable_auth::Type2ChannelState& controls) {
-    if (push_argument(state, kTemperamentsKey) == LUA_TNIL) {
-        lua_pop(state, 1);
+    std::array<std::uint32_t, scriptable_auth::kType2TemperamentCapacity> ids{};
+    std::uint8_t count = 0;
+    if (!read_temperament_list(state, kTemperamentsKey, ids, count)) {
         return false;
     }
-    luaL_checktype(state, -1, LUA_TTABLE);
-    const int list = lua_gettop(state);
     std::array<scriptable_auth::TemperamentId, scriptable_auth::kType2TemperamentCapacity>
         temperaments{};
-    const std::size_t count = lua_rawlen(state, list);
-    if (count > temperaments.size()) {
-        static_cast<void>(luaL_error(state,
-                                     "an actor holds at most %d temperaments",
-                                     static_cast<int>(temperaments.size())));
-    }
     for (std::size_t index = 0; index < count; ++index) {
-        lua_rawgeti(state, list, static_cast<lua_Integer>(index + 1));
-        const lua_Integer value = luaL_checkinteger(state, -1);
-        if (value < 0 || value > (std::numeric_limits<std::uint32_t>::max)()) {
-            static_cast<void>(luaL_error(state, "temperament is outside a 32-bit range"));
-        }
-        temperaments[index].value = static_cast<std::uint32_t>(value);
-        lua_pop(state, 1);
+        temperaments[index].value = ids[index];
     }
-    lua_pop(state, 1);
     if (!scriptable_auth::set_type2_temperaments(controls, std::span(temperaments).first(count))) {
         static_cast<void>(luaL_error(state, "temperaments must be distinct"));
     }

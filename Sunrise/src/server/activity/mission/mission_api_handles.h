@@ -23,8 +23,6 @@ inline constexpr ValueSpec kSquadAnchors[]{
      .ref = "squad_anchors",
      .optional = true,
      .note = "spawn points as world rows; a live SDK view; nil when the world is stale"}};
-inline constexpr ValueSpec kSquadTemperament[]{
-    {.kind = ValueKind::integer, .bound = uint32_range(), .note = "a generated temperament"}};
 inline constexpr ValueSpec kPlaceArguments[]{
     {.name = "counts",
      .kind = ValueKind::handle,
@@ -53,9 +51,8 @@ inline constexpr ValueSpec kPlaceArguments[]{
      .kind = ValueKind::list,
      .optional = true,
      .fallback = default_text("the squad's last list"),
-     .bound =
-         at_most(static_cast<std::int64_t>(state::activity::mission::kSquadTemperamentCapacity)),
-     .element = kSquadTemperament,
+     .bound = kTemperamentBound,
+     .element = kTemperament,
      .note = "distinct; every member merges them; empty clears them"},
 };
 inline constexpr ValueSpec kActorCommandArguments[]{

@@ -403,9 +403,8 @@ inline constexpr ValueSpec kCombatObjectiveArguments[]{
      .kind = ValueKind::list,
      .optional = true,
      .fallback = default_text("the squad's last list"),
-     .bound =
-         at_most(static_cast<std::int64_t>(state::activity::mission::kSquadTemperamentCapacity)),
-     .element = kSquadTemperament,
+     .bound = kTemperamentBound,
+     .element = kTemperament,
      .note = "replaces the squad's list without a new spawn; living members merge it"},
 };
 inline constexpr ValueSpec kTaskCounterArguments[]{
@@ -456,16 +455,12 @@ inline constexpr ValueSpec kActorActionArguments[]{
     kAbilityTargetArgument,
     kSpawnArgument,
 };
-inline constexpr ValueSpec kTemperament[]{
-    {.kind = ValueKind::integer, .bound = uint32_range(), .note = "a generated temperament"}};
 inline constexpr ValueSpec kActorChannelFields[]{
     {.name = "channel", .kind = ValueKind::integer, .bound = uint32_range()},
     {.name = "value", .kind = ValueKind::number, .note = "finite"},
 };
 inline constexpr ValueSpec kActorChannel[]{
     {.kind = ValueKind::table, .fields = kActorChannelFields}};
-inline constexpr Bound kTemperamentBound =
-    at_most(static_cast<std::int64_t>(slot_auth::kType2TemperamentCapacity));
 inline constexpr Bound kActorChannelBound =
     at_most(static_cast<std::int64_t>(slot_auth::kType2ChannelCapacity));
 inline constexpr ValueSpec kActorControlsArguments[]{

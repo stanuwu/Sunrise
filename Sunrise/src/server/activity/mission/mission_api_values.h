@@ -16,6 +16,13 @@ namespace sunrise::server::activity::mission::api {
 
 namespace slot_format = ::sunrise::state::activity_sdk::format;
 
+/** One temperament of an actor or of a squad's members; a list names each at most once. */
+inline constexpr ValueSpec kTemperament[]{
+    {.kind = ValueKind::integer, .bound = between(1, kUint32Maximum), .note = "a temperament id"}};
+/** An actor and a squad's members hold the same number of temperaments. */
+inline constexpr Bound kTemperamentBound = at_most(static_cast<std::int64_t>(
+    middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity));
+
 /** The gate every exact object-slot argument takes. */
 inline constexpr SlotGate kExactObject = exact_sensed_gate(slot_format::kObjectSlotType);
 

@@ -105,36 +105,59 @@ static_assert(bound_to<SquadDefinition>(api::kSquadMembers, kSquadBindings));
     return queue_intent(state, active_frame(state), intent);
 }
 
-/** Reads a squad's temperament list: distinct ids, at most the schema's six. */
-bool read_squad_temperaments(lua_State* state, const char* key, Intent& intent) {
+static_assert(state::activity::mission::kSquadTemperamentCapacity
+              == middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity);
+
+bool read_temperament_list(
+    lua_State* state,
+    const char* key,
+    std::array<std::uint32_t,
+               middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity>&
+        output,
+    std::uint8_t& count) {
+    output = {};
+    count = 0;
     lua_getfield(state, 2, key);
     if (lua_isnil(state, -1)) {
         lua_pop(state, 1);
         return false;
     }
     luaL_checktype(state, -1, LUA_TTABLE);
-    const std::size_t count = lua_rawlen(state, -1);
-    if (count > intent.squadTemperaments.size()) {
-        static_cast<void>(luaL_error(state,
-                                     "a squad holds at most %d temperaments",
-                                     static_cast<int>(intent.squadTemperaments.size())));
+    const std::size_t listed = lua_rawlen(state, -1);
+    if (listed > output.size()) {
+        static_cast<void>(luaL_error(
+            state, "%s names more than %d temperaments", key, static_cast<int>(output.size())));
     }
-    for (std::size_t index = 0; index < count; ++index) {
+    for (std::size_t index = 0; index < listed; ++index) {
         lua_rawgeti(state, -1, static_cast<lua_Integer>(index + 1));
         const lua_Integer value = luaL_checkinteger(state, -1);
         if (value <= 0 || value > (std::numeric_limits<std::uint32_t>::max)()) {
             static_cast<void>(luaL_error(state, "temperament is zero or outside a 32-bit range"));
         }
         const auto id = static_cast<std::uint32_t>(value);
-        const auto listed = intent.squadTemperaments.begin() + static_cast<std::ptrdiff_t>(index);
-        if (std::find(intent.squadTemperaments.begin(), listed, id) != listed) {
-            static_cast<void>(luaL_error(state, "squad temperaments must be distinct"));
+        const auto before = output.begin() + static_cast<std::ptrdiff_t>(index);
+        if (std::find(output.begin(), before, id) != before) {
+            static_cast<void>(luaL_error(state, "%s must be distinct", key));
         }
-        intent.squadTemperaments[index] = id;
+        output[index] = id;
         lua_pop(state, 1);
     }
-    intent.squadTemperamentCount = static_cast<std::uint8_t>(count);
+    count = static_cast<std::uint8_t>(listed);
     lua_pop(state, 1);
+    return true;
+}
+
+/** Reads a squad's temperament list into the placement or assignment it stages. */
+bool read_squad_temperaments(lua_State* state, const char* key, Intent& intent) {
+    std::array<std::uint32_t,
+               middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity>
+        ids{};
+    std::uint8_t count = 0;
+    if (!read_temperament_list(state, key, ids, count)) {
+        return false;
+    }
+    std::copy(ids.begin(), ids.end(), intent.squadTemperaments.begin());
+    intent.squadTemperamentCount = count;
     return true;
 }
 
