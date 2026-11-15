@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 #include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../state/activity/membership/definition.h"
@@ -60,6 +61,13 @@ inline constexpr ValueSpec kSlotLookupArguments[]{
 inline constexpr ValueSpec kHoldSpawnArguments[]{
     {.name = "active", .kind = ValueKind::boolean, .note = "true holds the spawn, false releases"},
 };
+inline constexpr ValueSpec kActivityFlagArguments[]{
+    {.name = "key",
+     .kind = ValueKind::integer,
+     .bound = between(1, (std::numeric_limits<std::uint32_t>::max)()),
+     .note = "the id an activity_flag condition tests"},
+    {.name = "raised", .kind = ValueKind::boolean, .note = "false lowers the flag"},
+};
 inline constexpr ValueSpec kSendIncidentArguments[]{
     {.name = "target",
      .kind = ValueKind::integer,
@@ -81,6 +89,11 @@ inline constexpr ValueSpec kSelectStateOptionFields[]{
      .optional = true,
      .fallback = default_boolean(false),
      .note = "ends the map props captured from the old state before the move"},
+    {.name = "spawn_set_hash",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .bound = between(1, kUint32Maximum - 1),
+     .note = "the authored spawn set this arrival uses instead of the declared one"},
 };
 inline constexpr ValueSpec kSelectStateArguments[]{
     {.name = "state",
@@ -195,6 +208,13 @@ inline constexpr MemberSpec kContextMembers[]{
      .returns = kRequestKey,
      .effect = "mission.send_incident",
      .note = "sends one msg-19 activity incident to the client, as the activity host would"},
+    {.name = "set_activity_flag",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .arguments = kActivityFlagArguments,
+     .returns = kRequestKey,
+     .effect = "mission.set_activity_flag",
+     .note = "raises or lowers one id every participation record lists"},
     {.name = "select_state",
      .kind = MemberKind::request,
      .call = CallForm::positional,
@@ -209,6 +229,12 @@ inline constexpr MemberSpec kContextMembers[]{
      .returns = kRequestKey,
      .effect = "mission.restart_checkpoint",
      .note = "arms a hard wipe at a spawn set, or releases one with release_request"},
+    {.name = "random",
+     .kind = MemberKind::maker,
+     .call = CallForm::positional,
+     .returns = kNumber,
+     .note = "draws a server random number in [0, 1); errors if entropy is unavailable; "
+             "store choices with set_variable when they must survive reload"},
     {.name = "set_phase",
      .kind = MemberKind::update,
      .call = CallForm::positional,
@@ -352,16 +378,23 @@ inline constexpr MemberSpec kPeerMembers[]{
     field("join_identity", kDecimal),
 };
 
-// The type of cohort.alive_count.
+// The types of cohort.alive_count and cohort.observed_alive.
 inline constexpr ValueSpec kCohortAlive[]{
     {.kind = ValueKind::integer, .optional = true, .note = "nil while any squad is unknown"}};
+inline constexpr ValueSpec kCohortObservedAlive[]{
+    {.kind = ValueKind::boolean, .optional = true, .note = "nil while any squad is unknown"}};
 
 /** Members of one cohort. A squad with a queued placement counts as unknown. */
 inline constexpr MemberSpec kCohortMembers[]{
     field("alive_count", kCohortAlive),
     field("observed_full", kBoolean, "every squad was seen at full strength"),
+    field("observed_alive", kCohortObservedAlive, "a member of any squad was seen alive"),
     field("cleared", kBoolean, "seen full, and now all dead"),
     field("size", kInteger),
+    field("members",
+          kInteger,
+          "members the squads hold in this attempt: their placed counts, more when more were seen, "
+          "or the authored members of a squad with no counts"),
 };
 
 // --- context.sdk makers and enums ---------------------------------------------------------------

@@ -323,6 +323,25 @@ constexpr const api::MemberSpec& kDialogueCue = api::slot_member("play_dialogue_
     Intent intent{};
     intent.kind = IntentKind::playSequence;
     intent.firstRow = definition.nativeRow;
+    if (lua_istable(state, 2)) {
+        if (push_argument(state, optional_key(kPlaySequence, "choice", api::ValueKind::integer))
+            != LUA_TNIL) {
+            const lua_Integer choice = luaL_checkinteger(state, -1);
+            constexpr auto kChoiceCount =
+                static_cast<lua_Integer>(scriptable_auth::kType5ChoiceCount);
+            if (choice < 0 || choice >= kChoiceCount) {
+                return luaL_error(
+                    state, "sequence choice must be 0 to %d", static_cast<int>(kChoiceCount - 1));
+            }
+            intent.sequenceChoice = static_cast<std::int32_t>(choice);
+        }
+        lua_pop(state, 1);
+        intent.sequenceRetain =
+            !optional_boolean_argument(state, boolean_option(kPlaySequence, "restart"));
+    }
+    if (intent.sequenceRetain && intent.sequenceChoice < 0) {
+        return luaL_error(state, "play_sequence with restart = false needs a choice");
+    }
     return queue_intent(state, frame, intent);
 }
 

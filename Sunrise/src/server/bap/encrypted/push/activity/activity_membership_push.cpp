@@ -13,6 +13,7 @@
 #include "../../../../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../../../../middleware/encoding/byte_order.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
+#include "../../../../../state/activity/destination/activity_destination_public.h"
 #include "../../../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../../../state/activity_sdk/runtime.h"
 #include "../../../../gameplay/gameplay_advertisement.h"
@@ -28,6 +29,80 @@ namespace {
 
 namespace membership_message = middleware::bap::activity_message::replicate_membership;
 namespace sdk = state::activity_sdk;
+
+/**
+ * A player's fireteam activity is its own private activity on every link: the client counts a
+ * private link's player monitors only for players of that activity, and never revises it once
+ * the player is added.
+ * @return The private session a link's membership names as each player's fireteam activity.
+ */
+[[nodiscard]] std::uint64_t player_activity_id(std::uint64_t source,
+                                               std::uint64_t linked) noexcept {
+    return source != state::activity::kAbsentSessionId ? source : linked;
+}
+
+/**
+ * @return The one private link the account behind a link holds, or null. A pooled public host
+ * keeps its first fireteam's binding as every link's source, so only the account ties a public
+ * link's player to its own private activity.
+ */
+[[nodiscard]] const Session* account_private_link(const Session& link) noexcept {
+    const Session* found = nullptr;
+    for (const Session& candidate : sessions()) {
+        if (&candidate == &link || candidate.id == 0 || !candidate.authenticated
+            || candidate.activity.role != ActivityClientRole::privateCurrent
+            || candidate.activity.bindingGeneration == 0
+            || candidate.accountHandle == state::kInvalidAccount
+            || candidate.accountHandle != link.accountHandle) {
+            continue;
+        }
+        if (found != nullptr) {
+            return nullptr;
+        }
+        found = &candidate;
+    }
+    return found;
+}
+
+/**
+ * @param publicLink True when the link answers on a public host.
+ * @param source The link's source session.
+ * @param linked The activity session the link answers on.
+ * @return The private activity the link's own player belongs to.
+ */
+[[nodiscard]] std::uint64_t fireteam_activity_id(const Session& link,
+                                                 bool publicLink,
+                                                 std::uint64_t source,
+                                                 std::uint64_t linked) noexcept {
+    if (publicLink) {
+        if (const Session* const own = account_private_link(link)) {
+            return own->activity.session.sessionId;
+        }
+    }
+    return player_activity_id(source, linked);
+}
+
+/** Names each peer row's own fireteam activity, found through the link its member key joined. */
+void name_peer_fireteams(std::uint64_t sessionId,
+                         membership_message::MembershipSnapshot& wire) noexcept {
+    for (auto& peer : wire.peers) {
+        if (!peer.present) {
+            continue;
+        }
+        for (const Session& link : sessions()) {
+            if (link.id != 0 && link.authenticated && link.activity.bindingGeneration != 0
+                && link.activityMemberKey == peer.identity.memberKey
+                && link.activity.session.sessionId == sessionId) {
+                peer.fireteamActivityHostId =
+                    fireteam_activity_id(link,
+                                         link.activity.role == ActivityClientRole::publicTarget,
+                                         link.activity.source.sessionId,
+                                         link.activity.session.sessionId);
+                break;
+            }
+        }
+    }
+}
 
 /** Descriptor fields reused by the matching remote activity-member row. */
 constexpr std::size_t kDescriptorMachineOffset = 0;
@@ -180,20 +255,24 @@ mirror_leg(const state::activity::membership::RegionState& leg, bool reported) n
  * @param session Exact ActivityClient owner, which selects the authored region policy.
  * @param mutation Prepared membership operation this body publishes.
  * @param activityHostId Activity session soid this link answers on, published as identity field 4.
+ * @param fireteamActivityHostId Private activity of the link's players, published as field 3.
  * @return Membership encoder input, without the citizen advertisement.
  */
 [[nodiscard]] membership_message::MembershipSnapshot
 make_base_snapshot(const Session& session,
                    const state::activity::membership::PendingMutation& mutation,
-                   std::uint64_t activityHostId) noexcept {
+                   std::uint64_t activityHostId,
+                   std::uint64_t fireteamActivityHostId) noexcept {
     const state::activity::membership::Snapshot& snapshot = mutation.snapshot;
     membership_message::MembershipSnapshot wire{};
     wire.activityHostId = activityHostId;
+    wire.fireteamActivityHostId = fireteamActivityHostId;
     if (mutation.memberDirectory.valid) {
         project_activity_peers(mutation.memberDirectory, wire);
     } else {
         project_activity_peers(mutation.peerSnapshot, wire);
     }
+    name_peer_fireteams(activityHostId, wire);
     wire.identity.memberKey = snapshot.identity.memberKey;
     wire.identity.field1 = snapshot.identity.smallOpaque;
     wire.identity.field2 = snapshot.identity.signedOpaque;
@@ -228,16 +307,18 @@ make_base_snapshot(const Session& session,
  * @param mutation Prepared membership operation, whose region this body publishes.
  * @param retains Cleared, then receives one retained host row per advertised region.
  * @param activityHostId Activity session soid this link answers on, published as identity field 4.
+ * @param fireteamActivityHostId Private activity of the link's players, published as field 3.
  * @return Whole current membership encoder input.
  */
 [[nodiscard]] membership_message::MembershipSnapshot
 make_wire_snapshot(const Session& session,
                    const state::activity::membership::PendingMutation& mutation,
                    AdvertisementRetains& retains,
-                   std::uint64_t activityHostId) noexcept {
+                   std::uint64_t activityHostId,
+                   std::uint64_t fireteamActivityHostId) noexcept {
     retains = {};
     membership_message::MembershipSnapshot wire =
-        make_base_snapshot(session, mutation, activityHostId);
+        make_base_snapshot(session, mutation, activityHostId, fireteamActivityHostId);
     if (session.activity.role != ActivityClientRole::privateCurrent
         || !state::activity::binding_matches(session.activity.source)) {
         return wire;
@@ -288,17 +369,17 @@ make_wire_snapshot(const Session& session,
                 wire.localSlot,
                 candidate,
                 hostGeneration,
-                public_region(
+                region_host(
                     session.activity.source, session.activity.bindingGeneration, regions[entry]));
         } else {
-            server::gameplay::build_directory_entry(
-                session.activity.source,
-                regions[entry],
-                wire.localSlot,
-                candidate,
-                hostGeneration,
-                public_region(
-                    session.activity.source, session.activity.bindingGeneration, regions[entry]));
+            server::gameplay::build_directory_entry(session.activity.source,
+                                                    regions[entry],
+                                                    wire.localSlot,
+                                                    candidate,
+                                                    hostGeneration,
+                                                    region_host(session.activity.source,
+                                                                session.activity.bindingGeneration,
+                                                                regions[entry]));
         }
         if (!candidate.present) {
             continue;
@@ -365,7 +446,58 @@ bool public_region(const state::activity::SessionBinding& source,
            && sdk::generated_world::region_is_public(view, region, isPublic) && isPublic;
 }
 
-/** Publicity is authored per bubble, so a bubble's state zero answers for all 8 of its states. */
+namespace {
+
+/**
+ * @return True when a launch that is not its destination's free-roam activity authors an object
+ * in the region's bubble. Free roam runs the public host's own activity, so it shares the row.
+ */
+[[nodiscard]] bool mission_content_in_bubble(const state::activity::SessionBinding& source,
+                                             std::uint64_t bindingGeneration,
+                                             std::int32_t region) noexcept {
+    std::uint16_t freeRoam = 0;
+    if (!state::activity::destination::free_roam_activity(source.destination.activityIndex,
+                                                          freeRoam)
+        || static_cast<std::int16_t>(freeRoam) == source.destination.activityIndex) {
+        return false;
+    }
+    sdk::BoundView view{};
+    if (!resolve_activity(source, bindingGeneration, view)) {
+        return false;
+    }
+    const sdk::format::Scenario* const scenario = sdk::bound_scenario(view);
+    if (scenario == nullptr) {
+        return false;
+    }
+    const auto bubbles = view.catalog->bubbles();
+    const auto bubble = static_cast<std::uint32_t>(region)
+                        / middleware::content::packages::tables::kSliceSetIndexFactor;
+    const auto occurrences = sdk::scenario_occurrences(*view.catalog, *scenario);
+    return std::any_of(
+        occurrences.begin(), occurrences.end(), [&](const sdk::format::Occurrence& occurrence) {
+            return occurrence.bubbleIndex < bubbles.size()
+                   && bubbles[occurrence.bubbleIndex].bubbleOrdinal == bubble;
+        });
+}
+
+} // namespace
+
+server::gameplay::group::RegionHost region_host(const state::activity::SessionBinding& source,
+                                                std::uint64_t bindingGeneration,
+                                                std::int32_t region) noexcept {
+    using server::gameplay::group::RegionHost;
+    if (!public_region(source, bindingGeneration, region)) {
+        return RegionHost::source;
+    }
+    return mission_content_in_bubble(source, bindingGeneration, region) ? RegionHost::missionPublic
+                                                                        : RegionHost::sharedPublic;
+}
+
+/**
+ * Publicity is authored per bubble, so a bubble's state zero answers for all 8 of its states. The
+ * wire carries one bit per bubble, so this mask keeps the bubble rule; content routing reads the
+ * owning state's flag, since the client opens no public link in a private alternate state.
+ */
 bool region_publicity_mask(const Session& session, std::uint64_t& mask) noexcept {
     mask = 0;
     sdk::BoundView view{};
@@ -394,7 +526,7 @@ server::gameplay::AdvertisementState region_advertisement(const Session& session
     return server::gameplay::advertisement_state(
         session.activity.source,
         region,
-        public_region(session.activity.source, session.activity.bindingGeneration, region));
+        region_host(session.activity.source, session.activity.bindingGeneration, region));
 }
 
 /** Appends one current membership svc9 notification and advances its local nonce. */
@@ -419,7 +551,14 @@ bool append_membership_notification(Scratch& scratch,
     std::size_t messageSize = 0;
     AdvertisementRetains retains{};
     const membership_message::MembershipSnapshot snapshot = make_wire_snapshot(
-        session, activity.membershipMutation, retains, session.activity.session.sessionId);
+        session,
+        activity.membershipMutation,
+        retains,
+        session.activity.session.sessionId,
+        fireteam_activity_id(session,
+                             session.activity.role == ActivityClientRole::publicTarget,
+                             session.activity.source.sessionId,
+                             session.activity.session.sessionId));
     bool encoded = membership_message::encode_replicate_membership(
         snapshot, scratch.responseBody, messageSize);
     if (!encoded) {
@@ -496,7 +635,14 @@ bool append_join_membership_notification(Scratch& scratch,
     auto initialNonce = nonce;
     std::size_t messageSize = 0;
     const membership_message::MembershipSnapshot snapshot =
-        make_base_snapshot(session, activity.membershipMutation, activity.sessionId);
+        make_base_snapshot(session,
+                           activity.membershipMutation,
+                           activity.sessionId,
+                           fireteam_activity_id(session,
+                                                activity.publicHost.source.sessionId
+                                                    != state::activity::kAbsentSessionId,
+                                                activity.publicHost.source.sessionId,
+                                                activity.sessionId));
     const bool bodyEncoded = membership_message::encode_replicate_membership(
         snapshot, scratch.responseBody, messageSize);
     if (!bodyEncoded) {

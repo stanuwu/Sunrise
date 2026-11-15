@@ -86,6 +86,12 @@ struct CachedTag final {
                                               PackageContext& packageContext,
                                               topology_enrichment::Snapshot& enrichment);
 
+/** Extracts the eased output count from each channel sensor's exact target object. */
+[[nodiscard]] bool attach_object_channel_counts(const topology_inventory::Snapshot& topology,
+                                                const squads::Facts& facts,
+                                                PackageContext& packageContext,
+                                                topology_enrichment::Snapshot& enrichment);
+
 /**
  * Reads the SObject table's notification rows and names each one by the English text its name
  * hash keys in an installed string bank. Rows without text are left out.

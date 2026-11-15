@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstddef>
@@ -114,6 +115,9 @@ struct Impl final {
     /** Ghost-link levels the runtime last published, readable outside their own callback. */
     std::array<GhostLinkRow, kGhostLinkCapacity> ghostLevels{};
     std::uint8_t ghostLevelCount{};
+    /** Objective task counters the runtime last published, readable from any callback. */
+    std::array<ObjectiveLevelRow, kObjectiveObservationCapacity> objectiveLevels{};
+    std::uint8_t objectiveLevelCount{};
     Arena arena{};
     ProgramIdentity identity{};
     DefinitionApi definitions{};
@@ -216,6 +220,20 @@ inline void attach_impl(lua_State* state, Impl& impl) noexcept {
 }
 
 /** Raises a Lua error when no mission callback is running. */
+[[nodiscard]] inline CallFrame& active_frame(lua_State* state);
+
+/**
+ * @return True when an intent this callback queued, or one still unread in the outbox, matches.
+ * Either one changes what a read of committed state would report.
+ */
+template <typename Match>
+[[nodiscard]] bool intent_queued(lua_State* state, const Impl& impl, Match match) {
+    const auto& candidate = active_frame(state).candidate.intents;
+    const auto outbox = std::span(impl.outbox).subspan(impl.outboxRead);
+    return std::any_of(candidate.begin(), candidate.end(), match)
+           || std::any_of(outbox.begin(), outbox.end(), match);
+}
+
 [[nodiscard]] inline CallFrame& active_frame(lua_State* state) {
     Impl* const impl = impl_from_state(state);
     if (impl == nullptr || impl->frame == nullptr) {

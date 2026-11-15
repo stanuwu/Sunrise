@@ -258,8 +258,8 @@ bool write_bubble_block(bits::Writer& writer, const Grant& grant) noexcept {
         if (encoded && granted) {
             encoded = writer.write(grant.token, kGrantTokenWidth);
         }
-        // The commit bool has no presence bit, so all 65 of them are explicit zeros.
-        encoded = encoded && writer.write(0, kPresenceWidth);
+        // The release bool has no presence bit. Set beside the held token, it releases the bubble.
+        encoded = encoded && writer.write(granted && grant.release ? 1U : 0U, kPresenceWidth);
     }
     return encoded;
 }

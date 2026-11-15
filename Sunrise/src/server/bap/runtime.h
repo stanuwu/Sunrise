@@ -65,6 +65,17 @@ struct ActivityLinkView final {
     std::uint64_t playerKey{};
 };
 
+/** The private link beside one public link. */
+struct PublicLinkOwner final {
+    state::activity::SessionBinding binding{};
+    /** ActivityClient generation of the same account's joined private link. */
+    std::uint64_t activityClientGeneration{};
+    /** Region the public link stands in. */
+    std::int32_t publicRegion{-1};
+    /** Region the private link selects. */
+    std::int32_t privateRegion{-1};
+};
+
 /** The active ActivityClient selected for a local world slice. */
 struct CurrentActivityLinkView final {
     state::activity::SessionBinding binding{};
@@ -166,6 +177,15 @@ activity_link_count(const state::activity::SessionBinding& binding) noexcept;
  */
 [[nodiscard]] bool activity_link_view(const state::activity::SessionBinding& binding,
                                       ActivityLinkView& output) noexcept;
+
+/**
+ * Finds the private link beside one public link: the same account's joined private ActivityClient.
+ * @param publicGeneration ActivityClient generation of the public link that reported.
+ * @return True when both links are current and each is the only match.
+ */
+[[nodiscard]] bool public_link_owner(const state::activity::SessionBinding& publicBinding,
+                                     std::uint64_t publicGeneration,
+                                     PublicLinkOwner& output) noexcept;
 
 /** Selects a joined delivery route for the activity's single mission program. */
 [[nodiscard]] bool mission_activity_link_view(const state::activity::SessionBinding& binding,
@@ -305,6 +325,14 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     std::uint64_t expectedGeneration,
     const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
 
+/** Queues one activity flag change while the requested client generation owns the binding. */
+[[nodiscard]] bool request_activity_flag_override(
+    const state::activity::SessionBinding& binding,
+    const middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange& change,
+    std::int32_t expectedRegion,
+    std::uint64_t expectedGeneration,
+    const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
+
 /** Queues a generated type-23 update while its exact mission-seed state is live. */
 [[nodiscard]] bool request_activity_state_local_type23_override(
     const state::activity::SessionBinding& binding,
@@ -350,14 +378,16 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     const activity::host::ScriptableOutputReservation* reservation = nullptr,
     bool enabled = true) noexcept;
 
-/** Queues one authored sequence restart only while its exact mission-seed state is live. */
+/** Queues one authored sequence start or choice change while its mission-seed state is live. */
 [[nodiscard]] bool request_activity_state_local_sequence_override(
     const state::activity::SessionBinding& binding,
     const activity::host::ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::int32_t expectedRegion,
     std::uint64_t expectedGeneration,
-    const activity::host::ScriptableOutputReservation* reservation = nullptr) noexcept;
+    const activity::host::ScriptableOutputReservation* reservation = nullptr,
+    const middleware::bap::activity_message::scriptable_auth::Type5Selection& selection =
+        {}) noexcept;
 
 /** Queues one authored cinematic start or stop while its mission-seed state is live. */
 [[nodiscard]] bool request_activity_state_local_cinematic_override(
@@ -389,7 +419,8 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     const activity::host::ScriptableOutputReservation* reservation = nullptr,
     const activity::host::AuthoredSceneDependencies& dependencies = {},
     std::uint32_t eventKey = 0,
-    bool stop = false) noexcept;
+    bool stop = false,
+    std::uint32_t initialEventKey = 0) noexcept;
 
 /** Queues one authored dialogue line only while its exact mission-seed state is live. */
 [[nodiscard]] bool request_activity_state_local_dialogue_override(
@@ -438,6 +469,8 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
     std::optional<middleware::bap::activity_message::squad_auth::Destination> destination =
         std::nullopt,
     std::optional<middleware::bap::activity_message::squad_auth::SpawnRule> spawnRule =
+        std::nullopt,
+    std::optional<middleware::bap::activity_message::squad_auth::Temperaments> temperaments =
         std::nullopt) noexcept;
 
 /** Cancels one exact typed override revision while excluding activity-link publication. */

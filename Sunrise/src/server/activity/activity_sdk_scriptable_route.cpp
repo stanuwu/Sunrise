@@ -45,14 +45,14 @@ namespace sdk = state::activity_sdk;
 
 } // namespace
 
-/** Resolves one exact occurrence and stages its complete group in the live region. */
+/** Resolves one exact occurrence and stages its complete group in one region. */
 Status resolve(const sdk::BoundView& view,
                const SourceIdentity& source,
-               std::int32_t effectiveRegion,
+               std::int32_t region,
                Resolution& output) noexcept {
     output = {};
     const format::Scenario* const scenario = sdk::bound_scenario(view);
-    if (view.catalog == nullptr || scenario == nullptr || effectiveRegion < 0
+    if (view.catalog == nullptr || scenario == nullptr || region < 0
         || scenario->tag != source.scenarioTag || source.objectTag == 0 || source.registryKey == 0
         || source.authSchema == 0 || source.slotType == 0) {
         return view.catalog == nullptr || scenario == nullptr ? Status::invalidView
@@ -110,13 +110,13 @@ Status resolve(const sdk::BoundView& view,
     output.target.rosterSlotOffset = slotOffset;
     output.target.slotIndex = source.slotIndex;
     output.target.sdkObjectIndex = source.objectRow;
-    output.target.stateLocalRegion = effectiveRegion;
+    output.target.stateLocalRegion = region;
     output.target.slotType = source.slotType;
     output.target.stateLocalRoster = true;
     output.rosterGroup = group;
     output.scenarioRow = view.scenarioRow;
     output.stateRow = source.stateRow;
-    output.region = effectiveRegion;
+    output.region = region;
     return Status::ready;
 }
 

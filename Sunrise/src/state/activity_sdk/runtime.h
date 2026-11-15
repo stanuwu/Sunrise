@@ -256,6 +256,10 @@ public:
     authored_scene_event_keys() const noexcept;
     /** @return Every published incident notification, in target order. */
     [[nodiscard]] std::span<const format::IncidentDefinition> incident_definitions() const noexcept;
+    /** @return Every slot's temperaments, by slot then id. */
+    [[nodiscard]] std::span<const format::ActorTemperament> actor_temperaments() const noexcept;
+    /** @return Every actor slot's writable object channels, by slot then name. */
+    [[nodiscard]] std::span<const format::ActorChannel> actor_channels() const noexcept;
 
 private:
     friend bool
@@ -372,6 +376,15 @@ void publish_mod_catalogs(std::vector<Snapshot>&& catalogs) noexcept;
  */
 [[nodiscard]] bool
 mod_region_is_public(const BoundView& view, std::int32_t effectiveRegion, bool& isPublic) noexcept;
+
+/**
+ * Reads the public flag of the one state that owns an effective region. An alternate state of a
+ * public bubble, such as a cutscene, carries its own flag and can be private.
+ * @return True when exactly one state owns the region.
+ */
+[[nodiscard]] bool state_region_is_public(const BoundView& view,
+                                          std::int32_t effectiveRegion,
+                                          bool& isPublic) noexcept;
 
 /** @return The activity row retained by a valid bound view. */
 [[nodiscard]] const format::Activity* bound_activity(const BoundView& view) noexcept;

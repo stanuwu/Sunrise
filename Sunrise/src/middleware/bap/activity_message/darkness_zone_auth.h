@@ -24,8 +24,8 @@ inline constexpr std::uint32_t kComponentClass = generated::C808099bd::kClass;
 inline constexpr std::uint32_t kSchema = generated::C808099bf::kClass;
 inline constexpr std::size_t kBits = 359;
 inline constexpr std::size_t kBytes = 45;
-/** Native durations count 673,200 ticks per second. */
-inline constexpr std::uint64_t kTicksPerSecond = 673'200;
+/** Native durations count ticks at the shared native rate. */
+inline constexpr std::uint64_t kTicksPerSecond = fields::kTicksPerSecond;
 /** The wipe countdown runs three seconds. */
 inline constexpr int kMaximumWipeSeconds = 3;
 /** No countdown requested. */

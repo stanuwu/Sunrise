@@ -17,10 +17,23 @@ struct State final {
 
 /** Root field ordinals are fixed by the squad Auth schema. */
 inline constexpr std::size_t kObjectiveField = 0;
+inline constexpr std::size_t kTemperamentField = 2;
 inline constexpr std::size_t kSpawnGenerationField = 6;
 inline constexpr std::size_t kRevisionField = 13;
+inline constexpr std::size_t kAwarenessRevisionField = 14;
+/**
+ * Root .15, named like kField15Width. A placement leaves it absent and only the objective body
+ * writes it (the -1 sentinel), so it moves with the objective.
+ */
+inline constexpr std::size_t kField15 = 15;
 inline constexpr std::size_t kTaskGroupField = 16;
 inline constexpr std::size_t kModeField = 19;
+
+/** The fields an objective owns; the placement owns the rest, active and mode included. */
+inline constexpr mission_auth_patch::FieldSet kObjectiveFields =
+    mission_auth_patch::field_bit(kObjectiveField) | mission_auth_patch::field_bit(kRevisionField)
+    | mission_auth_patch::field_bit(kAwarenessRevisionField)
+    | mission_auth_patch::field_bit(kField15) | mission_auth_patch::field_bit(kTaskGroupField);
 
 /** Reads objective state from the complete transported squad body. */
 [[nodiscard]] inline bool
@@ -104,6 +117,19 @@ read_state(std::span<const std::byte> body, std::size_t bits, State& output) noe
         request.reserved = previous.reserved;
     }
     return request.revision != 0;
+}
+
+/**
+ * @return The fields a request sets; mode joins them only to change the reservation, and the
+ * temperament list only when the request carries one.
+ */
+[[nodiscard]] constexpr mission_auth_patch::FieldSet patch_fields(const Request& request,
+                                                                  const State& previous) noexcept {
+    return kObjectiveFields
+           | (request.reserved != previous.reserved ? mission_auth_patch::field_bit(kModeField)
+                                                    : mission_auth_patch::FieldSet{})
+           | (request.temperaments.has_value() ? mission_auth_patch::field_bit(kTemperamentField)
+                                               : mission_auth_patch::FieldSet{});
 }
 
 } // namespace sunrise::middleware::bap::activity_message::squad_objective

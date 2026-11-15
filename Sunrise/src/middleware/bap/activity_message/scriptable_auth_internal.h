@@ -53,6 +53,17 @@ using auth_fields::write_absent_client_ref;
            && index == kClientRefIndexBias - 1U;
 }
 
+/** Writes an absent reference or an exact slot with the ClientRef type and index biases. */
+[[nodiscard]] inline bool write_optional_client_ref(encoding::bits::Writer& writer,
+                                                    const Type2LaneClientRef& target) noexcept {
+    return target.slotIndex < 0
+               ? write_absent_client_ref(writer)
+               : auth_fields::write_client_ref(writer,
+                                               target.registryKey,
+                                               static_cast<std::uint32_t>(target.slotType),
+                                               static_cast<std::uint16_t>(target.slotIndex));
+}
+
 /** @return True when a two-bit bias-one scalar is representable without wrapping. */
 [[nodiscard]] constexpr bool valid_mode(std::int8_t mode) noexcept {
     return mode >= kMinimumMode && mode <= kMaximumMode;

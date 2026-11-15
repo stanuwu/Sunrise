@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "../../../core/network_capacity.h"
@@ -23,6 +24,8 @@ inline constexpr std::size_t kIntentBurstCapacity = 63;
 inline constexpr std::size_t kMissionSeedOmitCapacity = 32;
 /** Squad Auth accepts at most fifteen authored member counts. */
 inline constexpr std::size_t kSquadMemberCapacity = 15;
+/** Squad Auth `.2` holds at most six temperaments. */
+inline constexpr std::size_t kSquadTemperamentCapacity = 6;
 /** A compiled Slot Auth body must fit the widest bounded msg-5 table. */
 inline constexpr std::size_t kMaximumAuthBodyByteCount = (53'150U + 7U) / 8U;
 /** Zero is reserved as the absent durable intent sequence. */
@@ -73,13 +76,16 @@ struct SquadPopulation final {
     std::int32_t expectedAlive{};
     std::int32_t alive{};
     std::int32_t maximumObservedAlive{};
-    /** Members ever created in this spawn generation, summed over the client's per-slot counts. */
-    std::int32_t maximumObservedCreated{};
+    /**
+     * Members lost in this spawn generation, summed over the client's per-slot counts. Each was
+     * created first, so it also bounds the members created from below.
+     */
+    std::int32_t maximumObservedLost{};
     bool generationKnown{};
     bool aliveKnown{};
 };
 
-/** Only present generation, alive and created fields can update a population observation. */
+/** Only present generation, alive and lost fields can update a population observation. */
 struct SquadPopulationReport final {
     std::uint64_t attemptGeneration{};
     /** Link whose client sent the report. */
@@ -91,10 +97,10 @@ struct SquadPopulationReport final {
     std::uint32_t spawnGeneration{};
     std::uint16_t slotIndex{};
     std::int32_t alive{};
-    std::int32_t created{};
+    std::int32_t lost{};
     bool generationKnown{};
     bool aliveKnown{};
-    bool createdKnown{};
+    bool lostKnown{};
     bool initialized{};
     /**
      * The report came from the link that simulates the squad now, so its population follows it.
@@ -218,6 +224,14 @@ enum class IntentKind : std::uint8_t {
     /** Sends one msg-19 incident to the client; `firstRow` is the target, `authBody` the payload.
      */
     sendIncident,
+    setActorControls,
+    deliverPassengers,
+    /** Raises or lowers one activity flag; `active` false lowers it. */
+    setActivityFlag,
+    /** Attaches or detaches one hop-on sensor; the Host owns its revision. */
+    setHopOn,
+    /** Sets an authored object-channel prefix; the Host owns its revisions. */
+    setObjectChannels,
 };
 
 /** Actor sequence values belong to one combatant and one SDK/client generation. */
@@ -265,6 +279,7 @@ struct TypedIntent final {
     IntentKind kind{IntentKind::placeSquad};
     std::uint32_t firstRow{};
     std::uint32_t secondRow{};
+    /** The input a scene signal sends, or the one an activation starts with; zero is none. */
     std::uint32_t sceneEventKey{};
     std::uint32_t objectTag{};
     std::uint32_t registryKey{};
@@ -273,6 +288,8 @@ struct TypedIntent final {
     std::uint32_t actorCommandSelector{};
     /** Spawn set a checkpoint restart respawns at. */
     std::uint32_t checkpointSpawnHash{};
+    /** Spawn set a state selection's arrival uses; zero keeps the program's declared set. */
+    std::uint32_t arrivalSpawnHash{};
     /** Request key of the wipe a checkpoint release ends; zero arms one instead. */
     std::uint64_t checkpointReleaseRequest{};
     /** Authored effective region selected by the generated mission-state table. */
@@ -281,8 +298,21 @@ struct TypedIntent final {
     std::int32_t squadSpawnRuleRow{-1};
     /** Catalog slot row of the type-60 volume a dialogue line waits for; absent is -1. */
     std::int32_t dialogueFilterRow{-1};
+    /** Catalog slot row of the type-1 squad an object entry spawns at; absent is -1. */
+    std::int32_t objectLocationRow{-1};
     std::int32_t entryIndex{};
     std::int32_t actorCommandValue{};
+    std::uint32_t activityFlagKey{};
+    /** A squad placement's temperament list, sent only when set; unset keeps the squad's last. */
+    std::array<std::uint32_t, kSquadTemperamentCapacity> squadTemperaments{};
+    std::uint8_t squadTemperamentCount{};
+    bool squadTemperamentsSet{};
+    /** A sequence's choice bit, or -1 for none. */
+    std::int32_t sequenceChoice{-1};
+    /** The sequence keeps running and only changes its choice. */
+    bool sequenceRetain{};
+    /** An object body keeps the committed generation and updates the live entity. */
+    bool objectInPlace{};
     float deviceValue{};
     std::uint16_t authBitCount{};
     std::uint16_t slotIndex{};

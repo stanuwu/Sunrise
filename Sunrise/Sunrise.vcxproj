@@ -919,6 +919,7 @@
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_value.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_ir_family_coverage.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_native_pack_pipeline.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_native_pack_object_channels.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_dialogue_group_index.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_actor_ability_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_dialogue_list.cpp" />
@@ -2691,6 +2692,7 @@
     <ClInclude Include="src\server\bap\activity_authority_query.h" />
     <ClInclude Include="src\server\bap\activity_authority_reset_owner.h" />
     <ClInclude Include="src\server\bap\activity_authority_reset.h" />
+    <ClInclude Include="src\server\bap\activity_bubble_handoff.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\activity_arrival.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\internal.h" />
     <ClInclude Include="src\server\bap\encrypted\push\snapshot\internal.h" />
@@ -2979,6 +2981,7 @@
     <ClInclude Include="src\client\content\activity\activity_sdk_squad_graph_shard.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_squad_inventory.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_squad_inventory_internal.h" />
+    <ClInclude Include="src\client\content\activity\activity_sdk_squad_occurrence_rule.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_topology_enrichment.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_topology_inventory.h" />
     <ClInclude Include="src\client\content\activity\activity_sdk_topology_inventory_internal.h" />
@@ -3183,6 +3186,7 @@
     <ClInclude Include="src\server\activity\mission\mission_script_region.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_ghost_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_object_sense.h" />
+    <ClInclude Include="src\server\activity\mission\mission_script_objective_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_player_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_member_life.h" />
     <ClInclude Include="src\server\activity\mission\mission_input_policy.h" />
@@ -3192,6 +3196,7 @@
     <ClInclude Include="src\server\activity\mission\mission_script_squad_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_combatant_damage_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_device_sense.h" />
+    <ClInclude Include="src\server\activity\mission\mission_script_effect_sense.h" />
     <ClInclude Include="src\server\activity\activity_sdk_behavior_scope.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\mission_seed_world_change.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\mission_entity_allocation.h" />

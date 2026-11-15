@@ -128,18 +128,20 @@ template <std::size_t Size>
 
 /**
  * Writes the present fields of the nested player identity block.
- * Field 3 carries the account SOID and field 5 the character SOID; the client builds its player
- * row from that pair and creates no player without it. Field 4 names the Activity Host.
+ * Field 3 names the fireteam's Activity Host; the client creates no player while it is zero.
+ * Field 4 names the group Activity Host.
  * @param writer Fixed-buffer writer sitting at identity field zero.
  * @param identity Values mirrored from the client identity update.
  * @param remote Optional remote-view row. Null writes the local member's shorter field set.
  * @param activityHostId Host id for field 4, which the client itself always sends as zero.
+ * @param fireteamActivityHostId Field 3 of the local row. Remote-view and peer rows name their own.
  * @return True when fields 3, 4, 5 and 14 and all presence bits fit.
  */
 [[nodiscard]] bool write_player_identity(encoding::bits::Writer& writer,
                                          const client_identity::ClientIdentity& identity,
                                          const RemoteViewMember* remote,
                                          std::uint64_t activityHostId,
+                                         std::uint64_t fireteamActivityHostId,
                                          const PeerMember* peer,
                                          std::span<const std::uint16_t> localName) noexcept {
     const bool named = peer != nullptr ? peer->hasName : !localName.empty();
@@ -179,7 +181,14 @@ template <std::size_t Size>
         if (field == 2 && remote != nullptr && !writer.write(remote->processSessionIdHash, 64)) {
             return false;
         }
-        if (field == 3 && !writer.write(identity.accountSoid, 64)) {
+        // A peer with no known fireteam keeps its own non-zero id, so it never joins ours.
+        const std::uint64_t peerFireteam = peer != nullptr && peer->fireteamActivityHostId != 0
+                                               ? peer->fireteamActivityHostId
+                                               : identity.accountSoid;
+        const std::uint64_t fireteam = remote != nullptr ? identity.accountSoid
+                                       : peer != nullptr ? peerFireteam
+                                                         : fireteamActivityHostId;
+        if (field == 3 && !writer.write(fireteam, 64)) {
             return false;
         }
         if (field == 4 && !writer.write(activityHostId, 64)) {
@@ -269,6 +278,7 @@ template <std::size_t Size>
                                 const RegionLeg& pendingLeg,
                                 std::uint8_t syncToken,
                                 std::uint64_t activityHostId,
+                                std::uint64_t fireteamActivityHostId,
                                 const PeerMember* peer = nullptr,
                                 std::span<const std::uint16_t> localName = {}) noexcept {
     const std::uint32_t field1Wire = std::bit_cast<std::uint32_t>(identity.field1) + kField1Bias;
@@ -278,7 +288,8 @@ template <std::size_t Size>
            && writer.write(identity.field3, 64) && writer.write(identity.accountSoid, 64)
            && writer.write(identity.field5, 64) && writer.write(identity.field6, 64)
            && writer.write(1, 1) && writer.write(1, 1)
-           && write_player_identity(writer, identity, remote, activityHostId, peer, localName)
+           && write_player_identity(
+               writer, identity, remote, activityHostId, fireteamActivityHostId, peer, localName)
            && (peer != nullptr ? write_peer_transition(writer, *peer)
                                : write_member_transition(writer, currentLeg, pendingLeg, syncToken))
            && writer.write(0, 1) && writer.write(0, 1) && writer.write(1, 1)
@@ -407,6 +418,7 @@ bool write_member_table(encoding::bits::Writer& writer,
                                    snapshot.pendingLeg,
                                    snapshot.teleport.token,
                                    snapshot.activityHostId,
+                                   snapshot.fireteamActivityHostId,
                                    nullptr,
                                    std::span(snapshot.localName).first(snapshot.localNameLength));
         } else if (slot == 1 && snapshot.remoteViewMember.present) {
@@ -416,7 +428,8 @@ bool write_member_table(encoding::bits::Writer& writer,
                                    absentLeg,
                                    absentLeg,
                                    snapshot.teleport.token,
-                                   snapshot.activityHostId);
+                                   snapshot.activityHostId,
+                                   snapshot.fireteamActivityHostId);
         } else if (const auto* peer = peer_at_slot(snapshot, slot)) {
             encoded = write_member(writer,
                                    peer->identity,
@@ -425,6 +438,7 @@ bool write_member_table(encoding::bits::Writer& writer,
                                    absentLeg,
                                    0,
                                    snapshot.activityHostId,
+                                   snapshot.fireteamActivityHostId,
                                    peer);
         } else {
             encoded = writer.write(0, kAbsentMemberBitCount);

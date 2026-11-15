@@ -29,6 +29,8 @@ constexpr std::uint8_t kSlotTypeActivityTimer = 18;
 /** Body widths, each checked against the writer after the body is written. */
 constexpr std::size_t kParticipationBits = 192;
 constexpr std::size_t kParticipationRegionBits = 32;
+/** One raw activity-flag id; the list's 6-bit count is part of the fixed width. */
+constexpr std::size_t kActivityFlagBits = 32;
 constexpr std::size_t kLifetimeBits = 520;
 constexpr std::size_t kConfigurationBits = 35;
 constexpr std::size_t kPackageBits = 7;
@@ -107,6 +109,19 @@ constexpr std::uint8_t kSpawnOverrideIndexWidth = 10;
 constexpr std::uint32_t kSpawnOverrideIndexBias = 1;
 /** Type 67 maps the 32 spawn-key ordinals to themselves, matching its constructor. */
 constexpr std::size_t kSpawnKeyCount = 32;
+/** The participation record's activity-flag count is six bits wide. */
+constexpr std::uint8_t kActivityFlagCountWidth = 6;
+static_assert(kActivityFlagCapacity < (std::size_t{1} << kActivityFlagCountWidth));
+
+/** Writes the participation record's activity-flag list: its count, then each raw id. */
+[[nodiscard]] bool write_activity_flags(bits::Writer& writer, const Snapshot& snapshot) noexcept {
+    const auto keys = std::span(snapshot.activityFlags.keys).first(snapshot.activityFlags.count);
+    bool encoded = writer.write(snapshot.activityFlags.count, kActivityFlagCountWidth);
+    for (const std::uint32_t key : keys) {
+        encoded = encoded && writer.write(key, kActivityFlagBits);
+    }
+    return encoded;
+}
 
 /**
  * Writes the participation body, which binds the player and latches the region.
@@ -133,7 +148,7 @@ constexpr std::size_t kSpawnKeyCount = 32;
            && writer.write(0, kPresenceWidth) && writer.write(0, 3)
            && writer.write(1, kPresenceWidth)
            && writer.write(playerKey != 0 ? playerKey : snapshot.playerKey, 64)
-           && writer.write(0, 5) && writer.write(3, 6) && writer.write(0, 6)
+           && writer.write(0, 5) && writer.write(3, 6) && write_activity_flags(writer, snapshot)
            && writer.write(0, 6)
            // Byte 736 bypasses the respawn countdown. Byte 737 holds the spawn while the client
            // loads. The revive delay stays authored unless a darkness policy is set.
@@ -249,6 +264,7 @@ auth_body_bits(const Snapshot& snapshot, std::uint8_t slotType, bool carriesPlay
         return carriesPlayerKey
                    ? kParticipationBits + (snapshot.hasRegion ? kParticipationRegionBits : 0)
                          + (snapshot.hasDarknessPolicy ? kHalfWidth : 0U)
+                         + snapshot.activityFlags.count * kActivityFlagBits
                    : 0;
     }
     if (slotType == scoreboard_record::kSlotType && snapshot.hasScoreboard) {

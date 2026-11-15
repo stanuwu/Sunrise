@@ -19,7 +19,7 @@ struct SourceIdentity final {
     std::uint8_t slotType{};
 };
 
-/** Exact generated group and live state selected for one SDK slot. */
+/** Exact generated group and state selected for one SDK slot. */
 struct Resolution final {
     host::ScriptableTarget target{};
     state::build_data::scenarios::RosterGroup rosterGroup{};
@@ -37,10 +37,13 @@ enum class Status : std::uint8_t {
     ambiguousSource,
 };
 
-/** Resolves one exact occurrence and stages its complete group in the live region. */
+/**
+ * Resolves one exact occurrence and stages its complete group in one region.
+ * @param region The client's region, or the occurrence's own in a bubble the client is not in.
+ */
 [[nodiscard]] Status resolve(const state::activity_sdk::BoundView& view,
                              const SourceIdentity& source,
-                             std::int32_t effectiveRegion,
+                             std::int32_t region,
                              Resolution& output) noexcept;
 
 } // namespace sunrise::server::activity::activity_sdk_scriptables

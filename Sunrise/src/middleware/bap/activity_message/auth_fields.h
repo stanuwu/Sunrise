@@ -34,6 +34,8 @@ inline constexpr std::uint16_t kMaximumClientRefIndex = 32'767;
 inline constexpr std::uint32_t kClientRefAbsentKey = 0x811C9DC5U;
 inline constexpr std::size_t kClientRefBits =
     kClientRefKeyWidth + kClientRefTypeWidth + kClientRefIndexWidth;
+/** Native durations count 673,200 ticks per second. */
+inline constexpr std::uint64_t kTicksPerSecond = 673'200;
 
 /** Writes the fields in order. @return False when the writer runs out of room. */
 [[nodiscard]] inline bool write_fields(encoding::bits::Writer& writer,

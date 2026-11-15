@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
+#include "../../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../../middleware/bap/activity_message/squad_auth_body.h"
 #include "../../../state/activity_sdk/format.h"
 #include "mission_api_types.h"
@@ -14,6 +15,21 @@
 namespace sunrise::server::activity::mission::api {
 
 namespace slot_format = ::sunrise::state::activity_sdk::format;
+
+/** The fields of one generated mission.ActorTemperament row. */
+inline constexpr ValueSpec kActorTemperamentRowFields[]{
+    {.name = "slot_row", .kind = ValueKind::integer, .bound = uint32_range()},
+    {.name = "id", .kind = ValueKind::integer, .bound = uint32_range()},
+};
+/** One temperament of an actor or of a squad's members; a list names each at most once. */
+inline constexpr ValueSpec kTemperament[]{{.kind = ValueKind::missionRow,
+                                           .ref = "mission.ActorTemperament",
+                                           .scope = Scope::receiver,
+                                           .fields = kActorTemperamentRowFields,
+                                           .note = "a temperament its behaviour program holds"}};
+/** An actor and a squad's members hold the same number of temperaments. */
+inline constexpr Bound kTemperamentBound = at_most(static_cast<std::int64_t>(
+    middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity));
 
 /** The gate every exact object-slot argument takes. */
 inline constexpr SlotGate kExactObject = exact_sensed_gate(slot_format::kObjectSlotType);
@@ -109,8 +125,12 @@ struct BoundedLane final {
  * Every lane whose array size is proved. The bound is the array the client indexes, never the
  * width of the wire lane; a lane with no proved array size is absent from this table.
  */
-inline constexpr std::array<BoundedLane, 7> kBoundedLanes{{
+inline constexpr std::array<BoundedLane, 8> kBoundedLanes{{
     {"gameplay_switches", BoundedLaneKind::count, 50},
+    {"activity_flags",
+     BoundedLaneKind::count,
+     static_cast<std::uint16_t>(
+         middleware::bap::activity_message::sensor_auth_update::kActivityFlagCapacity)},
     {"nav_nodes", BoundedLaneKind::count, 96},
     {"nav_node_links", BoundedLaneKind::count, 16},
     {"type8_field_1_0", BoundedLaneKind::count, 32},

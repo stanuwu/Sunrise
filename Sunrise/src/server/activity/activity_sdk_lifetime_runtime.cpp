@@ -74,4 +74,37 @@ Status set_reserved(const sdk::BoundView& view,
     return busy ? Status::outputBusy : Status::refused;
 }
 
+/**
+ * Queues one activity flag change through an already owned Host revision.
+ * @return queued on success; invalidValue when the flag list has no room for a new raised flag.
+ */
+Status set_activity_flag_reserved(
+    const sdk::BoundView& view,
+    const middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange& change,
+    const host::ScriptableOutputReservation& reservation) noexcept {
+    server::bap::ActivityLinkView link{};
+    const Status status = activity_sdk_devices::live_binding_status(view, link);
+    if (status != Status::ready) {
+        return status;
+    }
+    if (server::bap::request_activity_flag_override(view.binding,
+                                                    change,
+                                                    link.effectiveRegion,
+                                                    link.activityClientGeneration,
+                                                    &reservation)) {
+        return Status::queued;
+    }
+    host::InstanceSnapshot instance{};
+    if (!host::instance_snapshot(view.binding, instance)) {
+        return Status::refused;
+    }
+    if (instance.outputPending) {
+        return Status::outputBusy;
+    }
+    return middleware::bap::activity_message::sensor_auth_update::apply_activity_flag(
+               instance.activityFlags, change)
+               ? Status::refused
+               : Status::invalidValue;
+}
+
 } // namespace sunrise::server::activity::activity_sdk_lifetime

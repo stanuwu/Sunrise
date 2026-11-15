@@ -44,7 +44,7 @@ Status retain_population(MissionState& candidate,
     SquadPopulation next = population;
     next.requestKey = intent.requestKey;
     next.expectedAlive = expectedAlive;
-    next.alive = next.maximumObservedAlive = next.maximumObservedCreated = 0;
+    next.alive = next.maximumObservedAlive = next.maximumObservedLost = 0;
     next.lastInputSequence = 0;
     next.generationKnown = next.aliveKnown = false;
     for (auto& existing : candidate.squadPopulations) {
@@ -172,7 +172,7 @@ Status observe_squad_population(const SessionBinding& binding,
                                 Snapshot& output) noexcept {
     output = {};
     if ((report.aliveKnown && (report.alive < 0 || report.alive > kMaximumSquadAlive))
-        || (report.createdKnown && report.created < 0)) {
+        || (report.lostKnown && report.lost < 0)) {
         return Status::invalidTransition;
     }
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
@@ -215,7 +215,7 @@ Status observe_squad_population(const SessionBinding& binding,
                 }
                 if (report.generationKnown
                     && report.spawnGeneration != population.spawnGeneration) {
-                    population.maximumObservedCreated = 0;
+                    population.maximumObservedLost = 0;
                     population.generationKnown = population.aliveKnown = false;
                     population.lastInputSequence = report.inputSequence;
                     changed = true;
@@ -232,9 +232,9 @@ Status observe_squad_population(const SessionBinding& binding,
                     population.maximumObservedAlive =
                         (std::max)(population.maximumObservedAlive, report.alive);
                 }
-                if (report.createdKnown) {
-                    population.maximumObservedCreated =
-                        (std::max)(population.maximumObservedCreated, report.created);
+                if (report.lostKnown) {
+                    population.maximumObservedLost =
+                        (std::max)(population.maximumObservedLost, report.lost);
                 }
                 changed = true;
             }

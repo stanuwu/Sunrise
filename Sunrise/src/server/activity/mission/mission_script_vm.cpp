@@ -701,6 +701,18 @@ void publish_ghost_levels(Vm& vm, std::span<const GhostLinkRow> levels) noexcept
     std::copy_n(levels.begin(), impl.ghostLevelCount, impl.ghostLevels.begin());
 }
 
+/** Copies the used objective counter rows; rows past the capacity are dropped. */
+void publish_objective_levels(Vm& vm, std::span<const ObjectiveLevelRow> levels) noexcept {
+    Impl& impl = VmAccess::get(vm);
+    impl.objectiveLevels = {};
+    impl.objectiveLevelCount = 0;
+    for (const ObjectiveLevelRow& row : levels) {
+        if (row.used && impl.objectiveLevelCount < impl.objectiveLevels.size()) {
+            impl.objectiveLevels[impl.objectiveLevelCount++] = row;
+        }
+    }
+}
+
 /** Copies durable population facts without exposing the native store to Lua. */
 bool publish_populations(
     Vm& vm, std::span<const state::activity::mission::SquadPopulation> populations) noexcept {

@@ -8,6 +8,7 @@
 #include <tuple>
 
 #include "../../../middleware/bap/activity_message/incident.h"
+#include "../../../middleware/crypto/random_bytes.h"
 #include "../../../state/activity/membership/definition.h"
 #include "../../../state/mods/definition.h"
 #include "mission_script_lua_dispatch.h"
@@ -31,7 +32,28 @@ constexpr const api::MemberSpec& kRestartCheckpoint =
 constexpr const api::MemberSpec& kHoldSpawn = api::member(api::Receiver::context, "hold_spawn");
 constexpr const api::MemberSpec& kSendIncident =
     api::member(api::Receiver::context, "send_incident");
+constexpr const api::MemberSpec& kActivityFlag =
+    api::member(api::Receiver::context, "set_activity_flag");
 constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::context, "select_state");
+
+/** Draws a server-owned random fraction for one active callback. */
+[[nodiscard]] int context_random(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    static_cast<void>(active_frame(state));
+    std::uint64_t seed = 0;
+    if (!::sunrise::middleware::crypto::random::draw_seed(seed)) {
+        return luaL_error(state, "server randomness is unavailable");
+    }
+    constexpr int kNumberBits = std::numeric_limits<lua_Number>::digits;
+    constexpr int kSeedBits = std::numeric_limits<std::uint64_t>::digits;
+    static_assert(std::numeric_limits<lua_Number>::radix == 2 && kNumberBits < kSeedBits);
+    // Keep only exactly representable bits so the largest draw remains below one.
+    constexpr auto kFractionCount = std::uint64_t{1} << kNumberBits;
+    lua_pushnumber(state,
+                   static_cast<lua_Number>(seed >> (kSeedBits - kNumberBits))
+                       / static_cast<lua_Number>(kFractionCount));
+    return 1;
+}
 
 /**
  * Groups exact authored objects by native owner and reserves bounded output batches.
@@ -194,6 +216,31 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
     }
     Intent intent{};
     intent.kind = IntentKind::holdSpawn;
+    intent.active = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    return queue_intent(state, active_frame(state), intent);
+}
+
+/**
+ * Raises or lowers one activity flag, the id list every participation record carries.
+ * @param state Lua call holding the context, a `key` and `raised`.
+ * @return One RequestKey.
+ */
+[[nodiscard]] int context_set_activity_flag(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    refuse_unknown_arguments(state, kActivityFlag);
+    const lua_Integer key = checked_integer_argument(
+        state, required_key(kActivityFlag, "key", api::ValueKind::integer));
+    if (key <= 0 || key > (std::numeric_limits<std::uint32_t>::max)()) {
+        return luaL_error(state, "activity flag key is zero or out of range");
+    }
+    Intent intent{};
+    intent.kind = IntentKind::setActivityFlag;
+    intent.activityFlagKey = static_cast<std::uint32_t>(key);
+    lua_getfield(state, 2, required_key(kActivityFlag, "raised", api::ValueKind::boolean));
+    if (!lua_isboolean(state, -1)) {
+        return luaL_argerror(state, 2, "set_activity_flag requires a raised boolean");
+    }
     intent.active = lua_toboolean(state, -1) != 0;
     lua_pop(state, 1);
     return queue_intent(state, active_frame(state), intent);
@@ -403,6 +450,18 @@ resolve_message_name(lua_State* state, std::string_view name, ActivityMessageDef
         }
         intent.retirePlacedProps = lua_toboolean(state, -1) != 0;
         lua_pop(state, 1);
+        lua_getfield(state,
+                     3,
+                     table_field_key(
+                         kSelectState, "options", "spawn_set_hash", api::ValueKind::integer, true));
+        if (!lua_isnil(state, -1)) {
+            const lua_Integer hash = lua_isinteger(state, -1) ? lua_tointeger(state, -1) : 0;
+            if (hash <= 0 || hash >= (std::numeric_limits<std::uint32_t>::max)()) {
+                return luaL_argerror(state, 3, "spawn_set_hash must be an authored spawn-set hash");
+            }
+            intent.arrivalSpawnHash = static_cast<std::uint32_t>(hash);
+        }
+        lua_pop(state, 1);
     }
     return queue_intent(state, frame, intent);
 }
@@ -491,8 +550,10 @@ constexpr std::array<ContextBinding, std::size(api::kContextMembers)> kContextBi
     {"slot", &context_slot},
     {"hold_spawn", &context_hold_spawn},
     {"send_incident", &context_send_incident},
+    {"set_activity_flag", &context_set_activity_flag},
     {"select_state", &context_select_state},
     {"restart_checkpoint", &context_restart_checkpoint},
+    {"random", &context_random},
     {"set_phase", &context_set_phase},
     {"set_variable", &context_set_variable},
     {"clear_variable", &context_clear_variable},

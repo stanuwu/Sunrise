@@ -4,9 +4,7 @@
 
 namespace sunrise::state::gameplay::squad_entity_retirement {
 namespace {
-bool bit(const Mask& mask, std::size_t slot) {
-    return (std::to_integer<unsigned>(mask[slot / 8]) & (1U << (slot % 8))) != 0;
-}
+using middleware::bap::activity_message::entity_slots::has_slot;
 void set(Mask& mask, std::size_t slot) {
     mask[slot / 8] |= std::byte(1U << (slot % 8));
 }
@@ -22,10 +20,17 @@ bool same(const identities::Identity& a, const identities::Identity& b) {
            && a.anchorKnown && b.anchorKnown && a.anchorPresent == b.anchorPresent
            && (!a.anchorPresent || a.anchor == b.anchor);
 }
-bool actor(const identities::Identity& row, const Eligibility& eligibility) {
+/** @return True for the slot types a spawned actor names as its source. */
+bool actor_source(std::uint8_t type) {
+    return type == kSquadSourceType || type == kCombatantSourceType;
+}
+/** An entity of the eligible class from its exact source: an actor, or an authored object entry. */
+bool sourced(const identities::Identity& row, const Eligibility& eligibility) {
+    const auto type = row.actorSource.type;
     return row.known && row.present && !row.conflicted && row.type == 0 && row.metadata.hasRsat
            && row.metadata.rsatTag == eligibility.rsatTag && !row.metadata.hasPlayerBroadcast
-           && row.actorSource.known && row.actorSource.present && row.actorSource.type == 1
+           && row.actorSource.known && row.actorSource.present
+           && (actor_source(type) || type == kObjectSourceType)
            && row.actorSource.key == eligibility.squad.key
            && row.actorSource.type == eligibility.squad.type
            && row.actorSource.index == eligibility.squad.index;
@@ -46,21 +51,23 @@ bool prop(const identities::Identity& row) {
 bool root_matches(const identities::Identity& row, const Eligibility& eligibility) {
     return eligibility.placedProp ? prop(row) && row.metadata.rsatTag == eligibility.rsatTag
                                         && row.metadata.objectType == eligibility.objectType
-                                  : actor(row, eligibility);
+                                  : sourced(row, eligibility);
 }
-/** Only an anchored weapon may use its parent tree when its own source was not reported. */
-bool weapon(const identities::Identity& row, const Eligibility& eligibility) {
-    /** Native object-type 14 is the weapon class. */
-    constexpr std::uint8_t kWeaponObjectType = 14;
-    if (row.type != 0 || !row.metadata.hasRsat || !row.metadata.hasObjectType
-        || row.metadata.objectType != kWeaponObjectType || row.metadata.hasPlayerBroadcast
+/**
+ * A child released under a retired root leaves with it, such as an actor's weapon, shield or
+ * hop-on. The client's release is its own dependency closure; a player's object or another squad's
+ * member never belongs to the tree.
+ */
+bool dependent(const identities::Identity& row, const Eligibility& eligibility) {
+    if (row.type != 0 || !row.metadata.hasRsat || row.metadata.hasPlayerBroadcast
         || !row.anchorKnown || !row.anchorPresent) {
         return false;
     }
-    return !row.actorSource.known || !row.actorSource.present
-           || (row.actorSource.type == eligibility.squad.type
-               && row.actorSource.key == eligibility.squad.key
-               && row.actorSource.index == eligibility.squad.index);
+    // Another squad's or combatant's actor never joins; a weapon or hop-on (another source) does.
+    const auto& source = row.actorSource;
+    return !source.known || !source.present || !actor_source(source.type)
+           || (source.type == eligibility.squad.type && source.key == eligibility.squad.key
+               && source.index == eligibility.squad.index);
 }
 /** Every live anchor must resolve before a root's complete child set is trustworthy. */
 bool hierarchy(std::span<const identities::Identity> rows) {
@@ -92,7 +99,7 @@ bool closure(identities::Token root,
     output = {};
     if (root.slot >= rows.size() || rows[root.slot].token != root
         || !root_matches(rows[root.slot], eligibility) || rows[root.slot].anchorPresent
-        || !bit(released, root.slot)) {
+        || !has_slot(released, root.slot)) {
         return false;
     }
     set(output, root.slot);
@@ -100,16 +107,17 @@ bool closure(identities::Token root,
     while (changed) {
         changed = false;
         for (const auto& row : rows) {
-            if (!row.present || !row.anchorPresent || !bit(output, row.anchor.slot)
-                || bit(output, row.token.slot)) {
+            if (!row.present || !row.anchorPresent || !has_slot(output, row.anchor.slot)
+                || has_slot(output, row.token.slot)) {
                 continue;
             }
             const bool squad =
                 row.type == 1 && row.metadata.hasSquad && row.metadata.squad == eligibility.squad;
-            const bool eligible = eligibility.placedProp ? prop(row)
-                                                         : actor(row, eligibility)
-                                                               || weapon(row, eligibility) || squad;
-            if (!bit(released, row.token.slot) || !eligible) {
+            const bool eligible =
+                eligibility.placedProp
+                    ? prop(row)
+                    : sourced(row, eligibility) || dependent(row, eligibility) || squad;
+            if (!has_slot(released, row.token.slot) || !eligible) {
                 return false;
             }
             set(output, row.token.slot);
@@ -137,7 +145,7 @@ bool Store::capture(const identities::Source& source,
         next.bubble = bubble;
         next.requireComplete = requireComplete;
         for (const auto& row : rows) {
-            if (!row.present || row.anchorPresent || !bit(released, row.token.slot)) {
+            if (!row.present || row.anchorPresent || !has_slot(released, row.token.slot)) {
                 continue;
             }
             const Eligibility* selected = nullptr;
@@ -163,12 +171,7 @@ bool Store::capture(const identities::Source& source,
                 }
                 continue;
             }
-            if (!selected->placedProp
-                && std::count_if(rows.begin(), rows.end(), [&](const auto& candidate) {
-                       return !candidate.anchorPresent && actor(candidate, *selected);
-                   }) != 1) {
-                continue;
-            }
+            // Each member is its own tree, so a squad of several retires member by member.
             Release::Group group;
             group.root = row.token;
             group.eligibility = *selected;
@@ -180,7 +183,7 @@ bool Store::capture(const identities::Source& source,
             }
             bool valid = true;
             for (std::size_t slot = 0; slot < rows.size(); ++slot) {
-                if (bit(group.entities, slot)) {
+                if (has_slot(group.entities, slot)) {
                     const auto& member = rows[slot];
                     if (member.cell >= cells.size() || cells[member.cell] != bubble) {
                         valid = false;
@@ -296,12 +299,7 @@ bool Store::prepare(const identities::Source& source,
             return false;
         }
         for (const auto& group : release.groups) {
-            if (!group.eligibility.placedProp
-                && std::count_if(rows.begin(), rows.end(), [&](const auto& row) {
-                       return !row.anchorPresent && actor(row, group.eligibility);
-                   }) != 1) {
-                continue;
-            }
+            // A member the client already rebuilt is a new root outside every captured tree.
             Mask current{};
             if (!closure(group.root, group.eligibility, group.entities, rows, current)
                 || current != group.entities) {
@@ -468,6 +466,13 @@ bool Store::pending(const identities::Source& source, std::uint8_t bubble) const
     return std::any_of(releases_.begin(), releases_.end(), [&](const Release& release) {
         return release.source == source && release.bubble == bubble && !release.groups.empty();
     });
+}
+std::optional<std::uint8_t> Store::pending_bubble(const identities::Source& source,
+                                                  std::uint8_t excluded) const noexcept {
+    const auto release = std::find_if(releases_.begin(), releases_.end(), [&](const Release& row) {
+        return row.source == source && row.bubble != excluded && !row.groups.empty();
+    });
+    return release != releases_.end() ? std::optional(release->bubble) : std::nullopt;
 }
 /** Cancelling a transition invalidates every outstanding plan for its captured source. */
 void Store::invalidate_source(const identities::Source& source, std::uint8_t bubble) noexcept {

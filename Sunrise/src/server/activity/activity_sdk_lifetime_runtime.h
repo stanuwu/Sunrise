@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../state/activity_sdk/runtime.h"
 #include "activity_sdk_device_runtime.h"
 
@@ -26,5 +27,11 @@ using Status = activity_sdk_devices::Status;
 [[nodiscard]] Status set_reserved(const state::activity_sdk::BoundView& view,
                                   std::uint8_t lifetimeState,
                                   const host::ScriptableOutputReservation& reservation) noexcept;
+
+/** Queues one activity flag change; a full flag list refuses a new raised flag. */
+[[nodiscard]] Status set_activity_flag_reserved(
+    const state::activity_sdk::BoundView& view,
+    const middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange& change,
+    const host::ScriptableOutputReservation& reservation) noexcept;
 
 } // namespace sunrise::server::activity::activity_sdk_lifetime

@@ -55,8 +55,8 @@ constexpr std::uint32_t kCombatantAtomsSchema = server::activity::mission::kComb
 
 /** Type-1 Sense carries the alive count and the eight per-slot member counts. */
 constexpr std::uint32_t kSquadSenseSchema = message::squad_sense::kSchema;
-constexpr std::uint32_t kSquadSlotsSchema = server::activity::mission::kSquadCreatedListSchema;
-constexpr std::uint32_t kSquadCountsSchema = server::activity::mission::kSquadCreatedCountSchema;
+constexpr std::uint32_t kSquadSlotsSchema = server::activity::mission::kSquadLostListSchema;
+constexpr std::uint32_t kSquadCountsSchema = server::activity::mission::kSquadLostCountSchema;
 constexpr std::uint32_t kSquadSlotCapacity = 8;
 
 /**

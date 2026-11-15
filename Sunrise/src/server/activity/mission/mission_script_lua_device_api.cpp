@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -34,6 +36,7 @@ constexpr const api::MemberSpec& kInteractable = api::slot_member("set_interacta
 constexpr const api::MemberSpec& kSetGhostLink = api::slot_member("set_ghost_link");
 constexpr const api::MemberSpec& kGhostLink = api::slot_member("ghost_link");
 constexpr const api::MemberSpec& kObjectActive = api::slot_member("set_object_active");
+constexpr const api::MemberSpec& kObjectChannels = api::slot_member("set_object_channels");
 constexpr const api::MemberSpec& kSetChannel = api::slot_member("set_channel");
 constexpr const api::MemberSpec& kTransition = api::slot_member("transition");
 constexpr const api::MemberSpec& kFireTrigger = api::slot_member("fire_trigger");
@@ -146,6 +149,98 @@ constexpr std::int8_t kFilterModeInside = 1;
     }
     body.predicates[body.count++] = predicate;
     return true;
+}
+
+/**
+ * Appends one direct predicate per slot an optional object-filter list names.
+ * @param key The list argument; absent adds nothing.
+ * @param slotType The authored slot type every entry must name.
+ * @param empty Raised for an empty list.
+ * @param refusal Raised for an entry of another type.
+ * @param capacityError Raised when an entry exceeds the type-34 capacity.
+ */
+void append_listed_slots(lua_State* state,
+                         scriptable_auth::Type34Body& body,
+                         const char* key,
+                         std::uint32_t slotType,
+                         const char* empty,
+                         const char* refusal,
+                         const char* capacityError) {
+    lua_getfield(state, 2, key);
+    if (!lua_isnil(state, -1)) {
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const std::size_t count = lua_rawlen(state, -1);
+        if (count == 0) {
+            raise_lua_error(state, empty);
+        }
+        for (std::size_t index = 1; index <= count; ++index) {
+            lua_rawgeti(state, -1, static_cast<lua_Integer>(index));
+            const auto* const handle =
+                static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
+            SlotDefinition listed{};
+            if (!current_slot(state, *handle, listed) || listed.slotType != slotType
+                || listed.slotIndex > auth_fields::kMaximumClientRefIndex) {
+                raise_lua_error(state, refusal);
+            }
+            const scriptable_auth::Type2LaneClientRef reference{
+                listed.registryKey,
+                static_cast<std::int8_t>(slotType),
+                static_cast<std::int16_t>(listed.slotIndex)};
+            if (!append_predicate(
+                    body, scriptable_auth::Type34ModeSlotRefC{kFilterModeDirect, reference})) {
+                raise_lua_error(state, capacityError);
+            }
+            lua_pop(state, 1);
+        }
+    }
+    lua_pop(state, 1);
+}
+
+constexpr const char* kTimerKey = optional_key(kInteractable, "timer", api::ValueKind::table);
+constexpr const char* kTimerElapsedKey =
+    table_field_key(kInteractable, "timer", "elapsed", api::ValueKind::number);
+constexpr const char* kTimerRemainingKey =
+    table_field_key(kInteractable, "timer", "remaining", api::ValueKind::number);
+constexpr const char* kTimerActiveKey =
+    table_field_key(kInteractable, "timer", "active", api::ValueKind::boolean);
+
+/** Reads one field of the timer table on the stack top, in seconds, as activity ticks. */
+[[nodiscard]] std::uint64_t timer_ticks(lua_State* state, const char* name) {
+    // Bounded so the tick product stays exact in a double.
+    constexpr double kMaximumSeconds = (std::numeric_limits<std::int32_t>::max)();
+    lua_getfield(state, -1, name);
+    if (lua_type(state, -1) != LUA_TNUMBER) {
+        return static_cast<std::uint64_t>(luaL_error(state, "timer.%s must be a number", name));
+    }
+    const double seconds = lua_tonumber(state, -1);
+    lua_pop(state, 1);
+    if (!std::isfinite(seconds) || seconds < 0.0 || seconds > kMaximumSeconds) {
+        return static_cast<std::uint64_t>(
+            luaL_error(state, "timer.%s must be finite seconds, at least 0", name));
+    }
+    return static_cast<std::uint64_t>(seconds * static_cast<double>(auth_fields::kTicksPerSecond));
+}
+
+/** @return The optional stopped timer record of a set_interactable_object call. */
+[[nodiscard]] std::optional<middleware::bap::activity_message::interactable_object::Timer>
+timer_argument(lua_State* state) {
+    if (push_argument(state, kTimerKey) == LUA_TNIL) {
+        lua_pop(state, 1);
+        return std::nullopt;
+    }
+    if (!lua_istable(state, -1)) {
+        raise_lua_error(state, "timer must be a table");
+    }
+    middleware::bap::activity_message::interactable_object::Timer timer{};
+    timer.elapsedTicks = timer_ticks(state, kTimerElapsedKey);
+    timer.remainingTicks = timer_ticks(state, kTimerRemainingKey);
+    lua_getfield(state, -1, kTimerActiveKey);
+    if (!lua_isboolean(state, -1)) {
+        raise_lua_error(state, "timer.active must be a boolean");
+    }
+    timer.active = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 2);
+    return timer;
 }
 
 } // namespace
@@ -272,47 +367,36 @@ constexpr std::int8_t kFilterModeInside = 1;
         && !append_predicate(body, auth::Type34ModeOnlyB{static_cast<std::int8_t>(volumes)})) {
         return luaL_error(state, kCapacityError);
     }
+    // The direct predicate names its target by ClientRef, so it takes a combatant as it takes
+    // an object.
     auth::Type2LaneClientRef target{};
-    if (!optional_slot_reference(state,
-                                 optional_key(kObjectFilter, "target", api::ValueKind::handle),
-                                 auth::kType4SlotType,
-                                 target)) {
-        return luaL_error(state, "filter target must be an authored type-4 object");
+    lua_getfield(state, 2, optional_key(kObjectFilter, "target", api::ValueKind::handle));
+    if (!lua_isnil(state, -1)) {
+        const auto* const targetHandle =
+            static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
+        SlotDefinition targeted{};
+        if (!current_slot(state, *targetHandle, targeted)
+            || (targeted.slotType != auth::kType4SlotType && !exact_combatant_slot(targeted))
+            || targeted.slotIndex > auth_fields::kMaximumClientRefIndex) {
+            return luaL_error(state, "filter target must be an authored object or combatant");
+        }
+        target = {targeted.registryKey,
+                  static_cast<std::int8_t>(targeted.slotType),
+                  static_cast<std::int16_t>(targeted.slotIndex)};
     }
+    lua_pop(state, 1);
     if (target.slotIndex >= 0
         && !append_predicate(body, auth::Type34ModeSlotRefC{kFilterModeDirect, target})) {
         return luaL_error(state, kCapacityError);
     }
     // Several authored objects at once (a beam hop-on names every crystal it tethers).
-    lua_getfield(state, 2, optional_key(kObjectFilter, "targets", api::ValueKind::list));
-    if (!lua_isnil(state, -1)) {
-        luaL_checktype(state, -1, LUA_TTABLE);
-        const std::size_t count = lua_rawlen(state, -1);
-        if (count == 0) {
-            return luaL_error(state, "targets must name at least one object");
-        }
-        for (std::size_t index = 1; index <= count; ++index) {
-            lua_rawgeti(state, -1, static_cast<lua_Integer>(index));
-            const auto* const targetHandle =
-                static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
-            SlotDefinition object{};
-            if (!current_slot(state, *targetHandle, object)
-                || object.slotType != auth::kType4SlotType
-                || object.slotIndex > auth_fields::kMaximumClientRefIndex) {
-                return luaL_error(state, "targets require authored type-4 objects");
-            }
-            if (!append_predicate(
-                    body,
-                    auth::Type34ModeSlotRefC{kFilterModeDirect,
-                                             {object.registryKey,
-                                              static_cast<std::int8_t>(auth::kType4SlotType),
-                                              static_cast<std::int16_t>(object.slotIndex)}})) {
-                return luaL_error(state, kCapacityError);
-            }
-            lua_pop(state, 1);
-        }
-    }
-    lua_pop(state, 1);
+    append_listed_slots(state,
+                        body,
+                        optional_key(kObjectFilter, "targets", api::ValueKind::list),
+                        auth::kType4SlotType,
+                        "targets must name at least one object",
+                        "targets must name authored type-4 objects",
+                        kCapacityError);
     // A squad reference selects the boss a shield or tether hop-on hosts on.
     auth::Type2LaneClientRef squad{};
     if (!optional_slot_reference(state,
@@ -325,6 +409,14 @@ constexpr std::int8_t kFilterModeInside = 1;
         && !append_predicate(body, auth::Type34ModeSlotRefC{kFilterModeDirect, squad})) {
         return luaL_error(state, kCapacityError);
     }
+    // Several squads at once, so one shield can cover every member of the squads it protects.
+    append_listed_slots(state,
+                        body,
+                        optional_key(kObjectFilter, "squads", api::ValueKind::list),
+                        format::kSquadSlotType,
+                        "squads must name at least one squad",
+                        "squads must name authored type-1 squads",
+                        kCapacityError);
     auth::Type2LaneClientRef inside{};
     if (!optional_slot_reference(state,
                                  optional_key(kObjectFilter, "inside", api::ValueKind::handle),
@@ -343,6 +435,72 @@ constexpr std::int8_t kFilterModeInside = 1;
         return luaL_error(state, "object filter encoder failed");
     }
     return queue_slot_auth(state, slot, auth::kType34Schema, bits, std::span(bytes).first(written));
+}
+
+/** Sets a verified prefix of authored channels without exposing native row revisions. */
+[[nodiscard]] int slot_set_object_channels(lua_State* state) {
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    refuse_unknown_arguments(state, kObjectChannels);
+    SlotDefinition slot{};
+    if (!current_slot(state, *handle, slot) || slot.slotType != scriptable_auth::kType24SlotType
+        || slot.componentClass != scriptable_auth::kType24ComponentClass
+        || slot.senseSchema != scriptable_auth::kType24SenseSchema
+        || slot.authSchema != scriptable_auth::kType24Schema
+        || (slot.flags & format::kSlotSchemaJoinExact) == 0 || slot.objectChannelCount == 0) {
+        return luaL_error(state, "object channels require an exact type-24 with verified bounds");
+    }
+    lua_getfield(state, 2, optional_key(kObjectChannels, "blend_seconds", api::ValueKind::number));
+    const double blend = lua_isnil(state, -1) ? 0.0 : luaL_checknumber(state, -1);
+    lua_pop(state, 1);
+    if (!std::isfinite(blend) || blend < 0.0 || blend > (std::numeric_limits<float>::max)()) {
+        return luaL_error(state, "blend_seconds must be finite, nonnegative and fit float32");
+    }
+    lua_getfield(state, 2, required_key(kObjectChannels, "values", api::ValueKind::list));
+    luaL_checktype(state, -1, LUA_TTABLE);
+    const int list = lua_gettop(state);
+    const auto count = lua_rawlen(state, list);
+    scriptable_auth::Type24Body body{};
+    if (count == 0 || count > slot.objectChannelCount || count > body.channels.size()) {
+        return luaL_error(state, "object channel prefix exceeds the verified authored count");
+    }
+    std::size_t entries = 0;
+    lua_pushnil(state);
+    while (lua_next(state, list) != 0) {
+        if (!lua_isinteger(state, -2) || lua_tointeger(state, -2) < 1
+            || static_cast<std::uint64_t>(lua_tointeger(state, -2)) > count) {
+            return luaL_error(state, "object channel values must be a dense list");
+        }
+        ++entries;
+        lua_pop(state, 1);
+    }
+    if (entries != count) {
+        return luaL_error(state, "object channel values must be a dense list");
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        lua_rawgeti(state, list, static_cast<lua_Integer>(index + 1));
+        const double value = luaL_checknumber(state, -1);
+        lua_pop(state, 1);
+        if (!std::isfinite(value) || value < scriptable_auth::kType24MinimumValue
+            || value > scriptable_auth::kType24MaximumValue) {
+            return luaL_error(state, "object channel value is outside the native range");
+        }
+        body.channels[index] = {
+            kUncommittedCounter, static_cast<float>(value), static_cast<float>(blend)};
+    }
+    lua_pop(state, 1);
+    body.count = static_cast<std::uint8_t>(count);
+    std::array<std::byte, scriptable_auth::kType24MaximumByteCount> bytes{};
+    std::size_t written = 0, bits = 0;
+    if (!scriptable_auth::encode_type24(body, bytes, written, bits)) {
+        return luaL_error(state, "object channel encoder failed");
+    }
+    return queue_slot_auth(state,
+                           slot,
+                           scriptable_auth::kType24Schema,
+                           bits,
+                           std::span(bytes).first(written),
+                           IntentKind::setObjectChannels);
 }
 
 /** Binds an authored damage monitor to one exact object; a new revision re-binds it. */
@@ -378,7 +536,10 @@ constexpr std::int8_t kFilterModeInside = 1;
         state, slot, damage::kAuthSchema, damage::kBits, body, IntentKind::watchDamage);
 }
 
-/** Spawns authored entry zero and subscribes to accepted native player use. */
+/**
+ * Spawns authored entry zero and subscribes to accepted native player use. With respawn false the
+ * body keeps the entry's generation, so its records reach the entity where it is.
+ */
 [[nodiscard]] int slot_set_interactable_object(lua_State* state) {
     namespace object = middleware::bap::activity_message::interactable_object;
     const auto* const handle =
@@ -388,24 +549,27 @@ constexpr std::int8_t kFilterModeInside = 1;
     if (!current_slot(state, *handle, slot) || !exact_object_slot(slot)) {
         return luaL_error(state, "interaction requires an exact authored object");
     }
-    const bool trackOwner =
+    object::Options options{};
+    options.trackOwner =
         optional_boolean_argument(state, boolean_option(kInteractable, "track_owner"));
-    std::array<std::byte, object::kOwnerBytes> body{};
+    options.active = optional_boolean_argument(state, boolean_option(kInteractable, "active"));
+    options.used = optional_boolean_argument(state, boolean_option(kInteractable, "used"));
+    options.usable = optional_boolean_argument(state, boolean_option(kInteractable, "usable"));
+    options.timer = timer_argument(state);
+    const bool respawn = optional_boolean_argument(state, boolean_option(kInteractable, "respawn"));
+    std::array<std::byte, object::kMaximumBytes> body{};
     std::size_t written = 0;
-    if (!object::encode(kUncommittedCounter,
-                        body,
-                        written,
-                        trackOwner,
-                        optional_boolean_argument(state, boolean_option(kInteractable, "active")),
-                        optional_boolean_argument(state, boolean_option(kInteractable, "used")))) {
+    if (!object::encode(kUncommittedCounter, body, written, options)) {
         return luaL_error(state, "interactable object encoder failed");
     }
     return queue_slot_auth(state,
                            slot,
                            object::kSchema,
-                           trackOwner ? object::kOwnerBits : object::kBits,
+                           object::bit_count(options),
                            std::span(body).first(written),
-                           IntentKind::setInteractableObject);
+                           IntentKind::setInteractableObject,
+                           false,
+                           !respawn);
 }
 
 /** Arms or disarms the authored Ghost-link scan. The Host stamps the generation this body needs. */
@@ -486,6 +650,18 @@ constexpr std::int8_t kFilterModeInside = 1;
     if (!parse_object_burst(state, intent)) {
         return 0;
     }
+    lua_getfield(state, 2, optional_key(kObjectActive, "at", api::ValueKind::handle));
+    if (!lua_isnil(state, -1)) {
+        const auto* const squadHandle =
+            static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
+        SlotDefinition squad{};
+        if (!current_slot(state, *squadHandle, squad) || squad.slotType != format::kSquadSlotType
+            || squad.slotIndex > auth_fields::kMaximumClientRefIndex) {
+            return luaL_error(state, "object location must be an authored type-1 squad");
+        }
+        intent.objectLocationRow = static_cast<std::int32_t>(squad.nativeRow);
+    }
+    lua_pop(state, 1);
     return queue_intent(state, frame, intent);
 }
 
@@ -614,17 +790,9 @@ int slot_applied(lua_State* state) {
                && intent.deviceChannel == channel.channel
                && intent.attemptGeneration == impl->attempt.generation;
     };
-    for (const auto& intent : active_frame(state).candidate.intents) {
-        if (pending(intent)) {
-            lua_pushboolean(state, false);
-            return 1;
-        }
-    }
-    for (std::size_t index = impl->outboxRead; index < impl->outbox.size(); ++index) {
-        if (pending(impl->outbox[index])) {
-            lua_pushboolean(state, false);
-            return 1;
-        }
+    if (intent_queued(state, *impl, pending)) {
+        lua_pushboolean(state, false);
+        return 1;
     }
     bool applied = false;
     const auto& sources = impl->deviceRequestSources;

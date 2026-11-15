@@ -337,6 +337,8 @@ void destroy_state(Impl& impl) noexcept {
     std::vector<std::uint64_t>{}.swap(impl.deviceRequestSources);
     impl.ghostLevels = {};
     impl.ghostLevelCount = 0;
+    impl.objectiveLevels = {};
+    impl.objectiveLevelCount = 0;
     std::vector<Intent>{}.swap(impl.outbox);
     impl.variables = {};
     impl.timers = {};

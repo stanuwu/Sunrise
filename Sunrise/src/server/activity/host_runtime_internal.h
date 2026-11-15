@@ -37,6 +37,7 @@ struct ScriptableRequest final {
     bool objectiveRefreshAwareness{};
     middleware::bap::activity_message::sensor_auth_update::AuthoredSceneDependencies
         sceneDependencies{};
+    /** The input an event request sends, or the one an activation starts with; zero is none. */
     std::uint32_t sceneEventKey{};
     std::uint32_t sequenceHash{};
     state::gameplay::squad_entity_retirement::Eligibility squadRetirement{};
@@ -55,9 +56,12 @@ struct ScriptableRequest final {
     std::uint16_t authByteCount{};
     std::uint16_t dialogueCue{};
     middleware::bap::activity_message::scriptable_auth::Type2LaneClientRef dialogueFilter{};
+    /** The slot an authored object entry spawns at; absent keeps the package transform. */
+    middleware::bap::activity_message::scriptable_auth::Type2LaneClientRef objectLocation{};
     std::optional<std::uint32_t> nameHash{};
     std::optional<middleware::bap::activity_message::squad_auth::Destination> squadDestination{};
     std::optional<middleware::bap::activity_message::squad_auth::SpawnRule> squadSpawnRule{};
+    std::optional<middleware::bap::activity_message::squad_auth::Temperaments> squadTemperaments{};
     std::uint64_t expectedActivityClientGeneration{};
     /** Exact reserved revision, or zero for an ordinary operator request. */
     std::uint64_t expectedRevision{};
@@ -74,7 +78,12 @@ struct ScriptableRequest final {
     ScriptableOverrideKind kind{ScriptableOverrideKind::type23};
     /** Activity lifetime state for a lifetime request; ignored by every other kind. */
     std::uint8_t lifetimeState{kDefaultLifetimeState};
+    /** A lifetime request's flag change; a zero key changes no flag. */
+    middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange activityFlag{};
+    /** A sequence request's choices; a retained one keeps the running sequence. */
+    middleware::bap::activity_message::scriptable_auth::Type5Selection sequenceSelection{};
     bool snap{};
+    /** The kind's on input: an object or cinematic turns on, a program or binding spawns. */
     bool active{};
 };
 
@@ -153,7 +162,10 @@ struct ScriptableGuard final {
     std::uint32_t authoredSceneGeneration{};
     std::uint32_t type2AtomGeneration{};
     std::uint32_t type2SpawnGeneration{};
+    std::uint32_t type2DeliveryRevision{};
     std::uint32_t damageRevision{};
+    std::uint32_t hopOnRevision{};
+    std::uint32_t objectChannelsRevision{};
     GhostLinkScan ghostLink{};
     bool occupied{};
 };

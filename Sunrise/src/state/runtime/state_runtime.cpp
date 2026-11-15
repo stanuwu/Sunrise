@@ -375,6 +375,14 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept {
     investment::store::set_sign_in_time(seconds);
 }
 
+bool publish_entered_activity(std::uint16_t activityIndex) noexcept {
+    return investment::store::enter_activity(activityIndex);
+}
+
+bool publish_left_activity(std::uint16_t activityIndex) noexcept {
+    return investment::store::leave_activity(activityIndex);
+}
+
 /** @return Immutable generated BAP session fields. */
 const BapState& bap() noexcept {
     return runtime::storage::g_state.bap;

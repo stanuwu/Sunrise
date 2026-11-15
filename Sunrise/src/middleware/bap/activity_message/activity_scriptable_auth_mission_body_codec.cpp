@@ -49,17 +49,6 @@ constexpr std::uint32_t kWaypointMarkerMode = 2;
     return writer.write(kNoTimerEpoch, kWideIntegerWidth) && writer.write(0, kReal32Width);
 }
 
-/** Writes an absent reference or an exact slot with the ClientRef type and index biases. */
-[[nodiscard]] bool write_directive_reference(bits::Writer& writer,
-                                             const Type2LaneClientRef& target) noexcept {
-    return target.slotIndex < 0
-               ? write_absent_client_ref(writer)
-               : auth_fields::write_client_ref(writer,
-                                               target.registryKey,
-                                               static_cast<std::uint32_t>(target.slotType),
-                                               static_cast<std::uint16_t>(target.slotIndex));
-}
-
 /** Writes one 239-bit authored HUD marker subrecord, targeting the given slot or none. */
 [[nodiscard]] bool write_directive_marker(bits::Writer& writer,
                                           const Type2LaneClientRef& target,
@@ -68,7 +57,7 @@ constexpr std::uint32_t kWaypointMarkerMode = 2;
     // The client copies .0 into its target when that resolves. The first hash of .2 is the
     // navpoint's name, which the client resolves to a position itself; the next word is the
     // navpoint's bubble, which decides whether the marker is a route to another bubble.
-    return write_directive_reference(writer, target) && write_absent_client_ref(writer)
+    return write_optional_client_ref(writer, target) && write_absent_client_ref(writer)
            && writer.write(nameHash, 32) && writer.write(bubbleHash, 32) && writer.write(0, 32)
            && writer.write(0, 32) && writer.write(0, kBoolWidth);
 }
@@ -101,7 +90,7 @@ write_directive_entry(bits::Writer& writer,
     const std::uint32_t markerMode = waypoint.slotIndex >= 0 ? kWaypointMarkerMode
                                      : target.slotIndex >= 0 ? kTrackedMarkerMode
                                                              : kFlaggedMarkerMode;
-    if (!writer.write(1, kDirectiveStateWidth) || !write_directive_reference(writer, waypoint)
+    if (!writer.write(1, kDirectiveStateWidth) || !write_optional_client_ref(writer, waypoint)
         || !writer.write(markerMode, kDirectiveAuxStateWidth)) {
         return false;
     }
@@ -132,21 +121,25 @@ bool next_type5_revision(const Type5RevisionGuard& guard, std::uint8_t& next) no
     return next != kSequenceInactiveRevision;
 }
 
-/** Encodes the canonical sequence body: one revision and 129 unset ClientRefs. */
+/** Encodes the sequence body: one revision, the choice mask and 129 unset ClientRefs. */
 bool encode_type5(const Type5Preset& preset,
                   const Type5RevisionGuard& guard,
                   std::span<std::byte> output,
                   std::size_t& written) noexcept {
     written = 0;
-    if (preset.revision == kSequenceInactiveRevision
-        || (guard.hasLast && preset.revision <= guard.last) || output.size() < kType5ByteCount) {
+    // A retained body repeats the committed revision; any other must be newer.
+    const bool revisionValid = preset.selection.retain
+                                   ? guard.hasLast && preset.revision == guard.last
+                                   : !guard.hasLast || preset.revision > guard.last;
+    if (preset.revision == kSequenceInactiveRevision || !revisionValid
+        || output.size() < kType5ByteCount) {
         return false;
     }
     bits::Writer writer(output.first(kType5ByteCount));
     bool encoded = writer.write(0, kWideIntegerWidth) && writer.write(0, kWideIntegerWidth)
                    && writer.write(preset.revision, 8U);
-    for (std::size_t index = 0; encoded && index < 4U; ++index) {
-        encoded = writer.write(0, kSigned32Width);
+    for (const std::uint32_t lane : preset.selection.choices) {
+        encoded = encoded && writer.write(lane, kSigned32Width);
     }
     for (std::size_t index = 0; encoded && index < kSequenceReferenceCount; ++index) {
         encoded = write_absent_client_ref(writer);
@@ -314,7 +307,7 @@ bool encode_type68(const Type68Preset& preset,
     }
     bits::Writer writer(output.first(kType68ByteCount));
     bool encoded =
-        write_directive_reference(writer, preset.audience) && write_absent_client_ref(writer);
+        write_optional_client_ref(writer, preset.audience) && write_absent_client_ref(writer);
     for (std::size_t index = 0; encoded && index < kType68EntryCount; ++index) {
         encoded = index == 0 && preset.visible
                       ? write_directive_entry(writer,

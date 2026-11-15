@@ -35,8 +35,8 @@ constexpr std::uint8_t kNameHashWidth = 32;
 /** Logical active one becomes wire two after the schema bias; logical zero becomes one. */
 constexpr std::uint32_t kActiveWireValue = 2;
 constexpr std::uint32_t kInactiveWireValue = 1;
-/** Fields zero through two precede the requested-count block. */
-constexpr std::size_t kLeadingAbsentFieldCount = 3;
+/** Fields zero and one precede the temperament list. */
+constexpr std::size_t kLeadingAbsentFieldCount = 2;
 /** One unused dynamic field separates requested counts from generation. */
 constexpr std::size_t kAfterCountsAbsentFieldCount = 1;
 /**
@@ -48,9 +48,8 @@ constexpr std::size_t kBeforeDestinationAbsentFieldCount = 3;
 constexpr std::size_t kAfterSpawnReferenceAbsentFieldCount = 4;
 /** The destination request revision is a 31-bit counter the client echoes at +600. */
 constexpr std::uint8_t kDestinationRevisionWidth = 31;
-/** A spawn rule is a type-66 slot; `.12` is the second of the two spawn references. */
+/** A spawn rule is a type-66 slot. */
 constexpr std::uint8_t kSpawnRuleSlotType = 66;
-constexpr std::size_t kSpawnRuleReferenceIndex = 1;
 
 /** @return True when the guard itself can name a prior positive generation. */
 [[nodiscard]] constexpr bool valid_guard(const GenerationGuard& guard) noexcept {
@@ -89,12 +88,16 @@ constexpr std::size_t kSpawnRuleReferenceIndex = 1;
             || preset.spawnRule->slotIndex > auth_fields::kMaximumClientRefIndex)) {
         return false;
     }
-    return true;
+    return !preset.temperaments.has_value() || valid_temperaments(*preset.temperaments);
 }
 
 /** @return Exact number of meaningful schema bits for one validated preset. */
 [[nodiscard]] constexpr std::size_t body_bit_count(const Preset& preset) noexcept {
-    return exact_body_bit_count(preset.requestedCounts.size(), preset.destination.has_value());
+    return exact_body_bit_count(preset.requestedCounts.size(),
+                                preset.destination.has_value(),
+                                preset.temperaments.has_value()
+                                    ? std::optional<std::size_t>{preset.temperaments->count}
+                                    : std::nullopt);
 }
 
 /** Writes a repeated absent-field presence marker. */
@@ -109,7 +112,8 @@ constexpr std::size_t kSpawnRuleReferenceIndex = 1;
 
 /** Writes the root fields in schema order and leaves every unrelated optional field absent. */
 [[nodiscard]] bool write_body(bits::Writer& writer, const Preset& preset) noexcept {
-    if (!write_absent(writer, kLeadingAbsentFieldCount) || !writer.write(1, kPresenceWidth)
+    if (!write_absent(writer, kLeadingAbsentFieldCount)
+        || !write_temperaments(writer, preset.temperaments) || !writer.write(1, kPresenceWidth)
         || !writer.write(preset.requestedCounts.size(), kRequestedCountLengthWidth)) {
         return false;
     }
@@ -150,7 +154,9 @@ constexpr std::size_t kSpawnRuleReferenceIndex = 1;
         if (!writer.write(1, kPresenceWidth)) {
             return false;
         }
-        if (index == kSpawnRuleReferenceIndex && preset.spawnRule.has_value()) {
+        // The point resolver reads both references and falls back to the package rule for an
+        // unset one, so a set rule fills both.
+        if (preset.spawnRule.has_value()) {
             if (!auth_fields::write_client_ref(writer,
                                                preset.spawnRule->registryKey,
                                                kSpawnRuleSlotType,

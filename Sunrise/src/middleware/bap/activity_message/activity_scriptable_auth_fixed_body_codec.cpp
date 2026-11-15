@@ -122,7 +122,7 @@ bool next_type4_generation(const Type4GenerationGuard& guard, std::int32_t& next
     return next_positive_generation(guard.hasLast, guard.last, next);
 }
 
-/** Encodes one package-owned entry with no caller-authored transform or child records. */
+/** Encodes one package-owned entry with no child records; the second flag sends its location. */
 bool encode_type4(const Type4Preset& preset,
                   const Type4GenerationGuard& guard,
                   std::span<std::byte> output,
@@ -137,12 +137,14 @@ bool encode_type4(const Type4Preset& preset,
         std::bit_cast<std::uint32_t>(preset.generation) + kSigned32Bias;
     const std::uint32_t entry = std::bit_cast<std::uint32_t>(preset.entryIndex) + kSigned32Bias;
     const std::uint32_t neutral = kSigned32Bias;
+    const bool located = preset.location.slotIndex >= 0;
     const bool encoded =
         writer.write(generation, kSigned32Width) && writer.write(entry, kSigned32Width)
-        && writer.write(preset.active ? 1U : 0U, kBoolWidth) && writer.write(0, kBoolWidth)
-        && writer.write(neutral, kSigned32Width) && write_absent_client_ref(writer)
+        && writer.write(preset.active ? 1U : 0U, kBoolWidth)
+        && writer.write(located ? 1U : 0U, kBoolWidth) && writer.write(neutral, kSigned32Width)
+        && write_optional_client_ref(writer, preset.location) && writer.write(0, kReal32Width)
         && writer.write(0, kReal32Width) && writer.write(0, kReal32Width)
-        && writer.write(0, kReal32Width) && writer.write(0, kBoolWidth) && writer.write(0, 2U);
+        && writer.write(0, kBoolWidth) && writer.write(0, 2U);
     return encoded && writer.bit_count() == kType4BitCount && writer.finish(written)
            && written == kType4ByteCount;
 }
@@ -396,6 +398,47 @@ bool encode_type24(const Type24Body& body,
         return false;
     }
     writtenBits = bits;
+    return true;
+}
+
+/** Decodes the populated channel prefix and requires exact bit length and zero padding. */
+bool decode_type24(std::span<const std::byte> input,
+                   std::size_t bitCount,
+                   Type24Body& body) noexcept {
+    if (bitCount < kType24CountWidth || bitCount > kType24MaximumBitCount
+        || input.size() != (bitCount + 7U) / 8U) {
+        return false;
+    }
+    bits::Reader reader(input);
+    std::uint64_t count{};
+    if (!reader.read(kType24CountWidth, count) || count > kType24ChannelCapacity
+        || bitCount != kType24CountWidth + count * kType24ChannelBitCount) {
+        return false;
+    }
+    Type24Body parsed{};
+    parsed.count = static_cast<std::uint8_t>(count);
+    for (Type24Channel& channel : std::span(parsed.channels).first(parsed.count)) {
+        std::uint64_t revision{};
+        std::uint64_t value{};
+        std::uint64_t blend{};
+        if (!reader.read(kSigned32Width, revision) || !reader.read(kReal32Width, value)
+            || !reader.read(kReal32Width, blend)) {
+            return false;
+        }
+        channel.revision =
+            std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(revision) - kSigned32Bias);
+        channel.value = std::bit_cast<float>(static_cast<std::uint32_t>(value));
+        channel.blend = std::bit_cast<float>(static_cast<std::uint32_t>(blend));
+        if (!std::isfinite(channel.value) || channel.value < kType24MinimumValue
+            || channel.value > kType24MaximumValue || !std::isfinite(channel.blend)
+            || channel.blend < 0.F) {
+            return false;
+        }
+    }
+    if (!finish_padding(reader)) {
+        return false;
+    }
+    body = parsed;
     return true;
 }
 

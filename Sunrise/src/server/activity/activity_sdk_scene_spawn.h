@@ -75,12 +75,16 @@ collect_scene_spawn_plan(const state::activity_sdk::Catalog& catalog,
                                                  std::uint32_t sceneSlotRow,
                                                  SceneSpawnPlan& output) noexcept;
 
-/** Queues one missing preparation or the scene through the same durable intent reservation. */
-[[nodiscard]] SceneStatus activate_authored_scene_spawn_reserved(
-    const state::activity_sdk::BoundView& view,
-    std::uint32_t occurrenceRow,
-    std::uint32_t sceneSlotRow,
-    const host::ScriptableOutputReservation& reservation) noexcept;
+/**
+ * Queues one missing preparation or the scene through the same durable intent reservation.
+ * @param initialEventKey An input the final activation carries from its start; zero for none.
+ */
+[[nodiscard]] SceneStatus
+activate_authored_scene_spawn_reserved(const state::activity_sdk::BoundView& view,
+                                       std::uint32_t occurrenceRow,
+                                       std::uint32_t sceneSlotRow,
+                                       const host::ScriptableOutputReservation& reservation,
+                                       std::uint32_t initialEventKey = 0) noexcept;
 
 /** Matches one staged preparation to an exact actor/source pair owned by this scene. */
 [[nodiscard]] SceneStatus

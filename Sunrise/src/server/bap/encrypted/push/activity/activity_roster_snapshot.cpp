@@ -52,6 +52,34 @@ namespace {
     return false;
 }
 
+/**
+ * @return The generation a link's retained squad bodies are authorized for: the owner's on a
+ * public link that publishes its private link's mission, else the link's own.
+ */
+[[nodiscard]] std::uint64_t squad_lease_generation(const Session& session) noexcept {
+    const Session* const owner = public_mission_owner_locked(session);
+    return owner != nullptr ? owner->activity.bindingGeneration
+                            : session.activity.bindingGeneration;
+}
+
+/**
+ * Starts a public link's publication over when its owner's activity changes. Like a new link, it
+ * owes no dialogue line said before it.
+ */
+void begin_owner_publication(Session& link, const Session& owner) noexcept {
+    PublicOwnerPublication& publication = link.activityPublicOwner;
+    if (state::activity::same_binding(publication.binding, owner.activity.session)) {
+        return;
+    }
+    publication = {};
+    publication.binding = owner.activity.session;
+    server::activity::host::AuthState ownerState{};
+    if (server::activity::host::auth_state(
+            owner.activity.session, owner.activity.bindingGeneration, ownerState)) {
+        publication.dialogueRevision = ownerState.dialogueRevision;
+    }
+}
+
 } // namespace
 
 /** Merges one staged squad body after the complete cumulative frame reached transport output. */
@@ -59,16 +87,19 @@ bool activate_staged_squad_override(Session& session) noexcept {
     const RosterPublication& staged = session.activityRosterStaged;
     const server::activity::host::PendingScriptableOverride& pending = staged.scriptableOverride;
     const server::activity::host::ScriptableTarget& target = pending.target;
+    const std::uint64_t leaseGeneration =
+        staged.ownerScriptable ? staged.ownerGeneration : staged.bindingGeneration;
     if (!staged.staged || !staged.hasScriptableOverride || !staged.activatesSquadOverride
         || staged.bindingGeneration == 0
         || staged.bindingGeneration != session.activity.bindingGeneration
-        || pending.expectedActivityClientGeneration != staged.bindingGeneration
+        || leaseGeneration != squad_lease_generation(session)
+        || pending.expectedActivityClientGeneration != leaseGeneration
         || pending.kind != server::activity::host::ScriptableOverrideKind::squad
         || (target.stateLocalRoster && !staged.hasSquadStateSequence)) {
         return false;
     }
     RetainedSquadAuth retained{};
-    if (!make_retained_squad_auth(pending, session.activity.bindingGeneration, retained)) {
+    if (!make_retained_squad_auth(pending, leaseGeneration, retained)) {
         return false;
     }
     if (target.stateLocalRoster) {
@@ -101,13 +132,13 @@ bool activate_staged_squad_override(Session& session) noexcept {
         lease.groups[0].regionEpoch = session.activityRosterRegionEpoch;
         retained.groupIndex = 0;
         lease.authBodies[0] = retained;
-        lease.bindingGeneration = session.activity.bindingGeneration;
+        lease.bindingGeneration = leaseGeneration;
         lease.authCount = 1;
         lease.groupCount = 1;
         lease.active = true;
         return true;
     }
-    if (!valid_retained_squad_lease(lease, session.activity.bindingGeneration)) {
+    if (!valid_retained_squad_lease(lease, leaseGeneration)) {
         return false;
     }
     const std::size_t groupIndex = retained_group_index(lease, target);
@@ -186,6 +217,7 @@ build_roster_snapshot(Session& session,
                       std::size_t& destinationLength,
                       const middleware::bap::activity_message::patch_epoch::PatchEpoch* epoch,
                       std::uint8_t lifetimeState,
+                      const message::ActivityFlags& activityFlags,
                       const message::AuthOverride* authOverride,
                       std::uint16_t rosterGroupIndex,
                       std::uint16_t rosterSlotOffset,
@@ -220,6 +252,15 @@ build_roster_snapshot(Session& session,
     if (!fill_roster(
             layout, hostedBubbles, publishes_top_level_groups(session), scratch, snapshot.roster)) {
         return RosterOutcome::noGroups;
+    }
+    // A public link publishes the content its private link's mission places in a bubble the
+    // mission's world authors public and this link hosts.
+    const Session* const owner = public_mission_owner_locked(session);
+    const std::uint64_t ownerBubbles = owner != nullptr ? owner_public_bubbles(session, *owner) : 0;
+    layouts::Definition ownerLayout{};
+    if (owner != nullptr) {
+        begin_owner_publication(session, *owner);
+        static_cast<void>(session_scenario_layout(*owner, ownerLayout));
     }
 
     const state::activity::defaults::FallbackPolicy& fallback =
@@ -265,16 +306,26 @@ build_roster_snapshot(Session& session,
         == MissionSeedRosterResult::refused) {
         return refuse_override("mission_seed");
     }
+    if (ownerBubbles != 0) {
+        if (append_owner_mission_seed(session, *owner, scratch, snapshot, ownerBubbles)
+            == MissionSeedRosterResult::refused) {
+            return refuse_override("owner_mission_seed");
+        }
+        if (!append_owner_layout_groups(*owner, ownerBubbles, scratch, snapshot.roster)) {
+            return refuse_override("owner_layout_groups");
+        }
+    }
     // Retained and pending groups below may only match a group the seed published.
     const std::size_t seedGroupCount = snapshot.roster.groupCount;
     const bool pendingStateLocal = authOverride != nullptr && stateLocalRosterTarget;
+    const std::uint64_t leaseGeneration = squad_lease_generation(session);
     if (session.activitySquadOverride.active
-        && session.activitySquadOverride.bindingGeneration != session.activity.bindingGeneration) {
+        && session.activitySquadOverride.bindingGeneration != leaseGeneration) {
         SecureZeroMemory(&session.activitySquadOverride, sizeof session.activitySquadOverride);
     }
     const bool retainedSquad = session.activitySquadOverride.active;
     const SquadOverrideLease& lease = session.activitySquadOverride;
-    if (retainedSquad && !valid_retained_squad_lease(lease, session.activity.bindingGeneration)) {
+    if (retainedSquad && !valid_retained_squad_lease(lease, leaseGeneration)) {
         return refuse_override("retained_lease");
     }
     server::activity::host::ScriptableTarget pendingTarget{};
@@ -318,12 +369,23 @@ build_roster_snapshot(Session& session,
     }
     std::array<std::size_t, message::kPublishedGroupCapacity> retainedGroupPositions{};
     retainedGroupPositions.fill(snapshot.roster.groups.size());
+    // A group the private link's public link publishes is left out here with its bodies.
+    std::array<bool, message::kPublishedGroupCapacity> retainedElsewhere{};
     for (std::size_t index = 0; retainedSquad && index < lease.groupCount; ++index) {
         const RetainedSquadGroup& retainedGroup = lease.groups[index];
         if (!retainedGroup.scopeTarget.stateLocalRoster) {
             continue;
         }
-        if (!msg1_selects_region(layout, retainedGroup.region)) {
+        if (session.activity.role == ActivityClientRole::privateCurrent
+            && publishes_on_public(session, retainedGroup.scopeTarget)) {
+            retainedElsewhere[index] = true;
+            continue;
+        }
+        if (owner != nullptr && !note_owner_key(scratch, retainedGroup.scopeTarget.registryKey)) {
+            return refuse_override("owner_key_capacity");
+        }
+        // An owner's group names a region of the owner's world.
+        if (!msg1_selects_region(owner != nullptr ? ownerLayout : layout, retainedGroup.region)) {
             return refuse_override("retained_region");
         }
         const std::uint32_t bubble = static_cast<std::uint32_t>(retainedGroup.region)
@@ -357,6 +419,9 @@ build_roster_snapshot(Session& session,
             return refuse_override("retained_auth");
         }
         const RetainedSquadAuth& retained = lease.authBodies[index];
+        if (retainedElsewhere[retained.groupIndex]) {
+            continue;
+        }
         const RetainedSquadGroup& retainedGroup = lease.groups[retained.groupIndex];
         const bool replace =
             authOverride != nullptr && same_retained_target(retainedGroup, retained, pendingTarget);
@@ -377,9 +442,35 @@ build_roster_snapshot(Session& session,
             return refuse_override("retained_auth_install");
         }
     }
-    if (const char* refusal = append_retained_auth_estate(
-            layout, region, scratch, snapshot, authEstate, session.activityDialogueRevision)) {
+    if (const char* refusal = append_retained_auth_estate(session,
+                                                          nullptr,
+                                                          0,
+                                                          layout,
+                                                          region,
+                                                          scratch,
+                                                          snapshot,
+                                                          authEstate,
+                                                          session.activityDialogueRevision)) {
         return refuse_override(refusal);
+    }
+    if (ownerBubbles != 0) {
+        std::vector<server::activity::host::PendingScriptableOverride> ownerEstate{};
+        if (!server::activity::host::scriptable_auth_estate(
+                owner->activity.session, owner->activity.bindingGeneration, ownerEstate)) {
+            return refuse_override("owner_auth_estate");
+        }
+        if (const char* refusal =
+                append_retained_auth_estate(session,
+                                            owner,
+                                            ownerBubbles,
+                                            layout,
+                                            region,
+                                            scratch,
+                                            snapshot,
+                                            ownerEstate,
+                                            session.activityPublicOwner.dialogueRevision)) {
+            return refuse_override(refusal);
+        }
     }
     // The pending override's group goes after the retained estate, where the next push will place
     // it once retained, so two pushes carry the same group order. An exact match here may be a
@@ -391,6 +482,9 @@ build_roster_snapshot(Session& session,
         if (stateLocalRosterGroup != nullptr) {
             existing = find_existing_group(
                 *stateLocalRosterGroup, scratch, snapshot.roster, pendingGroupPosition);
+        }
+        if (existing == ExistingGroup::conflict && owner_key(scratch, pendingTarget.registryKey)) {
+            report_owner_key_conflict(owner, pendingTarget);
         }
         if (existing == ExistingGroup::conflict
             || (existing == ExistingGroup::exact
@@ -451,6 +545,7 @@ build_roster_snapshot(Session& session,
     // carries matches nothing.
     snapshot.playerKey = published_player_key(session);
     snapshot.lifetime = lifetimeState;
+    snapshot.activityFlags = activityFlags;
     // Each player owns its committed region readiness; a local writeback cannot ready peers.
     // A program that opens on a cutscene holds the spawn too, so no body exists to place.
     snapshot.awaitClientSync =
@@ -490,9 +585,13 @@ build_roster_snapshot(Session& session,
     const std::uint16_t setAnswers = programOwnsSpawn
                                          ? static_cast<std::uint16_t>(snapshot.spawnSliceSet)
                                          : static_cast<std::uint16_t>(region.arrival);
+    // The program's set is declared by its own destination. A public link runs another one, whose
+    // tables do not list the set and so cannot say where it has points.
+    const state::activity::destination::DestinationSelection& setOwner =
+        programOwnsSpawn ? session.activity.source.destination : selection;
     if (snapshot.spawnSliceSet
         != state::activity::destination::spawn_set_slice_set(
-            selection, snapshot.spawnSetHash, setAnswers)) {
+            setOwner, snapshot.spawnSetHash, setAnswers)) {
         snapshot.spawnSetHash = message::kAbsentSpawnSetHash;
     }
     // An armed wipe respawns at its checkpoint spawn set, not at the arrival override.
@@ -608,9 +707,14 @@ build_roster_snapshot(Session& session,
         key.senseSchema = middleware::bap::activity_message::squad_sense::kSchema;
         key.slotIndex = auth.slotIndex;
         key.slotType = auth.slotType;
+        // The owner's mission records its groups' reports under the owner's own link.
+        const bool ownerGroup = owner != nullptr && owner_key(scratch, auth.key);
         middleware::bap::activity_message::squad_sense::State recovered{};
         if (!server::activity::host::snapshot_squad_sense(
-                session.activity.session, session.activity.bindingGeneration, key, recovered)) {
+                ownerGroup ? owner->activity.session : session.activity.session,
+                ownerGroup ? owner->activity.bindingGeneration : session.activity.bindingGeneration,
+                key,
+                recovered)) {
             continue;
         }
         message::SenseOverride& sense = scratch.rosterSenseOverrides[senseCount];
@@ -644,7 +748,9 @@ build_roster_snapshot(Session& session,
         key.slotIndex = auth.slotIndex;
         key.slotType = auth.slotType;
         server::activity::host::GhostLinkLevel level{};
-        if (!server::activity::host::ghost_link_scan(session.activity.session, key, level)) {
+        const bool ownerGroup = owner != nullptr && owner_key(scratch, auth.key);
+        if (!server::activity::host::ghost_link_scan(
+                ownerGroup ? owner->activity.session : session.activity.session, key, level)) {
             continue;
         }
         message::SenseOverride& sense = scratch.rosterSenseOverrides[senseCount];

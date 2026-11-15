@@ -224,8 +224,18 @@ bool attach_combat_objective_groups(const topology_inventory::Snapshot& topology
     constexpr std::uint32_t kGroupClass = generated::ObjectiveGroup::kClass;
     constexpr std::uint32_t kTaskClass = generated::ObjectiveTask::kClass;
     static_assert(sizeof(generated::ObjectiveTask) == kRowStride);
-    std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> configs{};
-    std::map<std::uint32_t, std::vector<std::uint32_t>> slots{};
+    // A task's admission bounds are unnamed in the generated layout. The client's task admission
+    // reads them as four consecutive signed 32-bit values of each task row.
+    constexpr std::size_t kTaskMaximumMembers = offsetof(generated::ObjectiveTask, gap0) + 8;
+    constexpr std::size_t kTaskMaximumSquads = kTaskMaximumMembers + sizeof(std::int32_t);
+    constexpr std::size_t kTaskCounterLimit = kTaskMaximumSquads + sizeof(std::int32_t);
+    constexpr std::size_t kTaskMinimumMembers = kTaskCounterLimit + sizeof(std::int32_t);
+    // Pins the measured offsets against a regenerated layout.
+    static_assert(kTaskMaximumMembers == 0x08 && kTaskMinimumMembers == 0x14
+                  && kTaskMinimumMembers + sizeof(std::int32_t)
+                         <= offsetof(generated::ObjectiveTask, unk1c));
+    std::unordered_map<std::uint64_t, std::vector<format::CombatObjectiveGroup>> configs{};
+    std::map<std::uint32_t, std::vector<format::CombatObjectiveGroup>> slots{};
     try {
         for (const squads::DescriptorFact& descriptor : facts.descriptors) {
             if (descriptor.slotIndex >= topology.slots.size()
@@ -253,21 +263,35 @@ bool attach_combat_objective_groups(const topology_inventory::Snapshot& topology
                                    groupCount)) {
                     return false;
                 }
-                std::vector<std::uint32_t> taskCounts{};
+                std::vector<format::CombatObjectiveGroup> groups{};
                 for (std::size_t group = 0; group < groupCount; ++group) {
                     std::size_t taskData = 0;
                     std::size_t taskCount = 0;
+                    format::CombatObjectiveGroup decoded{};
                     if (!read_array(bytes,
                                     groupData + group * kRowStride + kTasksField,
                                     kRowStride,
                                     kTaskClass,
                                     taskData,
-                                    taskCount)) {
+                                    taskCount)
+                        || taskCount > decoded.tasks.size()) {
                         return false;
                     }
-                    taskCounts.push_back(static_cast<std::uint32_t>(taskCount));
+                    decoded.groupIndex = static_cast<std::uint32_t>(group);
+                    decoded.taskCount = static_cast<std::uint32_t>(taskCount);
+                    for (std::size_t task = 0; task < taskCount; ++task) {
+                        const std::size_t row = taskData + task * kRowStride;
+                        format::CombatTaskBounds& bounds = decoded.tasks[task];
+                        if (!read_value(bytes, row + kTaskMinimumMembers, bounds.minimumMembers)
+                            || !read_value(bytes, row + kTaskMaximumMembers, bounds.maximumMembers)
+                            || !read_value(bytes, row + kTaskMaximumSquads, bounds.maximumSquads)
+                            || !read_value(bytes, row + kTaskCounterLimit, bounds.counterLimit)) {
+                            return false;
+                        }
+                    }
+                    groups.push_back(decoded);
                 }
-                found = configs.emplace(descriptorKey, std::move(taskCounts)).first;
+                found = configs.emplace(descriptorKey, std::move(groups)).first;
             }
             const auto [slot, inserted] = slots.emplace(descriptor.slotIndex, found->second);
             if (!inserted && slot->second != found->second) {
@@ -277,9 +301,10 @@ bool attach_combat_objective_groups(const topology_inventory::Snapshot& topology
                 return false;
             }
         }
-        for (const auto& [slot, taskCounts] : slots) {
-            for (std::uint32_t group = 0; group < taskCounts.size(); ++group) {
-                output.combatObjectiveGroups.push_back({slot, group, taskCounts[group]});
+        for (const auto& [slot, groups] : slots) {
+            for (format::CombatObjectiveGroup group : groups) {
+                group.slotIndex = slot;
+                output.combatObjectiveGroups.push_back(group);
             }
         }
         return true;

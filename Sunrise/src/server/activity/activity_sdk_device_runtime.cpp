@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -21,6 +22,7 @@
 #include "../bap/runtime.h"
 #include "activity_sdk_actor_sequences.h"
 #include "activity_sdk_device_internal.h"
+#include "activity_sdk_squad_runtime.h"
 #include "host_runtime.h"
 
 namespace sunrise::server::activity::activity_sdk_devices {
@@ -45,6 +47,36 @@ using detail::prepare_slot;
 using detail::prepare_trigger;
 using detail::PreparedDevice;
 using detail::validate_auth;
+
+/**
+ * The combatant's actor is one member of the squad the combatant binds to, so its retirement takes
+ * that squad's single member class and names the combatant, the source a bound actor reports.
+ * @return invalidSlot when the squad's members have no single exact class to retire.
+ */
+[[nodiscard]] Status
+bound_actor_retirement(const sdk::BoundView& view,
+                       std::uint32_t slotRow,
+                       const host::ScriptableTarget& combatant,
+                       state::gameplay::squad_entity_retirement::Eligibility& output) noexcept {
+    output = {};
+    std::uint32_t squadRow = sdk::format::kAbsentIndex;
+    const Status parent = actor_program_source_squad(view, slotRow, squadRow);
+    if (parent != Status::ready) {
+        return parent;
+    }
+    const auto members = sdk::squad_members(*view.catalog, view.catalog->squads()[squadRow]);
+    std::array<std::int32_t,
+               middleware::bap::activity_message::squad_auth::kMaximumRequestedCountLength>
+        counts{};
+    if (members.size() > counts.size()) {
+        return Status::invalidSlot;
+    }
+    // Every member slot asks for one actor, so its classes must agree on the bound actor's.
+    std::fill_n(counts.begin(), members.size(), 1);
+    output = activity_sdk_squads::retirement_eligibility(
+        view, squadRow, std::span(counts).first(members.size()), combatant, true);
+    return output.enabled ? Status::ready : Status::invalidSlot;
+}
 
 } // namespace
 
@@ -188,12 +220,34 @@ Status set_objects_active_reserved(const sdk::BoundView& view,
                                    std::span<const std::uint32_t> extraRows,
                                    std::int32_t entryIndex,
                                    bool active,
+                                   std::optional<std::uint32_t> locationSlotRow,
                                    const host::ScriptableOutputReservation& reservation) noexcept {
     if (extraRows.size() > state::activity::mission::kIntentBurstCapacity) {
         return Status::refused;
     }
+    auth::Type2LaneClientRef location{};
+    if (locationSlotRow.has_value()) {
+        if (view.catalog == nullptr) {
+            return Status::invalidView;
+        }
+        const auto slots = view.catalog->slots();
+        const auto objects = view.catalog->objects();
+        if (*locationSlotRow >= slots.size()) {
+            return Status::invalidSlot;
+        }
+        const sdk::format::Slot& squad = slots[*locationSlotRow];
+        if (squad.slotType != format::kSquadSlotType || squad.objectIndex >= objects.size()
+            || squad.slotIndex
+                   > static_cast<std::uint32_t>((std::numeric_limits<std::int16_t>::max)())
+            || objects[squad.objectIndex].objectKey == 0) {
+            return Status::invalidSlot;
+        }
+        location = {objects[squad.objectIndex].objectKey,
+                    static_cast<std::int8_t>(format::kSquadSlotType),
+                    static_cast<std::int16_t>(squad.slotIndex)};
+    }
     // One push carries the run: the first row that resolves owns the revision and later rows
-    // answer under it. A row the client's state lacks, or from a second object, is dropped.
+    // answer under it. A row with no target, or from a second object, is dropped.
     Status skipped = Status::ready;
     bool head = false;
     host::ScriptableTarget group{};
@@ -215,6 +269,7 @@ Status set_objects_active_reserved(const sdk::BoundView& view,
                                                      prepared.generatedRosterGroup,
                                                      entryIndex,
                                                      active,
+                                                     location,
                                                      prepared.activityClientGeneration,
                                                      head ? nullptr : &reservation,
                                                      head ? &reservation : nullptr);
@@ -364,10 +419,11 @@ Status bind_combatant_to_squad(const sdk::BoundView& view, std::uint32_t slotRow
 }
 
 /** Resolves and queues squad binding for one exact generated combatant slot. */
-Status
-bind_combatant_to_squad_reserved(const sdk::BoundView& view,
-                                 std::uint32_t slotRow,
-                                 const host::ScriptableOutputReservation& reservation) noexcept {
+Status bind_combatant_to_squad_reserved(const sdk::BoundView& view,
+                                        std::uint32_t slotRow,
+                                        const host::ScriptableOutputReservation& reservation,
+                                        bool spawn,
+                                        bool retireOnReturn) noexcept {
     PreparedDevice prepared{};
     const Status status = prepare_combatant(view, slotRow, prepared);
     if (status != Status::ready) {
@@ -376,11 +432,20 @@ bind_combatant_to_squad_reserved(const sdk::BoundView& view,
     if (!prepared.target.stateLocalRoster) {
         return Status::targetUnavailable;
     }
+    state::gameplay::squad_entity_retirement::Eligibility retirement{};
+    if (retireOnReturn) {
+        const Status bound = bound_actor_retirement(view, slotRow, prepared.target, retirement);
+        if (bound != Status::ready) {
+            return bound;
+        }
+    }
     return host::request_state_local_type2_squad_binding(view.binding,
                                                          prepared.target,
                                                          prepared.generatedRosterGroup,
                                                          prepared.activityClientGeneration,
-                                                         &reservation)
+                                                         &reservation,
+                                                         spawn,
+                                                         retirement)
                ? Status::queued
                : Status::refused;
 }

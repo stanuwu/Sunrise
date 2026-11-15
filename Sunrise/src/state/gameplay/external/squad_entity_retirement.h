@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <optional>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -10,6 +11,14 @@ namespace sunrise::state::gameplay::squad_entity_retirement {
 namespace identities = entity_identity;
 using Mask = activity::bubble_authority::EntitySlotMask;
 using CellBubbles = std::array<std::int16_t, 256>;
+/** A spawned actor names its source: its squad, or the combatant that binds it to one. */
+inline constexpr std::uint8_t kSquadSourceType = 1;
+inline constexpr std::uint8_t kCombatantSourceType = 2;
+/**
+ * An authored object entry names its own type-4 slot as its source. The host policy for it: only
+ * an entry whose Auth the host retains, because a mission wrote it, is eligible.
+ */
+inline constexpr std::uint8_t kObjectSourceType = 4;
 /** Native map-prop types exclude actors, players, weapons and interactive objects. */
 inline constexpr std::array<std::uint8_t, 5> kRetirablePropTypes{1, 2, 3, 7, 8};
 /** Retirement eligibility comes from an explicit host policy for an exact class. */
@@ -56,6 +65,9 @@ public:
                                RetirementPlan&) const noexcept;
     [[nodiscard]] bool commit(const RetirementPlan&) noexcept;
     [[nodiscard]] bool pending(const identities::Source&, std::uint8_t bubble) const noexcept;
+    /** @return A bubble other than `excluded` with a pending release of the exact source. */
+    [[nodiscard]] std::optional<std::uint8_t> pending_bubble(const identities::Source&,
+                                                             std::uint8_t excluded) const noexcept;
     void invalidate_source(const identities::Source&, std::uint8_t bubble) noexcept;
     void returned_slots(std::uint64_t session, std::uint64_t generation, const Mask&) noexcept;
     void invalidate_target(std::uint64_t session,

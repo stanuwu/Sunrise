@@ -121,6 +121,8 @@ struct Storage final {
     std::vector<format::ActorAbilityTarget> actorAbilityTargets{};
     std::vector<format::AuthoredSceneEventKey> authoredSceneEventKeys{};
     std::vector<format::IncidentDefinition> incidentDefinitions{};
+    std::vector<format::ActorTemperament> actorTemperaments{};
+    std::vector<format::ActorChannel> actorChannels{};
 
     /** @return Borrowed sections in exact current format order. */
     [[nodiscard]] pack::Tables tables() const noexcept;

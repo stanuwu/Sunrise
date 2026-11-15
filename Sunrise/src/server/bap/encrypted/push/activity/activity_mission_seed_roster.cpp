@@ -9,6 +9,7 @@
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/content/packages/tables/region_reader.h"
+#include "../../../../../state/activity/member_context.h"
 #include "../../../../../state/activity/runtime.h"
 #include "../../../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../../../state/activity_sdk/runtime.h"
@@ -356,31 +357,37 @@ struct SceneSeedRefusal final {
     return true;
 }
 
-} // namespace
+/** Whose selection one seed publication carries, and the lease that records its receipt. */
+struct SeedSource final {
+    MissionSeedLease& lease;
+    /** Activity whose authored world the selection names. */
+    sdk::Selection selection{};
+    /** Generation the lease is pinned to: the publishing link's own. */
+    std::uint64_t leaseGeneration{};
+    /** Region the client holds in that activity's world. */
+    std::int32_t heldRegion{};
+    /** True when the lease adopts the destination's default plan. */
+    bool adopting{};
+    /** True when a public link publishes the mission of the private link beside it. */
+    bool ownerPass{};
+};
 
-/** Adds the destination's generated selected-state roster to the initial publication. */
-MissionSeedRosterResult append_initial_mission_seed(Session& session,
-                                                    Scratch& scratch,
-                                                    message::Snapshot& snapshot,
-                                                    std::uint32_t effectiveRegion,
-                                                    std::uint64_t hostedBubbles,
-                                                    std::size_t canonicalGroupCount,
-                                                    const RefreshReport* refresh) noexcept {
-    MissionSeedLease& lease = session.activityMissionSeed;
-    if (lease.configured && lease.bindingGeneration != session.activity.bindingGeneration) {
-        lease = {};
-    }
-
-    const state::activity::membership::ClientPlacement placement =
-        client_placement(session, refresh);
-    const std::int32_t heldRegion = state::activity::membership::instantiated_region(placement);
-    if (!inherit_mission_seed_locked(session, heldRegion)) {
-        return refuse_seed("shared_selection");
-    }
-    const bool adopting = !lease.configured;
-    if (adopting && session.activityRosterSends != 0) {
-        return MissionSeedRosterResult::inactive;
-    }
+/**
+ * Publishes one lease's selected state into the body.
+ * @param effectiveRegion Region an adopted plan starts in.
+ * @param hostedBubbles One bit per bubble the publishing link carries for this activity.
+ * @param canonicalGroupCount Groups already in the body; the seed reuses an exact one.
+ */
+[[nodiscard]] MissionSeedRosterResult
+publish_selected_seed(const SeedSource& seed,
+                      Scratch& scratch,
+                      message::Snapshot& snapshot,
+                      std::uint32_t effectiveRegion,
+                      std::uint64_t hostedBubbles,
+                      std::size_t canonicalGroupCount) noexcept {
+    MissionSeedLease& lease = seed.lease;
+    const bool adopting = seed.adopting;
+    const std::int32_t heldRegion = seed.heldRegion;
     if (canonicalGroupCount > scratch.rosterGroups.size()
         || canonicalGroupCount != snapshot.roster.groupCount) {
         return refuse_seed("canonical_count");
@@ -388,10 +395,7 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
 
     const sdk::Snapshot catalog = sdk::snapshot();
     sdk::BoundView view{};
-    // This builder already owns one exact lock-held ActivityClient. Global binding multiplicity is
-    // a panel-action concern; it must not stop each peer connection from publishing its roster.
-    const sdk::Selection selection{session.activity.session, 1, session.activity.bindingGeneration};
-    if (catalog == nullptr || sdk::resolve(catalog, selection, view) != sdk::Status::ready) {
+    if (catalog == nullptr || sdk::resolve(catalog, seed.selection, view) != sdk::Status::ready) {
         return refuse_seed("sdk_resolve");
     }
 
@@ -590,6 +594,14 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
         if (transitionPublication && !scenarioWide) {
             continue;
         }
+        // The private link registers a group of every state in its top-level list.
+        bool ownerWide = false;
+        if (seed.ownerPass
+            && sdk::mission_seed_group_is_scenario_wide(
+                view, candidate.objectTag, candidate.registryKey, ownerWide)
+            && ownerWide) {
+            continue;
+        }
         bool priorCandidate = false;
         for (std::size_t prior = 0; prior < source; ++prior) {
             const layouts::RosterGroup& earlier = materialized[prior];
@@ -628,6 +640,9 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
             managedBubbles[managedCount] = groupBubble[source];
             managedKeys[managedCount] = candidate.registryKey;
             managedActive[managedCount++] = groupActive[source];
+        }
+        if (seed.ownerPass && !note_owner_key(scratch, candidate.registryKey)) {
+            return refuse_seed("owner_key_capacity");
         }
         if (canonicalPosition == canonicalGroupCount) {
             if (appendCount >= appendRows.size()) {
@@ -770,7 +785,7 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
     if (adopting) {
         lease = {};
         lease.plan = plan;
-        lease.bindingGeneration = session.activity.bindingGeneration;
+        lease.bindingGeneration = seed.leaseGeneration;
         lease.revision = revision;
         // The peer registers this state's groups now, so a later selection must keep carrying them.
         lease.registeredRegions[0] = plan.effectiveRegion;
@@ -796,6 +811,89 @@ MissionSeedRosterResult append_initial_mission_seed(Session& session,
     }
     lease.fullSetPublished = lease.fullSetPublished || !transitionPublication;
     return MissionSeedRosterResult::ready;
+}
+
+} // namespace
+
+/** Adds the destination's generated selected-state roster to the initial publication. */
+MissionSeedRosterResult append_initial_mission_seed(Session& session,
+                                                    Scratch& scratch,
+                                                    message::Snapshot& snapshot,
+                                                    std::uint32_t effectiveRegion,
+                                                    std::uint64_t hostedBubbles,
+                                                    std::size_t canonicalGroupCount,
+                                                    const RefreshReport* refresh) noexcept {
+    MissionSeedLease& lease = session.activityMissionSeed;
+    if (lease.configured && lease.bindingGeneration != session.activity.bindingGeneration) {
+        lease = {};
+    }
+
+    const state::activity::membership::ClientPlacement placement =
+        client_placement(session, refresh);
+    const std::int32_t heldRegion = state::activity::membership::instantiated_region(placement);
+    if (!inherit_mission_seed_locked(session, heldRegion)) {
+        return refuse_seed("shared_selection");
+    }
+    const bool adopting = !lease.configured;
+    if (adopting && session.activityRosterSends != 0) {
+        return MissionSeedRosterResult::inactive;
+    }
+    // This builder already owns one exact lock-held ActivityClient. Global binding multiplicity is
+    // a panel-action concern; it must not stop each peer connection from publishing its roster.
+    const SeedSource source{
+        .lease = lease,
+        .selection = {session.activity.session, 1, session.activity.bindingGeneration},
+        .leaseGeneration = session.activity.bindingGeneration,
+        .heldRegion = heldRegion,
+        .adopting = adopting};
+    return publish_selected_seed(
+        source, scratch, snapshot, effectiveRegion, hostedBubbles, canonicalGroupCount);
+}
+
+MissionSeedRosterResult append_owner_mission_seed(Session& link,
+                                                  const Session& owner,
+                                                  Scratch& scratch,
+                                                  message::Snapshot& snapshot,
+                                                  std::uint64_t ownerBubbles) noexcept {
+    const MissionSeedLease& selected = owner.activityMissionSeed;
+    // Only a script selection is mission content; an adopted default plan stays private.
+    if (!selected.configured || !selected.scriptSelected
+        || selected.bindingGeneration != owner.activity.bindingGeneration) {
+        return MissionSeedRosterResult::inactive;
+    }
+    const std::uint32_t bubble =
+        selected.plan.effectiveRegion / middleware::content::packages::tables::kSliceSetIndexFactor;
+    if (bubble >= layouts::kBubbleCapacity || ((ownerBubbles >> bubble) & 1U) == 0) {
+        return MissionSeedRosterResult::inactive;
+    }
+    // The plan names regions of the owner's world, so its arrival reads the region the client
+    // reports there.
+    std::int32_t heldRegion = state::activity::membership::kAbsentRegionIndex;
+    {
+        const state::activity::ScopedMemberContext memberScope(owner.activity.session.sessionId,
+                                                               owner.activityMemberKey);
+        heldRegion =
+            state::activity::membership::instantiated_region(client_placement(owner, nullptr));
+    }
+    MissionSeedLease& lease = link.activityPublicOwner.seed;
+    MissionSeedLease next{};
+    if (!prepare_mission_seed_lease(
+            lease, selected.plan, link.activity.bindingGeneration, heldRegion, next)) {
+        return refuse_seed("owner_selection");
+    }
+    lease = next;
+    const SeedSource source{
+        .lease = lease,
+        .selection = {owner.activity.session, 1, owner.activity.bindingGeneration},
+        .leaseGeneration = link.activity.bindingGeneration,
+        .heldRegion = heldRegion,
+        .ownerPass = true};
+    return publish_selected_seed(source,
+                                 scratch,
+                                 snapshot,
+                                 selected.plan.effectiveRegion,
+                                 ownerBubbles,
+                                 snapshot.roster.groupCount);
 }
 
 } // namespace sunrise::server::bap::encrypted::push::activity

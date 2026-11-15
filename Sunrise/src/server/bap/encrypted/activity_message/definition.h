@@ -121,6 +121,8 @@ struct AuthorityAbdicationIngress final {
     middleware::bap::activity_message::entity_slots::EntitySlotMask entities{};
     std::uint64_t sourceGeneration{};
     std::uint8_t bubble{};
+    /** Message 26 gives up a departed bubble's records and leaves its authority as it was. */
+    bool abandoned{};
     bool pending{};
 };
 

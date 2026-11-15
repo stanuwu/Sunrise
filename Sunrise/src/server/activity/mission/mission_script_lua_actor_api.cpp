@@ -20,6 +20,7 @@ namespace {
 constexpr const api::MemberSpec& kActorPath = api::slot_member("play_actor_path");
 constexpr const api::MemberSpec& kActorAction = api::slot_member("play_actor_action");
 constexpr const api::MemberSpec& kRetireActor = api::slot_member("retire_actor");
+constexpr const api::MemberSpec& kDeliverPassengers = api::slot_member("deliver_passengers");
 constexpr const api::MemberSpec& kBindCombatant = api::slot_member("bind_combatant_to_squad");
 constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
 
@@ -58,6 +59,16 @@ constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
            && (definition.flags & format::kSlotSchemaJoinExact) != 0;
 }
 
+/** @return True for an exact authored type-58 path of the actor's own object and registry. */
+bool exact_actor_path(const SlotDefinition& path, const SlotDefinition& actor) noexcept {
+    namespace combatant = middleware::bap::activity_message::combatant_auth;
+    return path.slotType == combatant::kPathSlotType
+           && path.componentClass == combatant::kAbilityPointComponentClass
+           && (path.flags & format::kSlotSchemaJoinExact) != 0 && actor.objectTag == path.objectTag
+           && actor.registryKey == path.registryKey
+           && path.slotIndex <= auth_fields::kMaximumClientRefIndex;
+}
+
 /** Follows an authored path while native state owns actor creation and program revisions. */
 [[nodiscard]] int slot_play_actor_path(lua_State* state) {
     namespace combatant = middleware::bap::activity_message::combatant_auth;
@@ -67,11 +78,7 @@ constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
         state, required_key(kActorPath, "path", api::ValueKind::handle), kSlotMetatable);
     SlotDefinition actor{}, path{};
     if (!current_slot(state, *handle, actor) || !exact_combatant_slot(actor)
-        || !current_slot(state, reference, path) || path.slotType != combatant::kPathSlotType
-        || path.componentClass != combatant::kAbilityPointComponentClass
-        || (path.flags & format::kSlotSchemaJoinExact) == 0 || actor.objectTag != path.objectTag
-        || actor.registryKey != path.registryKey
-        || path.slotIndex > auth_fields::kMaximumClientRefIndex) {
+        || !current_slot(state, reference, path) || !exact_actor_path(path, actor)) {
         return luaL_error(state, "actor path requires an exact same-registry authored path");
     }
     const Impl* impl = impl_from_state(state);
@@ -122,6 +129,84 @@ constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
     return slot_run_atoms(state);
 }
 
+std::size_t authored_point_count(lua_State* state, const SlotDefinition& slot) {
+    const Impl* const impl = impl_from_state(state);
+    if (impl == nullptr || impl->definitions.resolveActorAbilityTarget == nullptr) {
+        return 0;
+    }
+    // A point is a one-byte parameter, so no slot names more than this many.
+    constexpr std::size_t kPointCapacity = std::size_t{1} << 8U;
+    std::size_t points = 0;
+    while (points < kPointCapacity
+           && impl->definitions.resolveActorAbilityTarget(
+               impl->definitions.context, slot.nativeRow, static_cast<std::uint32_t>(points))) {
+        ++points;
+    }
+    return points;
+}
+
+/** @return True for an exact authored squad on the delivering actor's own object. */
+[[nodiscard]] bool exact_passenger_squad(const SlotDefinition& squad,
+                                         const SlotDefinition& actor) noexcept {
+    return squad.slotType == format::kSquadSlotType
+           && squad.componentClass == format::kSquadComponentClass
+           && squad.authSchema == middleware::bap::activity_message::squad_auth::kSchema
+           && (squad.flags & format::kSlotSchemaJoinExact) != 0
+           && squad.objectTag == actor.objectTag && squad.registryKey == actor.registryKey
+           && squad.slotIndex <= auth_fields::kMaximumClientRefIndex;
+}
+
+/** Hands reserved squads to the actor's native passenger manifest; the Host owns its counters. */
+[[nodiscard]] int slot_deliver_passengers(lua_State* state) {
+    namespace combatant = middleware::bap::activity_message::combatant_auth;
+    const auto* handle = static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    refuse_unknown_arguments(state, kDeliverPassengers);
+    SlotDefinition actor{};
+    if (!current_slot(state, *handle, actor) || !exact_combatant_slot(actor)) {
+        return luaL_error(state, "passenger delivery requires an exact actor slot");
+    }
+    lua_getfield(state, 2, required_key(kDeliverPassengers, "squads", api::ValueKind::list));
+    luaL_checktype(state, -1, LUA_TTABLE);
+    const std::size_t count = lua_rawlen(state, -1);
+    if (count == 0 || count > combatant::kMaximumManifestSquads) {
+        return luaL_error(state,
+                          "squads must name one to %d squads",
+                          static_cast<int>(combatant::kMaximumManifestSquads));
+    }
+    std::array<combatant::SquadReference, combatant::kMaximumManifestSquads> squads{};
+    for (std::size_t index = 0; index < count; ++index) {
+        lua_rawgeti(state, -1, static_cast<lua_Integer>(index + 1));
+        const auto* const squadHandle =
+            static_cast<const SlotHandle*>(luaL_checkudata(state, -1, kSlotMetatable));
+        SlotDefinition squad{};
+        if (!current_slot(state, *squadHandle, squad) || !exact_passenger_squad(squad, actor)) {
+            return luaL_error(state, "squads must be exact squads of the actor's own object");
+        }
+        squads[index] = {squad.registryKey, static_cast<std::uint16_t>(squad.slotIndex)};
+        lua_pop(state, 1);
+    }
+    lua_pop(state, 1);
+    // The encoder needs positive placeholders; the Host assigns the transported counters.
+    constexpr std::uint32_t kTemplateCounter = 1;
+    std::array<std::byte, combatant::kDeliveryMaximumBytes> body{};
+    std::size_t written = 0;
+    std::size_t bits = 0;
+    if (!combatant::encode_delivery(kTemplateCounter,
+                                    kTemplateCounter,
+                                    std::span(squads).first(count),
+                                    body,
+                                    written,
+                                    bits)) {
+        return luaL_error(state, "squads must not repeat");
+    }
+    return queue_slot_auth(state,
+                           actor,
+                           combatant::kSchema,
+                           bits,
+                           std::span(body).first(written),
+                           IntentKind::deliverPassengers);
+}
+
 /** Retires one named actor without accepting a script-owned generation. */
 [[nodiscard]] int slot_retire_actor(lua_State* state) {
     const auto* handle = static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
@@ -135,8 +220,8 @@ constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
 }
 
 /**
- * Arms one exact combatant for its scene's squad member spawn.
- * @param state Lua call holding the slot and empty argument table.
+ * Arms one exact combatant for its scene's squad member spawn; with spawn, in a new actor life.
+ * @param state Lua call holding the slot and argument table.
  * @return One request handle after the intent is retained.
  */
 [[nodiscard]] int slot_bind_combatant_to_squad(lua_State* state) {
@@ -151,6 +236,9 @@ constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
     Intent intent{};
     intent.kind = IntentKind::bindCombatantToSquad;
     intent.firstRow = definition.nativeRow;
+    intent.active = optional_boolean_argument(state, boolean_option(kBindCombatant, "spawn"));
+    intent.squadRetireOnReturn =
+        optional_boolean_argument(state, boolean_option(kBindCombatant, "retire_on_return"));
     return queue_intent(state, frame, intent);
 }
 

@@ -134,10 +134,11 @@ diagnostic_status(const receipts::Framed& framed, bool incident) noexcept;
                                            bool& hasTransaction) noexcept;
 
 /**
- * Retains one exact msg-33 abdication until its authenticated frame commits.
+ * Retains one exact msg-33 abdication or msg-26 abandonment until its authenticated frame commits.
  * @param binding Exact ActivityClient generation owned by this link.
  * @param rosterDecode Last complete msg-5 identity map delivered on this same link.
- * @param adapter Ingress adapter the communication route named for this message type.
+ * @param adapter Ingress adapter the communication route named for this message type; the
+ * abandon adapter selects msg 26.
  * @param request Validated owned svc8 envelope.
  * @param plan Cleared, then receives the released mask and its bubble.
  * @param hasTransaction Receives true only when the abdication stages a transaction.

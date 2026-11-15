@@ -4,14 +4,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <span>
 
 #include "../../../middleware/bap/activity_message/damage_monitor_auth.h"
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
+#include "../../../middleware/bap/activity_message/mission_effect_auth.h"
+#include "../../../middleware/bap/activity_message/scene_events_auth.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../state/activity_sdk/scene_triggers.h"
 #include "../../gameplay/squad_entity_retirement.h"
 #include "../activity_sdk_mission_runtime.h"
+#include "mission_script_region.h"
 #include "mission_script_runtime_internal.h"
 #include "mission_script_runtime_objective.h"
 #include "mission_script_slot_index.h"
@@ -21,10 +25,12 @@
 namespace sunrise::server::activity::mission {
 namespace {
 
-/** Root ordinal of the squad removal flag. The rest of the root is inert on this build. */
+/** Root ordinal of the squad removal flag. */
 constexpr std::uint16_t kSquadRemovalOrdinal = 8;
 /** Root ordinal 0 echoes the spawn generation the squad's placement Auth carries. */
 constexpr std::uint16_t kSquadSpawnGenerationOrdinal = 0;
+/** Root ordinal of the squad's alert level, which its members' threat levels set. */
+constexpr std::uint16_t kSquadAlertLevelOrdinal = 7;
 /** Root ordinals of the type-20 damage Sense body: health, shield, then the echoed revision. */
 constexpr std::uint16_t kDamageHealthOrdinal = 0;
 constexpr std::uint16_t kDamageShieldOrdinal = 1;
@@ -131,6 +137,19 @@ template <typename Key>
     return spare;
 }
 
+/** @return True when one sensed object has a complete authored occurrence in one region. */
+[[nodiscard]] bool sensed_in_region(const state::build_data::scriptables::Snapshot& world,
+                                    const host::SenseObservationKey& key,
+                                    std::int32_t region) noexcept {
+    return std::any_of(world.objects.begin(),
+                       world.objects.end(),
+                       [&](const state::build_data::scriptables::Object& object) noexcept {
+                           return object.registryKey == key.registryKey
+                                  && object.objectTag == key.objectTag && object.complete
+                                  && occurrence_in_region(world, object, region);
+                       });
+}
+
 /**
  * Raises one triggerState event for a report its tracker does not drop. The event only informs;
  * entered and exited follow the level alone.
@@ -200,13 +219,17 @@ host::Event shared_edge_event(const RuntimeInstance& instance,
  * first time only records its level, because a first observation is not an entry.
  */
 void push_trigger_edges(RuntimeInstance& instance,
-                        const host::SenseObservationSnapshot& sense) noexcept {
+                        const host::SenseObservationSnapshot& sense,
+                        std::int32_t region) noexcept {
     namespace trigger = trigger_observation;
+    const state::build_data::scriptables::Snapshot* const world = instance.worldView.snapshot();
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
         if (observation.key.slotType != format::kOccupancySlotType
             || observation.valueCount < trigger::kValueCount
-            || observation.firstValue + trigger::kValueCount > sense.valueCount) {
+            || observation.firstValue + trigger::kValueCount > sense.valueCount
+            || (region != kAnyRegion
+                && (world == nullptr || !sensed_in_region(*world, observation.key, region)))) {
             continue;
         }
         const std::span<const sense_values::DecodedValue> body(
@@ -294,6 +317,7 @@ void push_actor_path_edges(RuntimeInstance& instance,
         ActorPathObservation* const slot =
             find_slot_row(instance.actorPathObservations, observation.key);
         if (slot == nullptr) {
+            log_line(core::log::Level::warn, &instance, "actor_path", "watch_capacity");
             continue;
         }
         claim_row(*slot, sense.sourceGeneration, true);
@@ -310,6 +334,14 @@ void push_actor_path_edges(RuntimeInstance& instance,
         event.actorDeliveryState = slot->level.deliveryState;
         event.actorDeliveryKnown = (slot->level.seen & kActorSeenDelivery) == kActorSeenDelivery;
         event.actorSuppressed = slot->level.suppressed;
+        event.actorProgramRequestKey = staged_request_key(
+            instance, observation.key, StagedCounter::actorProgram, slot->level.revision);
+        if (event.actorDeliveryKnown) {
+            event.actorDeliveryRequestKey = staged_request_key(instance,
+                                                               observation.key,
+                                                               StagedCounter::actorDelivery,
+                                                               slot->level.deliveryRevision);
+        }
         std::array<char, 160> details{};
         const int written =
             std::snprintf(details.data(),
@@ -538,6 +570,100 @@ void push_ghost_edges(RuntimeInstance& instance,
     publish_ghost_levels(instance);
 }
 
+/** Pairs a Host-owned revision with the script request that staged it, in a fixed table. */
+void record_staged_request(RuntimeInstance& instance,
+                           const host::ScriptableTarget& target,
+                           StagedCounter counter,
+                           std::uint64_t revision,
+                           std::uint64_t requestKey) noexcept {
+    StagedRequests* row = nullptr;
+    StagedRequests* spare = nullptr;
+    for (StagedRequests& candidate : instance.stagedRequests) {
+        if (candidate.used && candidate.registryKey == target.registryKey
+            && candidate.objectTag == target.objectTag && candidate.slotIndex == target.slotIndex
+            && candidate.counter == counter) {
+            row = &candidate;
+            break;
+        }
+        if (!candidate.used && spare == nullptr) {
+            spare = &candidate;
+        }
+    }
+    if (row == nullptr && spare != nullptr) {
+        *spare = {};
+        spare->registryKey = target.registryKey;
+        spare->objectTag = target.objectTag;
+        spare->slotIndex = target.slotIndex;
+        spare->counter = counter;
+        spare->used = true;
+        row = spare;
+    }
+    if (row == nullptr) {
+        log_line(core::log::Level::warn, &instance, "staged_request", "capacity");
+        return;
+    }
+    if (row->count == row->revisions.size()) {
+        std::shift_left(row->revisions.begin(), row->revisions.end(), 1);
+        std::shift_left(row->requestKeys.begin(), row->requestKeys.end(), 1);
+        --row->count;
+    }
+    row->revisions[row->count] = revision;
+    row->requestKeys[row->count] = requestKey;
+    ++row->count;
+}
+
+std::uint64_t staged_request_key(const RuntimeInstance& instance,
+                                 const host::SenseObservationKey& key,
+                                 StagedCounter counter,
+                                 std::int64_t revision) noexcept {
+    for (const StagedRequests& requests : instance.stagedRequests) {
+        if (!requests.used || requests.registryKey != key.registryKey
+            || requests.objectTag != key.objectTag || requests.slotIndex != key.slotIndex
+            || requests.counter != counter) {
+            continue;
+        }
+        for (std::uint8_t index = 0; index < requests.count; ++index) {
+            if (revision > 0 && requests.revisions[index] == static_cast<std::uint64_t>(revision)) {
+                return requests.requestKeys[index];
+            }
+        }
+    }
+    return 0;
+}
+
+/**
+ * Raises one event per hop-on sensor whose applied request or attachment changed.
+ * Only the link that simulates the sensor reports it.
+ */
+void push_effect_edges(RuntimeInstance& instance,
+                       const host::SenseObservationSnapshot& sense) noexcept {
+    namespace effect = middleware::bap::activity_message::mission_effect;
+    for (std::size_t index = 0; index < sense.observationCount; ++index) {
+        const host::SenseObservation& observation = sense.observations[index];
+        if (!observation_of(observation, sense, effect::kSlotType, effect::kSenseSchema)
+            || !admitted_report(instance, observation.key, sense.sourceGeneration)) {
+            continue;
+        }
+        EffectObservation* const slot = find_slot_row(instance.effectObservations, observation.key);
+        if (slot == nullptr) {
+            log_line(core::log::Level::warn, &instance, "hop_on", "watch_capacity");
+            continue;
+        }
+        claim_row(*slot, sense.sourceGeneration, true);
+        if (!update_effect_level(
+                slot->level, observation_values(observation, sense), observation.key.schemaRow)) {
+            continue;
+        }
+        host::Event event = shared_edge_event(instance, observation);
+        event.kind = host::EventKind::hopOnState;
+        event.hopOnRevision = slot->level.revision;
+        event.hopOnAttached = slot->level.attached;
+        event.hopOnRequestKey = staged_request_key(
+            instance, observation.key, StagedCounter::hopOn, slot->level.revision);
+        push_script_event(instance, event);
+    }
+}
+
 /**
  * Publishes each Ghost link's levels from one member's history, never mixing two: the member whose
  * client simulates the link, else the route's member when that member is not present.
@@ -588,6 +714,7 @@ namespace {
 struct SquadLevels final {
     std::array<std::int32_t, host::kSquadSlotCapacity> counts{};
     std::int32_t alive{};
+    std::int32_t alertLevel{};
     std::uint8_t countLength{};
     bool removal{};
     bool costsChanged{};
@@ -607,15 +734,23 @@ struct SquadLevels final {
     levels.alive = row.aliveCount;
     levels.hasAlive = read_squad_alive(body, root, levels.alive);
     levels.removal = sense_flag(body, root, kSquadRemovalOrdinal);
+    levels.alertLevel = row.alertLevel;
+    const sense_values::DecodedValue* const alert =
+        sense_value(body, root, kSquadAlertLevelOrdinal);
+    if (alert != nullptr && alert->present) {
+        levels.alertLevel = static_cast<std::int32_t>(alert->signedValue);
+    }
     levels.counts = row.slotCounts;
     levels.countLength = row.slotCountLength;
     std::array<std::int32_t, host::kSquadSlotCapacity> incomingCounts{};
-    const auto incomingLength = read_squad_created_counts(body, incomingCounts);
+    const auto incomingLength = read_squad_lost_counts(body, incomingCounts);
     if (incomingLength != 0) {
         levels.counts = incomingCounts;
         levels.countLength = incomingLength;
     }
-    levels.reported = levels.hasAlive || levels.costsChanged || incomingLength != 0;
+    // The alert level can move without any other level, so its change alone is a report.
+    levels.reported = levels.hasAlive || levels.costsChanged || incomingLength != 0
+                      || levels.alertLevel != row.alertLevel;
     return levels;
 }
 
@@ -640,6 +775,7 @@ void retain_squad_identity(SquadObservation& row,
 
 void store_squad_levels(SquadObservation& row, const SquadLevels& levels) noexcept {
     row.aliveCount = levels.alive;
+    row.alertLevel = levels.alertLevel;
     row.removalFlag = levels.removal;
     row.slotCounts = levels.counts;
     row.slotCountLength = levels.countLength;
@@ -650,6 +786,7 @@ void store_squad_levels(SquadObservation& row, const SquadLevels& levels) noexce
     return {.objectiveCosts = row.objectiveCosts,
             .slotCounts = row.slotCounts,
             .aliveCount = row.aliveCount,
+            .alertLevel = row.alertLevel,
             .slotCountLength = row.slotCountLength,
             .removalFlag = row.removalFlag};
 }
@@ -824,13 +961,37 @@ void log_squad_takeover(const RuntimeInstance& instance,
     return true;
 }
 
+/**
+ * @return The alive count one link reports after this body, or null for an invalid count. The
+ * client sends the count only when it differs from the last one it sent, starting from zero, so an
+ * omitted count is the link's last level.
+ */
+[[nodiscard]] std::optional<std::int32_t>
+link_alive_count(RuntimeInstance& instance,
+                 const host::SenseObservation& observation,
+                 std::span<const sense_values::DecodedValue> body,
+                 std::uint64_t sourceGeneration) noexcept {
+    const SquadObservation* levels = retained_squad(instance, observation.key);
+    if (levels == nullptr || levels->sourceGeneration != sourceGeneration) {
+        levels = find_squad_shadow(instance, observation.key, sourceGeneration, false);
+    }
+    std::int32_t alive = levels != nullptr ? levels->aliveCount : 0;
+    const sense_values::DecodedValue* const reported =
+        sense_value(body, observation.key.schemaRow, kSquadAliveOrdinal);
+    if (reported != nullptr && reported->present
+        && !read_squad_alive(body, observation.key.schemaRow, alive)) {
+        return std::nullopt;
+    }
+    return alive;
+}
+
 } // namespace
 
 /**
  * Raises the squad events derived from one msg 6 body.
  * The client publishes levels, so a first sighting of a source only records them. After that a
- * slot count that rose is the only spawn signal, and the alive count falling is the only death
- * signal. Only the link that simulates the squad reports its levels; a replica's counts would
+ * slot count that rose is a member lost, and the alive count falling is a member leaving its task
+ * points. Only the link that simulates the squad reports its levels; a replica's counts would
  * interleave with them, so they are kept apart as that link's shadow.
  */
 void push_squad_edges(RuntimeInstance& instance,
@@ -862,7 +1023,9 @@ void push_squad_edges(RuntimeInstance& instance,
             sense.sourceGeneration,
             {observation.key.registryKey, observation.key.slotIndex, observation.key.slotType},
             live_links(instance));
-        if (!observe_population(instance, observation, body, moved)) {
+        const std::optional<std::int32_t> linkAlive =
+            link_alive_count(instance, observation, body, sense.sourceGeneration);
+        if (!observe_population(instance, observation, body, linkAlive, moved)) {
             return;
         }
         // Accepting the population can start a new attempt, which clears every row.
@@ -885,6 +1048,7 @@ void push_squad_edges(RuntimeInstance& instance,
         const std::int32_t previousAlive = first ? 0 : published.aliveCount;
         const bool changed = first || squad->objectiveCosts != published.objectiveCosts
                              || published.aliveCount != levels.alive
+                             || published.alertLevel != levels.alertLevel
                              || published.removalFlag != levels.removal
                              || published.slotCountLength != levels.countLength
                              || published.slotCounts != levels.counts;
@@ -900,6 +1064,7 @@ void push_squad_edges(RuntimeInstance& instance,
         state.squadPreviousAliveCount = previousAlive;
         state.squadPopulationAvailable = squad->populationKnown;
         state.squadRemovalFlag = levels.removal;
+        state.squadAlertLevel = levels.alertLevel;
         state.squadSlotCounts = levels.counts;
         state.squadSlotCountLength = levels.countLength;
         state.initialObservation = first;
@@ -912,20 +1077,22 @@ void push_squad_edges(RuntimeInstance& instance,
         }
 
         // A replacement source starts from its own levels, so only a rise after the first sighting
-        // is a spawn.
+        // raises an edge. A slot's count is the client's lost counter: tearing down one of the
+        // slot's actors raises it and a new spawn generation clears it.
         for (std::uint8_t slot = 0; !first && slot < levels.countLength; ++slot) {
             const std::int32_t previous =
                 slot < published.slotCountLength ? published.slotCounts[slot] : 0;
             if (levels.counts[slot] <= previous) {
                 continue;
             }
-            host::Event spawned = squad_edge_event(instance, observation, *squad);
-            spawned.squadSlotOrdinal = slot;
-            spawned.squadSlotValue = levels.counts[slot];
-            spawned.squadPreviousSlotValue = previous;
-            spawned.kind = host::EventKind::entitySpawned;
+            host::Event lost = squad_edge_event(instance, observation, *squad);
+            lost.squadSlotOrdinal = slot;
+            lost.squadSlotValue = levels.counts[slot];
+            lost.squadPreviousSlotValue = previous;
+            lost.squadRemovalFlag = levels.removal;
+            lost.kind = host::EventKind::squadMemberLost;
             if (instance.programStatus == ProgramStatus::loaded) {
-                push_script_event(instance, spawned);
+                push_script_event(instance, lost);
             }
         }
         if (!first && levels.alive < published.aliveCount) {
@@ -947,6 +1114,7 @@ void push_squad_edges(RuntimeInstance& instance,
 bool reads_pins(const host::SenseObservationSnapshot& sense) noexcept {
     namespace auth = middleware::bap::activity_message::scriptable_auth;
     namespace damage = middleware::bap::activity_message::damage_monitor;
+    namespace effect = middleware::bap::activity_message::mission_effect;
     namespace ghost = middleware::bap::activity_message::ghost_link;
     static constexpr std::array kSharedSlotTypes{
         static_cast<std::uint32_t>(format::kSquadSlotType),
@@ -958,6 +1126,7 @@ bool reads_pins(const host::SenseObservationSnapshot& sense) noexcept {
         static_cast<std::uint32_t>(format::kObjectiveSlotType),
         static_cast<std::uint32_t>(format::kObjectSlotType),
         static_cast<std::uint32_t>(ghost::kSlotType),
+        static_cast<std::uint32_t>(effect::kSlotType),
     };
     const std::size_t count = (std::min)(sense.observationCount, sense.observations.size());
     return std::any_of(sense.observations.begin(),
@@ -988,21 +1157,18 @@ scene_gate_rows(const RuntimeInstance& instance, const host::SenseObservationKey
     return sdk::scene_gates(instance.view.catalog->authored_scene_event_keys(), found.nativeRow);
 }
 
-/**
- * Records the output keys a scene body lists, raising one event per key new to this run.
- * Any root value equal to an output key counts; the keys are name hashes, so no other field
- * carries one.
- */
+/** Records a scene body's exported keys, raising one event per key new to this run. */
 void record_scene_outputs(RuntimeInstance& instance,
                           const host::SenseObservation& observation,
                           std::span<const sense_values::DecodedValue> body,
-                          std::uint32_t root,
                           SceneObservation& scene,
                           bool raise) noexcept {
+    namespace scene_events = middleware::bap::activity_message::scene_events;
     const auto gates = scene_gate_rows(instance, observation.key);
     for (const sense_values::DecodedValue& value : body) {
         const auto key = static_cast<std::uint32_t>(value.unsignedValue);
-        if (value.schemaRow != root || !value.present
+        if (value.schemaRow != scene_events::kSenseKeyListSchema
+            || value.fieldOrdinal != scene_events::kSenseKeyOrdinal || !value.present
             || std::find(scene.outputs.begin(), scene.outputs.begin() + scene.outputCount, key)
                    != scene.outputs.begin() + scene.outputCount
             || std::none_of(gates.begin(), gates.end(), [key](const auto& gate) {
@@ -1079,7 +1245,7 @@ void push_scene_edges(RuntimeInstance& instance,
             spare->completed = completed;
             spare->token = sense_number(body, root, kSceneTokenOrdinal);
             spare->used = true;
-            record_scene_outputs(instance, observation, body, root, *spare, false);
+            record_scene_outputs(instance, observation, body, *spare, false);
             continue;
         }
         // A new activation token is a new run of the scene, whose outputs start empty.
@@ -1088,7 +1254,7 @@ void push_scene_edges(RuntimeInstance& instance,
             slot->token = static_cast<std::int32_t>(token->signedValue);
             slot->outputCount = 0;
         }
-        record_scene_outputs(instance, observation, body, root, *slot, true);
+        record_scene_outputs(instance, observation, body, *slot, true);
         if (!hasCompletion) {
             continue;
         }

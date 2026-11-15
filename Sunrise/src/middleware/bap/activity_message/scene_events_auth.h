@@ -6,6 +6,7 @@
 
 #include "../../content/packages/schema/generated/tag_classes_808062.h"
 #include "../../content/packages/schema/generated/tag_classes_808063.h"
+#include "../../content/packages/schema/generated/tag_classes_808094.h"
 #include "../../encoding/bit_writer.h"
 #include "auth_fields.h"
 #include "sensor_auth_update.h"
@@ -37,6 +38,10 @@ inline constexpr std::size_t kMaximumBytes =
     (kHeaderBits + kEventKeyWidth * kMaximumEvents + 7) / 8;
 /** All-one bits is not an event key. */
 inline constexpr std::uint32_t kInvalidEventKey = 0xFFFFFFFFU;
+/** The scene's Sense lists its exported event keys as elements of this u32 key list. */
+inline constexpr std::uint32_t kSenseKeyListSchema = generated::C808094df::kClass;
+/** Field of one key-list element that holds the key. */
+inline constexpr std::uint16_t kSenseKeyOrdinal = 0;
 
 /**
  * Encodes the scene body.

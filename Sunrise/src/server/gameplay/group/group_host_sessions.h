@@ -18,6 +18,19 @@ inline constexpr std::int32_t kUnknownRegion = -1;
  */
 inline constexpr std::size_t kHostSessionCapacity = core::network_capacity::kHostPorts;
 
+/** How one region's host row is shared. */
+enum class RegionHost : std::uint8_t {
+    /** The source's own row: a private region or the private Bubble Host. */
+    source,
+    /** An authored public region; compatible launches share one row. */
+    sharedPublic,
+    /**
+     * A public region the source's own mission content lies in. A shared row would put other
+     * fireteams on the same bubble authority and Sense, so the row is the source's alone.
+     */
+    missionPublic,
+};
+
 /** Immutable identity of one activity-host generation and its original destination source. */
 struct HostSessionBinding {
     state::activity::SessionBinding source{};
@@ -59,14 +72,14 @@ struct HostSessionRow {
  * @param source Exact source activity. A public region's target runs its free-roam activity.
  * @param regionIndex Concrete advertised region.
  * @param output Cleared, then receives the pending or ready row generation.
- * @param publicRegion True only when the installed destination authors this region as public.
+ * @param host How the row is shared; public rows run the destination's free-roam activity.
  * @return Current state of the requested row.
  */
 [[nodiscard]] HostSessionState request_host_session(std::uint64_t groupSessionId,
                                                     const state::activity::SessionBinding& source,
                                                     std::int32_t regionIndex,
                                                     HostSessionBinding& output,
-                                                    bool publicRegion = false) noexcept;
+                                                    RegionHost host = RegionHost::source) noexcept;
 
 /** Copies live sources that advertised this public host; each join still validates its identity. */
 void host_session_sources(std::uint64_t generation,

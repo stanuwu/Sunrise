@@ -38,6 +38,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "entitySpawned";
     case host::EventKind::entityDied:
         return "entityDied";
+    case host::EventKind::squadMemberLost:
+        return "squadMemberLost";
     case host::EventKind::sceneFinished:
         return "sceneFinished";
     case host::EventKind::sceneOutput:
@@ -70,6 +72,8 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "objectState";
     case host::EventKind::ghostLinkState:
         return "ghostLinkState";
+    case host::EventKind::hopOnState:
+        return "hopOnState";
     case host::EventKind::clientMessageReceived:
         return "clientMessageReceived";
     case host::EventKind::authStateCommitted:

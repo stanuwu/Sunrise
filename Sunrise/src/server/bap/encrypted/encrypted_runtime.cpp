@@ -165,13 +165,24 @@ void submit_committed_authority_abdication(Session& session,
         || plan.sessionId != session.activity.session.sessionId) {
         return;
     }
-    state::activity::bubble_authority::record_abdication(
-        plan.sessionId, plan.authorityAbdication.bubble, &plan.authorityAbdication.entities);
+    if (!plan.authorityAbdication.abandoned) {
+        state::activity::bubble_authority::record_abdication(
+            plan.sessionId, plan.authorityAbdication.bubble, &plan.authorityAbdication.entities);
+        if (session.activityMissionSeed.bubbleHandoff.acknowledge(
+                session.activity.bindingGeneration, plan.authorityAbdication.bubble)) {
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::info,
+                              "ev=activity stage=bubble_handoff result=acknowledged bubble=%u",
+                              static_cast<unsigned>(plan.authorityAbdication.bubble));
+        }
+    }
+    // Both messages give the client's records up, so either one feeds the retirement capture.
     server::gameplay::squad_entity_retirement::observe_abdication(
         session.activity.session,
         session.activity.bindingGeneration,
         plan.authorityAbdication.bubble,
-        plan.authorityAbdication.entities);
+        plan.authorityAbdication.entities,
+        plan.authorityAbdication.abandoned);
 }
 
 /** Applies one reset acknowledgement only after its authenticated service frame commits. */

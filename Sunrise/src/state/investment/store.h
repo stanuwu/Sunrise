@@ -87,6 +87,10 @@ void shutdown() noexcept;
 [[nodiscard]] bool read_settings(account::settings::AccountSettings& output) noexcept;
 [[nodiscard]] bool write_settings(const account::settings::AccountSettings& value) noexcept;
 void set_sign_in_time(std::uint64_t seconds) noexcept;
+/** Records the activity the selected character is in. @return True when it changed. */
+[[nodiscard]] bool enter_activity(std::uint16_t activityIndex) noexcept;
+/** Returns the character to orbit if it is still in this activity. @return True on a change. */
+[[nodiscard]] bool leave_activity(std::uint16_t activityIndex) noexcept;
 [[nodiscard]] bool read_family5(Family5State& output) noexcept;
 [[nodiscard]] bool write_family5(const Family5State& value) noexcept;
 [[nodiscard]] bool read_unlocks(unlocks::Table& output, int characterSlot = -1) noexcept;

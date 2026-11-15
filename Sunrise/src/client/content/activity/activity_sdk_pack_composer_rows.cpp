@@ -257,7 +257,9 @@ append_binding_locators(std::span<const activity_inventory::PackageLocator> sour
         target.senseSchema = linked.senseSchema;
         target.authSchema = linked.authSchema;
         target.flags = linked.flags;
-        target.reserved = linked.dialogueCueCount;
+        target.reserved = (linked.flags & format::kSlotObjectChannelsExact) != 0
+                              ? linked.objectChannelCount
+                              : linked.dialogueCueCount;
         target.aliases = policy.slotAliases[index];
         target.capabilities = ranges.slotCapabilities[index];
         if (!link_text(linker, source.id, target.id) || !link_text(linker, linked.name, target.name)
@@ -456,6 +458,8 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
     output.actorSequenceBindings = actorRsat.sequenceBindings;
     output.actorAbilities = actorRsat.actorAbilities;
     output.actorAbilityTargets = actorRsat.actorAbilityTargets;
+    output.actorTemperaments = actorRsat.actorTemperaments;
+    output.actorChannels = actorRsat.actorChannels;
     output.actorSequenceEntries.reserve(actorRsat.sequenceEntries.size());
     for (const auto& input : actorRsat.sequenceEntries) {
         auto row = input.row;

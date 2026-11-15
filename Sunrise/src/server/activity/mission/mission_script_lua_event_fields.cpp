@@ -115,8 +115,12 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "slot.set_channel";
     case ActionKind::runActorProgram:
         return "slot.run_atoms";
+    case ActionKind::setActorControls:
+        return "slot.set_actor_controls";
     case ActionKind::retireActor:
         return "slot.retire_actor";
+    case ActionKind::deliverPassengers:
+        return "slot.deliver_passengers";
     case ActionKind::setInteractableObject:
         return "slot.set_interactable_object";
     case ActionKind::setGhostLink:
@@ -127,6 +131,8 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "slot.assign_combat_objective";
     case ActionKind::setLifetime:
         return "lifetime.set";
+    case ActionKind::setActivityFlag:
+        return "mission.set_activity_flag";
     case ActionKind::restartCheckpoint:
         return "mission.restart_checkpoint";
     case ActionKind::fireTrigger:
@@ -150,7 +156,10 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "mission.send_incident";
     case ActionKind::selectMissionState:
         return "mission.select_state";
+    case ActionKind::setObjectChannels:
+        return "slot.set_object_channels";
     case ActionKind::applySlotAuth:
+    case ActionKind::setHopOn:
     case ActionKind::bindCombatantToSquad:
     case ActionKind::actorCommand:
         return {};
@@ -388,6 +397,7 @@ constexpr EventBinding kSquadState[]{
     {"initial_observation", nullptr, &boolean_field<&E::initialObservation>},
     {"population_available", nullptr, &boolean_field<&E::squadPopulationAvailable>},
     {"objective_revision", nullptr, &integer_field<&E::squadObjectiveRevision>},
+    {"alert_level", nullptr, &integer_field<&E::squadAlertLevel>},
     {"task_costs",
      nullptr,
      [](lua_State* state, const E& event) {
@@ -404,6 +414,11 @@ constexpr EventBinding kEntitySpawned[]{
     {"member_slot", nullptr, &integer_field<&E::squadSlotOrdinal>},
     {"count", nullptr, &integer_field<&E::squadSlotValue>},
     {"previous_count", nullptr, &integer_field<&E::squadPreviousSlotValue>},
+};
+constexpr EventBinding kSquadMemberLoss[]{
+    {"member_slot", nullptr, &integer_field<&E::squadSlotOrdinal>},
+    {"lost_count", nullptr, &integer_field<&E::squadSlotValue>},
+    {"previous_lost_count", nullptr, &integer_field<&E::squadPreviousSlotValue>},
 };
 constexpr EventBinding kSceneFinished[]{
     {"activation_token", nullptr, &integer_field<&E::sceneActivationToken>}};
@@ -450,6 +465,24 @@ constexpr EventBinding kActorPath[]{
      &present_integer<&E::actorDeliveryRevision, &E::actorDeliveryKnown>},
     {"delivery_state", nullptr, &present_integer<&E::actorDeliveryState, &E::actorDeliveryKnown>},
     {"suppressed", nullptr, &boolean_field<&E::actorSuppressed>},
+    {"request_key",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         if (event.actorProgramRequestKey != 0) {
+             push_request_key(state, event.actorProgramRequestKey);
+         } else {
+             lua_pushnil(state);
+         }
+     }},
+    {"delivery_request_key",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         if (event.actorDeliveryRequestKey != 0) {
+             push_request_key(state, event.actorDeliveryRequestKey);
+         } else {
+             lua_pushnil(state);
+         }
+     }},
 };
 constexpr EventBinding kDevice[]{
     {"position", nullptr, &device_value<kPosition>},
@@ -513,6 +546,10 @@ constexpr EventBinding kDamage[]{
              lua_pushnil(state);
          }
      }},
+    {"suppressed", nullptr, &present_boolean<&E::damageSuppressed, &E::damageLifecycleKnown>},
+    {"first_auth_applied",
+     nullptr,
+     &present_boolean<&E::damageFirstAuthApplied, &E::damageLifecycleKnown>},
 };
 // Sense ordinal 1 backs interaction_open; its meaning is assumed.
 constexpr EventBinding kObject[]{
@@ -544,6 +581,19 @@ constexpr EventBinding kGhostLink[]{
     {"generation", nullptr, &integer_field<&E::ghostGeneration>},
     {"progress", nullptr, &number_field<&E::ghostProgress>},
     {"active", nullptr, &boolean_field<&E::ghostActive>},
+};
+// The sensor echoes the revision it applied, which names the request the Host staged under it.
+constexpr EventBinding kHopOn[]{
+    {"attached", nullptr, &boolean_field<&E::hopOnAttached>},
+    {"request_key",
+     nullptr,
+     [](lua_State* state, const E& event) {
+         if (event.hopOnRequestKey != 0) {
+             push_request_key(state, event.hopOnRequestKey);
+         } else {
+             lua_pushnil(state);
+         }
+     }},
 };
 // A provocation carries the exact squad reference, not a native Sense body.
 constexpr EventBinding kSquadProvoked[]{
@@ -625,6 +675,8 @@ constexpr std::array<EventBindings, static_cast<std::size_t>(G::count)> kGroupBi
     kSenseGeneration,
     kSquadRemoval,
     kTriggerLevel,
+    kHopOn,
+    kSquadMemberLoss,
 }};
 static_assert([]() consteval {
     for (std::size_t index = 0; index < kGroupBindings.size(); ++index) {

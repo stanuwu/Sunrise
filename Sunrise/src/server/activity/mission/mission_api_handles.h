@@ -5,6 +5,7 @@
 
 #include "../../../middleware/bap/activity_message/scene_events_auth.h"
 #include "../../../middleware/content/packages/tables/authored_squad_reader.h"
+#include "../../../state/activity/mission/definition.h"
 #include "mission_api_types.h"
 #include "mission_api_values.h"
 
@@ -46,6 +47,13 @@ inline constexpr ValueSpec kPlaceArguments[]{
      .optional = true,
      .slot = type_gate(middleware::content::packages::tables::kAuthoredSquadRuleSlotType),
      .note = "replaces the authored spawn rule"},
+    {.name = "temperaments",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("the squad's last list"),
+     .bound = kTemperamentBound,
+     .element = kTemperament,
+     .note = "distinct; every member merges them; empty clears them"},
 };
 inline constexpr ValueSpec kActorCommandArguments[]{
     {.name = "command",
@@ -118,6 +126,18 @@ inline constexpr ValueSpec kActivateArguments[]{
      .optional = true,
      .fallback = default_boolean(false),
      .note = "also spawns the scene's single authored cast"},
+    {.name = "initial_event",
+     .kind = ValueKind::integer,
+     .ref = "mission.SceneInput",
+     .optional = true,
+     .fallback = default_text("none"),
+     .bound = between(1,
+                      static_cast<std::int64_t>(
+                          middleware::bap::activity_message::scene_events::kInvalidEventKey)
+                          - 1),
+     .scope = Scope::receiver,
+     .note = "an input the scene's activation already carries; a key no block waits on is "
+             "refused on delivery"},
 };
 inline constexpr ValueSpec kSendEventArguments[]{
     {.name = "key",

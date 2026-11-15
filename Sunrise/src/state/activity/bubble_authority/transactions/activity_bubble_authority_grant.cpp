@@ -98,6 +98,29 @@ void record_grant(std::uint64_t sessionId, std::uint64_t generation, const Grant
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
 }
 
+/** Reads the token one link holds a bubble under. */
+bool held_grant(std::uint64_t sessionId,
+                std::uint64_t generation,
+                std::uint8_t bubble,
+                Grant& grant) noexcept {
+    grant = {};
+    if (sessionId == kAbsentSessionId || generation == 0 || bubble >= kFallbackBubble) {
+        return false;
+    }
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot) {
+        const AuthorityState& authority = state.sessions[target].bubbleAuthority;
+        if (authority.held[bubble] && authority.holders[bubble] == generation
+            && authority.grantTokens[bubble] != 0) {
+            grant = {bubble, authority.grantTokens[bubble]};
+        }
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return grant.token != 0;
+}
+
 /** Copies which link holds each bubble of one session. */
 void grant_holders(std::uint64_t sessionId, GrantHolders& output) noexcept {
     output = {};

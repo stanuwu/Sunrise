@@ -1,5 +1,6 @@
 #include <array>
 
+#include "../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "validation_internal.h"
 
 namespace sunrise::state::activity_sdk::validation {
@@ -44,6 +45,32 @@ template <typename Row, typename Id>
             || !range(row.scenarioNameCandidateTags, catalog.activity_binding_tags().size())
             || !range(row.evidenceRootTags, catalog.activity_binding_tags().size())
             || !range(row.bindingLocators, catalog.activity_binding_locators().size())) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** Checks slot metadata against the exact family that owns the count. */
+[[nodiscard]] bool slot_metadata(const Catalog& catalog) noexcept {
+    namespace auth = middleware::bap::activity_message::scriptable_auth;
+    for (const format::Slot& row : catalog.slots()) {
+        const bool dialogue = (row.flags & format::kSlotDialogueCuesExact) != 0;
+        const bool channels = (row.flags & format::kSlotObjectChannelsExact) != 0;
+        if ((row.flags & ~format::kSlotFlagMask) != 0 || (dialogue && channels)
+            || (!dialogue && !channels && row.reserved != 0)) {
+            return false;
+        }
+        if (channels
+            && ((row.flags & format::kSlotSchemaJoinExact) == 0
+                || row.slotType != auth::kType24SlotType
+                || row.componentClass != auth::kType24ComponentClass
+                || row.senseSchema != auth::kType24SenseSchema
+                || row.authSchema != auth::kType24Schema
+                || row.reserved > auth::kType24ChannelCapacity)) {
+            return false;
+        }
+        if (dialogue && (row.slotType != format::kDialogueSlotType || row.reserved == 0)) {
             return false;
         }
     }
@@ -130,7 +157,7 @@ bool structure(const Catalog& catalog) {
            && required_ids(catalog.actor_command_definitions(),
                            catalog,
                            [](const auto& row) { return row.name; })
-           && actor_command_names(catalog)
+           && actor_command_names(catalog) && slot_metadata(catalog)
            && required_ids(catalog.simulation_event_definitions(),
                            catalog,
                            [](const auto& row) { return row.name; })
