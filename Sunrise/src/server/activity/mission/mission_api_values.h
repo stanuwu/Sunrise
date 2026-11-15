@@ -16,9 +16,17 @@ namespace sunrise::server::activity::mission::api {
 
 namespace slot_format = ::sunrise::state::activity_sdk::format;
 
+/** The fields of one generated mission.ActorTemperament row. */
+inline constexpr ValueSpec kActorTemperamentRowFields[]{
+    {.name = "slot_row", .kind = ValueKind::integer, .bound = uint32_range()},
+    {.name = "id", .kind = ValueKind::integer, .bound = uint32_range()},
+};
 /** One temperament of an actor or of a squad's members; a list names each at most once. */
-inline constexpr ValueSpec kTemperament[]{
-    {.kind = ValueKind::integer, .bound = between(1, kUint32Maximum), .note = "a temperament id"}};
+inline constexpr ValueSpec kTemperament[]{{.kind = ValueKind::missionRow,
+                                           .ref = "mission.ActorTemperament",
+                                           .scope = Scope::receiver,
+                                           .fields = kActorTemperamentRowFields,
+                                           .note = "a temperament its behaviour program holds"}};
 /** An actor and a squad's members hold the same number of temperaments. */
 inline constexpr Bound kTemperamentBound = at_most(static_cast<std::int64_t>(
     middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity));

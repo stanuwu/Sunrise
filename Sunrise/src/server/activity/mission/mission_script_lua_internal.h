@@ -26,17 +26,20 @@ void register_population_metatables(lua_State* state);
  * @return False when the call gave none, so the squad keeps its last list.
  */
 /**
- * Reads an optional temperament list: distinct, nonzero ids, at most an actor's capacity.
+ * Reads an optional list of mission.ActorTemperament rows of one slot, at most an actor's capacity.
+ * @param slotRow The actor or squad slot the rows must belong to.
  * @return False when the call gave no list.
  */
 [[nodiscard]] bool read_temperament_list(
     lua_State* state,
     const char* key,
+    std::uint32_t slotRow,
     std::array<std::uint32_t,
                middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity>&
         output,
     std::uint8_t& count);
-[[nodiscard]] bool read_squad_temperaments(lua_State* state, const char* key, Intent& intent);
+[[nodiscard]] bool
+read_squad_temperaments(lua_State* state, const char* key, std::uint32_t slotRow, Intent& intent);
 
 // Every mission API entry point, grouped by the translation unit that defines it. The names,
 // handles, re-read helpers and surface matchers live in the headers included above.

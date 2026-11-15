@@ -416,6 +416,14 @@ struct DefinitionApi final {
     bool (*resolveActorAbilityTarget)(const void* context,
                                       std::uint32_t slotRow,
                                       std::uint32_t selectorIndex) noexcept {};
+    /** True when the slot's actor or squad members' behaviour program holds the temperament. */
+    bool (*resolveActorTemperament)(const void* context,
+                                    std::uint32_t slotRow,
+                                    std::uint32_t id) noexcept {};
+    /** True when the slot's actor has the channel and nothing on the actor drives it. */
+    bool (*resolveActorChannel)(const void* context,
+                                std::uint32_t slotRow,
+                                std::uint32_t nameHash) noexcept {};
     bool (*resolveActorProgramSource)(const void* context,
                                       std::uint32_t slotRow,
                                       std::uint32_t& squadRow) noexcept {};

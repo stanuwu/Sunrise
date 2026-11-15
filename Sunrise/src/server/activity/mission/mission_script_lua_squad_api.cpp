@@ -111,10 +111,15 @@ static_assert(state::activity::mission::kSquadTemperamentCapacity
 bool read_temperament_list(
     lua_State* state,
     const char* key,
+    std::uint32_t slotRow,
     std::array<std::uint32_t,
                middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity>&
         output,
     std::uint8_t& count) {
+    constexpr const char* kOwnerKey =
+        api::find_field(api::kActorTemperamentRowFields, "slot_row").name.data();
+    constexpr const char* kIdKey = api::find_field(api::kActorTemperamentRowFields, "id").name.data();
+    const Impl* const impl = impl_from_state(state);
     output = {};
     count = 0;
     lua_getfield(state, 2, key);
@@ -130,9 +135,17 @@ bool read_temperament_list(
     }
     for (std::size_t index = 0; index < listed; ++index) {
         lua_rawgeti(state, -1, static_cast<lua_Integer>(index + 1));
-        const lua_Integer value = luaL_checkinteger(state, -1);
-        if (value <= 0 || value > (std::numeric_limits<std::uint32_t>::max)()) {
-            static_cast<void>(luaL_error(state, "temperament is zero or outside a 32-bit range"));
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const int row = lua_gettop(state);
+        const lua_Integer owner = directive_integer(state, row, kOwnerKey);
+        const lua_Integer value = directive_integer(state, row, kIdKey);
+        if (owner != static_cast<lua_Integer>(slotRow) || value <= 0
+            || value > (std::numeric_limits<std::uint32_t>::max)()
+            || impl->definitions.resolveActorTemperament == nullptr
+            || !impl->definitions.resolveActorTemperament(
+                impl->definitions.context, slotRow, static_cast<std::uint32_t>(value))) {
+            static_cast<void>(
+                luaL_error(state, "%s must name mission.ActorTemperament rows of this slot", key));
         }
         const auto id = static_cast<std::uint32_t>(value);
         const auto before = output.begin() + static_cast<std::ptrdiff_t>(index);
@@ -148,12 +161,15 @@ bool read_temperament_list(
 }
 
 /** Reads a squad's temperament list into the placement or assignment it stages. */
-bool read_squad_temperaments(lua_State* state, const char* key, Intent& intent) {
+bool read_squad_temperaments(lua_State* state,
+                             const char* key,
+                             std::uint32_t slotRow,
+                             Intent& intent) {
     std::array<std::uint32_t,
                middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity>
         ids{};
     std::uint8_t count = 0;
-    if (!read_temperament_list(state, key, ids, count)) {
+    if (!read_temperament_list(state, key, slotRow, ids, count)) {
         return false;
     }
     std::copy(ids.begin(), ids.end(), intent.squadTemperaments.begin());
@@ -216,7 +232,7 @@ bool read_squad_temperaments(lua_State* state, const char* key, Intent& intent) 
     intent.squadRetireOnReturn =
         optional_boolean_argument(state, boolean_option(kPlace, "retire_on_return"));
     intent.squadTemperamentsSet = read_squad_temperaments(
-        state, optional_key(kPlace, "temperaments", api::ValueKind::list), intent);
+        state, optional_key(kPlace, "temperaments", api::ValueKind::list), definition.slotRow, intent);
     return queue_intent(state, frame, intent);
 }
 

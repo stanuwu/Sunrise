@@ -131,7 +131,7 @@ int slot_assign_combat_objective(lua_State* state) {
     intent.objectiveRefreshAwareness = optional_boolean_argument(
         state, boolean_option(kAssignObjective, "refresh_player_awareness"));
     intent.squadTemperamentsSet = read_squad_temperaments(
-        state, optional_key(kAssignObjective, "temperaments", Kind::list), intent);
+        state, optional_key(kAssignObjective, "temperaments", Kind::list), squad.nativeRow, intent);
     const char* const reservedKey = optional_key(kAssignObjective, "reserved", Kind::boolean);
     // Left out, the reservation keeps its current value.
     const int reservedType = push_argument(state, reservedKey);

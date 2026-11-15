@@ -805,6 +805,38 @@ lua_vm::DefinitionApi definition_api(const sdk::BoundView& view) noexcept {
         .resolveCombatObjectiveGroup = &combat_objective::resolve,
         .resolveActorAbility = &actor_ability::resolve,
         .resolveActorAbilityTarget = &actor_ability::target,
+        .resolveActorTemperament =
+            [](const void* context, std::uint32_t slot, std::uint32_t id) noexcept {
+                const sdk::BoundView* const view = context_view(context);
+                if (!valid_view(view)) {
+                    return false;
+                }
+                const auto rows = view->catalog->actor_temperaments();
+                return std::binary_search(
+                    rows.begin(),
+                    rows.end(),
+                    format::ActorTemperament{slot, 0, id},
+                    [](const format::ActorTemperament& left, const format::ActorTemperament& right) {
+                        return left.slotIndex != right.slotIndex ? left.slotIndex < right.slotIndex
+                                                                 : left.id < right.id;
+                    });
+            },
+        .resolveActorChannel =
+            [](const void* context, std::uint32_t slot, std::uint32_t name) noexcept {
+                const sdk::BoundView* const view = context_view(context);
+                if (!valid_view(view)) {
+                    return false;
+                }
+                const auto rows = view->catalog->actor_channels();
+                return std::binary_search(
+                    rows.begin(),
+                    rows.end(),
+                    format::ActorChannel{slot, 0, name},
+                    [](const format::ActorChannel& left, const format::ActorChannel& right) {
+                        return left.slotIndex != right.slotIndex ? left.slotIndex < right.slotIndex
+                                                                 : left.nameHash < right.nameHash;
+                    });
+            },
         .resolveActorProgramSource =
             [](const void* context, std::uint32_t slot, std::uint32_t& source) noexcept {
                 const auto* view = context_view(context);

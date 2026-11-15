@@ -455,8 +455,17 @@ inline constexpr ValueSpec kActorActionArguments[]{
     kAbilityTargetArgument,
     kSpawnArgument,
 };
-inline constexpr ValueSpec kActorChannelFields[]{
+inline constexpr ValueSpec kActorChannelRowFields[]{
+    {.name = "slot_row", .kind = ValueKind::integer, .bound = uint32_range()},
     {.name = "channel", .kind = ValueKind::integer, .bound = uint32_range()},
+};
+inline constexpr ValueSpec kActorChannelFields[]{
+    {.name = "channel",
+     .kind = ValueKind::missionRow,
+     .ref = "mission.ActorChannel",
+     .scope = Scope::receiver,
+     .fields = kActorChannelRowFields,
+     .note = "a channel of this actor that nothing on it drives"},
     {.name = "value", .kind = ValueKind::number, .note = "finite"},
 };
 inline constexpr ValueSpec kActorChannel[]{

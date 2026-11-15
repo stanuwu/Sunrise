@@ -316,10 +316,11 @@ void parse_atom(lua_State* state,
 
 /** Reads the temperaments list into the controls. @return False when the call gave none. */
 [[nodiscard]] bool read_temperaments(lua_State* state,
+                                     std::uint32_t slotRow,
                                      scriptable_auth::Type2ChannelState& controls) {
     std::array<std::uint32_t, scriptable_auth::kType2TemperamentCapacity> ids{};
     std::uint8_t count = 0;
-    if (!read_temperament_list(state, kTemperamentsKey, ids, count)) {
+    if (!read_temperament_list(state, kTemperamentsKey, slotRow, ids, count)) {
         return false;
     }
     std::array<scriptable_auth::TemperamentId, scriptable_auth::kType2TemperamentCapacity>
@@ -334,7 +335,14 @@ void parse_atom(lua_State* state,
 }
 
 /** Reads the channels list into the controls. @return False when the call gave none. */
-[[nodiscard]] bool read_channels(lua_State* state, scriptable_auth::Type2ChannelState& controls) {
+[[nodiscard]] bool read_channels(lua_State* state,
+                                 std::uint32_t slotRow,
+                                 scriptable_auth::Type2ChannelState& controls) {
+    constexpr std::span<const api::ValueSpec> kRowFields =
+        api::find_field(kChannelFields, "channel").fields;
+    constexpr const char* kOwnerKey = api::find_field(kRowFields, "slot_row").name.data();
+    constexpr const char* kNameKey = api::find_field(kRowFields, "channel").name.data();
+    const Impl* const impl = impl_from_state(state);
     if (push_argument(state, kChannelsKey) == LUA_TNIL) {
         lua_pop(state, 1);
         return false;
@@ -347,9 +355,20 @@ void parse_atom(lua_State* state,
         luaL_checktype(state, -1, LUA_TTABLE);
         const int row = lua_gettop(state);
         refuse_unknown_fields(state, row, kChannelFields);
-        if (!scriptable_auth::set_type2_channel(controls,
-                                                atom_u32(state, row, kChannelKey),
-                                                atom_real(state, row, kChannelValueKey))) {
+        lua_getfield(state, row, kChannelKey);
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const int channel = lua_gettop(state);
+        const lua_Integer owner = directive_integer(state, channel, kOwnerKey);
+        const std::uint32_t name = atom_u32(state, channel, kNameKey);
+        lua_pop(state, 1);
+        if (owner != static_cast<lua_Integer>(slotRow)
+            || impl->definitions.resolveActorChannel == nullptr
+            || !impl->definitions.resolveActorChannel(impl->definitions.context, slotRow, name)) {
+            static_cast<void>(
+                luaL_error(state, "channels must name mission.ActorChannel rows of this actor"));
+        }
+        if (!scriptable_auth::set_type2_channel(
+                controls, name, atom_real(state, row, kChannelValueKey))) {
             static_cast<void>(luaL_error(state,
                                          "an actor holds at most %d channels",
                                          static_cast<int>(controls.channels.size())));
@@ -384,8 +403,8 @@ void push_atom_kinds(lua_State* state) {
     scriptable_auth::Type2Body body{};
     body.channels.revision = kUncommittedRevision;
     body.atoms.generation = kUncommittedRevision;
-    const bool temperaments = read_temperaments(state, body.channels);
-    const bool channels = read_channels(state, body.channels);
+    const bool temperaments = read_temperaments(state, slot.nativeRow, body.channels);
+    const bool channels = read_channels(state, slot.nativeRow, body.channels);
     if ((temperaments || channels)
         && (!spawn || (body.channels.temperamentCount == 0 && body.channels.count == 0))) {
         return luaL_error(state, "initial actor controls need spawn and a temperament or channel");
@@ -432,8 +451,8 @@ void push_atom_kinds(lua_State* state) {
     refuse_unknown_arguments(state, kActorControls);
     scriptable_auth::Type2Body body{};
     body.channels.revision = kUncommittedRevision;
-    static_cast<void>(read_temperaments(state, body.channels));
-    static_cast<void>(read_channels(state, body.channels));
+    static_cast<void>(read_temperaments(state, slot.nativeRow, body.channels));
+    static_cast<void>(read_channels(state, slot.nativeRow, body.channels));
     std::array<std::byte, scriptable_auth::kType2MaximumBodyByteCount> encoded{};
     std::size_t written = 0;
     std::size_t writtenBits = 0;
