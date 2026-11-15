@@ -135,10 +135,8 @@ struct MembershipSnapshot final {
      */
     std::uint64_t activityHostId{};
     /**
-     * Fireteam Activity Host id the local and peer rows publish as player-state field 3: the
-     * private activity the player's fireteam runs. The client sends zero there and skips a member
-     * whose field 3 is zero; a private link counts its player monitors only for players whose
-     * field 3 names that link's activity.
+     * Player-state field 3: the private activity the player's fireteam runs.
+     * The client skips a member whose field 3 is zero.
      */
     std::uint64_t fireteamActivityHostId{};
     /** The local member's own current and pending region legs. */

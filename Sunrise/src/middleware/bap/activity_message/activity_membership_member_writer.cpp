@@ -134,9 +134,7 @@ template <std::size_t Size>
  * @param identity Values mirrored from the client identity update.
  * @param remote Optional remote-view row. Null writes the local member's shorter field set.
  * @param activityHostId Host id for field 4, which the client itself always sends as zero.
- * @param fireteamActivityHostId Host id for field 3 of a player row that names none of its own.
- * A remote-view row keeps its own identity there, so the private link's player monitors never
- * count it.
+ * @param fireteamActivityHostId Field 3 of the local row. Remote-view and peer rows name their own.
  * @return True when fields 3, 4, 5 and 14 and all presence bits fit.
  */
 [[nodiscard]] bool write_player_identity(encoding::bits::Writer& writer,
@@ -183,10 +181,13 @@ template <std::size_t Size>
         if (field == 2 && remote != nullptr && !writer.write(remote->processSessionIdHash, 64)) {
             return false;
         }
+        // A peer with no known fireteam keeps its own non-zero id, so it never joins ours.
+        const std::uint64_t peerFireteam = peer != nullptr && peer->fireteamActivityHostId != 0
+                                               ? peer->fireteamActivityHostId
+                                               : identity.accountSoid;
         const std::uint64_t fireteam = remote != nullptr ? identity.accountSoid
-                                       : peer != nullptr && peer->fireteamActivityHostId != 0
-                                           ? peer->fireteamActivityHostId
-                                           : fireteamActivityHostId;
+                                       : peer != nullptr ? peerFireteam
+                                                         : fireteamActivityHostId;
         if (field == 3 && !writer.write(fireteam, 64)) {
             return false;
         }

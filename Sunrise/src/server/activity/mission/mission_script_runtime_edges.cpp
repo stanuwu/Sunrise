@@ -570,10 +570,7 @@ void push_ghost_edges(RuntimeInstance& instance,
     publish_ghost_levels(instance);
 }
 
-/**
- * Raises one event per hop-on sensor whose applied request or attachment changed. Every client
- * applies the sensor's body itself, so only the link that simulates it reports it.
- */
+/** Pairs a Host-owned revision with the script request that staged it, in a fixed table. */
 void record_staged_request(RuntimeInstance& instance,
                            const host::ScriptableTarget& target,
                            StagedCounter counter,
@@ -634,6 +631,10 @@ std::uint64_t staged_request_key(const RuntimeInstance& instance,
     return 0;
 }
 
+/**
+ * Raises one event per hop-on sensor whose applied request or attachment changed.
+ * Only the link that simulates the sensor reports it.
+ */
 void push_effect_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept {
     namespace effect = middleware::bap::activity_message::mission_effect;

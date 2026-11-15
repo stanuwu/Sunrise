@@ -7,12 +7,8 @@
 namespace sunrise::server::bap {
 
 /**
- * Releases one link's bubble before a state selection replaces the world inside that bubble.
- * The native load pass creates replicated placements whenever the bubble is granted, and only
- * the seed pass skips placements that already exist, so the client must give the bubble up
- * before it loads the sibling state. The release reuses the held token; the client answers with
- * message 33, and the destination's renewal then reclaims what it released. Every step runs
- * under the BAP session lock.
+ * Releases a link's bubble before a selection reloads it, since a granted bubble places twice.
+ * The release repeats the held token and message 33 answers it. Runs under the BAP session lock.
  */
 struct BubbleHandoff final {
     /** Requested until the release frame goes out, then published until message 33 answers it. */

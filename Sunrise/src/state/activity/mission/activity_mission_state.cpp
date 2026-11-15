@@ -148,7 +148,9 @@ namespace {
            && left.squadCount == right.squadCount && left.deviceChannel == right.deviceChannel
            && left.slotType == right.slotType && left.authByteCount == right.authByteCount
            && left.lifetimeState == right.lifetimeState && left.deviceSnap == right.deviceSnap
-           && left.active == right.active && left.requestKey == right.requestKey;
+           && left.active == right.active && left.requestKey == right.requestKey
+           && left.squadSpawnRuleRow == right.squadSpawnRuleRow
+           && left.dialogueFilterRow == right.dialogueFilterRow;
 }
 
 [[nodiscard]] std::string_view key_view(const StateKey& key) noexcept {

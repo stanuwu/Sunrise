@@ -246,14 +246,9 @@ static_assert(!mission_sequence_precedes(1, (std::numeric_limits<std::uint64_t>:
 }
 
 /**
- * Hands one raw public report to the mission of the private link beside it, under that member's
- * own link generation, so it is admitted and tracked as the member's input. The owner resolves it
- * in its own authored world; the public link's world cannot contain the mission's rows. Only the
- * mission copy crosses; the host's history keeps the delivering link.
- * @return True while the report waits for an owner that has not attached or whose member has not
- * settled the public link's region. Every drain retires it once either link is replaced, the
- * public link leaves the region it waited in, or the owner starts another attempt; the owner is
- * looked up again only after an owner readiness change.
+ * Hands one public report to the private link's mission, as that member's input.
+ * @return True while the owner has not attached or not settled the public link's region. The row
+ * is dropped when either link is replaced, the region changes, or the owner starts a new attempt.
  */
 [[nodiscard]] bool park_public_report(const RuntimeInstance& source,
                                       PendingMissionEvent& pending) noexcept {

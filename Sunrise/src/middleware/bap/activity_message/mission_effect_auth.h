@@ -10,11 +10,8 @@
 #include "auth_fields.h"
 #include "scriptable_auth_body.h"
 
-// A hop-on sensor attaches the hop-on entity its config names to every host its Auth selects.
-// The client reads the selection live: it attaches and prunes on each apply and several times a
-// second after, one hop-on per host. A body that selects nothing detaches every hop-on.
-// TODO: The body can also select hosts by a record instead of a filter (a squad, and two forms
-// not yet mapped). Only the filter form is written here.
+// A hop-on sensor attaches one hop-on to every host its Auth selects; selecting none detaches all.
+// TODO: write the record selection forms; only the filter form is mapped.
 
 namespace sunrise::middleware::bap::activity_message::mission_effect {
 

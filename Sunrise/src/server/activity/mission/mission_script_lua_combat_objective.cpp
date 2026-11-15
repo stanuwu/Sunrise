@@ -169,7 +169,8 @@ int slot_task_counter(lua_State* state) {
     }
     const lua_Integer task = checked_integer_argument(
         state, required_key(kTaskCounter, "task", api::ValueKind::integer));
-    if (task < 0 || task >= static_cast<lua_Integer>(kObjectiveTaskCapacity)) {
+    if (task < 0 || task >= static_cast<lua_Integer>(kObjectiveTaskCapacity)
+        || task >= static_cast<lua_Integer>(group.taskCount)) {
         return luaL_error(state, "task is outside an objective group's tasks");
     }
     const Impl* const impl = impl_from_state(state);

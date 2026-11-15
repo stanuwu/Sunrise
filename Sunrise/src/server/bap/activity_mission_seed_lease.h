@@ -17,11 +17,8 @@ namespace sunrise::server::bap {
                                               MissionSeedLease& output) noexcept;
 
 /**
- * Holds a selection that replaces the world inside the bubble a recipient's private client holds
- * until that client has released the bubble. The first call requests the release and reports
- * busy; the selection proceeds once the client's message 33 acknowledges it. A release pending
- * for another selection moves to this one when it reloads the same bubble, and is retired
- * otherwise.
+ * Holds a selection that reloads a recipient's held bubble until its message 33 releases it.
+ * A pending release moves to a new selection in the same bubble and is dropped otherwise.
  * @param recipient Recipient link; its handoff changes.
  * @param plan Selection being made.
  * @param placement The recipient client's reported placement.

@@ -95,11 +95,8 @@ struct Selection final {
 }
 
 /**
- * Selects the occurrence of an object the client's bubble does not place. The client applies a
- * bubble's retained Auth when it next holds that bubble, so a write goes to the occurrence's own
- * state. One object has one registry key in every bubble, so an object the client's bubble places
- * has no such occurrence. When occurrences name two states the result is ambiguous and names the
- * first.
+ * Selects the occurrence of an object outside the client's bubble, so a write goes to its state.
+ * Occurrences in two states give an ambiguous result that names the first.
  */
 [[nodiscard]] inline Selection select_unheld(std::span<const format::Occurrence> occurrences,
                                              std::span<const format::State> states,

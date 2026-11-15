@@ -367,6 +367,12 @@ void parse_atom(lua_State* state,
             static_cast<void>(
                 luaL_error(state, "channels must name mission.ActorChannel rows of this actor"));
         }
+        const auto held = std::span(controls.channels).first(controls.count);
+        if (std::any_of(held.begin(), held.end(), [name](const auto& entry) noexcept {
+                return entry.nameHash == name;
+            })) {
+            static_cast<void>(luaL_error(state, "channels must be distinct"));
+        }
         if (!scriptable_auth::set_type2_channel(
                 controls, name, atom_real(state, row, kChannelValueKey))) {
             static_cast<void>(luaL_error(state,

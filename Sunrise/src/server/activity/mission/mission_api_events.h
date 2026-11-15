@@ -642,7 +642,7 @@ inline constexpr EventSpec kEvents[]{
      "on_event_entity_spawned",
      "SunriseEntitySpawnedEvent",
      kEntitySpawnedGroups,
-     "not raised for squads: their per-slot counts are losses, raised as squad_member_lost"},
+     "not raised yet: no source reports a spawn; squad slot losses are squad_member_lost"},
     {22, "ENTITY_DIED", "on_event_entity_died", "SunriseEntityDiedEvent", kEntityDiedGroups},
     {23,
      "SCENE_FINISHED",

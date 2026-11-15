@@ -1006,10 +1006,8 @@ void note_client_entered(const Session& session) noexcept {
 }
 
 /**
- * Lets a host teleport run its spawn once the client can be placed: its private link has answered
- * the arrival, and the bubble it arrived in is valid on the link that hosts it. Either link's
- * roster may be the last of the two, so both ask. The membership body carrying the spawn state
- * follows on the private link.
+ * Raises a host teleport's spawn once the private link answered the arrival and the bubble is
+ * valid on its host link. Either link's roster may come last, so both call this.
  */
 void raise_teleport_spawn_when_valid(const Session& committed) noexcept {
     Session* privateLink = nullptr;

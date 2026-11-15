@@ -12,7 +12,7 @@
 namespace sunrise::server::activity::host {
 struct ScriptableOutputReservation;
 struct ScriptableTarget;
-}
+} // namespace sunrise::server::activity::host
 
 namespace sunrise::server::activity::activity_sdk_squads {
 

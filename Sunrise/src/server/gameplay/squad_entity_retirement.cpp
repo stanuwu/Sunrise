@@ -251,10 +251,8 @@ bool mission_written(std::span<const activity::host::ScriptablePin> pins,
 }
 
 /**
- * Host policy for authored object entries. An entry is eligible only when the host retains Auth a
- * mission wrote to its exact type-4 slot: every later roster carries that Auth, and the client
- * rebuilds the entry from it once it is back in the bubble. A stock package object has no retained
- * Auth and stays with the client. One eligibility per exact source and class.
+ * Makes an authored object entry eligible only when the host retains mission Auth for its type-4
+ * slot, since the client rebuilds the entry from that Auth. One eligibility per source and class.
  */
 void add_mission_objects(std::uint8_t bubble,
                          const policy::Mask& mask,
