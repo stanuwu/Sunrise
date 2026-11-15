@@ -8,6 +8,7 @@
 #include <tuple>
 
 #include "../../../middleware/bap/activity_message/incident.h"
+#include "../../../middleware/crypto/random_bytes.h"
 #include "../../../state/activity/membership/definition.h"
 #include "../../../state/mods/definition.h"
 #include "mission_script_lua_dispatch.h"
@@ -34,6 +35,25 @@ constexpr const api::MemberSpec& kSendIncident =
 constexpr const api::MemberSpec& kActivityFlag =
     api::member(api::Receiver::context, "set_activity_flag");
 constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::context, "select_state");
+
+/** Draws a server-owned random fraction for one active callback. */
+[[nodiscard]] int context_random(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    static_cast<void>(active_frame(state));
+    std::uint64_t seed = 0;
+    if (!::sunrise::middleware::crypto::random::draw_seed(seed)) {
+        return luaL_error(state, "server randomness is unavailable");
+    }
+    constexpr int kNumberBits = std::numeric_limits<lua_Number>::digits;
+    constexpr int kSeedBits = std::numeric_limits<std::uint64_t>::digits;
+    static_assert(std::numeric_limits<lua_Number>::radix == 2 && kNumberBits < kSeedBits);
+    // Keep only exactly representable bits so the largest draw remains below one.
+    constexpr auto kFractionCount = std::uint64_t{1} << kNumberBits;
+    lua_pushnumber(state,
+                   static_cast<lua_Number>(seed >> (kSeedBits - kNumberBits))
+                       / static_cast<lua_Number>(kFractionCount));
+    return 1;
+}
 
 /**
  * Groups exact authored objects by native owner and reserves bounded output batches.
@@ -533,6 +553,7 @@ constexpr std::array<ContextBinding, std::size(api::kContextMembers)> kContextBi
     {"set_activity_flag", &context_set_activity_flag},
     {"select_state", &context_select_state},
     {"restart_checkpoint", &context_restart_checkpoint},
+    {"random", &context_random},
     {"set_phase", &context_set_phase},
     {"set_variable", &context_set_variable},
     {"clear_variable", &context_clear_variable},

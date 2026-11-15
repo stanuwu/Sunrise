@@ -229,6 +229,12 @@ inline constexpr MemberSpec kContextMembers[]{
      .returns = kRequestKey,
      .effect = "mission.restart_checkpoint",
      .note = "arms a hard wipe at a spawn set, or releases one with release_request"},
+    {.name = "random",
+     .kind = MemberKind::maker,
+     .call = CallForm::positional,
+     .returns = kNumber,
+     .note = "draws a server random number in [0, 1); errors if entropy is unavailable; "
+             "store choices with set_variable when they must survive reload"},
     {.name = "set_phase",
      .kind = MemberKind::update,
      .call = CallForm::positional,
