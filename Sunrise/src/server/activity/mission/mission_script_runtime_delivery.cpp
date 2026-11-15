@@ -176,6 +176,16 @@ scene_population_sources(RuntimeInstance& instance,
         }
         receiptJoin = &receipt;
     }
+    if (intent.kind == lua_vm::IntentKind::setHopOn) {
+        host::PendingScriptableOverride staged{};
+        if (!host::staged_scriptable_override(
+                instance.view.binding, instance.expectedScriptableRevision, staged)
+            || staged.kind != host::ScriptableOverrideKind::hopOn) {
+            fault_instance(instance, "staged hop-on body has no Host revision");
+            return false;
+        }
+        record_hop_on_request(instance, staged.target, staged.generation, intent.requestKey);
+    }
     mission_state::Snapshot snapshot{};
     const mission_state::Status status =
         mission_state::acknowledge_intent_output(instance.view.binding,
@@ -455,6 +465,7 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
         result = "device_staged";
         break;
     case lua_vm::IntentKind::applySlotAuth:
+    case lua_vm::IntentKind::setHopOn:
     case lua_vm::IntentKind::setInteractableObject:
     case lua_vm::IntentKind::setGhostLink:
     case lua_vm::IntentKind::watchDamage:

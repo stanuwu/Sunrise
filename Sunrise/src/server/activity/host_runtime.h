@@ -291,6 +291,8 @@ enum class ScriptableOverrideKind : std::uint8_t {
      * since it respawns an entry only for a newer generation.
      */
     interactableObjectInPlace,
+    /** Type-26 hop-on sensor body under a Host-owned revision. */
+    hopOn,
 };
 
 /** The client stalls one frame short of the duration, so this reported fraction is the bar's end.
@@ -335,6 +337,7 @@ inline constexpr float kGhostLinkFinishFraction = 0.99F;
     case ScriptableOverrideKind::interactableObject:
     case ScriptableOverrideKind::interactableObjectInPlace:
     case ScriptableOverrideKind::ghostLink:
+    case ScriptableOverrideKind::hopOn:
         return true;
     }
     return true;
@@ -696,6 +699,8 @@ struct Event final {
     bool ghostActive{};
     /** Hop-on sensor level, for hopOnState events. */
     std::int32_t hopOnRevision{};
+    /** The request whose staged revision the sensor applied; zero when none is known. */
+    std::uint64_t hopOnRequestKey{};
     bool hopOnAttached{};
     /** Named actor level, for actorPathState events. */
     std::int32_t actorGeneration{};

@@ -204,6 +204,9 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::damageWatch) {
         nextCounter = pending.generation > guard->damageRevision
                       && pending.generation <= squad::kMaximumGeneration;
+    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::hopOn) {
+        nextCounter = pending.generation > guard->hopOnRevision
+                      && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::ghostLink) {
         nextCounter = pending.generation > guard->ghostLink.generation
                       && pending.generation <= squad::kMaximumGeneration;
@@ -304,6 +307,8 @@ void advance_staged_guard(ScriptableGuard* guard,
         guard->type4.hasLast = true;
     } else if (pending.kind == ScriptableOverrideKind::damageWatch) {
         guard->damageRevision = static_cast<std::uint32_t>(pending.generation);
+    } else if (pending.kind == ScriptableOverrideKind::hopOn) {
+        guard->hopOnRevision = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::ghostLink) {
         ghost_link::advance(*guard, pending);
     } else if (pending.kind == ScriptableOverrideKind::sequence) {

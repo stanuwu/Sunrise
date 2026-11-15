@@ -3,6 +3,7 @@
 #include "../../middleware/bap/activity_message/damage_monitor_auth.h"
 #include "../../middleware/bap/activity_message/ghost_link_auth.h"
 #include "../../middleware/bap/activity_message/interactable_object_auth.h"
+#include "../../middleware/bap/activity_message/mission_effect_auth.h"
 #include "host_runtime_actor_program.h"
 
 namespace sunrise::server::activity::host::counter_auth {
@@ -13,6 +14,7 @@ namespace sunrise::server::activity::host::counter_auth {
     namespace auth = middleware::bap::activity_message::scriptable_auth;
     namespace damage = middleware::bap::activity_message::damage_monitor;
     namespace ghost = middleware::bap::activity_message::ghost_link;
+    namespace hop_on = middleware::bap::activity_message::mission_effect;
     return ((kind == ScriptableOverrideKind::interactableObject
              || kind == ScriptableOverrideKind::interactableObjectInPlace)
             && target.slotType == auth::kType4SlotType && target.authSchema == auth::kType4Schema)
@@ -23,7 +25,9 @@ namespace sunrise::server::activity::host::counter_auth {
            || (kind == ScriptableOverrideKind::damageWatch && target.slotType == damage::kSlotType
                && target.authSchema == damage::kAuthSchema)
            || (kind == ScriptableOverrideKind::ghostLink && target.slotType == ghost::kSlotType
-               && target.authSchema == ghost::kAuthSchema);
+               && target.authSchema == ghost::kAuthSchema)
+           || (kind == ScriptableOverrideKind::hopOn && target.slotType == hop_on::kSlotType
+               && target.authSchema == hop_on::kSchema);
 }
 
 /** Reads the signed counter from a transported body; absent or negative state starts at zero. */
@@ -61,16 +65,21 @@ namespace sunrise::server::activity::host::counter_auth {
     namespace patch = middleware::bap::activity_message::mission_auth_patch;
     const bool inPlace = request.kind == ScriptableOverrideKind::interactableObjectInPlace;
     const bool object = request.kind == ScriptableOverrideKind::interactableObject || inPlace;
-    const std::size_t offset = object ? 0 : fields::kClientRefBits;
+    const bool hopOn = request.kind == ScriptableOverrideKind::hopOn;
+    const std::size_t offset = object  ? 0
+                               : hopOn ? middleware::bap::activity_message::mission_effect::
+                                             kRevisionOffset
+                                       : fields::kClientRefBits;
     std::uint32_t previous = 0;
     // Ghost link is compatible but keeps its own encoder, so it must not take the damage offset.
-    if ((!object && request.kind != ScriptableOverrideKind::damageWatch)
+    if ((!object && !hopOn && request.kind != ScriptableOverrideKind::damageWatch)
         || !compatible(request.kind, request.target) || request.authBitCount < offset + 32
         || !previous_revision(instance, request.target, offset, previous)) {
         return false;
     }
-    const auto committed =
-        object ? static_cast<std::uint32_t>((std::max)(guard.type4.last, 0)) : guard.damageRevision;
+    const auto committed = object ? static_cast<std::uint32_t>((std::max)(guard.type4.last, 0))
+                           : hopOn ? guard.hopOnRevision
+                                   : guard.damageRevision;
     const auto last = (std::max)(previous, committed);
     // An in-place body needs a live entry to update.
     if (last >= fields::kMaximumCounter || (inPlace && last == 0)) {

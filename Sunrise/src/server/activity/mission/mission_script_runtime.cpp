@@ -378,6 +378,7 @@ void clear_sense_levels(RuntimeInstance& instance) noexcept {
     instance.squadShadowAtCapacity = false;
     instance.ghostObservations = {};
     instance.effectObservations = {};
+    instance.hopOnRequests = {};
     instance.damageObservations = {};
     instance.combatantDamageObservations = {};
     instance.entityDamageObservations = {};

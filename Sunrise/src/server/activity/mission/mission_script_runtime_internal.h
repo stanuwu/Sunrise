@@ -206,6 +206,20 @@ struct GhostObservation final {
     bool used{};
 };
 
+/** Requests reports on one sensor still pair with; a report of an older one names none. */
+constexpr std::size_t kHopOnRequestDepth = 4;
+
+/** The requests staged on one hop-on sensor, by the revision the Host gave each; newest last. */
+struct HopOnRequests final {
+    std::array<std::uint64_t, kHopOnRequestDepth> requestKeys{};
+    std::array<std::uint64_t, kHopOnRequestDepth> revisions{};
+    std::uint32_t registryKey{};
+    std::uint32_t objectTag{};
+    std::uint16_t slotIndex{};
+    std::uint8_t count{};
+    bool used{};
+};
+
 /** Last hop-on sensor level seen for one type-26 slot. */
 struct EffectObservation final {
     EffectLevel level{};
@@ -368,6 +382,7 @@ struct RuntimeInstance final {
     bool squadShadowAtCapacity{};
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
     std::array<EffectObservation, kEffectObservationCapacity> effectObservations{};
+    std::array<HopOnRequests, kEffectObservationCapacity> hopOnRequests{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
     std::array<CombatantDamageObservation, kSquadObservationCapacity> combatantDamageObservations{};
     /** Damage levels replicated by authored entities, kept apart from the Type-2 Sense rows. */
@@ -639,6 +654,11 @@ void observe_carrier_actor(RuntimeInstance& instance,
                            const ActorPathLevel& level) noexcept;
 /** Moves carrier flights on between deliveries and raises carrier_state when one changed. */
 void advance_carriers(RuntimeInstance& instance) noexcept;
+/** Keeps the request a hop-on sensor's staged revision belongs to, so its report can name it. */
+void record_hop_on_request(RuntimeInstance& instance,
+                           const host::ScriptableTarget& sensor,
+                           std::uint64_t revision,
+                           std::uint64_t requestKey) noexcept;
 /** Raises one event per type-26 mission effect whose revision or attachment changed. */
 void push_effect_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;

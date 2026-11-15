@@ -27,6 +27,8 @@ inline constexpr std::uint32_t kComponentClass = generated::C8080953f::kClass;
 inline constexpr std::uint32_t kSchema = generated::C8080954b::kClass;
 inline constexpr std::size_t kBits = 186;
 inline constexpr std::size_t kBytes = 24;
+/** The revision follows two flags and three unused 32-bit fields. */
+inline constexpr std::size_t kRevisionOffset = 2 * fields::kBoolWidth + 3 * 32;
 /**
  * Sense root: three signed 32-bit counters, then a flag. The third counter echoes the revision of
  * the Auth the sensor applied, and the flag is set while at least one hop-on is attached.
@@ -41,8 +43,8 @@ inline constexpr std::uint16_t kSenseAttachedOrdinal = kSenseCounterCount;
  * detaches it from every host.
  * @param filter Type-34 object filter that selects the hosts; ignored when detaching.
  * @param attach False writes no selection, which makes the client drop every hop-on.
- * @param revision Writer-owned and positive. A higher one makes the client rebuild its
- * attachments, and the Sense echoes the one it applied.
+ * @param revision Positive. A higher one makes the client rebuild its attachments, and the Sense
+ * echoes the one it applied. The Host replaces it with the next one it owns.
  */
 [[nodiscard]] inline bool encode(scriptable_auth::Type2LaneClientRef filter,
                                  bool attach,

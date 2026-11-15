@@ -159,6 +159,7 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
     case ActionKind::selectMissionState:
         return "mission.select_state";
     case ActionKind::applySlotAuth:
+    case ActionKind::setHopOn:
     case ActionKind::bindCombatantToSquad:
     case ActionKind::actorCommand:
     case ActionKind::deliverPassengers:
@@ -565,14 +566,14 @@ constexpr EventBinding kGhostLink[]{
     {"progress", nullptr, &number_field<&E::ghostProgress>},
     {"active", nullptr, &boolean_field<&E::ghostActive>},
 };
-// The sensor echoes the revision it applied, and attach_hop_on writes its request key there.
+// The sensor echoes the revision it applied, which names the request the Host staged under it.
 constexpr EventBinding kHopOn[]{
     {"attached", nullptr, &boolean_field<&E::hopOnAttached>},
     {"request_key",
      nullptr,
      [](lua_State* state, const E& event) {
-         if (event.hopOnRevision > 0) {
-             push_request_key(state, static_cast<std::uint64_t>(event.hopOnRevision));
+         if (event.hopOnRequestKey != 0) {
+             push_request_key(state, event.hopOnRequestKey);
          } else {
              lua_pushnil(state);
          }

@@ -161,10 +161,7 @@ constexpr const api::MemberSpec& kDetachHopOn = api::slot_member("detach_hop_on"
         state, source, scriptable_auth::kType32Schema, scriptable_auth::kType32BitCount, body);
 }
 
-/**
- * Queues one hop-on sensor body. Its revision is the key this request is about to take, so the
- * report that echoes it names the request, and a later request always carries a higher one.
- */
+/** Queues one hop-on sensor body; the Host writes its revision. */
 [[nodiscard]] int queue_hop_on(lua_State* state,
                                const SlotHandle& handle,
                                scriptable_auth::Type2LaneClientRef filter,
@@ -175,16 +172,15 @@ constexpr const api::MemberSpec& kDetachHopOn = api::slot_member("detach_hop_on"
         || slot.authSchema != hop_on::kSchema) {
         return luaL_error(state, "the slot is not a hop-on sensor");
     }
-    const std::uint64_t key = active_frame(state).candidate.nextIntentKey;
-    if (key == 0 || key > static_cast<std::uint64_t>((std::numeric_limits<std::int32_t>::max)())) {
-        return luaL_error(state, "mission request keys are past the hop-on revision range");
-    }
+    // A positive placeholder; the Host replaces it with the sensor's next revision.
+    constexpr std::int32_t kPlaceholderRevision = 1;
     std::array<std::byte, hop_on::kBytes> body{};
     std::size_t written = 0;
-    if (!hop_on::encode(filter, attach, static_cast<std::int32_t>(key), body, written)) {
+    if (!hop_on::encode(filter, attach, kPlaceholderRevision, body, written)) {
         return luaL_error(state, "hop-on sensor body could not be encoded");
     }
-    return queue_slot_auth(state, slot, hop_on::kSchema, hop_on::kBits, body);
+    return queue_slot_auth(
+        state, slot, hop_on::kSchema, hop_on::kBits, body, IntentKind::setHopOn, attach);
 }
 
 /** Attaches the sensor's hop-on to every object one type-34 filter selects. */

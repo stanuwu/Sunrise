@@ -232,6 +232,8 @@ enum class IntentKind : std::uint8_t {
     reserveCarrierCargo,
     /** Raises or lowers one activity flag; `active` false lowers it. */
     setActivityFlag,
+    /** Attaches or detaches one hop-on sensor; the Host owns its revision. */
+    setHopOn,
 };
 
 /** Actor sequence values belong to one combatant and one SDK/client generation. */

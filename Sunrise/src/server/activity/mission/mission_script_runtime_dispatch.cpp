@@ -1182,6 +1182,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     case lua_vm::IntentKind::watchDamage:
     case lua_vm::IntentKind::setActorControls:
     case lua_vm::IntentKind::deliverPassengers:
+    case lua_vm::IntentKind::setHopOn:
     case lua_vm::IntentKind::applySlotAuth: {
         if (intent.authByteCount == 0 || intent.authByteCount != intent.authBody.size()) {
             refuse_delivery(
@@ -1206,7 +1207,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                 ? host::ScriptableOverrideKind::combatantControls
             : intent.kind == lua_vm::IntentKind::deliverPassengers
                 ? host::ScriptableOverrideKind::combatantDelivery
-                : host::ScriptableOverrideKind::sdkAuth;
+            : intent.kind == lua_vm::IntentKind::setHopOn ? host::ScriptableOverrideKind::hopOn
+                                                          : host::ScriptableOverrideKind::sdkAuth;
         std::uint64_t carrier = 0;
         const devices::Status status = deliver_through_holder(
             instance, intent, kDeviceWalk, carrier, [&](const sdk::BoundView& view) noexcept {

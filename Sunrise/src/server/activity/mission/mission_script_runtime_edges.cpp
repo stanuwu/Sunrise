@@ -567,6 +567,29 @@ void push_ghost_edges(RuntimeInstance& instance,
  * Raises one event per hop-on sensor whose applied request or attachment changed. Every client
  * applies the sensor's body itself, so only the link that simulates it reports it.
  */
+void record_hop_on_request(RuntimeInstance& instance,
+                           const host::ScriptableTarget& sensor,
+                           std::uint64_t revision,
+                           std::uint64_t requestKey) noexcept {
+    host::SenseObservationKey key{};
+    key.registryKey = sensor.registryKey;
+    key.objectTag = sensor.objectTag;
+    key.slotIndex = sensor.slotIndex;
+    HopOnRequests* const row = find_slot_row(instance.hopOnRequests, key);
+    if (row == nullptr) {
+        log_line(core::log::Level::warn, &instance, "hop_on", "request_capacity");
+        return;
+    }
+    if (row->count == row->revisions.size()) {
+        std::shift_left(row->revisions.begin(), row->revisions.end(), 1);
+        std::shift_left(row->requestKeys.begin(), row->requestKeys.end(), 1);
+        --row->count;
+    }
+    row->revisions[row->count] = revision;
+    row->requestKeys[row->count] = requestKey;
+    ++row->count;
+}
+
 void push_effect_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept {
     namespace effect = middleware::bap::activity_message::mission_effect;
@@ -590,6 +613,18 @@ void push_effect_edges(RuntimeInstance& instance,
         event.kind = host::EventKind::hopOnState;
         event.hopOnRevision = slot->level.revision;
         event.hopOnAttached = slot->level.attached;
+        for (const HopOnRequests& requests : instance.hopOnRequests) {
+            if (!requests.used || requests.registryKey != observation.key.registryKey
+                || requests.objectTag != observation.key.objectTag
+                || requests.slotIndex != observation.key.slotIndex) {
+                continue;
+            }
+            for (std::uint8_t index = 0; index < requests.count; ++index) {
+                if (requests.revisions[index] == static_cast<std::uint64_t>(slot->level.revision)) {
+                    event.hopOnRequestKey = requests.requestKeys[index];
+                }
+            }
+        }
         push_script_event(instance, event);
     }
 }
