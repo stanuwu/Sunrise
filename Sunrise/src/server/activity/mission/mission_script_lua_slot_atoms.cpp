@@ -268,6 +268,8 @@ static_assert([] {
 
 // Table entries of the members this file implements.
 constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
+/** A positive template counter for the encoder; the Host assigns every transported one. */
+constexpr std::uint32_t kUncommittedRevision = 1;
 constexpr const api::MemberSpec& kActorControls = api::slot_member("set_actor_controls");
 constexpr const char* kTemperamentsKey =
     optional_key(kActorControls, "temperaments", api::ValueKind::list);
@@ -539,8 +541,6 @@ void push_atom_kinds(lua_State* state) {
     }
     refuse_unknown_arguments(state, kRunAtoms);
     const bool spawn = optional_boolean_argument(state, boolean_option(kRunAtoms, "spawn"));
-    // The encoder needs a positive template value; only the native reducer publishes counters.
-    constexpr std::uint32_t kUncommittedRevision = 1;
     scriptable_auth::Type2Body body{};
     body.channels.revision = kUncommittedRevision;
     body.atoms.generation = kUncommittedRevision;
@@ -688,8 +688,6 @@ void push_atom_kinds(lua_State* state) {
         return luaL_error(state, "activity slot is not an exact type-2 combatant");
     }
     refuse_unknown_arguments(state, kActorControls);
-    // The encoder needs a positive template value; the Host assigns the transported revision.
-    constexpr std::uint32_t kUncommittedRevision = 1;
     scriptable_auth::Type2Body body{};
     body.channels.revision = kUncommittedRevision;
     static_cast<void>(read_temperaments(state, body.channels));

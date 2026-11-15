@@ -2,9 +2,7 @@
 
 #include <Windows.h>
 
-#include <array>
 #include <atomic>
-#include <cstdio>
 #include <limits>
 
 #include "../../../core/logging/log.h"
@@ -66,17 +64,11 @@ void note_private_activity(const Session& session, bool entered) noexcept {
         return;
     }
     arm_account_resync_everywhere();
-    std::array<char, core::log::kLineCapacity> line{};
-    const int written = std::snprintf(line.data(),
-                                      line.size(),
-                                      "ev=activity stage=occupied result=%s activity=%u",
-                                      entered ? "entered" : "left",
-                                      static_cast<unsigned>(activity));
-    if (written > 0) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::info,
-                         {line.data(), static_cast<std::size_t>(written)});
-    }
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=activity stage=occupied result=%s activity=%u",
+                      entered ? "entered" : "left",
+                      static_cast<unsigned>(activity));
 }
 
 /**
@@ -128,6 +120,7 @@ void reset_join_state(Session& session) noexcept {
     session.activityEstateRevision = 0;
     session.activityDialogueRevision = 0;
     session.activityRosterAwaitClientSync = false;
+    session.activityTeleportSpawnOwed = false;
     authority_query::reset(session.activityAuthorityQuery, session.activity.bindingGeneration);
     authority_reset::reset(session.activityAuthorityReset, session.activity.bindingGeneration);
     session.activityIncidentStaged = {};

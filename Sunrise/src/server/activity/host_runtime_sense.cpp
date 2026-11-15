@@ -50,8 +50,8 @@ packet_has_sense_key(const middleware::bap::activity_message::sense_update::Deco
 }
 
 /**
- * @return True when the receipt framed the envelope. A packet with one unsupported group is
- * receipted partial, and its decoded objects are still observations.
+ * @return True when the receipt framed the envelope. A packet with a skipped group is receipted
+ * partial, and its decoded objects are still observations.
  */
 [[nodiscard]] bool sense_envelope_framed(const SenseInput& input) noexcept {
     namespace sense = middleware::bap::activity_message::sense_update;

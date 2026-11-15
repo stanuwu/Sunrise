@@ -18,7 +18,6 @@ inline constexpr std::int32_t kUnknownRegion = -1;
  */
 inline constexpr std::size_t kHostSessionCapacity = core::network_capacity::kHostPorts;
 
-/** Immutable identity of one activity-host generation and its original destination source. */
 /** How one region's host row is shared. */
 enum class RegionHost : std::uint8_t {
     /** The source's own row: a private region or the private Bubble Host. */
@@ -32,6 +31,7 @@ enum class RegionHost : std::uint8_t {
     missionPublic,
 };
 
+/** Immutable identity of one activity-host generation and its original destination source. */
 struct HostSessionBinding {
     state::activity::SessionBinding source{};
     state::activity::SessionBinding target{};

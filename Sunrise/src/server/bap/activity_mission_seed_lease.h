@@ -115,9 +115,9 @@ void commit_owner_seed_publication(Session& link, const RosterPublication& stage
                                        std::uint32_t registryKey) noexcept;
 
 /**
- * Reads whether a state-local target of the owner's mission lies in a bubble its world authors
- * public, so the public link beside it publishes the target. A group in every state of the
- * scenario stays in the private link's top-level list.
+ * Reads whether a state-local target of the owner's mission lies in a state the owner's world
+ * authors public, so the public link beside it publishes the target. A group in every state of
+ * the scenario stays in the private link's top-level list.
  */
 [[nodiscard]] bool publishes_on_public(const Session& owner,
                                        const activity::host::ScriptableTarget& target) noexcept;
