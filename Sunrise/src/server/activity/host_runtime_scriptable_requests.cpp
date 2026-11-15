@@ -237,6 +237,8 @@ bool request_state_local_type4_override(
     std::int32_t entryIndex,
     bool active,
     const auth::Type2LaneClientRef& location,
+    bool capturePlate,
+    const auth::Type4PositionChild& position,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation,
     const ScriptableOutputReservation* burstHead) noexcept {
@@ -252,6 +254,8 @@ bool request_state_local_type4_override(
     request.entryIndex = entryIndex;
     request.active = active;
     request.objectLocation = location;
+    request.capturePlate = capturePlate;
+    request.position = position;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = ScriptableOverrideKind::object;
     if (burstHead != nullptr) {

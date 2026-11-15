@@ -221,6 +221,8 @@ Status set_objects_active_reserved(const sdk::BoundView& view,
                                    std::int32_t entryIndex,
                                    bool active,
                                    std::optional<std::uint32_t> locationSlotRow,
+                                   bool capturePlate,
+                                   const auth::Type4PositionChild& position,
                                    const host::ScriptableOutputReservation& reservation) noexcept {
     if (extraRows.size() > state::activity::mission::kIntentBurstCapacity) {
         return Status::refused;
@@ -270,6 +272,8 @@ Status set_objects_active_reserved(const sdk::BoundView& view,
                                                      entryIndex,
                                                      active,
                                                      location,
+                                                     capturePlate,
+                                                     position,
                                                      prepared.activityClientGeneration,
                                                      head ? nullptr : &reservation,
                                                      head ? &reservation : nullptr);

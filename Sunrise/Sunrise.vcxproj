@@ -3331,6 +3331,11 @@
     <ClInclude Include="src\client\activity\mission_launch.h" />
     <ClInclude Include="src\client\activity\mission_launch_options.h" />
     <ClCompile Include="src\client\content\activity\activity_catalog_build.cpp" />
+    <ClCompile Include="src\client\content\activity\public_event_schedule_build.cpp" />
+    <ClCompile Include="src\server\activity\mission\public_event_schedule_evaluate.cpp" />
+    <ClCompile Include="src\state\build_data\public_event_schedule\public_event_schedule.cpp" />
+    <ClCompile Include="src\middleware\content\packages\tables\public_event_schedule_table.cpp" />
+    <ClInclude Include="src\middleware\content\packages\tables\public_event_schedule_records.h" />
     <ClInclude Include="src\client\content\activity\activity_catalog_build.h" />
     <ClInclude Include="src\client\content\activity\activity_presentation_build.h" />
     <ClInclude Include="src\client\content\activity\activity_menu_text_build.h" />

@@ -850,6 +850,9 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             intent.objectLocationRow < 0 ? std::nullopt
                                          : std::optional<std::uint32_t>{static_cast<std::uint32_t>(
                                                intent.objectLocationRow)};
+        const scriptable_auth::Type4PositionChild position{.present = intent.positionChild,
+                                                           .value = intent.positionValue,
+                                                           .snap = intent.positionSnap};
         std::uint64_t carrier = 0;
         const devices::Status status = deliver_through_holder(
             instance, intent, kDeviceWalk, carrier, [&](const sdk::BoundView& view) noexcept {
@@ -860,6 +863,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                     intent.entryIndex,
                     intent.active,
                     location,
+                    intent.capturePlate,
+                    position,
                     reservation);
             });
         finish_reserved(
@@ -1090,6 +1095,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     case lua_vm::IntentKind::deliverPassengers:
     case lua_vm::IntentKind::setHopOn:
     case lua_vm::IntentKind::setObjectChannels:
+    case lua_vm::IntentKind::setEngagement:
     case lua_vm::IntentKind::applySlotAuth: {
         if (intent.authByteCount == 0 || intent.authByteCount != intent.authBody.size()) {
             refuse_delivery(
@@ -1116,6 +1122,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                 ? host::ScriptableOverrideKind::combatantDelivery
             : intent.kind == lua_vm::IntentKind::setObjectChannels
                 ? host::ScriptableOverrideKind::objectChannels
+            : intent.kind == lua_vm::IntentKind::setEngagement
+                ? host::ScriptableOverrideKind::engagement
             : intent.kind == lua_vm::IntentKind::setHopOn ? host::ScriptableOverrideKind::hopOn
                                                           : host::ScriptableOverrideKind::sdkAuth;
         std::uint64_t carrier = 0;

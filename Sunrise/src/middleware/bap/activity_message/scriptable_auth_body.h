@@ -7,7 +7,9 @@
 #include <span>
 #include <variant>
 
+#include "../../content/packages/schema/generated/tag_classes_80804d.h"
 #include "../../content/packages/schema/generated/tag_classes_80804f.h"
+#include "../../content/packages/schema/generated/tag_classes_808050.h"
 #include "../../content/packages/schema/generated/tag_classes_80807d.h"
 #include "../../content/packages/schema/generated/tag_classes_80807f.h"
 #include "../../content/packages/schema/generated/tag_classes_808083.h"
@@ -479,6 +481,33 @@ inline constexpr std::uint32_t kType4Schema = generated::C8080992f::kClass;
 /** Body with no position vector and no dynamic trailing entries; a location ClientRef fits. */
 inline constexpr std::size_t kType4BitCount = 252;
 inline constexpr std::size_t kType4ByteCount = (kType4BitCount + 7) / 8;
+/** Capture-plate component Auth carried as the object's one selected child. */
+inline constexpr std::uint32_t kType4CapturePlateSchema = generated::C80804df7::kClass;
+/** The canonical body plus a present bit, the 32-bit handle and the 160-bit plate body. */
+inline constexpr std::size_t kType4CapturePlateBitCount = kType4BitCount + 1 + 32 + 160;
+/** Object state-machine child: three lanes {sequence, snap revision, value}; lane 3 is position. */
+inline constexpr std::uint32_t kType4PositionChildSchema = generated::C80805063::kClass;
+inline constexpr std::size_t kType4PositionChildBodyBitCount = 9 * 32;
+inline constexpr std::size_t kType4PositionChildBitCount =
+    kType4BitCount + 1 + 32 + kType4PositionChildBodyBitCount;
+static_assert(kType4CapturePlateBitCount <= kType4PositionChildBitCount);
+/** The position lane's sequence follows the root, the child header and two unchanged lanes. */
+inline constexpr std::size_t kType4PositionSequenceOffset = kType4BitCount + 1 + 32 + 6 * 32;
+inline constexpr std::size_t kType4MaximumByteCount = (kType4PositionChildBitCount + 7) / 8;
+
+/**
+ * The object's own state-machine position lane (lane 3 of child 0x80805063), sent at the object's
+ * current generation so the live object takes it in place. Lanes 1-2 (power, lock) stay stale.
+ */
+struct Type4PositionChild final {
+    /** Adds the optional child when true. */
+    bool present{};
+    /** Lane sequence, Host-owned; the client applies the value only when it is newer. */
+    std::int32_t revision{};
+    float value{};
+    /** Snaps (no blend) by also advancing the lane's snap revision. */
+    bool snap{true};
+};
 
 /** Last committed authored-object generation for one ClientRef. */
 struct Type4GenerationGuard final {
@@ -496,13 +525,24 @@ struct Type4Preset final {
     std::int32_t entryIndex{};
     bool active{true};
     Type2LaneClientRef location{};
+    /** Adds a plate component Auth whose stale revisions leave every plate field unchanged. */
+    bool capturePlate{};
+    /** Adds the object state-machine child (position lane); exclusive with capturePlate. */
+    Type4PositionChild position{};
 };
+
+/** @return The wire bit count encode_type4 produces for this preset. */
+[[nodiscard]] constexpr std::size_t type4_bit_count(const Type4Preset& preset) noexcept {
+    return preset.position.present ? kType4PositionChildBitCount
+           : preset.capturePlate   ? kType4CapturePlateBitCount
+                                   : kType4BitCount;
+}
 
 /** Finds the next positive authored-object generation without wrapping. */
 [[nodiscard]] bool next_type4_generation(const Type4GenerationGuard& guard,
                                          std::int32_t& next) noexcept;
 
-/** Encodes the canonical 252-bit authored-object activation body. */
+/** Encodes the canonical authored-object activation body, with or without the plate child. */
 [[nodiscard]] bool encode_type4(const Type4Preset& preset,
                                 const Type4GenerationGuard& guard,
                                 std::span<std::byte> output,
@@ -578,6 +618,10 @@ inline constexpr std::uint32_t kType68Schema = generated::C80804f67::kClass;
 inline constexpr std::size_t kType68EntryCount = 3;
 /** Signed progress values each lane carries; a counter element shows the first two. */
 inline constexpr std::size_t kType68ProgressCount = 4;
+/** No countdown on a directive lane. A clock holds whole seconds up to the client's one-year
+ * clock-window maximum. */
+inline constexpr std::int32_t kType68NoClock = -1;
+inline constexpr std::int32_t kType68MaximumClockSeconds = 31'536'000;
 inline constexpr std::size_t kType68BitCount = 4'802;
 inline constexpr std::size_t kType68ByteCount = (kType68BitCount + 7) / 8;
 /** ClientRef slot type of an authored navigation marker a directive may point at. */
@@ -586,10 +630,16 @@ inline constexpr std::uint8_t kType47SlotType = 47;
 inline constexpr std::uint8_t kType60SlotType = 60;
 /** ClientRef slot type for the encounter/player engagement observer. */
 inline constexpr std::uint8_t kType70SlotType = 70;
+inline constexpr std::uint32_t kType70ComponentClass = generated::C808094ee::kClass;
 inline constexpr std::uint32_t kType70Schema = generated::C808094f1::kClass;
 /** Flags, two absent dynamic lists, and the signed 16-bit Sense revision. */
 inline constexpr std::size_t kType70BitCount = 23;
 inline constexpr std::size_t kType70ByteCount = (kType70BitCount + 7) / 8;
+/** The 0x808094F2 child holds eight ClientRefs; its count occupies four wire bits. */
+inline constexpr std::size_t kType70VolumeCapacity = 8;
+inline constexpr std::uint8_t kType70VolumeCountWidth = 4;
+/** Full volume form: 23 fixed bits, four count bits and eight 55-bit ClientRefs. */
+inline constexpr std::size_t kType70MaximumByteCount = 59;
 
 /** Native device-auth properties, matched against their consumers. */
 enum class Type23Channel : std::uint8_t {
@@ -630,6 +680,10 @@ struct Type68Preset final {
     /** Native directive state: 0 enters, 1 completes, and 2 uses the alternate exit state. */
     std::int8_t state{};
     bool visible{true};
+    /** Entry presentation phase the HUD container reads: -1 marks the entry presented and plays
+     * nothing, 0 replays the incoming transition, 1 replays the active one and admits the
+     * completion notification. The entry carries it biased by one. */
+    std::int8_t phase{};
     /** Lane progress values, current then maximum first; the HUD reads them as a counter. */
     std::array<std::int32_t, kType68ProgressCount> progress{};
     /** Authored type-47 destination; absent removes the explicit guidance marker. */
@@ -643,15 +697,30 @@ struct Type68Preset final {
     Type2LaneClientRef audience{};
     /** Type-60 volume; while the player is inside it the HUD marker hides and the map pin stays. */
     Type2LaneClientRef waypoint{};
+    /** Type-71 public-event sensor whose state and local-player byte the HUD record copies. */
+    Type2LaneClientRef event{};
+    /** Countdown shown beside the goal, in whole seconds; kType68NoClock sends the no-timer
+     * child. Remaining counts down from total; both ride only on the visible entry. */
+    std::int32_t clockRemainingSeconds{kType68NoClock};
+    /** Whole-second total paired with clockRemainingSeconds. */
+    std::int32_t clockTotalSeconds{kType68NoClock};
+    /** Native activity-clock time when the countdown was authored. */
+    std::uint64_t clockEpochTicks{};
 };
 
-// TODO: Map the five flag bits and participant-filter policy before exposing a mission control.
-/** One exact type-70 state with both optional authored filter lists absent. */
+/** Type-70 audience state; explicit player keys remain absent. */
+/** Type-70 flags with bit 0 clear: the client also admits every present player. */
+inline constexpr std::uint8_t kType70AdmitEveryoneFlags = 0;
+
+/** Type-70 audience state; explicit player keys remain absent. */
 struct Type70Preset final {
     /** Five raw native flag bits. The shipped constructor default is one. */
     std::uint8_t flags{1};
     /** Signed Sense-list revision. The shipped constructor default is one. */
     std::int16_t revision{1};
+    /** Authored type-60 volumes whose occupants enter the client-maintained audience. */
+    std::array<Type2LaneClientRef, kType70VolumeCapacity> volumes{};
+    std::uint8_t volumeCount{};
 };
 
 /** Encodes the complete three-lane type-68 body with one selected HUD element. */
@@ -659,10 +728,29 @@ struct Type70Preset final {
                                  std::span<std::byte> output,
                                  std::size_t& written) noexcept;
 
-/** Encodes the exact 23-bit type-70 body with no player or definition filter rows. */
+/**
+ * Encodes an audience with optional volume references and no explicit player keys.
+ * @param preset Borrowed state; active references must name type-60 slots.
+ * @param output Receives the body; may be modified on failure.
+ * @param written Receives byte count on success, zero on failure.
+ * @param bitCount Receives wire bit count on success, zero on failure.
+ * @return False for invalid fields or insufficient output space.
+ */
 [[nodiscard]] bool encode_type70(const Type70Preset& preset,
                                  std::span<std::byte> output,
-                                 std::size_t& written) noexcept;
+                                 std::size_t& written,
+                                 std::size_t& bitCount) noexcept;
+
+/**
+ * Decodes the bounded volume form; reference ownership must be checked against the SDK.
+ * @param input Borrowed complete body, including zero byte padding.
+ * @param bitCount Exact number of payload bits.
+ * @param output Receives the decoded state; unchanged on failure.
+ * @return False for malformed fields, unsupported player keys or mismatched lengths.
+ */
+[[nodiscard]] bool decode_type70(std::span<const std::byte> input,
+                                 std::size_t bitCount,
+                                 Type70Preset& output) noexcept;
 
 /** ClientRef slot type for the performance sensor that starts one named actor performance. */
 inline constexpr std::uint8_t kType42SlotType = 42;

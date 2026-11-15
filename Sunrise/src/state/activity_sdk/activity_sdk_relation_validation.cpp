@@ -254,7 +254,8 @@ constexpr std::uint32_t kTaskReferenceOffset =
     }
     const format::DirectiveElement* priorElement = nullptr;
     for (const format::DirectiveElement& row : catalog.directive_elements()) {
-        // An authored field has both source tags; an absent one has neither.
+        // An authored field has both source tags; an absent one has neither. Only the title
+        // is always authored.
         const bool descriptionPaired =
             (row.descriptionContainerTag == 0) == (row.descriptionStringHash == 0);
         const bool progressPaired =
@@ -266,7 +267,6 @@ constexpr std::uint32_t kTaskReferenceOffset =
             || static_cast<std::uint32_t>(row.elementIndex) >= row.elementCount
             || row.titleContainerTag == 0 || row.titleStringHash == 0 || !descriptionPaired
             || !progressPaired
-            || (row.descriptionContainerTag == 0 && row.progressContainerTag == 0)
             || (priorElement != nullptr
                 && std::tie(row.slotIndex, row.nameHash, row.elementIndex)
                        <= std::tie(priorElement->slotIndex,

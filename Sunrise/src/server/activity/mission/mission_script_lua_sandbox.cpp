@@ -361,6 +361,8 @@ void destroy_state(Impl& impl) noexcept {
     impl.initialStateSpawnSet = 0;
     impl.initialStateOmissions = {};
     impl.initialStateOmissionCount = 0;
+    impl.seedOmissions = {};
+    impl.seedOmissionCount = 0;
     impl.lastError = {};
     impl.state = nullptr;
     impl.frame = nullptr;

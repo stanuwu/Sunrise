@@ -22,13 +22,12 @@ template <typename Row, typename Id>
     return true;
 }
 
-/** @return True when every directive element has a valid description or progress label. */
+/** @return True when every directive element's description and progress label are plain text. */
 [[nodiscard]] bool directive_texts(const Catalog& catalog) noexcept {
     for (const format::DirectiveElement& row : catalog.directive_elements()) {
         const std::string_view description = catalog.string(row.description);
         const std::string_view progress = catalog.string(row.progress);
-        if ((description.empty() && progress.empty())
-            || description.find('\0') != std::string_view::npos
+        if (description.find('\0') != std::string_view::npos
             || progress.find('\0') != std::string_view::npos) {
             return false;
         }

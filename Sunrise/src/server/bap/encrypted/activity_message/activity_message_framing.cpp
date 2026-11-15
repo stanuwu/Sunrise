@@ -8,6 +8,7 @@
 #include "../../../../middleware/bap/activity_message/cinematic_incident.h"
 #include "../../../../middleware/bap/activity_message/entity_authority.h"
 #include "../../../../middleware/bap/activity_message/incident.h"
+#include "../../../../middleware/bap/activity_message/integration_incident.h"
 #include "../../../../middleware/bap/activity_message/player_trigger_incident.h"
 #include "../../../../middleware/bap/activity_message/sense_observation_packet.h"
 #include "../../../../middleware/bap/activity_message/sense_update.h"
@@ -22,6 +23,7 @@ namespace {
 namespace sense_update = middleware::bap::activity_message::sense_update;
 namespace cinematic_incident = middleware::bap::activity_message::cinematic_incident;
 namespace player_trigger_incident = middleware::bap::activity_message::player_trigger_incident;
+namespace integration_incident = middleware::bap::activity_message::integration_incident;
 namespace activity_sdk = state::activity_sdk;
 
 /** Borrowed exact connection and SDK state used only during one msg-6 route call. */
@@ -374,6 +376,12 @@ bool frame_only(const ActivityClientBinding& binding,
             input.hasPlayerTrigger = player_trigger_incident::decode(
                 std::span(parsedIncident.payload).first(parsedIncident.payloadLength),
                 input.playerTrigger);
+        }
+        if (parsedIncident.primaryTarget == integration_incident::kPrimaryTarget
+            && parsedIncident.payloadLength == integration_incident::kPayloadBytes) {
+            input.hasIntegration = integration_incident::decode(
+                std::span(parsedIncident.payload).first(parsedIncident.payloadLength),
+                input.integration);
         }
         if (parsedIncident.payloadLength == cinematic_incident::kPayloadBytes
             && cinematic_incident::signal_for_target(parsedIncident.primaryTarget,

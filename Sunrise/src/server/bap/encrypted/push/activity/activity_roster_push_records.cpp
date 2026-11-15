@@ -14,7 +14,7 @@ namespace {
 /** A body over this size is never suppressed, only delivered. */
 constexpr std::size_t kBodyRecordCapacity = 16 * 1024;
 
-/** One outbound body kept for the byte-identical repeat check. */
+/** One outbound body kept for the repeat check. */
 struct BodyRecord final {
     std::array<std::byte, kBodyRecordCapacity> bytes{};
     std::uint64_t bindingGeneration{};
@@ -35,7 +35,7 @@ struct DeferralRecord final {
     std::uint64_t scriptableRevision{};
 };
 
-/** Per-connection last-body records for the byte-identical repeat check. */
+/** Per-connection last-body records for repeat checks. */
 struct ConnectionRecord final {
     BodyRecord rosterSent{};
     BodyRecord rosterStaged{};
@@ -95,7 +95,8 @@ void promote_record(BodyRecord& staged,
 void report_roster_body_delta(const Session& session, std::span<const std::byte> body) noexcept {
     const ConnectionRecord* const record = connection_record(session);
     if (record == nullptr || !record->rosterSent.valid
-        || record->rosterSent.bindingGeneration != session.activity.bindingGeneration) {
+        || record->rosterSent.bindingGeneration != session.activity.bindingGeneration
+        || repeats_delivered_roster_body(session, body)) {
         return;
     }
     const std::size_t previous = record->rosterSent.size;
@@ -159,12 +160,14 @@ void report_roster_deferral(const Session& session,
     }
 }
 
-/** @return True when this body equals the last roster body delivered on this connection. */
+/** @return True when roster content matches this connection's last delivery, ignoring time. */
 bool repeats_delivered_roster_body(const Session& session,
                                    std::span<const std::byte> body) noexcept {
     const ConnectionRecord* const record = connection_record(session);
-    return record != nullptr
-           && matches_record(record->rosterSent, session.activity.bindingGeneration, body);
+    return record != nullptr && record->rosterSent.valid
+           && record->rosterSent.bindingGeneration == session.activity.bindingGeneration
+           && middleware::bap::activity_message::sensor_auth_update::same_roster_content(
+               std::span(record->rosterSent.bytes).first(record->rosterSent.size), body);
 }
 
 /** Keeps one staged roster body until its frame outcome is known. */

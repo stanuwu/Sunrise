@@ -798,6 +798,8 @@ bool program_identity(const sdk::BoundView& view,
     output.activityRow = view.activityRow + 1;
     output.definitionHash = activity->definitionHash;
     output.publicTarget = publicTarget;
+    output.sessionId = view.binding.sessionId;
+    output.sessionCreatedRevision = view.binding.createdRevision;
     return true;
 }
 

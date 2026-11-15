@@ -198,9 +198,10 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     } else if (guard != nullptr
                && (pending.kind == ScriptableOverrideKind::object
                    || pending.kind == ScriptableOverrideKind::interactableObject)) {
-        nextCounter =
-            pending.generation > static_cast<std::uint64_t>((std::max)(guard->type4.last, 0))
-            && pending.generation <= squad::kMaximumGeneration;
+        const auto last = static_cast<std::uint64_t>((std::max)(guard->type4.last, 0));
+        nextCounter = (pending.inPlace ? guard->type4.hasLast && pending.generation == last
+                                       : pending.generation > last)
+                      && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::damageWatch) {
         nextCounter = pending.generation > guard->damageRevision
                       && pending.generation <= squad::kMaximumGeneration;
@@ -211,6 +212,10 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::hopOn) {
         nextCounter = pending.generation > guard->hopOnRevision
                       && pending.generation <= squad::kMaximumGeneration;
+    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::engagement) {
+        // A body that keeps its members repeats the committed revision.
+        nextCounter = pending.generation >= guard->engagementRevision && pending.generation > 0
+                      && pending.generation <= guard->engagementRevision + 1U;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::ghostLink) {
         nextCounter = pending.generation > guard->ghostLink.generation
                       && pending.generation <= squad::kMaximumGeneration;
@@ -316,6 +321,8 @@ void advance_staged_guard(ScriptableGuard* guard,
         guard->objectChannelsRevision = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::hopOn) {
         guard->hopOnRevision = static_cast<std::uint32_t>(pending.generation);
+    } else if (pending.kind == ScriptableOverrideKind::engagement) {
+        guard->engagementRevision = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::ghostLink) {
         ghost_link::advance(*guard, pending);
     } else if (pending.kind == ScriptableOverrideKind::sequence) {

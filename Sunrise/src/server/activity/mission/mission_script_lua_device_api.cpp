@@ -13,6 +13,7 @@
 #include "../../../middleware/bap/activity_message/darkness_zone_auth.h"
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
 #include "../../../middleware/bap/activity_message/interactable_object_auth.h"
+#include "../../../middleware/bap/activity_message/mission_effect_auth.h"
 #include "../../../middleware/encoding/bit_writer.h"
 #include "mission_script_lua_internal.h"
 

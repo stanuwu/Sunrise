@@ -114,6 +114,8 @@ mission_input_allowed(host::EventKind kind, bool selectedSource, bool currentMem
            || event.kind == host::EventKind::sessionJoined
            || event.kind == host::EventKind::sessionLeft
            || event.kind == host::EventKind::playerTrigger
+           || event.kind == host::EventKind::integration
+           || event.kind == host::EventKind::engagementState
            || event.kind == host::EventKind::cinematicStarted
            || event.kind == host::EventKind::actorPathState
            || event.kind == host::EventKind::damageState

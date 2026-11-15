@@ -57,6 +57,8 @@ enum class FieldGroupId : std::uint8_t {
     triggerLevel,
     hopOn,
     squadMemberLoss,
+    integration,
+    engagement,
     count,
 };
 
@@ -209,6 +211,19 @@ inline constexpr MemberSpec kPlayerTriggerFields[]{
     field("volume_slot_index", kInteger),
     field("resolved_object_id", kInteger),
 };
+inline constexpr MemberSpec kIntegrationFields[]{
+    field("report_value", kInteger),
+    field("report_kind", kInteger),
+    field("context", kDecimal),
+};
+inline constexpr MemberSpec kEngagementFields[]{
+    field("member_count", kInteger, "participants the client reported, at most 16"),
+    field("keys_decoded", kInteger, "keys retained from the report"),
+    field("local_member", kBoolean, "the bound player's key is in the reported list"),
+    field("value", kInteger, "the report's 16-bit biased field; its meaning is not recovered"),
+    field("complete", kBoolean, "every reported key was retained"),
+    field("first_report", kBoolean, "first report of this sensor since attach"),
+};
 inline constexpr MemberSpec kCinematicFields[]{
     field("runtime_object_id", kDecimal),
     field("event_value", kNumber),
@@ -351,6 +366,10 @@ inline constexpr MemberSpec kObjectFields[]{
     field("entry_index", kInteger, "authored entry the object instantiated"),
     field("spawn_mask_low", kInteger),
     field("spawn_mask_high", kInteger),
+    field("plate_owner", kOptionalInteger, "capture-plate owner team, -3 before a capture"),
+    field("plate_capturing", kOptionalInteger, "team capturing the plate, -1 for none"),
+    field("plate_occupants", kOptionalInteger, "mask of players on the plate"),
+    field("plate_progress", kOptionalNumber, "capture progress from 0 to 1"),
 };
 inline constexpr MemberSpec kGhostLinkFields[]{
     field("generation", kInteger),
@@ -439,6 +458,8 @@ inline constexpr std::array<FieldGroup, static_cast<std::size_t>(FieldGroupId::c
         {"trigger_level", kTriggerLevelFields},
         {"hop_on", kHopOnFields},
         {"squad_member_loss", kSquadMemberLossFields},
+        {"integration", kIntegrationFields},
+        {"engagement", kEngagementFields},
     }};
 
 /** @return The address of one field group, for an event's group list. */
@@ -523,6 +544,13 @@ inline constexpr const FieldGroup* kSessionLeftGroups[]{
     group(G::common), group(G::missionSequence), group(G::sessionPeer)};
 inline constexpr const FieldGroup* kPlayerTriggerGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::playerTrigger)};
+inline constexpr const FieldGroup* kIntegrationGroups[]{
+    group(G::common), group(G::missionSequence), group(G::integration)};
+inline constexpr const FieldGroup* kEngagementStateGroups[]{group(G::common),
+                                                            group(G::missionSequence),
+                                                            group(G::slotIdentity),
+                                                            group(G::senseGeneration),
+                                                            group(G::engagement)};
 inline constexpr const FieldGroup* kCinematicGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::cinematic)};
 inline constexpr const FieldGroup* kGhostLinkGroups[]{
@@ -726,6 +754,20 @@ inline constexpr EventSpec kEvents[]{
      "SunriseSquadMemberLostEvent",
      kSquadMemberLostGroups,
      "a member slot's lost count rose; the client raises it as it tears down one of its actors"},
+    {45,
+     "INTEGRATION",
+     "on_event_integration",
+     "SunriseIntegrationEvent",
+     kIntegrationGroups,
+     "one report from the Vex block's sacrifice trigger; how reports map to integrations is "
+     "the script's policy"},
+    {46,
+     "ENGAGEMENT_STATE",
+     "on_event_engagement_state",
+     "SunriseEngagementStateEvent",
+     kEngagementStateGroups,
+     "one type-70 report whose member count, local membership or value changed; a nonzero "
+     "count alone is not local membership"},
 };
 
 // --- Program table -----------------------------------------------------------------------------
@@ -755,6 +797,13 @@ inline constexpr ValueSpec kProgramEntries[]{
      .optional = true,
      .fields = kInitialStateFields,
      .note = "a generated mission.states row; the arrival loads it"},
+    {.name = "seed_omit",
+     .kind = ValueKind::list,
+     .optional = true,
+     .bound = at_most(
+         static_cast<std::int64_t>(::sunrise::state::activity::mission::kMissionSeedOmitCapacity)),
+     .element = kSlotSelector,
+     .note = "objects kept out of every seed, the adopted arrival seed included"},
     {.name = "on_start",
      .kind = ValueKind::function,
      .optional = true,

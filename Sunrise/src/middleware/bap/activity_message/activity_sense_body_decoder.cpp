@@ -59,6 +59,12 @@ constexpr std::uint64_t kEngagementCapacity = 16;
 constexpr std::uint16_t kEngagementValueOrdinal = 1;
 constexpr std::uint8_t kEngagementValueWidth = 16;
 constexpr std::int32_t kEngagementValueBias = 32'768;
+/**
+ * Engagement list ordinal 1 is the key array (schema 0x808094F7): 64-bit player keys, as the
+ * type-13 identity read uses. Field 0 of 0x808094F8 is the five-bit count of up to 16 keys.
+ */
+constexpr std::uint16_t kEngagementKeyOrdinal = 1;
+constexpr std::uint8_t kEngagementKeyWidth = 64;
 /** The type-26 attachment body: three required signed 32-bit counters, then one flag. */
 constexpr std::uint16_t kAttachmentCounterCount = mission_effect::kSenseCounterCount;
 constexpr std::uint8_t kAttachmentCounterWidth = 32;
@@ -77,6 +83,15 @@ constexpr std::uint32_t kDamage = damage_monitor::kSenseSchema;
 /** Registered object replies: the interaction latch and the ownership key. */
 constexpr std::uint32_t kInteractionReply = interactable_object::kInteractionReply,
                         kOwnershipReply = interactable_object::kOwnershipReply;
+/**
+ * The capture-plate reply, sent once the plate Auth exists: two six-bit values at bias three, a
+ * flag, two signed revisions, then an optional word and an optional 4-bit unit real.
+ * Ordinals are recorded unnamed; their meanings are not recovered.
+ */
+constexpr std::uint32_t kCapturePlateReply = generated::C80804df6::kClass;
+constexpr std::uint8_t kPlateSmallWidth = 6, kPlateSmallStorage = 8;
+constexpr std::int32_t kPlateSmallBias = 3;
+constexpr std::uint8_t kPlateUnitWidth = 4;
 /** Counted lists inside the participation body. */
 constexpr std::uint64_t kPlayerScalarCountMaximum = 4, kPlayerKeyCountMaximum = 32;
 /** Quantization ceilings the combatant reals carry in their own descriptors. */
@@ -450,6 +465,43 @@ real_value(std::uint64_t raw, std::uint8_t width, std::uint32_t maximumBits) noe
                 || !read_unsigned(reader, values, kOwnershipReply, 1, 64, false, index)) {
                 return NativeStatus::malformed;
             }
+        } else if (schema == kCapturePlateReply) {
+            constexpr std::int32_t kRevisionBias = (std::numeric_limits<std::int32_t>::min)();
+            if (!read_signed(reader,
+                             values,
+                             kCapturePlateReply,
+                             0,
+                             kPlateSmallWidth,
+                             kPlateSmallStorage,
+                             kPlateSmallBias,
+                             false,
+                             index)
+                || !read_bool(reader, values, kCapturePlateReply, 1, false, index)
+                || !read_signed(
+                    reader, values, kCapturePlateReply, 2, 32, 32, kRevisionBias, false, index)
+                || !read_signed(
+                    reader, values, kCapturePlateReply, 3, 32, 32, kRevisionBias, false, index)
+                || !read_signed(reader,
+                                values,
+                                kCapturePlateReply,
+                                4,
+                                kPlateSmallWidth,
+                                kPlateSmallStorage,
+                                kPlateSmallBias,
+                                false,
+                                index)
+                || !read_unsigned(reader, values, kCapturePlateReply, 5, 32, true, index)
+                || !read_real(reader,
+                              values,
+                              kCapturePlateReply,
+                              6,
+                              kPlateUnitWidth,
+                              true,
+                              index,
+                              kUnitMaximumBits)) {
+                // A plate read past the budget falls back to the old skip, never the packet.
+                return NativeStatus::unsupported;
+            }
         } else {
             return NativeStatus::unsupported;
         }
@@ -503,8 +555,9 @@ real_value(std::uint64_t raw, std::uint8_t width, std::uint32_t maximumBits) noe
     return NativeStatus::complete;
 }
 /**
- * Decodes the engagement body. Only an empty element list is supported: the element codec is
- * unknown, and its storage size says nothing about its wire width.
+ * Decodes the engagement body: the counted key list, then the 16-bit biased value. A count above
+ * the native capacity is unsafe; a body that ends inside the list is malformed. The keys are
+ * retained as integers; which player they name is the edge's comparison, not the decoder's.
  */
 [[nodiscard]] NativeStatus decode_engagement(Reader& reader, Values& values) noexcept {
     std::uint64_t count = 0;
@@ -514,9 +567,6 @@ real_value(std::uint64_t raw, std::uint8_t width, std::uint32_t maximumBits) noe
     }
     if (count > kEngagementCapacity) {
         return NativeStatus::unsafeCount;
-    }
-    if (count != 0) {
-        return NativeStatus::unsupported;
     }
     values.put(kEngagementList,
                0,
@@ -528,6 +578,17 @@ real_value(std::uint64_t raw, std::uint8_t width, std::uint32_t maximumBits) noe
                0,
                0.0F,
                true);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        if (!read_unsigned(reader,
+                           values,
+                           kEngagementList,
+                           kEngagementKeyOrdinal,
+                           kEngagementKeyWidth,
+                           false,
+                           index)) {
+            return NativeStatus::malformed;
+        }
+    }
     return read_signed(reader,
                        values,
                        kEngagement,

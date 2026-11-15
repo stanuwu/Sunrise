@@ -54,6 +54,10 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
         return "sessionLeft";
     case host::EventKind::playerTrigger:
         return "playerTrigger";
+    case host::EventKind::integration:
+        return "integration";
+    case host::EventKind::engagementState:
+        return "engagementState";
     case host::EventKind::cinematicStarted:
         return "cinematicStarted";
     case host::EventKind::cinematicSkipRequested:

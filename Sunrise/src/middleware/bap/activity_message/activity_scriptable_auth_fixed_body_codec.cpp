@@ -21,6 +21,46 @@ constexpr std::uint8_t kSequenceWidth = 16;
 constexpr std::uint64_t kUnusedAuxiliary = 0;
 /** Type-31 reserves the largest generation as its unset sentinel. */
 constexpr std::uint64_t kReservedGeneration = std::numeric_limits<std::uint64_t>::max();
+/** The type-4 selected-child count is two bits; the plate form carries exactly one child. */
+constexpr std::uint8_t kType4ChildCountWidth = 2;
+/** Raw zero in a biased revision is INT32_MIN, never newer than the plate's stored revisions. */
+constexpr std::uint32_t kStaleRevision = 0;
+/** The plate owner is a six-bit field at bias three; raw two is the neutral owner, -1. */
+constexpr std::uint8_t kPlateOwnerWidth = 6;
+constexpr std::uint32_t kPlateNeutralOwner = 2;
+
+/**
+ * Writes the plate child that matches the content defaults: label 0, stale inhibition and owner
+ * revisions, no participant filter and both optional overrides null.
+ */
+[[nodiscard]] bool write_capture_plate_child(bits::Writer& writer) noexcept {
+    return writer.write(1, kBoolWidth) && writer.write(kType4CapturePlateSchema, kSigned32Width)
+           && writer.write(kSigned32Bias, kSigned32Width)
+           && writer.write(kStaleRevision, kSigned32Width) && writer.write(0, kBoolWidth)
+           && writer.write(kStaleRevision, kSigned32Width)
+           && writer.write(kPlateNeutralOwner, kPlateOwnerWidth) && write_absent_client_ref(writer)
+           && writer.write(0, kBoolWidth) && writer.write(0, kBoolWidth);
+}
+
+/**
+ * Writes the object state-machine child: lanes 1-2 stale (raw 0, never newer), lane 3 the position
+ * at the given sequence, with the snap revision advanced to the same value when snapping.
+ */
+[[nodiscard]] bool write_position_child(bits::Writer& writer,
+                                        const Type4PositionChild& child) noexcept {
+    const std::uint32_t sequence = std::bit_cast<std::uint32_t>(child.revision) + kSigned32Bias;
+    bool written =
+        writer.write(1, kBoolWidth) && writer.write(kType4PositionChildSchema, kSigned32Width);
+    // Native lanes zero and one stay unchanged; lane two receives the position.
+    constexpr int kUnchangedPositionLanes = 2;
+    for (int lane = 0; lane < kUnchangedPositionLanes && written; ++lane) {
+        written = writer.write(kStaleRevision, kSigned32Width)
+                  && writer.write(kStaleRevision, kSigned32Width) && writer.write(0, kReal32Width);
+    }
+    return written && writer.write(sequence, kSigned32Width)
+           && writer.write(child.snap ? sequence : kStaleRevision, kSigned32Width)
+           && writer.write(std::bit_cast<std::uint32_t>(child.value), kReal32Width);
+}
 
 /** @return The reflected channel ordinal, or the channel count for an invalid enum value. */
 [[nodiscard]] constexpr std::size_t channel_index(Type23Channel channel) noexcept {
@@ -79,18 +119,6 @@ constexpr std::uint64_t kReservedGeneration = std::numeric_limits<std::uint64_t>
            && (!guard.hasLast || preset.generation >= guard.last);
 }
 
-/** Writes the complete fixed-width shared timed-state child. */
-[[nodiscard]] bool write_shared_timed_state(bits::Writer& writer,
-                                            const SharedTimedState& state) noexcept {
-    return writer.write(state.running ? 1U : 0U, kBoolWidth)
-           && writer.write(state.minimum, kWideIntegerWidth)
-           && writer.write(state.maximum, kWideIntegerWidth)
-           && writer.write(state.currentAtEpoch, kWideIntegerWidth)
-           && writer.write(state.remainingAtEpoch, kWideIntegerWidth)
-           && writer.write(state.epoch, kWideIntegerWidth)
-           && writer.write(std::bit_cast<std::uint32_t>(state.rate), kReal32Width);
-}
-
 /** Reads the complete fixed-width shared timed-state child. */
 [[nodiscard]] bool read_shared_timed_state(bits::Reader& reader, SharedTimedState& state) noexcept {
     SharedTimedState parsed{};
@@ -122,17 +150,27 @@ bool next_type4_generation(const Type4GenerationGuard& guard, std::int32_t& next
     return next_positive_generation(guard.hasLast, guard.last, next);
 }
 
-/** Encodes one package-owned entry with no child records; the second flag sends its location. */
+/** Encodes one package-owned entry; the second flag sends its location, plus one optional child. */
 bool encode_type4(const Type4Preset& preset,
                   const Type4GenerationGuard& guard,
                   std::span<std::byte> output,
                   std::size_t& written) noexcept {
     written = 0;
-    if (preset.generation <= 0 || preset.entryIndex < 0
-        || (guard.hasLast && preset.generation <= guard.last) || output.size() < kType4ByteCount) {
+    const std::size_t bitCount = type4_bit_count(preset);
+    const std::size_t byteCount = (bitCount + 7) / 8;
+    // A position update repeats the committed generation; everything else advances it.
+    const Type4PositionChild& position = preset.position;
+    const bool generationAccepted = position.present
+                                        ? guard.hasLast && preset.generation == guard.last
+                                        : !guard.hasLast || preset.generation > guard.last;
+    if (preset.generation <= 0 || preset.entryIndex < 0 || !generationAccepted
+        || output.size() < byteCount
+        || (position.present
+            && (preset.capturePlate || position.revision <= 0
+                || !(position.value >= 0.0F && position.value <= 1.0F)))) {
         return false;
     }
-    bits::Writer writer(output.first(kType4ByteCount));
+    bits::Writer writer(output.first(byteCount));
     const std::uint32_t generation =
         std::bit_cast<std::uint32_t>(preset.generation) + kSigned32Bias;
     const std::uint32_t entry = std::bit_cast<std::uint32_t>(preset.entryIndex) + kSigned32Bias;
@@ -144,9 +182,12 @@ bool encode_type4(const Type4Preset& preset,
         && writer.write(located ? 1U : 0U, kBoolWidth) && writer.write(neutral, kSigned32Width)
         && write_optional_client_ref(writer, preset.location) && writer.write(0, kReal32Width)
         && writer.write(0, kReal32Width) && writer.write(0, kReal32Width)
-        && writer.write(0, kBoolWidth) && writer.write(0, 2U);
-    return encoded && writer.bit_count() == kType4BitCount && writer.finish(written)
-           && written == kType4ByteCount;
+        && writer.write(0, kBoolWidth)
+        && writer.write(preset.capturePlate || position.present ? 1U : 0U, kType4ChildCountWidth)
+        && (!preset.capturePlate || write_capture_plate_child(writer))
+        && (!position.present || write_position_child(writer, position));
+    return encoded && writer.bit_count() == bitCount && writer.finish(written)
+           && written == byteCount;
 }
 
 /** Finds the next positive type-23 sequence without wrapping. */

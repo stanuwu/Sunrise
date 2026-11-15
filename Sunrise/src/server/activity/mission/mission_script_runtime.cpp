@@ -373,6 +373,7 @@ void note_vm_status(RuntimeInstance& instance,
 /** Native Sense levels cannot cross an attempt or ActivityClient generation boundary. */
 void clear_sense_levels(RuntimeInstance& instance) noexcept {
     instance.triggerOccupancy = {};
+    instance.engagementObservations = {};
     instance.squadObservations = {};
     instance.squadShadows = {};
     instance.squadShadowAtCapacity = false;

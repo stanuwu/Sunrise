@@ -232,6 +232,8 @@ enum class IntentKind : std::uint8_t {
     setHopOn,
     /** Sets an authored object-channel prefix; the Host owns its revisions. */
     setObjectChannels,
+    /** Sets a type-70 audience; the Host owns its revision and raises it only to clear. */
+    setEngagement,
 };
 
 /** Actor sequence values belong to one combatant and one SDK/client generation. */
@@ -325,6 +327,14 @@ struct TypedIntent final {
     std::uint8_t lifetimeState{};
     bool deviceSnap{};
     bool active{};
+    /** An object activation also carries the no-change capture-plate component Auth. */
+    bool capturePlate{};
+    /** An object activation also carries the state-machine position lane (in place). */
+    bool positionChild{};
+    /** Requested normalized native position value. */
+    float positionValue{};
+    /** True to snap; false preserves the authored transition rate. */
+    bool positionSnap{true};
     /** A state transition may end its captured map-prop lifetimes before teleporting. */
     bool retirePlacedProps{};
 };

@@ -655,13 +655,14 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             const display::Name& progress = names.names[resolved++];
             const bool hasDescription = !description.authoredEmpty && description.length != 0;
             const bool hasProgress = !progress.authoredEmpty && progress.length != 0;
-            if (title.authoredEmpty || title.length == 0 || (!hasDescription && !hasProgress)) {
+            // A title alone is a complete element: a public event's rally point announces the
+            // event with a title-only directive beside its countdown.
+            if (title.authoredEmpty || title.length == 0) {
                 log_directive_element(candidate.slotIndex,
                                       candidate.nameHash,
                                       static_cast<std::size_t>(candidate.elementIndex),
                                       candidate.flags,
-                                      title.authoredEmpty || title.length == 0 ? "no_title"
-                                                                               : "no_text");
+                                      "no_title");
                 continue;
             }
             char id[96]{};

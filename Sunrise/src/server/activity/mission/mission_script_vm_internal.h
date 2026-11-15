@@ -150,6 +150,12 @@ struct Impl final {
                state::activity::mission::kMissionSeedOmitCapacity>
         initialStateOmissions{};
     std::uint8_t initialStateOmissionCount{};
+    /** Objects program.seed_omit keeps out of every seed, the adopted arrival seed included. */
+    std::array<state::activity::mission::MissionSeedOmission,
+               state::activity::mission::kMissionSeedOmitCapacity>
+        seedOmissions{};
+    /** Valid entries in seedOmissions; bounded by kMissionSeedOmitCapacity. */
+    std::uint8_t seedOmissionCount{};
     std::size_t arenaBytesAfterClose{};
     std::array<char, 256> lastError{};
     lua_State* state{};

@@ -179,6 +179,12 @@ void apply_incident(const IncidentInput& input, std::uint64_t now) noexcept {
         event.playerTriggerSlotIndex = input.playerTrigger.slotIndex;
         event.playerTriggerResolvedObjectId = input.playerTrigger.resolvedObjectId;
     }
+    event.hasIntegration = input.hasIntegration;
+    if (input.hasIntegration) {
+        event.integrationValue = input.integration.value;
+        event.integrationKind = input.integration.kind;
+        event.integrationContext = input.integration.context;
+    }
     event.hasCinematic = input.hasCinematic;
     if (input.hasCinematic) {
         event.cinematicRegistryKey = input.cinematic.registryKey;

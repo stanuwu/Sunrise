@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <limits>
 
 #include "../../account/account_context.h"
@@ -269,6 +270,44 @@ void note_declared_spawn_set(std::uint64_t sessionId, std::uint32_t spawnSetHash
         state.sessions[target].membership.declaredSpawnSetHash = spawnSetHash;
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+}
+
+/** Records the declared seed omissions on the joined session that owns the program. */
+void note_declared_seed_omissions(
+    std::uint64_t sessionId,
+    std::span<const activity::mission::MissionSeedOmission> omissions) noexcept {
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    ActivityState& state = runtime::storage::g_state.activity;
+    const auto target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot) {
+        MembershipState& membership = state.sessions[target].membership;
+        membership.declaredSeedOmissions = {};
+        membership.declaredSeedOmissionCount = 0;
+        if (omissions.size() <= membership.declaredSeedOmissions.size()) {
+            std::copy(omissions.begin(), omissions.end(), membership.declaredSeedOmissions.begin());
+            membership.declaredSeedOmissionCount = static_cast<std::uint8_t>(omissions.size());
+        }
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+}
+
+/** @return The declared seed omissions copied into `output`, or zero while none fit. */
+std::size_t
+declared_seed_omissions(std::uint64_t sessionId,
+                        std::span<activity::mission::MissionSeedOmission> output) noexcept {
+    std::size_t count = 0;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const auto target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot) {
+        const MembershipState& membership = state.sessions[target].membership;
+        if (membership.declaredSeedOmissionCount <= output.size()) {
+            count = membership.declaredSeedOmissionCount;
+            std::copy_n(membership.declaredSeedOmissions.begin(), count, output.begin());
+        }
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return count;
 }
 
 /** @return The declared spawn set, or zero while no program declared one. */

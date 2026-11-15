@@ -19,6 +19,7 @@
 #include "../../../../../state/activity/bubble_authority/runtime.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/activity/runtime.h"
+#include "../../../../activity/activity_clock.h"
 #include "../../../../activity/host_runtime.h"
 #include "../../../../gameplay/peer/peer_transport.h"
 #include "../../../../gameplay/squad_entity_retirement.h"
@@ -603,7 +604,16 @@ bool append_roster_notification(
         SecureZeroMemory(&initialNonce, sizeof initialNonce);
         return false;
     }
-    bool encoded = message::encode_sensor_auth_update(snapshot, scratch.responseBody, messageSize);
+    // Ticks since this public session's join result; a private session's clock never starts, so
+    // its value stays zero, the only value the heartbeat-carrying private link has accepted.
+    bool encoded =
+        server::activity::activity_clock_wire_ticks(session.activity.session.sessionId,
+                                                    session.activity.session.createdRevision,
+                                                    GetTickCount64(),
+                                                    false,
+                                                    snapshot.activityTime)
+        && message::encode_sensor_auth_update(snapshot, scratch.responseBody, messageSize);
+
     // Only a body that cannot be built is refused. A full frame or a held purge is tried again.
     bool bodyRefused = !encoded;
     encoded =
@@ -658,7 +668,7 @@ bool append_roster_notification(
                             .purged = hasRetirement ? &entityRetirement.entities : nullptr,
                             .heldEpoch = session.activity.replicationEpoch});
     }
-    // An unsolicited body identical to the last delivered one is skipped. A solicited one never
+    // Unchanged content is skipped even when its clock advances. A solicited body never
     // is. The repeat check knows only this host's own history, and a slice-set teardown clears
     // the client's mirror without telling us, which is exactly when it asks again.
     const bool suppressible = encoded && !solicited && !snapshot.hasGrant && !ownsHostState

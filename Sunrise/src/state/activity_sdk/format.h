@@ -14,6 +14,7 @@
 #include "../../middleware/content/packages/schema/generated/tag_classes_80807f.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808083.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808088.h"
+#include "../../middleware/content/packages/schema/generated/tag_classes_808094.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808095.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_808099.h"
 #include "../../middleware/content/packages/schema/generated/tag_classes_80809a.h"
@@ -139,6 +140,12 @@ inline constexpr std::uint32_t kOccupancyComponentClass =
 inline constexpr std::uint32_t kOccupancySenseSchema = generated::C80809531::kClass;
 /** Auth schema of a type-30 occupancy-condition slot. */
 inline constexpr std::uint32_t kOccupancyAuthSchema = generated::C80809532::kClass;
+/** Component class of a type-70 engagement slot. */
+inline constexpr std::uint32_t kEngagementComponentClass = generated::C808094ee::kClass;
+/** Sense schema of a type-70 engagement slot. */
+inline constexpr std::uint32_t kEngagementSenseSchema = generated::C808094f0::kClass;
+/** Auth schema of a type-70 engagement slot. */
+inline constexpr std::uint32_t kEngagementAuthSchema = generated::C808094f1::kClass;
 /** Component class of a type-68 directive slot. */
 inline constexpr std::uint32_t kDirectiveComponentClass = generated::C80804f53::kClass;
 /** Auth schema of a type-68 directive slot. */
@@ -186,6 +193,8 @@ inline constexpr std::uint32_t kCinematicSlotType = 6U;
 inline constexpr std::uint32_t kDeviceSlotType = 23U;
 /** Slot type of the occupancy-condition Auth surface. */
 inline constexpr std::uint32_t kOccupancySlotType = 30U;
+/** Slot type of the encounter-engagement audience surface. */
+inline constexpr std::uint32_t kEngagementSlotType = 70U;
 /** Authored three-lane HUD directive state. */
 inline constexpr std::uint32_t kDirectiveSlotType = 68U;
 /** Only the counter bit of a directive element's flag word is named. */

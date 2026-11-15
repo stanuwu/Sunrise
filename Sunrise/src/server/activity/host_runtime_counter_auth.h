@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <limits>
+
 #include "../../middleware/bap/activity_message/damage_monitor_auth.h"
 #include "../../middleware/bap/activity_message/ghost_link_auth.h"
 #include "../../middleware/bap/activity_message/interactable_object_auth.h"
@@ -30,7 +33,10 @@ namespace sunrise::server::activity::host::counter_auth {
                && target.slotType == auth::kType24SlotType
                && target.authSchema == auth::kType24Schema)
            || (kind == ScriptableOverrideKind::hopOn && target.slotType == hop_on::kSlotType
-               && target.authSchema == hop_on::kSchema);
+               && target.authSchema == hop_on::kSchema)
+           || (kind == ScriptableOverrideKind::engagement
+               && target.slotType == auth::kType70SlotType
+               && target.authSchema == auth::kType70Schema);
 }
 
 /** Reads the signed counter from a transported body; absent or negative state starts at zero. */
@@ -101,6 +107,48 @@ namespace sunrise::server::activity::host::counter_auth {
     return true;
 }
 
+/**
+ * Stamps a type-70 audience with the retained revision, or the next one when the template asks
+ * to clear. A raised revision empties the members the client has gathered.
+ */
+[[nodiscard]] inline bool encode_engagement(const detail::Instance& instance,
+                                            const detail::ScriptableRequest& request,
+                                            const detail::ScriptableGuard& guard,
+                                            PendingScriptableOverride& pending,
+                                            std::size_t& written) noexcept {
+    namespace auth = middleware::bap::activity_message::scriptable_auth;
+    auth::Type70Preset incoming{}, retained{};
+    if (!compatible(request.kind, request.target)
+        || !auth::decode_type70(std::span(request.authBody).first(request.authByteCount),
+                                request.authBitCount,
+                                incoming)) {
+        return false;
+    }
+    // The client starts a sensor at revision one, so a sensor never sent keeps that.
+    std::uint32_t last = (std::max)(guard.engagementRevision, 1U);
+    const auto* previous = actor_program::retained(instance, request.target);
+    if (previous != nullptr
+        && auth::decode_type70(
+            std::span(previous->body).first(previous->byteCount), previous->bitCount, retained)) {
+        last = (std::max)(last,
+                          static_cast<std::uint32_t>(
+                              (std::max)(static_cast<std::int32_t>(retained.revision), 1)));
+    }
+    const bool clear = incoming.revision != 0;
+    const std::uint32_t next = clear ? last + 1U : last;
+    if (next > static_cast<std::uint32_t>((std::numeric_limits<std::int16_t>::max)())) {
+        return false;
+    }
+    incoming.revision = static_cast<std::int16_t>(next);
+    std::size_t bits = 0;
+    if (!auth::encode_type70(incoming, pending.body, written, bits)) {
+        return false;
+    }
+    pending.bitCount = static_cast<std::uint16_t>(bits);
+    pending.generation = next;
+    return true;
+}
+
 /** Substitutes one fresh counter while retaining every requested non-counter bit. */
 [[nodiscard]] inline bool encode(const detail::Instance& instance,
                                  const detail::ScriptableRequest& request,
@@ -109,6 +157,9 @@ namespace sunrise::server::activity::host::counter_auth {
                                  std::size_t& written) noexcept {
     if (request.kind == ScriptableOverrideKind::objectChannels) {
         return encode_object_channels(instance, request, guard, pending, written);
+    }
+    if (request.kind == ScriptableOverrideKind::engagement) {
+        return encode_engagement(instance, request, guard, pending, written);
     }
     namespace fields = middleware::bap::activity_message::auth_fields;
     namespace patch = middleware::bap::activity_message::mission_auth_patch;

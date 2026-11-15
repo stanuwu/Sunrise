@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 #include "../../../middleware/bap/activity_message/combatant_auth.h"
 #include "../../../middleware/bap/activity_message/damage_monitor_auth.h"
@@ -61,6 +62,23 @@ inline constexpr ValueSpec kAuthType[]{{.kind = ValueKind::string,
 // --- Slot method arguments ----------------------------------------------------------------------
 inline constexpr ValueSpec kVolume[]{
     {.kind = ValueKind::handle, .ref = "slot", .slot = type_gate(slot_auth::kType60SlotType)}};
+inline constexpr ValueSpec kEngagementArguments[]{
+    {.name = "volumes",
+     .kind = ValueKind::list,
+     .bound = between(0, static_cast<std::int64_t>(slot_auth::kType70VolumeCapacity)),
+     .element = kVolume,
+     .note = "same-owner volumes that admit players to the audience"},
+    {.name = "clear",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "empties the members the client has gathered; the Host owns the revision"},
+    {.name = "everyone",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "admit every present player as well, not only the occupants of the volumes"},
+};
 inline constexpr ValueSpec kFilterObject[]{
     {.kind = ValueKind::handle, .ref = "slot", .slot = type_gate(slot_format::kObjectSlotType)}};
 inline constexpr ValueSpec kFilterSquad[]{
@@ -262,6 +280,14 @@ inline constexpr ValueSpec kDirectiveRowFields[]{
     {.name = "name_hash", .kind = ValueKind::integer, .bound = uint32_range()},
     {.name = "element", .kind = ValueKind::integer, .bound = between(0, kInt32Maximum)},
 };
+inline constexpr ValueSpec kDirectiveClockFields[]{
+    {.name = "remaining",
+     .kind = ValueKind::integer,
+     .bound = between(0, slot_auth::kType68MaximumClockSeconds)},
+    {.name = "total",
+     .kind = ValueKind::integer,
+     .bound = between(0, slot_auth::kType68MaximumClockSeconds)},
+};
 inline constexpr ValueSpec kSetDirectiveArguments[]{
     {.name = "directive",
      .kind = ValueKind::missionRow,
@@ -274,6 +300,17 @@ inline constexpr ValueSpec kSetDirectiveArguments[]{
      .optional = true,
      .fallback = default_integer(0),
      .bound = between(0, 2)},
+    {.name = "active",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "entry phase: true plays the active transition and admits completion; false incoming"},
+    {.name = "settled",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "entry phase: the HUD shows the entry as presented and plays no transition; "
+             "excludes active"},
     {.name = "navpoint",
      .kind = ValueKind::handle,
      .ref = "slot",
@@ -298,6 +335,17 @@ inline constexpr ValueSpec kSetDirectiveArguments[]{
      .bound = between(1, 4),
      .element = kInt32Element,
      .note = "counter values; only on a directive whose row has counter = true"},
+    {.name = "event",
+     .kind = ValueKind::handle,
+     .ref = "slot",
+     .optional = true,
+     .slot = type_gate(slot_auth::kType71SlotType),
+     .note = "public-event sensor whose state and local-player byte the HUD record copies"},
+    {.name = "clock",
+     .kind = ValueKind::table,
+     .optional = true,
+     .fields = kDirectiveClockFields,
+     .note = "countdown in whole seconds beside the goal; remaining at most total"},
 };
 // Darkness zone, music, interaction, Ghost link and public event arguments.
 inline constexpr ValueSpec kDarknessZoneArguments[]{
@@ -701,6 +749,12 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kGenerateMapArguments,
      .returns = kRequestKey,
      .note = "writes one of the two generator records and leaves the other authored"},
+    {.name = "set_engagement",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = exact_class_gate(slot_auth::kType70SlotType),
+     .arguments = kEngagementArguments,
+     .returns = kRequestKey},
     {.name = "set_directive",
      .kind = MemberKind::request,
      .call = CallForm::named,
