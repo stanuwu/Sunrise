@@ -109,6 +109,8 @@ struct PeerMember final {
     std::uint8_t nameLength{};
     bool hasName{};
     bool present{};
+    /** The peer's own fireteam Activity Host for field 3; zero takes the body's. */
+    std::uint64_t fireteamActivityHostId{};
 };
 /** Peers fill slots two through the last, leaving the table room for its owner and the host. */
 inline constexpr std::size_t kPeerMemberCapacity = kMemberSlotCount - 2;

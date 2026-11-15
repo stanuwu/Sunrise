@@ -128,14 +128,15 @@ template <std::size_t Size>
 
 /**
  * Writes the present fields of the nested player identity block.
- * Field 3 names the fireteam's Activity Host and field 5 the fireteam; the client creates no
- * player while field 3 is zero. Field 4 names the group Activity Host.
+ * Field 3 names the fireteam's Activity Host; the client creates no player while it is zero.
+ * Field 4 names the group Activity Host.
  * @param writer Fixed-buffer writer sitting at identity field zero.
  * @param identity Values mirrored from the client identity update.
  * @param remote Optional remote-view row. Null writes the local member's shorter field set.
  * @param activityHostId Host id for field 4, which the client itself always sends as zero.
- * @param fireteamActivityHostId Host id for field 3 of a player row. A remote-view row keeps its
- * own identity there, so the private link's player monitors never count it.
+ * @param fireteamActivityHostId Host id for field 3 of a player row that names none of its own.
+ * A remote-view row keeps its own identity there, so the private link's player monitors never
+ * count it.
  * @return True when fields 3, 4, 5 and 14 and all presence bits fit.
  */
 [[nodiscard]] bool write_player_identity(encoding::bits::Writer& writer,
@@ -182,9 +183,11 @@ template <std::size_t Size>
         if (field == 2 && remote != nullptr && !writer.write(remote->processSessionIdHash, 64)) {
             return false;
         }
-        if (field == 3
-            && !writer.write(remote != nullptr ? identity.accountSoid : fireteamActivityHostId,
-                             64)) {
+        const std::uint64_t fireteam =
+            remote != nullptr ? identity.accountSoid
+            : peer != nullptr && peer->fireteamActivityHostId != 0 ? peer->fireteamActivityHostId
+                                                                    : fireteamActivityHostId;
+        if (field == 3 && !writer.write(fireteam, 64)) {
             return false;
         }
         if (field == 4 && !writer.write(activityHostId, 64)) {

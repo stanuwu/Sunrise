@@ -30,6 +30,80 @@ namespace {
 namespace membership_message = middleware::bap::activity_message::replicate_membership;
 namespace sdk = state::activity_sdk;
 
+/**
+ * A player's fireteam activity is its own private activity on every link: the client counts a
+ * private link's player monitors only for players of that activity, and never revises it once
+ * the player is added.
+ * @return The private session a link's membership names as each player's fireteam activity.
+ */
+[[nodiscard]] std::uint64_t player_activity_id(std::uint64_t source,
+                                               std::uint64_t linked) noexcept {
+    return source != state::activity::kAbsentSessionId ? source : linked;
+}
+
+/**
+ * @return The one private link the account behind a link holds, or null. A pooled public host
+ * keeps its first fireteam's binding as every link's source, so only the account ties a public
+ * link's player to its own private activity.
+ */
+[[nodiscard]] const Session* account_private_link(const Session& link) noexcept {
+    const Session* found = nullptr;
+    for (const Session& candidate : sessions()) {
+        if (&candidate == &link || candidate.id == 0 || !candidate.authenticated
+            || candidate.activity.role != ActivityClientRole::privateCurrent
+            || candidate.activity.bindingGeneration == 0
+            || candidate.accountHandle == state::kInvalidAccount
+            || candidate.accountHandle != link.accountHandle) {
+            continue;
+        }
+        if (found != nullptr) {
+            return nullptr;
+        }
+        found = &candidate;
+    }
+    return found;
+}
+
+/**
+ * @param publicLink True when the link answers on a public host.
+ * @param source The link's source session.
+ * @param linked The activity session the link answers on.
+ * @return The private activity the link's own player belongs to.
+ */
+[[nodiscard]] std::uint64_t fireteam_activity_id(const Session& link,
+                                                 bool publicLink,
+                                                 std::uint64_t source,
+                                                 std::uint64_t linked) noexcept {
+    if (publicLink) {
+        if (const Session* const own = account_private_link(link)) {
+            return own->activity.session.sessionId;
+        }
+    }
+    return player_activity_id(source, linked);
+}
+
+/** Names each peer row's own fireteam activity, found through the link its member key joined. */
+void name_peer_fireteams(std::uint64_t sessionId,
+                         membership_message::MembershipSnapshot& wire) noexcept {
+    for (auto& peer : wire.peers) {
+        if (!peer.present) {
+            continue;
+        }
+        for (const Session& link : sessions()) {
+            if (link.id != 0 && link.authenticated && link.activity.bindingGeneration != 0
+                && link.activityMemberKey == peer.identity.memberKey
+                && link.activity.session.sessionId == sessionId) {
+                peer.fireteamActivityHostId =
+                    fireteam_activity_id(link,
+                                         link.activity.role == ActivityClientRole::publicTarget,
+                                         link.activity.source.sessionId,
+                                         link.activity.session.sessionId);
+                break;
+            }
+        }
+    }
+}
+
 /** Descriptor fields reused by the matching remote activity-member row. */
 constexpr std::size_t kDescriptorMachineOffset = 0;
 constexpr std::size_t kDescriptorNetAddrOffset = 8;
@@ -198,6 +272,7 @@ make_base_snapshot(const Session& session,
     } else {
         project_activity_peers(mutation.peerSnapshot, wire);
     }
+    name_peer_fireteams(activityHostId, wire);
     wire.identity.memberKey = snapshot.identity.memberKey;
     wire.identity.field1 = snapshot.identity.smallOpaque;
     wire.identity.field2 = snapshot.identity.signedOpaque;
@@ -451,17 +526,6 @@ server::gameplay::AdvertisementState region_advertisement(const Session& session
         region_host(session.activity.source, session.activity.bindingGeneration, region));
 }
 
-/**
- * A player's fireteam activity is its own private activity on every link: the client counts a
- * private link's player monitors only for players of that activity, and never revises it once
- * the player is added.
- * @return The private session a link's membership names as each player's fireteam activity.
- */
-[[nodiscard]] static std::uint64_t player_activity_id(std::uint64_t source,
-                                                      std::uint64_t linked) noexcept {
-    return source != state::activity::kAbsentSessionId ? source : linked;
-}
-
 /** Appends one current membership svc9 notification and advances its local nonce. */
 bool append_membership_notification(Scratch& scratch,
                                     Session& session,
@@ -488,7 +552,10 @@ bool append_membership_notification(Scratch& scratch,
         activity.membershipMutation,
         retains,
         session.activity.session.sessionId,
-        player_activity_id(session.activity.source.sessionId, session.activity.session.sessionId));
+        fireteam_activity_id(session,
+                             session.activity.role == ActivityClientRole::publicTarget,
+                             session.activity.source.sessionId,
+                             session.activity.session.sessionId));
     bool encoded = membership_message::encode_replicate_membership(
         snapshot, scratch.responseBody, messageSize);
     if (!encoded) {
@@ -568,8 +635,11 @@ bool append_join_membership_notification(Scratch& scratch,
         make_base_snapshot(session,
                            activity.membershipMutation,
                            activity.sessionId,
-                           player_activity_id(activity.publicHost.source.sessionId,
-                                              activity.sessionId));
+                           fireteam_activity_id(session,
+                                                activity.publicHost.source.sessionId
+                                                    != state::activity::kAbsentSessionId,
+                                                activity.publicHost.source.sessionId,
+                                                activity.sessionId));
     const bool bodyEncoded = membership_message::encode_replicate_membership(
         snapshot, scratch.responseBody, messageSize);
     if (!bodyEncoded) {
