@@ -265,9 +265,16 @@ bool render_contract_files(const Source& source, Bundle& output) noexcept {
 ---@field group_hash integer
 ---@field request_hash integer
 
+---@class SunriseCombatTask
+---@field minimum_members integer
+---@field maximum_members integer -1 when unbounded
+---@field maximum_squads integer -1 when unbounded
+---@field counter_limit integer -1 when unbounded; the task stops admitting at this counter
+
 ---@class SunriseCombatTaskGroup
 ---@field slot_row integer
 ---@field group_index integer
+---@field tasks SunriseCombatTask[]
 
 ---@class SunriseMission
 ---@field name string

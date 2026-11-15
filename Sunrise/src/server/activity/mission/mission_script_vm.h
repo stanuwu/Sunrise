@@ -574,9 +574,6 @@ void publish_ghost_levels(Vm& vm, std::span<const GhostLinkRow> levels) noexcept
 /** Copies the retained objective task counters so a callback can read any objective's. */
 void publish_objective_levels(Vm& vm, std::span<const ObjectiveLevelRow> levels) noexcept;
 
-/** Replaces the squads' qualified task costs that slot:select_combat_task reads. */
-[[nodiscard]] bool publish_objective_offers(Vm& vm,
-                                            std::span<const SquadObjectiveOffer> offers) noexcept;
 
 /** Copies the durable carrier flights before any callback reads one. */
 [[nodiscard]] bool

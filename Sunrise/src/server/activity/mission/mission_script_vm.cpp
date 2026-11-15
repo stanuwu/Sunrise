@@ -758,15 +758,6 @@ bool adopt_intents(Vm& vm,
     return true;
 }
 
-/** Copies the qualified offers; a failed copy leaves the previous ones. */
-bool publish_objective_offers(Vm& vm, std::span<const SquadObjectiveOffer> offers) noexcept {
-    try {
-        VmAccess::get(vm).objectiveOffers.assign(offers.begin(), offers.end());
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    return true;
-}
 
 /** Copies durable population facts without exposing the native store to Lua. */
 bool publish_populations(

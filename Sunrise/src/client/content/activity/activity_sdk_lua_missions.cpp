@@ -477,7 +477,23 @@ bool render_mission(const Source& source,
             append_uint(taskGroupConstants, group.slotIndex);
             taskGroupConstants.append(", group_index = ");
             append_uint(taskGroupConstants, group.groupIndex);
-            taskGroupConstants.append(" },\n");
+            // Each authored task's admission bounds, in the order its counters are reported.
+            taskGroupConstants.append(", tasks = {");
+            const std::uint32_t taskCount =
+                (std::min)(group.taskCount, static_cast<std::uint32_t>(group.tasks.size()));
+            for (std::uint32_t task = 0; task < taskCount; ++task) {
+                const format::CombatTaskBounds& bounds = group.tasks[task];
+                taskGroupConstants.append(" { minimum_members = ");
+                append_int(taskGroupConstants, bounds.minimumMembers);
+                taskGroupConstants.append(", maximum_members = ");
+                append_int(taskGroupConstants, bounds.maximumMembers);
+                taskGroupConstants.append(", maximum_squads = ");
+                append_int(taskGroupConstants, bounds.maximumSquads);
+                taskGroupConstants.append(", counter_limit = ");
+                append_int(taskGroupConstants, bounds.counterLimit);
+                taskGroupConstants.append(" },");
+            }
+            taskGroupConstants.append(" } },\n");
         }
         taskGroupConstants.append("    },\n");
     }

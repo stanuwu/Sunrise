@@ -167,47 +167,4 @@ void publish_objective_levels(RuntimeInstance& instance) noexcept {
     lua_vm::publish_objective_levels(instance.vm, instance.objectiveObservations);
 }
 
-/**
- * Hands the VM every squad's costs that echo its transported assignment's evaluation revision.
- * An assignment that keeps the revision keeps the offer under its new task group. Only a squad
- * that reported a revision can hold an offer, so only then are the full bodies copied.
- */
-void publish_objective_offers(RuntimeInstance& instance) noexcept {
-    const auto costed = [](const SquadObservation& squad) noexcept {
-        return squad.used && squad.objectiveCosts.revision != 0;
-    };
-    const auto& squads = instance.squadObservations;
-    if (std::any_of(squads.begin(), squads.end(), costed) && !copy_estate(instance)) {
-        return;
-    }
-    std::vector<SquadObjectiveOffer> offers{};
-    bool built = true;
-    try {
-        for (const SquadObservation& squad : squads) {
-            middleware::bap::activity_message::squad_objective::State assignment{};
-            if (costed(squad)
-                && transported_objective(instance.estate,
-                                         squad.registryKey,
-                                         squad.objectTag,
-                                         squad.slotIndex,
-                                         format::kSquadSlotType,
-                                         assignment)
-                && assignment.revision == squad.objectiveCosts.revision) {
-                offers.push_back({squad.objectiveCosts,
-                                  squad.registryKey,
-                                  squad.objectTag,
-                                  assignment.registryKey,
-                                  assignment.taskGroup,
-                                  squad.slotIndex,
-                                  assignment.objectiveIndex});
-            }
-        }
-    } catch (const std::bad_alloc&) {
-        built = false;
-    }
-    if (!built || !lua_vm::publish_objective_offers(instance.vm, offers)) {
-        fault_instance(instance, "objective offer allocation failed");
-    }
-}
-
 } // namespace sunrise::server::activity::mission

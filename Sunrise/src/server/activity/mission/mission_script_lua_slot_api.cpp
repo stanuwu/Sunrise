@@ -341,7 +341,7 @@ constexpr std::array<SlotBinding, std::size(api::kSlotMembers)> kSlotBindings{{
     {"ghost_link", &slot_ghost_link},
     {"set_public_event_state", &slot_set_public_event_state},
     {"assign_combat_objective", &slot_assign_combat_objective},
-    {"select_combat_task", &slot_select_combat_task},
+    {"task_counter", &slot_task_counter},
     {"play_actor_path", &slot_play_actor_path},
     {"play_actor_action", &slot_play_actor_action},
     {"retire_actor", &slot_retire_actor},

@@ -412,6 +412,10 @@ inline constexpr MemberSpec kCohortMembers[]{
     field("observed_alive", kCohortObservedAlive, "a member of any squad was seen alive"),
     field("cleared", kBoolean, "seen full, and now all dead"),
     field("size", kInteger),
+    field("members",
+          kInteger,
+          "members the squads hold in this attempt: their placed counts, more when more were seen, "
+          "or the authored members of a squad with no counts"),
 };
 
 // --- context.sdk makers and enums ---------------------------------------------------------------

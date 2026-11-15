@@ -639,11 +639,6 @@ void publish_ghost_levels(RuntimeInstance& instance) noexcept;
 [[nodiscard]] bool publish_device_sources(const RuntimeInstance& instance, lua_vm::Vm& vm) noexcept;
 /** Hands the VM the retained objective task counters, so a callback can read any objective's. */
 void publish_objective_levels(RuntimeInstance& instance) noexcept;
-/**
- * Hands the VM the squads' qualified task costs, so any callback can select a task. A failed copy
- * of the retained bodies faults the instance.
- */
-void publish_objective_offers(RuntimeInstance& instance) noexcept;
 /** Reads the Host counters a transported carrier step's completion report must echo. */
 [[nodiscard]] bool carrier_step_receipt(const RuntimeInstance& instance,
                                         const lua_vm::Intent& intent,

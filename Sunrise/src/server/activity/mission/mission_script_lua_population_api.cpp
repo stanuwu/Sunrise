@@ -29,6 +29,7 @@ struct CohortTotals final {
     bool full{true};
     bool observedAlive{};
     std::uint8_t size{};
+    std::int64_t members{};
 };
 
 /** Cohort members in table order. */
@@ -64,7 +65,30 @@ constexpr std::array<Binding<CohortTotals>, std::size(api::kCohortMembers)> kCoh
     {"size",
      nullptr,
      [](lua_State* state, const CohortTotals& totals) { lua_pushinteger(state, totals.size); }},
+    {"members",
+     nullptr,
+     [](lua_State* state, const CohortTotals& totals) { lua_pushinteger(state, totals.members); }},
 }};
+
+/**
+ * @return The squad's whole membership in this attempt: its placed count, or more when more were
+ * seen in the placed generation, or its authored members while it has no placed count.
+ */
+[[nodiscard]] std::int64_t squad_members(const Impl& impl, const SquadDefinition& squad) noexcept {
+    const auto found = std::find_if(
+        impl.squadPopulations.begin(), impl.squadPopulations.end(), [&](const auto& population) {
+            return population.squadRow == squad.nativeRow
+                   && population.attemptGeneration == impl.attempt.generation;
+        });
+    std::int32_t counted = 0;
+    if (found != impl.squadPopulations.end()) {
+        counted = found->generationKnown ? (std::max)({found->expectedAlive,
+                                                       found->maximumObservedAlive,
+                                                       found->maximumObservedLost})
+                                         : found->expectedAlive;
+    }
+    return counted > 0 ? counted : static_cast<std::int64_t>(squad.memberCount);
+}
 static_assert(bound_to<CohortTotals>(api::kCohortMembers, kCohortBindings));
 
 /** Aggregates only the current attempt's exact transported squad generations. */
@@ -76,11 +100,13 @@ int cohort_index(lua_State* state) {
     bool known = true;
     bool full = true;
     bool observedAlive = false;
+    std::int64_t members = 0;
     for (std::size_t index = 0; index < handle->count; ++index) {
         SquadDefinition squad{};
         if (!current_squad(state, SquadHandle{handle->rows[index]}, squad)) {
             return luaL_error(state, "cohort contains a stale squad");
         }
+        members += squad_members(*impl, squad);
         const auto pending = [&squad, impl](const auto& intent) noexcept {
             const bool scene = intent.kind == IntentKind::activateAuthoredScene && intent.active
                                && intent.burstRowCount <= intent.burstRows.size()
@@ -123,7 +149,7 @@ int cohort_index(lua_State* state) {
                && (found->maximumObservedAlive >= found->expectedAlive
                    || found->maximumObservedLost >= found->expectedAlive);
     }
-    const CohortTotals totals{alive, known, full, observedAlive, handle->count};
+    const CohortTotals totals{alive, known, full, observedAlive, handle->count, members};
     return dispatch<CohortTotals>(state, kCohortBindings, lua_string_view(state, 2), totals);
 }
 

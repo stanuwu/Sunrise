@@ -86,21 +86,6 @@ struct SquadObjectiveCosts final {
 };
 
 /**
- * One squad's last reported costs, retained while they echo the evaluation revision of its
- * transported objective assignment.
- */
-struct SquadObjectiveOffer final {
-    SquadObjectiveCosts costs{};
-    std::uint32_t registryKey{};
-    std::uint32_t objectTag{};
-    std::uint32_t objectiveRegistryKey{};
-    /** The assigned group, or squad_objective::kNoTaskGroup. */
-    std::int32_t taskGroup{};
-    std::uint16_t slotIndex{};
-    std::uint16_t objectiveSlotIndex{};
-};
-
-/**
  * Merges present cost deltas over the retained native defaults.
  * @param retained Current costs for this squad and source generation.
  * @param values Accepted squad Sense fields.

@@ -961,7 +961,6 @@ link_alive_count(RuntimeInstance& instance,
  */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept {
-    bool costsMoved = false;
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
         if (observation.sourceGeneration != sense.sourceGeneration
@@ -999,12 +998,9 @@ void push_squad_edges(RuntimeInstance& instance,
         if (squad == nullptr) {
             continue;
         }
-        // A row handed to another link holds that link's costs.
-        const bool handedOver = squad->used && squad->sourceGeneration != sense.sourceGeneration;
         const bool rebaselined = squad->sourceGeneration != sense.sourceGeneration
                                  && take_over_squad(instance, *squad, sense.sourceGeneration);
         const SquadLevels levels = read_squad_levels(*squad, body, root);
-        costsMoved = costsMoved || handedOver || levels.costsChanged;
         const SquadPublishedLevels& published = squad->published;
         // A fold leaves the row ahead of the script, so a delta that restates nothing raises it.
         if (!rebaselined && !levels.reported && current_squad_levels(*squad) == published) {
@@ -1076,9 +1072,6 @@ void push_squad_edges(RuntimeInstance& instance,
         }
         store_squad_levels(*squad, levels);
         squad->published = current_squad_levels(*squad);
-    }
-    if (costsMoved) {
-        publish_objective_offers(instance);
     }
 }
 

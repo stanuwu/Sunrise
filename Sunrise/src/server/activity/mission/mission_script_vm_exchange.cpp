@@ -23,7 +23,6 @@ bool exchange(Vm& first, Vm& second) noexcept {
                ghostLevelCount,
                objectiveLevels,
                objectiveLevelCount,
-               objectiveOffers,
                carriers,
                arena,
                identity,
@@ -68,7 +67,6 @@ bool exchange(Vm& first, Vm& second) noexcept {
                         ghostLevelCount,
                         objectiveLevels,
                         objectiveLevelCount,
-                        objectiveOffers,
                         carriers,
                         arena,
                         identity,
@@ -127,11 +125,6 @@ bool copy_inputs(const Vm& source, Vm& prepared) noexcept {
     const Impl& from = VmAccess::get(source);
     Impl& to = VmAccess::get(prepared);
     if (from.frame != nullptr || to.frame != nullptr) {
-        return false;
-    }
-    try {
-        to.objectiveOffers = from.objectiveOffers;
-    } catch (const std::bad_alloc&) {
         return false;
     }
     to.attempt = from.attempt;
