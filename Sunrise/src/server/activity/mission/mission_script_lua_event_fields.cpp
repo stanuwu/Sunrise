@@ -123,6 +123,8 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "slot.cancel_carrier";
     case ActionKind::retireActor:
         return "slot.retire_actor";
+    case ActionKind::deliverPassengers:
+        return "slot.deliver_passengers";
     case ActionKind::setInteractableObject:
         return "slot.set_interactable_object";
     case ActionKind::setGhostLink:
@@ -162,7 +164,6 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
     case ActionKind::setHopOn:
     case ActionKind::bindCombatantToSquad:
     case ActionKind::actorCommand:
-    case ActionKind::deliverPassengers:
     case ActionKind::reserveCarrierCargo:
         return {};
     }

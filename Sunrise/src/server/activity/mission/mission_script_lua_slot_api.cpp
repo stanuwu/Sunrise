@@ -322,6 +322,11 @@ constexpr std::array<SlotBinding, std::size(api::kSlotMembers)> kSlotBindings{{
     {"flags",
      nullptr,
      [](lua_State* state, const SlotDefinition& slot) { lua_pushinteger(state, slot.flags); }},
+    {"point_count",
+     nullptr,
+     [](lua_State* state, const SlotDefinition& slot) {
+         lua_pushinteger(state, static_cast<lua_Integer>(authored_point_count(state, slot)));
+     }},
     {"set_object_filter", &slot_set_object_filter},
     {"set_volume_active", &slot_set_volume_active},
     {"attach_hop_on", &slot_attach_hop_on},
@@ -345,6 +350,7 @@ constexpr std::array<SlotBinding, std::size(api::kSlotMembers)> kSlotBindings{{
     {"play_actor_path", &slot_play_actor_path},
     {"play_actor_action", &slot_play_actor_action},
     {"retire_actor", &slot_retire_actor},
+    {"deliver_passengers", &slot_deliver_passengers},
     {"bind_combatant_to_squad", &slot_bind_combatant_to_squad},
     {"run_atoms", &slot_run_atoms},
     {"start_carrier", &slot_start_carrier},

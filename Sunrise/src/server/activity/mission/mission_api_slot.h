@@ -562,6 +562,20 @@ inline constexpr ValueSpec kStartCarrierArguments[]{
      .element = kActorChannel,
      .note = "held for the whole flight beside the door channel, one value per channel"},
 };
+inline constexpr ValueSpec kPassengerSquad[]{{.kind = ValueKind::handle,
+                                              .ref = "slot",
+                                              .slot = exact_gate(slot_format::kSquadSlotType),
+                                              .scope = Scope::sameObject}};
+inline constexpr ValueSpec kDeliverPassengersArguments[]{
+    {.name = "squads",
+     .kind = ValueKind::list,
+     .bound =
+         between(1,
+                 static_cast<std::int64_t>(
+                     middleware::bap::activity_message::combatant_auth::kMaximumManifestSquads)),
+     .element = kPassengerSquad,
+     .note = "each already reserved on the actor with squad:place{mode = reserve}"},
+};
 inline constexpr ValueSpec kAtom[]{{.kind = ValueKind::atom, .ref = "atom_kinds"}};
 inline constexpr ValueSpec kRunAtomsArguments[]{
     kSpawnArgument,
@@ -662,6 +676,9 @@ inline constexpr MemberSpec kSlotMembers[]{
     field("auth_dynamic", kAuthFlag),
     field("auth_writable", kAuthFlag),
     field("flags", kInteger, "catalog flags"),
+    field("point_count",
+          kInteger,
+          "authored point parameters of the slot, which atoms and abilities name from 0"),
     {.name = "set_object_filter",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -818,6 +835,15 @@ inline constexpr MemberSpec kSlotMembers[]{
      .gate = kExactCombatant,
      .returns = kRequestKey,
      .effect = "slot.retire_actor"},
+    {.name = "deliver_passengers",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = kExactCombatant,
+     .arguments = kDeliverPassengersArguments,
+     .returns = kRequestKey,
+     .effect = "slot.deliver_passengers",
+     .note = "the live actor unloads the squads through its native passenger manifest; "
+             "on_event_actor_path_state names this request in delivery_request_key"},
     {.name = "bind_combatant_to_squad",
      .kind = MemberKind::request,
      .call = CallForm::named,
