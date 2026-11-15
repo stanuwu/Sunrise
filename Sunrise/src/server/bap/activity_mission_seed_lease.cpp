@@ -263,6 +263,19 @@ namespace {
            / middleware::content::packages::tables::kSliceSetIndexFactor;
 }
 
+/** @return True when the state that owns this region of the owner's mission is public. */
+[[nodiscard]] bool owner_state_public(const Session& owner, std::int32_t region) noexcept {
+    const state::activity_sdk::Snapshot catalog = state::activity_sdk::snapshot();
+    state::activity_sdk::BoundView view{};
+    const state::activity_sdk::Selection selection{
+        owner.activity.session, 1, owner.activity.bindingGeneration};
+    bool isPublic = false;
+    return catalog != nullptr
+           && state::activity_sdk::resolve(catalog, selection, view)
+                  == state::activity_sdk::Status::ready
+           && state::activity_sdk::state_region_is_public(view, region, isPublic) && isPublic;
+}
+
 } // namespace
 
 bool owner_scenario_wide(const Session& owner,
@@ -279,19 +292,6 @@ bool owner_scenario_wide(const Session& owner,
            && state::activity_sdk::mission_seed_group_is_scenario_wide(
                view, objectTag, registryKey, wide)
            && wide;
-}
-
-/** @return True when the state that owns this region of the owner's mission is public. */
-[[nodiscard]] static bool owner_state_public(const Session& owner, std::int32_t region) noexcept {
-    const state::activity_sdk::Snapshot catalog = state::activity_sdk::snapshot();
-    state::activity_sdk::BoundView view{};
-    const state::activity_sdk::Selection selection{
-        owner.activity.session, 1, owner.activity.bindingGeneration};
-    bool isPublic = false;
-    return catalog != nullptr
-           && state::activity_sdk::resolve(catalog, selection, view)
-                  == state::activity_sdk::Status::ready
-           && state::activity_sdk::state_region_is_public(view, region, isPublic) && isPublic;
 }
 
 bool publishes_on_public(const Session& owner,
