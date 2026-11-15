@@ -361,6 +361,8 @@ bool append_roster_notification(
     const bool lifetimePending =
         ownsPending
         && scriptablePending.kind == server::activity::host::ScriptableOverrideKind::lifetime;
+    // A flag change carries the committed lifetime, so it never stands in for the loading one.
+    const bool lifetimeRequested = lifetimePending && scriptablePending.activityFlag.key == 0;
     // State 4 shows the loading screen and releases once the region is instantiated. The spawn
     // hold is `awaiting_client_sync`, not the lifetime. An explicit lifetime request still wins.
     const bool clientLoading = !client_region_ready(session, refresh);
@@ -471,8 +473,8 @@ bool append_roster_notification(
             destination,
             destinationLength,
             epoch,
-            lifetimePending ? scriptablePending.lifetimeState
-            : clientLoading ? server::activity::host::kLoadingLifetimeState
+            lifetimeRequested ? scriptablePending.lifetimeState
+            : clientLoading   ? server::activity::host::kLoadingLifetimeState
             : hasHostState  ? hostState.lifetimeState
                             : server::activity::host::kDefaultLifetimeState,
             activityFlags,
