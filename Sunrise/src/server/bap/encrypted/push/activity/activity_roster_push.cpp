@@ -216,15 +216,6 @@ owner_pending_scriptable(const Session& link,
            && body_carried_here(link, &owner, output);
 }
 
-/** @return How many Auth bodies of this body target groups published for the owner. */
-[[nodiscard]] std::size_t owner_auth_count(const Scratch& scratch,
-                                           const message::Snapshot& snapshot) noexcept {
-    return static_cast<std::size_t>(std::count_if(
-        snapshot.authOverrides.begin(),
-        snapshot.authOverrides.end(),
-        [&scratch](const message::AuthOverride& value) { return owner_key(scratch, value.key); }));
-}
-
 } // namespace
 
 /** Copies the decode identities from one complete, already-encoded msg-5 roster snapshot. */
@@ -858,20 +849,6 @@ bool append_roster_notification(
         if (owner != nullptr) {
             stage_owner_publication(session, *owner, ownerState, hasOwnerState, peerLeave);
             session.activityRosterStaged.ownerScriptable = ownerScriptable && ownsPending;
-            core::log::writef(core::log::Channel::server,
-                              core::log::Level::debug,
-                              "ev=activity stage=roster_push link=public owner_gen=%llu "
-                              "owner_bubbles=0x%llX advertised=%d owner_pending=%u "
-                              "owner_groups=%zu owner_auth=%zu seed_rev=%llu/%llu",
-                              static_cast<unsigned long long>(owner->activity.bindingGeneration),
-                              static_cast<unsigned long long>(owner_public_bubbles(session, *owner)),
-                              session.activity.advertisedRegion,
-                              ownerScriptable ? 1U : 0U,
-                              scratch.rosterOwnerKeyCount,
-                              owner_auth_count(scratch, snapshot),
-                              static_cast<unsigned long long>(session.activityPublicOwner.seed.revision),
-                              static_cast<unsigned long long>(
-                                  session.activityPublicOwner.seed.publishedRevision));
         }
         if (squadPending && scriptablePending.target.stateLocalRoster
             && snapshot.roster.groupCount != 0) {
@@ -1062,34 +1039,16 @@ void raise_teleport_spawn_when_valid(const Session& committed) noexcept {
             break;
         }
     }
-    if (privateLink == nullptr
+    // The arrival and the in-flight read are cheap; the bubble check walks every link.
+    if (privateLink == nullptr || privateLink->activityRosterAwaitClientSync
         || !state::activity::membership::host_teleport_in_flight(
-            privateLink->activity.session.sessionId)) {
+            privateLink->activity.session.sessionId)
+        || !destination_bubble_valid(*privateLink)) {
         return;
     }
-    const bool arrived = !privateLink->activityRosterAwaitClientSync;
-    const bool bubbleValid = destination_bubble_valid(*privateLink);
-    const bool raised = arrived && bubbleValid
-                        && state::activity::membership::raise_host_teleport_spawn(
-                            privateLink->activity.session.sessionId);
-    if (raised) {
+    if (state::activity::membership::raise_host_teleport_spawn(
+            privateLink->activity.session.sessionId)) {
         privateLink->activityTeleportSpawnOwed = true;
-    }
-    std::array<char, 160> line{};
-    const int written = std::snprintf(line.data(),
-                                      line.size(),
-                                      "ev=activity stage=teleport_spawn result=%s committed=%s "
-                                      "arrived=%u bubble_valid=%u",
-                                      raised ? "raised" : "waiting",
-                                      committed.activity.role == ActivityClientRole::publicTarget
-                                          ? "public"
-                                          : "private",
-                                      arrived ? 1U : 0U,
-                                      bubbleValid ? 1U : 0U);
-    if (written > 0 && static_cast<std::size_t>(written) < line.size()) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::debug,
-                         {line.data(), static_cast<std::size_t>(written)});
     }
 }
 

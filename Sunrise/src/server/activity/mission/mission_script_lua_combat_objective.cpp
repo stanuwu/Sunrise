@@ -348,20 +348,6 @@ int slot_select_combat_task(lua_State* state) {
     const bool pending = assignment_pending(state, *impl, squad.nativeRow);
     const bool offered = offer != impl->objectiveOffers.end();
     if (authored == 0 || !offered || members <= 0 || pending) {
-        core::log::writef(core::log::Channel::server,
-                          core::log::Level::debug,
-                          "ev=mission_script stage=objective_selection result=unready "
-                          "object=%08x registry=%08x slot=%u objective_slot=%u authored=%06x "
-                          "offer=%d offers=%zu members=%d pending=%d",
-                          squad.objectTag,
-                          squad.registryKey,
-                          squad.slotIndex,
-                          target.slotIndex,
-                          authored,
-                          offered ? 1 : 0,
-                          impl->objectiveOffers.size(),
-                          members,
-                          pending ? 1 : 0);
         lua_pushnil(state);
         lua_pushboolean(state, false);
         return 2;

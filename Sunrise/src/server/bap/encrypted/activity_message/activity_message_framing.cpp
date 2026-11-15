@@ -5,7 +5,6 @@
 #include <limits>
 #include <span>
 
-#include "../../../../core/logging/log.h"
 #include "../../../../middleware/bap/activity_message/cinematic_incident.h"
 #include "../../../../middleware/bap/activity_message/entity_authority.h"
 #include "../../../../middleware/bap/activity_message/incident.h"
@@ -361,14 +360,6 @@ bool frame_only(const ActivityClientBinding& binding,
             input.binding = rosterDecode.ownerBinding;
             input.sourceGeneration = rosterDecode.ownerGeneration;
             summarize_packet(input);
-            core::log::writef(core::log::Channel::server,
-                              core::log::Level::debug,
-                              "ev=activity stage=public_sense_owner keys=%zu first=0x%08X "
-                              "owner_gen=%llu publisher_gen=%llu",
-                              moved,
-                              input.firstRegistryKey,
-                              static_cast<unsigned long long>(rosterDecode.ownerGeneration),
-                              static_cast<unsigned long long>(binding.bindingGeneration));
             submit_sense_input(input, request);
         }
     } else if (isIncident && framed.verdict == store::Verdict::framed) {
@@ -397,13 +388,6 @@ bool frame_only(const ActivityClientBinding& binding,
                 rosterDecode, binding.bindingGeneration, input.playerTrigger.registryKey)) {
             input.binding = rosterDecode.ownerBinding;
             input.sourceGeneration = rosterDecode.ownerGeneration;
-            core::log::writef(core::log::Channel::server,
-                              core::log::Level::debug,
-                              "ev=activity stage=public_sense_owner keys=1 first=0x%08X "
-                              "owner_gen=%llu publisher_gen=%llu kind=trigger",
-                              input.playerTrigger.registryKey,
-                              static_cast<unsigned long long>(rosterDecode.ownerGeneration),
-                              static_cast<unsigned long long>(binding.bindingGeneration));
         }
         const auto refusal = server::activity::host::submit_incident(input);
         if (refusal != server::activity::host::IngressRefusal::none) {
