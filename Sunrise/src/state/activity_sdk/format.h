@@ -27,12 +27,12 @@ namespace generated = middleware::content::packages::schema::generated;
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
 /**
- * Runtime-pack schema version accepted by this reader. 50 marks squads whose rule resolves inside
- * their own occurrence.
+ * Runtime-pack schema version accepted by this reader. 51 adds each actor's temperaments and the
+ * object channels a server may write.
  */
-inline constexpr std::uint32_t kVersion = 50;
+inline constexpr std::uint32_t kVersion = 51;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
-inline constexpr std::uint32_t kSectionCount = 52;
+inline constexpr std::uint32_t kSectionCount = 54;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
 /** The runtime accepts only the checked generated SDK build. Each pin is a SHA-256 digest. */
 inline constexpr std::array<std::byte, 32> kExpectedSdkBuildDigest{
@@ -444,7 +444,7 @@ inline constexpr std::int64_t kAbsentSignedValue = (-0x7FFFFFFFFFFFFFFFLL - 1);
 
 /** Fixed packed byte sizes make producer and consumer ABI drift fail at compile time. */
 inline constexpr std::size_t kSectionSize = 16;
-inline constexpr std::size_t kHeaderSize = 992;
+inline constexpr std::size_t kHeaderSize = 1024;
 inline constexpr std::size_t kStringRefSize = 8;
 inline constexpr std::size_t kRangeSize = 8;
 inline constexpr std::size_t kActivitySize = 124;
@@ -791,9 +791,11 @@ enum class SectionIndex : std::uint32_t {
     actorAbilityTargets,
     authoredSceneEventKeys,
     incidentDefinitions,
+    actorTemperaments,
+    actorChannels,
 };
 
-static_assert(static_cast<std::uint32_t>(SectionIndex::incidentDefinitions) + 1 == kSectionCount);
+static_assert(static_cast<std::uint32_t>(SectionIndex::actorChannels) + 1 == kSectionCount);
 
 /** Exact activity-name/root join result retained for every activity row. */
 enum class ActivityJoinStatus : std::uint32_t {
@@ -1293,6 +1295,27 @@ struct ActorAbilityTarget final {
     std::uint32_t selectorCount{};
 
     bool operator==(const ActorAbilityTarget&) const = default;
+};
+
+/**
+ * One temperament the behaviour program of a Type 2 actor, or of a Type 1 squad's members, holds.
+ * The client ignores an id its program does not hold.
+ */
+struct ActorTemperament final {
+    std::uint32_t slotIndex{};
+    std::uint32_t programTag{};
+    std::uint32_t id{};
+
+    bool operator==(const ActorTemperament&) const = default;
+};
+
+/** One object channel of a Type 2 actor's value provider that nothing on the actor drives. */
+struct ActorChannel final {
+    std::uint32_t slotIndex{};
+    std::uint32_t providerTag{};
+    std::uint32_t nameHash{};
+
+    bool operator==(const ActorChannel&) const = default;
 };
 
 /** Tasks one combat group holds; the objective Sense reports one counter per task. */

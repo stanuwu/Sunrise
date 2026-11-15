@@ -256,6 +256,10 @@ public:
     authored_scene_event_keys() const noexcept;
     /** @return Every published incident notification, in target order. */
     [[nodiscard]] std::span<const format::IncidentDefinition> incident_definitions() const noexcept;
+    /** @return Every slot's temperaments, by slot then id. */
+    [[nodiscard]] std::span<const format::ActorTemperament> actor_temperaments() const noexcept;
+    /** @return Every actor slot's writable object channels, by slot then name. */
+    [[nodiscard]] std::span<const format::ActorChannel> actor_channels() const noexcept;
 
 private:
     friend bool

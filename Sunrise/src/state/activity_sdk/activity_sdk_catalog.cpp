@@ -352,6 +352,14 @@ std::span<const format::IncidentDefinition> Catalog::incident_definitions() cons
         header_, view_, format::SectionIndex::incidentDefinitions);
 }
 
+std::span<const format::ActorTemperament> Catalog::actor_temperaments() const noexcept {
+    return rows<format::ActorTemperament>(header_, view_, format::SectionIndex::actorTemperaments);
+}
+
+std::span<const format::ActorChannel> Catalog::actor_channels() const noexcept {
+    return rows<format::ActorChannel>(header_, view_, format::SectionIndex::actorChannels);
+}
+
 std::span<const format::ActorStateName> Catalog::actor_state_names() const noexcept {
     return rows<format::ActorStateName>(header_, view_, format::SectionIndex::actorStateNames);
 }

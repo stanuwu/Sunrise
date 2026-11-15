@@ -26,6 +26,8 @@ constexpr RowClass kRowClasses[]{
     {"mission.Directive", "SunriseDirective"},
     {"mission.TaskGroup", "SunriseCombatTaskGroup"},
     {"mission.ActorAbility", "SunriseActorAbility"},
+    {"mission.ActorTemperament", "SunriseActorTemperament"},
+    {"mission.ActorChannel", "SunriseActorChannel"},
     {"mission.states", "SunriseState"},
     {"mission.Slot", "SunriseSlotHandle"},
     {"mission.Squad", "SunriseSquadHandle"},

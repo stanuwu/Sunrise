@@ -535,6 +535,47 @@ bool render_mission(const Source& source,
         abilityConstants.append("    },\n");
     }
     abilityConstants.append("}\n");
+    // Temperaments and channels are named only by hash in the packages, as abilities are.
+    std::string temperamentConstants = "mission.ActorTemperament = {\n";
+    std::string channelConstants = "mission.ActorChannel = {\n";
+    for (const std::uint32_t slot : slots) {
+        const auto key = slotKeyByRow.find(slot);
+        if (key == slotKeyByRow.end()) {
+            continue;
+        }
+        std::array<char, 32> symbol{};
+        if (const auto found = index.temperamentsBySlot.find(slot);
+            found != index.temperamentsBySlot.end()) {
+            temperamentConstants.append("    ").append(key->second).append(" = {\n");
+            for (const std::uint32_t row : found->second) {
+                const format::ActorTemperament& temperament = source.actorTemperaments[row];
+                std::snprintf(symbol.data(), symbol.size(), "KEY_%08X", temperament.id);
+                temperamentConstants.append("        ")
+                    .append(symbol.data())
+                    .append(" = { slot_row = ");
+                append_uint(temperamentConstants, temperament.slotIndex);
+                temperamentConstants.append(", id = ");
+                append_hex(temperamentConstants, temperament.id);
+                temperamentConstants.append(" },\n");
+            }
+            temperamentConstants.append("    },\n");
+        }
+        if (const auto found = index.channelsBySlot.find(slot); found != index.channelsBySlot.end()) {
+            channelConstants.append("    ").append(key->second).append(" = {\n");
+            for (const std::uint32_t row : found->second) {
+                const format::ActorChannel& channel = source.actorChannels[row];
+                std::snprintf(symbol.data(), symbol.size(), "KEY_%08X", channel.nameHash);
+                channelConstants.append("        ").append(symbol.data()).append(" = { slot_row = ");
+                append_uint(channelConstants, channel.slotIndex);
+                channelConstants.append(", channel = ");
+                append_hex(channelConstants, channel.nameHash);
+                channelConstants.append(" },\n");
+            }
+            channelConstants.append("    },\n");
+        }
+    }
+    temperamentConstants.append("}\n");
+    channelConstants.append("}\n");
     std::string dialogueCueConstants = "mission.DialogueCue = {\n";
     std::string dialogueCueTextConstants = "mission.DialogueCueVariants = {\n";
     std::string dialogueDefinitionConstants = "mission.DialogueDefinition = {\n";
@@ -740,6 +781,8 @@ bool render_mission(const Source& source,
     output.append(taskConstants);
     output.append(taskGroupConstants);
     output.append(abilityConstants);
+    output.append(temperamentConstants);
+    output.append(channelConstants);
     output.append(dialogueCueConstants);
     output.append(dialogueCueTextConstants);
     output.append(dialogueDefinitionConstants);

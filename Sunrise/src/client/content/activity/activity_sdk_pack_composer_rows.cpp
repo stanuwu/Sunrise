@@ -456,6 +456,8 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
     output.actorSequenceBindings = actorRsat.sequenceBindings;
     output.actorAbilities = actorRsat.actorAbilities;
     output.actorAbilityTargets = actorRsat.actorAbilityTargets;
+    output.actorTemperaments = actorRsat.actorTemperaments;
+    output.actorChannels = actorRsat.actorChannels;
     output.actorSequenceEntries.reserve(actorRsat.sequenceEntries.size());
     for (const auto& input : actorRsat.sequenceEntries) {
         auto row = input.row;

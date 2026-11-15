@@ -243,6 +243,10 @@ struct Snapshot final {
     std::vector<state::activity_sdk::format::ActorSequenceBinding> sequenceBindings{};
     std::vector<state::activity_sdk::format::ActorAbility> actorAbilities{};
     std::vector<state::activity_sdk::format::ActorAbilityTarget> actorAbilityTargets{};
+    /** Sorted by slot then id. */
+    std::vector<state::activity_sdk::format::ActorTemperament> actorTemperaments{};
+    /** Sorted by slot then name. */
+    std::vector<state::activity_sdk::format::ActorChannel> actorChannels{};
     bool complete{};
 };
 

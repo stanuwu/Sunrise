@@ -82,6 +82,8 @@ struct Source final {
     std::span<const format::AuthoredSceneEventKey> authoredSceneEventKeys{};
     std::span<const format::DialogueCue> dialogueCues{};
     std::span<const format::IncidentDefinition> incidentDefinitions{};
+    std::span<const format::ActorTemperament> actorTemperaments{};
+    std::span<const format::ActorChannel> actorChannels{};
 };
 
 /** One readable generated Lua module with a filesystem-safe canonical name. */

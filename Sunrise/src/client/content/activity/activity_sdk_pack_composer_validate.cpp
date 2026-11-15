@@ -61,6 +61,8 @@ bool validate_storage(const PreparedRanges& prepared, const Storage& value) noex
         value.actorAbilityTargets.size(),
         value.authoredSceneEventKeys.size(),
         value.incidentDefinitions.size(),
+        value.actorTemperaments.size(),
+        value.actorChannels.size(),
     };
     const bool bounded = std::all_of(counts.begin(), counts.end(), [](std::size_t count) {
         return count <= (std::numeric_limits<std::uint32_t>::max)();

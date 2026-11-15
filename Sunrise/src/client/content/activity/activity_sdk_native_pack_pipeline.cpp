@@ -223,7 +223,9 @@ lua_source(const state::activity_sdk::identity::Expected& identity,
             storage.actorAbilities,
             storage.authoredSceneEventKeys,
             storage.dialogueCues,
-            storage.incidentDefinitions};
+            storage.incidentDefinitions,
+            storage.actorTemperaments,
+            storage.actorChannels};
 }
 
 } // namespace

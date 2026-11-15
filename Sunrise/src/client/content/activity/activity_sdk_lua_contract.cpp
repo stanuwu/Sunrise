@@ -265,6 +265,14 @@ bool render_contract_files(const Source& source, Bundle& output) noexcept {
 ---@field group_hash integer
 ---@field request_hash integer
 
+---@class SunriseActorTemperament
+---@field slot_row integer
+---@field id integer
+
+---@class SunriseActorChannel
+---@field slot_row integer
+---@field channel integer
+
 ---@class SunriseCombatTask
 ---@field minimum_members integer
 ---@field maximum_members integer -1 when unbounded
@@ -296,6 +304,8 @@ bool render_contract_files(const Source& source, Bundle& output) noexcept {
 ---@field Task table<string, string>
 ---@field TaskGroup table<string, table<string, SunriseCombatTaskGroup>>
 ---@field ActorAbility table<string, table<string, table<string, SunriseActorAbility>>>
+---@field ActorTemperament table<string, table<string, SunriseActorTemperament>>
+---@field ActorChannel table<string, table<string, SunriseActorChannel>>
 ---@field TriggerVolume table<string, SunriseTriggerVolume>
 ---@field Directive table<string, SunriseDirective>
 ---@field PerformanceState table<string, table<string, {slot_row: integer, )lua"
