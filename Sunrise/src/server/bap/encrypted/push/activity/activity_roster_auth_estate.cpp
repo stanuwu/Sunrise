@@ -6,20 +6,6 @@
 namespace sunrise::server::bap::encrypted::push::activity {
 namespace layouts = state::build_data::scenarios;
 
-void report_state_local_unhosted(const server::activity::host::ScriptableTarget& target,
-                                 std::uint64_t revision) noexcept {
-    core::log::writef(core::log::Channel::server,
-                      core::log::Level::debug,
-                      "ev=activity stage=state_local_unhosted key=0x%08X object=0x%08X bubble=%d "
-                      "rev=%llu",
-                      target.registryKey,
-                      target.objectTag,
-                      target.stateLocalRegion
-                          / static_cast<std::int32_t>(
-                              middleware::content::packages::tables::kSliceSetIndexFactor),
-                      static_cast<unsigned long long>(revision));
-}
-
 void report_owner_key_conflict(const Session* owner,
                                const server::activity::host::ScriptableTarget& target) noexcept {
     if (owner == nullptr) {
@@ -57,9 +43,6 @@ namespace {
     if (link.activity.role != ActivityClientRole::privateCurrent
         || !publishes_on_public(link, target)) {
         return true;
-    }
-    if (public_publisher_locked(link, target) == nullptr) {
-        report_state_local_unhosted(target, retained.revision);
     }
     return false;
 }

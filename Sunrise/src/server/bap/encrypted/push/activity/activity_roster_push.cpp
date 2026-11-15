@@ -183,26 +183,6 @@ void stage_owner_publication(Session& link,
     staged.ownerSeedFullSet = !peerLeave && seed.fullSetPublished;
 }
 
-/** Logs which link publishes one typed body, or that its public publisher is missing. */
-void report_scriptable_publisher(const server::activity::host::PendingScriptableOverride& pending,
-                                 const char* publisher) noexcept {
-    const server::activity::host::ScriptableTarget& target = pending.target;
-    core::log::writef(core::log::Channel::server,
-                      core::log::Level::debug,
-                      "ev=activity stage=scriptable_publisher key=0x%08X object=0x%08X slot=%u "
-                      "bubble=%d publisher=%s rev=%llu",
-                      target.registryKey,
-                      target.objectTag,
-                      static_cast<unsigned>(target.slotIndex),
-                      target.stateLocalRegion < 0
-                          ? -1
-                          : target.stateLocalRegion
-                                / static_cast<std::int32_t>(
-                                    middleware::content::packages::tables::kSliceSetIndexFactor),
-                      publisher,
-                      static_cast<unsigned long long>(pending.revision));
-}
-
 /**
  * Reads the owner's pending typed body a public link publishes: one whose target lies in a bubble
  * the owner's world authors public and this link hosts.
@@ -327,7 +307,6 @@ bool append_roster_notification(
                                   && publishes_on_public(session, scriptablePending.target);
     if (publicScriptable && !peerLeave
         && public_publisher_locked(session, scriptablePending.target) == nullptr) {
-        report_scriptable_publisher(scriptablePending, "waiting");
         server::activity::host::note_scriptable_attempt(
             session.activity.session,
             session.activity.bindingGeneration,
@@ -338,9 +317,6 @@ bool append_roster_notification(
     // owed and neither is spent on it.
     const bool ownsPending =
         hasScriptablePending && singleScriptableLink && !peerLeave && !publicScriptable;
-    if (ownsPending) {
-        report_scriptable_publisher(scriptablePending, ownerScriptable ? "public" : "private");
-    }
     const bool ownsHostState = hostStatePending && !peerLeave;
     // The estate this body carries holds a body another link's push staged, and the client
     // behind this link applies it itself; only a push lets that client see it. The push that

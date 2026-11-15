@@ -378,9 +378,6 @@ build_roster_snapshot(Session& session,
         }
         if (session.activity.role == ActivityClientRole::privateCurrent
             && publishes_on_public(session, retainedGroup.scopeTarget)) {
-            if (public_publisher_locked(session, retainedGroup.scopeTarget) == nullptr) {
-                report_state_local_unhosted(retainedGroup.scopeTarget, 0);
-            }
             retainedElsewhere[index] = true;
             continue;
         }

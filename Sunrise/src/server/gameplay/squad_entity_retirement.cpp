@@ -766,7 +766,6 @@ bool prepare_departed_retirement(const state::activity::SessionBinding& binding,
     AcquireSRWLockShared(&g_lock);
     const bool ready = g_store.prepare(source, *bubble, rows, output);
     ReleaseSRWLockShared(&g_lock);
-    report("departed", ready, *bubble, &output.entities, core::log::Level::debug);
     // A captured tree that changed with no gap left to fill can never be retired whole, and a
     // release kept for it would be prepared again on every keepalive.
     if (!ready && !has_hierarchy_gap(rows)) {

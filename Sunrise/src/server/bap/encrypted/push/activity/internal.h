@@ -500,14 +500,6 @@ make_auth_override(const server::activity::host::PendingScriptableOverride& reta
     std::uint64_t deliveredDialogueRevision) noexcept;
 
 /**
- * Logs a state-local target a private link leaves out while no public link of its client hosts
- * the target's bubble, so nothing publishes it yet.
- * @param revision The target's output revision.
- */
-void report_state_local_unhosted(const server::activity::host::ScriptableTarget& target,
-                                 std::uint64_t revision) noexcept;
-
-/**
  * Logs an owner's group whose key a public link already publishes with other wire fields. The
  * collision refuses the whole body, so it is logged at warning level. Does nothing without an
  * owner.
