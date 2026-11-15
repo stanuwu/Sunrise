@@ -723,17 +723,9 @@ int slot_applied(lua_State* state) {
                && intent.deviceChannel == channel.channel
                && intent.attemptGeneration == impl->attempt.generation;
     };
-    for (const auto& intent : active_frame(state).candidate.intents) {
-        if (pending(intent)) {
-            lua_pushboolean(state, false);
-            return 1;
-        }
-    }
-    for (std::size_t index = impl->outboxRead; index < impl->outbox.size(); ++index) {
-        if (pending(impl->outbox[index])) {
-            lua_pushboolean(state, false);
-            return 1;
-        }
+    if (intent_queued(state, *impl, pending)) {
+        lua_pushboolean(state, false);
+        return 1;
     }
     bool applied = false;
     const auto& sources = impl->deviceRequestSources;

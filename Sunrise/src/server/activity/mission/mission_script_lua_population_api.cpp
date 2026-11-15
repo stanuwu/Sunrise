@@ -122,10 +122,7 @@ int cohort_index(lua_State* state) {
                               && intent.secondRow == squad.nativeRow);
             return source && intent.attemptGeneration == impl->attempt.generation;
         };
-        const auto& candidate = active_frame(state).candidate.intents;
-        const auto outbox = std::span(impl->outbox).subspan(impl->outboxRead);
-        if (std::any_of(candidate.begin(), candidate.end(), pending)
-            || std::any_of(outbox.begin(), outbox.end(), pending)) {
+        if (intent_queued(state, *impl, pending)) {
             known = full = false;
             continue;
         }
