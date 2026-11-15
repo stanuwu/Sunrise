@@ -265,6 +265,14 @@ struct Type2ProgramLayout final {
                                          std::size_t bitCount,
                                          Type2ProgramLayout& output) noexcept;
 
+/**
+ * Reads a body's `.5` with the root's ownership branch and spawn revision.
+ * @return False when the body is malformed, has no `.5`, or holds a field the set cannot carry.
+ */
+[[nodiscard]] bool read_type2_controls(std::span<const std::byte> input,
+                                       std::size_t bitCount,
+                                       Type2ChannelState& output) noexcept;
+
 /** Replaces only `.6`; a zero hash cancels the program on the enabled squad-bound actor. */
 [[nodiscard]] bool replace_type2_sequence(std::span<const std::byte> previous,
                                           std::size_t previousBits,

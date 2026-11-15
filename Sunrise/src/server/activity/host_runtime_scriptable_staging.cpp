@@ -247,6 +247,19 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     return nextCounter;
 }
 
+/**
+ * Takes a staged type-2 body's `.5` as the guard's controls when it is newer, so a later channel
+ * or binding body starts from the controls the client holds and above their revision.
+ */
+void adopt_type2_controls(ScriptableGuard& guard, const PendingScriptableOverride& pending) noexcept {
+    auth::Type2ChannelState controls{};
+    if (auth::read_type2_controls(
+            std::span(pending.body).first(pending.byteCount), pending.bitCount, controls)
+        && controls.revision > guard.type2.revision) {
+        guard.type2 = controls;
+    }
+}
+
 /** Advances one committed guard to the body that has just reached transport. */
 void advance_staged_guard(ScriptableGuard* guard,
                           const PendingScriptableOverride& pending) noexcept {
@@ -272,6 +285,10 @@ void advance_staged_guard(ScriptableGuard* guard,
         if (pending.actorSpawnGeneration != 0) {
             guard->type2SpawnGeneration = pending.actorSpawnGeneration;
         }
+        // A creating program may carry the new life's controls.
+        adopt_type2_controls(*guard, pending);
+    } else if (pending.kind == ScriptableOverrideKind::combatantControls) {
+        adopt_type2_controls(*guard, pending);
     } else if (pending.kind == ScriptableOverrideKind::combatantDelivery) {
         guard->type2DeliveryRevision = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::combatantSequence) {

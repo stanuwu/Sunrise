@@ -681,6 +681,49 @@ bool inspect_type2_program(std::span<const std::byte> input,
     return true;
 }
 
+bool read_type2_controls(std::span<const std::byte> input,
+                         std::size_t bitCount,
+                         Type2ChannelState& output) noexcept {
+    output = {};
+    Type2ProgramLayout layout{};
+    if (!inspect_type2_program(input, bitCount, layout) || layout.controlRevision == 0) {
+        return false;
+    }
+    Type2ChannelState candidate{};
+    candidate.actorBinding =
+        static_cast<Type2ActorBinding>(static_cast<std::int8_t>(layout.bindingWire) - 1);
+    candidate.revision = layout.controlRevision;
+    candidate.spawnGeneration = layout.spawnGeneration;
+    // The writer leaves the two six-bit fields zero; a body that sets them cannot be retained.
+    constexpr std::uint8_t kReservedBits = 6;
+    bits::Reader reader(input);
+    std::uint64_t first = 0, second = 0, count = 0, value = 0;
+    bool decoded =
+        valid_type2_actor_binding(candidate.actorBinding)
+        && reader.skip(layout.channelsOffset + auth_fields::kPresenceWidth
+                       + auth_fields::kCounterWidth)
+        && reader.read(kReservedBits, first) && reader.read(kReservedBits, second) && first == 0
+        && second == 0 && reader.read(3, count) && count == layout.temperamentCount;
+    candidate.temperamentCount = static_cast<std::uint8_t>(count);
+    for (std::size_t index = 0; decoded && index < candidate.temperamentCount; ++index) {
+        decoded = reader.read(kSigned32Width, value);
+        candidate.temperaments[index].value = static_cast<std::uint32_t>(value);
+    }
+    decoded = decoded && read_absent_client_ref(reader) && reader.read(kSigned32Width, value)
+              && value == 0 && reader.read(5, count) && count == layout.channelCount;
+    candidate.count = static_cast<std::uint8_t>(count);
+    for (std::size_t index = 0; decoded && index < candidate.count; ++index) {
+        std::uint64_t real = 0;
+        decoded = reader.read(kSigned32Width, value) && reader.read(kReal32Width, real);
+        candidate.channels[index] = {static_cast<std::uint32_t>(value),
+                                     std::bit_cast<float>(static_cast<std::uint32_t>(real))};
+    }
+    if (decoded) {
+        output = candidate;
+    }
+    return decoded;
+}
+
 namespace {
 
 /**
