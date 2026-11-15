@@ -113,8 +113,7 @@ namespace {
 
 /** Field-by-field equality of two typed intents. */
 [[nodiscard]] bool same_intent(const TypedIntent& left, const TypedIntent& right) noexcept {
-    return left.carrierPlan == right.carrierPlan
-           && left.expectedObjectiveRevision == right.expectedObjectiveRevision
+    return left.expectedObjectiveRevision == right.expectedObjectiveRevision
            && left.objectiveReconsider == right.objectiveReconsider
            && left.objectiveReserved == right.objectiveReserved
            && left.objectivePreserveReservation == right.objectivePreserveReservation

@@ -137,30 +137,7 @@ acknowledge_intent_output(const SessionBinding& binding,
                           Snapshot& output,
                           const DeviceRequestReport* device = nullptr,
                           const SquadPopulation* population = nullptr,
-                          std::span<const SquadPopulation> scenePopulations = {},
-                          const CarrierReceipt* carrierStep = nullptr) noexcept;
-
-/**
- * Joins one accepted type-2 actor level to the step a running carrier waits on.
- * @param output Receives the durable mission state only when a carrier changed.
- */
-[[nodiscard]] Status observe_carrier_actor(const SessionBinding& binding,
-                                           const ProgramKey& program,
-                                           const CarrierActorReport& report,
-                                           Snapshot& output,
-                                           bool& changed) noexcept;
-
-/**
- * Ends flights that lost their attempt or their link, moves running flights past finished steps
- * and queues their next steps at the queue's tail.
- * @param liveGenerations The route and every joined private link of the binding.
- * @param output Receives the durable mission state only when a carrier or the queue changed.
- */
-[[nodiscard]] Status advance_carriers(const SessionBinding& binding,
-                                      const ProgramKey& program,
-                                      std::span<const std::uint64_t> liveGenerations,
-                                      Snapshot& output,
-                                      bool& changed) noexcept;
+                          std::span<const SquadPopulation> scenePopulations = {}) noexcept;
 
 /** Retains count evidence only for the exact transported spawn generation. */
 [[nodiscard]] Status observe_squad_population(const SessionBinding& binding,

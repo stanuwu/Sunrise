@@ -268,27 +268,6 @@ inline constexpr ValueSpec kOptionalScalar[]{{.kind = ValueKind::scalar, .option
 inline constexpr ValueSpec kTimerDeadline[]{
     {.kind = ValueKind::decimalString, .optional = true, .note = "the deadline tick"}};
 
-// The request state:operation reads and the flight it reports.
-inline constexpr ValueSpec kOperationArguments[]{
-    {.name = "request",
-     .kind = ValueKind::decimalString,
-     .note = "a start_carrier RequestKey or its value"}};
-inline constexpr ValueSpec kOperationFields[]{
-    {.name = "status",
-     .kind = ValueKind::string,
-     .note = "running, complete, refused or cancelled"},
-    {.name = "stage",
-     .kind = ValueKind::string,
-     .optional = true,
-     .note = "entry, unloading, departure or retirement; nil once the flight ended"},
-    {.name = "delivered", .kind = ValueKind::boolean, .note = "every cargo manifest finished"},
-};
-inline constexpr ValueSpec kOperation[]{
-    {.kind = ValueKind::table,
-     .optional = true,
-     .fields = kOperationFields,
-     .note = "nil for any other request, or one of an earlier attempt"}};
-
 /** Members of the read-only state view. */
 inline constexpr MemberSpec kStateMembers[]{
     field("phase", kInteger, "includes a set_phase made earlier in this callback"),
@@ -309,12 +288,6 @@ inline constexpr MemberSpec kStateMembers[]{
      .call = CallForm::positional,
      .arguments = kNameArguments,
      .returns = kTimerDeadline},
-    {.name = "operation",
-     .kind = MemberKind::query,
-     .call = CallForm::positional,
-     .arguments = kOperationArguments,
-     .returns = kOperation,
-     .note = "the carrier flight a start_carrier request opened"},
 };
 
 // The other key a request key compares against.

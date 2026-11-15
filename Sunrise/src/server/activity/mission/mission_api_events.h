@@ -289,7 +289,9 @@ inline constexpr MemberSpec kActorPathFields[]{
     field("revision", kInteger),
     field("path_state", kInteger),
     field("delivery_revision", kOptionalInteger, "nil until the delivery is known"),
-    field("delivery_state", kOptionalInteger, "nil until the delivery is known"),
+    field("delivery_state",
+          kOptionalInteger,
+          "nil until the delivery is known; 0 once the actor holds no passenger left to unload"),
     field("suppressed", kBoolean),
     field("request_key",
           kRequestKey,
@@ -525,7 +527,6 @@ inline constexpr const FieldGroup* kCinematicGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::cinematic)};
 inline constexpr const FieldGroup* kGhostLinkGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::ghostLink)};
-inline constexpr const FieldGroup* kCarrierGroups[]{group(G::common), group(G::missionSequence)};
 inline constexpr const FieldGroup* kHopOnGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::hopOn)};
 inline constexpr const FieldGroup* kActorPathGroups[]{
@@ -724,12 +725,6 @@ inline constexpr EventSpec kEvents[]{
      "SunriseHopOnStateEvent",
      kHopOnGroups},
     {44,
-     "CARRIER_STATE",
-     "on_event_carrier_state",
-     "SunriseCarrierStateEvent",
-     kCarrierGroups,
-     "one or more carrier flights moved on; state:operation reads each"},
-    {45,
      "SQUAD_MEMBER_LOST",
      "on_event_squad_member_lost",
      "SunriseSquadMemberLostEvent",

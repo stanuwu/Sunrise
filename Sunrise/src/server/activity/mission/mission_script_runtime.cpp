@@ -425,9 +425,6 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.missionPhase = 0;
     instance.missionStateRevision = 0;
     instance.missionRecordRevision = 0;
-    instance.carrierRecordRevision = 0;
-    instance.carrierLinks = {};
-    instance.carrierLinkCount = 0;
     instance.activityStateRevision = 0;
     instance.durableIntentSequence = 0;
     instance.durableHostOutputRevision = 0;
@@ -452,7 +449,6 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.initialStateDeclared = false;
     instance.initialStateSelected = false;
     instance.missionReattached = false;
-    instance.carriersActive = false;
     instance.startPending = false;
     instance.timerPending = false;
     reset_shared_observations(instance);
@@ -509,17 +505,6 @@ void accept_mission_state(RuntimeInstance& instance,
         lua_vm::fault(instance.vm, "population snapshot allocation failed");
         instance.programStatus = ProgramStatus::programError;
     }
-    if (!lua_vm::publish_carriers(instance.vm, snapshot.state.carriers)) {
-        lua_vm::fault(instance.vm, "carrier snapshot allocation failed");
-        instance.programStatus = ProgramStatus::programError;
-    }
-    instance.carriersActive =
-        std::any_of(snapshot.state.carriers.begin(),
-                    snapshot.state.carriers.end(),
-                    [](const mission_state::CarrierOperation& carrier) {
-                        return carrier.status == mission_state::CarrierStatus::running
-                               || carrier.stepRequestKey != 0;
-                    });
     accept_compare_fields(instance, snapshot);
 }
 
@@ -871,7 +856,6 @@ void service(std::uint64_t now) noexcept {
                 if (instance.programStatus == ProgramStatus::programError) {
                     reconcile_terminal_delivery(instance);
                 } else {
-                    advance_carriers(instance);
                     dispatch_intent(instance, now);
                 }
             }

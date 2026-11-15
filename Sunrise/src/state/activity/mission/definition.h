@@ -226,10 +226,6 @@ enum class IntentKind : std::uint8_t {
     sendIncident,
     setActorControls,
     deliverPassengers,
-    startCarrier,
-    cancelCarrier,
-    /** A carrier step that reserves one cargo squad unless its reservation is still unused. */
-    reserveCarrierCargo,
     /** Raises or lowers one activity flag; `active` false lowers it. */
     setActivityFlag,
     /** Attaches or detaches one hop-on sensor; the Host owns its revision. */
@@ -257,12 +253,8 @@ struct MissionSeedOmission final {
     bool operator==(const MissionSeedOmission&) const = default;
 };
 
-struct CarrierPlan;
-
 /** Typed action with RAII-owned body bytes and no packet or native pointers. */
 struct TypedIntent final {
-    /** The immutable flight a startCarrier intent asks State to run. */
-    std::shared_ptr<const CarrierPlan> carrierPlan{};
     std::uint32_t expectedObjectiveRevision{};
     bool objectiveReconsider{};
     bool objectiveReserved{};
@@ -335,117 +327,6 @@ struct TypedIntent final {
     bool retirePlacedProps{};
 };
 
-/** The part of a flight one carrier step belongs to. */
-enum class CarrierStage : std::uint8_t {
-    entry,
-    unloading,
-    departure,
-    retirement,
-};
-
-/** What ends one carrier step after its transport. */
-enum class CarrierWait : std::uint8_t {
-    /** Transport alone. */
-    transport,
-    /** The actor reports every lane of the program run. */
-    program,
-    /** The actor reports the program, then is suppressed: the ability retires it. */
-    programRetires,
-    /** The actor reports the manifest idle under its revision. */
-    delivery,
-};
-
-/** One intent of a flight, the stage it belongs to and what ends it. */
-struct CarrierStep final {
-    TypedIntent intent{};
-    CarrierStage stage{};
-    CarrierWait wait{};
-};
-
-/** Immutable steps a script's start_carrier compiled from validated authored descriptors. */
-struct CarrierPlan final {
-    std::vector<CarrierStep> steps{};
-};
-
-enum class CarrierStatus : std::uint8_t {
-    running,
-    complete,
-    refused,
-    cancelled,
-};
-
-/**
- * The counters the Host gave one transported carrier step, which the actor's report must echo
- * after the step's accepted-input boundary.
- */
-struct CarrierReceipt final {
-    std::uint64_t requestKey{};
-    /** Link the step was staged on. */
-    std::uint64_t sourceGeneration{};
-    std::uint64_t inputSequenceAtStage{};
-    std::uint64_t clientMessageSequenceAtStage{};
-    std::uint32_t objectTag{};
-    std::uint32_t registryKey{};
-    /** Program generation, or manifest revision for a delivery step. */
-    std::uint32_t revision{};
-    std::uint32_t actorGeneration{};
-    std::uint16_t slotIndex{};
-    std::uint8_t laneCount{};
-};
-
-/** The manifest state an actor reports once it holds no passenger left to unload. */
-inline constexpr std::int32_t kCarrierDeliveryIdle = 0;
-
-/** One accepted type-2 actor level, joined to the step a running carrier waits on. */
-struct CarrierActorReport final {
-    std::uint64_t attemptGeneration{};
-    /** Link whose client sent the report. */
-    std::uint64_t sourceGeneration{};
-    std::uint64_t inputSequence{};
-    std::uint64_t clientMessageSequence{};
-    std::uint32_t objectTag{};
-    std::uint32_t registryKey{};
-    std::uint32_t actorGeneration{};
-    std::uint32_t programRevision{};
-    /** Lanes the program has finished. */
-    std::int32_t programProgress{};
-    std::uint32_t deliveryRevision{};
-    std::int32_t deliveryState{};
-    std::uint16_t slotIndex{};
-    bool suppressed{};
-    bool deliveryKnown{};
-    /**
-     * The report came from the link that simulates the actor now, so a flight waiting on it
-     * follows that link. The mission runtime sends only admitted reports.
-     */
-    bool admitted{};
-};
-
-/** One running or finished flight; State issues its steps one at a time behind other intents. */
-struct CarrierOperation final {
-    std::shared_ptr<const CarrierPlan> plan{};
-    CarrierReceipt receipt{};
-    /** The start_carrier request the script holds. */
-    std::uint64_t requestKey{};
-    /** Request key of the step in the queue, zero between steps. */
-    std::uint64_t stepRequestKey{};
-    std::uint64_t attemptGeneration{};
-    /**
-     * Link whose client flies the actor: zero until a step is staged, then the link that step
-     * was staged on, until an admitted report moves it. The flight ends when it leaves.
-     */
-    std::uint64_t sourceGeneration{};
-    std::uint32_t actorRow{};
-    std::uint32_t step{};
-    CarrierStatus status{CarrierStatus::running};
-    bool transported{};
-    /** The actor reported the step's program or manifest at least once. */
-    bool observed{};
-    bool stepFinished{};
-    /** Every cargo manifest finished. */
-    bool delivered{};
-};
-
 /** One durable action and the exact Host output revision assigned to it. */
 struct PendingIntent final {
     TypedIntent value{};
@@ -496,7 +377,6 @@ struct MissionState final {
     AttemptState attempt{};
     std::vector<SquadPopulation> squadPopulations{};
     std::vector<DeviceRequestReport> deviceRequests{};
-    std::vector<CarrierOperation> carriers{};
     /** Durable delivery queue with no policy count limit. */
     std::vector<PendingIntent> pendingIntents{};
     std::array<ScriptVariable, kVariableCapacity> variables{};

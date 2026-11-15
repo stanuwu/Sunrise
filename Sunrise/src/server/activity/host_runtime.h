@@ -154,10 +154,8 @@ enum class EventKind : std::uint8_t {
     triggerState = 42,
     /** A hop-on sensor applied a request or changed attachment; from one msg 6 body. */
     hopOnState = 43,
-    /** State moved one or more carrier flights on. */
-    carrierState = 44,
     /** One squad member slot's lost count rose; derived from one msg 6 body. */
-    squadMemberLost = 45,
+    squadMemberLost = 44,
 };
 
 /** Kinds are numbered without gaps, so the last one plus one is the count. */

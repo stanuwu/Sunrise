@@ -713,52 +713,6 @@ void publish_objective_levels(Vm& vm, std::span<const ObjectiveLevelRow> levels)
     }
 }
 
-/** Copies the flights; a failed copy leaves the previous ones. */
-bool publish_carriers(
-    Vm& vm, std::span<const state::activity::mission::CarrierOperation> carriers) noexcept {
-    try {
-        VmAccess::get(vm).carriers.assign(carriers.begin(), carriers.end());
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    return true;
-}
-
-/** @return True when the request is a step State queued for a carrier, not a script's. */
-bool carrier_step(const Vm& vm, std::uint64_t requestKey) noexcept {
-    const Impl& impl = VmAccess::get(vm);
-    return requestKey != state::activity::mission::kAbsentIntentKey
-           && std::any_of(impl.carriers.begin(),
-                          impl.carriers.end(),
-                          [requestKey](const auto& carrier) {
-                              return carrier.stepRequestKey == requestKey;
-                          });
-}
-
-/** Replaces the unread outbox with State's queue between callbacks. */
-bool adopt_intents(Vm& vm,
-                   std::span<const state::activity::mission::PendingIntent> pendingIntents,
-                   std::uint64_t nextIntentKey) noexcept {
-    Impl& impl = VmAccess::get(vm);
-    if (!impl.active || impl.faulted || impl.frame != nullptr) {
-        return false;
-    }
-    std::vector<Intent> outbox{};
-    try {
-        outbox.reserve(pendingIntents.size());
-        for (const auto& pending : pendingIntents) {
-            outbox.push_back(pending.value);
-        }
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    impl.outbox = std::move(outbox);
-    impl.outboxRead = 0;
-    impl.nextIntentKey = nextIntentKey;
-    return true;
-}
-
-
 /** Copies durable population facts without exposing the native store to Lua. */
 bool publish_populations(
     Vm& vm, std::span<const state::activity::mission::SquadPopulation> populations) noexcept {

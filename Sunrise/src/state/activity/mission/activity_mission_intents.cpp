@@ -125,7 +125,6 @@ matching_device_publication(const MissionState& state,
                 candidate.deviceRequests.clear();
                 candidate.squadPopulations.clear();
             }
-            status = settle_carrier_intent(candidate, pending->value, accepted);
             candidate.pendingIntents.erase(candidate.pendingIntents.begin());
             if (status == Status::ready) {
                 if (!publish(activity, *record)) {
@@ -289,8 +288,7 @@ Status acknowledge_intent_output(const SessionBinding& binding,
                                  Snapshot& output,
                                  const DeviceRequestReport* device,
                                  const SquadPopulation* population,
-                                 std::span<const SquadPopulation> scenePopulations,
-                                 const CarrierReceipt* carrierStep) noexcept {
+                                 std::span<const SquadPopulation> scenePopulations) noexcept {
     output = {};
     if (!valid_program(program)) {
         return Status::invalidProgram;
@@ -320,11 +318,6 @@ Status acknowledge_intent_output(const SessionBinding& binding,
             || device->channel != pending->value.deviceChannel
             || device->value != pending->value.deviceValue || device->channel >= kDeviceChannelCount
             || device->sourceGeneration == 0)) {
-        status = Status::intentMismatch;
-    }
-    if (status == Status::ready && carrierStep != nullptr
-        && (carrierStep->requestKey != pending->value.requestKey
-            || carrierStep->sourceGeneration == 0)) {
         status = Status::intentMismatch;
     }
     if (status == Status::ready) {
@@ -365,18 +358,6 @@ Status acknowledge_intent_output(const SessionBinding& binding,
                 && pending->value.lifetimeState == kCompletedLifetimeState
                 && pending->value.attemptGeneration == candidate.attempt.generation) {
                 candidate.attempt.complete = true;
-            }
-            if (status == Status::ready) {
-                status = settle_carrier_intent(candidate, pending->value, true);
-            }
-            if (status == Status::ready && carrierStep != nullptr) {
-                for (CarrierOperation& carrier : candidate.carriers) {
-                    if (carrier.status == CarrierStatus::running
-                        && carrier.stepRequestKey == carrierStep->requestKey) {
-                        carrier.receipt = *carrierStep;
-                        carrier.sourceGeneration = carrierStep->sourceGeneration;
-                    }
-                }
             }
             candidate.pendingIntents.erase(candidate.pendingIntents.begin());
             if (status == Status::ready) {

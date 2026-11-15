@@ -117,10 +117,6 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "slot.run_atoms";
     case ActionKind::setActorControls:
         return "slot.set_actor_controls";
-    case ActionKind::startCarrier:
-        return "slot.start_carrier";
-    case ActionKind::cancelCarrier:
-        return "slot.cancel_carrier";
     case ActionKind::retireActor:
         return "slot.retire_actor";
     case ActionKind::deliverPassengers:
@@ -164,7 +160,6 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
     case ActionKind::setHopOn:
     case ActionKind::bindCombatantToSquad:
     case ActionKind::actorCommand:
-    case ActionKind::reserveCarrierCargo:
         return {};
     }
     return {};

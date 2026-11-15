@@ -140,8 +140,7 @@ Status retain_scene_populations(MissionState& candidate,
 Status retain_squad_population(MissionState& candidate,
                                const TypedIntent& intent,
                                const SquadPopulation& population) noexcept {
-    if ((intent.kind != IntentKind::placeSquad && intent.kind != IntentKind::reserveCarrierCargo)
-        || intent.squadCount > intent.squadCounts.size()
+    if (intent.kind != IntentKind::placeSquad || intent.squadCount > intent.squadCounts.size()
         || population.squadRow != intent.firstRow || population.spawnGeneration == 0
         || population.sourceGeneration == 0
         || population.attemptGeneration != intent.attemptGeneration

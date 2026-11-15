@@ -117,8 +117,6 @@ struct Impl final {
     /** Objective task counters the runtime last published, readable from any callback. */
     std::array<ObjectiveLevelRow, kObjectiveObservationCapacity> objectiveLevels{};
     std::uint8_t objectiveLevelCount{};
-    /** Durable carrier flights the runtime last published, for state:operation. */
-    std::vector<state::activity::mission::CarrierOperation> carriers{};
     Arena arena{};
     ProgramIdentity identity{};
     DefinitionApi definitions{};

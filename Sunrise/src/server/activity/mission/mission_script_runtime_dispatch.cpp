@@ -354,8 +354,7 @@ intent_pins(const RuntimeInstance& instance,
         return {};
     }
     switch (intent.kind) {
-    case lua_vm::IntentKind::placeSquad:
-    case lua_vm::IntentKind::reserveCarrierCargo: {
+    case lua_vm::IntentKind::placeSquad: {
         std::uint8_t bubble = 0;
         return squads::authored_bubble(view, intent.firstRow, bubble) == squads::Status::ready
                    ? bubble_bit(bubble)
@@ -459,7 +458,6 @@ template <typename Result, typename Adapter>
     RoutePins pins{};
     // A placement may move its squad's pin, so only its bubble orders it.
     const std::size_t pinCount = intent.kind == lua_vm::IntentKind::placeSquad
-                                         || intent.kind == lua_vm::IntentKind::reserveCarrierCargo
                                      ? 0
                                      : intent_pins(instance, intent, holders, pins);
     const auto pinned = std::span(pins).first(pinCount);
@@ -503,84 +501,6 @@ template <typename Result, typename Adapter>
            && ::sunrise::state::activity::destination::spawn_set_slice_set(
                   instance.view.binding.destination, hash, static_cast<std::uint16_t>(region))
                   == region;
-}
-
-/** @return Why one actor row cannot start a flight, or null when it can. */
-[[nodiscard]] const char* carrier_start_refusal(const RuntimeInstance& instance,
-                                                std::uint32_t actorRow) noexcept {
-    mission_state::Snapshot snapshot{};
-    if (!mission_state::state_snapshot(instance.view.binding, snapshot)) {
-        return "state_unreadable";
-    }
-    const bool flying = std::any_of(snapshot.state.carriers.begin(),
-                                    snapshot.state.carriers.end(),
-                                    [actorRow](const mission_state::CarrierOperation& carrier) {
-                                        return carrier.status
-                                                   == mission_state::CarrierStatus::running
-                                               && carrier.actorRow == actorRow;
-                                    });
-    return flying ? "actor_flying" : nullptr;
-}
-
-/**
- * Decides one carrier cargo reservation. An unused reservation is kept, a consumed one is
- * renewed only once its passengers are gone, and a squad another owner holds is refused.
- * @return True when the squad must be placed in reserve; otherwise the head was retired.
- */
-[[nodiscard]] bool carrier_cargo_needs_reservation(RuntimeInstance& instance,
-                                                   const lua_vm::Intent& intent) noexcept {
-    const auto& catalog = *instance.view.catalog;
-    const auto squads = catalog.squads();
-    if (intent.firstRow >= squads.size()
-        || squads[intent.firstRow].slotIndex >= catalog.slots().size()) {
-        refuse_delivery(instance, "carrier_cargo", "unknown_squad", host::EffectOutcome::refused);
-        return false;
-    }
-    const auto& slot = catalog.slots()[squads[intent.firstRow].slotIndex];
-    const auto& object = catalog.objects()[slot.objectIndex];
-    host::ScriptableTarget target{};
-    target.objectTag = object.objectTag;
-    target.registryKey = object.objectKey;
-    target.slotType = static_cast<std::uint8_t>(slot.slotType);
-    target.slotIndex = static_cast<std::uint16_t>(slot.slotIndex);
-    target.authSchema = slot.authSchema;
-    const auto source = host::actor_program_source_status(instance.view.binding, target);
-    if (source == host::ActorProgramSourceStatus::incompatible) {
-        refuse_delivery(instance, "carrier_cargo", "source_in_use", host::EffectOutcome::refused);
-        return false;
-    }
-    if (source != host::ActorProgramSourceStatus::ready) {
-        return true;
-    }
-    mission_state::Snapshot snapshot{};
-    if (!mission_state::state_snapshot(instance.view.binding, snapshot)) {
-        refuse_delivery(
-            instance, "carrier_cargo", "population_unavailable", host::EffectOutcome::refused);
-        return false;
-    }
-    const auto& populations = snapshot.state.squadPopulations;
-    const auto population =
-        std::find_if(populations.begin(), populations.end(), [&intent](const auto& row) {
-            return row.squadRow == intent.firstRow
-                   && row.attemptGeneration == intent.attemptGeneration;
-        });
-    if (population == populations.end() || population->expectedAlive <= 0) {
-        refuse_delivery(
-            instance, "carrier_cargo", "reservation_not_owned", host::EffectOutcome::refused);
-        return false;
-    }
-    // No member ever reached its task points or was lost, so the reservation produced none.
-    if (population->maximumObservedLost == 0 && population->maximumObservedAlive == 0) {
-        static_cast<void>(complete_local_effect(instance, "carrier_cargo_reserved"));
-        return false;
-    }
-    // A new reservation must never discard passengers still alive from the last one.
-    if (!population->generationKnown || !population->aliveKnown || population->alive != 0) {
-        refuse_delivery(
-            instance, "carrier_cargo", "passengers_still_alive", host::EffectOutcome::refused);
-        return false;
-    }
-    return true;
 }
 
 } // namespace
@@ -847,21 +767,6 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         }
         return;
     }
-    case lua_vm::IntentKind::startCarrier:
-        if (const char* const refusal = carrier_start_refusal(instance, intent.firstRow)) {
-            refuse_delivery(instance, "carrier_refused", refusal, host::EffectOutcome::refused);
-            return;
-        }
-        [[fallthrough]];
-    case lua_vm::IntentKind::cancelCarrier:
-        // State opens or ends the flight when this head retires.
-        static_cast<void>(complete_local_effect(instance, "carrier_admitted"));
-        return;
-    case lua_vm::IntentKind::reserveCarrierCargo:
-        if (!carrier_cargo_needs_reservation(instance, intent)) {
-            return;
-        }
-        [[fallthrough]];
     case lua_vm::IntentKind::placeSquad: {
         const std::span<const std::int32_t> counts(intent.squadCounts.data(), intent.squadCount);
         const auto mode = static_cast<squad_auth::Mode>(intent.squadMode);

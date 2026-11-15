@@ -575,23 +575,6 @@ void publish_ghost_levels(Vm& vm, std::span<const GhostLinkRow> levels) noexcept
 void publish_objective_levels(Vm& vm, std::span<const ObjectiveLevelRow> levels) noexcept;
 
 
-/** Copies the durable carrier flights before any callback reads one. */
-[[nodiscard]] bool
-publish_carriers(Vm& vm,
-                 std::span<const state::activity::mission::CarrierOperation> carriers) noexcept;
-
-/** @return True when the request is a step State queued for a carrier, not a script's. */
-[[nodiscard]] bool carrier_step(const Vm& vm, std::uint64_t requestKey) noexcept;
-
-/**
- * Replaces the unread outbox with State's queue between callbacks, after State queued or removed
- * carrier steps, so the next commit extends the same queue.
- */
-[[nodiscard]] bool
-adopt_intents(Vm& vm,
-              std::span<const state::activity::mission::PendingIntent> pendingIntents,
-              std::uint64_t nextIntentKey) noexcept;
-
 /** Copies durable native population facts before any callback reads a cohort. */
 [[nodiscard]] bool publish_populations(
     Vm& vm, std::span<const state::activity::mission::SquadPopulation> populations) noexcept;

@@ -707,7 +707,6 @@
     <ClCompile Include="src\state\activity\mission\activity_mission_state.cpp" />
     <ClCompile Include="src\state\activity\mission\activity_mission_reload.cpp" />
     <ClCompile Include="src\state\activity\mission\activity_mission_publication.cpp" />
-    <ClCompile Include="src\state\activity\mission\activity_mission_carriers.cpp" />
     <ClCompile Include="src\state\activity\mission\activity_mission_intents.cpp" />
     <ClCompile Include="src\state\activity\mission\activity_mission_population.cpp" />
     <ClCompile Include="src\state\activity\membership\activity_membership_query.cpp" />
@@ -1035,8 +1034,6 @@
     <ClCompile Include="src\server\activity\mission\mission_script_cinematic.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_player_trigger.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_delivery.cpp" />
-    <ClCompile Include="src\server\activity\mission\mission_script_runtime_carriers.cpp" />
-    <ClCompile Include="src\server\activity\mission\mission_script_carrier_plan.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_dispatch.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_region.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_actor_command_policy.cpp" />
@@ -3199,7 +3196,6 @@
     <ClInclude Include="src\server\activity\mission\mission_script_combatant_damage_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_device_sense.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_effect_sense.h" />
-    <ClInclude Include="src\server\activity\mission\mission_script_carrier_plan.h" />
     <ClInclude Include="src\server\activity\activity_sdk_behavior_scope.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\mission_seed_world_change.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\mission_entity_allocation.h" />

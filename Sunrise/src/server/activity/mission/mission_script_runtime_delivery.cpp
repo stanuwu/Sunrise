@@ -121,8 +121,7 @@ scene_population_sources(RuntimeInstance& instance,
         }
         sceneJoin = std::span(sceneSources).first(intent.burstRowCount);
     }
-    if (intent.kind == lua_vm::IntentKind::placeSquad
-        || intent.kind == lua_vm::IntentKind::reserveCarrierCargo) {
+    if (intent.kind == lua_vm::IntentKind::placeSquad) {
         host::PendingScriptableOverride staged{};
         if (!host::staged_scriptable_override(
                 instance.view.binding, instance.expectedScriptableRevision, staged)
@@ -165,17 +164,6 @@ scene_population_sources(RuntimeInstance& instance,
         device.value = staged.channelValue;
         deviceJoin = &device;
     }
-    mission_state::CarrierReceipt receipt{};
-    const mission_state::CarrierReceipt* receiptJoin = nullptr;
-    if ((intent.kind == lua_vm::IntentKind::runActorProgram
-         || intent.kind == lua_vm::IntentKind::deliverPassengers)
-        && lua_vm::carrier_step(instance.vm, intent.requestKey)) {
-        if (!carrier_step_receipt(instance, intent, receipt)) {
-            fault_instance(instance, "staged carrier step has no readable actor counters");
-            return false;
-        }
-        receiptJoin = &receipt;
-    }
     // A request whose report echoes a Host-owned counter is kept under the counter it staged.
     const bool hopOn = intent.kind == lua_vm::IntentKind::setHopOn;
     const bool program = intent.kind == lua_vm::IntentKind::runActorProgram
@@ -206,8 +194,7 @@ scene_population_sources(RuntimeInstance& instance,
                                                  snapshot,
                                                  deviceJoin,
                                                  populationJoin,
-                                                 sceneJoin,
-                                                 receiptJoin);
+                                                 sceneJoin);
     if (status != mission_state::Status::ready) {
         // This attachment lost its compare. Leave authoritative State unchanged so an exact
         // reattach can reconcile the retained Host transport revision without rerunning Lua.
@@ -229,9 +216,7 @@ scene_population_sources(RuntimeInstance& instance,
 void queue_effect_result(RuntimeInstance& instance,
                          const lua_vm::Intent& intent,
                          host::EffectOutcome outcome) noexcept {
-    // A carrier step answers to its flight, which state:operation reports.
-    if (intent.requestKey == mission_state::kAbsentIntentKey
-        || lua_vm::carrier_step(instance.vm, intent.requestKey)) {
+    if (intent.requestKey == mission_state::kAbsentIntentKey) {
         return;
     }
     host::Event event{};
@@ -449,7 +434,6 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
     const char* result = nullptr;
     switch (intent.kind) {
     case lua_vm::IntentKind::placeSquad:
-    case lua_vm::IntentKind::reserveCarrierCargo:
         result = "squad_staged";
         break;
     case lua_vm::IntentKind::actorCommand:
@@ -498,10 +482,6 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
         break;
     case lua_vm::IntentKind::holdSpawn:
         result = "spawn_hold_staged";
-        break;
-    case lua_vm::IntentKind::startCarrier:
-    case lua_vm::IntentKind::cancelCarrier:
-        result = "carrier_staged";
         break;
     case lua_vm::IntentKind::fireTrigger:
         result = "trigger_staged";
