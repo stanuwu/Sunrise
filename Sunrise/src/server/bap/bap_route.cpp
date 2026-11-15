@@ -649,25 +649,6 @@ select_activity_mission_seed(const state::activity::SessionBinding& binding,
         status = ActivityMissionSeedLeaseStatus::refused;
     }
     if (status == ActivityMissionSeedLeaseStatus::ready) {
-        // A selection that reloads a recipient's held bubble waits until that client released it.
-        bool released = true;
-        for (Session& peer : g_sessions) {
-            if (!mission_seed_recipient(peer, binding)) {
-                continue;
-            }
-            const state::ScopedAccount accountScope(peer.accountHandle);
-            const state::activity::ScopedMemberContext memberScope(binding.sessionId,
-                                                                   peer.activityMemberKey);
-            const ActivityMissionSeedLeaseStatus handoff = prepare_bubble_handoff(
-                peer, plan, state::activity::membership::reported_placement(binding.sessionId));
-            if (handoff == ActivityMissionSeedLeaseStatus::refused) {
-                return handoff;
-            }
-            released = released && handoff == ActivityMissionSeedLeaseStatus::ready;
-        }
-        if (!released) {
-            return ActivityMissionSeedLeaseStatus::outputBusy;
-        }
         // No peer can observe a new selection unless every current recipient can retain it. The
         // first pass only checks each recipient; the second commits. Each keeps its own
         // generation, receipt, registered groups and arrival window.
@@ -696,7 +677,27 @@ select_activity_mission_seed(const state::activity::SessionBinding& binding,
             }
             return true;
         };
-        if (!prepare_recipients(false) || !prepare_recipients(true)) {
+        if (!prepare_recipients(false)) {
+            return ActivityMissionSeedLeaseStatus::refused;
+        }
+        // A selection that reloads a recipient's held bubble waits until that client released it.
+        // Releases are requested only once every recipient can take the selection.
+        bool released = true;
+        for (Session& peer : g_sessions) {
+            if (!mission_seed_recipient(peer, binding)) {
+                continue;
+            }
+            const state::ScopedAccount accountScope(peer.accountHandle);
+            const state::activity::ScopedMemberContext memberScope(binding.sessionId,
+                                                                   peer.activityMemberKey);
+            const ActivityMissionSeedLeaseStatus handoff = prepare_bubble_handoff(
+                peer, plan, state::activity::membership::reported_placement(binding.sessionId));
+            released = released && handoff == ActivityMissionSeedLeaseStatus::ready;
+        }
+        if (!released) {
+            return ActivityMissionSeedLeaseStatus::outputBusy;
+        }
+        if (!prepare_recipients(true)) {
             return ActivityMissionSeedLeaseStatus::refused;
         }
     }

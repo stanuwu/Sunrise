@@ -15,7 +15,9 @@ namespace sunrise::server::bap {
  * under the BAP session lock.
  */
 struct BubbleHandoff final {
+    /** Requested until the release frame goes out, then published until message 33 answers it. */
     enum class Stage : std::uint8_t { none, requested, published, acknowledged };
+    /** ActivityClient generation the release belongs to. */
     std::uint64_t generation{};
     /** Effective regions of the state the client holds and of the selected state. */
     std::uint32_t source{};
@@ -32,6 +34,32 @@ struct BubbleHandoff final {
     /** @return True while this handoff belongs to the link's current client binding. */
     [[nodiscard]] bool active(std::uint64_t current) const noexcept {
         return stage != Stage::none && generation == current;
+    }
+    /**
+     * @param heldRegion Region the client is resident in.
+     * @return True once nothing is left to release: before the release goes out the client no
+     * longer holds the source state, and after it the client is resident in another bubble.
+     */
+    [[nodiscard]] bool source_left(std::int32_t heldRegion) const noexcept {
+        if (stage == Stage::requested) {
+            return heldRegion != static_cast<std::int32_t>(source);
+        }
+        return heldRegion >= 0
+               && (static_cast<std::uint32_t>(heldRegion)
+                   >> state::activity::bubble_authority::kSliceSetToBubbleShift)
+                      != bubble();
+    }
+    /**
+     * Moves the release onto another selection. One in the same bubble keeps the release, which
+     * covers the whole bubble; any other has nothing to wait for.
+     */
+    void retarget(std::uint32_t to) noexcept {
+        if ((to >> state::activity::bubble_authority::kSliceSetToBubbleShift) == bubble()
+            && to != source) {
+            destination = to;
+        } else {
+            *this = {};
+        }
     }
     /** @return True when this handoff is the exact pending move. */
     [[nodiscard]] bool

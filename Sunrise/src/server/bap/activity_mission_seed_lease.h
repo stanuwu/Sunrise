@@ -19,12 +19,13 @@ namespace sunrise::server::bap {
 /**
  * Holds a selection that replaces the world inside the bubble a recipient's private client holds
  * until that client has released the bubble. The first call requests the release and reports
- * busy; the selection proceeds once the client's message 33 acknowledges it.
- * @param recipient Recipient link; its handoff and keepalive schedule change.
+ * busy; the selection proceeds once the client's message 33 acknowledges it. A release pending
+ * for another selection moves to this one when it reloads the same bubble, and is retired
+ * otherwise.
+ * @param recipient Recipient link; its handoff changes.
  * @param plan Selection being made.
  * @param placement The recipient client's reported placement.
- * @return Ready when no release is owed or it was acknowledged, busy while it is pending, refused
- * when a pending release belongs to another selection.
+ * @return Ready when no release is owed or it was acknowledged, busy while it is pending.
  */
 [[nodiscard]] ActivityMissionSeedLeaseStatus
 prepare_bubble_handoff(Session& recipient,

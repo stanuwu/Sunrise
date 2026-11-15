@@ -93,7 +93,12 @@ bool prepare_mission_seed_lease(const MissionSeedLease& current,
         return false;
     }
     if (!output.configured || output.bindingGeneration != generation) {
+        // A release requested before this client's first selection still belongs to it.
+        const BubbleHandoff handoff = output.bubbleHandoff;
         output = {};
+        if (handoff.active(generation)) {
+            output.bubbleHandoff = handoff;
+        }
     }
     if (output.registeredRegionCount > output.registeredRegions.size()
         || (output.configured && output.plan.scenarioRow != plan.scenarioRow)) {
@@ -146,14 +151,15 @@ prepare_bubble_handoff(Session& recipient,
     const std::uint64_t generation = recipient.activity.bindingGeneration;
     MissionSeedLease& lease = recipient.activityMissionSeed;
     BubbleHandoff& handoff = lease.bubbleHandoff;
+    // The selection the release was for was replaced, or abandoned for the one already held.
+    if (handoff.active(generation) && handoff.destination != plan.effectiveRegion) {
+        handoff.retarget(plan.effectiveRegion);
+    }
     if (lease.configured && lease.bindingGeneration == generation
         && same_mission_seed_plan(lease.plan, plan)) {
         return ActivityMissionSeedLeaseStatus::ready;
     }
     if (handoff.active(generation)) {
-        if (handoff.destination != plan.effectiveRegion) {
-            return ActivityMissionSeedLeaseStatus::refused;
-        }
         return handoff.stage == BubbleHandoff::Stage::acknowledged
                    ? ActivityMissionSeedLeaseStatus::ready
                    : ActivityMissionSeedLeaseStatus::outputBusy;
@@ -181,8 +187,6 @@ prepare_bubble_handoff(Session& recipient,
                .destination = plan.effectiveRegion,
                .token = grant.token,
                .stage = BubbleHandoff::Stage::requested};
-    // The release is owed now; nothing else would make a roster due for it.
-    recipient.activityKeepaliveDueTick = 0;
     core::log::writef(core::log::Channel::server,
                       core::log::Level::info,
                       "ev=activity stage=bubble_handoff result=requested bubble=%u source=%u "

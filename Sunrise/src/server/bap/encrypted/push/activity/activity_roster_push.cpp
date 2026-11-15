@@ -540,8 +540,10 @@ bool append_roster_notification(
     // selected state, so the load pass cannot create placements the seed pass would repeat.
     BubbleHandoff& handoff = session.activityMissionSeed.bubbleHandoff;
     const std::uint64_t generation = session.activity.bindingGeneration;
-    if (handoff.active(generation) && handoff.stage == BubbleHandoff::Stage::acknowledged
-        && resident && static_cast<std::uint32_t>(heldRegion) == handoff.destination) {
+    if (handoff.active(generation)
+        && ((handoff.stage == BubbleHandoff::Stage::acknowledged && resident
+             && static_cast<std::uint32_t>(heldRegion) == handoff.destination)
+            || (regionReady && handoff.source_left(heldRegion)))) {
         handoff = {};
     }
     const bool handoffActive = handoff.active(generation);
@@ -556,7 +558,7 @@ bool append_roster_notification(
         grant = {handoff.bubble(), handoff.token};
         snapshot.hasGrant = true;
         snapshot.grant = {.bubble = grant.bubble, .token = grant.token, .release = true};
-    } else if (!peerLeave && !handoffActive && !placedRetirementPending
+    } else if (!peerLeave && !placedRetirementPending
                && (sharedBubbles
                 ? state::activity::bubble_authority::select_shared_grant(
                       sessionId,
@@ -567,6 +569,8 @@ bool append_roster_notification(
                       grant)
                 : state::activity::bubble_authority::select_grant(
                       sessionId, grantRequest.region, grant, grantRequest.renewReleased))
+               // Only the released bubble waits for the selected state; others keep their grants.
+               && !(handoffActive && grant.bubble == handoff.bubble())
                // A sole client renewing a bubble it stays in reclaims what it released, so that
                // renewal waits for the loaded state. Entering a bubble keeps the retirement rule.
                && (sharedBubbles || enteringBubble
