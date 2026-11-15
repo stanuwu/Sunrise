@@ -189,8 +189,12 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
                       && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr
                && pending.kind == ScriptableOverrideKind::interactableObjectInPlace) {
-        nextCounter = guard->type4.hasLast
-                      && pending.generation == static_cast<std::uint64_t>(guard->type4.last);
+        // The encoder repeats the newer of this guard's counter and the retained body's, which an
+        // SDK body may have advanced without the guard.
+        nextCounter =
+            pending.generation > 0
+            && pending.generation >= static_cast<std::uint64_t>((std::max)(guard->type4.last, 0))
+            && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr
                && (pending.kind == ScriptableOverrideKind::object
                    || pending.kind == ScriptableOverrideKind::interactableObject)) {
