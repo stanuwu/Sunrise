@@ -505,16 +505,21 @@ template <typename Result, typename Adapter>
                   == region;
 }
 
-/** @return True while one actor row has a running flight, or its flights cannot be read. */
-[[nodiscard]] bool carrier_flying(const RuntimeInstance& instance, std::uint32_t actorRow) noexcept {
+/** @return Why one actor row cannot start a flight, or null when it can. */
+[[nodiscard]] const char* carrier_start_refusal(const RuntimeInstance& instance,
+                                                std::uint32_t actorRow) noexcept {
     mission_state::Snapshot snapshot{};
-    return !mission_state::state_snapshot(instance.view.binding, snapshot)
-           || std::any_of(snapshot.state.carriers.begin(),
-                          snapshot.state.carriers.end(),
-                          [actorRow](const mission_state::CarrierOperation& carrier) {
-                              return carrier.status == mission_state::CarrierStatus::running
-                                     && carrier.actorRow == actorRow;
-                          });
+    if (!mission_state::state_snapshot(instance.view.binding, snapshot)) {
+        return "state_unreadable";
+    }
+    const bool flying = std::any_of(snapshot.state.carriers.begin(),
+                                    snapshot.state.carriers.end(),
+                                    [actorRow](const mission_state::CarrierOperation& carrier) {
+                                        return carrier.status
+                                                   == mission_state::CarrierStatus::running
+                                               && carrier.actorRow == actorRow;
+                                    });
+    return flying ? "actor_flying" : nullptr;
 }
 
 /**
@@ -842,9 +847,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         return;
     }
     case lua_vm::IntentKind::startCarrier:
-        if (carrier_flying(instance, intent.firstRow)) {
-            refuse_delivery(
-                instance, "carrier_refused", "actor_flying", host::EffectOutcome::refused);
+        if (const char* const refusal = carrier_start_refusal(instance, intent.firstRow)) {
+            refuse_delivery(instance, "carrier_refused", refusal, host::EffectOutcome::refused);
             return;
         }
         [[fallthrough]];

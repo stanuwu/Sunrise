@@ -622,10 +622,12 @@ void push_atom_kinds(lua_State* state) {
     if (entryAbility == (definition.entryMode == CarrierEntryMode::path)) {
         return luaL_error(state, "entry_ability goes with every entry_mode but path");
     }
-    static_cast<void>(carrier_ability(state,
-                                      required_key(kStartCarrier, "exit_ability", Kind::missionRow),
-                                      actor,
-                                      definition.exitAbility));
+    if (!carrier_ability(state,
+                         required_key(kStartCarrier, "exit_ability", Kind::missionRow),
+                         actor,
+                         definition.exitAbility)) {
+        return luaL_error(state, "exit_ability is required");
+    }
     definition.relocateStart =
         optional_boolean_argument(state, boolean_option(kStartCarrier, "relocate_start"));
     definition.serial = optional_boolean_argument(state, boolean_option(kStartCarrier, "serial"));

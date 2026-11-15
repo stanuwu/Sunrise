@@ -317,6 +317,7 @@ void push_actor_path_edges(RuntimeInstance& instance,
         ActorPathObservation* const slot =
             find_slot_row(instance.actorPathObservations, observation.key);
         if (slot == nullptr) {
+            log_line(core::log::Level::warn, &instance, "actor_path", "watch_capacity");
             continue;
         }
         claim_row(*slot, sense.sourceGeneration, true);
