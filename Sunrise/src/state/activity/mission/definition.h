@@ -76,13 +76,16 @@ struct SquadPopulation final {
     std::int32_t expectedAlive{};
     std::int32_t alive{};
     std::int32_t maximumObservedAlive{};
-    /** Members ever created in this spawn generation, summed over the client's per-slot counts. */
-    std::int32_t maximumObservedCreated{};
+    /**
+     * Members lost in this spawn generation, summed over the client's per-slot counts. Each was
+     * created first, so it also bounds the members created from below.
+     */
+    std::int32_t maximumObservedLost{};
     bool generationKnown{};
     bool aliveKnown{};
 };
 
-/** Only present generation, alive and created fields can update a population observation. */
+/** Only present generation, alive and lost fields can update a population observation. */
 struct SquadPopulationReport final {
     std::uint64_t attemptGeneration{};
     /** Link whose client sent the report. */
@@ -94,10 +97,10 @@ struct SquadPopulationReport final {
     std::uint32_t spawnGeneration{};
     std::uint16_t slotIndex{};
     std::int32_t alive{};
-    std::int32_t created{};
+    std::int32_t lost{};
     bool generationKnown{};
     bool aliveKnown{};
-    bool createdKnown{};
+    bool lostKnown{};
     bool initialized{};
     /**
      * The report came from the link that simulates the squad now, so its population follows it.

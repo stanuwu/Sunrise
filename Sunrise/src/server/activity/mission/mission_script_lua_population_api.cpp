@@ -118,10 +118,10 @@ int cohort_index(lua_State* state) {
         }
         alive += found->alive;
         observedAlive = observedAlive || found->maximumObservedAlive > 0;
-        // Members ever created also prove a full spawn, so an early death cannot hide one.
+        // Members lost were created first, so they also prove a full spawn an early death hid.
         full = full && found->expectedAlive > 0
                && (found->maximumObservedAlive >= found->expectedAlive
-                   || found->maximumObservedCreated >= found->expectedAlive);
+                   || found->maximumObservedLost >= found->expectedAlive);
     }
     const CohortTotals totals{alive, known, full, observedAlive, handle->count};
     return dispatch<CohortTotals>(state, kCohortBindings, lua_string_view(state, 2), totals);

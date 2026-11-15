@@ -569,7 +569,8 @@ template <typename Result, typename Adapter>
             instance, "carrier_cargo", "reservation_not_owned", host::EffectOutcome::refused);
         return false;
     }
-    if (population->maximumObservedCreated == 0 && population->maximumObservedAlive == 0) {
+    // No member ever reached its task points or was lost, so the reservation produced none.
+    if (population->maximumObservedLost == 0 && population->maximumObservedAlive == 0) {
         static_cast<void>(complete_local_effect(instance, "carrier_cargo_reserved"));
         return false;
     }

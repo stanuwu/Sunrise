@@ -53,13 +53,13 @@ bool observe_population(
     report.alive = linkAlive.value_or(0);
     std::int32_t restated = 0;
     const bool aliveRestated = read_squad_alive(values, observation.key.schemaRow, restated);
-    std::array<std::int32_t, kSquadCreatedSlotCapacity> created{};
-    if (read_squad_created_counts(values, created) != 0) {
-        const std::int64_t total = std::accumulate(created.begin(), created.end(), std::int64_t{0});
-        report.createdKnown = total <= kMaximumCounter;
-        report.created = static_cast<std::int32_t>(report.createdKnown ? total : 0);
+    std::array<std::int32_t, kSquadLostSlotCapacity> lost{};
+    if (read_squad_lost_counts(values, lost) != 0) {
+        const std::int64_t total = std::accumulate(lost.begin(), lost.end(), std::int64_t{0});
+        report.lostKnown = total <= kMaximumCounter;
+        report.lost = static_cast<std::int32_t>(report.lostKnown ? total : 0);
     }
-    if (!moved && !aliveRestated && !report.generationKnown && !report.createdKnown) {
+    if (!moved && !aliveRestated && !report.generationKnown && !report.lostKnown) {
         return true;
     }
     mission_state::Snapshot snapshot{};

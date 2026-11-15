@@ -13,15 +13,15 @@ namespace sunrise::server::activity::mission {
 
 namespace generated = middleware::content::packages::schema::generated;
 
-/** Type-1 squad Sense nested schemas: the created-count list, its counts, and the cost reals. */
-inline constexpr std::uint32_t kSquadCreatedListSchema = generated::C80807ecf::kClass;
-inline constexpr std::uint32_t kSquadCreatedCountSchema = generated::C80809491::kClass;
+/** Type-1 squad Sense nested schemas: the lost-count list, its counts, and the cost reals. */
+inline constexpr std::uint32_t kSquadLostListSchema = generated::C80807ecf::kClass;
+inline constexpr std::uint32_t kSquadLostCountSchema = generated::C80809491::kClass;
 inline constexpr std::uint32_t kSquadObjectiveCostSchema = generated::C80807ecd::kClass;
 /** Root ordinals: field 1 echoes the objective revision, field 3 is the alive count. */
 inline constexpr std::uint16_t kSquadObjectiveRevisionOrdinal = 1;
 inline constexpr std::uint16_t kSquadAliveOrdinal = 3;
-/** The created-count list has at most eight slots. */
-inline constexpr std::size_t kSquadCreatedSlotCapacity = 8;
+/** The lost-count list has at most eight slots. */
+inline constexpr std::size_t kSquadLostSlotCapacity = 8;
 /** One cost per authored objective task group. */
 inline constexpr std::size_t kSquadObjectiveGroupCount = 24;
 /** Costs are saturated distances; the client never publishes more than this. */
@@ -34,29 +34,28 @@ inline constexpr std::int64_t kMaximumAliveCount = 63;
 inline constexpr std::int64_t kMaximumCounter = 0x7FFFFFFF;
 
 /**
- * Reads the per-slot created counts. They never decrement and are zeroed on a generation change,
- *
- * so a rise after the first sighting is a spawn.
- * @param output Receives one count per slot;
- * slots past the list length read zero.
+ * Reads the per-slot lost counts. The client raises a slot's count as it tears down one of that
+ * slot's actors, and a new spawn generation clears them, so a rise after the first sighting is a
+ * loss. The squad Sense does not report creations.
+ * @param output Receives one count per slot; slots past the list length read zero.
  * @return The list length, or zero when the list is absent or incomplete.
  */
-[[nodiscard]] inline std::uint8_t read_squad_created_counts(
+[[nodiscard]] inline std::uint8_t read_squad_lost_counts(
     std::span<const middleware::bap::activity_message::sense_update::DecodedValue> values,
     std::span<std::int32_t> output) noexcept {
     std::uint32_t length = 0;
     std::uint32_t known = 0;
-    std::array<std::int32_t, kSquadCreatedSlotCapacity> counts{};
+    std::array<std::int32_t, kSquadLostSlotCapacity> counts{};
     for (const auto& value : values) {
         if (!value.present) {
             continue;
         }
-        if (value.schemaRow == kSquadCreatedListSchema && value.fieldOrdinal == 0) {
+        if (value.schemaRow == kSquadLostListSchema && value.fieldOrdinal == 0) {
             if (value.unsignedValue > counts.size()) {
                 return 0;
             }
             length = static_cast<std::uint32_t>(value.unsignedValue);
-        } else if (value.schemaRow == kSquadCreatedCountSchema && value.fieldOrdinal == 0
+        } else if (value.schemaRow == kSquadLostCountSchema && value.fieldOrdinal == 0
                    && value.occurrence < counts.size()) {
             if (value.signedValue < 0 || value.signedValue > kMaximumCounter) {
                 return 0;

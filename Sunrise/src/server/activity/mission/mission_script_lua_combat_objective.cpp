@@ -150,7 +150,7 @@ void push_task_group(lua_State* state, std::uint32_t slotRow, std::int32_t group
         return found->expectedAlive;
     }
     return (std::max)(
-        {found->expectedAlive, found->maximumObservedAlive, found->maximumObservedCreated});
+        {found->expectedAlive, found->maximumObservedAlive, found->maximumObservedLost});
 }
 
 /**

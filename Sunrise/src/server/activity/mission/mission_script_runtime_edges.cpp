@@ -673,7 +673,7 @@ struct SquadLevels final {
     levels.counts = row.slotCounts;
     levels.countLength = row.slotCountLength;
     std::array<std::int32_t, host::kSquadSlotCapacity> incomingCounts{};
-    const auto incomingLength = read_squad_created_counts(body, incomingCounts);
+    const auto incomingLength = read_squad_lost_counts(body, incomingCounts);
     if (incomingLength != 0) {
         levels.counts = incomingCounts;
         levels.countLength = incomingLength;
@@ -920,8 +920,8 @@ link_alive_count(RuntimeInstance& instance,
 /**
  * Raises the squad events derived from one msg 6 body.
  * The client publishes levels, so a first sighting of a source only records them. After that a
- * slot count that rose is the only spawn signal, and the alive count falling is the only death
- * signal. Only the link that simulates the squad reports its levels; a replica's counts would
+ * slot count that rose is a member lost, and the alive count falling is a member leaving its task
+ * points. Only the link that simulates the squad reports its levels; a replica's counts would
  * interleave with them, so they are kept apart as that link's shadow.
  */
 void push_squad_edges(RuntimeInstance& instance,
@@ -1012,24 +1012,20 @@ void push_squad_edges(RuntimeInstance& instance,
 
         // A replacement source starts from its own levels, so only a rise after the first sighting
         // raises an edge. A slot's count is the client's lost counter: tearing down one of the
-        // slot's actors raises it and a new spawn generation clears it. The rise still raises
-        // entitySpawned, and raises squadMemberLost, which reads it as the loss it is.
+        // slot's actors raises it and a new spawn generation clears it.
         for (std::uint8_t slot = 0; !first && slot < levels.countLength; ++slot) {
             const std::int32_t previous =
                 slot < published.slotCountLength ? published.slotCounts[slot] : 0;
             if (levels.counts[slot] <= previous) {
                 continue;
             }
-            host::Event spawned = squad_edge_event(instance, observation, *squad);
-            spawned.squadSlotOrdinal = slot;
-            spawned.squadSlotValue = levels.counts[slot];
-            spawned.squadPreviousSlotValue = previous;
-            spawned.kind = host::EventKind::entitySpawned;
-            host::Event lost = spawned;
+            host::Event lost = squad_edge_event(instance, observation, *squad);
+            lost.squadSlotOrdinal = slot;
+            lost.squadSlotValue = levels.counts[slot];
+            lost.squadPreviousSlotValue = previous;
             lost.squadRemovalFlag = levels.removal;
             lost.kind = host::EventKind::squadMemberLost;
             if (instance.programStatus == ProgramStatus::loaded) {
-                push_script_event(instance, spawned);
                 push_script_event(instance, lost);
             }
         }
