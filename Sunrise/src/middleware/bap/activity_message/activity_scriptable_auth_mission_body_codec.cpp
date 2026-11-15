@@ -106,7 +106,7 @@ write_directive_entry(bits::Writer& writer,
                                                              : kFlaggedMarkerMode;
     if (phase < -1 || phase > 1
         || !writer.write(static_cast<std::uint32_t>(phase + 1), kDirectiveStateWidth)
-        || !write_directive_reference(writer, waypoint)
+        || !write_optional_client_ref(writer, waypoint)
         || !writer.write(markerMode, kDirectiveAuxStateWidth)) {
         return false;
     }
@@ -352,8 +352,8 @@ bool encode_type68(const Type68Preset& preset,
     bits::Writer writer(output.first(kType68ByteCount));
     // The two leading references: the engagement sensor that gates the banner, then the
     // public-event sensor whose state the HUD record copies.
-    bool encoded = write_directive_reference(writer, preset.audience)
-                   && write_directive_reference(writer, preset.event);
+    bool encoded = write_optional_client_ref(writer, preset.audience)
+                   && write_optional_client_ref(writer, preset.event);
     for (std::size_t index = 0; encoded && index < kType68EntryCount; ++index) {
         encoded = index == 0 && preset.visible
                       ? write_directive_entry(writer,
@@ -408,7 +408,7 @@ bool encode_type70(const Type70Preset& preset,
         return false;
     }
     for (std::size_t index = 0; index < preset.volumeCount; ++index) {
-        if (!write_directive_reference(writer, preset.volumes[index])) {
+        if (!write_optional_client_ref(writer, preset.volumes[index])) {
             return false;
         }
     }

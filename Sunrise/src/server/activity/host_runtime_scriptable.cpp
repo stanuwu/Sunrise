@@ -524,7 +524,8 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
                    || request.kind == ScriptableOverrideKind::interactableObjectInPlace
                    || request.kind == ScriptableOverrideKind::damageWatch
                    || request.kind == ScriptableOverrideKind::hopOn
-                   || request.kind == ScriptableOverrideKind::objectChannels)) {
+                   || request.kind == ScriptableOverrideKind::objectChannels
+                   || request.kind == ScriptableOverrideKind::engagement)) {
         encoded = counter_auth::encode(*instance, request, candidate, pending, written);
     } else if (encoded && request.kind == ScriptableOverrideKind::ghostLink) {
         encoded = ghost_link::encode(*instance, request, candidate, pending, written);
@@ -532,8 +533,8 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
         auth::Type4Preset preset{};
         preset.entryIndex = request.entryIndex;
         preset.active = request.active;
+        preset.location = request.objectLocation;
         preset.capturePlate = request.capturePlate;
-        preset.timed = request.timed;
         preset.position = request.position;
         pending.bitCount = static_cast<std::uint16_t>(auth::type4_bit_count(preset));
         std::int32_t generation = 0;
@@ -545,11 +546,23 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
             candidate.type4.last = static_cast<std::int32_t>(retainedGeneration);
             candidate.type4.hasLast = true;
         }
-        const bool inPlace = request.timed.inPlace || request.position.present;
+        const bool inPlace = request.position.present;
         if (inPlace) {
             // Same generation: the client updates the live object's components in place.
             encoded = encoded && candidate.type4.hasLast && candidate.type4.last > 0;
             generation = candidate.type4.last;
+            // The Host owns the lane sequence; the retained position body holds the last one.
+            std::uint32_t lastSequence = 0;
+            const auto* retained = actor_program::retained(*instance, request.target);
+            if (encoded && retained != nullptr
+                && retained->bitCount == auth::kType4PositionChildBitCount) {
+                encoded = counter_auth::previous_revision(
+                    *instance, request.target, auth::kType4PositionSequenceOffset, lastSequence);
+            }
+            encoded =
+                encoded
+                && lastSequence < middleware::bap::activity_message::auth_fields::kMaximumCounter;
+            preset.position.revision = static_cast<std::int32_t>(lastSequence + 1U);
         } else {
             encoded = encoded && auth::next_type4_generation(candidate.type4, generation);
         }

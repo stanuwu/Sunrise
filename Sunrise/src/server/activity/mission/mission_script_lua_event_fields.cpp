@@ -701,6 +701,8 @@ constexpr std::array<EventBindings, static_cast<std::size_t>(G::count)> kGroupBi
     kSenseGeneration,
     kSquadRemoval,
     kTriggerLevel,
+    kHopOn,
+    kSquadMemberLoss,
     kIntegration,
     kEngagement,
 }};

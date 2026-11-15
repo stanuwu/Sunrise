@@ -86,11 +86,18 @@ struct CachedTag final {
                                               PackageContext& packageContext,
                                               topology_enrichment::Snapshot& enrichment);
 
-/** Attaches exact output counts from each resolved type-24 object target. */
-[[nodiscard]] bool attach_channel_bounds(const topology_inventory::Snapshot& topology,
-                                         const squads::Facts& facts,
-                                         PackageContext& packageContext,
-                                         topology_enrichment::Snapshot& enrichment);
+/** Extracts the eased output count from each channel sensor's exact target object. */
+[[nodiscard]] bool attach_object_channel_counts(const topology_inventory::Snapshot& topology,
+                                                const squads::Facts& facts,
+                                                PackageContext& packageContext,
+                                                topology_enrichment::Snapshot& enrichment);
+
+/**
+ * Reads the SObject table's notification rows and names each one by the English text its name
+ * hash keys in an installed string bank. Rows without text are left out.
+ */
+[[nodiscard]] bool build_incident_definitions(PackageContext& packageContext,
+                                              incident_inventory::Snapshot& output);
 
 /** Marks the SDK slot row of every type-43 scene whose descriptor names no resource. */
 [[nodiscard]] bool attach_unresourced_scenes(const topology_inventory::Snapshot& topology,

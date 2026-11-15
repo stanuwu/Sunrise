@@ -60,10 +60,8 @@ constexpr std::uint16_t kEngagementValueOrdinal = 1;
 constexpr std::uint8_t kEngagementValueWidth = 16;
 constexpr std::int32_t kEngagementValueBias = 32'768;
 /**
- * Engagement list ordinal 1 is the key array (schema 0x808094F7): code-35 player keys, read as
- * the same 64-bit integer the type-13 identity read uses. The generated schema rows give the
- * five-bit count (0x808094F8 field 0) and the 16-key array (field 1); the installed SDK's generic
- * decoder is the offline oracle for those widths.
+ * Engagement list ordinal 1 is the key array (schema 0x808094F7): 64-bit player keys, as the
+ * type-13 identity read uses. Field 0 of 0x808094F8 is the five-bit count of up to 16 keys.
  */
 constexpr std::uint16_t kEngagementKeyOrdinal = 1;
 constexpr std::uint8_t kEngagementKeyWidth = 64;
@@ -86,9 +84,8 @@ constexpr std::uint32_t kDamage = damage_monitor::kSenseSchema;
 constexpr std::uint32_t kInteractionReply = interactable_object::kInteractionReply,
                         kOwnershipReply = interactable_object::kOwnershipReply;
 /**
- * The capture-plate reply, sent once the plate's component Auth exists. Reflected group 2408:
- * two six-bit values at bias three, a flag, two signed revisions, then an optional word and an
- * optional 4-bit unit real, each behind its own presence bit.
+ * The capture-plate reply, sent once the plate Auth exists: two six-bit values at bias three, a
+ * flag, two signed revisions, then an optional word and an optional 4-bit unit real.
  * Ordinals are recorded unnamed; their meanings are not recovered.
  */
 constexpr std::uint32_t kCapturePlateReply = generated::C80804df6::kClass;

@@ -272,7 +272,7 @@ namespace catalog = state::build_data::scriptables;
            && left.componentClass == right.componentClass && left.senseSchema == right.senseSchema
            && left.authSchema == right.authSchema && left.flags == right.flags
            && left.dialogueCueCount == right.dialogueCueCount
-           && left.outputChannelCount == right.outputChannelCount
+           && left.objectChannelCount == right.objectChannelCount
            && left.aliases.first == right.aliases.first
            && left.aliases.count == right.aliases.count;
 }

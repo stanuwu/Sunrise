@@ -683,14 +683,14 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         }
     }
     if (event.kind == host::EventKind::incidentReceived) {
-        push_player_trigger(instance, event);
+        push_player_trigger(instance, event, kAnyRegion);
         push_integration(instance, event);
         push_cinematic(instance, event);
     }
     if (event.kind == host::EventKind::senseUpdate && sense != nullptr) {
         observe_player_life(instance, *sense);
         publish_fireteam_life(now);
-        push_trigger_edges(instance, *sense);
+        push_trigger_edges(instance, *sense, kAnyRegion);
         push_engagement_edges(instance, *sense);
         push_ghost_edges(instance, *sense);
         push_object_interaction_edges(instance, *sense);

@@ -508,11 +508,6 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
         || typed(message::map_generator_auth::kSlotType,
                  message::map_generator_auth::kComponentClass,
                  message::map_generator_auth::kSchema);
-    const bool outputs =
-        typed(format::kChannelSlotType, format::kChannelComponentClass, format::kChannelAuthSchema)
-        && slot.senseSchema == format::kChannelSenseSchema
-        && (slot.flags & format::kSlotOutputChannelsExact) != 0
-        && auth::validate_type24_body(body, bitCount, slot.reserved);
     const bool occupancy = slotType == format::kOccupancySlotType
                            && authSchema == format::kOccupancyAuthSchema
                            && bitCount == kOccupancyAuthBits && body.size() == kOccupancyAuthBytes;
@@ -552,7 +547,15 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
         });
         volumeToggle = matches == 1;
     }
-    if (!typedSdkBody && !occupancy && !scriptable && !engagement && !volumeToggle && !outputs) {
+    auth::Type24Body channels{};
+    const bool objectChannels =
+        typed(auth::kType24SlotType, auth::kType24ComponentClass, auth::kType24Schema)
+        && slot.senseSchema == auth::kType24SenseSchema
+        && (slot.flags & format::kSlotObjectChannelsExact) != 0
+        && auth::decode_type24(body, bitCount, channels) && channels.count > 0
+        && channels.count <= slot.reserved;
+    if (!typedSdkBody && !occupancy && !scriptable && !engagement && !volumeToggle
+        && !objectChannels) {
         return Status::invalidBody;
     }
     return Status::ready;

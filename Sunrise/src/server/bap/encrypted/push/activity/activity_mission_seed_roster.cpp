@@ -9,6 +9,7 @@
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/content/packages/tables/region_reader.h"
+#include "../../../../../state/activity/member_context.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/activity/runtime.h"
 #include "../../../../../state/activity_sdk/generated_world/runtime.h"
@@ -480,7 +481,7 @@ publish_selected_seed(const SeedSource& seed,
         lease.configured ? std::span(activePlan.omissions).first(activePlan.omissionCount)
                          : std::span(declaredOmissions)
                                .first(state::activity::membership::declared_seed_omissions(
-                                   session.activity.session.sessionId, declaredOmissions));
+                                   seed.selection.binding.sessionId, declaredOmissions));
     sdk::MissionSeedSummary summary{};
     if (sdk::materialize_initial_mission_seed(
             view, static_cast<std::int32_t>(selectedRegion), omissions, materialized, summary)

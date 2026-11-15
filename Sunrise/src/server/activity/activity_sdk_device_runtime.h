@@ -145,8 +145,8 @@ play_combatant_sequence_reserved(const state::activity_sdk::BoundView& view,
     std::span<const std::uint32_t> extraRows,
     std::int32_t entryIndex,
     bool active,
+    std::optional<std::uint32_t> locationSlotRow,
     bool capturePlate,
-    const middleware::bap::activity_message::scriptable_auth::Type4TimedClock& timed,
     const middleware::bap::activity_message::scriptable_auth::Type4PositionChild& position,
     const host::ScriptableOutputReservation& reservation) noexcept;
 

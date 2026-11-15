@@ -329,6 +329,8 @@ struct SquadObservation final {
     std::int32_t aliveCount{};
     /** Last spawn generation the squad Sense echoed from its placement Auth. */
     std::int32_t spawnGeneration{};
+    /** Last alert level the squad Sense reported. */
+    std::int32_t alertLevel{};
     /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
     std::uint8_t slotCountLength{};
@@ -355,21 +357,6 @@ struct SceneObservation final {
     std::uint16_t slotIndex{};
     std::uint8_t outputCount{};
     bool completed{};
-    /** This retained observation row has been initialized. */
-    bool used{};
-};
-
-/** Last task counters seen for one watched objective sensor, so only a rise raises an event. */
-struct ObjectiveObservation final {
-    std::array<std::array<std::uint8_t, kObjectiveTaskCapacity>, kObjectiveCapacity> counters{};
-    /** Link whose reports these levels were read from. */
-    std::uint64_t sourceGeneration{};
-    /** Registry identity of the observed scriptable sensor. */
-    std::uint32_t registryKey{};
-    /** Generated object tag resolving this observed sensor. */
-    std::uint32_t objectTag{};
-    /** Exact sensor slot within its registry. */
-    std::uint16_t slotIndex{};
     /** This retained observation row has been initialized. */
     bool used{};
 };
@@ -660,12 +647,18 @@ void observe_player_life(RuntimeInstance& instance,
  * @param region Region the volume must lie in, or kAnyRegion.
  */
 void push_trigger_edges(RuntimeInstance& instance,
-                        const host::SenseObservationSnapshot& sense) noexcept;
+                        const host::SenseObservationSnapshot& sense,
+                        std::int32_t region) noexcept;
+/**
+ * Raises one dedicated type-31 edge from a decoded player-trigger msg-19 payload.
+ * @param region Region the volume must lie in, or kAnyRegion.
+ */
+void push_player_trigger(RuntimeInstance& instance,
+                         const host::Event& incident,
+                         std::int32_t region) noexcept;
 /** Raises one engagementState per type-70 report whose count, membership or value changed. */
 void push_engagement_edges(RuntimeInstance& instance,
                            const host::SenseObservationSnapshot& sense) noexcept;
-/** Raises one dedicated type-31 edge from a decoded player-trigger msg-19 payload. */
-void push_player_trigger(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Forwards one decoded integration report to the script with its three fields. */
 void push_integration(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Raises one exact Type-6 start/finish edge from a decoded cinematic msg-19 payload. */

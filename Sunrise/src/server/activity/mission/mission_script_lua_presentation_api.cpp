@@ -98,7 +98,7 @@ constexpr const api::MemberSpec& kDialogueCue = api::slot_member("play_dialogue_
  * Stages audience admission: the occupants of the volumes, and with `everyone` every present
  * player. The native flag bit 0 suppresses the client's player-table admission; the shipped
  * default keeps it set, so only volume occupants enter unless the script asks for everyone.
- * @param state Borrowed Lua call with a current sensor and named volumes/revision arguments.
+ * @param state Borrowed Lua call with a current sensor and named volumes/clear arguments.
  * @return One RequestKey; invalid inputs raise a Lua error before an intent is queued.
  */
 [[nodiscard]] int slot_set_engagement(lua_State* state) {
@@ -112,11 +112,7 @@ constexpr const api::MemberSpec& kDialogueCue = api::slot_member("play_dialogue_
         || (slot.flags & format::kSlotSchemaJoinExact) == 0) {
         return luaL_error(state, "engagement requires an exact type-70 sensor");
     }
-    const lua_Integer revision = checked_integer_argument(
-        state, required_key(kSetEngagement, "revision", api::ValueKind::integer));
-    if (revision < 1 || revision > (std::numeric_limits<std::int16_t>::max)()) {
-        return luaL_error(state, "engagement revision must be a positive signed 16-bit integer");
-    }
+    const bool clear = optional_boolean_argument(state, boolean_option(kSetEngagement, "clear"));
     static_cast<void>(
         push_argument(state, required_key(kSetEngagement, "volumes", api::ValueKind::list)));
     luaL_checktype(state, -1, LUA_TTABLE);
@@ -126,7 +122,8 @@ constexpr const api::MemberSpec& kDialogueCue = api::slot_member("play_dialogue_
     if (count > preset.volumes.size()) {
         return luaL_error(state, "engagement volume count exceeds native capacity");
     }
-    preset.revision = static_cast<std::int16_t>(revision);
+    // The Host replaces this template revision: one asks it to clear the audience, zero keeps it.
+    preset.revision = clear ? 1 : 0;
     preset.volumeCount = static_cast<std::uint8_t>(count);
     if (optional_boolean_argument(state, boolean_option(kSetEngagement, "everyone"))) {
         preset.flags = scriptable_auth::kType70AdmitEveryoneFlags;
@@ -154,8 +151,12 @@ constexpr const api::MemberSpec& kDialogueCue = api::slot_member("play_dialogue_
     if (!scriptable_auth::encode_type70(preset, body, written, bitCount)) {
         return luaL_error(state, "engagement native encoder failed");
     }
-    return queue_slot_auth(
-        state, slot, scriptable_auth::kType70Schema, bitCount, std::span(body).first(written));
+    return queue_slot_auth(state,
+                           slot,
+                           scriptable_auth::kType70Schema,
+                           bitCount,
+                           std::span(body).first(written),
+                           IntentKind::setEngagement);
 }
 
 /** Shows one generated directive through the exact type-68 Auth schema. */

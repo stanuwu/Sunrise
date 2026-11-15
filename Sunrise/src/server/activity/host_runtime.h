@@ -153,10 +153,14 @@ enum class EventKind : std::uint8_t {
     sceneOutput = 41,
     /** Validated type-30 level or explicit continuity invalidation. */
     triggerState = 42,
+    /** A hop-on sensor applied a request or changed attachment; from one msg 6 body. */
+    hopOnState = 43,
+    /** One squad member slot's lost count rose; derived from one msg 6 body. */
+    squadMemberLost = 44,
     /** One schema-0x808087F1 msg-19 report from the Vex block's sacrifice trigger. */
-    integration = 43,
+    integration = 45,
     /** A type-70 engagement report changed its member count, local membership or value. */
-    engagementState = 44,
+    engagementState = 46,
 };
 
 /** Kinds are numbered without gaps, so the last one plus one is the count. */
@@ -294,6 +298,8 @@ enum class ScriptableOverrideKind : std::uint8_t {
     hopOn,
     /** Type-24 authored object channels under Host-owned revisions. */
     objectChannels,
+    /** Type-70 audience under a Host-owned revision that rises only to clear its members. */
+    engagement,
 };
 
 /** The client stalls one frame short of the duration, so this reported fraction is the bar's end.
@@ -340,6 +346,7 @@ inline constexpr float kGhostLinkFinishFraction = 0.99F;
     case ScriptableOverrideKind::ghostLink:
     case ScriptableOverrideKind::hopOn:
     case ScriptableOverrideKind::objectChannels:
+    case ScriptableOverrideKind::engagement:
         return true;
     }
     return true;
@@ -1108,7 +1115,7 @@ struct PendingScriptableOverride final {
     /** A sequence body that repeats the committed revision to change its choices in place. */
     bool sequenceRetain{};
     bool sdkCompiled{};
-    /** An object body that repeats its committed generation (in-place timed update). */
+    /** An object body that repeats its committed generation (in-place position update). */
     bool inPlace{};
 };
 
@@ -1273,8 +1280,8 @@ request_type23_override(const state::activity::SessionBinding& binding,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::int32_t entryIndex,
     bool active,
+    const middleware::bap::activity_message::scriptable_auth::Type2LaneClientRef& location,
     bool capturePlate,
-    const middleware::bap::activity_message::scriptable_auth::Type4TimedClock& timed,
     const middleware::bap::activity_message::scriptable_auth::Type4PositionChild& position,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation = nullptr,

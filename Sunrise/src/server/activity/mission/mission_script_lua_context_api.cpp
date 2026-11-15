@@ -8,6 +8,8 @@
 #include <tuple>
 
 #include "../../../core/runtime/server_clock.h"
+#include "../../../middleware/bap/activity_message/incident.h"
+#include "../../../middleware/crypto/random_bytes.h"
 #include "../../../state/activity/membership/definition.h"
 #include "../../../state/build_data/public_event_schedule/definition.h"
 #include "../../../state/mods/definition.h"
@@ -36,6 +38,11 @@ constexpr const api::MemberSpec& kRestartCheckpoint =
 constexpr const api::MemberSpec& kHoldSpawn = api::member(api::Receiver::context, "hold_spawn");
 constexpr const api::MemberSpec& kPublicEventSchedule =
     api::member(api::Receiver::context, "public_event_schedule");
+
+constexpr const api::MemberSpec& kSendIncident =
+    api::member(api::Receiver::context, "send_incident");
+constexpr const api::MemberSpec& kActivityFlag =
+    api::member(api::Receiver::context, "set_activity_flag");
 constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::context, "select_state");
 
 /** Draws a server-owned random fraction for one active callback. */
@@ -69,75 +76,14 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
         optional_boolean_argument(state, boolean_option(kActivateObjects, "active"));
     const bool capturePlate =
         optional_boolean_argument(state, boolean_option(kActivateObjects, "capture_plate"));
-    // The timed child's clock is authored in whole seconds and stamped with the activity time
-    // of this call, as a directive clock is.
-    bool timedChild = false;
-    lua_Integer timedRemaining = 0;
-    lua_Integer timedTotal = 0;
-    std::uint64_t timedEpoch = 0;
-    bool timedRunning = true;
-    bool timedInPlace = false;
-    if (push_argument(state, optional_key(kActivateObjects, "timed", api::ValueKind::table))
-        != LUA_TNIL) {
-        luaL_checktype(state, -1, LUA_TTABLE);
-        timedRemaining = directive_integer(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "timed", "remaining", api::ValueKind::integer));
-        timedTotal = directive_integer(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "timed", "total", api::ValueKind::integer));
-        refuse_unknown_fields(state, -1, api::find_argument(kActivateObjects, "timed").fields);
-        lua_getfield(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "timed", "running", api::ValueKind::boolean, true));
-        if (!lua_isnil(state, -1) && !lua_isboolean(state, -1)) {
-            return luaL_error(state, "timed.running must be a boolean");
-        }
-        timedRunning = lua_isnil(state, -1) || lua_toboolean(state, -1) != 0;
-        lua_pop(state, 1);
-        lua_getfield(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "timed", "in_place", api::ValueKind::boolean, true));
-        if (!lua_isnil(state, -1) && !lua_isboolean(state, -1)) {
-            return luaL_error(state, "timed.in_place must be a boolean");
-        }
-        timedInPlace = lua_toboolean(state, -1) != 0;
-        lua_pop(state, 1);
-        if (capturePlate || timedRemaining < 0 || timedTotal < timedRemaining
-            || timedTotal > scriptable_auth::kType68MaximumClockSeconds) {
-            return luaL_error(state,
-                              "timed needs 0 <= remaining <= total <= one year, without "
-                              "capture_plate");
-        }
-        Impl* const impl = impl_from_state(state);
-        if (impl == nullptr
-            || !activity_clock_wire_ticks(impl->identity.sessionId,
-                                          impl->identity.sessionCreatedRevision,
-                                          active_frame(state).now,
-                                          false,
-                                          timedEpoch)) {
-            return luaL_error(state, "timed clock is outside the activity time domain");
-        }
-        timedChild = true;
-    }
-    lua_pop(state, 1);
     // The position lane is the object's own state input; it is sent at the current generation.
     bool positionChild = false;
-    lua_Integer positionRevision = 0;
     lua_Number positionValue = 0;
     bool positionSnap = true;
     if (push_argument(state, optional_key(kActivateObjects, "position", api::ValueKind::table))
         != LUA_TNIL) {
         luaL_checktype(state, -1, LUA_TTABLE);
         refuse_unknown_fields(state, -1, api::find_argument(kActivateObjects, "position").fields);
-        positionRevision = directive_integer(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "position", "revision", api::ValueKind::integer));
         lua_getfield(
             state,
             -1,
@@ -154,11 +100,10 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
         }
         positionSnap = lua_isnil(state, -1) || lua_toboolean(state, -1) != 0;
         lua_pop(state, 1);
-        if (!numeric || !(positionValue >= 0 && positionValue <= 1) || positionRevision <= 0
-            || positionRevision > api::kInt32Maximum || capturePlate || timedChild || !active) {
+        if (!numeric || !(positionValue >= 0 && positionValue <= 1) || capturePlate || !active) {
             return luaL_error(state,
-                              "position needs 0 <= value <= 1 and 1 <= revision, on an active "
-                              "activation without timed or capture_plate");
+                              "position needs 0 <= value <= 1, on an active activation without "
+                              "capture_plate");
         }
         positionChild = true;
     }
@@ -222,14 +167,7 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
         intent.kind = IntentKind::setObjectActive;
         intent.active = active;
         intent.capturePlate = capturePlate;
-        intent.timedChild = timedChild;
-        intent.timedRemainingSeconds = static_cast<std::int32_t>(timedRemaining);
-        intent.timedTotalSeconds = static_cast<std::int32_t>(timedTotal);
-        intent.timedEpochTicks = timedEpoch;
-        intent.timedRunning = timedRunning;
-        intent.timedInPlace = timedInPlace;
         intent.positionChild = positionChild;
-        intent.positionRevision = static_cast<std::int32_t>(positionRevision);
         intent.positionValue = static_cast<float>(positionValue);
         intent.positionSnap = positionSnap;
         intent.firstRow = slots[first].nativeRow;
@@ -387,6 +325,82 @@ void set_integer_field(lua_State* state, const char* name, lua_Integer value) {
         }
     }
     return 1;
+}
+
+/**
+ * Raises or lowers one activity flag, the id list every participation record carries.
+ * @param state Lua call holding the context, a `key` and `raised`.
+ * @return One RequestKey.
+ */
+[[nodiscard]] int context_set_activity_flag(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    refuse_unknown_arguments(state, kActivityFlag);
+    const lua_Integer key = checked_integer_argument(
+        state, required_key(kActivityFlag, "key", api::ValueKind::integer));
+    if (key <= 0 || key > (std::numeric_limits<std::uint32_t>::max)()) {
+        return luaL_error(state, "activity flag key is zero or out of range");
+    }
+    Intent intent{};
+    intent.kind = IntentKind::setActivityFlag;
+    intent.activityFlagKey = static_cast<std::uint32_t>(key);
+    lua_getfield(state, 2, required_key(kActivityFlag, "raised", api::ValueKind::boolean));
+    if (!lua_isboolean(state, -1)) {
+        return luaL_argerror(state, 2, "set_activity_flag requires a raised boolean");
+    }
+    intent.active = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    return queue_intent(state, active_frame(state), intent);
+}
+
+/**
+ * Sends one activity incident (message 19) to the client. The client indexes its handler tables
+ * with the target unchecked, so out-of-range and poisoned targets are refused here.
+ * @param state Lua call holding the context and `{target, payload?}`. An absent payload sends the
+ * all-zero notification body; `""` sends none.
+ * @return One RequestKey. Its effect result is `queued`; host delivery events report the stage.
+ */
+[[nodiscard]] int context_send_incident(lua_State* state) {
+    namespace incident = ::sunrise::middleware::bap::activity_message::incident;
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    refuse_unknown_arguments(state, kSendIncident);
+    lua_getfield(state, 2, required_key(kSendIncident, "target", api::ValueKind::integer));
+    const lua_Integer target = lua_isinteger(state, -1) ? lua_tointeger(state, -1) : -1;
+    lua_pop(state, 1);
+    if (target < 0 || target > static_cast<lua_Integer>(incident::kTargetMaximum)) {
+        return luaL_error(state,
+                          "send_incident requires a target from 0 to %d",
+                          static_cast<int>(incident::kTargetMaximum));
+    }
+    Intent intent{};
+    intent.kind = IntentKind::sendIncident;
+    intent.firstRow = static_cast<std::uint32_t>(target);
+    lua_getfield(state, 2, optional_key(kSendIncident, "payload", api::ValueKind::string));
+    if (lua_isnil(state, -1)) {
+        intent.authBody.assign(incident::kNotificationPayloadBytes, std::byte{0});
+        intent.authByteCount = static_cast<std::uint16_t>(incident::kNotificationPayloadBytes);
+    } else {
+        if (lua_type(state, -1) != LUA_TSTRING) {
+            return luaL_argerror(state, 2, "send_incident payload must be a byte string");
+        }
+        std::size_t length = 0;
+        const char* const bytes = lua_tolstring(state, -1, &length);
+        if (length > incident::kPayloadMaximum) {
+            return luaL_error(state,
+                              "send_incident payload exceeds %d bytes",
+                              static_cast<int>(incident::kPayloadMaximum));
+        }
+        const auto* const first = reinterpret_cast<const std::byte*>(bytes);
+        intent.authBody.assign(first, first + length);
+        intent.authByteCount = static_cast<std::uint16_t>(length);
+    }
+    lua_pop(state, 1);
+    incident::Incident probe{};
+    probe.primaryTarget = intent.firstRow;
+    probe.payloadLength = intent.authByteCount;
+    if (!incident::outer_valid(probe)) {
+        return luaL_error(state, "send_incident target %d is poisoned", static_cast<int>(target));
+    }
+    return queue_intent(state, active_frame(state), intent);
 }
 
 [[nodiscard]] int context_scene(lua_State* state) {

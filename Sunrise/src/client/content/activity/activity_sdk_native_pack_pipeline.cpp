@@ -366,8 +366,6 @@ const char* status_name(Status value) noexcept {
         return "authored_scene_facts";
     case Status::authoredSceneLinks:
         return "authored_scene_links";
-    case Status::channelBounds:
-        return "channel_bounds";
     case Status::dialogueCues:
         return "dialogue_cues";
     case Status::objectChannels:
@@ -507,9 +505,9 @@ Status stage(const wchar_t* sdkDirectory,
         if (!attach_dialogue_cue_counts(topology, squadFacts, packageContext, topologyDetails)) {
             return cancelled(cancel, cancelContext) ? Status::cancelled : Status::dialogueCues;
         }
-        report(progress, progressContext, Phase::channelBounds);
-        if (!attach_channel_bounds(topology, squadFacts, packageContext, topologyDetails)) {
-            return cancelled(cancel, cancelContext) ? Status::cancelled : Status::channelBounds;
+        report(progress, progressContext, Phase::objectChannels);
+        if (!attach_object_channel_counts(topology, squadFacts, packageContext, topologyDetails)) {
+            return cancelled(cancel, cancelContext) ? Status::cancelled : Status::objectChannels;
         }
         report(progress, progressContext, Phase::authoredText);
         if (!attach_combat_objective_groups(topology, squadFacts, packageContext, sceneRows)

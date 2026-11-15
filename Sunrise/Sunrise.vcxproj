@@ -936,7 +936,6 @@
     <ClCompile Include="src\client\content\activity\activity_sdk_squad_inventory_link.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_squad_inventory_link_support.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_topology_enrichment.cpp" />
-    <ClCompile Include="src\client\content\activity\activity_sdk_channel_bounds.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_topology_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_topology_inventory_finish.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_topology_inventory_objects.cpp" />

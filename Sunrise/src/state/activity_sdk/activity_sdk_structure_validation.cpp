@@ -90,18 +90,6 @@ template <typename Row, typename Id>
             return false;
         }
     }
-    for (const format::Slot& row : catalog.slots()) {
-        if ((row.flags & format::kSlotOutputChannelsExact) != 0
-            && (row.slotType != format::kChannelSlotType
-                || row.componentClass != format::kChannelComponentClass
-                || row.senseSchema != format::kChannelSenseSchema
-                || row.authSchema != format::kChannelAuthSchema
-                || (row.flags & format::kSlotSchemaJoinExact) == 0
-                || (row.flags & format::kSlotDialogueCuesExact) != 0 || row.reserved == 0
-                || row.reserved > format::kOutputChannelCapacity)) {
-            return false;
-        }
-    }
     for (const format::Squad& row : catalog.squads()) {
         if (!range(row.members, catalog.squad_members().size())
             || !range(row.anchors, catalog.squad_anchors().size())) {

@@ -87,8 +87,6 @@ struct ScriptableRequest final {
     bool active{};
     /** An object request also carries the no-change capture-plate component Auth. */
     bool capturePlate{};
-    /** An object request also carries the enabled timed component Auth with this clock. */
-    middleware::bap::activity_message::scriptable_auth::Type4TimedClock timed{};
     /** An object request also carries the state-machine position lane (in place). */
     middleware::bap::activity_message::scriptable_auth::Type4PositionChild position{};
 };
@@ -172,6 +170,7 @@ struct ScriptableGuard final {
     std::uint32_t damageRevision{};
     std::uint32_t hopOnRevision{};
     std::uint32_t objectChannelsRevision{};
+    std::uint32_t engagementRevision{};
     GhostLinkScan ghostLink{};
     bool occupied{};
 };

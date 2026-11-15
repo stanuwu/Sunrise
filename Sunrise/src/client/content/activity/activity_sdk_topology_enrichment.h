@@ -17,8 +17,7 @@ struct Slot final {
     std::uint32_t authSchema{state::activity_sdk::format::kAbsentIndex};
     std::uint32_t flags{};
     std::uint32_t dialogueCueCount{};
-    /** Exact authored output count for a resolved type-24 target. */
-    std::uint32_t outputChannelCount{};
+    std::uint32_t objectChannelCount{};
     state::activity_sdk::format::Range aliases{};
 };
 

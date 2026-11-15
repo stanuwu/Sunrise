@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <limits>
 
+#include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../state/activity/membership/definition.h"
 #include "../../../state/activity/mission/definition.h"
@@ -31,36 +32,11 @@ inline constexpr ValueSpec kExactObjectSelector[]{{.kind = ValueKind::selector,
                                                    .ref = "mission.Slot",
                                                    .slot = kExactObject,
                                                    .handleAccepted = true}};
-/** The timed child's clock: remaining counts down from total, in whole seconds. */
-inline constexpr ValueSpec kActivateTimedFields[]{
-    {.name = "remaining",
-     .kind = ValueKind::integer,
-     .bound = between(
-         0, middleware::bap::activity_message::scriptable_auth::kType68MaximumClockSeconds)},
-    {.name = "total",
-     .kind = ValueKind::integer,
-     .bound = between(
-         0, middleware::bap::activity_message::scriptable_auth::kType68MaximumClockSeconds)},
-    {.name = "running",
-     .kind = ValueKind::boolean,
-     .optional = true,
-     .fallback = default_boolean(true),
-     .note = "false sends the window paused at its current value"},
-    {.name = "in_place",
-     .kind = ValueKind::boolean,
-     .optional = true,
-     .fallback = default_boolean(false),
-     .note = "repeats the object's current generation, updating the live object without respawn"},
-};
 /** The object's own state-machine position lane, applied to the live object in place. */
 inline constexpr ValueSpec kActivatePositionFields[]{
     {.name = "value",
      .kind = ValueKind::number,
      .note = "0 to 1; the object's graph owns the bins"},
-    {.name = "revision",
-     .kind = ValueKind::integer,
-     .bound = between(1, kInt32Maximum),
-     .note = "lane sequence; must exceed the last one the object took"},
     {.name = "snap",
      .kind = ValueKind::boolean,
      .optional = true,
@@ -78,11 +54,6 @@ inline constexpr ValueSpec kActivateObjectsArguments[]{
      .optional = true,
      .fallback = default_boolean(false),
      .note = "adds the capture-plate component Auth; it changes no plate field"},
-    {.name = "timed",
-     .kind = ValueKind::table,
-     .optional = true,
-     .fields = kActivateTimedFields,
-     .note = "adds the enabled timed component Auth with a clock of these whole seconds"},
     {.name = "position",
      .kind = ValueKind::table,
      .optional = true,

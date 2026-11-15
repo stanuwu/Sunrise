@@ -16,6 +16,7 @@
 #include "../../gameplay/squad_entity_retirement.h"
 #include "../activity_sdk_mission_runtime.h"
 #include "engagement_observation.h"
+#include "mission_script_region.h"
 #include "mission_script_runtime_internal.h"
 #include "mission_script_runtime_objective.h"
 #include "mission_script_slot_index.h"
@@ -792,6 +793,7 @@ namespace {
 struct SquadLevels final {
     std::array<std::int32_t, host::kSquadSlotCapacity> counts{};
     std::int32_t alive{};
+    std::int32_t alertLevel{};
     std::int32_t spawnGeneration{};
     std::uint8_t countLength{};
     bool hasSpawnGeneration{};
@@ -823,6 +825,13 @@ struct SquadLevels final {
     levels.alive = levels.generationChanged ? 0 : row.aliveCount;
     levels.hasAlive = read_squad_alive(body, root, levels.alive);
     levels.removal = sense_flag(body, root, kSquadRemovalOrdinal);
+    levels.alertLevel = row.alertLevel;
+    const sense_values::DecodedValue* const alert =
+        sense_value(body, root, kSquadAlertLevelOrdinal);
+    if (alert != nullptr && alert->present) {
+        levels.alertLevel = static_cast<std::int32_t>(alert->signedValue);
+    }
+    // A new spawn generation clears the client's lost counters.
     levels.counts = levels.generationChanged ? std::array<std::int32_t, host::kSquadSlotCapacity>{}
                                              : row.slotCounts;
     levels.countLength = levels.generationChanged ? 0 : row.slotCountLength;
@@ -832,8 +841,9 @@ struct SquadLevels final {
         levels.counts = incomingCounts;
         levels.countLength = incomingLength;
     }
-    levels.reported =
-        levels.hasAlive || levels.costsChanged || incomingLength != 0 || levels.generationChanged;
+    // The alert level can move without any other level, so its change alone is a report.
+    levels.reported = levels.hasAlive || levels.costsChanged || incomingLength != 0
+                      || levels.generationChanged || levels.alertLevel != row.alertLevel;
     return levels;
 }
 
@@ -1069,9 +1079,10 @@ link_alive_count(RuntimeInstance& instance,
 
 /**
  * Raises the squad events derived from one msg 6 body.
- * Population comparisons stay within one reported spawn generation. Only the simulating
- * link publishes squad levels; other links retain their own shadows. An alive decrease
- * is a population edge, not evidence of its cause.
+ * The client publishes levels, so a first sighting of a source only records them. After that a
+ * slot count that rose is a member lost, and the alive count falling is a member leaving its task
+ * points. Only the link that simulates the squad reports its levels; a replica's counts would
+ * interleave with them, so they are kept apart as that link's shadow.
  */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept {

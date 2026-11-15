@@ -28,26 +28,20 @@ bool build_public_event_schedule(const packages::reader::Source& source,
     }
     std::vector<std::byte> globals, payload;
     store::Table table{};
-    bool readFailed = false;
     for (std::size_t i = 0; i < candidateCount; ++i) {
         std::uint32_t tag{};
-        if (!packages::reader::read_tag(source, scratch, candidates[i], globals)) {
-            readFailed = true;
-            continue;
-        }
-        if (!packages::tables::child_tag(globals, schedule::kGlobalsChild, tag)
-            || packages::tables::package_of(tag) == packages::tables::kAbsentPackageId) {
-            continue;
-        }
-        if (!packages::reader::read_tag(source, scratch, tag, payload)) {
-            readFailed = true;
+        if (!packages::reader::read_tag(source, scratch, candidates[i], globals)
+            || !packages::tables::child_tag(globals, schedule::kGlobalsChild, tag)
+            || packages::tables::package_of(tag) == packages::tables::kAbsentPackageId
+            || !packages::reader::read_tag(source, scratch, tag, payload)) {
             continue;
         }
         if (schedule::decode(payload, tag, table) && (store::publish(table) || store::ready())) {
             return true;
         }
     }
-    // An unread candidate can still supply a schedule on a later package pass.
-    return !readFailed && state::build_data::named_catalog_ready();
+    // Retry until the catalog is sealed; after that every package is registered, so an unread
+    // candidate stays unread and the optional schedule settles absent.
+    return state::build_data::named_catalog_ready();
 }
 } // namespace sunrise::client::content::activity

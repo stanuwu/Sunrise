@@ -326,16 +326,15 @@ struct Type24Body final {
     std::uint8_t count{};
 };
 
-/** Encodes only the declared channel rows in their authored order. */
+/** Encodes only the declared channel rows; the host owns each row's revision. */
 [[nodiscard]] bool encode_type24(const Type24Body& body,
                                  std::span<std::byte> output,
                                  std::size_t& written,
                                  std::size_t& writtenBits) noexcept;
 
-/** Checks an output body against its SDK-recovered count and native value bounds. */
-[[nodiscard]] bool validate_type24_body(std::span<const std::byte> body,
-                                        std::size_t bitCount,
-                                        std::uint32_t channelCount) noexcept;
+/** Decodes the populated channel prefix and requires exact bit length and zero padding. */
+[[nodiscard]] bool
+decode_type24(std::span<const std::byte> input, std::size_t bitCount, Type24Body& body) noexcept;
 
 /** ClientRef slot type and Auth schema for the object-filter sensor. */
 inline constexpr std::uint8_t kType34SlotType = 34;
@@ -486,37 +485,15 @@ inline constexpr std::size_t kType4ByteCount = (kType4BitCount + 7) / 8;
 inline constexpr std::uint32_t kType4CapturePlateSchema = generated::C80804df7::kClass;
 /** The canonical body plus a present bit, the 32-bit handle and the 160-bit plate body. */
 inline constexpr std::size_t kType4CapturePlateBitCount = kType4BitCount + 1 + 32 + 160;
-/** Timed component Auth the lane props read: an enable flag, a clock window and a flag. */
-inline constexpr std::uint32_t kType4TimedChildSchema = generated::C80804fca::kClass;
-inline constexpr std::size_t kType4TimedChildBodyBitCount = 1 + (1 + 5 * 64 + 32) + 1;
-inline constexpr std::size_t kType4TimedChildBitCount =
-    kType4BitCount + 1 + 32 + kType4TimedChildBodyBitCount;
 /** Object state-machine child: three lanes {sequence, snap revision, value}; lane 3 is position. */
 inline constexpr std::uint32_t kType4PositionChildSchema = generated::C80805063::kClass;
 inline constexpr std::size_t kType4PositionChildBodyBitCount = 9 * 32;
 inline constexpr std::size_t kType4PositionChildBitCount =
     kType4BitCount + 1 + 32 + kType4PositionChildBodyBitCount;
-static_assert(kType4PositionChildBitCount <= kType4TimedChildBitCount);
-inline constexpr std::size_t kType4MaximumByteCount = (kType4TimedChildBitCount + 7) / 8;
-
-/** Clock the timed child carries: present adds the child, running from epochTicks. */
-struct Type4TimedClock final {
-    /** Adds the optional child when true. */
-    bool present{};
-    /** Whole seconds remaining in the native timed window. */
-    std::int32_t remainingSeconds{};
-    /** Whole-second total of the native timed window. */
-    std::int32_t totalSeconds{};
-    /** Activity-clock ticks at which remainingSeconds was authored. */
-    std::uint64_t epochTicks{};
-    /** False writes the window paused at its current value. */
-    bool running{true};
-    /**
-     * Re-sends the object's current generation, so the client hands the child to the live
-     * object's components instead of rebuilding it; a newer generation respawns the object.
-     */
-    bool inPlace{};
-};
+static_assert(kType4CapturePlateBitCount <= kType4PositionChildBitCount);
+/** The position lane's sequence follows the root, the child header and two unchanged lanes. */
+inline constexpr std::size_t kType4PositionSequenceOffset = kType4BitCount + 1 + 32 + 6 * 32;
+inline constexpr std::size_t kType4MaximumByteCount = (kType4PositionChildBitCount + 7) / 8;
 
 /**
  * The object's own state-machine position lane (lane 3 of child 0x80805063), sent at the object's
@@ -525,7 +502,7 @@ struct Type4TimedClock final {
 struct Type4PositionChild final {
     /** Adds the optional child when true. */
     bool present{};
-    /** Lane sequence; the client applies the value only when it is newer than the last. */
+    /** Lane sequence, Host-owned; the client applies the value only when it is newer. */
     std::int32_t revision{};
     float value{};
     /** Snaps (no blend) by also advancing the lane's snap revision. */
@@ -547,20 +524,18 @@ struct Type4Preset final {
     std::int32_t generation{1};
     std::int32_t entryIndex{};
     bool active{true};
+    Type2LaneClientRef location{};
     /** Adds a plate component Auth whose stale revisions leave every plate field unchanged. */
     bool capturePlate{};
-    /** Adds the enabled timed component Auth with this clock; exclusive with capturePlate. */
-    Type4TimedClock timed{};
-    /** Adds the object state-machine child (position lane); exclusive with the other children. */
+    /** Adds the object state-machine child (position lane); exclusive with capturePlate. */
     Type4PositionChild position{};
 };
 
 /** @return The wire bit count encode_type4 produces for this preset. */
 [[nodiscard]] constexpr std::size_t type4_bit_count(const Type4Preset& preset) noexcept {
-    return preset.timed.present      ? kType4TimedChildBitCount
-           : preset.position.present ? kType4PositionChildBitCount
-           : preset.capturePlate     ? kType4CapturePlateBitCount
-                                     : kType4BitCount;
+    return preset.position.present ? kType4PositionChildBitCount
+           : preset.capturePlate   ? kType4CapturePlateBitCount
+                                   : kType4BitCount;
 }
 
 /** Finds the next positive authored-object generation without wrapping. */

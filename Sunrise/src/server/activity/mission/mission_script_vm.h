@@ -112,8 +112,8 @@ struct SlotDefinition final {
     std::uint32_t senseSchema{};
     std::uint32_t authSchema{};
     std::uint32_t flags{};
-    /** Exact output count, or zero when the target was not resolved. */
-    std::uint32_t outputChannelCount{};
+    /** Runtime-extracted writable object channels; zero when unverified. */
+    std::uint8_t objectChannelCount{};
     /** FNV-1 of the slot name, the hash the packages key the slot by. */
     std::uint32_t nameHash{};
     /** Slice-set hash of the object's bubble in this scenario, or zero when unknown. */

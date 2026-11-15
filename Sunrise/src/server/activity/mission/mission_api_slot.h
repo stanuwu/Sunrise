@@ -68,10 +68,11 @@ inline constexpr ValueSpec kEngagementArguments[]{
      .bound = between(0, static_cast<std::int64_t>(slot_auth::kType70VolumeCapacity)),
      .element = kVolume,
      .note = "same-owner volumes that admit players to the audience"},
-    {.name = "revision",
-     .kind = ValueKind::integer,
-     .bound = between(1, (std::numeric_limits<std::int16_t>::max)()),
-     .note = "increase to clear accumulated members; do not wrap within a sensor lifetime"},
+    {.name = "clear",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "empties the members the client has gathered; the Host owns the revision"},
     {.name = "everyone",
      .kind = ValueKind::boolean,
      .optional = true,
@@ -143,18 +144,6 @@ inline constexpr ValueSpec kAttachHopOnArguments[]{
 inline constexpr ValueSpec kWatchDamageArguments[]{
     {.name = "target", .kind = ValueKind::handle, .ref = "slot", .slot = kExactObject},
 };
-inline constexpr ValueSpec kHopOnArguments[]{
-    {.name = "filter",
-     .kind = ValueKind::handle,
-     .ref = "slot",
-     .optional = true,
-     .slot = type_gate(slot_auth::kType34SlotType),
-     .note = "the type-34 filter whose matches the hop-on binds; absent stops it"},
-    {.name = "revision",
-     .kind = ValueKind::integer,
-     .bound = between(1, kInt32Maximum),
-     .note = "bind revision; a higher value drops the spawned copies and gathers again"},
-};
 inline constexpr ValueSpec kBurstSlot[]{
     {.kind = ValueKind::selector, .ref = "mission.Slot", .slot = kExactObject}};
 inline constexpr ValueSpec kObjectChannelValue[]{
@@ -204,14 +193,6 @@ inline constexpr ValueSpec kSetChannelArguments[]{
      .ref = "unit_scalar",
      .note = "context.sdk.unit(x)"},
     kSnapArgument,
-};
-inline constexpr ValueSpec kOutputValue[]{{.kind = ValueKind::handle, .ref = "unit_scalar"}};
-inline constexpr ValueSpec kOutputChannelArguments[]{
-    {.name = "values",
-     .kind = ValueKind::list,
-     .element = kOutputValue,
-     .note = "a prefix of the target object's authored output order"},
-    {.name = "revision", .kind = ValueKind::integer, .bound = between(1, kInt32Maximum)},
 };
 inline constexpr ValueSpec kTransitionArguments[]{
     {.name = "transition", .kind = ValueKind::enumValue, .ref = "device_transitions"},
@@ -704,13 +685,21 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kVolumeActiveArguments,
      .returns = kRequestKey,
      .note = "turns one authored volume on or off through its type-32 toggle"},
-    {.name = "set_hop_on",
+    {.name = "attach_hop_on",
      .kind = MemberKind::request,
      .call = CallForm::named,
      .gate = schema_gate(middleware::bap::activity_message::mission_effect::kSlotType),
-     .arguments = kHopOnArguments,
+     .arguments = kAttachHopOnArguments,
      .returns = kRequestKey,
-     .note = "spawns the hop-on's object on each match of the filter; absent filter removes them"},
+     .note = "attaches the sensor's authored hop-on to every object the filter selects, and "
+             "keeps doing so as objects start and stop matching; on_event_hop_on_state names "
+             "this request once the client has applied it"},
+    {.name = "detach_hop_on",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = schema_gate(middleware::bap::activity_message::mission_effect::kSlotType),
+     .returns = kRequestKey,
+     .note = "removes the sensor's hop-on from every object that carries it"},
     {.name = "watch_damage",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -732,13 +721,6 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kSetChannelArguments,
      .returns = kRequestKey,
      .effect = "slot.set_channel"},
-    {.name = "set_output_channels",
-     .kind = MemberKind::request,
-     .call = CallForm::named,
-     .gate = exact_sensed_gate(slot_format::kChannelSlotType),
-     .arguments = kOutputChannelArguments,
-     .returns = kRequestKey,
-     .note = "sets a bounded prefix of authored object outputs immediately"},
     {.name = "transition",
      .kind = MemberKind::request,
      .call = CallForm::named,

@@ -92,11 +92,13 @@ inline constexpr std::size_t kRosterReadBudget = 150;
 
 /** Live scenario tags found by the class sweep. The live count is 468. */
 inline constexpr std::size_t kLiveTagCapacity = 1'024;
-/**
- * How often a collection still waiting on unread destinations logs its progress.
- * Packages register during the boot at an uneven pace, so the wait itself has no limit.
- */
+/** How often a collection still waiting on unread destinations logs its progress. */
 inline constexpr std::uint64_t kResolveReportMs = 15'000;
+/**
+ * How long the collection waits after the last row read before it settles without the rest.
+ * Packages register at an uneven pace, so the window restarts on every row that reads.
+ */
+inline constexpr std::uint64_t kResolveStallMs = 15'000;
 /** Tag reads one collection call may spend, for the same reason the roster walk is bounded. */
 inline constexpr std::size_t kResolveReadBudget = 150;
 
@@ -124,6 +126,8 @@ struct Storage {
     std::size_t resolveCursor{};
     /** Tick at which a collection still waiting next logs its progress. */
     std::uint64_t resolveReportTick{};
+    /** Tick after which a collection that read no new row stops waiting for the rest. */
+    std::uint64_t resolveDeadlineTick{};
     std::vector<std::byte> blob{};
     RosterStorage roster{};
     /** Resolved rows, moved to the front. The roster walk runs over exactly these. */
@@ -146,7 +150,7 @@ struct Storage {
 [[nodiscard]] bool
 collect_rows(const reader::Source& source, Storage& storage, const char*& reason) noexcept;
 
-/** @return True once every live row has read, so a partial set is never published or cached. */
+/** @return True once every live row has read. */
 [[nodiscard]] constexpr bool collection_complete(std::size_t resolvedCount,
                                                  std::size_t liveRowCount) noexcept {
     return resolvedCount >= liveRowCount;

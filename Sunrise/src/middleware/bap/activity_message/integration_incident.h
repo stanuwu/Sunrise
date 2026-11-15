@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <span>
 
+#include "../../content/packages/schema/generated/tag_classes_808087.h"
 #include "../../encoding/bit_reader.h"
 
 namespace sunrise::middleware::bap::activity_message::integration_incident {
@@ -11,7 +12,7 @@ namespace sunrise::middleware::bap::activity_message::integration_incident {
 /** Global incident-table row the Vex block's sacrifice trigger fires (operand 0x0882F18A). */
 inline constexpr std::uint32_t kPrimaryTarget = 260;
 /** Runtime metadata schema carried by the integration incident payload. */
-inline constexpr std::uint32_t kSchema = 0x808087F1U;
+inline constexpr std::uint32_t kSchema = content::packages::schema::generated::C808087f1::kClass;
 /** A u32, a biased three-bit kind and a 64-bit context: 99 bits and five zero padding bits. */
 inline constexpr std::size_t kPayloadBits = 99;
 inline constexpr std::size_t kPayloadBytes = 13;

@@ -846,15 +846,11 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         if (!reserve_or_refuse(instance, reservation, "object_refused")) {
             return;
         }
-        const scriptable_auth::Type4TimedClock timed{.present = intent.timedChild,
-                                                     .remainingSeconds =
-                                                         intent.timedRemainingSeconds,
-                                                     .totalSeconds = intent.timedTotalSeconds,
-                                                     .epochTicks = intent.timedEpochTicks,
-                                                     .running = intent.timedRunning,
-                                                     .inPlace = intent.timedInPlace};
+        const std::optional<std::uint32_t> location =
+            intent.objectLocationRow < 0 ? std::nullopt
+                                         : std::optional<std::uint32_t>{static_cast<std::uint32_t>(
+                                               intent.objectLocationRow)};
         const scriptable_auth::Type4PositionChild position{.present = intent.positionChild,
-                                                           .revision = intent.positionRevision,
                                                            .value = intent.positionValue,
                                                            .snap = intent.positionSnap};
         std::uint64_t carrier = 0;
@@ -866,8 +862,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                     std::span(intent.burstRows).first(intent.burstRowCount),
                     intent.entryIndex,
                     intent.active,
+                    location,
                     intent.capturePlate,
-                    timed,
                     position,
                     reservation);
             });
@@ -1099,6 +1095,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     case lua_vm::IntentKind::deliverPassengers:
     case lua_vm::IntentKind::setHopOn:
     case lua_vm::IntentKind::setObjectChannels:
+    case lua_vm::IntentKind::setEngagement:
     case lua_vm::IntentKind::applySlotAuth: {
         if (intent.authByteCount == 0 || intent.authByteCount != intent.authBody.size()) {
             refuse_delivery(
@@ -1125,6 +1122,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                 ? host::ScriptableOverrideKind::combatantDelivery
             : intent.kind == lua_vm::IntentKind::setObjectChannels
                 ? host::ScriptableOverrideKind::objectChannels
+            : intent.kind == lua_vm::IntentKind::setEngagement
+                ? host::ScriptableOverrideKind::engagement
             : intent.kind == lua_vm::IntentKind::setHopOn ? host::ScriptableOverrideKind::hopOn
                                                           : host::ScriptableOverrideKind::sdkAuth;
         std::uint64_t carrier = 0;

@@ -230,9 +230,8 @@ resolve_activity_binding_locator(const void* context,
     output.senseSchema = slot.senseSchema;
     output.authSchema = slot.authSchema;
     output.flags = slot.flags;
-    output.outputChannelCount = slot.slotType == format::kChannelSlotType
-                                        && (slot.flags & format::kSlotOutputChannelsExact) != 0
-                                    ? slot.reserved
+    output.objectChannelCount = (slot.flags & sdk::format::kSlotObjectChannelsExact) != 0
+                                    ? static_cast<std::uint8_t>(slot.reserved)
                                     : 0;
     return !output.id.empty() && !output.objectId.empty();
 }

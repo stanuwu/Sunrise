@@ -65,13 +65,10 @@ packet_has_sense_key(const middleware::bap::activity_message::sense_update::Deco
 [[nodiscard]] bool valid_sense_observation_input(const SenseInput& input) noexcept {
     namespace sense = middleware::bap::activity_message::sense_update;
     const auto& packet = input.decoded;
-    using Verdict = state::activity::receipts::Verdict;
-    const bool admitted =
-        input.verdict == Verdict::framed
-        || (input.verdict == Verdict::partial && packet.status == sense::DecodeStatus::partial);
-    return input.sourceGeneration != 0 && input.clientMessageSequence != 0 && admitted
-           && input.decodeStatus == packet.status && sense::observation_packet(packet)
-           && input.groupsSeen == packet.groupsSeen && input.groupsDecoded == packet.groupsDecoded
+    return input.sourceGeneration != 0 && input.clientMessageSequence != 0
+           && sense_envelope_framed(input) && input.decodeStatus == packet.status
+           && sense::observation_packet(packet) && input.groupsSeen == packet.groupsSeen
+           && input.groupsDecoded == packet.groupsDecoded
            && input.groupsSkipped == packet.groupsSkipped && input.objectsSeen == packet.objectsSeen
            && input.objectsDecoded == packet.objectsDecoded;
 }
