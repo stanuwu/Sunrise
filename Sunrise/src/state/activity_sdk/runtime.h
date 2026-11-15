@@ -382,8 +382,9 @@ mod_region_is_public(const BoundView& view, std::int32_t effectiveRegion, bool& 
  * public bubble, such as a cutscene, carries its own flag and can be private.
  * @return True when exactly one state owns the region.
  */
-[[nodiscard]] bool
-state_region_is_public(const BoundView& view, std::int32_t effectiveRegion, bool& isPublic) noexcept;
+[[nodiscard]] bool state_region_is_public(const BoundView& view,
+                                          std::int32_t effectiveRegion,
+                                          bool& isPublic) noexcept;
 
 /** @return The activity row retained by a valid bound view. */
 [[nodiscard]] const format::Activity* bound_activity(const BoundView& view) noexcept;

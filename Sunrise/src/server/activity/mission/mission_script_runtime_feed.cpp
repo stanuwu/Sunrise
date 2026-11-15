@@ -43,7 +43,8 @@ struct PendingMissionEvent final {
     std::int32_t parkedRegion{};
     /** Owner readiness the report last tried. */
     std::uint64_t ownerReadiness{};
-    /** Owner attempt the report first waited in, zero before an owner attached; no later attempt receives it. */
+    /** Owner attempt the report first waited in, zero before an owner attached; no later attempt
+     * receives it. */
     std::uint64_t parkedAttempt{};
 };
 
@@ -259,8 +260,7 @@ static_assert(!mission_sequence_precedes(1, (std::numeric_limits<std::uint64_t>:
     const host::Event& event = pending.event;
     bap::PublicLinkOwner link{};
     if (!bap::public_link_owner(source.view.binding, event.sourceGeneration, link)
-        || link.publicRegion < 0
-        || (pending.parked && link.publicRegion != pending.parkedRegion)) {
+        || link.publicRegion < 0 || (pending.parked && link.publicRegion != pending.parkedRegion)) {
         return false;
     }
     if (pending.parked && pending.ownerReadiness == g_ownerReadiness) {

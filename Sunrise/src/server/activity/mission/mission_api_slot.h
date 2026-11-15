@@ -128,6 +128,24 @@ inline constexpr ValueSpec kWatchDamageArguments[]{
 };
 inline constexpr ValueSpec kBurstSlot[]{
     {.kind = ValueKind::selector, .ref = "mission.Slot", .slot = kExactObject}};
+inline constexpr ValueSpec kObjectChannelValue[]{
+    {.kind = ValueKind::number,
+     .bound = between(static_cast<std::int64_t>(slot_auth::kType24MinimumValue),
+                      static_cast<std::int64_t>(slot_auth::kType24MaximumValue)),
+     .note = "finite"}};
+inline constexpr ValueSpec kObjectChannelsArguments[]{
+    {.name = "values",
+     .kind = ValueKind::list,
+     .bound = between(1, static_cast<std::int64_t>(slot_auth::kType24ChannelCapacity)),
+     .element = kObjectChannelValue,
+     .note = "prefix of the object's verified authored channels; later channels stay unchanged"},
+    {.name = "blend_seconds",
+     .kind = ValueKind::number,
+     .optional = true,
+     .fallback = default_integer(0),
+     .bound = at_least(0),
+     .note = "finite duration shared by the requested channels"},
+};
 inline constexpr ValueSpec kObjectActiveArguments[]{
     kActiveArgument,
     {.name = "with",
@@ -465,7 +483,7 @@ inline constexpr ValueSpec kActorChannelFields[]{
      .ref = "mission.ActorChannel",
      .scope = Scope::receiver,
      .fields = kActorChannelRowFields,
-     .note = "a channel of this actor that nothing on it drives"},
+     .note = "a channel of this actor that nothing on it drives, or that its program reads"},
     {.name = "value", .kind = ValueKind::number, .note = "finite"},
 };
 inline constexpr ValueSpec kActorChannel[]{
@@ -509,7 +527,7 @@ inline constexpr ValueSpec kRunAtomsArguments[]{
      .kind = ValueKind::list,
      .bound = at_most(static_cast<std::int64_t>(slot_auth::kType2AtomCapacity)),
      .element = kAtom,
-     .note = "one lane per atom, run in order; empty only with spawn"},
+     .note = "one lane per atom, run in order; empty releases the current program"},
     {.name = "temperaments",
      .kind = ValueKind::list,
      .optional = true,
@@ -662,6 +680,14 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kTransitionArguments,
      .returns = kRequestKey,
      .effect = "slot.set_channel"},
+    {.name = "set_object_channels",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = exact_sensed_gate(slot_auth::kType24SlotType),
+     .arguments = kObjectChannelsArguments,
+     .returns = kRequestKey,
+     .effect = "slot.set_object_channels",
+     .note = "requires runtime-extracted channel bounds; the Host owns revisions"},
     {.name = "set_occupancy_condition",
      .kind = MemberKind::request,
      .call = CallForm::named,

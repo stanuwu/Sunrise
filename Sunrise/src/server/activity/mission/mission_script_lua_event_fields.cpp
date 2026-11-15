@@ -156,6 +156,8 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "mission.send_incident";
     case ActionKind::selectMissionState:
         return "mission.select_state";
+    case ActionKind::setObjectChannels:
+        return "slot.set_object_channels";
     case ActionKind::applySlotAuth:
     case ActionKind::setHopOn:
     case ActionKind::bindCombatantToSquad:

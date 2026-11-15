@@ -225,8 +225,7 @@ HostSessionState request_host_session(std::uint64_t groupSessionId,
             break;
         }
     }
-    if (matching != nullptr && matching->publicRegion == publicRegion
-        && matching->pooled == pooled
+    if (matching != nullptr && matching->publicRegion == publicRegion && matching->pooled == pooled
         && (same_binding(matching->binding.source, source)
             || (pooled
                 && compatible_destination(matching->binding.source.destination,

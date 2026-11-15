@@ -36,6 +36,7 @@ constexpr const api::MemberSpec& kInteractable = api::slot_member("set_interacta
 constexpr const api::MemberSpec& kSetGhostLink = api::slot_member("set_ghost_link");
 constexpr const api::MemberSpec& kGhostLink = api::slot_member("ghost_link");
 constexpr const api::MemberSpec& kObjectActive = api::slot_member("set_object_active");
+constexpr const api::MemberSpec& kObjectChannels = api::slot_member("set_object_channels");
 constexpr const api::MemberSpec& kSetChannel = api::slot_member("set_channel");
 constexpr const api::MemberSpec& kTransition = api::slot_member("transition");
 constexpr const api::MemberSpec& kFireTrigger = api::slot_member("fire_trigger");
@@ -434,6 +435,72 @@ timer_argument(lua_State* state) {
         return luaL_error(state, "object filter encoder failed");
     }
     return queue_slot_auth(state, slot, auth::kType34Schema, bits, std::span(bytes).first(written));
+}
+
+/** Sets a verified prefix of authored channels without exposing native row revisions. */
+[[nodiscard]] int slot_set_object_channels(lua_State* state) {
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    refuse_unknown_arguments(state, kObjectChannels);
+    SlotDefinition slot{};
+    if (!current_slot(state, *handle, slot) || slot.slotType != scriptable_auth::kType24SlotType
+        || slot.componentClass != scriptable_auth::kType24ComponentClass
+        || slot.senseSchema != scriptable_auth::kType24SenseSchema
+        || slot.authSchema != scriptable_auth::kType24Schema
+        || (slot.flags & format::kSlotSchemaJoinExact) == 0 || slot.objectChannelCount == 0) {
+        return luaL_error(state, "object channels require an exact type-24 with verified bounds");
+    }
+    lua_getfield(state, 2, optional_key(kObjectChannels, "blend_seconds", api::ValueKind::number));
+    const double blend = lua_isnil(state, -1) ? 0.0 : luaL_checknumber(state, -1);
+    lua_pop(state, 1);
+    if (!std::isfinite(blend) || blend < 0.0 || blend > (std::numeric_limits<float>::max)()) {
+        return luaL_error(state, "blend_seconds must be finite, nonnegative and fit float32");
+    }
+    lua_getfield(state, 2, required_key(kObjectChannels, "values", api::ValueKind::list));
+    luaL_checktype(state, -1, LUA_TTABLE);
+    const int list = lua_gettop(state);
+    const auto count = lua_rawlen(state, list);
+    scriptable_auth::Type24Body body{};
+    if (count == 0 || count > slot.objectChannelCount || count > body.channels.size()) {
+        return luaL_error(state, "object channel prefix exceeds the verified authored count");
+    }
+    std::size_t entries = 0;
+    lua_pushnil(state);
+    while (lua_next(state, list) != 0) {
+        if (!lua_isinteger(state, -2) || lua_tointeger(state, -2) < 1
+            || static_cast<std::uint64_t>(lua_tointeger(state, -2)) > count) {
+            return luaL_error(state, "object channel values must be a dense list");
+        }
+        ++entries;
+        lua_pop(state, 1);
+    }
+    if (entries != count) {
+        return luaL_error(state, "object channel values must be a dense list");
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        lua_rawgeti(state, list, static_cast<lua_Integer>(index + 1));
+        const double value = luaL_checknumber(state, -1);
+        lua_pop(state, 1);
+        if (!std::isfinite(value) || value < scriptable_auth::kType24MinimumValue
+            || value > scriptable_auth::kType24MaximumValue) {
+            return luaL_error(state, "object channel value is outside the native range");
+        }
+        body.channels[index] = {
+            kUncommittedCounter, static_cast<float>(value), static_cast<float>(blend)};
+    }
+    lua_pop(state, 1);
+    body.count = static_cast<std::uint8_t>(count);
+    std::array<std::byte, scriptable_auth::kType24MaximumByteCount> bytes{};
+    std::size_t written = 0, bits = 0;
+    if (!scriptable_auth::encode_type24(body, bytes, written, bits)) {
+        return luaL_error(state, "object channel encoder failed");
+    }
+    return queue_slot_auth(state,
+                           slot,
+                           scriptable_auth::kType24Schema,
+                           bits,
+                           std::span(bytes).first(written),
+                           IntentKind::setObjectChannels);
 }
 
 /** Binds an authored damage monitor to one exact object; a new revision re-binds it. */

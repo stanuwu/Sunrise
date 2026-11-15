@@ -204,6 +204,10 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::damageWatch) {
         nextCounter = pending.generation > guard->damageRevision
                       && pending.generation <= squad::kMaximumGeneration;
+    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::objectChannels) {
+        nextCounter = pending.generation > guard->objectChannelsRevision
+                      && pending.generation
+                             <= middleware::bap::activity_message::auth_fields::kMaximumCounter;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::hopOn) {
         nextCounter = pending.generation > guard->hopOnRevision
                       && pending.generation <= squad::kMaximumGeneration;
@@ -258,7 +262,8 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
  * Takes a staged type-2 body's `.5` as the guard's controls when it is newer, so a later channel
  * or binding body starts from the controls the client holds and above their revision.
  */
-void adopt_type2_controls(ScriptableGuard& guard, const PendingScriptableOverride& pending) noexcept {
+void adopt_type2_controls(ScriptableGuard& guard,
+                          const PendingScriptableOverride& pending) noexcept {
     auth::Type2ChannelState controls{};
     if (auth::read_type2_controls(
             std::span(pending.body).first(pending.byteCount), pending.bitCount, controls)
@@ -307,6 +312,8 @@ void advance_staged_guard(ScriptableGuard* guard,
         guard->type4.hasLast = true;
     } else if (pending.kind == ScriptableOverrideKind::damageWatch) {
         guard->damageRevision = static_cast<std::uint32_t>(pending.generation);
+    } else if (pending.kind == ScriptableOverrideKind::objectChannels) {
+        guard->objectChannelsRevision = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::hopOn) {
         guard->hopOnRevision = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::ghostLink) {

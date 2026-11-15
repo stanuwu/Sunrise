@@ -183,10 +183,10 @@ template <std::size_t Size>
         if (field == 2 && remote != nullptr && !writer.write(remote->processSessionIdHash, 64)) {
             return false;
         }
-        const std::uint64_t fireteam =
-            remote != nullptr ? identity.accountSoid
-            : peer != nullptr && peer->fireteamActivityHostId != 0 ? peer->fireteamActivityHostId
-                                                                    : fireteamActivityHostId;
+        const std::uint64_t fireteam = remote != nullptr ? identity.accountSoid
+                                       : peer != nullptr && peer->fireteamActivityHostId != 0
+                                           ? peer->fireteamActivityHostId
+                                           : fireteamActivityHostId;
         if (field == 3 && !writer.write(fireteam, 64)) {
             return false;
         }

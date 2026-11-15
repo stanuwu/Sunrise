@@ -108,6 +108,8 @@ struct SlotDefinition final {
     std::uint32_t senseSchema{};
     std::uint32_t authSchema{};
     std::uint32_t flags{};
+    /** Runtime-extracted writable object channels; zero when unverified. */
+    std::uint8_t objectChannelCount{};
     /** FNV-1 of the slot name, the hash the packages key the slot by. */
     std::uint32_t nameHash{};
     /** Slice-set hash of the object's bubble in this scenario, or zero when unknown. */
@@ -420,7 +422,7 @@ struct DefinitionApi final {
     bool (*resolveActorTemperament)(const void* context,
                                     std::uint32_t slotRow,
                                     std::uint32_t id) noexcept {};
-    /** True when the slot's actor has the channel and nothing on the actor drives it. */
+    /** True when the slot's actor has the channel as a mission.ActorChannel row. */
     bool (*resolveActorChannel)(const void* context,
                                 std::uint32_t slotRow,
                                 std::uint32_t nameHash) noexcept {};
@@ -581,7 +583,6 @@ void publish_ghost_levels(Vm& vm, std::span<const GhostLinkRow> levels) noexcept
 
 /** Copies the retained objective task counters so a callback can read any objective's. */
 void publish_objective_levels(Vm& vm, std::span<const ObjectiveLevelRow> levels) noexcept;
-
 
 /** Copies durable native population facts before any callback reads a cohort. */
 [[nodiscard]] bool publish_populations(

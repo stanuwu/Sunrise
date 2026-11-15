@@ -413,8 +413,8 @@ void push_atom_kinds(lua_State* state) {
     luaL_checktype(state, -1, LUA_TTABLE);
     const int list = lua_gettop(state);
     const auto count = static_cast<std::size_t>(lua_rawlen(state, list));
-    if ((count == 0 && !spawn) || count > body.atoms.lanes.size()) {
-        return luaL_error(state, "an atom program holds one to 32 lanes, or none when it spawns");
+    if (count > body.atoms.lanes.size()) {
+        return luaL_error(state, "an atom program holds up to 32 lanes");
     }
     for (std::size_t index = 0; index < count; ++index) {
         lua_rawgeti(state, list, static_cast<lua_Integer>(index) + 1);

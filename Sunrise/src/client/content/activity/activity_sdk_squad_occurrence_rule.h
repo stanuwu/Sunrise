@@ -167,8 +167,7 @@ private:
             || source.objectIndex >= topology_.objects.size()
             || source.slotIndex >= topology_.slots.size()
             || occurrence.stateIndex >= topology_.states.size()
-            || source.configTag != authored.configTag
-            || spawner(authored.configTag) != spawnerRow
+            || source.configTag != authored.configTag || spawner(authored.configTag) != spawnerRow
             || source.descriptorOffset != authored.secondaryComponentOffset
             || authored.primaryComponentClass != tables::kAuthoredSquadSpawnerPrimaryClass
             || authored.secondaryComponentClass != tables::kAuthoredSquadSpawnerSecondaryClass

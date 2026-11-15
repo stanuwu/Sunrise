@@ -451,8 +451,8 @@ bool append_roster_notification(
             epoch,
             lifetimeRequested ? scriptablePending.lifetimeState
             : clientLoading   ? server::activity::host::kLoadingLifetimeState
-            : hasHostState  ? hostState.lifetimeState
-                            : server::activity::host::kDefaultLifetimeState,
+            : hasHostState    ? hostState.lifetimeState
+                              : server::activity::host::kDefaultLifetimeState,
             activityFlags,
             bodyPending ? &authOverride : nullptr,
             scriptablePending.target.rosterGroupIndex,
@@ -538,15 +538,15 @@ bool append_roster_notification(
         snapshot.grant = {.bubble = grant.bubble, .token = grant.token, .release = true};
     } else if (!peerLeave && !placedRetirementPending
                && (sharedBubbles
-                ? state::activity::bubble_authority::select_shared_grant(
-                      sessionId,
-                      session.activity.bindingGeneration,
-                      grantRequest.region,
-                      pendingRegion,
-                      enteringBubble,
-                      grant)
-                : state::activity::bubble_authority::select_grant(
-                      sessionId, grantRequest.region, grant, grantRequest.renewReleased))
+                       ? state::activity::bubble_authority::select_shared_grant(
+                             sessionId,
+                             session.activity.bindingGeneration,
+                             grantRequest.region,
+                             pendingRegion,
+                             enteringBubble,
+                             grant)
+                       : state::activity::bubble_authority::select_grant(
+                             sessionId, grantRequest.region, grant, grantRequest.renewReleased))
                // Only the released bubble waits for the selected state; others keep their grants.
                && !(handoffActive && grant.bubble == handoff.bubble())
                // A sole client renewing a bubble it stays in reclaims what it released, so that
@@ -1013,12 +1013,12 @@ void note_client_entered(const Session& session) noexcept {
  */
 void raise_teleport_spawn_when_valid(const Session& committed) noexcept {
     Session* privateLink = nullptr;
-    for (Session& link : sessions()) {
-        if (link.activity.role != ActivityClientRole::privateCurrent) {
+    for (Session& recipient : sessions()) {
+        if (recipient.activity.role != ActivityClientRole::privateCurrent) {
             continue;
         }
-        if (&link == &committed || mission_seed_public_link(committed, link)) {
-            privateLink = &link;
+        if (&recipient == &committed || mission_seed_public_link(committed, recipient)) {
+            privateLink = &recipient;
             break;
         }
     }
@@ -1130,11 +1130,12 @@ void commit_staged_roster(Session& session) noexcept {
         scriptableCommitReady = activate_staged_squad_override(session);
     }
     if (scriptableCommitReady) {
-        server::activity::host::note_scriptable_transport_staged(scriptableBinding,
-                                                                 scriptableGeneration,
-                                                                 published.scriptableOverride,
-                                                                 session.activity.session,
-                                                                 session.activity.bindingGeneration);
+        server::activity::host::note_scriptable_transport_staged(
+            scriptableBinding,
+            scriptableGeneration,
+            published.scriptableOverride,
+            session.activity.session,
+            session.activity.bindingGeneration);
     } else if (published.hasScriptableOverride && ownerCurrent) {
         server::activity::host::note_scriptable_attempt(
             scriptableBinding,
@@ -1143,7 +1144,8 @@ void commit_staged_roster(Session& session) noexcept {
             server::activity::host::OutputStatus::noOverrideTarget);
     }
     if (published.hasOwnerEstateRevision
-        && state::activity::same_binding(session.activityPublicOwner.binding, published.ownerBinding)) {
+        && state::activity::same_binding(session.activityPublicOwner.binding,
+                                         published.ownerBinding)) {
         // As below: a pending owner body this frame carried joined the owner's estate.
         server::activity::host::AuthState ownerState{};
         const bool staged = scriptableCommitReady && published.ownerScriptable

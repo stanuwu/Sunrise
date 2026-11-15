@@ -165,6 +165,7 @@ struct ScriptableGuard final {
     std::uint32_t type2DeliveryRevision{};
     std::uint32_t damageRevision{};
     std::uint32_t hopOnRevision{};
+    std::uint32_t objectChannelsRevision{};
     GhostLinkScan ghostLink{};
     bool occupied{};
 };

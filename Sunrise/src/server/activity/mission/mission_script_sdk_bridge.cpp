@@ -230,6 +230,9 @@ resolve_activity_binding_locator(const void* context,
     output.senseSchema = slot.senseSchema;
     output.authSchema = slot.authSchema;
     output.flags = slot.flags;
+    output.objectChannelCount = (slot.flags & sdk::format::kSlotObjectChannelsExact) != 0
+                                    ? static_cast<std::uint8_t>(slot.reserved)
+                                    : 0;
     return !output.id.empty() && !output.objectId.empty();
 }
 
@@ -812,14 +815,15 @@ lua_vm::DefinitionApi definition_api(const sdk::BoundView& view) noexcept {
                     return false;
                 }
                 const auto rows = view->catalog->actor_temperaments();
-                return std::binary_search(
-                    rows.begin(),
-                    rows.end(),
-                    format::ActorTemperament{slot, 0, id},
-                    [](const format::ActorTemperament& left, const format::ActorTemperament& right) {
-                        return left.slotIndex != right.slotIndex ? left.slotIndex < right.slotIndex
-                                                                 : left.id < right.id;
-                    });
+                return std::binary_search(rows.begin(),
+                                          rows.end(),
+                                          format::ActorTemperament{slot, 0, id},
+                                          [](const format::ActorTemperament& left,
+                                             const format::ActorTemperament& right) {
+                                              return left.slotIndex != right.slotIndex
+                                                         ? left.slotIndex < right.slotIndex
+                                                         : left.id < right.id;
+                                          });
             },
         .resolveActorChannel =
             [](const void* context, std::uint32_t slot, std::uint32_t name) noexcept {

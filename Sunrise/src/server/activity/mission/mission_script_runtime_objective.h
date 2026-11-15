@@ -57,8 +57,8 @@ transported_objective(std::span<const host::PendingScriptableOverride> estate,
         event.squadObjectiveRegistryKey = assignment.registryKey;
         event.squadObjectiveSlotIndex = assignment.objectiveIndex;
         event.squadObjectiveTaskGroup = assignment.taskGroup;
-        event.squadObjectiveCostQualified =
-            event.squadObjectiveRevision != 0 && assignment.revision == event.squadObjectiveRevision;
+        event.squadObjectiveCostQualified = event.squadObjectiveRevision != 0
+                                            && assignment.revision == event.squadObjectiveRevision;
     }
     return true;
 }

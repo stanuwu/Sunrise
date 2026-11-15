@@ -381,8 +381,7 @@ build_roster_snapshot(Session& session,
             retainedElsewhere[index] = true;
             continue;
         }
-        if (owner != nullptr
-            && !note_owner_key(scratch, retainedGroup.scopeTarget.registryKey)) {
+        if (owner != nullptr && !note_owner_key(scratch, retainedGroup.scopeTarget.registryKey)) {
             return refuse_override("owner_key_capacity");
         }
         // An owner's group names a region of the owner's world.
@@ -713,8 +712,7 @@ build_roster_snapshot(Session& session,
         middleware::bap::activity_message::squad_sense::State recovered{};
         if (!server::activity::host::snapshot_squad_sense(
                 ownerGroup ? owner->activity.session : session.activity.session,
-                ownerGroup ? owner->activity.bindingGeneration
-                           : session.activity.bindingGeneration,
+                ownerGroup ? owner->activity.bindingGeneration : session.activity.bindingGeneration,
                 key,
                 recovered)) {
             continue;

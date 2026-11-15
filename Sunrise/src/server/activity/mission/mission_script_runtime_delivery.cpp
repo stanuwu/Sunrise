@@ -459,6 +459,7 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
         break;
     case lua_vm::IntentKind::applySlotAuth:
     case lua_vm::IntentKind::setHopOn:
+    case lua_vm::IntentKind::setObjectChannels:
     case lua_vm::IntentKind::setInteractableObject:
     case lua_vm::IntentKind::setGhostLink:
     case lua_vm::IntentKind::watchDamage:

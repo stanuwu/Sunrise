@@ -335,6 +335,7 @@ constexpr std::array<SlotBinding, std::size(api::kSlotMembers)> kSlotBindings{{
     {"set_object_active", &slot_set_object_active},
     {"set_channel", &slot_set_channel},
     {"transition", &slot_transition},
+    {"set_object_channels", &slot_set_object_channels},
     {"set_occupancy_condition", &slot_set_occupancy_condition},
     {"generate_map", &slot_generate_map},
     {"set_directive", &slot_set_directive},

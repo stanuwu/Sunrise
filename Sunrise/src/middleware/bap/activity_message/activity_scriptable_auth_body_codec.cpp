@@ -225,15 +225,13 @@ constexpr std::uint8_t kType2AtomFieldMaximum = 0x3F;
 [[nodiscard]] bool write_type2_root(bits::Writer& writer, const Type2Body& body) noexcept {
     const Type2ChannelState& state = body.channels;
     const bool spawned = state.spawnGeneration != 0;
-    bool encoded = writer.write(spawned ? 1U : 0U, kBoolWidth)
-                   && (!spawned
-                       || writer.write(state.spawnGeneration, kType2SpawnRevisionBitCount))
-                   && writer.write(0, 2U)
-                   && writer.write(type2_actor_binding_wire(state.actorBinding), 3U)
-                   && writer.write(kEnabled, kBoolWidth) && writer.write(0, kBoolWidth)
-                   && writer.write(1, kBoolWidth) && writer.write(state.revision, 31U)
-                   && writer.write(0, 6U) && writer.write(0, 6U)
-                   && writer.write(state.temperamentCount, 3U);
+    bool encoded =
+        writer.write(spawned ? 1U : 0U, kBoolWidth)
+        && (!spawned || writer.write(state.spawnGeneration, kType2SpawnRevisionBitCount))
+        && writer.write(0, 2U) && writer.write(type2_actor_binding_wire(state.actorBinding), 3U)
+        && writer.write(kEnabled, kBoolWidth) && writer.write(0, kBoolWidth)
+        && writer.write(1, kBoolWidth) && writer.write(state.revision, 31U) && writer.write(0, 6U)
+        && writer.write(0, 6U) && writer.write(state.temperamentCount, 3U);
     for (std::size_t index = 0; encoded && index < state.temperamentCount; ++index) {
         encoded = writer.write(state.temperaments[index].value, kSigned32Width);
     }
@@ -698,12 +696,12 @@ bool read_type2_controls(std::span<const std::byte> input,
     constexpr std::uint8_t kReservedBits = 6;
     bits::Reader reader(input);
     std::uint64_t first = 0, second = 0, count = 0, value = 0;
-    bool decoded =
-        valid_type2_actor_binding(candidate.actorBinding)
-        && reader.skip(layout.channelsOffset + auth_fields::kPresenceWidth
-                       + auth_fields::kCounterWidth)
-        && reader.read(kReservedBits, first) && reader.read(kReservedBits, second) && first == 0
-        && second == 0 && reader.read(3, count) && count == layout.temperamentCount;
+    bool decoded = valid_type2_actor_binding(candidate.actorBinding)
+                   && reader.skip(layout.channelsOffset + auth_fields::kPresenceWidth
+                                  + auth_fields::kCounterWidth)
+                   && reader.read(kReservedBits, first) && reader.read(kReservedBits, second)
+                   && first == 0 && second == 0 && reader.read(3, count)
+                   && count == layout.temperamentCount;
     candidate.temperamentCount = static_cast<std::uint8_t>(count);
     for (std::size_t index = 0; decoded && index < candidate.temperamentCount; ++index) {
         decoded = reader.read(kSigned32Width, value);
@@ -774,9 +772,8 @@ bool replace_type2_atoms(std::span<const std::byte> previous,
     const auto last = (std::max)(committedGeneration, old.generation);
     const auto lastSpawn = (std::max)(committedSpawnGeneration, old.spawnGeneration);
     const bool replacesRoot = spawn || retire;
-    const bool initialControls =
-        spawn && incoming.controlRevision != 0
-        && (incoming.temperamentCount != 0 || incoming.channelCount != 0);
+    const bool initialControls = spawn && incoming.controlRevision != 0
+                                 && (incoming.temperamentCount != 0 || incoming.channelCount != 0);
     if (last >= kMaximumRevision || (replacesRoot && lastSpawn >= kMaximumRevision)
         || (initialControls && old.controlRevision >= kMaximumRevision)) {
         return false;
@@ -789,14 +786,14 @@ bool replace_type2_atoms(std::span<const std::byte> previous,
     bool encoded = true;
     if (initialControls) {
         // The controls arrive with the creation, so the new life never runs without them.
-        encoded = combatant_auth::write_root(writer, nextSpawn, true)
-                  && (retained ? patch::copy_field(writer,
-                                                   previous,
-                                                   {old.controlOffset,
-                                                    old.channelsOffset - old.controlOffset,
-                                                    true})
-                               : writer.write(0, auth_fields::kPresenceWidth))
-                  && write_type2_controls(writer, program, incoming, old.controlRevision + 1U);
+        encoded =
+            combatant_auth::write_root(writer, nextSpawn, true)
+            && (retained ? patch::copy_field(
+                               writer,
+                               previous,
+                               {old.controlOffset, old.channelsOffset - old.controlOffset, true})
+                         : writer.write(0, auth_fields::kPresenceWidth))
+            && write_type2_controls(writer, program, incoming, old.controlRevision + 1U);
     } else if (replacesRoot) {
         encoded =
             combatant_auth::write_root(writer, nextSpawn, !retire)
@@ -854,8 +851,8 @@ bool replace_type2_controls(std::span<const std::byte> previous,
     revision = 0;
     Type2ProgramLayout old{}, incoming{};
     if (!inspect_type2_program(previous, previousBits, old) || !old.enabled
-        || !inspect_type2_program(controls, controlsBits, incoming)
-        || incoming.controlRevision == 0 || old.controlRevision >= kMaximumRevision) {
+        || !inspect_type2_program(controls, controlsBits, incoming) || incoming.controlRevision == 0
+        || old.controlRevision >= kMaximumRevision) {
         return false;
     }
     std::array<std::byte, kType2FullMaximumByteCount> staged{};

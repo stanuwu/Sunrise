@@ -27,10 +27,10 @@ namespace generated = middleware::content::packages::schema::generated;
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
 /**
- * Runtime-pack schema version accepted by this reader. 51 adds each actor's temperaments and the
- * object channels a server may write.
+ * Runtime-pack schema version accepted by this reader. 53 includes actor behaviour inputs
+ * and exact target output-channel counts.
  */
-inline constexpr std::uint32_t kVersion = 51;
+inline constexpr std::uint32_t kVersion = 53;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
 inline constexpr std::uint32_t kSectionCount = 54;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
@@ -106,10 +106,12 @@ inline constexpr std::uint32_t kSlotDialogueCuesExact = 0x4U;
  * gets no flag.
  */
 inline constexpr std::uint32_t kSlotAuthoredSceneUnresourced = 0x8U;
-/** Slot rows expose only reader, schema-join, authored-dialogue, and unresourced-scene facts. */
-inline constexpr std::uint32_t kSlotFlagMask = kSlotReaderVerified | kSlotSchemaJoinExact
-                                               | kSlotDialogueCuesExact
-                                               | kSlotAuthoredSceneUnresourced;
+/** The target Variables component proves the type-24 output row count. */
+inline constexpr std::uint32_t kSlotObjectChannelsExact = 0x10U;
+/** Slot rows expose only verified reader, schema and authored metadata facts. */
+inline constexpr std::uint32_t kSlotFlagMask =
+    kSlotReaderVerified | kSlotSchemaJoinExact | kSlotDialogueCuesExact
+    | kSlotAuthoredSceneUnresourced | kSlotObjectChannelsExact;
 /** Component class of an authored type-4 object slot. */
 inline constexpr std::uint32_t kObjectComponentClass = generated::ObjectSlotHandleType4::kClass;
 /** Sense schema of an authored type-4 object slot. */
@@ -1056,7 +1058,7 @@ struct Slot final {
     std::uint32_t senseSchema{};
     std::uint32_t authSchema{};
     std::uint32_t flags{};
-    /** Authored dialogue cue count when kSlotDialogueCuesExact is set; zero otherwise. */
+    /** Dialogue cue count or object-channel count under its exactness flag; zero otherwise. */
     std::uint32_t reserved{};
     Range aliases{};
     Range capabilities{};
@@ -1309,7 +1311,10 @@ struct ActorTemperament final {
     bool operator==(const ActorTemperament&) const = default;
 };
 
-/** One object channel of a Type 2 actor's value provider that nothing on the actor drives. */
+/**
+ * One object channel a server may write on a Type 2 actor: a row of its value provider that nothing
+ * on the actor drives, or an input its behaviour program reads. The tag is the record naming it.
+ */
 struct ActorChannel final {
     std::uint32_t slotIndex{};
     std::uint32_t providerTag{};

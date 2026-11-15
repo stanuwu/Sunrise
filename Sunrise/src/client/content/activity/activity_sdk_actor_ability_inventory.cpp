@@ -7,9 +7,11 @@
 #include <set>
 #include <tuple>
 
+#include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/reader/layout.h"
 #include "../../../middleware/content/packages/schema/generated/tag_classes_808000.h"
 #include "../../../middleware/content/packages/schema/generated/tag_classes_80807d.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_80807e.h"
 #include "../../../middleware/content/packages/schema/generated/tag_classes_808081.h"
 #include "../../../middleware/content/packages/schema/generated/tag_classes_808082.h"
 #include "../../../middleware/content/packages/schema/generated/tag_classes_808083.h"
@@ -88,6 +90,13 @@ constexpr std::uint32_t kExternalRowClass = generated::UnknownValueProviderSourc
 constexpr std::size_t kExternalRowStride = sizeof(generated::UnknownValueProviderSource);
 constexpr std::size_t kExternalRowIndexOffset =
     offsetof(generated::UnknownValueProviderSource, rowIndex);
+// The AI source also lists, by name, the object channels its behaviour program reads.
+constexpr std::size_t kProgramChannelsField = offsetof(generated::ActorGroupSource, h86374c3c);
+constexpr std::uint32_t kProgramChannelClass = generated::C80807ee9::kClass;
+constexpr std::size_t kProgramChannelStride = sizeof(generated::C80807ee9);
+constexpr std::size_t kProgramChannelNameOffset =
+    offsetof(generated::C80807ee9, h01041631)
+    + offsetof(generated::SModelValueBankResource, channelHashReloading0xecde609e);
 
 /** Reads one bounded package scalar. @return False without changing the output on failure. */
 template <typename Value>
@@ -308,8 +317,10 @@ bool actor_channels(Packages& packages,
         const Package* config = packages.get(configTag);
         tables::ComponentPair pair{};
         if (config == nullptr || config->classId != kConfigClass
-            || !tables::config_component_pair(config->bytes, configTag, pair)
-            || pair.primaryClass != kProviderClass || pair.secondaryClass != kProviderSourceClass) {
+            || !tables::config_component_pair(config->bytes, configTag, pair)) {
+            return false;
+        }
+        if (pair.primaryClass != kProviderClass || pair.secondaryClass != kProviderSourceClass) {
             continue;
         }
         std::size_t rows = 0;
@@ -333,7 +344,8 @@ bool actor_channels(Packages& packages,
         for (std::uint32_t entry = 0; entry < externalCount; ++entry) {
             std::int32_t row = -1;
             std::uint32_t name = 0;
-            if (!read(config->bytes, external + entry * kExternalRowStride + kExternalRowIndexOffset,
+            if (!read(config->bytes,
+                      external + entry * kExternalRowStride + kExternalRowIndexOffset,
                       row)
                 || row < 0 || static_cast<std::uint32_t>(row) >= rowCount
                 || !read(config->bytes,
@@ -354,12 +366,16 @@ bool actor_channels(Packages& packages,
 
 /**
  * Reads the one behaviour program the AI components of an actor class name.
- * @return The program tag, or zero when the class names none or more than one.
+ * @param output Receives zero when the class names none or more than one.
+ * @return False when a referenced AI source cannot be read.
  */
-std::uint32_t actor_program(Packages& packages,
-                            const actor_rsat_inventory::Snapshot& snapshot,
-                            std::uint32_t actorClass) {
+bool actor_program(Packages& packages,
+                   const actor_rsat_inventory::Snapshot& snapshot,
+                   std::uint32_t actorClass,
+                   std::uint32_t& output) {
+    output = 0;
     std::set<std::uint32_t> programs{};
+    bool absent = false;
     for (const auto& binding : snapshot.sequenceBindings) {
         if (binding.actorClassIndex != actorClass) {
             continue;
@@ -367,42 +383,101 @@ std::uint32_t actor_program(Packages& packages,
         const Package* config = packages.get(binding.configTag);
         std::uint32_t program = 0;
         if (config == nullptr
-            || !read(config->bytes, static_cast<std::size_t>(binding.sourceOffset) + kProgramField,
-                     program)
-            || program == 0 || program == format::kAbsentIndex) {
-            return 0;
+            || !read(config->bytes,
+                     static_cast<std::size_t>(binding.sourceOffset) + kProgramField,
+                     program)) {
+            return false;
         }
+        absent = absent || program == 0 || program == format::kAbsentIndex;
         programs.insert(program);
     }
-    return programs.size() == 1 ? *programs.begin() : 0;
+    if (!absent && programs.size() == 1) {
+        output = *programs.begin();
+    }
+    return true;
 }
 
 /**
- * Adds each slot's temperaments and each actor slot's writable channels. A record that does not
- * read leaves its slots without rows rather than refusing the pack: a script names only what was
- * read.
+ * Reads the object channels the AI components of an actor class read.
+ * @param output Receives (AI config, channel name) pairs, sorted and unique.
+ * @return False when an AI source's channel list is malformed.
+ */
+bool program_channels(Packages& packages,
+                      const actor_rsat_inventory::Snapshot& snapshot,
+                      std::uint32_t actorClass,
+                      std::vector<std::pair<std::uint32_t, std::uint32_t>>& output) {
+    output.clear();
+    for (const auto& binding : snapshot.sequenceBindings) {
+        if (binding.actorClassIndex != actorClass) {
+            continue;
+        }
+        const Package* config = packages.get(binding.configTag);
+        std::size_t rows = 0;
+        std::uint32_t count = 0;
+        if (config == nullptr
+            || !array(config->bytes,
+                      static_cast<std::size_t>(binding.sourceOffset) + kProgramChannelsField,
+                      kProgramChannelStride,
+                      kProgramChannelClass,
+                      rows,
+                      count)) {
+            return false;
+        }
+        for (std::uint32_t row = 0; row < count; ++row) {
+            std::uint32_t name = 0;
+            if (!read(config->bytes,
+                      rows + row * kProgramChannelStride + kProgramChannelNameOffset,
+                      name)) {
+                return false;
+            }
+            if (name != 0 && name != kAbsentName) {
+                output.emplace_back(binding.configTag, name);
+            }
+        }
+    }
+    std::sort(output.begin(), output.end());
+    output.erase(std::unique(output.begin(), output.end()), output.end());
+    return true;
+}
+
+/** Reports a failed control table read without publishing an incomplete catalog. */
+[[nodiscard]] bool invalid_controls(std::uint32_t tag, const char* field) noexcept {
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::warn,
+                      "ev=activity_sdk stage=actor_controls tag=0x%08X field=%s",
+                      tag,
+                      field);
+    return false;
+}
+
+/**
+ * Adds each slot's temperaments and each actor slot's writable channels: its value provider's
+ * external rows and its behaviour program's inputs, one row per name.
  * @param slotClasses The actor classes each Type 1 or Type 2 slot spawns.
  * @param actorSlots The Type 2 slots among them.
+ * @return False when a referenced control table cannot be read.
  */
-void actor_controls(Packages& packages,
+bool actor_controls(Packages& packages,
                     const std::map<std::uint32_t, std::set<std::uint32_t>>& slotClasses,
                     const std::set<std::uint32_t>& actorSlots,
                     actor_rsat_inventory::Snapshot& output) {
     std::map<std::uint32_t, std::uint32_t> programs{};
     std::map<std::uint32_t, std::vector<std::uint32_t>> programTables{};
-    const auto program_of = [&](std::uint32_t actorClass) {
-        const auto found = programs.find(actorClass);
-        return found != programs.end()
-                   ? found->second
-                   : programs.emplace(actorClass, actor_program(packages, output, actorClass))
-                         .first->second;
-    };
     output.actorTemperaments.clear();
     output.actorChannels.clear();
     for (const auto& [slotRow, classes] : slotClasses) {
         std::set<std::pair<std::uint32_t, std::uint32_t>> ids{};
         for (const std::uint32_t actorClass : classes) {
-            const std::uint32_t program = program_of(actorClass);
+            auto found = programs.find(actorClass);
+            if (found == programs.end()) {
+                std::uint32_t program = 0;
+                if (!actor_program(packages, output, actorClass, program)) {
+                    return invalid_controls(output.actorClasses[actorClass].definitionTag,
+                                            "program");
+                }
+                found = programs.emplace(actorClass, program).first;
+            }
+            const std::uint32_t program = found->second;
             if (program == 0) {
                 continue;
             }
@@ -410,7 +485,7 @@ void actor_controls(Packages& packages,
             if (table == programTables.end()) {
                 std::vector<std::uint32_t> programIds{};
                 if (!program_temperaments(packages, program, programIds)) {
-                    programIds.clear();
+                    return invalid_controls(program, "temperaments");
                 }
                 table = programTables.emplace(program, std::move(programIds)).first;
             }
@@ -425,13 +500,30 @@ void actor_controls(Packages& packages,
             continue;
         }
         const std::uint32_t actorClass = *classes.begin();
-        std::vector<std::pair<std::uint32_t, std::uint32_t>> channels{};
-        if (actorClass >= output.actorClasses.size()
-            || !actor_channels(packages, output.actorClasses[actorClass].definitionTag, channels)) {
+        if (actorClass >= output.actorClasses.size()) {
             continue;
         }
-        for (const auto& [provider, name] : channels) {
-            output.actorChannels.push_back({slotRow, provider, name});
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> providerChannels{};
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> programInputs{};
+        if (!actor_channels(
+                packages, output.actorClasses[actorClass].definitionTag, providerChannels)) {
+            return invalid_controls(output.actorClasses[actorClass].definitionTag,
+                                    "provider_channels");
+        }
+        if (!program_channels(packages, output, actorClass, programInputs)) {
+            return invalid_controls(output.actorClasses[actorClass].definitionTag,
+                                    "program_channels");
+        }
+        // A provider row names its own record; a program input the provider also lists keeps it.
+        std::map<std::uint32_t, std::uint32_t> sources{};
+        for (const auto& [source, name] : providerChannels) {
+            sources.emplace(name, source);
+        }
+        for (const auto& [source, name] : programInputs) {
+            sources.emplace(name, source);
+        }
+        for (const auto& [name, source] : sources) {
+            output.actorChannels.push_back({slotRow, source, name});
         }
     }
     const auto byId = [](const auto& left, const auto& right) {
@@ -442,6 +534,7 @@ void actor_controls(Packages& packages,
     };
     std::sort(output.actorTemperaments.begin(), output.actorTemperaments.end(), byId);
     std::sort(output.actorChannels.begin(), output.actorChannels.end(), byName);
+    return true;
 }
 
 } // namespace
@@ -613,8 +706,7 @@ bool build(const topology_inventory::Snapshot& topology,
                 output.actorAbilityTargets.push_back(target);
             }
         }
-        actor_controls(packages, slotClasses, actorSlots, output);
-        return true;
+        return actor_controls(packages, slotClasses, actorSlots, output);
     } catch (...) {
         return false;
     }

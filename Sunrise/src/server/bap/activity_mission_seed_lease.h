@@ -97,7 +97,8 @@ void commit_owner_seed_publication(Session& link, const RosterPublication& stage
  * when the owner's world authors that bubble public. The public link's own free-roam world says
  * nothing about the mission's bubbles.
  */
-[[nodiscard]] std::uint64_t owner_public_bubbles(const Session& link, const Session& owner) noexcept;
+[[nodiscard]] std::uint64_t owner_public_bubbles(const Session& link,
+                                                 const Session& owner) noexcept;
 
 /**
  * Finds the private link a public link stands beside: the same account's joined private link.

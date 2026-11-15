@@ -476,7 +476,8 @@ template <typename Result, typename Adapter>
 }
 
 /** @return True when the destination authors one spawn set that has spawn points. */
-[[nodiscard]] bool authored_spawn_set(const RuntimeInstance& instance, std::uint32_t hash) noexcept {
+[[nodiscard]] bool authored_spawn_set(const RuntimeInstance& instance,
+                                      std::uint32_t hash) noexcept {
     namespace data = ::sunrise::state::build_data;
     const auto& destination = instance.view.binding.destination;
     const std::string_view package(reinterpret_cast<const char*>(destination.packageName.data()),
@@ -1088,6 +1089,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     case lua_vm::IntentKind::setActorControls:
     case lua_vm::IntentKind::deliverPassengers:
     case lua_vm::IntentKind::setHopOn:
+    case lua_vm::IntentKind::setObjectChannels:
     case lua_vm::IntentKind::applySlotAuth: {
         if (intent.authByteCount == 0 || intent.authByteCount != intent.authBody.size()) {
             refuse_delivery(
@@ -1112,6 +1114,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                 ? host::ScriptableOverrideKind::combatantControls
             : intent.kind == lua_vm::IntentKind::deliverPassengers
                 ? host::ScriptableOverrideKind::combatantDelivery
+            : intent.kind == lua_vm::IntentKind::setObjectChannels
+                ? host::ScriptableOverrideKind::objectChannels
             : intent.kind == lua_vm::IntentKind::setHopOn ? host::ScriptableOverrideKind::hopOn
                                                           : host::ScriptableOverrideKind::sdkAuth;
         std::uint64_t carrier = 0;

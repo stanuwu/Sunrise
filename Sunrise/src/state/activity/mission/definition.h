@@ -230,6 +230,8 @@ enum class IntentKind : std::uint8_t {
     setActivityFlag,
     /** Attaches or detaches one hop-on sensor; the Host owns its revision. */
     setHopOn,
+    /** Sets an authored object-channel prefix; the Host owns its revisions. */
+    setObjectChannels,
 };
 
 /** Actor sequence values belong to one combatant and one SDK/client generation. */

@@ -378,12 +378,13 @@ struct SeedSource final {
  * @param hostedBubbles One bit per bubble the publishing link carries for this activity.
  * @param canonicalGroupCount Groups already in the body; the seed reuses an exact one.
  */
-[[nodiscard]] MissionSeedRosterResult publish_selected_seed(const SeedSource& seed,
-                                                            Scratch& scratch,
-                                                            message::Snapshot& snapshot,
-                                                            std::uint32_t effectiveRegion,
-                                                            std::uint64_t hostedBubbles,
-                                                            std::size_t canonicalGroupCount) noexcept {
+[[nodiscard]] MissionSeedRosterResult
+publish_selected_seed(const SeedSource& seed,
+                      Scratch& scratch,
+                      message::Snapshot& snapshot,
+                      std::uint32_t effectiveRegion,
+                      std::uint64_t hostedBubbles,
+                      std::size_t canonicalGroupCount) noexcept {
     MissionSeedLease& lease = seed.lease;
     const bool adopting = seed.adopting;
     const std::int32_t heldRegion = seed.heldRegion;

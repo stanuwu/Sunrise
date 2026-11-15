@@ -17,6 +17,7 @@ struct Slot final {
     std::uint32_t authSchema{state::activity_sdk::format::kAbsentIndex};
     std::uint32_t flags{};
     std::uint32_t dialogueCueCount{};
+    std::uint32_t objectChannelCount{};
     state::activity_sdk::format::Range aliases{};
 };
 

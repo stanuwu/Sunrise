@@ -372,14 +372,14 @@ make_wire_snapshot(const Session& session,
                 region_host(
                     session.activity.source, session.activity.bindingGeneration, regions[entry]));
         } else {
-            server::gameplay::build_directory_entry(
-                session.activity.source,
-                regions[entry],
-                wire.localSlot,
-                candidate,
-                hostGeneration,
-                region_host(
-                    session.activity.source, session.activity.bindingGeneration, regions[entry]));
+            server::gameplay::build_directory_entry(session.activity.source,
+                                                    regions[entry],
+                                                    wire.localSlot,
+                                                    candidate,
+                                                    hostGeneration,
+                                                    region_host(session.activity.source,
+                                                                session.activity.bindingGeneration,
+                                                                regions[entry]));
         }
         if (!candidate.present) {
             continue;
@@ -489,9 +489,8 @@ server::gameplay::group::RegionHost region_host(const state::activity::SessionBi
     if (!public_region(source, bindingGeneration, region)) {
         return RegionHost::source;
     }
-    return mission_content_in_bubble(source, bindingGeneration, region)
-               ? RegionHost::missionPublic
-               : RegionHost::sharedPublic;
+    return mission_content_in_bubble(source, bindingGeneration, region) ? RegionHost::missionPublic
+                                                                        : RegionHost::sharedPublic;
 }
 
 /**

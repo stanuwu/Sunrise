@@ -175,11 +175,11 @@ prepare_bubble_handoff(Session& recipient,
         return ActivityMissionSeedLeaseStatus::ready;
     }
     authority::Grant grant{};
-    if (!authority::held_grant(recipient.activity.session.sessionId,
-                               generation,
-                               static_cast<std::uint8_t>(plan.effectiveRegion
-                                                         >> authority::kSliceSetToBubbleShift),
-                               grant)) {
+    if (!authority::held_grant(
+            recipient.activity.session.sessionId,
+            generation,
+            static_cast<std::uint8_t>(plan.effectiveRegion >> authority::kSliceSetToBubbleShift),
+            grant)) {
         return ActivityMissionSeedLeaseStatus::ready;
     }
     handoff = {.generation = generation,

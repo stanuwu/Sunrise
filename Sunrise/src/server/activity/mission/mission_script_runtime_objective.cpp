@@ -1,3 +1,5 @@
+#include "mission_script_runtime_objective.h"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -7,7 +9,6 @@
 #include <vector>
 
 #include "mission_script_runtime_internal.h"
-#include "mission_script_runtime_objective.h"
 
 namespace sunrise::server::activity::mission {
 namespace {

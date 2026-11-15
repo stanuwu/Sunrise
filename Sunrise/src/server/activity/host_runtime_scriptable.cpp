@@ -523,7 +523,8 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
                && (request.kind == ScriptableOverrideKind::interactableObject
                    || request.kind == ScriptableOverrideKind::interactableObjectInPlace
                    || request.kind == ScriptableOverrideKind::damageWatch
-                   || request.kind == ScriptableOverrideKind::hopOn)) {
+                   || request.kind == ScriptableOverrideKind::hopOn
+                   || request.kind == ScriptableOverrideKind::objectChannels)) {
         encoded = counter_auth::encode(*instance, request, candidate, pending, written);
     } else if (encoded && request.kind == ScriptableOverrideKind::ghostLink) {
         encoded = ghost_link::encode(*instance, request, candidate, pending, written);

@@ -533,7 +533,14 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
         });
         volumeToggle = matches == 1;
     }
-    if (!typedSdkBody && !occupancy && !scriptable && !volumeToggle) {
+    auth::Type24Body channels{};
+    const bool objectChannels =
+        typed(auth::kType24SlotType, auth::kType24ComponentClass, auth::kType24Schema)
+        && slot.senseSchema == auth::kType24SenseSchema
+        && (slot.flags & format::kSlotObjectChannelsExact) != 0
+        && auth::decode_type24(body, bitCount, channels) && channels.count > 0
+        && channels.count <= slot.reserved;
+    if (!typedSdkBody && !occupancy && !scriptable && !volumeToggle && !objectChannels) {
         return Status::invalidBody;
     }
     return Status::ready;

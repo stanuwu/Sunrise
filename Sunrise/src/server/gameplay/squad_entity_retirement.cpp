@@ -578,7 +578,8 @@ void record_delivered_target(const state::activity::SessionBinding& binding,
             return row.session == binding.sessionId && row.revision == binding.createdRevision
                    && row.generation == generation
                    && row.eligibility.squad.key == pending.target.registryKey
-                   && row.eligibility.squad.index == pending.target.slotIndex;
+                   && row.eligibility.squad.index == pending.target.slotIndex
+                   && row.eligibility.squad.type == pending.target.slotType;
         });
         const bool enabled = selected.enabled && selected.squad.key == pending.target.registryKey
                              && selected.squad.index == pending.target.slotIndex
@@ -597,7 +598,8 @@ void record_delivered_target(const state::activity::SessionBinding& binding,
                 return row.session == binding.sessionId
                        && (row.revision != binding.createdRevision
                            || (row.eligibility.squad.key == pending.target.registryKey
-                               && row.eligibility.squad.index == pending.target.slotIndex));
+                               && row.eligibility.squad.index == pending.target.slotIndex
+                               && row.eligibility.squad.type == pending.target.slotType));
             });
             /** An active source cannot own more actor targets than native entity slots. */
             constexpr std::size_t kMaximumTargets =
@@ -632,8 +634,7 @@ void follow_squad(const state::activity::SessionBinding& binding,
     };
     const auto due = [&](const Target& row) noexcept {
         return row.session == binding.sessionId && row.revision == binding.createdRevision
-               && row.eligibility.squad.key == squad.key
-               && row.eligibility.squad.index == squad.index && row.generation != followed(row);
+               && row.eligibility.squad == squad && row.generation != followed(row);
     };
     // Every admitted squad report asks, so the common answer is read without blocking capture.
     AcquireSRWLockShared(&g_lock);

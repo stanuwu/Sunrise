@@ -66,9 +66,9 @@ packet_has_sense_key(const middleware::bap::activity_message::sense_update::Deco
     namespace sense = middleware::bap::activity_message::sense_update;
     const auto& packet = input.decoded;
     return input.sourceGeneration != 0 && input.clientMessageSequence != 0
-           && sense_envelope_framed(input)
-           && input.decodeStatus == packet.status && sense::observation_packet(packet)
-           && input.groupsSeen == packet.groupsSeen && input.groupsDecoded == packet.groupsDecoded
+           && sense_envelope_framed(input) && input.decodeStatus == packet.status
+           && sense::observation_packet(packet) && input.groupsSeen == packet.groupsSeen
+           && input.groupsDecoded == packet.groupsDecoded
            && input.groupsSkipped == packet.groupsSkipped && input.objectsSeen == packet.objectsSeen
            && input.objectsDecoded == packet.objectsDecoded;
 }

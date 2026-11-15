@@ -51,10 +51,11 @@ append_initial_mission_seed(Session& session,
  * that hosts the bubble. Scenario-wide groups stay in the private link's top-level list.
  * @param ownerBubbles Bubbles public in the owner's world that this link hosts.
  */
-[[nodiscard]] MissionSeedRosterResult append_owner_mission_seed(Session& link,
-                                                                const Session& owner,
-                                                                Scratch& scratch,
-                                                                message::Snapshot& snapshot,
-                                                                std::uint64_t ownerBubbles) noexcept;
+[[nodiscard]] MissionSeedRosterResult
+append_owner_mission_seed(Session& link,
+                          const Session& owner,
+                          Scratch& scratch,
+                          message::Snapshot& snapshot,
+                          std::uint64_t ownerBubbles) noexcept;
 
 } // namespace sunrise::server::bap::encrypted::push::activity

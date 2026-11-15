@@ -719,11 +719,7 @@ inline constexpr EventSpec kEvents[]{
      kTriggerStateGroups,
      "every accepted occupancy report and its counter continuity; it never changes when "
      "entered and exited fire"},
-    {43,
-     "HOP_ON_STATE",
-     "on_event_hop_on_state",
-     "SunriseHopOnStateEvent",
-     kHopOnGroups},
+    {43, "HOP_ON_STATE", "on_event_hop_on_state", "SunriseHopOnStateEvent", kHopOnGroups},
     {44,
      "SQUAD_MEMBER_LOST",
      "on_event_squad_member_lost",

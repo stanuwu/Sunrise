@@ -919,6 +919,7 @@
     <ClCompile Include="src\client\content\activity\activity_sdk_lua_value.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_ir_family_coverage.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_native_pack_pipeline.cpp" />
+    <ClCompile Include="src\client\content\activity\activity_sdk_native_pack_object_channels.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_dialogue_group_index.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_actor_ability_inventory.cpp" />
     <ClCompile Include="src\client\content\activity\activity_sdk_dialogue_list.cpp" />

@@ -231,12 +231,12 @@ SceneStatus query_scene_spawn_plan(const sdk::BoundView& view,
  * @param initialEventKey An input the final activation carries from its start; zero for none.
  * @return Queued for one preparation or the final scene activation.
  */
-SceneStatus activate_authored_scene_spawn_reserved(
-    const sdk::BoundView& view,
-    std::uint32_t occurrenceRow,
-    std::uint32_t sceneSlotRow,
-    const host::ScriptableOutputReservation& reservation,
-    std::uint32_t initialEventKey) noexcept {
+SceneStatus
+activate_authored_scene_spawn_reserved(const sdk::BoundView& view,
+                                       std::uint32_t occurrenceRow,
+                                       std::uint32_t sceneSlotRow,
+                                       const host::ScriptableOutputReservation& reservation,
+                                       std::uint32_t initialEventKey) noexcept {
     SceneSpawnPlan plan{};
     const auto status = query_scene_spawn_plan(view, occurrenceRow, sceneSlotRow, plan);
     if (status != SceneStatus::ready) {

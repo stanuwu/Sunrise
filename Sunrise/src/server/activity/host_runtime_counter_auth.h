@@ -26,6 +26,9 @@ namespace sunrise::server::activity::host::counter_auth {
                && target.authSchema == damage::kAuthSchema)
            || (kind == ScriptableOverrideKind::ghostLink && target.slotType == ghost::kSlotType
                && target.authSchema == ghost::kAuthSchema)
+           || (kind == ScriptableOverrideKind::objectChannels
+               && target.slotType == auth::kType24SlotType
+               && target.authSchema == auth::kType24Schema)
            || (kind == ScriptableOverrideKind::hopOn && target.slotType == hop_on::kSlotType
                && target.authSchema == hop_on::kSchema);
 }
@@ -55,21 +58,67 @@ namespace sunrise::server::activity::host::counter_auth {
     return true;
 }
 
+/** Replaces a channel prefix while retaining later values and their revisions. */
+[[nodiscard]] inline bool encode_object_channels(const detail::Instance& instance,
+                                                 const detail::ScriptableRequest& request,
+                                                 const detail::ScriptableGuard& guard,
+                                                 PendingScriptableOverride& pending,
+                                                 std::size_t& written) noexcept {
+    namespace auth = middleware::bap::activity_message::scriptable_auth;
+    auth::Type24Body incoming{}, merged{};
+    if (!compatible(request.kind, request.target)
+        || !auth::decode_type24(std::span(request.authBody).first(request.authByteCount),
+                                request.authBitCount,
+                                incoming)
+        || incoming.count == 0) {
+        return false;
+    }
+    const auto* previous = actor_program::retained(instance, request.target);
+    if (previous != nullptr
+        && !auth::decode_type24(
+            std::span(previous->body).first(previous->byteCount), previous->bitCount, merged)) {
+        return false;
+    }
+    auto last = guard.objectChannelsRevision;
+    for (const auto& channel : std::span(merged.channels).first(merged.count)) {
+        last = (std::max)(last, static_cast<std::uint32_t>((std::max)(channel.revision, 0)));
+    }
+    if (last >= middleware::bap::activity_message::auth_fields::kMaximumCounter) {
+        return false;
+    }
+    const auto next = last + 1U;
+    for (std::size_t index = 0; index < incoming.count; ++index) {
+        merged.channels[index] = incoming.channels[index];
+        merged.channels[index].revision = static_cast<std::int32_t>(next);
+    }
+    merged.count = (std::max)(merged.count, incoming.count);
+    std::size_t bits = 0;
+    if (!auth::encode_type24(merged, pending.body, written, bits)) {
+        return false;
+    }
+    pending.bitCount = static_cast<std::uint16_t>(bits);
+    pending.generation = next;
+    return true;
+}
+
 /** Substitutes one fresh counter while retaining every requested non-counter bit. */
 [[nodiscard]] inline bool encode(const detail::Instance& instance,
                                  const detail::ScriptableRequest& request,
                                  const detail::ScriptableGuard& guard,
                                  PendingScriptableOverride& pending,
                                  std::size_t& written) noexcept {
+    if (request.kind == ScriptableOverrideKind::objectChannels) {
+        return encode_object_channels(instance, request, guard, pending, written);
+    }
     namespace fields = middleware::bap::activity_message::auth_fields;
     namespace patch = middleware::bap::activity_message::mission_auth_patch;
     const bool inPlace = request.kind == ScriptableOverrideKind::interactableObjectInPlace;
     const bool object = request.kind == ScriptableOverrideKind::interactableObject || inPlace;
     const bool hopOn = request.kind == ScriptableOverrideKind::hopOn;
-    const std::size_t offset = object  ? 0
-                               : hopOn ? middleware::bap::activity_message::mission_effect::
-                                             kRevisionOffset
-                                       : fields::kClientRefBits;
+    const std::size_t offset =
+        object  ? 0
+        : hopOn ? middleware::bap::activity_message::mission_effect::kRevisionOffset
+                : fields::kClientRefBits;
     std::uint32_t previous = 0;
     // Ghost link is compatible but keeps its own encoder, so it must not take the damage offset.
     if ((!object && !hopOn && request.kind != ScriptableOverrideKind::damageWatch)
@@ -77,7 +126,7 @@ namespace sunrise::server::activity::host::counter_auth {
         || !previous_revision(instance, request.target, offset, previous)) {
         return false;
     }
-    const auto committed = object ? static_cast<std::uint32_t>((std::max)(guard.type4.last, 0))
+    const auto committed = object  ? static_cast<std::uint32_t>((std::max)(guard.type4.last, 0))
                            : hopOn ? guard.hopOnRevision
                                    : guard.damageRevision;
     const auto last = (std::max)(previous, committed);

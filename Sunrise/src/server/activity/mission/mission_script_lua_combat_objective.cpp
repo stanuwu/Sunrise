@@ -39,7 +39,8 @@ static_assert(kSquadObjectiveGroupCount == static_cast<std::size_t>(objective::k
                                          const SlotDefinition& target) noexcept {
     return squad.slotType == format::kSquadSlotType
            && squad.componentClass == format::kSquadComponentClass
-           && squad.authSchema == objective::kSchema && target.slotType == format::kObjectiveSlotType
+           && squad.authSchema == objective::kSchema
+           && target.slotType == format::kObjectiveSlotType
            && target.componentClass == format::kObjectiveComponentClass
            && target.authSchema == middleware::bap::activity_message::scriptable_auth::kType3Schema
            && (squad.flags & format::kSlotSchemaJoinExact) != 0
@@ -166,8 +167,8 @@ int slot_task_counter(lua_State* state) {
     if (group.slotRow != target.nativeRow) {
         return luaL_error(state, "task group belongs to another objective");
     }
-    const lua_Integer task =
-        checked_integer_argument(state, required_key(kTaskCounter, "task", api::ValueKind::integer));
+    const lua_Integer task = checked_integer_argument(
+        state, required_key(kTaskCounter, "task", api::ValueKind::integer));
     if (task < 0 || task >= static_cast<lua_Integer>(kObjectiveTaskCapacity)) {
         return luaL_error(state, "task is outside an objective group's tasks");
     }

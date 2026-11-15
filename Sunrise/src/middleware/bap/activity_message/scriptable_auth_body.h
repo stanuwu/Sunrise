@@ -324,12 +324,15 @@ struct Type24Body final {
     std::uint8_t count{};
 };
 
-// TODO: bind extracted output-channel counts before exposing mission controls for this body.
 /** Encodes only the declared channel rows; the host owns each row's revision. */
 [[nodiscard]] bool encode_type24(const Type24Body& body,
                                  std::span<std::byte> output,
                                  std::size_t& written,
                                  std::size_t& writtenBits) noexcept;
+
+/** Decodes the populated channel prefix and requires exact bit length and zero padding. */
+[[nodiscard]] bool
+decode_type24(std::span<const std::byte> input, std::size_t bitCount, Type24Body& body) noexcept;
 
 /** ClientRef slot type and Auth schema for the object-filter sensor. */
 inline constexpr std::uint8_t kType34SlotType = 34;

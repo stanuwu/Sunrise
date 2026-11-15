@@ -241,6 +241,8 @@ void push_atom_kinds(lua_State* state);
 [[nodiscard]] int slot_set_ghost_link(lua_State* state);
 [[nodiscard]] int slot_ghost_link(lua_State* state);
 [[nodiscard]] int slot_set_object_active(lua_State* state);
+/** Sets the verified prefix of an object's authored channels. */
+[[nodiscard]] int slot_set_object_channels(lua_State* state);
 [[nodiscard]] int slot_fire_trigger(lua_State* state);
 [[nodiscard]] int slot_disarm_trigger(lua_State* state);
 /** @return True for a positive counter accepted by every typed Auth body. */

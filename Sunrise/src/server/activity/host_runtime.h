@@ -291,6 +291,8 @@ enum class ScriptableOverrideKind : std::uint8_t {
     interactableObjectInPlace,
     /** Type-26 hop-on sensor body under a Host-owned revision. */
     hopOn,
+    /** Type-24 authored object channels under Host-owned revisions. */
+    objectChannels,
 };
 
 /** The client stalls one frame short of the duration, so this reported fraction is the bar's end.
@@ -336,6 +338,7 @@ inline constexpr float kGhostLinkFinishFraction = 0.99F;
     case ScriptableOverrideKind::interactableObjectInPlace:
     case ScriptableOverrideKind::ghostLink:
     case ScriptableOverrideKind::hopOn:
+    case ScriptableOverrideKind::objectChannels:
         return true;
     }
     return true;

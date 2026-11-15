@@ -26,16 +26,15 @@ namespace {
  * state-local targets in the bubbles it publishes for it, and a private link carries every
  * target except those its public link publishes.
  */
-[[nodiscard]] bool estate_carries(const Session& link,
-                                  const Session* owner,
-                                  std::uint64_t ownerBubbles,
-                                  const server::activity::host::PendingScriptableOverride& retained)
-    noexcept {
+[[nodiscard]] bool
+estate_carries(const Session& link,
+               const Session* owner,
+               std::uint64_t ownerBubbles,
+               const server::activity::host::PendingScriptableOverride& retained) noexcept {
     const server::activity::host::ScriptableTarget& target = retained.target;
     if (owner != nullptr) {
-        const std::uint32_t bubble =
-            static_cast<std::uint32_t>(target.stateLocalRegion)
-            / middleware::content::packages::tables::kSliceSetIndexFactor;
+        const std::uint32_t bubble = static_cast<std::uint32_t>(target.stateLocalRegion)
+                                     / middleware::content::packages::tables::kSliceSetIndexFactor;
         return target.stateLocalRoster && target.stateLocalRegion >= 0
                && bubble < layouts::kBubbleCapacity && ((ownerBubbles >> bubble) & 1U) != 0
                && publishes_on_public(*owner, target);

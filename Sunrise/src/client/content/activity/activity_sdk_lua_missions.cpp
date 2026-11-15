@@ -560,12 +560,15 @@ bool render_mission(const Source& source,
             }
             temperamentConstants.append("    },\n");
         }
-        if (const auto found = index.channelsBySlot.find(slot); found != index.channelsBySlot.end()) {
+        if (const auto found = index.channelsBySlot.find(slot);
+            found != index.channelsBySlot.end()) {
             channelConstants.append("    ").append(key->second).append(" = {\n");
             for (const std::uint32_t row : found->second) {
                 const format::ActorChannel& channel = source.actorChannels[row];
                 std::snprintf(symbol.data(), symbol.size(), "KEY_%08X", channel.nameHash);
-                channelConstants.append("        ").append(symbol.data()).append(" = { slot_row = ");
+                channelConstants.append("        ")
+                    .append(symbol.data())
+                    .append(" = { slot_row = ");
                 append_uint(channelConstants, channel.slotIndex);
                 channelConstants.append(", channel = ");
                 append_hex(channelConstants, channel.nameHash);

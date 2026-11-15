@@ -118,7 +118,8 @@ bool read_temperament_list(
     std::uint8_t& count) {
     constexpr const char* kOwnerKey =
         api::find_field(api::kActorTemperamentRowFields, "slot_row").name.data();
-    constexpr const char* kIdKey = api::find_field(api::kActorTemperamentRowFields, "id").name.data();
+    constexpr const char* kIdKey =
+        api::find_field(api::kActorTemperamentRowFields, "id").name.data();
     const Impl* const impl = impl_from_state(state);
     output = {};
     count = 0;
@@ -231,8 +232,11 @@ bool read_squad_temperaments(lua_State* state,
     lua_pop(state, 1);
     intent.squadRetireOnReturn =
         optional_boolean_argument(state, boolean_option(kPlace, "retire_on_return"));
-    intent.squadTemperamentsSet = read_squad_temperaments(
-        state, optional_key(kPlace, "temperaments", api::ValueKind::list), definition.slotRow, intent);
+    intent.squadTemperamentsSet =
+        read_squad_temperaments(state,
+                                optional_key(kPlace, "temperaments", api::ValueKind::list),
+                                definition.slotRow,
+                                intent);
     return queue_intent(state, frame, intent);
 }
 

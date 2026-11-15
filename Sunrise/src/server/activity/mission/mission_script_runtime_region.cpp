@@ -35,13 +35,13 @@ void arm_state_region_teleport(RuntimeInstance& instance,
     const std::uint32_t declared = membership::declared_spawn_set(instance.view.binding.sessionId);
     const bool declaredAnswers =
         declared != 0 && dest::spawn_set_slice_set(destination, declared, target) == target;
-    const bool armed = server::bap::arm_shared_mission_region(
-        instance.view.binding,
-        instance.view.activityClientGeneration,
-        static_cast<std::int32_t>(plan.effectiveRegion),
-        arrivalSpawnHash != 0 ? arrivalSpawnHash
-        : declaredAnswers     ? declared
-                              : dest::kAbsentSpawnSetHash);
+    const bool armed =
+        server::bap::arm_shared_mission_region(instance.view.binding,
+                                               instance.view.activityClientGeneration,
+                                               static_cast<std::int32_t>(plan.effectiveRegion),
+                                               arrivalSpawnHash != 0 ? arrivalSpawnHash
+                                               : declaredAnswers     ? declared
+                                                                     : dest::kAbsentSpawnSetHash);
     log_line(core::log::Level::info,
              &instance,
              "state_region",
