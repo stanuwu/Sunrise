@@ -14,6 +14,19 @@ struct Exports {
     bool tagDefinitions{false};
 };
 
+/** The tag heap budget the client reserves on its own, in MiB. */
+inline constexpr std::uint32_t kTagHeapStockMib = 474;
+/**
+ * The tag heap budget Sunrise sets unless the settings say otherwise, in MiB. It gives the tag
+ * data of installed mods 550 MiB beyond the client's own budget.
+ */
+inline constexpr std::uint32_t kTagHeapDefaultMib = 1024;
+/**
+ * The largest tag heap budget the setting accepts, in MiB. It stays under 2 GiB, where a signed
+ * 32-bit offset into the heap would turn negative.
+ */
+inline constexpr std::uint32_t kTagHeapMaximumMib = 2047;
+
 /** Read-only Client settings parsed by Core. */
 struct Settings {
     server_endpoint::Settings serverEndpoint;
@@ -35,6 +48,14 @@ struct Settings {
     bool cheats{false};
     /** Startup exports for Sunrise Studio; all off by default. */
     Exports exports;
+    /**
+     * Budget in MiB for the client's tag heap, which holds loaded tag data. Installed mods that
+     * load more than the client's 474 MiB leave the heap full: content stops loading and the
+     * client asserts `Cortex TAG OOM`. 474 is the client's own budget. The client reserves and
+     * commits the whole heap once at startup, so a change needs a restart. The part the client
+     * never fills costs commit charge, not physical memory.
+     */
+    std::uint32_t tagHeapMib{kTagHeapDefaultMib};
 };
 
 } // namespace sunrise::core::settings::client

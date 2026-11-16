@@ -6,6 +6,7 @@
 #include "../../client/hooks/bootflow/bootflow_texture_override.h"
 #include "../../client/hooks/egress/runtime.h"
 #include "../../client/hooks/package_trust/package_trust_bypass.h"
+#include "../../client/hooks/tag_heap/tag_heap_budget.h"
 #include "../../client/runtime/runtime.h"
 #include "../../core/logging/log.h"
 #include "../../core/runtime/core_runtime.h"
@@ -92,6 +93,9 @@ bool initialize(void* module) noexcept {
                              core::log::Level::warn,
                              "ev=steam_init stage=bootflow_texture result=fail");
         }
+        // The client creates its tag heap once, after Steam init, so its budget is raised here. A
+        // failure is logged and leaves the client's own budget.
+        (void)client::hooks::tag_heap::install();
         advance_context_generation();
         g_initialized.store(true, std::memory_order_release);
         core::log::write(
