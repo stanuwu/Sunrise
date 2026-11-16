@@ -19,6 +19,7 @@ bool Parser::client_settings(client::Settings& output, bool& endpointConfigured)
     bool hasServerEndpoint = false;
     bool hasMachineId = false;
     bool hasExports = false;
+    bool hasTagHeapMib = false;
     if (consume('}')) {
         return true;
     }
@@ -75,6 +76,15 @@ bool Parser::client_settings(client::Settings& output, bool& endpointConfigured)
                 return false;
             }
             hasExports = true;
+        } else if (key == "tag_heap_mib") {
+            // The client's own budget is the smallest accepted and changes nothing.
+            std::uint64_t value = 0;
+            if (hasTagHeapMib || !unsigned_integer(value) || value < client::kTagHeapStockMib
+                || value > client::kTagHeapMaximumMib) {
+                return false;
+            }
+            candidate.tagHeapMib = static_cast<std::uint32_t>(value);
+            hasTagHeapMib = true;
         } else if (!skip_value(0)) {
             return false;
         }

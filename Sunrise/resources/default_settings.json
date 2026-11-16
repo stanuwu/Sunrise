@@ -44,7 +44,8 @@
     "exports": {
       "package_keys": false,
       "tag_definitions": false
-    }
+    },
+    "tag_heap_mib": 1024
   },
   "server": {
     "max_players": 32,
