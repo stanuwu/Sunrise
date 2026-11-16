@@ -52,14 +52,38 @@ namespace {
     return false;
 }
 
-/**
- * @return The generation a link's retained squad bodies are authorized for: the owner's on a
- * public link that publishes its private link's mission, else the link's own.
- */
-[[nodiscard]] std::uint64_t squad_lease_generation(const Session& session) noexcept {
-    const Session* const owner = public_mission_owner_locked(session);
-    return owner != nullptr ? owner->activity.bindingGeneration
-                            : session.activity.bindingGeneration;
+/** Drops a departed mission's squads while keeping the public patrol's groups and slot indices. */
+void discard_departed_squads(SquadOverrideLease& lease, std::uint64_t currentOwner) noexcept {
+    std::array<std::uint16_t, message::kPublishedGroupCapacity> positions{};
+    std::uint16_t kept = 0;
+    for (std::uint16_t index = 0; index < lease.groupCount; ++index) {
+        const auto origin = lease.groups[index].ownerGeneration;
+        if (origin != 0 && origin != currentOwner) {
+            positions[index] = lease.groupCount;
+            continue;
+        }
+        positions[index] = kept;
+        if (kept != index) {
+            lease.groups[kept] = lease.groups[index];
+        }
+        ++kept;
+    }
+    if (kept == lease.groupCount) {
+        return;
+    }
+    std::uint16_t bodies = 0;
+    for (std::uint16_t index = 0; index < lease.authCount; ++index) {
+        const auto group = positions[lease.authBodies[index].groupIndex];
+        if (group < kept) {
+            if (bodies != index) {
+                lease.authBodies[bodies] = lease.authBodies[index];
+            }
+            lease.authBodies[bodies++].groupIndex = static_cast<std::uint8_t>(group);
+        }
+    }
+    lease.groupCount = kept;
+    lease.authCount = bodies;
+    lease.active = kept != 0;
 }
 
 /**
@@ -87,19 +111,19 @@ bool activate_staged_squad_override(Session& session) noexcept {
     const RosterPublication& staged = session.activityRosterStaged;
     const server::activity::host::PendingScriptableOverride& pending = staged.scriptableOverride;
     const server::activity::host::ScriptableTarget& target = pending.target;
-    const std::uint64_t leaseGeneration =
-        staged.ownerScriptable ? staged.ownerGeneration : staged.bindingGeneration;
+    const std::uint64_t ownerGeneration = staged.ownerScriptable ? staged.ownerGeneration : 0;
+    const std::uint64_t sourceGeneration =
+        staged.ownerScriptable ? ownerGeneration : staged.bindingGeneration;
     if (!staged.staged || !staged.hasScriptableOverride || !staged.activatesSquadOverride
         || staged.bindingGeneration == 0
         || staged.bindingGeneration != session.activity.bindingGeneration
-        || leaseGeneration != squad_lease_generation(session)
-        || pending.expectedActivityClientGeneration != leaseGeneration
+        || sourceGeneration == 0 || pending.expectedActivityClientGeneration != sourceGeneration
         || pending.kind != server::activity::host::ScriptableOverrideKind::squad
         || (target.stateLocalRoster && !staged.hasSquadStateSequence)) {
         return false;
     }
     RetainedSquadAuth retained{};
-    if (!make_retained_squad_auth(pending, leaseGeneration, retained)) {
+    if (!make_retained_squad_auth(pending, sourceGeneration, retained)) {
         return false;
     }
     if (target.stateLocalRoster) {
@@ -123,6 +147,7 @@ bool activate_staged_squad_override(Session& session) noexcept {
     if (!lease.active) {
         SecureZeroMemory(&lease, sizeof lease);
         lease.groups[0].scopeTarget = target;
+        lease.groups[0].ownerGeneration = ownerGeneration;
         if (target.stateLocalRoster) {
             lease.groups[0].stateLocalRosterGroup = pending.stateLocalRosterGroup;
         }
@@ -132,18 +157,21 @@ bool activate_staged_squad_override(Session& session) noexcept {
         lease.groups[0].regionEpoch = session.activityRosterRegionEpoch;
         retained.groupIndex = 0;
         lease.authBodies[0] = retained;
-        lease.bindingGeneration = leaseGeneration;
+        lease.bindingGeneration = staged.bindingGeneration;
         lease.authCount = 1;
         lease.groupCount = 1;
         lease.active = true;
         return true;
     }
-    if (!valid_retained_squad_lease(lease, leaseGeneration)) {
+    if (!valid_retained_squad_lease(lease, staged.bindingGeneration)) {
         return false;
     }
     const std::size_t groupIndex = retained_group_index(lease, target);
     if (groupIndex < lease.groupCount) {
         RetainedSquadGroup& group = lease.groups[groupIndex];
+        if (group.ownerGeneration != ownerGeneration) {
+            return false;
+        }
         if (target.stateLocalRoster
             && (!same_generated_group(group.stateLocalRosterGroup, pending.stateLocalRosterGroup)
                 || staged.squadStateSequence != group.stateSequence)) {
@@ -179,6 +207,7 @@ bool activate_staged_squad_override(Session& session) noexcept {
     RetainedSquadGroup& group = lease.groups[lease.groupCount];
     group = {};
     group.scopeTarget = target;
+    group.ownerGeneration = ownerGeneration;
     if (target.stateLocalRoster) {
         group.stateLocalRosterGroup = pending.stateLocalRosterGroup;
     }
@@ -227,7 +256,8 @@ build_roster_snapshot(Session& session,
                       const layouts::RosterGroup* stateLocalRosterGroup,
                       const EffectiveRegion* exactRegion,
                       const RefreshReport* refresh,
-                      std::span<const TailAuthOverride> tailOverrides) noexcept {
+                      std::span<const TailAuthOverride> tailOverrides,
+                      std::uint64_t pendingOwner) noexcept {
     snapshot = {};
     destinationLength = 0;
     state::activity::defaults::ActivityDefaults defaults{};
@@ -318,16 +348,17 @@ build_roster_snapshot(Session& session,
     // Retained and pending groups below may only match a group the seed published.
     const std::size_t seedGroupCount = snapshot.roster.groupCount;
     const bool pendingStateLocal = authOverride != nullptr && stateLocalRosterTarget;
-    const std::uint64_t leaseGeneration = squad_lease_generation(session);
-    if (session.activitySquadOverride.active
-        && session.activitySquadOverride.bindingGeneration != leaseGeneration) {
-        SecureZeroMemory(&session.activitySquadOverride, sizeof session.activitySquadOverride);
+    SquadOverrideLease& lease = session.activitySquadOverride;
+    if (lease.active && lease.bindingGeneration != session.activity.bindingGeneration) {
+        SecureZeroMemory(&lease, sizeof lease);
     }
-    const bool retainedSquad = session.activitySquadOverride.active;
-    const SquadOverrideLease& lease = session.activitySquadOverride;
-    if (retainedSquad && !valid_retained_squad_lease(lease, leaseGeneration)) {
-        return refuse_override("retained_lease");
+    if (lease.active) {
+        if (!valid_retained_squad_lease(lease, session.activity.bindingGeneration)) {
+            return refuse_override("retained_lease");
+        }
+        discard_departed_squads(lease, owner != nullptr ? owner->activity.bindingGeneration : 0);
     }
+    const bool retainedSquad = lease.active;
     server::activity::host::ScriptableTarget pendingTarget{};
     if (authOverride != nullptr) {
         pendingTarget.objectTag = authOverride->objectTag;
@@ -349,6 +380,9 @@ build_roster_snapshot(Session& session,
     if (retainedSquad && authOverride != nullptr) {
         if (pendingGroupIndex < lease.groupCount) {
             const RetainedSquadGroup& retainedGroup = lease.groups[pendingGroupIndex];
+            if (squadOverride && retainedGroup.ownerGeneration != pendingOwner) {
+                return refuse_override("retained_group_owner");
+            }
             if (stateLocalRosterTarget
                 && (stateLocalRosterGroup == nullptr
                     || !same_generated_group(*stateLocalRosterGroup,
@@ -381,11 +415,12 @@ build_roster_snapshot(Session& session,
             retainedElsewhere[index] = true;
             continue;
         }
-        if (owner != nullptr && !note_owner_key(scratch, retainedGroup.scopeTarget.registryKey)) {
+        const bool forwarded = retainedGroup.ownerGeneration != 0;
+        if (forwarded && !note_owner_key(scratch, retainedGroup.scopeTarget.registryKey)) {
             return refuse_override("owner_key_capacity");
         }
         // An owner's group names a region of the owner's world.
-        if (!msg1_selects_region(owner != nullptr ? ownerLayout : layout, retainedGroup.region)) {
+        if (!msg1_selects_region(forwarded ? ownerLayout : layout, retainedGroup.region)) {
             return refuse_override("retained_region");
         }
         const std::uint32_t bubble = static_cast<std::uint32_t>(retainedGroup.region)

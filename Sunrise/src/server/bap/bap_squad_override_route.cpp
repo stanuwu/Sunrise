@@ -275,6 +275,9 @@ squad_override_available_locked(const Session& session,
     }
     if (groupIndex < lease.groupCount) {
         const RetainedSquadGroup& group = lease.groups[groupIndex];
+        if (group.ownerGeneration != 0) {
+            return false;
+        }
         if (target.stateLocalRoster
             && !same_scriptable_group(group.stateLocalRosterGroup, *stateLocalRosterGroup)) {
             return false;

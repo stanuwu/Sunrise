@@ -138,6 +138,17 @@ valid_canonical_sdk_auth_target(const activity::host::ScriptableTarget& target) 
 [[nodiscard]] bool carries_state_local_target(const Session& session,
                                               const activity::host::ScriptableTarget& target,
                                               std::int32_t clientRegion) noexcept {
+    if (session.activity.role == ActivityClientRole::publicTarget) {
+        if (clientRegion < 0 || target.stateLocalRegion != clientRegion) {
+            return false;
+        }
+        const auto bubble = static_cast<std::uint32_t>(clientRegion) / tables::kSliceSetIndexFactor;
+        return bubble < layouts::kBubbleCapacity
+               && ((advertised_bubble(session) >> bubble) & 1U) != 0;
+    }
+    if (session.activity.role != ActivityClientRole::privateCurrent) {
+        return false;
+    }
     return target.stateLocalRegion == clientRegion
            || (activity::behavior_scope::other_bubble(target.stateLocalRegion, clientRegion)
                && !publishes_on_public(session, target));
@@ -174,7 +185,6 @@ state_local_type23_available_locked(const Session& session,
                                     std::uint64_t expectedGeneration) noexcept {
     const std::int32_t region = selected_region_index_locked(session);
     return expectedRegion >= 0 && expectedGeneration != 0
-           && session.activity.role == ActivityClientRole::privateCurrent
            && region == expectedRegion
            && carries_state_local_target(session, target, expectedRegion)
            && session.activity.bindingGeneration == expectedGeneration
@@ -204,7 +214,6 @@ state_local_sdk_auth_available_locked(const Session& session,
                                       std::uint64_t expectedGeneration) noexcept {
     const std::int32_t region = selected_region_index_locked(session);
     return expectedRegion >= 0 && expectedGeneration != 0
-           && session.activity.role == ActivityClientRole::privateCurrent
            && region == expectedRegion
            && carries_state_local_target(session, target, expectedRegion)
            && session.activity.bindingGeneration == expectedGeneration
@@ -408,7 +417,7 @@ bool request_activity_state_local_type31_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
+        && region == expectedRegion
         && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_type31_target(target, stateLocalRosterGroup)
@@ -433,7 +442,7 @@ bool request_activity_state_local_sequence_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
+        && region == expectedRegion
         && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
@@ -460,7 +469,7 @@ bool request_activity_state_local_cinematic_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
+        && region == expectedRegion
         && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
@@ -517,7 +526,7 @@ bool request_activity_state_local_authored_scene_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
+        && region == expectedRegion
         && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_authored_scene_target(target, stateLocalRosterGroup)
@@ -551,7 +560,7 @@ bool request_activity_state_local_dialogue_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
+        && region == expectedRegion
         && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)

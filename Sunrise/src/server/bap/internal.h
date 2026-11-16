@@ -283,6 +283,8 @@ struct RetainedSquadGroup {
     activity::host::ScriptableTarget scopeTarget{};
     /** Exact generated SDK group shared by this group's retained slots. */
     state::build_data::scenarios::RosterGroup stateLocalRosterGroup{};
+    /** Private mission generation for a forwarded group; zero for this link's own squad. */
+    std::uint64_t ownerGeneration{};
     std::int32_t region{-1};
     std::uint16_t authCount{};
     /** Last delivered revision of the generated state-local roster group. */
