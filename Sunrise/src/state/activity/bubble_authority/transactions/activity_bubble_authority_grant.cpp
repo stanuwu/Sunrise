@@ -70,7 +70,13 @@ bool select_shared_grant(std::uint64_t sessionId,
             pendingRegion >= 0 && (pendingRegion >> kSliceSetToBubbleShift) != bubble;
         const bool mayRetake =
             enteringBubble || !headingAway || authority.releasedBy[bubble] != generation;
-        if (authority.grantTokens[bubble] == 0 || (!authority.held[bubble] && mayRetake)) {
+        // A state selection released this bubble's entities from the releaser's own client, and
+        // another client adopting them in the selected state crashes. The releaser's handoff holds
+        // it until the releaser has loaded that state.
+        const bool reserved =
+            authority.selectionReleased[bubble] && authority.releasedBy[bubble] != generation;
+        if (!reserved
+            && (authority.grantTokens[bubble] == 0 || (!authority.held[bubble] && mayRetake))) {
             grant.bubble = bubble;
             grant.token = next_token(authority, bubble);
             owed = true;
@@ -94,6 +100,7 @@ void record_grant(std::uint64_t sessionId, std::uint64_t generation, const Grant
         state.sessions[target].bubbleAuthority.held[grant.bubble] = true;
         state.sessions[target].bubbleAuthority.holders[grant.bubble] = generation;
         state.sessions[target].bubbleAuthority.releasedBy[grant.bubble] = 0;
+        state.sessions[target].bubbleAuthority.selectionReleased[grant.bubble] = false;
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
 }
@@ -167,6 +174,10 @@ void release_holder(std::uint64_t sessionId, std::uint64_t generation) noexcept 
                 authority.holders[bubble] = 0;
                 // The link that takes the bubble over next resumes from the leaver's state.
                 authority.releasedBy[bubble] = generation;
+            } else if (authority.selectionReleased[bubble]
+                       && authority.releasedBy[bubble] == generation) {
+                // A selection whose releaser left has no load to wait for.
+                authority.selectionReleased[bubble] = false;
             }
         }
     }
@@ -178,10 +189,12 @@ void release_holder(std::uint64_t sessionId, std::uint64_t generation) noexcept 
  * @param sessionId Joined activity session.
  * @param bubble Bubble named by the accepted abdication.
  * @param mask Optional released entities to merge into the pending claim.
+ * @param forSelection Whether the release answers a state selection.
  */
 void record_abdication(std::uint64_t sessionId,
                        std::uint8_t bubble,
-                       const EntitySlotMask* mask) noexcept {
+                       const EntitySlotMask* mask,
+                       bool forSelection) noexcept {
     if (sessionId == kAbsentSessionId || bubble >= kAuthoritySlotCount) {
         return;
     }
@@ -196,6 +209,10 @@ void record_abdication(std::uint64_t sessionId,
         }
         authority.held[bubble] = false;
         authority.holders[bubble] = 0;
+        // A later report for the same release leaves the selection it answered in place.
+        if (forSelection) {
+            authority.selectionReleased[bubble] = true;
+        }
         if (mask != nullptr) {
             auto& released = authority.releasedEntities[bubble];
             for (std::size_t index = 0; index < released.size(); ++index) {
@@ -296,6 +313,7 @@ void clear_grants(std::uint64_t sessionId) noexcept {
         authority.held = {};
         authority.holders = {};
         authority.releasedBy = {};
+        authority.selectionReleased = {};
         authority.releasedEntities = {};
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);

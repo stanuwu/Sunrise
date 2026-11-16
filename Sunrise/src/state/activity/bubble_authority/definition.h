@@ -58,6 +58,11 @@ struct AuthorityState final {
      * moves its client into it.
      */
     std::array<std::uint64_t, kAuthoritySlotCount> releasedBy{};
+    /**
+     * True while a bubble a state selection released waits for its releaser to load the selected
+     * state. The released entities are that client's own, so the bubble goes to no other link.
+     */
+    std::array<bool, kAuthoritySlotCount> selectionReleased{};
     /** Released entities remain pending until their exact claim is delivered. */
     std::array<EntitySlotMask, kAuthoritySlotCount> releasedEntities{};
 };

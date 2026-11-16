@@ -166,10 +166,14 @@ void submit_committed_authority_abdication(Session& session,
         return;
     }
     if (!plan.authorityAbdication.abandoned) {
-        state::activity::bubble_authority::record_abdication(
-            plan.sessionId, plan.authorityAbdication.bubble, &plan.authorityAbdication.entities);
-        if (session.activityMissionSeed.bubbleHandoff.acknowledge(
-                session.activity.bindingGeneration, plan.authorityAbdication.bubble)) {
+        // An acknowledged handoff answers a state selection, so the bubble waits for its releaser.
+        const bool acknowledged = session.activityMissionSeed.bubbleHandoff.acknowledge(
+            session.activity.bindingGeneration, plan.authorityAbdication.bubble);
+        state::activity::bubble_authority::record_abdication(plan.sessionId,
+                                                             plan.authorityAbdication.bubble,
+                                                             &plan.authorityAbdication.entities,
+                                                             acknowledged);
+        if (acknowledged) {
             core::log::writef(core::log::Channel::server,
                               core::log::Level::info,
                               "ev=activity stage=bubble_handoff result=acknowledged bubble=%u",
