@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/darkness_zone_auth.h"
 #include "../../../../../middleware/bap/activity_message/ghost_link_sense.h"
 #include "../../../../../middleware/content/packages/tables/region_reader.h"
@@ -116,10 +117,25 @@ bool activate_staged_squad_override(Session& session) noexcept {
         staged.ownerScriptable ? ownerGeneration : staged.bindingGeneration;
     if (!staged.staged || !staged.hasScriptableOverride || !staged.activatesSquadOverride
         || staged.bindingGeneration == 0
-        || staged.bindingGeneration != session.activity.bindingGeneration
-        || sourceGeneration == 0 || pending.expectedActivityClientGeneration != sourceGeneration
+        || staged.bindingGeneration != session.activity.bindingGeneration || sourceGeneration == 0
+        || pending.expectedActivityClientGeneration != sourceGeneration
         || pending.kind != server::activity::host::ScriptableOverrideKind::squad
         || (target.stateLocalRoster && !staged.hasSquadStateSequence)) {
+        // The script sees its squad canceled; this line names the generations that disagreed.
+        core::log::writef(
+            core::log::Channel::server,
+            core::log::Level::warn,
+            "ev=activity stage=squad_override result=refused reason=staged_state key=0x%08X "
+            "slot_index=%u owner=%d staged_generation=%llu link_generation=%llu "
+            "source_generation=%llu expected_generation=%llu state_sequence=%d",
+            target.registryKey,
+            static_cast<unsigned>(target.slotIndex),
+            staged.ownerScriptable ? 1 : 0,
+            static_cast<unsigned long long>(staged.bindingGeneration),
+            static_cast<unsigned long long>(session.activity.bindingGeneration),
+            static_cast<unsigned long long>(sourceGeneration),
+            static_cast<unsigned long long>(pending.expectedActivityClientGeneration),
+            staged.hasSquadStateSequence ? 1 : 0);
         return false;
     }
     RetainedSquadAuth retained{};
