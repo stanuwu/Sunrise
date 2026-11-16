@@ -653,6 +653,20 @@ constexpr std::array<ContextBinding, std::size(api::kContextMembers)> kContextBi
      [](lua_State* state, const Impl&) {
          lua_pushinteger(state, core::runtime::server_clock_seconds());
      }},
+    {"public_event_request",
+     nullptr,
+     [](lua_State* state, const Impl& impl) {
+         const auto& request = impl.eventRequest;
+         if (!request.serial) {
+             lua_pushnil(state);
+             return;
+         }
+         lua_createtable(state, 0, static_cast<int>(std::size(api::kEventRequestFields)));
+         set_integer_field(state, "serial", request.serial);
+         set_integer_field(state, "region", request.region);
+         set_integer_field(state, "site", request.site);
+         set_integer_field(state, "rally_seconds", request.rallySeconds);
+     }},
     {"public_event_schedule", &context_public_event_schedule},
     {"complete_mission", &context_complete_mission},
     {"activate_objects", &context_activate_objects},

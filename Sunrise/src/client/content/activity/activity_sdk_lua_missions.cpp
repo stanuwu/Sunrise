@@ -5,11 +5,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "../../../middleware/bap/activity_message/auth_schema_catalog.h"
@@ -536,6 +538,24 @@ bool render_mission(const Source& source,
     }
     abilityConstants.append("}\n");
     // Temperaments and channels are named only by hash in the packages, as abilities are.
+    // Slots share temperament lists. Emit each list once and build its slot-owned rows on use.
+    std::map<std::vector<std::uint32_t>, std::size_t> temperamentSets;
+    std::string temperamentLists = R"(local function temperament_slot(slot, ids)
+    local function fill(rows)
+        setmetatable(rows, nil)
+        for _, id in ipairs(ids) do
+            rows[string.format("KEY_%08X", id)] = { slot_row = slot, id = id }
+        end
+        return rows
+    end
+    return setmetatable({}, {
+        __index = function(rows, key) return fill(rows)[key] end,
+        __newindex = function(rows, key, value) fill(rows)[key] = value end,
+        __pairs = function(rows) return pairs(fill(rows)) end,
+    })
+end
+local temperament_ids = {
+)";
     std::string temperamentConstants = "mission.ActorTemperament = {\n";
     std::string channelConstants = "mission.ActorChannel = {\n";
     for (const std::uint32_t slot : slots) {
@@ -546,19 +566,26 @@ bool render_mission(const Source& source,
         std::array<char, 32> symbol{};
         if (const auto found = index.temperamentsBySlot.find(slot);
             found != index.temperamentsBySlot.end()) {
-            temperamentConstants.append("    ").append(key->second).append(" = {\n");
+            std::vector<std::uint32_t> ids;
+            ids.reserve(found->second.size());
             for (const std::uint32_t row : found->second) {
-                const format::ActorTemperament& temperament = source.actorTemperaments[row];
-                std::snprintf(symbol.data(), symbol.size(), "KEY_%08X", temperament.id);
-                temperamentConstants.append("        ")
-                    .append(symbol.data())
-                    .append(" = { slot_row = ");
-                append_uint(temperamentConstants, temperament.slotIndex);
-                temperamentConstants.append(", id = ");
-                append_hex(temperamentConstants, temperament.id);
-                temperamentConstants.append(" },\n");
+                ids.push_back(source.actorTemperaments[row].id);
             }
-            temperamentConstants.append("    },\n");
+            const auto [set, added] =
+                temperamentSets.try_emplace(std::move(ids), temperamentSets.size() + 1);
+            if (added) {
+                temperamentLists.append("    {");
+                for (const auto id : set->first) {
+                    append_hex(temperamentLists, id);
+                    temperamentLists.append(", ");
+                }
+                temperamentLists.append("},\n");
+            }
+            temperamentConstants.append("    ").append(key->second).append(" = temperament_slot(");
+            append_uint(temperamentConstants, slot);
+            temperamentConstants.append(", temperament_ids[");
+            append_uint(temperamentConstants, static_cast<std::uint32_t>(set->second));
+            temperamentConstants.append("]),\n");
         }
         if (const auto found = index.channelsBySlot.find(slot);
             found != index.channelsBySlot.end()) {
@@ -784,7 +811,7 @@ bool render_mission(const Source& source,
     output.append(taskConstants);
     output.append(taskGroupConstants);
     output.append(abilityConstants);
-    output.append(temperamentConstants);
+    output.append(temperamentLists).append("}\n").append(temperamentConstants);
     output.append(channelConstants);
     output.append(dialogueCueConstants);
     output.append(dialogueCueTextConstants);

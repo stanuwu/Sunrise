@@ -197,6 +197,69 @@ using SeedOmissions = std::array<state::activity::mission::MissionSeedOmission,
 // One callback per EventKind, in EventKind order; the table owns the names.
 static_assert(std::size(api::kEvents) == host::kEventKindCount);
 
+/** Reads a site label into owned storage; embedded nul bytes cannot name UI rows. */
+bool read_label(lua_State* state, const char* key, event_launcher::Label& label) {
+    lua_getfield(state, -1, key);
+    std::size_t size{};
+    const char* text =
+        lua_type(state, -1) == LUA_TSTRING ? lua_tolstring(state, -1, &size) : nullptr;
+    const bool valid = text && size && size < label.size() && !std::memchr(text, 0, size);
+    if (valid) {
+        std::memcpy(label.data(), text, size);
+        label[size] = '\0';
+    }
+    lua_pop(state, 1);
+    return valid;
+}
+
+/** Reads an exact nonnegative Lua integer; -1 denotes a malformed field. */
+int read_site_number(lua_State* state, const char* key) {
+    lua_getfield(state, -1, key);
+    const auto number = lua_isinteger(state, -1) ? lua_tointeger(state, -1) : -1;
+    lua_pop(state, 1);
+    return number >= 0 && number <= (std::numeric_limits<int>::max)() ? static_cast<int>(number)
+                                                                      : -1;
+}
+
+/** Captures the same regional ordinals used by the mission's own rotation. */
+bool capture_event_sites(lua_State* state, Impl& impl) {
+    lua_getfield(state, 1, program_key("public_events"));
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return true;
+    }
+    if (!lua_istable(state, -1) || lua_rawlen(state, -1) > event_launcher::kMaxSites) {
+        return false;
+    }
+    try {
+        impl.eventSites.resize(lua_rawlen(state, -1));
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    for (std::size_t i = 0; i < impl.eventSites.size(); ++i) {
+        lua_rawgeti(state, -1, static_cast<lua_Integer>(i + 1));
+        auto& row = impl.eventSites[i];
+        if (!lua_istable(state, -1) || !read_label(state, "location", row.location)
+            || !read_label(state, "name", row.name)) {
+            return false;
+        }
+        row.region = read_site_number(state, "region");
+        row.ordinal = read_site_number(state, "site");
+        if (row.region < 0 || row.ordinal <= 0) {
+            return false;
+        }
+        for (const auto& prior : std::span(impl.eventSites).first(i)) {
+            if (prior.region == row.region
+                && (prior.ordinal == row.ordinal || prior.location != row.location)) {
+                return false;
+            }
+        }
+        lua_pop(state, 1);
+    }
+    lua_pop(state, 1);
+    return true;
+}
+
 /** Captures immutable callback references while table access remains inside lua_pcall. */
 [[nodiscard]] int capture_program(lua_State* state) {
     Impl* const impl = impl_from_state(state);
@@ -217,6 +280,10 @@ static_assert(std::size(api::kEvents) == host::kEventKindCount);
     if (!capture_initial_state(state, 1, *impl)) {
         return luaL_error(state,
                           "initial_state must be a generated state with an integer region_index");
+    }
+    if (!capture_event_sites(state, *impl)) {
+        return luaL_error(state,
+                          "public_events must list named sites with distinct regional ordinals");
     }
     if (!capture_seed_omit(state, 1, *impl)) {
         return luaL_error(state, "seed_omit must be a list of generated slots");

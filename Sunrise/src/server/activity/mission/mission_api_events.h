@@ -789,8 +789,23 @@ inline constexpr ValueSpec kInitialStateFields[]{
      .note = "objects kept out of every seed"},
 };
 
+/** A playable site in the mission's regional rotation. */
+inline constexpr ValueSpec kLauncherSiteFields[]{
+    {.name = "region", .kind = ValueKind::integer},
+    {.name = "site", .kind = ValueKind::integer},
+    {.name = "location", .kind = ValueKind::string},
+    {.name = "name", .kind = ValueKind::string},
+};
+inline constexpr ValueSpec kLauncherSite[]{
+    {.kind = ValueKind::table, .fields = kLauncherSiteFields}};
+
 /** Keys of the table a mission chunk returns, beside the event callbacks. */
 inline constexpr ValueSpec kProgramEntries[]{
+    {.name = "public_events",
+     .kind = ValueKind::list,
+     .optional = true,
+     .element = kLauncherSite,
+     .note = "playable sites offered by the Event Launcher"},
     {.name = "initial_state",
      .kind = ValueKind::table,
      .ref = "mission.states",

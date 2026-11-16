@@ -15,7 +15,9 @@ bool exchange(Vm& first, Vm& second) noexcept {
         return false;
     }
     const auto members = [](Impl& value) noexcept {
-        auto& [attempt,
+        auto& [eventSites,
+               eventRequest,
+               attempt,
                deviceRequests,
                deviceRequestSources,
                squadPopulations,
@@ -60,7 +62,9 @@ bool exchange(Vm& first, Vm& second) noexcept {
                hasInitialState,
                active,
                faulted] = value;
-        return std::tie(attempt,
+        return std::tie(eventSites,
+                        eventRequest,
+                        attempt,
                         deviceRequests,
                         deviceRequestSources,
                         squadPopulations,
@@ -130,6 +134,7 @@ bool copy_inputs(const Vm& source, Vm& prepared) noexcept {
         return false;
     }
     to.attempt = from.attempt;
+    to.eventRequest = from.eventRequest;
     to.ghostLevels = from.ghostLevels;
     to.ghostLevelCount = from.ghostLevelCount;
     to.objectiveLevels = from.objectiveLevels;

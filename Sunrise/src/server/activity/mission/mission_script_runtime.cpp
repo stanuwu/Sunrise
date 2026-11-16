@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <limits>
@@ -31,6 +32,7 @@
 #include "mission_script_runtime_internal.h"
 #include "mission_script_variable_log.h"
 #include "mission_script_vm.h"
+#include "mission_script_vm_internal.h"
 
 namespace sunrise::server::activity::mission {
 
@@ -483,6 +485,122 @@ RuntimeInstance* free_instance() noexcept {
     }
     return nullptr;
 }
+
+namespace event_launcher {
+namespace {
+using lua_vm::detail::Impl;
+using lua_vm::detail::VmAccess;
+
+/** Launcher progress is visible only after the host commits the script variables. */
+const mission_state::VariableValue*
+variable(const Impl& vm, int region, const char* name) noexcept {
+    std::array<char, mission_state::kStateKeyByteCapacity> key{};
+    const int size = std::snprintf(key.data(), key.size(), "z%d.%s", region, name);
+    if (size <= 0 || static_cast<std::size_t>(size) >= key.size()) {
+        return nullptr;
+    }
+    const std::string_view scoped(key.data(), static_cast<std::size_t>(size));
+    for (const auto& row : std::span(vm.variables).first(vm.variableCount)) {
+        if (std::string_view(row.key.bytes.data(), row.key.length) == scoped) {
+            return &row.value;
+        }
+    }
+    return nullptr;
+}
+
+std::int64_t number(const Impl& vm, int region, const char* name, int fallback = 0) noexcept {
+    const auto* value = variable(vm, region, name);
+    return value && value->kind == mission_state::VariableValueKind::integer ? value->integerValue
+                                                                             : fallback;
+}
+
+/** A public link that never confirmed arrival is ineligible even if it shares the region. */
+bool owns(const RuntimeInstance& instance, int region) noexcept {
+    const auto& vm = VmAccess::get(instance.vm);
+    return region >= 0 && instance.occupied && instance.publicTarget && vm.active && !vm.faulted
+           && number(vm, region, "event_region", -1) == region;
+}
+} // namespace
+
+void read(const state::activity::SessionBinding& local, int region, Menu& menu) noexcept {
+    menu = {};
+    AcquireSRWLockShared(&g_lock);
+    if (const auto* source = find_instance(local)) {
+        menu.scriptFailed = source->programStatus == ProgramStatus::programError
+                            || source->programStatus == ProgramStatus::fileError
+                            || source->programStatus == ProgramStatus::sourceTooLarge;
+        const auto& sites = VmAccess::get(source->vm).eventSites;
+        menu.count = sites.size();
+        std::copy(sites.begin(), sites.end(), menu.sites.begin());
+        const RuntimeInstance* owner = nullptr;
+        for (const auto& candidate : g_instances) {
+            if (!owns(candidate, region) || candidate.playerKey != source->playerKey
+                || candidate.view.activityRow != source->view.activityRow
+                || candidate.view.catalog != source->view.catalog) {
+                continue;
+            }
+            if (owner) {
+                owner = nullptr;
+                break;
+            }
+            owner = &candidate;
+        }
+        if (owner) {
+            const auto& vm = VmAccess::get(owner->vm);
+            // The public host's declarations decide which ordinals it can actually run.
+            menu.count = vm.eventSites.size();
+            std::copy(vm.eventSites.begin(), vm.eventSites.end(), menu.sites.begin());
+            menu.owner = owner->view.binding;
+            menu.request = vm.eventRequest;
+            menu.currentSite = static_cast<int>(number(vm, region, "event_current"));
+            menu.acknowledged = number(vm, region, "event_request_seen");
+            const auto rallyEnd = number(vm, region, "event_rally_end");
+            const auto now = static_cast<std::int64_t>(GetTickCount64());
+            if (rallyEnd > now) {
+                menu.rallySeconds = std::chrono::duration_cast<std::chrono::seconds>(
+                                        std::chrono::milliseconds{rallyEnd - now})
+                                        .count();
+            }
+            const auto* manual = variable(vm, region, "manual_event");
+            menu.manual = manual && manual->kind == mission_state::VariableValueKind::boolean
+                          && manual->booleanValue;
+            const auto* phase = variable(vm, region, "event_status");
+            if (phase && phase->kind == mission_state::VariableValueKind::string) {
+                const auto n = (std::min)(static_cast<std::size_t>(phase->stringLength),
+                                          menu.phase.size() - 1);
+                std::copy_n(phase->stringValue.begin(), n, menu.phase.begin());
+            }
+        }
+    }
+    ReleaseSRWLockShared(&g_lock);
+}
+
+bool submit(const state::activity::SessionBinding& owner,
+            int region,
+            int site,
+            int delaySeconds) noexcept {
+    if (delaySeconds < 0 || delaySeconds > kMaxRallySeconds) {
+        return false;
+    }
+    AcquireSRWLockExclusive(&g_lock);
+    bool accepted = false;
+    auto* instance = find_instance(owner);
+    if (instance && owns(*instance, region) && state::activity::binding_matches(owner)) {
+        auto& vm = VmAccess::get(instance->vm);
+        const bool known = std::ranges::any_of(vm.eventSites, [=](const Site& row) {
+            return row.region == region && row.ordinal == site;
+        });
+        const auto last =
+            (std::max)(vm.eventRequest.serial, number(vm, region, "event_request_seen"));
+        if ((known || site == 0) && last < (std::numeric_limits<std::int64_t>::max)()) {
+            vm.eventRequest = {last + 1, region, site, delaySeconds};
+            accepted = true;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+    return accepted;
+}
+} // namespace event_launcher
 
 /** Copies one committed authoritative snapshot into the runtime's exact compare baseline. */
 void accept_mission_state(RuntimeInstance& instance,

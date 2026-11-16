@@ -325,6 +325,8 @@ int protected_callback(lua_State* state) {
 
 /** Closes Lua before resetting the allocator that owns its objects. */
 void destroy_state(Impl& impl) noexcept {
+    impl.eventSites.clear();
+    impl.eventRequest = {};
     if (impl.state != nullptr) {
         lua_close(impl.state);
         impl.arenaBytesAfterClose = impl.arena.used;
