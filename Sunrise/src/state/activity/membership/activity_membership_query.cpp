@@ -30,6 +30,12 @@ auto selected_member(Record& record) noexcept -> decltype(member_state(record, 0
                                    context.sessionId == record.sessionId ? context.memberKey : 0,
                                    account_primary_soid(account)));
 }
+/** @return True when an armed teleport names the region the client now holds. */
+[[nodiscard]] bool teleport_arrived(const MembershipState& membership) noexcept {
+    return membership.hasHostTeleport && membership.hostTeleport.state == kHostTeleportArmedState
+           && membership.currentRegion.index == membership.hostTeleport.sliceSetIndex;
+}
+
 } // namespace
 
 bool snapshot_mission_party(const SessionBinding& binding,
@@ -349,13 +355,61 @@ bool host_teleport_armed(std::uint64_t sessionId) noexcept {
     const std::size_t target = activity::transactions::find_session(state, sessionId);
     if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
         const MembershipState& membership = *selected_member(state.sessions[target]);
-        // The spawn state is the arm after the client has moved. It still rides every body, but it
-        // is no longer waiting on anything, so it must not keep forcing revisions.
-        armed =
-            membership.hasHostTeleport && membership.hostTeleport.state != kHostTeleportSpawnState;
+        // Once the client names the region as its pending or current leg it has the move, and
+        // the arm still rides every body, so it must not keep forcing revisions.
+        const std::int32_t region = membership.hostTeleport.sliceSetIndex;
+        armed = membership.hasHostTeleport
+                && membership.hostTeleport.state != kHostTeleportSpawnState
+                && membership.region.index != region && membership.currentRegion.index != region;
     }
     ReleaseSRWLockShared(&runtime::storage::g_stateLock);
     return armed;
+}
+
+/** Raises an armed host teleport to its spawn state once the client holds the region it names. */
+bool raise_host_teleport_spawn(std::uint64_t sessionId) noexcept {
+    if (sessionId == kAbsentSessionId) {
+        return false;
+    }
+    // Every delivered roster asks, and almost none finds an arrived teleport.
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& current = runtime::storage::g_state.activity;
+    const std::size_t row = activity::transactions::find_session(current, sessionId);
+    const bool arrived = row != kInvalidSessionSlot
+                         && selected_member(current.sessions[row]) != nullptr
+                         && teleport_arrived(*selected_member(current.sessions[row]));
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    if (!arrived) {
+        return false;
+    }
+    bool raised = false;
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr
+        && teleport_arrived(*selected_member(state.sessions[target]))) {
+        // The client's step 3 runs the spawn only while the host state reads 3. Step 0 refuses
+        // to re-latch on 3, so raising the arm cannot start a second move.
+        selected_member(state.sessions[target])->hostTeleport.state = kHostTeleportSpawnState;
+        raised = true;
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    return raised;
+}
+
+bool host_teleport_in_flight(std::uint64_t sessionId) noexcept {
+    if (sessionId == kAbsentSessionId) {
+        return false;
+    }
+    bool inFlight = false;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        inFlight = selected_member(state.sessions[target])->hasHostTeleport;
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return inFlight;
 }
 
 /** Reads the pending region the client last reported. */

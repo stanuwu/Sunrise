@@ -4,6 +4,7 @@
 #include <span>
 
 #include "../../../middleware/bap/activity_message/sense_update.h"
+#include "../../../middleware/content/packages/schema/generated/tag_classes_808094.h"
 
 // Reads one decoded type-70 engagement report into a membership snapshot. The report lists the
 // player keys the client admitted; whether the bound player is among them is the only membership
@@ -12,8 +13,10 @@
 namespace sunrise::server::activity::mission::engagement_observation {
 
 /** Root and list schemas the Sense body decoder records the report under. */
-inline constexpr std::uint32_t kRootSchema = 0x808094F0U;
-inline constexpr std::uint32_t kListSchema = 0x808094F8U;
+inline constexpr std::uint32_t kRootSchema =
+    middleware::content::packages::schema::generated::C808094f0::kClass;
+inline constexpr std::uint32_t kListSchema =
+    middleware::content::packages::schema::generated::C808094f8::kClass;
 /** List ordinal 0 is the five-bit count; ordinal 1 the key array, one occurrence per key. */
 inline constexpr std::uint16_t kCountOrdinal = 0;
 inline constexpr std::uint16_t kKeyOrdinal = 1;

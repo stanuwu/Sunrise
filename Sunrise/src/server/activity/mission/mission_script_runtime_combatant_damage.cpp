@@ -38,6 +38,10 @@ void push_damage_state(RuntimeInstance& instance,
     event.damageHealth = level.primary;
     event.damageShield = level.secondary;
     event.damageRevision = level.revision;
+    // Only the Type-2 Sense reports the lifecycle flags; an entity row carries the pools alone.
+    event.damageLifecycleKnown = key.senseSchema != 0;
+    event.damageSuppressed = level.suppressed;
+    event.damageFirstAuthApplied = level.firstAuthApplied;
     std::array<char, 128> details{};
     const int written = std::snprintf(details.data(),
                                       details.size(),

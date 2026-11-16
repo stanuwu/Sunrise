@@ -34,7 +34,9 @@ namespace sunrise::server::activity::mission::sdk_bridge::combat_objective {
     output = {slotRow,
               groupIndex,
               objects[slots[slotRow].objectIndex].objectKey,
-              static_cast<std::uint16_t>(slots[slotRow].slotIndex)};
+              static_cast<std::uint16_t>(slots[slotRow].slotIndex),
+              found->taskCount,
+              found->tasks};
     return true;
 }
 

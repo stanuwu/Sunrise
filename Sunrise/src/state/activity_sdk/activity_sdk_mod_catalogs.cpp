@@ -113,25 +113,36 @@ std::shared_ptr<const std::vector<Snapshot>> mod_catalogs() noexcept {
     return g_mods.load(std::memory_order_acquire);
 }
 
-/** Reads the public flag from the pack's state rows; see runtime.h. */
-bool mod_region_is_public(const BoundView& view,
-                          std::int32_t effectiveRegion,
-                          bool& isPublic) noexcept {
-    isPublic = false;
+namespace {
+
+/** @return The one state of the bound scenario that owns an effective region, or null. */
+[[nodiscard]] const format::State* region_state(const BoundView& view,
+                                                std::int32_t effectiveRegion) noexcept {
     const format::Scenario* const scenario = bound_scenario(view);
     if (scenario == nullptr || effectiveRegion < 0) {
-        return false;
+        return nullptr;
     }
     const auto region = static_cast<std::uint32_t>(effectiveRegion);
     const format::State* owner = nullptr;
     for (const format::State& state : scenario_states(*view.catalog, *scenario)) {
         if (state.sliceSetIndex + state.stateOrdinal == region) {
             if (owner != nullptr) {
-                return false;
+                return nullptr;
             }
             owner = &state;
         }
     }
+    return owner;
+}
+
+} // namespace
+
+/** Reads the public flag from the pack's state rows; see runtime.h. */
+bool mod_region_is_public(const BoundView& view,
+                          std::int32_t effectiveRegion,
+                          bool& isPublic) noexcept {
+    isPublic = false;
+    const format::State* const owner = region_state(view, effectiveRegion);
     if (owner == nullptr) {
         return false;
     }
@@ -140,6 +151,18 @@ bool mod_region_is_public(const BoundView& view,
         return false;
     }
     isPublic = (states.front().publicValue & kPublicFlagMask) != 0;
+    return true;
+}
+
+bool state_region_is_public(const BoundView& view,
+                            std::int32_t effectiveRegion,
+                            bool& isPublic) noexcept {
+    isPublic = false;
+    const format::State* const owner = region_state(view, effectiveRegion);
+    if (owner == nullptr) {
+        return false;
+    }
+    isPublic = (owner->publicValue & kPublicFlagMask) != 0;
     return true;
 }
 

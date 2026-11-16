@@ -30,6 +30,8 @@ struct HostSession {
     std::uint32_t references{};
     bool occupied{};
     bool publicRegion{};
+    /** Compatible launches may join this public row. */
+    bool pooled{};
 };
 
 // The table must outsize the directory a body carries, because the previous body's rows are still
@@ -197,8 +199,10 @@ HostSessionState request_host_session(std::uint64_t groupSessionId,
                                       const state::activity::SessionBinding& source,
                                       std::int32_t regionIndex,
                                       HostSessionBinding& output,
-                                      bool publicRegion) noexcept {
+                                      RegionHost host) noexcept {
     output = {};
+    const bool publicRegion = host != RegionHost::source;
+    const bool pooled = host == RegionHost::sharedPublic;
     if (groupSessionId == 0 || regionIndex < 0 || !state::activity::retain_binding(source)) {
         return HostSessionState::absent;
     }
@@ -214,16 +218,16 @@ HostSessionState request_host_session(std::uint64_t groupSessionId,
     for (HostSession& row : g_hostSessions) {
         if (row.occupied
             && (row.binding.groupSessionId == groupSessionId
-                || (publicRegion && row.publicRegion && row.binding.regionIndex == regionIndex
+                || (pooled && row.pooled && row.binding.regionIndex == regionIndex
                     && compatible_destination(row.binding.source.destination,
                                               source.destination)))) {
             matching = &row;
             break;
         }
     }
-    if (matching != nullptr && matching->publicRegion == publicRegion
+    if (matching != nullptr && matching->publicRegion == publicRegion && matching->pooled == pooled
         && (same_binding(matching->binding.source, source)
-            || (publicRegion
+            || (pooled
                 && compatible_destination(matching->binding.source.destination,
                                           source.destination)))
         && matching->binding.regionIndex == regionIndex) {
@@ -260,6 +264,7 @@ HostSessionState request_host_session(std::uint64_t groupSessionId,
             target->binding.previous = previous;
             target->binding.source = source;
             target->publicRegion = publicRegion;
+            target->pooled = pooled;
             if (publicRegion) {
                 target->sources[0] = source;
             }

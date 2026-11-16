@@ -55,6 +55,8 @@ enum class FieldGroupId : std::uint8_t {
     senseGeneration,
     squadRemoval,
     triggerLevel,
+    hopOn,
+    squadMemberLoss,
     integration,
     engagement,
     count,
@@ -248,7 +250,9 @@ inline constexpr MemberSpec kSquadStateFields[]{
      .arguments = kTaskGroupQueryArguments,
      .returns = kTaskGroupReturns,
      .note = "the group the squad holds for this objective"},
-    field("slot_counts", kIntegerList),
+    field("slot_counts",
+          kIntegerList,
+          "members each slot has lost since its placement; a new spawn generation clears them"),
     field("initial_observation", kBoolean, "the first report of this squad; never a death"),
     field("population_available",
           kBoolean,
@@ -256,6 +260,10 @@ inline constexpr MemberSpec kSquadStateFields[]{
     field("objective_revision",
           kInteger,
           "objective revision the squad echoed with its costs; 0 before any"),
+    field("alert_level",
+          kInteger,
+          "from the members' threat levels: 0 never alerted, 2 alerted, 3 in combat, 1 alerted "
+          "before with no member alerted now"),
     field("task_costs", kTaskCosts),
 };
 inline constexpr MemberSpec kEntitySpawnedFields[]{
@@ -296,8 +304,18 @@ inline constexpr MemberSpec kActorPathFields[]{
     field("revision", kInteger),
     field("path_state", kInteger),
     field("delivery_revision", kOptionalInteger, "nil until the delivery is known"),
-    field("delivery_state", kOptionalInteger, "nil until the delivery is known"),
+    field("delivery_state",
+          kOptionalInteger,
+          "nil until the delivery is known; 0 once the actor holds no passenger left to unload"),
     field("suppressed", kBoolean),
+    field("request_key",
+          kRequestKey,
+          "the run_atoms or retire_actor request whose program revision this report echoes; nil "
+          "when it echoes none of the last few"),
+    field("delivery_request_key",
+          kRequestKey,
+          "the deliver_passengers request whose manifest revision this report echoes; nil when it "
+          "echoes none of the last few"),
 };
 inline constexpr std::string_view kNotCarried = "nil when this report did not carry it";
 inline constexpr MemberSpec kDeviceFields[]{
@@ -327,6 +345,14 @@ inline constexpr MemberSpec kDamageFields[]{
     field("entity_incarnation", kOptionalInteger, "nil unless from_entity"),
     field("allocation_sequence", kOptionalInteger, "nil unless from_entity"),
     field("allocation_domain", kOptionalDecimal, "nil unless from_entity"),
+    field("suppressed",
+          kOptionalBoolean,
+          "a combatant's actor is suppressed, and health and shield read -1; nil for a reporter "
+          "other than a combatant's Sense"),
+    field("first_auth_applied",
+          kOptionalBoolean,
+          "a combatant applied its first Auth; health and shield read -1 until then; nil like "
+          "suppressed"),
 };
 inline constexpr MemberSpec kObjectFields[]{
     field("generation", kInteger),
@@ -350,6 +376,10 @@ inline constexpr MemberSpec kGhostLinkFields[]{
     field("progress", kNumber),
     field("active", kBoolean),
 };
+inline constexpr MemberSpec kHopOnFields[]{
+    field("attached", kBoolean, "at least one host carries the hop-on"),
+    field("request_key", kRequestKey, "the attach or detach request the client last applied"),
+};
 inline constexpr MemberSpec kSquadProvokedFields[]{
     field("registry_key", kInteger),
     field("slot_type", kInteger),
@@ -368,6 +398,13 @@ inline constexpr MemberSpec kSenseGenerationFields[]{
 };
 inline constexpr MemberSpec kSquadRemovalFields[]{
     field("removal_flag", kBoolean, "false when the report did not carry it")};
+inline constexpr MemberSpec kSquadMemberLossFields[]{
+    field("member_slot", kInteger),
+    field("lost_count",
+          kInteger,
+          "members this slot has lost since its placement; a new spawn generation clears it"),
+    field("previous_lost_count", kInteger),
+};
 inline constexpr MemberSpec kTriggerLevelFields[]{
     field("available", kBoolean, "the report carried a complete occupancy level"),
     field("continuity", kContinuity),
@@ -419,6 +456,8 @@ inline constexpr std::array<FieldGroup, static_cast<std::size_t>(FieldGroupId::c
         {"sense_generation", kSenseGenerationFields},
         {"squad_removal", kSquadRemovalFields},
         {"trigger_level", kTriggerLevelFields},
+        {"hop_on", kHopOnFields},
+        {"squad_member_loss", kSquadMemberLossFields},
         {"integration", kIntegrationFields},
         {"engagement", kEngagementFields},
     }};
@@ -485,6 +524,12 @@ inline constexpr const FieldGroup* kEntityDiedGroups[]{group(G::common),
                                                        group(G::senseGeneration),
                                                        group(G::squadAlive),
                                                        group(G::squadRemoval)};
+inline constexpr const FieldGroup* kSquadMemberLostGroups[]{group(G::common),
+                                                            group(G::missionSequence),
+                                                            group(G::slotIdentity),
+                                                            group(G::senseGeneration),
+                                                            group(G::squadMemberLoss),
+                                                            group(G::squadRemoval)};
 inline constexpr const FieldGroup* kSceneFinishedGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::sceneFinished)};
 inline constexpr const FieldGroup* kObjectiveProgressGroups[]{group(G::common),
@@ -510,6 +555,8 @@ inline constexpr const FieldGroup* kCinematicGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::cinematic)};
 inline constexpr const FieldGroup* kGhostLinkGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::ghostLink)};
+inline constexpr const FieldGroup* kHopOnGroups[]{
+    group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::hopOn)};
 inline constexpr const FieldGroup* kActorPathGroups[]{
     group(G::common), group(G::missionSequence), group(G::slotIdentity), group(G::actorPath)};
 inline constexpr const FieldGroup* kObjectGroups[]{group(G::common),
@@ -622,7 +669,8 @@ inline constexpr EventSpec kEvents[]{
      "ENTITY_SPAWNED",
      "on_event_entity_spawned",
      "SunriseEntitySpawnedEvent",
-     kEntitySpawnedGroups},
+     kEntitySpawnedGroups,
+     "not raised yet: no source reports a spawn; squad slot losses are squad_member_lost"},
     {22, "ENTITY_DIED", "on_event_entity_died", "SunriseEntityDiedEvent", kEntityDiedGroups},
     {23,
      "SCENE_FINISHED",
@@ -699,14 +747,21 @@ inline constexpr EventSpec kEvents[]{
      kTriggerStateGroups,
      "every accepted occupancy report and its counter continuity; it never changes when "
      "entered and exited fire"},
-    {43,
+    {43, "HOP_ON_STATE", "on_event_hop_on_state", "SunriseHopOnStateEvent", kHopOnGroups},
+    {44,
+     "SQUAD_MEMBER_LOST",
+     "on_event_squad_member_lost",
+     "SunriseSquadMemberLostEvent",
+     kSquadMemberLostGroups,
+     "a member slot's lost count rose; the client raises it as it tears down one of its actors"},
+    {45,
      "INTEGRATION",
      "on_event_integration",
      "SunriseIntegrationEvent",
      kIntegrationGroups,
      "one report from the Vex block's sacrifice trigger; how reports map to integrations is "
      "the script's policy"},
-    {44,
+    {46,
      "ENGAGEMENT_STATE",
      "on_event_engagement_state",
      "SunriseEngagementStateEvent",

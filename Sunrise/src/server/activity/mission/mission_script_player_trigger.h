@@ -27,10 +27,14 @@ struct Source final {
     std::uint8_t slotType{};
 };
 
-/** Resolves one type-31 incident and its generated type-60 target. */
+/**
+ * Resolves one type-31 incident and its generated type-60 target.
+ * @param region Region the volume's occurrence must lie in, or kAnyRegion.
+ */
 [[nodiscard]] ResolveStatus
 resolve(const state::build_data::scriptables::Snapshot& snapshot,
         const middleware::bap::activity_message::player_trigger_incident::Payload& payload,
-        Source& output) noexcept;
+        Source& output,
+        std::int32_t region) noexcept;
 
 } // namespace sunrise::server::activity::mission::player_trigger

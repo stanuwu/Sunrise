@@ -1,8 +1,12 @@
+#include "mission_script_runtime_objective.h"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <span>
+#include <vector>
 
 #include "mission_script_runtime_internal.h"
 
@@ -18,10 +22,10 @@ constexpr std::int32_t kObjectiveTaskCountLimit = 80;
 namespace sense_values = middleware::bap::activity_message::sense_update;
 
 /** @return The retained record for one objective sensor, allocating on a first observation. */
-[[nodiscard]] ObjectiveObservation* find_objective(RuntimeInstance& instance,
-                                                   const host::SenseObservationKey& key) noexcept {
-    ObjectiveObservation* spare = nullptr;
-    for (ObjectiveObservation& retained : instance.objectiveObservations) {
+[[nodiscard]] ObjectiveLevelRow* find_objective(RuntimeInstance& instance,
+                                                const host::SenseObservationKey& key) noexcept {
+    ObjectiveLevelRow* spare = nullptr;
+    for (ObjectiveLevelRow& retained : instance.objectiveObservations) {
         if (retained.used && retained.registryKey == key.registryKey
             && retained.objectTag == key.objectTag && retained.slotIndex == key.slotIndex) {
             return &retained;
@@ -104,6 +108,7 @@ void objective_task_counters(std::span<const sense_values::DecodedValue> body,
  */
 void push_objective_edges(RuntimeInstance& instance,
                           const host::SenseObservationSnapshot& sense) noexcept {
+    bool changed = false;
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
         if (observation.key.slotType != format::kObjectiveSlotType
@@ -120,10 +125,12 @@ void push_objective_edges(RuntimeInstance& instance,
         if (counters.blocks == 0) {
             continue;
         }
-        ObjectiveObservation* const watched = find_objective(instance, observation.key);
+        ObjectiveLevelRow* const watched = find_objective(instance, observation.key);
         if (watched == nullptr) {
             continue;
         }
+        // A row handed to another link drops the counters the script could read.
+        changed = changed || (watched->used && watched->sourceGeneration != sense.sourceGeneration);
         claim_row(*watched, sense.sourceGeneration, false);
         const bool first = !watched->used;
         watched->used = true;
@@ -134,7 +141,10 @@ void push_objective_edges(RuntimeInstance& instance,
                 }
                 const std::uint8_t value = counters.value[block][task];
                 const std::uint8_t previous = watched->counters[block][task];
+                const std::uint32_t taskBit = std::uint32_t{1} << task;
+                changed = changed || value != previous || (watched->known[block] & taskBit) == 0;
                 watched->counters[block][task] = value;
+                watched->known[block] |= taskBit;
                 if (first || value <= previous) {
                     continue;
                 }
@@ -148,6 +158,14 @@ void push_objective_edges(RuntimeInstance& instance,
             }
         }
     }
+    if (changed) {
+        publish_objective_levels(instance);
+    }
+}
+
+/** Hands the VM the retained objective task counters. */
+void publish_objective_levels(RuntimeInstance& instance) noexcept {
+    lua_vm::publish_objective_levels(instance.vm, instance.objectiveObservations);
 }
 
 } // namespace sunrise::server::activity::mission

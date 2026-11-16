@@ -30,11 +30,16 @@ begin_placed_transition(const state::activity_sdk::BoundView&,
 void cancel_placed_transition(const state::activity::SessionBinding&,
                               std::uint64_t generation,
                               std::uint64_t transition = 0) noexcept;
-/** The authenticated abdication freezes exact identities before a later renewal can retire them. */
+/**
+ * An authenticated abdication (msg 33) or abandonment (msg 26) freezes exact identities before a
+ * later purge can retire them.
+ * @param abandoned The release is an abandonment, which also captures the mission's objects.
+ */
 void observe_abdication(const state::activity::SessionBinding&,
                         std::uint64_t generation,
                         std::uint8_t bubble,
-                        const state::activity::bubble_authority::EntitySlotMask&) noexcept;
+                        const state::activity::bubble_authority::EntitySlotMask&,
+                        bool abandoned) noexcept;
 /** Returned slots cannot remain eligible for an earlier release. */
 void returned_slots(const state::activity::SessionBinding&,
                     std::uint64_t generation,
@@ -44,6 +49,14 @@ void returned_slots(const state::activity::SessionBinding&,
                                       std::uint64_t generation,
                                       std::uint8_t bubble,
                                       RetirementPlan&) noexcept;
+/**
+ * Prepares the purge of what this link released in a bubble its client has left.
+ * @param heldBubble Bubble the client holds a slice set in; its release waits for a renewal.
+ */
+[[nodiscard]] bool prepare_departed_retirement(const state::activity::SessionBinding&,
+                                               std::uint64_t generation,
+                                               std::uint8_t heldBubble,
+                                               RetirementPlan&) noexcept;
 /** Publication must revalidate the exact staged source, mask, and revision. */
 [[nodiscard]] bool validate_retirement(const state::activity::SessionBinding&,
                                        std::uint64_t generation,
@@ -55,9 +68,14 @@ void returned_slots(const state::activity::SessionBinding&,
                                                 entity_identities::PublicationLease&) noexcept;
 /** Commits only after the complete carrying transport publication succeeds. */
 void commit_retirement(const RetirementPlan&) noexcept;
-/** Authored opt-in becomes eligible only after its positive Auth body was delivered. */
+/**
+ * Authored opt-in becomes eligible only after its positive Auth body was delivered.
+ * @param generation The publishing link's generation; the target is recorded under that link.
+ * @param ownerGeneration The generation the body was authorized for.
+ */
 void record_delivered_target(const state::activity::SessionBinding&,
                              std::uint64_t generation,
+                             std::uint64_t ownerGeneration,
                              const activity::host::PendingScriptableOverride&) noexcept;
 /**
  * Moves a squad's target to the link that delivered its body while that link is live, else to the

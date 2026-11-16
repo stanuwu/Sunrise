@@ -1,11 +1,34 @@
 #pragma once
 
 #include <algorithm>
+#include <span>
 
 #include "../../../middleware/bap/activity_message/squad_objective_state.h"
 #include "mission_script_runtime_internal.h"
 
 namespace sunrise::server::activity::mission {
+
+/**
+ * Reads the objective assignment last transported to one squad slot.
+ * @return False when the estate holds no readable body for the slot.
+ */
+[[nodiscard]] inline bool
+transported_objective(std::span<const host::PendingScriptableOverride> estate,
+                      std::uint32_t registryKey,
+                      std::uint32_t objectTag,
+                      std::uint16_t slotIndex,
+                      std::uint32_t slotType,
+                      middleware::bap::activity_message::squad_objective::State& output) noexcept {
+    for (const auto& retained : estate) {
+        const auto& target = retained.target;
+        if (target.registryKey == registryKey && target.objectTag == objectTag
+            && target.slotIndex == slotIndex && target.slotType == slotType) {
+            return middleware::bap::activity_message::squad_objective::read_state(
+                std::span(retained.body).first(retained.byteCount), retained.bitCount, output);
+        }
+    }
+    return false;
+}
 
 /**
  * Qualifies reported costs against the exact transported objective and evaluation revision. Only
@@ -14,7 +37,6 @@ namespace sunrise::server::activity::mission {
  */
 [[nodiscard]] inline bool qualify_objective_costs(RuntimeInstance& instance,
                                                   host::Event& event) noexcept {
-    namespace objective = middleware::bap::activity_message::squad_objective;
     const auto pins = pass_pins(instance);
     if (std::none_of(pins.begin(), pins.end(), [&event](const host::ScriptablePin& pin) noexcept {
             return pin.registryKey == event.firstRegistryKey && pin.objectTag == event.slotObjectTag
@@ -25,24 +47,18 @@ namespace sunrise::server::activity::mission {
     if (!copy_estate(instance)) {
         return false;
     }
-    for (const auto& retained : instance.estate) {
-        const auto& target = retained.target;
-        if (target.registryKey != event.firstRegistryKey || target.objectTag != event.slotObjectTag
-            || target.slotIndex != event.firstSlotIndex || target.slotType != event.firstSlotType) {
-            continue;
-        }
-        objective::State assignment{};
-        if (objective::read_state(std::span(retained.body).first(retained.byteCount),
-                                  retained.bitCount,
-                                  assignment)) {
-            event.squadObjectiveRegistryKey = assignment.registryKey;
-            event.squadObjectiveSlotIndex = assignment.objectiveIndex;
-            event.squadObjectiveTaskGroup = assignment.taskGroup;
-            event.squadObjectiveCostQualified =
-                event.squadObjectiveRevision != 0
-                && assignment.revision == event.squadObjectiveRevision;
-        }
-        return true;
+    middleware::bap::activity_message::squad_objective::State assignment{};
+    if (transported_objective(instance.estate,
+                              event.firstRegistryKey,
+                              event.slotObjectTag,
+                              event.firstSlotIndex,
+                              event.firstSlotType,
+                              assignment)) {
+        event.squadObjectiveRegistryKey = assignment.registryKey;
+        event.squadObjectiveSlotIndex = assignment.objectiveIndex;
+        event.squadObjectiveTaskGroup = assignment.taskGroup;
+        event.squadObjectiveCostQualified = event.squadObjectiveRevision != 0
+                                            && assignment.revision == event.squadObjectiveRevision;
     }
     return true;
 }

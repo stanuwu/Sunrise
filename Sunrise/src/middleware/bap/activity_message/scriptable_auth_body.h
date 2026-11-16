@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <variant>
 
@@ -27,11 +28,13 @@ inline constexpr std::uint32_t kType2SenseSchema = generated::C80807da2::kClass;
 inline constexpr std::uint32_t kType2Schema = generated::C80807da1::kClass;
 inline constexpr std::size_t kType2ChannelCapacity = 16;
 inline constexpr std::size_t kType2TemperamentCapacity = 6;
-/** Fixed bits around the variable 64-bit channel rows. */
+/** Fixed bits around the variable 64-bit channel rows, with `.0` absent. */
 inline constexpr std::size_t kType2ChannelBaseBitCount = 149;
 inline constexpr std::size_t kType2ChannelRowBitCount = 64;
+/** A present `.0` adds its 31-bit spawn revision after the presence bit. */
+inline constexpr std::size_t kType2SpawnRevisionBitCount = 31;
 inline constexpr std::size_t kType2MaximumChannelBitCount =
-    kType2ChannelBaseBitCount + kType2TemperamentCapacity * 32U
+    kType2ChannelBaseBitCount + kType2SpawnRevisionBitCount + kType2TemperamentCapacity * 32U
     + kType2ChannelCapacity * kType2ChannelRowBitCount;
 /** Buffer the channel set needs at the full temperament and channel counts. */
 inline constexpr std::size_t kType2MaximumChannelByteCount = (kType2MaximumChannelBitCount + 7) / 8;
@@ -61,6 +64,11 @@ struct Type2ChannelState final {
     std::array<TemperamentId, kType2TemperamentCapacity> temperaments{};
     std::array<Type2Channel, kType2ChannelCapacity> channels{};
     std::uint32_t revision{};
+    /**
+     * `.0`, the actor's spawn revision. The client takes any change as a spawn edge and reads an
+     * absent `.0` as zero, so a body sent after a spawn must repeat it; zero leaves it absent.
+     */
+    std::uint32_t spawnGeneration{};
     std::uint8_t temperamentCount{};
     std::uint8_t count{};
     Type2ActorBinding actorBinding{Type2ActorBinding::selfOwned};
@@ -173,24 +181,43 @@ inline constexpr std::size_t kType2MaximumBodyBitCount =
 /** Same size padded up to whole bytes. */
 inline constexpr std::size_t kType2MaximumBodyByteCount = (kType2MaximumBodyBitCount + 7) / 8;
 
-/** Full Auth also permits spawn generation, eight keyed rows and eight manifest references. */
+/** Squad references one `.7` passenger manifest carries at most. */
+inline constexpr std::size_t kType2ManifestCapacity = 8;
+
+/** Full Auth also permits eight keyed rows and eight manifest references. */
 inline constexpr std::size_t kType2FullMaximumBitCount =
-    kType2MaximumBodyBitCount + 31U + (1U + 8U * (1U + 32U + 1U + 31U) + 1U + 32U)
-    + (4U + 8U * 55U + 31U);
+    kType2MaximumBodyBitCount + (1U + 8U * (1U + 32U + 1U + 31U) + 1U + 32U)
+    + (4U + kType2ManifestCapacity * 55U + 31U);
 inline constexpr std::size_t kType2FullMaximumByteCount = (kType2FullMaximumBitCount + 7U) / 8U;
 
 /** Exact retained spans around `.6`; all other root fields remain byte-for-byte unchanged. */
 struct Type2ProgramLayout final {
     std::size_t controlOffset{};
+    /** Start of `.5`, the actor controls. */
+    std::size_t channelsOffset{};
     std::size_t programOffset{};
     std::size_t programBits{};
+    /** Squads the `.7` manifest names, as logical type-1 ClientRefs. */
+    std::array<Type2LaneClientRef, kType2ManifestCapacity> deliverySources{};
     std::uint32_t spawnGeneration{};
     std::uint32_t generation{};
+    /** `.5` revision; zero while `.5` is absent. */
+    std::uint32_t controlRevision{};
+    std::uint8_t temperamentCount{};
+    std::uint8_t channelCount{};
+    /** Lanes of the `.6` program; zero while `.6` is absent. */
+    std::uint8_t laneCount{};
+    /** Manifest revision; zero while `.7` is absent. */
+    std::uint32_t deliveryRevision{};
+    std::uint8_t deliveryCount{};
     std::uint8_t bindingWire{};
     bool enabled{};
 };
 
-/** Replaces a program and owns the counters for actor creation or retirement. */
+/**
+ * Replaces a program and owns the counters for actor creation or retirement. A creating program
+ * whose `.5` names a temperament or channel gives the new life those controls.
+ */
 [[nodiscard]] bool replace_type2_atoms(std::span<const std::byte> previous,
                                        std::size_t previousBits,
                                        std::span<const std::byte> program,
@@ -205,10 +232,48 @@ struct Type2ProgramLayout final {
                                        std::uint32_t& spawnGeneration,
                                        bool retire = false) noexcept;
 
+/**
+ * Replaces only `.5` on an enabled actor: the root, program and passengers are kept bit for bit.
+ * @param controls A body whose `.5` holds the complete controls; its revision is a placeholder.
+ * @param revision Receives the control revision written, one above the transported one.
+ */
+[[nodiscard]] bool replace_type2_controls(std::span<const std::byte> previous,
+                                          std::size_t previousBits,
+                                          std::span<const std::byte> controls,
+                                          std::size_t controlsBits,
+                                          std::span<std::byte> output,
+                                          std::size_t& written,
+                                          std::size_t& writtenBits,
+                                          std::uint32_t& revision) noexcept;
+
+/**
+ * Replaces only `.7` on an enabled actor: the root, controls and program are kept bit for bit.
+ * @param manifest A body whose `.7` names at least one squad; its counters are placeholders.
+ * @param committedRevision Last manifest revision the Host committed for this actor.
+ * @param revision Receives the manifest revision written, one above every earlier one.
+ */
+[[nodiscard]] bool replace_type2_delivery(std::span<const std::byte> previous,
+                                          std::size_t previousBits,
+                                          std::span<const std::byte> manifest,
+                                          std::size_t manifestBits,
+                                          std::uint32_t committedRevision,
+                                          std::span<std::byte> output,
+                                          std::size_t& written,
+                                          std::size_t& writtenBits,
+                                          std::uint32_t& revision) noexcept;
+
 /** Reads every full-root field using native bounded arrays and finite atom-lane tags. */
 [[nodiscard]] bool inspect_type2_program(std::span<const std::byte> input,
                                          std::size_t bitCount,
                                          Type2ProgramLayout& output) noexcept;
+
+/**
+ * Reads a body's `.5` with the root's ownership branch and spawn revision.
+ * @return False when the body is malformed, has no `.5`, or holds a field the set cannot carry.
+ */
+[[nodiscard]] bool read_type2_controls(std::span<const std::byte> input,
+                                       std::size_t bitCount,
+                                       Type2ChannelState& output) noexcept;
 
 /** Replaces only `.6`; a zero hash cancels the program on the enabled squad-bound actor. */
 [[nodiscard]] bool replace_type2_sequence(std::span<const std::byte> previous,
@@ -261,16 +326,15 @@ struct Type24Body final {
     std::uint8_t count{};
 };
 
-/** Encodes only the declared channel rows in their authored order. */
+/** Encodes only the declared channel rows; the host owns each row's revision. */
 [[nodiscard]] bool encode_type24(const Type24Body& body,
                                  std::span<std::byte> output,
                                  std::size_t& written,
                                  std::size_t& writtenBits) noexcept;
 
-/** Checks an output body against its SDK-recovered count and native value bounds. */
-[[nodiscard]] bool validate_type24_body(std::span<const std::byte> body,
-                                        std::size_t bitCount,
-                                        std::uint32_t channelCount) noexcept;
+/** Decodes the populated channel prefix and requires exact bit length and zero padding. */
+[[nodiscard]] bool
+decode_type24(std::span<const std::byte> input, std::size_t bitCount, Type24Body& body) noexcept;
 
 /** ClientRef slot type and Auth schema for the object-filter sensor. */
 inline constexpr std::uint8_t kType34SlotType = 34;
@@ -414,44 +478,22 @@ set_type2_channel(Type2ChannelState& state, std::uint32_t nameHash, float value)
 /** ClientRef slot type for an authored object entry. */
 inline constexpr std::uint8_t kType4SlotType = 4;
 inline constexpr std::uint32_t kType4Schema = generated::C8080992f::kClass;
-/** Canonical body with no transform override and no dynamic trailing entries. */
+/** Body with no position vector and no dynamic trailing entries; a location ClientRef fits. */
 inline constexpr std::size_t kType4BitCount = 252;
 inline constexpr std::size_t kType4ByteCount = (kType4BitCount + 7) / 8;
 /** Capture-plate component Auth carried as the object's one selected child. */
 inline constexpr std::uint32_t kType4CapturePlateSchema = generated::C80804df7::kClass;
 /** The canonical body plus a present bit, the 32-bit handle and the 160-bit plate body. */
 inline constexpr std::size_t kType4CapturePlateBitCount = kType4BitCount + 1 + 32 + 160;
-/** Timed component Auth the lane props read: an enable flag, a clock window and a flag. */
-inline constexpr std::uint32_t kType4TimedChildSchema = generated::C80804fca::kClass;
-inline constexpr std::size_t kType4TimedChildBodyBitCount = 1 + (1 + 5 * 64 + 32) + 1;
-inline constexpr std::size_t kType4TimedChildBitCount =
-    kType4BitCount + 1 + 32 + kType4TimedChildBodyBitCount;
 /** Object state-machine child: three lanes {sequence, snap revision, value}; lane 3 is position. */
 inline constexpr std::uint32_t kType4PositionChildSchema = generated::C80805063::kClass;
 inline constexpr std::size_t kType4PositionChildBodyBitCount = 9 * 32;
 inline constexpr std::size_t kType4PositionChildBitCount =
     kType4BitCount + 1 + 32 + kType4PositionChildBodyBitCount;
-static_assert(kType4PositionChildBitCount <= kType4TimedChildBitCount);
-inline constexpr std::size_t kType4MaximumByteCount = (kType4TimedChildBitCount + 7) / 8;
-
-/** Clock the timed child carries: present adds the child, running from epochTicks. */
-struct Type4TimedClock final {
-    /** Adds the optional child when true. */
-    bool present{};
-    /** Whole seconds remaining in the native timed window. */
-    std::int32_t remainingSeconds{};
-    /** Whole-second total of the native timed window. */
-    std::int32_t totalSeconds{};
-    /** Activity-clock ticks at which remainingSeconds was authored. */
-    std::uint64_t epochTicks{};
-    /** False writes the window paused at its current value. */
-    bool running{true};
-    /**
-     * Re-sends the object's current generation, so the client hands the child to the live
-     * object's components instead of rebuilding it; a newer generation respawns the object.
-     */
-    bool inPlace{};
-};
+static_assert(kType4CapturePlateBitCount <= kType4PositionChildBitCount);
+/** The position lane's sequence follows the root, the child header and two unchanged lanes. */
+inline constexpr std::size_t kType4PositionSequenceOffset = kType4BitCount + 1 + 32 + 6 * 32;
+inline constexpr std::size_t kType4MaximumByteCount = (kType4PositionChildBitCount + 7) / 8;
 
 /**
  * The object's own state-machine position lane (lane 3 of child 0x80805063), sent at the object's
@@ -460,7 +502,7 @@ struct Type4TimedClock final {
 struct Type4PositionChild final {
     /** Adds the optional child when true. */
     bool present{};
-    /** Lane sequence; the client applies the value only when it is newer than the last. */
+    /** Lane sequence, Host-owned; the client applies the value only when it is newer. */
     std::int32_t revision{};
     float value{};
     /** Snaps (no blend) by also advancing the lane's snap revision. */
@@ -473,25 +515,27 @@ struct Type4GenerationGuard final {
     bool hasLast{};
 };
 
-/** One authored object entry activation. The package owns the entry and its transform. */
+/**
+ * One authored object entry activation. The package owns the entry and its transform.
+ * A present location moves the spawn: the client places the entry at a squad's live-member
+ * centroid (identity rotation) or at a combatant's transform.
+ */
 struct Type4Preset final {
     std::int32_t generation{1};
     std::int32_t entryIndex{};
     bool active{true};
+    Type2LaneClientRef location{};
     /** Adds a plate component Auth whose stale revisions leave every plate field unchanged. */
     bool capturePlate{};
-    /** Adds the enabled timed component Auth with this clock; exclusive with capturePlate. */
-    Type4TimedClock timed{};
-    /** Adds the object state-machine child (position lane); exclusive with the other children. */
+    /** Adds the object state-machine child (position lane); exclusive with capturePlate. */
     Type4PositionChild position{};
 };
 
 /** @return The wire bit count encode_type4 produces for this preset. */
 [[nodiscard]] constexpr std::size_t type4_bit_count(const Type4Preset& preset) noexcept {
-    return preset.timed.present      ? kType4TimedChildBitCount
-           : preset.position.present ? kType4PositionChildBitCount
-           : preset.capturePlate     ? kType4CapturePlateBitCount
-                                     : kType4BitCount;
+    return preset.position.present ? kType4PositionChildBitCount
+           : preset.capturePlate   ? kType4CapturePlateBitCount
+                                   : kType4BitCount;
 }
 
 /** Finds the next positive authored-object generation without wrapping. */
@@ -849,9 +893,35 @@ struct Type5RevisionGuard final {
     bool hasLast{};
 };
 
-/** One authored sequence restart. */
+/**
+ * A sequence body's choice mask, four 32-bit lanes. Bit k is the k-th name across the sequence's
+ * choices in table order; each choice plays the highest set bit inside its own range.
+ */
+using Type5Choices = std::array<std::uint32_t, 4>;
+/** Choice bits one lane of the mask holds. */
+inline constexpr std::size_t kType5ChoiceLaneBits = std::numeric_limits<std::uint32_t>::digits;
+/** Choice bits the whole mask holds. */
+inline constexpr std::size_t kType5ChoiceCount =
+    std::tuple_size_v<Type5Choices> * kType5ChoiceLaneBits;
+
+/** @return The mask that selects exactly one choice bit, which must be below the count. */
+[[nodiscard]] constexpr Type5Choices type5_choice_mask(std::size_t choice) noexcept {
+    Type5Choices choices{};
+    choices[choice / kType5ChoiceLaneBits] = std::uint32_t{1} << (choice % kType5ChoiceLaneBits);
+    return choices;
+}
+
+/** What a script asks of a sequence: its choices, and whether the running one keeps going. */
+struct Type5Selection final {
+    Type5Choices choices{};
+    /** Keeps the committed revision, so the live sequence re-evaluates its choices in place. */
+    bool retain{};
+};
+
+/** One authored sequence start, or a choice change on the running one. */
 struct Type5Preset final {
     std::uint8_t revision{1};
+    Type5Selection selection{};
 };
 
 /** Last committed cinematic generation. */

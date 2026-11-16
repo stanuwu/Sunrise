@@ -5,6 +5,7 @@
 
 #include "mission_script_cinematic.h"
 #include "mission_script_player_trigger.h"
+#include "mission_script_region.h"
 #include "mission_script_runtime_internal.h"
 
 // Message-19 incidents resolved to their authored source slots.
@@ -12,7 +13,9 @@
 namespace sunrise::server::activity::mission {
 
 /** Resolves a native player-trigger notification to its authored type-31 source. */
-void push_player_trigger(RuntimeInstance& instance, const host::Event& incident) noexcept {
+void push_player_trigger(RuntimeInstance& instance,
+                         const host::Event& incident,
+                         std::int32_t region) noexcept {
     if (!incident.hasPlayerTrigger) {
         return;
     }
@@ -26,9 +29,13 @@ void push_player_trigger(RuntimeInstance& instance, const host::Event& incident)
     payload.slotIndex = incident.playerTriggerSlotIndex;
     payload.resolvedObjectId = incident.playerTriggerResolvedObjectId;
     player_trigger::Source source{};
-    const player_trigger::ResolveStatus status = player_trigger::resolve(*world, payload, source);
+    const player_trigger::ResolveStatus status =
+        player_trigger::resolve(*world, payload, source, region);
     if (status != player_trigger::ResolveStatus::ready) {
-        log_line(core::log::Level::warn,
+        // A public report handed to its owner mostly names free-roam volumes, so its miss is quiet.
+        const bool handedAbsent =
+            status == player_trigger::ResolveStatus::absent && region != kAnyRegion;
+        log_line(handedAbsent ? core::log::Level::debug : core::log::Level::warn,
                  &instance,
                  "player_trigger",
                  status == player_trigger::ResolveStatus::ambiguous        ? "ambiguous"

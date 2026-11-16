@@ -63,6 +63,17 @@ static_assert(bound_to<SceneDefinition>(api::kSceneMembers, kSceneBindings));
     intent.firstRow = definition.occurrenceRow;
     intent.secondRow = definition.slotRow;
     intent.active = optional_boolean_argument(state, boolean_option(kActivate, "spawn"));
+    if (push_argument(state, optional_key(kActivate, "initial_event", api::ValueKind::integer))
+        != LUA_TNIL) {
+        const lua_Integer key = luaL_checkinteger(state, -1);
+        if (key <= 0
+            || key >= static_cast<lua_Integer>(
+                   middleware::bap::activity_message::scene_events::kInvalidEventKey)) {
+            return luaL_error(state, "invalid initial scene event key");
+        }
+        intent.sceneEventKey = static_cast<std::uint32_t>(key);
+    }
+    lua_pop(state, 1);
     if (intent.active) {
         const auto& definitions = impl_from_state(state)->definitions;
         std::size_t count = 0;

@@ -20,6 +20,11 @@ namespace sunrise::server::gameplay::squad_entity_retirement {
 namespace {
 namespace policy = state::gameplay::squad_entity_retirement;
 namespace identities = state::gameplay::entity_identity;
+static_assert(policy::kSquadSourceType == state::activity_sdk::format::kSquadSlotType);
+static_assert(policy::kCombatantSourceType
+              == middleware::bap::activity_message::scriptable_auth::kType2SlotType);
+static_assert(policy::kObjectSourceType == state::activity_sdk::format::kObjectSlotType);
+using middleware::bap::activity_message::entity_slots::has_slot;
 SRWLOCK g_lock{SRWLOCK_INIT};
 policy::Store g_store;
 policy::Store g_propStore;
@@ -30,6 +35,31 @@ struct Target final {
     policy::Eligibility eligibility{};
 };
 std::vector<Target> g_targets;
+/** @return True for the deliveries that choose their actors' retirement. */
+bool chooses_retirement(const activity::host::PendingScriptableOverride& pending) {
+    using Kind = activity::host::ScriptableOverrideKind;
+    return (pending.kind == Kind::squad && pending.target.slotType == policy::kSquadSourceType)
+           || (pending.kind == Kind::combatantBinding
+               && pending.target.slotType == policy::kCombatantSourceType);
+}
+/**
+ * The retirement choice a delivery stands for. A placement or a combatant binding makes it; any
+ * other write to the same slot, such as an objective update, carries the choice already made in
+ * this session.
+ */
+policy::Eligibility delivered_choice(const state::activity::SessionBinding& binding,
+                                     const activity::host::PendingScriptableOverride& pending) {
+    if (chooses_retirement(pending)) {
+        return pending.squadRetirement;
+    }
+    const auto placed = std::find_if(g_targets.begin(), g_targets.end(), [&](const Target& row) {
+        return row.session == binding.sessionId && row.revision == binding.createdRevision
+               && row.eligibility.squad.key == pending.target.registryKey
+               && row.eligibility.squad.index == pending.target.slotIndex
+               && row.eligibility.squad.type == pending.target.slotType;
+    });
+    return placed != g_targets.end() ? placed->eligibility : policy::Eligibility{};
+}
 struct PropTransition final {
     identities::Source source{};
     std::uint64_t transition{};
@@ -64,12 +94,10 @@ policy::CellBubbles cell_bubbles(const state::activity::SessionBinding& binding)
     return cells;
 }
 /** Exactly one admitted current view must own the ActivityClient generation. */
-bool snapshot(const state::activity::SessionBinding& binding,
-              std::uint64_t generation,
-              identities::Source& source,
-              std::vector<identities::Identity>& rows) noexcept {
+bool current_source(const state::activity::SessionBinding& binding,
+                    std::uint64_t generation,
+                    identities::Source& source) noexcept {
     source = {};
-    rows.clear();
     if (!generation || !state::activity::binding_matches(binding)) {
         return false;
     }
@@ -86,7 +114,15 @@ bool snapshot(const state::activity::SessionBinding& binding,
             ++matches;
         }
     }
-    return matches == 1
+    return matches == 1;
+}
+/** Copies the identity rows of the one view that owns the ActivityClient generation. */
+bool snapshot(const state::activity::SessionBinding& binding,
+              std::uint64_t generation,
+              identities::Source& source,
+              std::vector<identities::Identity>& rows) noexcept {
+    rows.clear();
+    return current_source(binding, generation, source)
            && entity_identities::snapshot_source(source, rows) == identities::Result::unchanged
            && state::gameplay::entity_object_types::enrich_snapshot(rows);
 }
@@ -100,7 +136,7 @@ void report_released(const policy::Mask& mask,
     constexpr std::size_t kMaximumReportedSlots = 64;
     std::size_t shown = 0;
     for (std::size_t slot = 0; slot < rows.size() && shown < kMaximumReportedSlots; ++slot) {
-        if ((std::to_integer<unsigned>(mask[slot / 8]) & (1U << (slot % 8))) == 0) {
+        if (!has_slot(mask, slot)) {
             continue;
         }
         ++shown;
@@ -205,6 +241,43 @@ void report_hierarchy_gaps(std::span<const identities::Identity> rows) noexcept 
     }
 }
 
+/** @return True when the host retains Auth a mission wrote to the exact type-4 slot. */
+bool mission_written(std::span<const activity::host::ScriptablePin> pins,
+                     const identities::ActorSourceReference& source) {
+    return std::ranges::any_of(pins, [&](const activity::host::ScriptablePin& pin) {
+        return pin.slotType == source.type && pin.registryKey == source.key
+               && pin.slotIndex == source.index;
+    });
+}
+
+/**
+ * Makes an authored object entry eligible only when the host retains mission Auth for its type-4
+ * slot, since the client rebuilds the entry from that Auth. One eligibility per source and class.
+ */
+void add_mission_objects(std::uint8_t bubble,
+                         const policy::Mask& mask,
+                         std::span<const identities::Identity> rows,
+                         std::span<const activity::host::ScriptablePin> pins,
+                         std::vector<policy::Eligibility>& eligible) {
+    for (std::size_t slot = 0; slot < rows.size(); ++slot) {
+        const auto& row = rows[slot];
+        const auto& source = row.actorSource;
+        if (!has_slot(mask, slot) || !row.present || row.anchorPresent || !row.metadata.hasRsat
+            || !source.known || !source.present || source.type != policy::kObjectSourceType
+            || !mission_written(pins, source)) {
+            continue;
+        }
+        policy::Eligibility entry{};
+        entry.squad = {source.key, source.index, source.type};
+        entry.rsatTag = row.metadata.rsatTag;
+        entry.bubble = bubble;
+        entry.enabled = true;
+        if (std::find(eligible.begin(), eligible.end(), entry) == eligible.end()) {
+            eligible.push_back(entry);
+        }
+    }
+}
+
 /** Logs the complete selected count and a bounded prefix of slot indices. */
 void report(const char* stage,
             bool result,
@@ -237,7 +310,7 @@ void report(const char* stage,
     std::size_t length = static_cast<std::size_t>(prefix), shown = 0;
     if (mask) {
         for (std::size_t slot = 0; slot < identities::kSlotCapacity && shown < 32; ++slot) {
-            if ((std::to_integer<unsigned>((*mask)[slot / 8]) & (1U << (slot % 8))) == 0) {
+            if (!has_slot(*mask, slot)) {
                 continue;
             }
             const int count = std::snprintf(
@@ -482,27 +555,33 @@ void cancel_placed_transition(const state::activity::SessionBinding& binding,
     });
     ReleaseSRWLockExclusive(&g_lock);
 }
-/** Delivered squad choices replace eligibility for their exact authored target. */
+/**
+ * Delivered squad choices replace eligibility for their exact authored target. An objective update
+ * keeps the placement's choice, so a squad tasked after it is placed is still retired on a leave.
+ */
 void record_delivered_target(const state::activity::SessionBinding& binding,
                              std::uint64_t generation,
+                             std::uint64_t ownerGeneration,
                              const activity::host::PendingScriptableOverride& pending) noexcept {
-    if (!generation || pending.target.slotType != 1
-        || pending.expectedActivityClientGeneration != generation) {
+    if (!generation
+        || (pending.target.slotType != policy::kSquadSourceType
+            && pending.target.slotType != policy::kCombatantSourceType)
+        || pending.expectedActivityClientGeneration != ownerGeneration) {
         return;
     }
     AcquireSRWLockExclusive(&g_lock);
     try {
-        const auto& selected = pending.squadRetirement;
+        const auto selected = delivered_choice(binding, pending);
         const auto prior = std::find_if(g_targets.begin(), g_targets.end(), [&](const Target& row) {
             return row.session == binding.sessionId && row.revision == binding.createdRevision
                    && row.generation == generation
                    && row.eligibility.squad.key == pending.target.registryKey
-                   && row.eligibility.squad.index == pending.target.slotIndex;
+                   && row.eligibility.squad.index == pending.target.slotIndex
+                   && row.eligibility.squad.type == pending.target.slotType;
         });
-        const bool enabled = pending.kind == activity::host::ScriptableOverrideKind::squad
-                             && selected.enabled && selected.squad.key == pending.target.registryKey
+        const bool enabled = selected.enabled && selected.squad.key == pending.target.registryKey
                              && selected.squad.index == pending.target.slotIndex
-                             && selected.squad.type == 1;
+                             && selected.squad.type == pending.target.slotType;
         const bool unchanged =
             prior != g_targets.end() && enabled && prior->eligibility == selected;
         if (!unchanged) {
@@ -517,7 +596,8 @@ void record_delivered_target(const state::activity::SessionBinding& binding,
                 return row.session == binding.sessionId
                        && (row.revision != binding.createdRevision
                            || (row.eligibility.squad.key == pending.target.registryKey
-                               && row.eligibility.squad.index == pending.target.slotIndex));
+                               && row.eligibility.squad.index == pending.target.slotIndex
+                               && row.eligibility.squad.type == pending.target.slotType));
             });
             /** An active source cannot own more actor targets than native entity slots. */
             constexpr std::size_t kMaximumTargets =
@@ -552,8 +632,7 @@ void follow_squad(const state::activity::SessionBinding& binding,
     };
     const auto due = [&](const Target& row) noexcept {
         return row.session == binding.sessionId && row.revision == binding.createdRevision
-               && row.eligibility.squad.key == squad.key
-               && row.eligibility.squad.index == squad.index && row.generation != followed(row);
+               && row.eligibility.squad == squad && row.generation != followed(row);
     };
     // Every admitted squad report asks, so the common answer is read without blocking capture.
     AcquireSRWLockShared(&g_lock);
@@ -570,11 +649,15 @@ void follow_squad(const state::activity::SessionBinding& binding,
     }
     ReleaseSRWLockExclusive(&g_lock);
 }
-/** Only package-mapped, positively authored trees enter a captured release. */
+/**
+ * Only package-mapped, positively authored trees enter a captured release. An abandonment also
+ * captures the mission's objects; an abdication hands the bubble to a peer that keeps them.
+ */
 void observe_abdication(const state::activity::SessionBinding& binding,
                         std::uint64_t generation,
                         std::uint8_t bubble,
-                        const state::activity::bubble_authority::EntitySlotMask& mask) noexcept {
+                        const state::activity::bubble_authority::EntitySlotMask& mask,
+                        bool abandoned) noexcept {
     identities::Source source{};
     std::vector<identities::Identity> rows;
     if (!snapshot(binding, generation, source, rows)) {
@@ -599,6 +682,19 @@ void observe_abdication(const state::activity::SessionBinding& binding,
             cells[i] = owner;
         }
     }
+    // Read before the store lock, so the host lock is never taken under it.
+    std::vector<activity::host::ScriptablePin> pins;
+    std::size_t pinCount = 0;
+    try {
+        if (abandoned) {
+            pins.resize(activity::host::kScriptablePinCapacity);
+            if (!activity::host::scriptable_auth_pins(binding, pins, pinCount)) {
+                report("capture_pins", false, bubble);
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        report("capture_pins", false, bubble);
+    }
     AcquireSRWLockExclusive(&g_lock);
     bool accepted = false;
     try {
@@ -609,6 +705,7 @@ void observe_abdication(const state::activity::SessionBinding& binding,
                 eligible.push_back(row.eligibility);
             }
         }
+        add_mission_objects(bubble, mask, rows, std::span(pins).first(pinCount), eligible);
         accepted = g_store.capture(source, bubble, mask, rows, eligible, cells);
     } catch (...) {}
     ReleaseSRWLockExclusive(&g_lock);
@@ -643,6 +740,39 @@ bool prepare_retirement(const state::activity::SessionBinding& binding,
         refuse_placed_transition(source, bubble);
     }
     report("prepare", ready, bubble, &output.entities, core::log::Level::debug);
+    return ready;
+}
+/**
+ * Without an activity link the client destroys a departed bubble's records itself. With one, the
+ * host purges the trees it chose to retire as soon as the client is out of that bubble.
+ */
+bool prepare_departed_retirement(const state::activity::SessionBinding& binding,
+                                 std::uint64_t generation,
+                                 std::uint8_t heldBubble,
+                                 RetirementPlan& output) noexcept {
+    output = {};
+    identities::Source source{};
+    if (!current_source(binding, generation, source)) {
+        return false;
+    }
+    AcquireSRWLockShared(&g_lock);
+    const auto bubble = g_store.pending_bubble(source, heldBubble);
+    ReleaseSRWLockShared(&g_lock);
+    std::vector<identities::Identity> rows;
+    if (!bubble || !snapshot(binding, generation, source, rows)) {
+        return false;
+    }
+    AcquireSRWLockShared(&g_lock);
+    const bool ready = g_store.prepare(source, *bubble, rows, output);
+    ReleaseSRWLockShared(&g_lock);
+    // A captured tree that changed with no gap left to fill can never be retired whole, and a
+    // release kept for it would be prepared again on every keepalive.
+    if (!ready && !has_hierarchy_gap(rows)) {
+        AcquireSRWLockExclusive(&g_lock);
+        g_store.invalidate_source(source, *bubble);
+        ReleaseSRWLockExclusive(&g_lock);
+        report("departed_dropped", false, *bubble);
+    }
     return ready;
 }
 /** The exact identity view remains pinned until its transport response has been copied. */

@@ -109,13 +109,6 @@ inline MembershipState merge(const MembershipState& state,
         merged.region = update.region;
         merged.pendingReported = true;
     }
-    // The client has reported the region the arm named, so the move is done and the same machine
-    // owes the spawn. Its step 3 runs the spawn only while the host state reads 3, so the arm is
-    // raised rather than dropped. Step 0 refuses to re-latch on 3, so this cannot re-arm.
-    if (merged.hasHostTeleport && merged.region.index >= 0
-        && merged.region.index == merged.hostTeleport.sliceSetIndex) {
-        merged.hostTeleport.state = kHostTeleportSpawnState;
-    }
     // Retire the matching teleport before staging the answer so its screen can release.
     if (merged.hasHostTeleport && merged.hostTeleport.state == kHostTeleportSpawnState
         && merged.teleport.state == kClientTeleportResetState
@@ -202,6 +195,13 @@ inline Snapshot make_snapshot(const MembershipState& state,
     // An armed host teleport replaces the mirror, because these are the fields the client's
     // teleport arm reads. Everything else about the block stays the client's own report.
     snapshot.teleport = state.hasHostTeleport ? state.hostTeleport : state.teleport;
+    // Once the client names the target as its pending or current leg it has latched the move.
+    // Until the spawn is due the arm reads as moving, not armed.
+    const std::int32_t target = state.hostTeleport.sliceSetIndex;
+    if (state.hasHostTeleport && state.hostTeleport.state == kHostTeleportArmedState && target >= 0
+        && (state.region.index == target || state.currentRegion.index == target)) {
+        snapshot.teleport.state = kHostTeleportMovingState;
+    }
     snapshot.currentLeg = state.currentRegion;
     snapshot.pendingLeg = state.region;
     snapshot.hasCurrentLeg = state.currentReported;

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -217,7 +218,13 @@ constexpr std::uint32_t kTaskReferenceOffset =
             || row.groupIndex
                    != (priorGroup != nullptr && row.slotIndex == priorGroup->slotIndex
                            ? priorGroup->groupIndex + 1U
-                           : 0U)) {
+                           : 0U)
+            || row.taskCount > row.tasks.size()
+            || std::any_of(row.tasks.begin() + row.taskCount,
+                           row.tasks.end(),
+                           [](const format::CombatTaskBounds& task) {
+                               return task != format::CombatTaskBounds{};
+                           })) {
             return false;
         }
         priorGroup = &row;

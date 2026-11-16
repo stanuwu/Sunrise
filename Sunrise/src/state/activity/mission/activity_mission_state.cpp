@@ -123,6 +123,7 @@ namespace {
            && left.seedOmissionCount == right.seedOmissionCount && left.burstRows == right.burstRows
            && left.burstRowCount == right.burstRowCount
            && left.checkpointSpawnHash == right.checkpointSpawnHash
+           && left.arrivalSpawnHash == right.arrivalSpawnHash
            && left.checkpointReleaseRequest == right.checkpointReleaseRequest
            && left.entryIndex == right.entryIndex && left.squadCounts == right.squadCounts
            && left.authBody == right.authBody && left.sequenceOwner == right.sequenceOwner
@@ -132,8 +133,15 @@ namespace {
            && left.sceneEventKey == right.sceneEventKey && left.authSchema == right.authSchema
            && left.actorCommandSelector == right.actorCommandSelector
            && left.actorCommandValue == right.actorCommandValue
-           && left.authBitCount == right.authBitCount
+           && left.activityFlagKey == right.activityFlagKey
+           && left.squadTemperaments == right.squadTemperaments
+           && left.squadTemperamentCount == right.squadTemperamentCount
+           && left.squadTemperamentsSet == right.squadTemperamentsSet
+           && left.sequenceChoice == right.sequenceChoice
+           && left.sequenceRetain == right.sequenceRetain
+           && left.objectInPlace == right.objectInPlace && left.authBitCount == right.authBitCount
            && left.effectiveRegion == right.effectiveRegion
+           && left.objectLocationRow == right.objectLocationRow
            && left.retirePlacedProps == right.retirePlacedProps && left.slotIndex == right.slotIndex
            && left.deviceValue == right.deviceValue && left.squadMode == right.squadMode
            && left.squadRetireOnReturn == right.squadRetireOnReturn
@@ -141,15 +149,10 @@ namespace {
            && left.slotType == right.slotType && left.authByteCount == right.authByteCount
            && left.lifetimeState == right.lifetimeState && left.deviceSnap == right.deviceSnap
            && left.active == right.active && left.capturePlate == right.capturePlate
-           && left.timedChild == right.timedChild
-           && left.timedRemainingSeconds == right.timedRemainingSeconds
-           && left.timedTotalSeconds == right.timedTotalSeconds
-           && left.timedEpochTicks == right.timedEpochTicks
-           && left.timedRunning == right.timedRunning && left.timedInPlace == right.timedInPlace
-           && left.positionChild == right.positionChild
-           && left.positionRevision == right.positionRevision
-           && left.positionValue == right.positionValue && left.positionSnap == right.positionSnap
-           && left.requestKey == right.requestKey;
+           && left.positionChild == right.positionChild && left.positionValue == right.positionValue
+           && left.positionSnap == right.positionSnap && left.requestKey == right.requestKey
+           && left.squadSpawnRuleRow == right.squadSpawnRuleRow
+           && left.dialogueFilterRow == right.dialogueFilterRow;
 }
 
 [[nodiscard]] std::string_view key_view(const StateKey& key) noexcept {
@@ -308,54 +311,10 @@ namespace {
         if (intents[index].attemptGeneration != candidate.attempt.generation) {
             return Status::invalidTransition;
         }
-        if (candidate.nextIntentSequence == kAbsentIntentSequence) {
-            return Status::intentSequenceExhausted;
+        const auto status = append_intent(candidate, intents[index], nextMissionRevision);
+        if (status != Status::ready) {
+            return status;
         }
-        PendingIntent pending{};
-        try {
-            pending.value = intents[index];
-        } catch (const std::bad_alloc&) {
-            return Status::outOfMemory;
-        }
-        pending.sequence = candidate.nextIntentSequence;
-        pending.missionRevision = nextMissionRevision;
-        candidate.pendingIntents.push_back(std::move(pending));
-        if (intents[index].kind == IntentKind::placeSquad
-            || ((intents[index].kind == IntentKind::runActorProgram
-                 || intents[index].kind == IntentKind::activateAuthoredScene)
-                && intents[index].active)) {
-            const auto status = prepare_squad_population(candidate, intents[index]);
-            if (status != Status::ready) {
-                return status;
-            }
-        }
-        if (intents[index].kind == IntentKind::setDeviceChannel) {
-            DeviceRequestReport desired{};
-            desired.requestKey = intents[index].requestKey;
-            desired.attemptGeneration = intents[index].attemptGeneration;
-            desired.slotRow = intents[index].firstRow;
-            desired.channel = intents[index].deviceChannel;
-            desired.value = intents[index].deviceValue;
-            const auto found = std::find_if(candidate.deviceRequests.begin(),
-                                            candidate.deviceRequests.end(),
-                                            [&desired](const auto& existing) noexcept {
-                                                return existing.slotRow == desired.slotRow
-                                                       && existing.channel == desired.channel;
-                                            });
-            if (found != candidate.deviceRequests.end()) {
-                *found = desired;
-            } else {
-                try {
-                    candidate.deviceRequests.push_back(desired);
-                } catch (const std::bad_alloc&) {
-                    return Status::outOfMemory;
-                }
-            }
-        }
-        candidate.nextIntentSequence =
-            candidate.nextIntentSequence == (std::numeric_limits<std::uint64_t>::max)()
-                ? kAbsentIntentSequence
-                : candidate.nextIntentSequence + 1;
     }
     return Status::ready;
 }
@@ -380,6 +339,61 @@ namespace {
 }
 
 } // namespace
+
+/** Appends one intent to the durable queue with its sequence and the tables it seeds. */
+Status append_intent(MissionState& candidate,
+                     const TypedIntent& intent,
+                     std::uint64_t missionRevision) noexcept {
+    if (candidate.nextIntentSequence == kAbsentIntentSequence) {
+        return Status::intentSequenceExhausted;
+    }
+    PendingIntent pending{};
+    try {
+        pending.value = intent;
+        pending.sequence = candidate.nextIntentSequence;
+        pending.missionRevision = missionRevision;
+        candidate.pendingIntents.push_back(std::move(pending));
+    } catch (const std::bad_alloc&) {
+        return Status::outOfMemory;
+    }
+    if (intent.kind == IntentKind::placeSquad
+        || ((intent.kind == IntentKind::runActorProgram
+             || intent.kind == IntentKind::activateAuthoredScene)
+            && intent.active)) {
+        const auto status = prepare_squad_population(candidate, intent);
+        if (status != Status::ready) {
+            return status;
+        }
+    }
+    if (intent.kind == IntentKind::setDeviceChannel) {
+        DeviceRequestReport desired{};
+        desired.requestKey = intent.requestKey;
+        desired.attemptGeneration = intent.attemptGeneration;
+        desired.slotRow = intent.firstRow;
+        desired.channel = intent.deviceChannel;
+        desired.value = intent.deviceValue;
+        const auto found = std::find_if(candidate.deviceRequests.begin(),
+                                        candidate.deviceRequests.end(),
+                                        [&desired](const auto& existing) noexcept {
+                                            return existing.slotRow == desired.slotRow
+                                                   && existing.channel == desired.channel;
+                                        });
+        if (found != candidate.deviceRequests.end()) {
+            *found = desired;
+        } else {
+            try {
+                candidate.deviceRequests.push_back(desired);
+            } catch (const std::bad_alloc&) {
+                return Status::outOfMemory;
+            }
+        }
+    }
+    candidate.nextIntentSequence =
+        candidate.nextIntentSequence == (std::numeric_limits<std::uint64_t>::max)()
+            ? kAbsentIntentSequence
+            : candidate.nextIntentSequence + 1;
+    return Status::ready;
+}
 
 /** Builds the replacement record; publishes nothing. */
 Status prepare_reload(const Snapshot& current,

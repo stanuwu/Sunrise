@@ -27,10 +27,13 @@ namespace generated = middleware::content::packages::schema::generated;
 
 /** Eight-byte identity at the start of every runtime SDK pack. */
 inline constexpr std::array<char, 8> kMagic{'S', 'R', 'S', 'D', 'K', 'P', '0', '1'};
-/** Runtime-pack schema version accepted by this reader. 48 adds incident definition rows. */
-inline constexpr std::uint32_t kVersion = 48;
+/**
+ * Runtime-pack schema version accepted by this reader. 53 includes actor behaviour inputs
+ * and exact target output-channel counts.
+ */
+inline constexpr std::uint32_t kVersion = 53;
 /** The ABI contains only activity identity, topology, placement, and panel metadata. */
-inline constexpr std::uint32_t kSectionCount = 52;
+inline constexpr std::uint32_t kSectionCount = 54;
 #if defined(SUNRISE_ACTIVITY_SDK_TESTING)
 /** The runtime accepts only the checked generated SDK build. Each pin is a SHA-256 digest. */
 inline constexpr std::array<std::byte, 32> kExpectedSdkBuildDigest{
@@ -104,12 +107,12 @@ inline constexpr std::uint32_t kSlotDialogueCuesExact = 0x4U;
  * gets no flag.
  */
 inline constexpr std::uint32_t kSlotAuthoredSceneUnresourced = 0x8U;
-/** The type-24 target has a counted, unambiguous authored output array. */
-inline constexpr std::uint32_t kSlotOutputChannelsExact = 0x10U;
-/** Slot flags record facts recovered from package content. */
+/** The target Variables component proves the type-24 output row count. */
+inline constexpr std::uint32_t kSlotObjectChannelsExact = 0x10U;
+/** Slot rows expose only verified reader, schema and authored metadata facts. */
 inline constexpr std::uint32_t kSlotFlagMask =
     kSlotReaderVerified | kSlotSchemaJoinExact | kSlotDialogueCuesExact
-    | kSlotAuthoredSceneUnresourced | kSlotOutputChannelsExact;
+    | kSlotAuthoredSceneUnresourced | kSlotObjectChannelsExact;
 /** Component class of an authored type-4 object slot. */
 inline constexpr std::uint32_t kObjectComponentClass = generated::ObjectSlotHandleType4::kClass;
 /** Sense schema of an authored type-4 object slot. */
@@ -130,12 +133,6 @@ inline constexpr std::uint32_t kDeviceComponentClass = generated::DeviceSlotHand
 inline constexpr std::uint32_t kDeviceSenseSchema = generated::C80804f47::kClass;
 /** Auth schema of a type-23 device slot. */
 inline constexpr std::uint32_t kDeviceAuthSchema = generated::C80804f48::kClass;
-/** Component class of a type-24 output-channel slot. */
-inline constexpr std::uint32_t kChannelComponentClass = generated::C80804f3b::kClass;
-/** Sense schema of a type-24 output-channel slot. */
-inline constexpr std::uint32_t kChannelSenseSchema = generated::C80804f3d::kClass;
-/** Auth schema of a type-24 output-channel slot. */
-inline constexpr std::uint32_t kChannelAuthSchema = generated::C80804f40::kClass;
 /** Component class of a type-30 occupancy-condition slot. */
 inline constexpr std::uint32_t kOccupancyComponentClass =
     generated::MonitorSlotHandleType30::kClass;
@@ -194,9 +191,6 @@ inline constexpr std::uint32_t kSequenceSlotType = 5U;
 inline constexpr std::uint32_t kCinematicSlotType = 6U;
 /** Slot type of the three-channel device Auth surface. */
 inline constexpr std::uint32_t kDeviceSlotType = 23U;
-/** Slot type and native capacity for authored object output channels. */
-inline constexpr std::uint32_t kChannelSlotType = 24U;
-inline constexpr std::uint32_t kOutputChannelCapacity = 4U;
 /** Slot type of the occupancy-condition Auth surface. */
 inline constexpr std::uint32_t kOccupancySlotType = 30U;
 /** Slot type of the encounter-engagement audience surface. */
@@ -333,14 +327,20 @@ inline constexpr std::uint32_t kSquadRequiresSelectedRule = 0x40U;
 /** Runnable without the authored edge and its points, which a selected rule replaces. */
 inline constexpr std::uint32_t kSquadSourcePrerequisiteMask =
     kSquadRunnableMask & ~(kSquadSpawnerRuleEdgeExact | kSquadAllPointsExact);
+/** The spawner's rule reference resolved inside this squad's own object occurrence. */
+inline constexpr std::uint32_t kSquadOccurrenceRuleExact = 0x80U;
 /**
  * @return True when a squad row may be placed or commanded. A rule-less squad is exempt from the
- * rule edge and points that its selected rule supplies.
+ * rule edge and points that its selected rule supplies; a rule resolved inside the squad's
+ * occurrence is exempt from the points, which the client reads from that rule.
  */
 [[nodiscard]] constexpr bool squad_runnable(std::uint32_t flags) noexcept {
-    const std::uint32_t required = (flags & kSquadRequiresSelectedRule) != 0
-                                       ? kSquadSourcePrerequisiteMask
-                                       : kSquadRunnableMask;
+    std::uint32_t required = kSquadRunnableMask;
+    if ((flags & kSquadRequiresSelectedRule) != 0) {
+        required = kSquadSourcePrerequisiteMask;
+    } else if ((flags & kSquadOccurrenceRuleExact) != 0) {
+        required = kSquadRunnableMask & ~kSquadAllPointsExact;
+    }
     return (flags & required) == required;
 }
 /** Member flags separate actor resolution from count-array completeness. */
@@ -455,7 +455,7 @@ inline constexpr std::int64_t kAbsentSignedValue = (-0x7FFFFFFFFFFFFFFFLL - 1);
 
 /** Fixed packed byte sizes make producer and consumer ABI drift fail at compile time. */
 inline constexpr std::size_t kSectionSize = 16;
-inline constexpr std::size_t kHeaderSize = 992;
+inline constexpr std::size_t kHeaderSize = 1024;
 inline constexpr std::size_t kStringRefSize = 8;
 inline constexpr std::size_t kRangeSize = 8;
 inline constexpr std::size_t kActivitySize = 124;
@@ -802,9 +802,11 @@ enum class SectionIndex : std::uint32_t {
     actorAbilityTargets,
     authoredSceneEventKeys,
     incidentDefinitions,
+    actorTemperaments,
+    actorChannels,
 };
 
-static_assert(static_cast<std::uint32_t>(SectionIndex::incidentDefinitions) + 1 == kSectionCount);
+static_assert(static_cast<std::uint32_t>(SectionIndex::actorChannels) + 1 == kSectionCount);
 
 /** Exact activity-name/root join result retained for every activity row. */
 enum class ActivityJoinStatus : std::uint32_t {
@@ -1065,7 +1067,7 @@ struct Slot final {
     std::uint32_t senseSchema{};
     std::uint32_t authSchema{};
     std::uint32_t flags{};
-    /** Authored dialogue or output count when its exact-count flag is set; zero otherwise. */
+    /** Dialogue cue count or object-channel count under its exactness flag; zero otherwise. */
     std::uint32_t reserved{};
     Range aliases{};
     Range capabilities{};
@@ -1306,11 +1308,51 @@ struct ActorAbilityTarget final {
     bool operator==(const ActorAbilityTarget&) const = default;
 };
 
+/**
+ * One temperament the behaviour program of a Type 2 actor, or of a Type 1 squad's members, holds.
+ * The client ignores an id its program does not hold.
+ */
+struct ActorTemperament final {
+    std::uint32_t slotIndex{};
+    std::uint32_t programTag{};
+    std::uint32_t id{};
+
+    bool operator==(const ActorTemperament&) const = default;
+};
+
+/**
+ * One object channel a server may write on a Type 2 actor: a row of its value provider that nothing
+ * on the actor drives, or an input its behaviour program reads. The tag is the record naming it.
+ */
+struct ActorChannel final {
+    std::uint32_t slotIndex{};
+    std::uint32_t providerTag{};
+    std::uint32_t nameHash{};
+
+    bool operator==(const ActorChannel&) const = default;
+};
+
+/** Tasks one combat group holds; the objective Sense reports one counter per task. */
+inline constexpr std::size_t kCombatTaskCapacity = 24;
+
+/** One authored task's admission bounds, as signed authored values; -1 means unbounded. */
+struct CombatTaskBounds final {
+    std::int32_t minimumMembers{};
+    std::int32_t maximumMembers{-1};
+    std::int32_t maximumSquads{-1};
+    /** The task stops admitting squads once its objective counter reaches this value. */
+    std::int32_t counterLimit{-1};
+
+    bool operator==(const CombatTaskBounds&) const = default;
+};
+
 /** One authored combat group belongs to an exact objective slot. */
 struct CombatObjectiveGroup final {
     std::uint32_t slotIndex{};
     std::uint32_t groupIndex{};
     std::uint32_t taskCount{};
+    /** The first taskCount rows are authored; the rest keep their defaults. */
+    std::array<CombatTaskBounds, kCombatTaskCapacity> tasks{};
 
     bool operator==(const CombatObjectiveGroup&) const = default;
 };

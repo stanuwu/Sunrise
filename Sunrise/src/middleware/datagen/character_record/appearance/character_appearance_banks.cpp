@@ -169,7 +169,11 @@ void apply_perk_banks(const family4::loadout::ResolvedInstances& instances,
                       layout::Appearance& appearance) noexcept {
     const std::array<std::span<std::uint16_t>, kWeaponSlotCount> weaponBanks{
         appearance.smallBankA, appearance.smallBankB, appearance.smallBankC};
-    std::size_t characterCount = 0;
+    // apply_ability_buckets already filed the subclass's sandbox perks, so items start after them.
+    auto characterCount = static_cast<std::size_t>(std::find(appearance.indexBank.begin(),
+                                                             appearance.indexBank.end(),
+                                                             layout::kEmptyDefinitionIndex)
+                                                   - appearance.indexBank.begin());
     // Slot order is the character bank's own order, so the loop visits slots rather than the
     // instance list, whose order is the loadout's.
     for (std::uint8_t slot = 0; slot < layout::kRenderSlotCapacity; ++slot) {

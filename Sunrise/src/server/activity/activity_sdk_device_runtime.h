@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 #include "../../middleware/bap/activity_message/scriptable_auth_body.h"
@@ -131,9 +132,11 @@ play_combatant_sequence_reserved(const state::activity_sdk::BoundView& view,
 
 /**
  * Instantiates or removes package-authored type-4 entries, one push for the whole run.
- * A row is dropped, not refused, when the client's state does not hold it, or when it names a
- * second object. Only the first row's group reaches the roster, so a stranger discards the push.
+ * A row is dropped, not refused, when it has no target, as when the client's bubble places it only
+ * in another state, or when it names a second object. Only the first row's group reaches the
+ * roster, so a stranger discards the push.
  * @param extraRows Slot rows that share the reservation, so one push carries the whole run.
+ * @param locationSlotRow Type-1 squad every entry spawns at, or none for the package transform.
  * @return `queued` when at least one row resolved, else why the last one did not.
  */
 [[nodiscard]] Status set_objects_active_reserved(
@@ -142,16 +145,22 @@ play_combatant_sequence_reserved(const state::activity_sdk::BoundView& view,
     std::span<const std::uint32_t> extraRows,
     std::int32_t entryIndex,
     bool active,
+    std::optional<std::uint32_t> locationSlotRow,
     bool capturePlate,
-    const middleware::bap::activity_message::scriptable_auth::Type4TimedClock& timed,
     const middleware::bap::activity_message::scriptable_auth::Type4PositionChild& position,
     const host::ScriptableOutputReservation& reservation) noexcept;
 
-/** Arms one generated combatant for its scene's squad member spawn. */
+/**
+ * Arms one generated combatant for its scene's squad member spawn.
+ * @param spawn Also starts a new actor life in the same body (a new spawn revision).
+ * @param retireOnReturn The host retires the bound actor when a client gives it up on a leave.
+ */
 [[nodiscard]] Status
 bind_combatant_to_squad_reserved(const state::activity_sdk::BoundView& view,
                                  std::uint32_t slotRow,
-                                 const host::ScriptableOutputReservation& reservation) noexcept;
+                                 const host::ScriptableOutputReservation& reservation,
+                                 bool spawn = false,
+                                 bool retireOnReturn = false) noexcept;
 
 /** Checks one exact SDK device request without changing Activity Host output state. */
 [[nodiscard]] Status

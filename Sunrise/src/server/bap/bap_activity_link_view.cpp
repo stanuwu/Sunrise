@@ -9,6 +9,7 @@
 #include "../../state/activity/member_context.h"
 #include "../../state/activity/runtime.h"
 #include "../../state/activity/transactions/internal.h"
+#include "encrypted/activity_message/activity_message_route.h"
 #include "encrypted/push/activity/internal.h"
 #include "internal.h"
 #include "runtime.h"
@@ -114,6 +115,56 @@ bool activity_link_view(const state::activity::SessionBinding& binding,
         fill_link_view(*session, output);
     }
     return session != nullptr;
+}
+
+bool public_link_owner(const state::activity::SessionBinding& publicBinding,
+                       std::uint64_t publicGeneration,
+                       PublicLinkOwner& output) noexcept {
+    output = {};
+    if (publicGeneration == 0) {
+        return false;
+    }
+    const auto current = [](const Session& session, ActivityClientRole role) noexcept {
+        return session.id != 0 && session.authenticated && session.activity.role == role
+               && session.activity.bindingGeneration != 0
+               && encrypted::activity_message::binding_is_current(session.activity);
+    };
+    const std::shared_lock lock(session_lock());
+    const Session* publicLink = nullptr;
+    for (const Session& session : sessions()) {
+        if (current(session, ActivityClientRole::publicTarget)
+            && session.activity.bindingGeneration == publicGeneration
+            && state::activity::same_binding(session.activity.session, publicBinding)) {
+            if (publicLink != nullptr) {
+                return false;
+            }
+            publicLink = &session;
+        }
+    }
+    if (publicLink == nullptr || publicLink->accountHandle == state::kInvalidAccount) {
+        return false;
+    }
+    // A pooled public host keeps the first fireteam's binding as every link's source, so the
+    // account is what ties a public link to the private link beside it.
+    const Session* privateLink = nullptr;
+    for (const Session& session : sessions()) {
+        if (current(session, ActivityClientRole::privateCurrent)
+            && session.accountHandle == publicLink->accountHandle
+            && session.activityJoinGeneration == session.activity.bindingGeneration) {
+            if (privateLink != nullptr) {
+                return false;
+            }
+            privateLink = &session;
+        }
+    }
+    if (privateLink == nullptr) {
+        return false;
+    }
+    output.binding = privateLink->activity.session;
+    output.activityClientGeneration = privateLink->activity.bindingGeneration;
+    output.publicRegion = selected_region_locked(*publicLink).index;
+    output.privateRegion = selected_region_locked(*privateLink).index;
+    return true;
 }
 
 bool mission_activity_link_view(const state::activity::SessionBinding& binding,

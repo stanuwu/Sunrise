@@ -109,6 +109,8 @@ struct PeerMember final {
     std::uint8_t nameLength{};
     bool hasName{};
     bool present{};
+    /** The peer's own fireteam Activity Host for field 3; zero takes the body's. */
+    std::uint64_t fireteamActivityHostId{};
 };
 /** Peers fill slots two through the last, leaving the table room for its owner and the host. */
 inline constexpr std::size_t kPeerMemberCapacity = kMemberSlotCount - 2;
@@ -128,11 +130,15 @@ struct MembershipSnapshot final {
     std::array<std::uint16_t, kPlayerNameUnitCount> localName{};
     std::uint8_t localNameLength{};
     /**
-     * Activity Host id every member row publishes as player-state field 4.
-     * The client sends zero there in its own join request, so the host names itself. It is the
-     * activity session soid, the same value the join result carries as its field 1.
+     * Group Activity Host id every member row publishes as player-state field 4: the activity
+     * session soid this link answers on, the same value the join result carries as its field 1.
      */
     std::uint64_t activityHostId{};
+    /**
+     * Player-state field 3: the private activity the player's fireteam runs.
+     * The client skips a member whose field 3 is zero.
+     */
+    std::uint64_t fireteamActivityHostId{};
     /** The local member's own current and pending region legs. */
     RegionLeg currentLeg{};
     RegionLeg pendingLeg{};

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <span>
 #include <string_view>
 
@@ -13,6 +14,7 @@
 
 namespace sunrise::server::activity::mission::lua_vm::detail {
 
+namespace format = state::activity_sdk::format;
 namespace scriptable_auth = middleware::bap::activity_message::scriptable_auth;
 
 namespace {
@@ -165,6 +167,32 @@ scriptable_auth::Type2LanePrimary atom_set_channel(lua_State* state, int table) 
         atom_real(state, table, atom_key("set_channel", "value"))};
 }
 
+/**
+ * Reads one generated mission.ActorAbility row at stack index `row` into an untargeted ability
+ * lane; the ability must belong to the actor.
+ */
+[[nodiscard]] scriptable_auth::Type2LaneTripleRef
+actor_ability(lua_State* state, int row, const SlotDefinition& actor) {
+    luaL_checktype(state, row, LUA_TTABLE);
+    const std::uint32_t owner = atom_u32(state, row, ability_row_key("slot_row"));
+    const std::uint32_t group = atom_u32(state, row, ability_row_key("group_hash"));
+    const std::uint32_t request = atom_u32(state, row, ability_row_key("request_hash"));
+    Impl* const impl = impl_from_state(state);
+    if (owner != actor.nativeRow || impl == nullptr
+        || impl->definitions.resolveActorAbility == nullptr
+        || !impl->definitions.resolveActorAbility(
+            impl->definitions.context, owner, group, request)) {
+        static_cast<void>(luaL_error(state, "ability does not belong to this SDK actor"));
+    }
+    scriptable_auth::Type2LaneTripleRef ability{};
+    ability.values = {
+        group, request, middleware::bap::activity_message::auth_fields::kClientRefAbsentKey};
+    ability.reference.slotType = -1;
+    ability.mode = -1;
+    ability.value = -1;
+    return ability;
+}
+
 /** Uses one exact actor-owned ability and the first parameter of an optional authored point. */
 scriptable_auth::Type2LanePrimary
 atom_ability(lua_State* state, int table, const SlotDefinition& actor) {
@@ -183,24 +211,9 @@ atom_ability(lua_State* state, int table, const SlotDefinition& actor) {
         lua_pop(state, 1);
     }
     lua_getfield(state, table, api::find_field(kAbility.fields, "ability").name.data());
-    luaL_checktype(state, -1, LUA_TTABLE);
-    const std::uint32_t owner = atom_u32(state, -1, ability_row_key("slot_row"));
-    const std::uint32_t group = atom_u32(state, -1, ability_row_key("group_hash"));
-    const std::uint32_t request = atom_u32(state, -1, ability_row_key("request_hash"));
+    scriptable_auth::Type2LaneTripleRef ability = actor_ability(state, lua_gettop(state), actor);
     lua_pop(state, 1);
     Impl* const impl = impl_from_state(state);
-    if (owner != actor.nativeRow || impl == nullptr
-        || impl->definitions.resolveActorAbility == nullptr
-        || !impl->definitions.resolveActorAbility(
-            impl->definitions.context, owner, group, request)) {
-        static_cast<void>(luaL_error(state, "ability does not belong to this SDK actor"));
-    }
-    scriptable_auth::Type2LaneTripleRef ability{};
-    ability.values = {
-        group, request, middleware::bap::activity_message::auth_fields::kClientRefAbsentKey};
-    ability.reference.slotType = -1;
-    ability.mode = -1;
-    ability.value = -1;
     const char* const targetKey = api::find_field(kAbility.fields, "target").name.data();
     lua_getfield(state, table, targetKey);
     const bool targeted = !lua_isnil(state, -1);
@@ -252,8 +265,24 @@ static_assert([] {
     return true;
 }());
 
-// The table entry of run_atoms.
+// Table entries of the members this file implements.
 constexpr const api::MemberSpec& kRunAtoms = api::slot_member("run_atoms");
+/** A positive template counter for the encoder; the Host assigns every transported one. */
+constexpr std::uint32_t kUncommittedRevision = 1;
+constexpr const api::MemberSpec& kActorControls = api::slot_member("set_actor_controls");
+constexpr const char* kTemperamentsKey =
+    optional_key(kActorControls, "temperaments", api::ValueKind::list);
+constexpr const char* kChannelsKey = optional_key(kActorControls, "channels", api::ValueKind::list);
+// run_atoms takes the same two lists, so one reader serves both.
+static_assert(std::string_view(optional_key(kRunAtoms, "temperaments", api::ValueKind::list))
+                  == kTemperamentsKey
+              && std::string_view(optional_key(kRunAtoms, "channels", api::ValueKind::list))
+                     == kChannelsKey);
+// The fields of one channel row.
+constexpr std::span<const api::ValueSpec> kChannelFields =
+    api::find_argument(kActorControls, "channels").element.front().fields;
+constexpr const char* kChannelKey = api::find_field(kChannelFields, "channel").name.data();
+constexpr const char* kChannelValueKey = api::find_field(kChannelFields, "value").name.data();
 
 /** Builds one atom lane from its declaration table at stack index `table`. */
 void parse_atom(lua_State* state,
@@ -284,6 +313,78 @@ void parse_atom(lua_State* state,
     }
     lua_pop(state, 1);
 }
+
+/** Reads the temperaments list into the controls. @return False when the call gave none. */
+[[nodiscard]] bool read_temperaments(lua_State* state,
+                                     std::uint32_t slotRow,
+                                     scriptable_auth::Type2ChannelState& controls) {
+    std::array<std::uint32_t, scriptable_auth::kType2TemperamentCapacity> ids{};
+    std::uint8_t count = 0;
+    if (!read_temperament_list(state, kTemperamentsKey, slotRow, ids, count)) {
+        return false;
+    }
+    std::array<scriptable_auth::TemperamentId, scriptable_auth::kType2TemperamentCapacity>
+        temperaments{};
+    for (std::size_t index = 0; index < count; ++index) {
+        temperaments[index].value = ids[index];
+    }
+    if (!scriptable_auth::set_type2_temperaments(controls, std::span(temperaments).first(count))) {
+        static_cast<void>(luaL_error(state, "temperaments must be distinct"));
+    }
+    return true;
+}
+
+/** Reads the channels list into the controls. @return False when the call gave none. */
+[[nodiscard]] bool read_channels(lua_State* state,
+                                 std::uint32_t slotRow,
+                                 scriptable_auth::Type2ChannelState& controls) {
+    constexpr std::span<const api::ValueSpec> kRowFields =
+        api::find_field(kChannelFields, "channel").fields;
+    constexpr const char* kOwnerKey = api::find_field(kRowFields, "slot_row").name.data();
+    constexpr const char* kNameKey = api::find_field(kRowFields, "channel").name.data();
+    const Impl* const impl = impl_from_state(state);
+    if (push_argument(state, kChannelsKey) == LUA_TNIL) {
+        lua_pop(state, 1);
+        return false;
+    }
+    luaL_checktype(state, -1, LUA_TTABLE);
+    const int list = lua_gettop(state);
+    const std::size_t count = lua_rawlen(state, list);
+    for (std::size_t index = 0; index < count; ++index) {
+        lua_rawgeti(state, list, static_cast<lua_Integer>(index + 1));
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const int row = lua_gettop(state);
+        refuse_unknown_fields(state, row, kChannelFields);
+        lua_getfield(state, row, kChannelKey);
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const int channel = lua_gettop(state);
+        const lua_Integer owner = directive_integer(state, channel, kOwnerKey);
+        const std::uint32_t name = atom_u32(state, channel, kNameKey);
+        lua_pop(state, 1);
+        if (owner != static_cast<lua_Integer>(slotRow)
+            || impl->definitions.resolveActorChannel == nullptr
+            || !impl->definitions.resolveActorChannel(impl->definitions.context, slotRow, name)) {
+            static_cast<void>(
+                luaL_error(state, "channels must name mission.ActorChannel rows of this actor"));
+        }
+        const auto held = std::span(controls.channels).first(controls.count);
+        if (std::any_of(held.begin(), held.end(), [name](const auto& entry) noexcept {
+                return entry.nameHash == name;
+            })) {
+            static_cast<void>(luaL_error(state, "channels must be distinct"));
+        }
+        if (!scriptable_auth::set_type2_channel(
+                controls, name, atom_real(state, row, kChannelValueKey))) {
+            static_cast<void>(luaL_error(state,
+                                         "an actor holds at most %d channels",
+                                         static_cast<int>(controls.channels.size())));
+        }
+        lua_pop(state, 1);
+    }
+    lua_pop(state, 1);
+    return true;
+}
+
 } // namespace
 
 /** Exposes the same closed operation names the native atom parser accepts. */
@@ -305,17 +406,21 @@ void push_atom_kinds(lua_State* state) {
     }
     refuse_unknown_arguments(state, kRunAtoms);
     const bool spawn = optional_boolean_argument(state, boolean_option(kRunAtoms, "spawn"));
-    // The encoder needs a positive template value; only the native reducer publishes counters.
-    constexpr std::uint32_t kUncommittedRevision = 1;
     scriptable_auth::Type2Body body{};
     body.channels.revision = kUncommittedRevision;
     body.atoms.generation = kUncommittedRevision;
+    const bool temperaments = read_temperaments(state, slot.nativeRow, body.channels);
+    const bool channels = read_channels(state, slot.nativeRow, body.channels);
+    if ((temperaments || channels)
+        && (!spawn || (body.channels.temperamentCount == 0 && body.channels.count == 0))) {
+        return luaL_error(state, "initial actor controls need spawn and a temperament or channel");
+    }
     lua_getfield(state, 2, required_key(kRunAtoms, "atoms", api::ValueKind::list));
     luaL_checktype(state, -1, LUA_TTABLE);
     const int list = lua_gettop(state);
     const auto count = static_cast<std::size_t>(lua_rawlen(state, list));
-    if (count == 0 || count > body.atoms.lanes.size()) {
-        return luaL_error(state, "an atom program holds one to 32 lanes");
+    if (count > body.atoms.lanes.size()) {
+        return luaL_error(state, "an atom program holds up to 32 lanes");
     }
     for (std::size_t index = 0; index < count; ++index) {
         lua_rawgeti(state, list, static_cast<lua_Integer>(index) + 1);
@@ -339,6 +444,33 @@ void push_atom_kinds(lua_State* state) {
                            std::span<const std::byte>(encoded.data(), written),
                            IntentKind::runActorProgram,
                            spawn);
+}
+
+/** Stages a complete control set; the Host writes it under the actor's next control revision. */
+[[nodiscard]] int slot_set_actor_controls(lua_State* state) {
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    SlotDefinition slot{};
+    if (!current_slot(state, *handle, slot) || !exact_combatant_slot(slot)) {
+        return luaL_error(state, "activity slot is not an exact type-2 combatant");
+    }
+    refuse_unknown_arguments(state, kActorControls);
+    scriptable_auth::Type2Body body{};
+    body.channels.revision = kUncommittedRevision;
+    static_cast<void>(read_temperaments(state, slot.nativeRow, body.channels));
+    static_cast<void>(read_channels(state, slot.nativeRow, body.channels));
+    std::array<std::byte, scriptable_auth::kType2MaximumBodyByteCount> encoded{};
+    std::size_t written = 0;
+    std::size_t writtenBits = 0;
+    if (!scriptable_auth::encode_type2_body(body, encoded, written, writtenBits)) {
+        return luaL_error(state, "actor control native encoder failed");
+    }
+    return queue_slot_auth(state,
+                           slot,
+                           scriptable_auth::kType2Schema,
+                           writtenBits,
+                           std::span<const std::byte>(encoded.data(), written),
+                           IntentKind::setActorControls);
 }
 
 } // namespace sunrise::server::activity::mission::lua_vm::detail

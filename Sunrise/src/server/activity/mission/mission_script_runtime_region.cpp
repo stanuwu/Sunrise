@@ -15,9 +15,11 @@ namespace sunrise::server::activity::mission {
  * region has no findable objects until it transitions. Message 12 is the only mid-activity move.
  * @param instance Runtime instance whose state selection just published.
  * @param plan Published plan naming the target region and its bubble.
+ * @param arrivalSpawnHash Spawn set the selection chose and dispatch proved, or zero.
  */
 void arm_state_region_teleport(RuntimeInstance& instance,
-                               const server::bap::ActivityMissionSeedPlan& plan) noexcept {
+                               const server::bap::ActivityMissionSeedPlan& plan,
+                               std::uint32_t arrivalSpawnHash) noexcept {
     namespace membership = ::sunrise::state::activity::membership;
     const auto& destination = instance.view.binding.destination;
     if (destination.packageNameLength == 0
@@ -33,11 +35,13 @@ void arm_state_region_teleport(RuntimeInstance& instance,
     const std::uint32_t declared = membership::declared_spawn_set(instance.view.binding.sessionId);
     const bool declaredAnswers =
         declared != 0 && dest::spawn_set_slice_set(destination, declared, target) == target;
-    const bool armed = server::bap::arm_shared_mission_region(
-        instance.view.binding,
-        instance.view.activityClientGeneration,
-        static_cast<std::int32_t>(plan.effectiveRegion),
-        declaredAnswers ? declared : dest::kAbsentSpawnSetHash);
+    const bool armed =
+        server::bap::arm_shared_mission_region(instance.view.binding,
+                                               instance.view.activityClientGeneration,
+                                               static_cast<std::int32_t>(plan.effectiveRegion),
+                                               arrivalSpawnHash != 0 ? arrivalSpawnHash
+                                               : declaredAnswers     ? declared
+                                                                     : dest::kAbsentSpawnSetHash);
     log_line(core::log::Level::info,
              &instance,
              "state_region",

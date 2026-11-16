@@ -9,6 +9,7 @@
 
 #include "../../../core/runtime/server_clock.h"
 #include "../../../middleware/bap/activity_message/incident.h"
+#include "../../../middleware/crypto/random_bytes.h"
 #include "../../../state/activity/membership/definition.h"
 #include "../../../state/build_data/public_event_schedule/definition.h"
 #include "../../../state/mods/definition.h"
@@ -40,7 +41,28 @@ constexpr const api::MemberSpec& kPublicEventSchedule =
 
 constexpr const api::MemberSpec& kSendIncident =
     api::member(api::Receiver::context, "send_incident");
+constexpr const api::MemberSpec& kActivityFlag =
+    api::member(api::Receiver::context, "set_activity_flag");
 constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::context, "select_state");
+
+/** Draws a server-owned random fraction for one active callback. */
+[[nodiscard]] int context_random(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    static_cast<void>(active_frame(state));
+    std::uint64_t seed = 0;
+    if (!::sunrise::middleware::crypto::random::draw_seed(seed)) {
+        return luaL_error(state, "server randomness is unavailable");
+    }
+    constexpr int kNumberBits = std::numeric_limits<lua_Number>::digits;
+    constexpr int kSeedBits = std::numeric_limits<std::uint64_t>::digits;
+    static_assert(std::numeric_limits<lua_Number>::radix == 2 && kNumberBits < kSeedBits);
+    // Keep only exactly representable bits so the largest draw remains below one.
+    constexpr auto kFractionCount = std::uint64_t{1} << kNumberBits;
+    lua_pushnumber(state,
+                   static_cast<lua_Number>(seed >> (kSeedBits - kNumberBits))
+                       / static_cast<lua_Number>(kFractionCount));
+    return 1;
+}
 
 /**
  * Groups exact authored objects by native owner and reserves bounded output batches.
@@ -54,75 +76,14 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
         optional_boolean_argument(state, boolean_option(kActivateObjects, "active"));
     const bool capturePlate =
         optional_boolean_argument(state, boolean_option(kActivateObjects, "capture_plate"));
-    // The timed child's clock is authored in whole seconds and stamped with the activity time
-    // of this call, as a directive clock is.
-    bool timedChild = false;
-    lua_Integer timedRemaining = 0;
-    lua_Integer timedTotal = 0;
-    std::uint64_t timedEpoch = 0;
-    bool timedRunning = true;
-    bool timedInPlace = false;
-    if (push_argument(state, optional_key(kActivateObjects, "timed", api::ValueKind::table))
-        != LUA_TNIL) {
-        luaL_checktype(state, -1, LUA_TTABLE);
-        timedRemaining = directive_integer(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "timed", "remaining", api::ValueKind::integer));
-        timedTotal = directive_integer(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "timed", "total", api::ValueKind::integer));
-        refuse_unknown_fields(state, -1, api::find_argument(kActivateObjects, "timed").fields);
-        lua_getfield(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "timed", "running", api::ValueKind::boolean, true));
-        if (!lua_isnil(state, -1) && !lua_isboolean(state, -1)) {
-            return luaL_error(state, "timed.running must be a boolean");
-        }
-        timedRunning = lua_isnil(state, -1) || lua_toboolean(state, -1) != 0;
-        lua_pop(state, 1);
-        lua_getfield(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "timed", "in_place", api::ValueKind::boolean, true));
-        if (!lua_isnil(state, -1) && !lua_isboolean(state, -1)) {
-            return luaL_error(state, "timed.in_place must be a boolean");
-        }
-        timedInPlace = lua_toboolean(state, -1) != 0;
-        lua_pop(state, 1);
-        if (capturePlate || timedRemaining < 0 || timedTotal < timedRemaining
-            || timedTotal > scriptable_auth::kType68MaximumClockSeconds) {
-            return luaL_error(state,
-                              "timed needs 0 <= remaining <= total <= one year, without "
-                              "capture_plate");
-        }
-        Impl* const impl = impl_from_state(state);
-        if (impl == nullptr
-            || !activity_clock_wire_ticks(impl->identity.sessionId,
-                                          impl->identity.sessionCreatedRevision,
-                                          active_frame(state).now,
-                                          false,
-                                          timedEpoch)) {
-            return luaL_error(state, "timed clock is outside the activity time domain");
-        }
-        timedChild = true;
-    }
-    lua_pop(state, 1);
     // The position lane is the object's own state input; it is sent at the current generation.
     bool positionChild = false;
-    lua_Integer positionRevision = 0;
     lua_Number positionValue = 0;
     bool positionSnap = true;
     if (push_argument(state, optional_key(kActivateObjects, "position", api::ValueKind::table))
         != LUA_TNIL) {
         luaL_checktype(state, -1, LUA_TTABLE);
         refuse_unknown_fields(state, -1, api::find_argument(kActivateObjects, "position").fields);
-        positionRevision = directive_integer(
-            state,
-            -1,
-            table_field_key(kActivateObjects, "position", "revision", api::ValueKind::integer));
         lua_getfield(
             state,
             -1,
@@ -139,11 +100,10 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
         }
         positionSnap = lua_isnil(state, -1) || lua_toboolean(state, -1) != 0;
         lua_pop(state, 1);
-        if (!numeric || !(positionValue >= 0 && positionValue <= 1) || positionRevision <= 0
-            || positionRevision > api::kInt32Maximum || capturePlate || timedChild || !active) {
+        if (!numeric || !(positionValue >= 0 && positionValue <= 1) || capturePlate || !active) {
             return luaL_error(state,
-                              "position needs 0 <= value <= 1 and 1 <= revision, on an active "
-                              "activation without timed or capture_plate");
+                              "position needs 0 <= value <= 1, on an active activation without "
+                              "capture_plate");
         }
         positionChild = true;
     }
@@ -207,14 +167,7 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
         intent.kind = IntentKind::setObjectActive;
         intent.active = active;
         intent.capturePlate = capturePlate;
-        intent.timedChild = timedChild;
-        intent.timedRemainingSeconds = static_cast<std::int32_t>(timedRemaining);
-        intent.timedTotalSeconds = static_cast<std::int32_t>(timedTotal);
-        intent.timedEpochTicks = timedEpoch;
-        intent.timedRunning = timedRunning;
-        intent.timedInPlace = timedInPlace;
         intent.positionChild = positionChild;
-        intent.positionRevision = static_cast<std::int32_t>(positionRevision);
         intent.positionValue = static_cast<float>(positionValue);
         intent.positionSnap = positionSnap;
         intent.firstRow = slots[first].nativeRow;
@@ -372,6 +325,31 @@ void set_integer_field(lua_State* state, const char* name, lua_Integer value) {
         }
     }
     return 1;
+}
+
+/**
+ * Raises or lowers one activity flag, the id list every participation record carries.
+ * @param state Lua call holding the context, a `key` and `raised`.
+ * @return One RequestKey.
+ */
+[[nodiscard]] int context_set_activity_flag(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    refuse_unknown_arguments(state, kActivityFlag);
+    const lua_Integer key = checked_integer_argument(
+        state, required_key(kActivityFlag, "key", api::ValueKind::integer));
+    if (key <= 0 || key > (std::numeric_limits<std::uint32_t>::max)()) {
+        return luaL_error(state, "activity flag key is zero or out of range");
+    }
+    Intent intent{};
+    intent.kind = IntentKind::setActivityFlag;
+    intent.activityFlagKey = static_cast<std::uint32_t>(key);
+    lua_getfield(state, 2, required_key(kActivityFlag, "raised", api::ValueKind::boolean));
+    if (!lua_isboolean(state, -1)) {
+        return luaL_argerror(state, 2, "set_activity_flag requires a raised boolean");
+    }
+    intent.active = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    return queue_intent(state, active_frame(state), intent);
 }
 
 /**
@@ -578,6 +556,18 @@ resolve_message_name(lua_State* state, std::string_view name, ActivityMessageDef
         }
         intent.retirePlacedProps = lua_toboolean(state, -1) != 0;
         lua_pop(state, 1);
+        lua_getfield(state,
+                     3,
+                     table_field_key(
+                         kSelectState, "options", "spawn_set_hash", api::ValueKind::integer, true));
+        if (!lua_isnil(state, -1)) {
+            const lua_Integer hash = lua_isinteger(state, -1) ? lua_tointeger(state, -1) : 0;
+            if (hash <= 0 || hash >= (std::numeric_limits<std::uint32_t>::max)()) {
+                return luaL_argerror(state, 3, "spawn_set_hash must be an authored spawn-set hash");
+            }
+            intent.arrivalSpawnHash = static_cast<std::uint32_t>(hash);
+        }
+        lua_pop(state, 1);
     }
     return queue_intent(state, frame, intent);
 }
@@ -673,8 +663,10 @@ constexpr std::array<ContextBinding, std::size(api::kContextMembers)> kContextBi
     {"slot", &context_slot},
     {"hold_spawn", &context_hold_spawn},
     {"send_incident", &context_send_incident},
+    {"set_activity_flag", &context_set_activity_flag},
     {"select_state", &context_select_state},
     {"restart_checkpoint", &context_restart_checkpoint},
+    {"random", &context_random},
     {"set_phase", &context_set_phase},
     {"set_variable", &context_set_variable},
     {"clear_variable", &context_clear_variable},

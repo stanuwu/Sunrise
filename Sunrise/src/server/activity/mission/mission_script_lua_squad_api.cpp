@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 #include "../../../middleware/content/packages/tables/authored_squad_reader.h"
@@ -104,10 +105,83 @@ static_assert(bound_to<SquadDefinition>(api::kSquadMembers, kSquadBindings));
     return queue_intent(state, active_frame(state), intent);
 }
 
+static_assert(state::activity::mission::kSquadTemperamentCapacity
+              == middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity);
+
+bool read_temperament_list(
+    lua_State* state,
+    const char* key,
+    std::uint32_t slotRow,
+    std::array<std::uint32_t,
+               middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity>&
+        output,
+    std::uint8_t& count) {
+    constexpr const char* kOwnerKey =
+        api::find_field(api::kActorTemperamentRowFields, "slot_row").name.data();
+    constexpr const char* kIdKey =
+        api::find_field(api::kActorTemperamentRowFields, "id").name.data();
+    const Impl* const impl = impl_from_state(state);
+    output = {};
+    count = 0;
+    lua_getfield(state, 2, key);
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return false;
+    }
+    luaL_checktype(state, -1, LUA_TTABLE);
+    const std::size_t listed = lua_rawlen(state, -1);
+    if (listed > output.size()) {
+        static_cast<void>(luaL_error(
+            state, "%s names more than %d temperaments", key, static_cast<int>(output.size())));
+    }
+    for (std::size_t index = 0; index < listed; ++index) {
+        lua_rawgeti(state, -1, static_cast<lua_Integer>(index + 1));
+        luaL_checktype(state, -1, LUA_TTABLE);
+        const int row = lua_gettop(state);
+        const lua_Integer owner = directive_integer(state, row, kOwnerKey);
+        const lua_Integer value = directive_integer(state, row, kIdKey);
+        if (owner != static_cast<lua_Integer>(slotRow) || value <= 0
+            || value > (std::numeric_limits<std::uint32_t>::max)()
+            || impl->definitions.resolveActorTemperament == nullptr
+            || !impl->definitions.resolveActorTemperament(
+                impl->definitions.context, slotRow, static_cast<std::uint32_t>(value))) {
+            static_cast<void>(
+                luaL_error(state, "%s must name mission.ActorTemperament rows of this slot", key));
+        }
+        const auto id = static_cast<std::uint32_t>(value);
+        const auto before = output.begin() + static_cast<std::ptrdiff_t>(index);
+        if (std::find(output.begin(), before, id) != before) {
+            static_cast<void>(luaL_error(state, "%s must be distinct", key));
+        }
+        output[index] = id;
+        lua_pop(state, 1);
+    }
+    count = static_cast<std::uint8_t>(listed);
+    lua_pop(state, 1);
+    return true;
+}
+
+/** Reads a squad's temperament list into the placement or assignment it stages. */
+bool read_squad_temperaments(lua_State* state,
+                             const char* key,
+                             std::uint32_t slotRow,
+                             Intent& intent) {
+    std::array<std::uint32_t,
+               middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity>
+        ids{};
+    std::uint8_t count = 0;
+    if (!read_temperament_list(state, key, slotRow, ids, count)) {
+        return false;
+    }
+    std::copy(ids.begin(), ids.end(), intent.squadTemperaments.begin());
+    intent.squadTemperamentCount = count;
+    return true;
+}
+
 /**
- * Stages one squad placement: squad:place{counts, mode, retire_on_return, spawn_rule}.
- * Every parameter is optional; the counts and mode carry their own bounds. A spawn rule is a
- * type-66 slot that replaces the package rule.
+ * Stages one squad placement: squad:place{counts, mode, retire_on_return, spawn_rule,
+ * temperaments}. Every parameter is optional; the counts and mode carry their own bounds. A spawn
+ * rule is a type-66 slot that replaces the package rule.
  */
 [[nodiscard]] int squad_place(lua_State* state) {
     const auto* const handle =
@@ -158,6 +232,11 @@ static_assert(bound_to<SquadDefinition>(api::kSquadMembers, kSquadBindings));
     lua_pop(state, 1);
     intent.squadRetireOnReturn =
         optional_boolean_argument(state, boolean_option(kPlace, "retire_on_return"));
+    intent.squadTemperamentsSet =
+        read_squad_temperaments(state,
+                                optional_key(kPlace, "temperaments", api::ValueKind::list),
+                                definition.slotRow,
+                                intent);
     return queue_intent(state, frame, intent);
 }
 

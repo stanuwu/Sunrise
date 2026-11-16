@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "mission_script_region.h"
+
 namespace sunrise::server::activity::mission::player_trigger {
 namespace {
 
@@ -27,7 +29,8 @@ constexpr std::uint8_t kTargetSlotType = 60;
 ResolveStatus
 resolve(const catalog::Snapshot& snapshot,
         const middleware::bap::activity_message::player_trigger_incident::Payload& payload,
-        Source& output) noexcept {
+        Source& output,
+        std::int32_t region) noexcept {
     output = {};
     bool found = false;
     for (std::size_t ownerRow = 0; ownerRow < snapshot.triggerVolumeOwners.size(); ++ownerRow) {
@@ -58,7 +61,8 @@ resolve(const catalog::Snapshot& snapshot,
             if (slot.objectRow != incoming.sourceObjectRow || slot.slotType != kSourceSlotType
                 || object.registryKey != payload.registryKey
                 || slot.slotType != static_cast<std::uint8_t>(payload.slotType)
-                || slot.slotIndex != static_cast<std::uint16_t>(payload.slotIndex)) {
+                || slot.slotIndex != static_cast<std::uint16_t>(payload.slotIndex)
+                || (region != kAnyRegion && !occurrence_in_region(snapshot, object, region))) {
                 continue;
             }
             const Source candidate{object.registryKey,

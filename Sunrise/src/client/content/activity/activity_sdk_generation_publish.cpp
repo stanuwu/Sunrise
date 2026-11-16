@@ -59,10 +59,10 @@ struct PackProgressContext final {
         return "reading authored scene facts";
     case native_pack::Phase::authoredSceneLinks:
         return "building authored scene links";
-    case native_pack::Phase::channelBounds:
-        return "reading authored output channels";
     case native_pack::Phase::dialogueCues:
         return "reading authored dialogue cues";
+    case native_pack::Phase::objectChannels:
+        return "reading object output channels";
     case native_pack::Phase::authoredText:
         return "reading authored dialogue and HUD text";
     case native_pack::Phase::incidents:
@@ -98,10 +98,10 @@ struct PackProgressContext final {
         return "authored_scene_facts";
     case native_pack::Phase::authoredSceneLinks:
         return "authored_scene_links";
-    case native_pack::Phase::channelBounds:
-        return "channel_bounds";
     case native_pack::Phase::dialogueCues:
         return "dialogue_cues";
+    case native_pack::Phase::objectChannels:
+        return "object_channels";
     case native_pack::Phase::authoredText:
         return "authored_text";
     case native_pack::Phase::incidents:

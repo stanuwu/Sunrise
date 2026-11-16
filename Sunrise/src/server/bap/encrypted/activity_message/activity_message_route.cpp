@@ -139,8 +139,10 @@ void report_release_refusal(const service::Request& request,
     }
 }
 
+} // namespace
+
 /** Tests whether a retained link binding still names its exact State and host generations. */
-[[nodiscard]] bool binding_is_current(const ActivityClientBinding& binding) noexcept {
+bool binding_is_current(const ActivityClientBinding& binding) noexcept {
     if (binding.role == ActivityClientRole::privateCurrent) {
         return binding.session.sessionId != state::activity::kAbsentSessionId
                && binding.source.sessionId == binding.session.sessionId
@@ -161,6 +163,8 @@ void report_release_refusal(const service::Request& request,
            && host.target.sessionId == binding.session.sessionId
            && host.target.createdRevision == binding.session.createdRevision;
 }
+
+namespace {
 
 /**
  * Tests whether one message may mutate the State this link owns.
@@ -190,7 +194,7 @@ void report_release_refusal(const service::Request& request,
     server::gameplay::complete_host_session(
         binding.session,
         arrival,
-        push::activity::public_region(binding.session, binding.bindingGeneration, arrival));
+        push::activity::region_host(binding.session, binding.bindingGeneration, arrival));
     return true;
 }
 
@@ -582,6 +586,7 @@ bool process(const ActivityClientBinding& binding,
     case IngressAdapter::authorityResetAcknowledgement:
         return prepare_authority_reset_acknowledgement(
             binding, rosterDecode, adapter, request, plan, hasTransaction);
+    case IngressAdapter::authorityAbandon:
     case IngressAdapter::authorityAbdicate:
         return prepare_authority_abdication(
             binding, rosterDecode, adapter, request, plan, hasTransaction);

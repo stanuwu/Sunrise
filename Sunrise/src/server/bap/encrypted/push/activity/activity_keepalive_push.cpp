@@ -19,6 +19,7 @@
 #include "../../../../gameplay/squad_entity_retirement.h"
 #include "../../../activity_authority_query_owner.h"
 #include "../../../activity_authority_reset_owner.h"
+#include "../../../activity_mission_seed_lease.h"
 #include "../../activity_message/definition.h"
 #include "../../bap_connection_publication.h"
 #include "activity_arrival.h"
@@ -273,12 +274,14 @@ bool consume_activity_keepalive(Session& session,
     const bool estateDue = hostKnown && !hostRefused && isPrivate
                            && hostState.estateRevision != session.activityEstateRevision;
     server::activity::host::PendingScriptableOverride pendingScriptable{};
+    // A target in a public bubble is the public link's to publish, so it owes this link nothing.
     const bool scriptableDue =
         rosterOpen
         && activity_link_count_locked(session.activity.session, session.activity.bindingGeneration)
                == 1
         && server::activity::host::pending_scriptable_override_for_activity_client(
-            session.activity.session, session.activity.bindingGeneration, pendingScriptable);
+            session.activity.session, session.activity.bindingGeneration, pendingScriptable)
+        && !(isPrivate && publishes_on_public(session, pendingScriptable.target));
     // An operator incident waits for the arrival report. Its body always fits an empty frame, so a
     // refused attempt only lost its slot and the next push carries it.
     const bool incidentClientReady = regionReady;
@@ -331,9 +334,9 @@ bool consume_activity_keepalive(Session& session,
                 server::gameplay::complete_host_session(
                     session.activity.session,
                     arrival.index,
-                    public_region(session.activity.session,
-                                  session.activity.bindingGeneration,
-                                  arrival.index));
+                    region_host(session.activity.session,
+                                session.activity.bindingGeneration,
+                                arrival.index));
             }
             core::log::writef(core::log::Channel::server,
                               core::log::Level::info,
@@ -366,6 +369,7 @@ bool consume_activity_keepalive(Session& session,
     const bool hostTeleportDue =
         active
         && (state::activity::membership::host_teleport_armed(session.activity.session.sessionId)
+            || session.activityTeleportSpawnOwed
             || state::activity::membership::hard_wipe_start_unseen(
                 session.activity.session.sessionId))
         && state::activity::membership::acknowledged(session.activity.session.sessionId);
@@ -390,21 +394,37 @@ bool consume_activity_keepalive(Session& session,
                             && retirement.pending;
         }
     }
+    // A release in a bubble the client has left makes a roster due; the roster asks the same.
+    if (retirementReady && !placedPending && !retirementDue) {
+        server::gameplay::squad_entity_retirement::RetirementPlan retirement{};
+        retirementDue = prepare_departed_purge_locked(
+            session,
+            state::activity::membership::instantiated_region(client_placement(session, nullptr)),
+            retirement);
+    }
     const bool missionAllocationDue =
         rosterOpen && !hostRefused && mission_entity_allocation_owed(session, false);
+    // A public link carries the mission content its private link places in public bubbles.
+    const bool ownerPublicationDue =
+        rosterOpen && !hostRefused && !isPrivate && owner_publication_due_locked(session);
     // A bubble its holder abdicated is owed to a client still inside it, and that client's link
     // may owe nothing else, so the grant alone schedules the roster that carries it. A sole link
     // renews on its own region reports. The question is the one the roster asks, so a roster that
     // would refuse the grant is never scheduled for it. A refused body waits for a new revision.
+    // A requested bubble release rides the next roster; a state selection waits on it.
+    const auto& handoff = session.activityMissionSeed.bubbleHandoff;
+    const bool releaseDue = handoff.active(session.activity.bindingGeneration)
+                            && handoff.stage == BubbleHandoff::Stage::requested;
     const bool grantDue = rosterOpen && !hostRefused
-                          && activity_link_count_locked(session.activity.session)
-                                 >= state::activity::bubble_authority::kSharedLinkCount
-                          && owes_shared_grant(session, incidentClientReady);
+                          && (releaseDue
+                              || (activity_link_count_locked(session.activity.session)
+                                      >= state::activity::bubble_authority::kSharedLinkCount
+                                  && owes_shared_grant(session, incidentClientReady)));
     if (!active
         || (!keepaliveDue && !regionChanged && !hostStateDue && !estateDue && !scriptableDue
             && !incidentDue && !authorityResetDue && !authorityQueryDue && !hostTeleportDue
             && !retirementDue && !arrivalDue && !membershipDue && !missionAllocationDue && !grantDue
-            && !missionSeedDue)) {
+            && !missionSeedDue && !ownerPublicationDue)) {
         return false;
     }
     touchesScratch = true;
@@ -416,11 +436,12 @@ bool consume_activity_keepalive(Session& session,
     // Held until the frame reaches the caller. Encoding alone does not spend the region trigger.
     std::int32_t stagedAdvertisedRegion = -1;
     bool stagedAdvertisedPrivate = false;
+    bool stagedTeleportSpawn = false;
     // Only a changed Host value or mission state, retirement or the arrival answer can publish a
     // standalone roster.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue && !membershipDue) {
         if (hostStateDue || estateDue || scriptableDue || retirementDue || arrivalDue
-            || missionAllocationDue || grantDue || missionSeedDue) {
+            || missionAllocationDue || grantDue || missionSeedDue || ownerPublicationDue) {
             published = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
         }
@@ -498,7 +519,7 @@ bool consume_activity_keepalive(Session& session,
             SecureZeroMemory(&plan, sizeof plan);
         }
         if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue || grantDue
-            || missionSeedDue) {
+            || missionSeedDue || ownerPublicationDue) {
             published = append_roster_notification(
                             session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                         || published;
@@ -548,6 +569,7 @@ bool consume_activity_keepalive(Session& session,
     const bool needsRepublish =
         (advertisedRegionReady
          || state::activity::membership::host_teleport_armed(session.activity.session.sessionId)
+         || session.activityTeleportSpawnOwed
          || state::activity::membership::hard_wipe_needs_publish(
              session.activity.session.sessionId))
         && state::activity::membership::acknowledged(session.activity.session.sessionId);
@@ -644,6 +666,7 @@ bool consume_activity_keepalive(Session& session,
                                                          framedSize,
                                                          suppressUnchanged);
         appendedMembership = sent;
+        stagedTeleportSpawn = sent && preparedRepublish && session.activityTeleportSpawnOwed;
         // Only `pending` leaves the trigger armed, because only `pending` is transient. `absent`
         // means this channel advertises nothing, so re-arming there republishes on every poll.
         if (sent && reportedRegion >= 0) {
@@ -721,6 +744,9 @@ bool consume_activity_keepalive(Session& session,
         commit_membership_body_record(session);
     }
     // A body the client never saw must advertise its region again on the next poll.
+    if (delivered && stagedTeleportSpawn) {
+        session.activityTeleportSpawnOwed = false;
+    }
     if (delivered && stagedAdvertisedRegion >= 0) {
         session.activity.advertisedRegion = stagedAdvertisedRegion;
         session.activity.advertisedPrivate = stagedAdvertisedPrivate;

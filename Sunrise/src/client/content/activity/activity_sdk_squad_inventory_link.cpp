@@ -5,6 +5,7 @@
 #include <bcrypt.h>
 #include <cstdio>
 #include <limits>
+#include <map>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -17,6 +18,7 @@
 #include "activity_sdk_squad_graph.h"
 #include "activity_sdk_squad_inventory.h"
 #include "activity_sdk_squad_inventory_internal.h"
+#include "activity_sdk_squad_occurrence_rule.h"
 
 namespace sunrise::client::content::activity::sdk_generation::squad_inventory {
 namespace {
@@ -87,6 +89,10 @@ struct Edge final {
     const DescriptorFact* targetDescriptor{};
     std::string id{};
     std::vector<std::uint32_t> scenarios{};
+    std::vector<std::uint32_t> geometryScenarios{};
+    std::vector<std::uint32_t> provedOccurrences{};
+    std::uint32_t spawnerRow{format::kAbsentIndex};
+    std::uint32_t sourceDescriptorRow{format::kAbsentIndex};
     bool associationExact{};
 };
 
@@ -496,6 +502,8 @@ bool link(const topology::Snapshot& topology,
             edge.targetDescriptor = &facts.descriptors[source.targetDescriptorRow];
             edge.id = source.id;
             edge.associationExact = source.associationExact;
+            edge.spawnerRow = source.spawnerRow;
+            edge.sourceDescriptorRow = source.sourceDescriptorRow;
             for (std::uint32_t contextRow = source.scenarioContexts.first;
                  contextRow < source.scenarioContexts.first + source.scenarioContexts.count;
                  ++contextRow) {
@@ -506,7 +514,79 @@ bool link(const topology::Snapshot& topology,
                 }
                 edge.scenarios.push_back(context.scenarioIndex);
             }
+            edge.geometryScenarios = edge.scenarios;
             edges.push_back(std::move(edge));
+        }
+
+        // A rule whose points lie outside the scenario's object lists gives the graph no edge
+        // context. Such an edge is joined per occurrence, and only those occurrences gain a squad.
+        const OccurrenceRuleIndex occurrenceRules(topology, facts);
+        using EdgeKey = std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>;
+        std::map<EdgeKey, std::size_t> edgesByBinding{};
+        for (std::size_t row = 0; row < graph.edges.size(); ++row) {
+            const auto& edge = graph.edges[row];
+            edgesByBinding.emplace(EdgeKey{edge.spawnerRow,
+                                           edge.sourceDescriptorRow,
+                                           edge.ruleRow,
+                                           edge.targetDescriptorRow},
+                                   row);
+        }
+        for (const auto& context : facts.configOccurrences) {
+            const auto spawnerRow = occurrenceRules.spawner(context.configTag);
+            if (spawnerRow == format::kAbsentIndex) {
+                continue;
+            }
+            for (const auto sourceRow : occurrenceRules.sources(context.configTag)) {
+                const auto proof =
+                    occurrenceRules.resolve(spawnerRow, sourceRow, context.occurrenceIndex);
+                if (!proof.exact()) {
+                    continue;
+                }
+                const EdgeKey key{spawnerRow, sourceRow, proof.ruleRow, proof.descriptorRow};
+                auto found = edgesByBinding.find(key);
+                if (found == edgesByBinding.end()) {
+                    Edge edge{};
+                    edge.spawnerRow = spawnerRow;
+                    edge.sourceDescriptorRow = sourceRow;
+                    edge.spawner = &facts.spawners[spawnerRow];
+                    edge.rule = &facts.rules[proof.ruleRow];
+                    edge.sourceDescriptor = &facts.descriptors[sourceRow];
+                    edge.targetDescriptor = &facts.descriptors[proof.descriptorRow];
+                    std::string objectId{}, digest{};
+                    std::string_view slotId{};
+                    if (!format_text(
+                            objectId,
+                            "object/%08x",
+                            static_cast<unsigned>(
+                                topology.objects[edge.targetDescriptor->objectIndex].objectTag))
+                        || !text_view(topology.slots[edge.targetDescriptor->slotIndex].id,
+                                      slotId)) {
+                        return false;
+                    }
+                    const std::array<std::string_view, 5> parts{graph.spawners[spawnerRow].id,
+                                                                edge.sourceDescriptor->id,
+                                                                graph.rules[proof.ruleRow].id,
+                                                                objectId,
+                                                                slotId};
+                    if (!domain_hash(squadIdHasher,
+                                     "sunrise-authored-spawner-rule-edge-v1",
+                                     parts,
+                                     digest)) {
+                        return false;
+                    }
+                    edge.id = "authored-spawner-rule-edge/" + digest;
+                    const auto row = edges.size();
+                    edges.push_back(std::move(edge));
+                    found = edgesByBinding.emplace(key, row).first;
+                }
+                auto& edge = edges[found->second];
+                edge.provedOccurrences.push_back(context.occurrenceIndex);
+                const auto scenario = topology.occurrences[context.occurrenceIndex].scenarioIndex;
+                if (std::find(edge.scenarios.begin(), edge.scenarios.end(), scenario)
+                    == edge.scenarios.end()) {
+                    edge.scenarios.push_back(scenario);
+                }
+            }
         }
 
         if (edges.size() >= format::kAbsentIndex) {
@@ -528,6 +608,25 @@ bool link(const topology::Snapshot& topology,
                 const std::vector<std::uint32_t>& occurrenceIndexes = sourceOccurrences->second;
                 for (const std::uint32_t occurrenceIndex : occurrenceIndexes) {
                     const topology::Occurrence& occurrence = topology.occurrences[occurrenceIndex];
+                    const bool hasOccurrenceProof = std::find(edge.provedOccurrences.begin(),
+                                                              edge.provedOccurrences.end(),
+                                                              occurrenceIndex)
+                                                    != edge.provedOccurrences.end();
+                    const auto proof = hasOccurrenceProof
+                                           ? occurrenceRules.resolve(edge.spawnerRow,
+                                                                     edge.sourceDescriptorRow,
+                                                                     occurrenceIndex)
+                                           : OccurrenceRule{};
+                    const bool occurrenceExact =
+                        proof.exact() && &facts.rules[proof.ruleRow] == edge.rule
+                        && &facts.descriptors[proof.descriptorRow] == edge.targetDescriptor;
+                    const bool geometryScenario = std::find(edge.geometryScenarios.begin(),
+                                                            edge.geometryScenarios.end(),
+                                                            scenarioIndex)
+                                                  != edge.geometryScenarios.end();
+                    if (!geometryScenario && !occurrenceExact) {
+                        continue;
+                    }
                     std::string_view occurrenceId{};
                     if (!text_view(occurrence.id, occurrenceId)) {
                         return false;
@@ -563,10 +662,13 @@ bool link(const topology::Snapshot& topology,
                     if (sourceExact) {
                         squad.row.flags |= format::kSquadSourceDescriptorExact;
                     }
-                    if (edge.associationExact) {
+                    if (edge.associationExact || occurrenceExact) {
                         squad.row.flags |= format::kSquadSpawnerRuleEdgeExact;
                     }
                     squad.row.flags |= format::kSquadScenarioOccurrenceExact;
+                    if (sourceExact && occurrenceExact) {
+                        squad.row.flags |= format::kSquadOccurrenceRuleExact;
+                    }
 
                     squad.members.reserve(edge.spawner->members.size());
                     for (std::uint32_t memberOrdinal = 0;

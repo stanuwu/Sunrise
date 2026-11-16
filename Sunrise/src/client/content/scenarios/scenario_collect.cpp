@@ -195,6 +195,7 @@ bool collect_rows(const reader::Source& source, Storage& storage, const char*& r
         storage.rows[row].spawnStemLength = live->stemLength;
     }
     storage.resolveReportTick = GetTickCount64() + kResolveReportMs;
+    storage.resolveDeadlineTick = GetTickCount64() + kResolveStallMs;
     return true;
 }
 
@@ -221,9 +222,12 @@ bool resolve_pending(const reader::Source& source,
         if (resolve_row(source, scratch, storage, storage.rows[row])) {
             storage.resolved[row] = 1;
             ++storage.resolvedCount;
+            storage.resolveDeadlineTick = GetTickCount64() + kResolveStallMs;
         }
     }
-    return collection_complete(storage.resolvedCount, storage.liveRowCount);
+    // A row that never reads must not hold the boot, so a stalled collection settles without it.
+    return collection_complete(storage.resolvedCount, storage.liveRowCount)
+           || GetTickCount64() >= storage.resolveDeadlineTick;
 }
 
 /** Reads the bubble layout of every row once, with no budget and no retry window. */
@@ -250,6 +254,7 @@ void rearm_resolve(Storage& storage) noexcept {
     storage.resolvedCount = 0;
     storage.resolveCursor = 0;
     storage.resolveReportTick = GetTickCount64() + kResolveReportMs;
+    storage.resolveDeadlineTick = GetTickCount64() + kResolveStallMs;
     ++storage.resolveRounds;
 }
 

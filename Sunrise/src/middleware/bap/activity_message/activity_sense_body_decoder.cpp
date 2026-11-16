@@ -15,6 +15,8 @@
 #include "damage_monitor_auth.h"
 #include "ghost_link_auth.h"
 #include "interactable_object_auth.h"
+#include "mission_effect_auth.h"
+#include "scene_events_auth.h"
 #include "scriptable_auth_body.h"
 #include "sense_update_body.h"
 #include "squad_sense_state.h"
@@ -31,14 +33,14 @@ constexpr std::uint32_t kDevice = generated::C80804f47::kClass,
                         kScene = generated::C8080626a::kClass;
 constexpr std::uint32_t kSquad = squad_sense::kSchema, kObjective = generated::C80807f04::kClass;
 constexpr std::uint32_t kOccupancy = generated::C80809531::kClass;
-constexpr std::uint32_t kAttachment = generated::C8080954a::kClass;
+constexpr std::uint32_t kAttachment = mission_effect::kSenseSchema;
 constexpr std::uint32_t kGhostLink = ghost_link::kSenseSchema;
 constexpr std::uint32_t kObject = generated::C8080992e::kClass;
 constexpr std::uint32_t kObjectSpawnMask = generated::C80809e1b::kClass,
                         kObjectReplies = generated::C80809aea::kClass;
 constexpr std::uint32_t kSceneList = generated::C808094e1::kClass;
 /** A u32 key list; scene events and player keys use the same schema. */
-constexpr std::uint32_t kKeyList = generated::C808094df::kClass;
+constexpr std::uint32_t kKeyList = scene_events::kSenseKeyListSchema;
 constexpr std::uint32_t kSquadCounts = generated::C80809491::kClass,
                         kSquadList = generated::C80807ecf::kClass;
 constexpr std::uint32_t kSquadReals = generated::C80807ecd::kClass;
@@ -58,17 +60,15 @@ constexpr std::uint16_t kEngagementValueOrdinal = 1;
 constexpr std::uint8_t kEngagementValueWidth = 16;
 constexpr std::int32_t kEngagementValueBias = 32'768;
 /**
- * Engagement list ordinal 1 is the key array (schema 0x808094F7): code-35 player keys, read as
- * the same 64-bit integer the type-13 identity read uses. The generated schema rows give the
- * five-bit count (0x808094F8 field 0) and the 16-key array (field 1); the installed SDK's generic
- * decoder is the offline oracle for those widths.
+ * Engagement list ordinal 1 is the key array (schema 0x808094F7): 64-bit player keys, as the
+ * type-13 identity read uses. Field 0 of 0x808094F8 is the five-bit count of up to 16 keys.
  */
 constexpr std::uint16_t kEngagementKeyOrdinal = 1;
 constexpr std::uint8_t kEngagementKeyWidth = 64;
 /** The type-26 attachment body: three required signed 32-bit counters, then one flag. */
-constexpr std::uint16_t kAttachmentCounterCount = 3;
+constexpr std::uint16_t kAttachmentCounterCount = mission_effect::kSenseCounterCount;
 constexpr std::uint8_t kAttachmentCounterWidth = 32;
-constexpr std::uint16_t kAttachmentFlagOrdinal = kAttachmentCounterCount;
+constexpr std::uint16_t kAttachmentFlagOrdinal = mission_effect::kSenseAttachedOrdinal;
 /** Type-13 participation root and its nested blocks, in body order. */
 constexpr std::uint32_t kPlayer = generated::C80804f2f::kClass,
                         kPlayerState = generated::C808094e4::kClass;
@@ -84,9 +84,8 @@ constexpr std::uint32_t kDamage = damage_monitor::kSenseSchema;
 constexpr std::uint32_t kInteractionReply = interactable_object::kInteractionReply,
                         kOwnershipReply = interactable_object::kOwnershipReply;
 /**
- * The capture-plate reply, sent once the plate's component Auth exists. Reflected group 2408:
- * two six-bit values at bias three, a flag, two signed revisions, then an optional word and an
- * optional 4-bit unit real, each behind its own presence bit.
+ * The capture-plate reply, sent once the plate Auth exists: two six-bit values at bias three, a
+ * flag, two signed revisions, then an optional word and an optional 4-bit unit real.
  * Ordinals are recorded unnamed; their meanings are not recovered.
  */
 constexpr std::uint32_t kCapturePlateReply = generated::C80804df6::kClass;

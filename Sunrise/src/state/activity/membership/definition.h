@@ -43,6 +43,12 @@ inline constexpr std::int8_t kHostTeleportArmedState = 1;
  * reads 3. Step 0 refuses to re-latch on 3, so holding it there is inert once the spawn has run.
  */
 inline constexpr std::int8_t kHostTeleportSpawnState = 3;
+/**
+ * Teleport state published while a latched move is under way and its spawn is not yet due.
+ * Step 0 does not latch on it, so an activity client that starts during the move (the public
+ * link's, which reads the same player block) cannot run the move a second time.
+ */
+inline constexpr std::int8_t kHostTeleportMovingState = 0;
 /** The client resets its teleport byte to zero when the spawn call finishes. */
 inline constexpr std::int8_t kClientTeleportResetState = 0;
 /** The mirrored 10-bit slice-set field reaches logical 1022. */

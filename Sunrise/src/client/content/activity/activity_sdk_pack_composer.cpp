@@ -738,6 +738,8 @@ pack::Tables Storage::tables() const noexcept {
         actorAbilityTargets,
         authoredSceneEventKeys,
         incidentDefinitions,
+        actorTemperaments,
+        actorChannels,
     };
 }
 

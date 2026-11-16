@@ -154,7 +154,7 @@ void report_outcome(Skip skip,
                                    std::uint8_t localMemberSlot,
                                    message::CitizenAdvertisement& candidate,
                                    std::uint64_t& hostGeneration,
-                                   bool publicRegion) noexcept {
+                                   group::RegionHost host) noexcept {
     candidate = {};
     hostGeneration = 0;
     if (!endpoint::ready()) {
@@ -168,9 +168,9 @@ void report_outcome(Skip skip,
     }
 
     const endpoint::Identity identity = endpoint::identity();
-    group::HostSessionBinding host{};
+    group::HostSessionBinding binding{};
     switch (group::request_host_session(
-        region_machine_id(source, regionIndex), source, regionIndex, host, publicRegion)) {
+        region_machine_id(source, regionIndex), source, regionIndex, binding, host)) {
     case group::HostSessionState::ready:
         break;
     case group::HostSessionState::pending:
@@ -184,8 +184,8 @@ void report_outcome(Skip skip,
         return Skip::noSource;
     }
     if (!encode_candidate(
-            host,
-            region_identity(source_identity(identity.onlineSessionId, host.source), regionIndex),
+            binding,
+            region_identity(source_identity(identity.onlineSessionId, binding.source), regionIndex),
             regionIndex,
             localMemberSlot,
             candidate,
@@ -204,9 +204,9 @@ void build_advertisement(const state::activity::SessionBinding& source,
                          std::uint8_t localMemberSlot,
                          message::CitizenAdvertisement& output,
                          std::uint64_t& hostGeneration,
-                         bool publicRegion) noexcept {
+                         group::RegionHost host) noexcept {
     const Skip skip =
-        build_candidate(source, regionIndex, localMemberSlot, output, hostGeneration, publicRegion);
+        build_candidate(source, regionIndex, localMemberSlot, output, hostGeneration, host);
     report_outcome(skip, regionIndex, regionSource, output.ambassadorSlot);
 }
 
@@ -216,19 +216,19 @@ void build_directory_entry(const state::activity::SessionBinding& source,
                            std::uint8_t localMemberSlot,
                            message::CitizenAdvertisement& output,
                            std::uint64_t& hostGeneration,
-                           bool publicRegion) noexcept {
-    static_cast<void>(build_candidate(
-        source, regionIndex, localMemberSlot, output, hostGeneration, publicRegion));
+                           group::RegionHost host) noexcept {
+    static_cast<void>(
+        build_candidate(source, regionIndex, localMemberSlot, output, hostGeneration, host));
 }
 
 /** Claims a missing host row and reports whether its advertisement is ready. */
 AdvertisementState advertisement_state(const state::activity::SessionBinding& source,
                                        std::int32_t regionIndex,
-                                       bool publicRegion) noexcept {
+                                       group::RegionHost host) noexcept {
     message::CitizenAdvertisement candidate{};
     std::uint64_t generation = 0;
-    const Skip skip = build_candidate(
-        source, regionIndex, kQueriedMemberSlot, candidate, generation, publicRegion);
+    const Skip skip =
+        build_candidate(source, regionIndex, kQueriedMemberSlot, candidate, generation, host);
     if (generation != 0) {
         group::release_host_session(generation);
     }
@@ -245,8 +245,8 @@ AdvertisementState advertisement_state(const state::activity::SessionBinding& so
 /** Claims the region's host row and completes a pending allocation at once. */
 void complete_host_session(const state::activity::SessionBinding& source,
                            std::int32_t regionIndex,
-                           bool publicRegion) noexcept {
-    if (advertisement_state(source, regionIndex, publicRegion) == AdvertisementState::pending) {
+                           group::RegionHost host) noexcept {
+    if (advertisement_state(source, regionIndex, host) == AdvertisementState::pending) {
         group::allocate_claimed_host_sessions();
     }
 }

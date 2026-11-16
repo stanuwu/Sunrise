@@ -145,7 +145,9 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
         || (guard != nullptr && pending.kind == ScriptableOverrideKind::sdkAuth
             && pending.sdkCompiled)) {
         nextCounter = true;
-    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::squadObjective) {
+    } else if (guard != nullptr
+               && (pending.kind == ScriptableOverrideKind::squadObjective
+                   || pending.kind == ScriptableOverrideKind::combatantControls)) {
         // The revision was derived from the transported estate while this ClientRef was reserved.
         nextCounter = pending.generation > 0 && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::squad
@@ -163,8 +165,11 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::combatantBinding) {
         auth::Type2ChannelState candidate = guard->type2;
         std::uint32_t revision = 0;
-        nextCounter =
-            auth::next_type2_revision(candidate, revision) && revision == pending.generation;
+        nextCounter = auth::next_type2_revision(candidate, revision)
+                      && revision == pending.generation
+                      && (pending.actorSpawnGeneration == 0
+                          || (pending.actorSpawnGeneration > guard->type2SpawnGeneration
+                              && pending.actorSpawnGeneration <= squad::kMaximumGeneration));
         candidate.revision = revision;
         candidate.actorBinding = auth::Type2ActorBinding::squadMember;
     } else if (guard != nullptr
@@ -175,10 +180,21 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
                       && (pending.actorSpawnGeneration == 0
                           || (pending.actorSpawnGeneration > guard->type2SpawnGeneration
                               && pending.actorSpawnGeneration <= squad::kMaximumGeneration));
+    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::combatantDelivery) {
+        nextCounter = pending.generation > guard->type2DeliveryRevision
+                      && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::combatantSequence) {
         // A retained generic Auth program may be ahead of this typed guard.
         nextCounter = pending.generation > guard->type2AtomGeneration
                       && pending.generation <= squad::kMaximumGeneration;
+    } else if (guard != nullptr
+               && pending.kind == ScriptableOverrideKind::interactableObjectInPlace) {
+        // The encoder repeats the newer of this guard's counter and the retained body's, which an
+        // SDK body may have advanced without the guard.
+        nextCounter =
+            pending.generation > 0
+            && pending.generation >= static_cast<std::uint64_t>((std::max)(guard->type4.last, 0))
+            && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr
                && (pending.kind == ScriptableOverrideKind::object
                    || pending.kind == ScriptableOverrideKind::interactableObject)) {
@@ -189,12 +205,26 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::damageWatch) {
         nextCounter = pending.generation > guard->damageRevision
                       && pending.generation <= squad::kMaximumGeneration;
+    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::objectChannels) {
+        nextCounter = pending.generation > guard->objectChannelsRevision
+                      && pending.generation
+                             <= middleware::bap::activity_message::auth_fields::kMaximumCounter;
+    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::hopOn) {
+        nextCounter = pending.generation > guard->hopOnRevision
+                      && pending.generation <= squad::kMaximumGeneration;
+    } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::engagement) {
+        // A body that keeps its members repeats the committed revision.
+        nextCounter = pending.generation >= guard->engagementRevision && pending.generation > 0
+                      && pending.generation <= guard->engagementRevision + 1U;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::ghostLink) {
         nextCounter = pending.generation > guard->ghostLink.generation
                       && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::sequence) {
         std::uint8_t next = 0;
-        nextCounter = auth::next_type5_revision(guard->type5, next) && next == pending.generation;
+        nextCounter =
+            pending.sequenceRetain
+                ? guard->type5.hasLast && guard->type5.last == pending.generation
+                : auth::next_type5_revision(guard->type5, next) && next == pending.generation;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::cinematic) {
         std::uint32_t next = 0;
         nextCounter = auth::next_type6_generation(guard->type6, next) && next == pending.generation;
@@ -233,6 +263,20 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
     return nextCounter;
 }
 
+/**
+ * Takes a staged type-2 body's `.5` as the guard's controls when it is newer, so a later channel
+ * or binding body starts from the controls the client holds and above their revision.
+ */
+void adopt_type2_controls(ScriptableGuard& guard,
+                          const PendingScriptableOverride& pending) noexcept {
+    auth::Type2ChannelState controls{};
+    if (auth::read_type2_controls(
+            std::span(pending.body).first(pending.byteCount), pending.bitCount, controls)
+        && controls.revision > guard.type2.revision) {
+        guard.type2 = controls;
+    }
+}
+
 /** Advances one committed guard to the body that has just reached transport. */
 void advance_staged_guard(ScriptableGuard* guard,
                           const PendingScriptableOverride& pending) noexcept {
@@ -249,20 +293,36 @@ void advance_staged_guard(ScriptableGuard* guard,
     } else if (pending.kind == ScriptableOverrideKind::combatantBinding) {
         guard->type2.revision = static_cast<std::uint32_t>(pending.generation);
         guard->type2.actorBinding = auth::Type2ActorBinding::squadMember;
+        if (pending.actorSpawnGeneration != 0) {
+            guard->type2SpawnGeneration = pending.actorSpawnGeneration;
+        }
     } else if (pending.kind == ScriptableOverrideKind::combatantProgram
                || pending.kind == ScriptableOverrideKind::combatantRetirement) {
         guard->type2AtomGeneration = static_cast<std::uint32_t>(pending.generation);
         if (pending.actorSpawnGeneration != 0) {
             guard->type2SpawnGeneration = pending.actorSpawnGeneration;
         }
+        // A creating program may carry the new life's controls.
+        adopt_type2_controls(*guard, pending);
+    } else if (pending.kind == ScriptableOverrideKind::combatantControls) {
+        adopt_type2_controls(*guard, pending);
+    } else if (pending.kind == ScriptableOverrideKind::combatantDelivery) {
+        guard->type2DeliveryRevision = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::combatantSequence) {
         guard->type2AtomGeneration = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::object
-               || pending.kind == ScriptableOverrideKind::interactableObject) {
+               || pending.kind == ScriptableOverrideKind::interactableObject
+               || pending.kind == ScriptableOverrideKind::interactableObjectInPlace) {
         guard->type4.last = static_cast<std::int32_t>(pending.generation);
         guard->type4.hasLast = true;
     } else if (pending.kind == ScriptableOverrideKind::damageWatch) {
         guard->damageRevision = static_cast<std::uint32_t>(pending.generation);
+    } else if (pending.kind == ScriptableOverrideKind::objectChannels) {
+        guard->objectChannelsRevision = static_cast<std::uint32_t>(pending.generation);
+    } else if (pending.kind == ScriptableOverrideKind::hopOn) {
+        guard->hopOnRevision = static_cast<std::uint32_t>(pending.generation);
+    } else if (pending.kind == ScriptableOverrideKind::engagement) {
+        guard->engagementRevision = static_cast<std::uint32_t>(pending.generation);
     } else if (pending.kind == ScriptableOverrideKind::ghostLink) {
         ghost_link::advance(*guard, pending);
     } else if (pending.kind == ScriptableOverrideKind::sequence) {
@@ -297,7 +357,9 @@ void advance_staged_guard(ScriptableGuard* guard,
 /** Records that one pending body reached the transport, so its retained estate can advance. */
 void note_scriptable_transport_staged(const state::activity::SessionBinding& binding,
                                       std::uint64_t sourceGeneration,
-                                      const PendingScriptableOverride& pending) noexcept {
+                                      const PendingScriptableOverride& pending,
+                                      const state::activity::SessionBinding& publisher,
+                                      std::uint64_t publisherGeneration) noexcept {
     if (pending.revision == 0
         || (pending.expectedActivityClientGeneration != 0
             && pending.expectedActivityClientGeneration != sourceGeneration)) {
@@ -317,12 +379,18 @@ void note_scriptable_transport_staged(const state::activity::SessionBinding& bin
             return;
         }
         server::gameplay::squad_entity_retirement::record_delivered_target(
-            binding, sourceGeneration, pending);
+            publisher, publisherGeneration, sourceGeneration, pending);
         advance_staged_guard(guard, pending);
         bool clientApplied = client_applied_override(pending.kind);
         if (pending.kind == ScriptableOverrideKind::lifetime) {
             // Latch the state so every later msg 5 keeps reporting it.
             instance->view.lifetimeState = pending.lifetimeState;
+            // Enqueue refused any change the committed list could not hold.
+            if (pending.activityFlag.key != 0) {
+                static_cast<void>(
+                    middleware::bap::activity_message::sensor_auth_update::apply_activity_flag(
+                        instance->view.activityFlags, pending.activityFlag));
+            }
         }
         instance->view.lastOutputAttemptTick = GetTickCount64();
         Event event{};
@@ -340,7 +408,7 @@ void note_scriptable_transport_staged(const state::activity::SessionBinding& bin
                 continue;
             }
             server::gameplay::squad_entity_retirement::record_delivered_target(
-                binding, sourceGeneration, queued);
+                publisher, publisherGeneration, sourceGeneration, queued);
             advance_staged_guard(queuedGuard, queued);
             clientApplied = clientApplied || client_applied_override(queued.kind);
             event.scriptableRevision = queued.revision;

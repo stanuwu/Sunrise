@@ -170,6 +170,11 @@ bool build_character_abilities(
                 "bucket_build", character, socketEntryListIndex, packedSelection);
             return;
         }
+        if (row.perkCount == row.perks.size()) {
+            // A full row has no room left, so any further sandbox perk its active socket entries
+            // declare is dropped.
+            report_ability_failure("perk_capacity", character, socketEntryListIndex, row.perkCount);
+        }
         output[count++] = row;
     };
     for (std::size_t character = 0; character < account.characterCount; ++character) {

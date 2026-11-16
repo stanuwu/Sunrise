@@ -253,7 +253,11 @@ private:
             {ValueRole::commandAuxiliary8, std::uint8_t{8}},
         }};
         std::uint8_t selector = 0;
+        bool skipTarget = false;
         for (const auto& [role, width] : fields) {
+            if (skipTarget && role == ValueRole::commandTarget) {
+                continue;
+            }
             const std::uint32_t at = static_cast<std::uint32_t>(reader_.position());
             std::uint64_t value = 0;
             if (!reader_.read(width, value)) {
@@ -264,12 +268,17 @@ private:
                 && value != 0) {
                 return RuntimeWalkStatus::complete;
             }
-            if (resolver_.nativeCommandEmptyShortcut && role == ValueRole::commandTargetReference
-                && value != 0) {
-                return RuntimeWalkStatus::unsupportedField;
-            }
             if (role == ValueRole::commandSelector) {
                 selector = static_cast<std::uint8_t>(value);
+            }
+            if (resolver_.nativeCommandEmptyShortcut && role == ValueRole::commandTargetReference
+                && value != 0) {
+                const RuntimeWalkStatus target =
+                    walk_command_target(owner, field, occurrence, depth);
+                if (target != RuntimeWalkStatus::complete) {
+                    return target;
+                }
+                skipTarget = true;
             }
         }
         std::uint32_t payloadHandle = 0;
@@ -284,6 +293,20 @@ private:
         }
         return payload.arrayLength != 0 ? walk_array(payload, payload.arrayLength, depth + 1)
                                         : walk_schema(payload, depth + 1);
+    }
+
+    /**
+     * Reads the reflected target that replaces a mode-one command's 16-bit target. The native
+     * reader walks one registered class there whose wire form is a single type-24 variant.
+     */
+    [[nodiscard]] RuntimeWalkStatus walk_command_target(const runtime::SchemaView& owner,
+                                                        const runtime::FieldView& field,
+                                                        std::uint32_t occurrence,
+                                                        std::size_t depth) noexcept {
+        runtime::FieldView target = field;
+        target.typeCode = runtime::kVariantType;
+        RuntimeMemoryMap memory{};
+        return walk_inline_type(owner, target, occurrence, memory, depth + 1);
     }
 
     /** Reads one type-18 sentinel or live simulation entity token. */

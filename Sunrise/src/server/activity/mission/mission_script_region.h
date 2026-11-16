@@ -1,8 +1,28 @@
 #pragma once
 
+#include <cstdint>
+
+#include "../../../state/build_data/scriptables/definition.h"
 #include "../host_runtime.h"
 
 namespace sunrise::server::activity::mission {
+
+/** Region argument that accepts an occurrence in any region. */
+inline constexpr std::int32_t kAnyRegion = -1;
+
+/**
+ * Tests whether one authored object's occurrence is resolved and lies in one region.
+ * A region numbers a slice-set state the way membership does: slice set plus state ordinal.
+ */
+[[nodiscard]] inline bool
+occurrence_in_region(const state::build_data::scriptables::Snapshot& snapshot,
+                     const state::build_data::scriptables::Object& object,
+                     std::int32_t region) noexcept {
+    const state::build_data::scriptables::State& state = snapshot.states[object.stateRow];
+    return state.resolved && state.registryTag == object.registryTag
+           && std::uint64_t{state.sliceSetIndex} + state.index
+                  == static_cast<std::uint64_t>(region);
+}
 
 /**
  * Pending-region changes never establish entry into a held region.

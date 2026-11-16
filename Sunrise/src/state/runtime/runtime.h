@@ -705,6 +705,21 @@ void shutdown() noexcept;
  */
 void publish_sign_in_time(std::uint64_t seconds) noexcept;
 
+/**
+ * Records the activity the selected character entered. Its record names it as the next
+ * launch's from side.
+ * @param activityIndex Activity definition index.
+ * @return True when the character record changed and is owed to the client.
+ */
+[[nodiscard]] bool publish_entered_activity(std::uint16_t activityIndex) noexcept;
+
+/**
+ * Returns the selected character to orbit when it is still in the activity it left.
+ * @param activityIndex Activity definition index of the closed activity.
+ * @return True when the character record changed and is owed to the client.
+ */
+[[nodiscard]] bool publish_left_activity(std::uint16_t activityIndex) noexcept;
+
 /** @return Immutable generated BAP session fields. */
 [[nodiscard]] const BapState& bap() noexcept;
 

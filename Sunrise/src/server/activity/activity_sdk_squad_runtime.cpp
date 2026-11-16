@@ -372,16 +372,24 @@ struct PreparedSquad final {
     return Status::ready;
 }
 
-/** Opt-in needs one exact actor class for every positively requested member. */
+} // namespace
+
+/**
+ * Opt-in needs one exact actor class for every positively requested member. The source is the
+ * squad, or the combatant its member binds to: a bound actor's identity names the combatant.
+ */
 state::gameplay::squad_entity_retirement::Eligibility
 retirement_eligibility(const sdk::BoundView& view,
                        std::uint32_t squadRow,
                        std::span<const std::int32_t> counts,
-                       const host::ScriptableTarget& target,
+                       const host::ScriptableTarget& source,
                        bool enabled) noexcept {
-    state::gameplay::squad_entity_retirement::Eligibility result{};
-    result.squad = {target.registryKey, target.slotIndex, target.slotType};
-    if (!enabled || !view.catalog || target.slotType != format::kSquadSlotType) {
+    namespace retirement = state::gameplay::squad_entity_retirement;
+    retirement::Eligibility result{};
+    result.squad = {source.registryKey, source.slotIndex, source.slotType};
+    if (!enabled || !view.catalog
+        || (source.slotType != retirement::kSquadSourceType
+            && source.slotType != retirement::kCombatantSourceType)) {
         return result;
     }
     const auto& catalog = *view.catalog;
@@ -424,6 +432,8 @@ retirement_eligibility(const sdk::BoundView& view,
     return result;
 }
 
+namespace {
+
 /** The destination is another type-1 squad of the same object, sent as its wire slot. */
 [[nodiscard]] Status resolve_destination(const sdk::Catalog& catalog,
                                          std::uint32_t squadRow,
@@ -449,10 +459,14 @@ retirement_eligibility(const sdk::BoundView& view,
     return Status::ready;
 }
 
-/** The rule is a type-66 slot of the squad's own object, sent as its wire slot. */
+/**
+ * The rule is a type-66 slot of the squad's own object, sent as its wire slot. A reservation
+ * spawns nothing on the ground: its carrier's unload supplies the spawn point.
+ */
 [[nodiscard]] Status resolve_spawn_rule(const sdk::Catalog& catalog,
                                         std::uint32_t squadRow,
                                         std::uint32_t registryKey,
+                                        squad_auth::Mode mode,
                                         std::optional<std::uint32_t> spawnRuleSlotRow,
                                         std::optional<squad_auth::SpawnRule>& output) noexcept {
     output.reset();
@@ -460,7 +474,7 @@ retirement_eligibility(const sdk::BoundView& view,
     const auto slots = catalog.slots();
     if (!spawnRuleSlotRow.has_value()) {
         // A spawner with no rule of its own cannot be placed without a selected one.
-        return squadRow < squads.size()
+        return mode != squad_auth::Mode::reserve && squadRow < squads.size()
                        && (squads[squadRow].flags & format::kSquadRequiresSelectedRule) != 0
                    ? Status::notRunnable
                    : Status::ready;
@@ -492,7 +506,8 @@ retirement_eligibility(const sdk::BoundView& view,
                            std::optional<std::uint32_t> nameHash,
                            bool retireOnReturn,
                            std::optional<std::uint32_t> destinationSquadRow,
-                           std::optional<std::uint32_t> spawnRuleSlotRow) noexcept {
+                           std::optional<std::uint32_t> spawnRuleSlotRow,
+                           std::optional<squad_auth::Temperaments> temperaments) noexcept {
     PreparedSquad prepared{};
     const Status status = prepare(view, squadRow, requestedCounts, mode, prepared);
     if (status != Status::ready) {
@@ -506,7 +521,7 @@ retirement_eligibility(const sdk::BoundView& view,
     }
     std::optional<squad_auth::SpawnRule> spawnRule{};
     const Status ruleStatus = resolve_spawn_rule(
-        *view.catalog, squadRow, prepared.target.registryKey, spawnRuleSlotRow, spawnRule);
+        *view.catalog, squadRow, prepared.target.registryKey, mode, spawnRuleSlotRow, spawnRule);
     if (ruleStatus != Status::ready) {
         return ruleStatus;
     }
@@ -524,7 +539,8 @@ retirement_eligibility(const sdk::BoundView& view,
             retirement_eligibility(
                 view, squadRow, requestedCounts, prepared.target, retireOnReturn),
             destination,
-            spawnRule)) {
+            spawnRule,
+            temperaments)) {
         return Status::queued;
     }
     return Status::refused;
@@ -561,7 +577,7 @@ Status availability(const sdk::BoundView& view,
     }
     std::optional<squad_auth::SpawnRule> spawnRule{};
     return resolve_spawn_rule(
-        *view.catalog, squadRow, prepared.target.registryKey, spawnRuleSlotRow, spawnRule);
+        *view.catalog, squadRow, prepared.target.registryKey, mode, spawnRuleSlotRow, spawnRule);
 }
 
 /** Queues one preflighted generated squad through the proved private type-1 route. */
@@ -581,7 +597,8 @@ Status place(const sdk::BoundView& view,
                  nameHash,
                  retireOnReturn,
                  destinationSquadRow,
-                 spawnRuleSlotRow);
+                 spawnRuleSlotRow,
+                 std::nullopt);
 }
 
 /** Queues one preflighted squad only through an exact unarmed Host revision. */
@@ -593,7 +610,8 @@ Status place_reserved(const sdk::BoundView& view,
                       std::optional<std::uint32_t> nameHash,
                       bool retireOnReturn,
                       std::optional<std::uint32_t> destinationSquadRow,
-                      std::optional<std::uint32_t> spawnRuleSlotRow) noexcept {
+                      std::optional<std::uint32_t> spawnRuleSlotRow,
+                      std::optional<squad_auth::Temperaments> temperaments) noexcept {
     return queue(view,
                  squadRow,
                  requestedCounts,
@@ -602,7 +620,8 @@ Status place_reserved(const sdk::BoundView& view,
                  nameHash,
                  retireOnReturn,
                  destinationSquadRow,
-                 spawnRuleSlotRow);
+                 spawnRuleSlotRow,
+                 temperaments);
 }
 
 /** Reads the squad's authored bubble without resolving a link or a roster target. */

@@ -15,6 +15,7 @@
 #include "../../../middleware/bap/activity_message/volume_toggle_auth.h"
 #include "../../../state/activity/mission/definition.h"
 #include "../../../state/activity_sdk/format.h"
+#include "mission_api_handles.h"
 #include "mission_api_types.h"
 #include "mission_api_values.h"
 
@@ -67,10 +68,11 @@ inline constexpr ValueSpec kEngagementArguments[]{
      .bound = between(0, static_cast<std::int64_t>(slot_auth::kType70VolumeCapacity)),
      .element = kVolume,
      .note = "same-owner volumes that admit players to the audience"},
-    {.name = "revision",
-     .kind = ValueKind::integer,
-     .bound = between(1, (std::numeric_limits<std::int16_t>::max)()),
-     .note = "increase to clear accumulated members; do not wrap within a sensor lifetime"},
+    {.name = "clear",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "empties the members the client has gathered; the Host owns the revision"},
     {.name = "everyone",
      .kind = ValueKind::boolean,
      .optional = true,
@@ -79,6 +81,8 @@ inline constexpr ValueSpec kEngagementArguments[]{
 };
 inline constexpr ValueSpec kFilterObject[]{
     {.kind = ValueKind::handle, .ref = "slot", .slot = type_gate(slot_format::kObjectSlotType)}};
+inline constexpr ValueSpec kFilterSquad[]{
+    {.kind = ValueKind::handle, .ref = "slot", .slot = type_gate(slot_format::kSquadSlotType)}};
 inline constexpr ValueSpec kObjectFilterArguments[]{
     {.name = "players",
      .kind = ValueKind::boolean,
@@ -89,8 +93,7 @@ inline constexpr ValueSpec kObjectFilterArguments[]{
      .kind = ValueKind::handle,
      .ref = "slot",
      .optional = true,
-     .slot = type_gate(slot_format::kObjectSlotType),
-     .note = "adds a test: this one object"},
+     .note = "adds a test: this one authored object or exact type-2 combatant"},
     {.name = "targets",
      .kind = ValueKind::list,
      .optional = true,
@@ -103,6 +106,12 @@ inline constexpr ValueSpec kObjectFilterArguments[]{
      .optional = true,
      .slot = type_gate(slot_format::kSquadSlotType),
      .note = "adds a test: this squad"},
+    {.name = "squads",
+     .kind = ValueKind::list,
+     .optional = true,
+     .bound = between(1, static_cast<std::int64_t>(slot_auth::kType34PredicateCapacity)),
+     .element = kFilterSquad,
+     .note = "adds one test per squad"},
     {.name = "inside",
      .kind = ValueKind::handle,
      .ref = "slot",
@@ -125,23 +134,36 @@ inline constexpr ValueSpec kVolumeActiveArguments[]{
      .note = "an authored volume of the toggle's own object"},
     {.name = "active", .kind = ValueKind::boolean, .note = "true turns it on, false off"},
 };
-inline constexpr ValueSpec kWatchDamageArguments[]{
-    {.name = "target", .kind = ValueKind::handle, .ref = "slot", .slot = kExactObject},
-};
-inline constexpr ValueSpec kHopOnArguments[]{
+inline constexpr ValueSpec kAttachHopOnArguments[]{
     {.name = "filter",
      .kind = ValueKind::handle,
      .ref = "slot",
-     .optional = true,
      .slot = type_gate(slot_auth::kType34SlotType),
-     .note = "the type-34 filter whose matches the hop-on binds; absent stops it"},
-    {.name = "revision",
-     .kind = ValueKind::integer,
-     .bound = between(1, kInt32Maximum),
-     .note = "bind revision; a higher value drops the spawned copies and gathers again"},
+     .note = "the object filter whose matches host the hop-on; set it with set_object_filter"},
+};
+inline constexpr ValueSpec kWatchDamageArguments[]{
+    {.name = "target", .kind = ValueKind::handle, .ref = "slot", .slot = kExactObject},
 };
 inline constexpr ValueSpec kBurstSlot[]{
     {.kind = ValueKind::selector, .ref = "mission.Slot", .slot = kExactObject}};
+inline constexpr ValueSpec kObjectChannelValue[]{
+    {.kind = ValueKind::number,
+     .bound = between(static_cast<std::int64_t>(slot_auth::kType24MinimumValue),
+                      static_cast<std::int64_t>(slot_auth::kType24MaximumValue)),
+     .note = "finite"}};
+inline constexpr ValueSpec kObjectChannelsArguments[]{
+    {.name = "values",
+     .kind = ValueKind::list,
+     .bound = between(1, static_cast<std::int64_t>(slot_auth::kType24ChannelCapacity)),
+     .element = kObjectChannelValue,
+     .note = "prefix of the object's verified authored channels; later channels stay unchanged"},
+    {.name = "blend_seconds",
+     .kind = ValueKind::number,
+     .optional = true,
+     .fallback = default_integer(0),
+     .bound = at_least(0),
+     .note = "finite duration shared by the requested channels"},
+};
 inline constexpr ValueSpec kObjectActiveArguments[]{
     kActiveArgument,
     {.name = "with",
@@ -150,6 +172,12 @@ inline constexpr ValueSpec kObjectActiveArguments[]{
      .bound = at_most(static_cast<std::int64_t>(state::activity::mission::kIntentBurstCapacity)),
      .element = kBurstSlot,
      .note = "more objects sent on the same request"},
+    {.name = "at",
+     .kind = ValueKind::handle,
+     .ref = "slot",
+     .optional = true,
+     .slot = type_gate(slot_format::kSquadSlotType),
+     .note = "spawns each entry at the centre of this squad's living members"},
 };
 inline constexpr ValueSpec kSnapArgument{.name = "snap",
                                          .kind = ValueKind::boolean,
@@ -165,14 +193,6 @@ inline constexpr ValueSpec kSetChannelArguments[]{
      .ref = "unit_scalar",
      .note = "context.sdk.unit(x)"},
     kSnapArgument,
-};
-inline constexpr ValueSpec kOutputValue[]{{.kind = ValueKind::handle, .ref = "unit_scalar"}};
-inline constexpr ValueSpec kOutputChannelArguments[]{
-    {.name = "values",
-     .kind = ValueKind::list,
-     .element = kOutputValue,
-     .note = "a prefix of the target object's authored output order"},
-    {.name = "revision", .kind = ValueKind::integer, .bound = between(1, kInt32Maximum)},
 };
 inline constexpr ValueSpec kTransitionArguments[]{
     {.name = "transition", .kind = ValueKind::enumValue, .ref = "device_transitions"},
@@ -350,6 +370,11 @@ inline constexpr ValueSpec kMusicSectionArguments[]{
      .optional = true,
      .fallback = default_boolean(true)},
 };
+inline constexpr ValueSpec kObjectTimerFields[]{
+    {.name = "elapsed", .kind = ValueKind::number, .note = "seconds, finite, at least 0"},
+    {.name = "remaining", .kind = ValueKind::number, .note = "seconds, finite, at least 0"},
+    {.name = "active", .kind = ValueKind::boolean, .note = "a timer completes only while active"},
+};
 inline constexpr ValueSpec kInteractableArguments[]{
     {.name = "track_owner",
      .kind = ValueKind::boolean,
@@ -360,6 +385,21 @@ inline constexpr ValueSpec kInteractableArguments[]{
      .kind = ValueKind::boolean,
      .optional = true,
      .fallback = default_boolean(false)},
+    {.name = "usable",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(true),
+     .note = "false keeps the entry in place but lets no player use it"},
+    {.name = "respawn",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(true),
+     .note = "false keeps the entry's generation, so the body updates the entity where it is"},
+    {.name = "timer",
+     .kind = ValueKind::table,
+     .optional = true,
+     .fields = kObjectTimerFields,
+     .note = "a stopped timer for the object's timer component; remaining 0 completes it"},
 };
 inline constexpr ValueSpec kActiveTrueArguments[]{kActiveArgument};
 inline constexpr ValueSpec kGhostLevelFields[]{
@@ -425,13 +465,48 @@ inline constexpr ValueSpec kCombatObjectiveArguments[]{
      .kind = ValueKind::boolean,
      .optional = true,
      .fallback = default_boolean(false)},
+    {.name = "temperaments",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("the squad's last list"),
+     .bound = kTemperamentBound,
+     .element = kTemperament,
+     .note = "replaces the squad's list without a new spawn; living members merge it"},
 };
+inline constexpr ValueSpec kTaskCounterArguments[]{
+    {.name = "group",
+     .kind = ValueKind::missionRow,
+     .ref = "mission.TaskGroup",
+     .scope = Scope::receiver,
+     .fields = kTaskGroupRowFields,
+     .note = "a group of this objective"},
+    {.name = "task",
+     .kind = ValueKind::integer,
+     .bound = between(0, static_cast<std::int64_t>(slot_format::kCombatTaskCapacity) - 1),
+     .note = "the task's position in the group's tasks list, from zero"},
+};
+inline constexpr ValueSpec kTaskCounterReturns[]{
+    {.name = "count",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .note = "nil until the objective reports this counter"}};
 inline constexpr ValueSpec kSpawnArgument{
     .name = "spawn",
     .kind = ValueKind::boolean,
     .optional = true,
     .fallback = default_boolean(false),
     .note = "creates the actor from its single authored source first"};
+inline constexpr ValueSpec kBindCombatantArguments[]{
+    {.name = "spawn",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "starts a new actor life in the same body, for a combatant whose actor is gone"},
+    {.name = "retire_on_return",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(false),
+     .note = "the host retires the bound actor when the client gives it up on a bubble leave"}};
 inline constexpr ValueSpec kActorPathArguments[]{
     {.name = "path",
      .kind = ValueKind::handle,
@@ -446,14 +521,75 @@ inline constexpr ValueSpec kActorActionArguments[]{
     kAbilityTargetArgument,
     kSpawnArgument,
 };
+inline constexpr ValueSpec kActorChannelRowFields[]{
+    {.name = "slot_row", .kind = ValueKind::integer, .bound = uint32_range()},
+    {.name = "channel", .kind = ValueKind::integer, .bound = uint32_range()},
+};
+inline constexpr ValueSpec kActorChannelFields[]{
+    {.name = "channel",
+     .kind = ValueKind::missionRow,
+     .ref = "mission.ActorChannel",
+     .scope = Scope::receiver,
+     .fields = kActorChannelRowFields,
+     .note = "a channel of this actor that nothing on it drives, or that its program reads"},
+    {.name = "value", .kind = ValueKind::number, .note = "finite"},
+};
+inline constexpr ValueSpec kActorChannel[]{
+    {.kind = ValueKind::table, .fields = kActorChannelFields}};
+inline constexpr Bound kActorChannelBound =
+    at_most(static_cast<std::int64_t>(slot_auth::kType2ChannelCapacity));
+inline constexpr ValueSpec kActorControlsArguments[]{
+    {.name = "temperaments",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("none"),
+     .bound = kTemperamentBound,
+     .element = kTemperament,
+     .note = "distinct"},
+    {.name = "channels",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("none"),
+     .bound = kActorChannelBound,
+     .element = kActorChannel,
+     .note = "one value per channel"},
+};
+inline constexpr ValueSpec kPassengerSquad[]{{.kind = ValueKind::handle,
+                                              .ref = "slot",
+                                              .slot = exact_gate(slot_format::kSquadSlotType),
+                                              .scope = Scope::sameObject}};
+inline constexpr ValueSpec kDeliverPassengersArguments[]{
+    {.name = "squads",
+     .kind = ValueKind::list,
+     .bound =
+         between(1,
+                 static_cast<std::int64_t>(
+                     middleware::bap::activity_message::combatant_auth::kMaximumManifestSquads)),
+     .element = kPassengerSquad,
+     .note = "each already reserved on the actor with squad:place{mode = reserve}"},
+};
 inline constexpr ValueSpec kAtom[]{{.kind = ValueKind::atom, .ref = "atom_kinds"}};
 inline constexpr ValueSpec kRunAtomsArguments[]{
     kSpawnArgument,
     {.name = "atoms",
      .kind = ValueKind::list,
-     .bound = between(1, 32),
+     .bound = at_most(static_cast<std::int64_t>(slot_auth::kType2AtomCapacity)),
      .element = kAtom,
-     .note = "one lane per atom, run in order"},
+     .note = "one lane per atom, run in order; empty releases the current program"},
+    {.name = "temperaments",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("the actor's current ones"),
+     .bound = kTemperamentBound,
+     .element = kTemperament,
+     .note = "needs spawn; the new actor is created with these controls"},
+    {.name = "channels",
+     .kind = ValueKind::list,
+     .optional = true,
+     .fallback = default_text("the actor's current ones"),
+     .bound = kActorChannelBound,
+     .element = kActorChannel,
+     .note = "needs spawn; the new actor is created with these controls"},
 };
 inline constexpr ValueSpec kActorSequenceArguments[]{
     {.name = "sequence",
@@ -461,6 +597,18 @@ inline constexpr ValueSpec kActorSequenceArguments[]{
      .ref = "actor_sequence",
      .scope = Scope::receiver,
      .note = "a playable sequence of this actor"},
+};
+inline constexpr ValueSpec kSequenceArguments[]{
+    {.name = "choice",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .bound = between(0, static_cast<std::int64_t>(slot_auth::kType5ChoiceCount) - 1),
+     .note = "the k-th name across the sequence's choices; each plays its highest set bit"},
+    {.name = "restart",
+     .kind = ValueKind::boolean,
+     .optional = true,
+     .fallback = default_boolean(true),
+     .note = "false keeps the running sequence and moves it to `choice` through its transitions"},
 };
 inline constexpr ValueSpec kActorSequencesHandle[]{
     {.kind = ValueKind::handle, .ref = "actor_sequences"}};
@@ -520,6 +668,9 @@ inline constexpr MemberSpec kSlotMembers[]{
     field("auth_dynamic", kAuthFlag),
     field("auth_writable", kAuthFlag),
     field("flags", kInteger, "catalog flags"),
+    field("point_count",
+          kInteger,
+          "authored point parameters of the slot, which atoms and abilities name from 0"),
     {.name = "set_object_filter",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -534,13 +685,21 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kVolumeActiveArguments,
      .returns = kRequestKey,
      .note = "turns one authored volume on or off through its type-32 toggle"},
-    {.name = "set_hop_on",
+    {.name = "attach_hop_on",
      .kind = MemberKind::request,
      .call = CallForm::named,
      .gate = schema_gate(middleware::bap::activity_message::mission_effect::kSlotType),
-     .arguments = kHopOnArguments,
+     .arguments = kAttachHopOnArguments,
      .returns = kRequestKey,
-     .note = "spawns the hop-on's object on each match of the filter; absent filter removes them"},
+     .note = "attaches the sensor's authored hop-on to every object the filter selects, and "
+             "keeps doing so as objects start and stop matching; on_event_hop_on_state names "
+             "this request once the client has applied it"},
+    {.name = "detach_hop_on",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = schema_gate(middleware::bap::activity_message::mission_effect::kSlotType),
+     .returns = kRequestKey,
+     .note = "removes the sensor's hop-on from every object that carries it"},
     {.name = "watch_damage",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -562,13 +721,6 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kSetChannelArguments,
      .returns = kRequestKey,
      .effect = "slot.set_channel"},
-    {.name = "set_output_channels",
-     .kind = MemberKind::request,
-     .call = CallForm::named,
-     .gate = exact_sensed_gate(slot_format::kChannelSlotType),
-     .arguments = kOutputChannelArguments,
-     .returns = kRequestKey,
-     .note = "sets a bounded prefix of authored object outputs immediately"},
     {.name = "transition",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -576,6 +728,14 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kTransitionArguments,
      .returns = kRequestKey,
      .effect = "slot.set_channel"},
+    {.name = "set_object_channels",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = exact_sensed_gate(slot_auth::kType24SlotType),
+     .arguments = kObjectChannelsArguments,
+     .returns = kRequestKey,
+     .effect = "slot.set_object_channels",
+     .note = "requires runtime-extracted channel bounds; the Host owns revisions"},
     {.name = "set_occupancy_condition",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -652,6 +812,14 @@ inline constexpr MemberSpec kSlotMembers[]{
      .returns = kRequestKey,
      .effect = "slot.assign_combat_objective",
      .note = "inside on_event_squad_state for this squad it carries the reported revision"},
+    {.name = "task_counter",
+     .kind = MemberKind::query,
+     .call = CallForm::named,
+     .gate = kExactObjective,
+     .arguments = kTaskCounterArguments,
+     .returns = kTaskCounterReturns,
+     .note = "one task's counter as the objective last reported it; a task stops admitting squads "
+             "once it reaches the task's counter_limit"},
     {.name = "play_actor_path",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -673,10 +841,20 @@ inline constexpr MemberSpec kSlotMembers[]{
      .gate = kExactCombatant,
      .returns = kRequestKey,
      .effect = "slot.retire_actor"},
+    {.name = "deliver_passengers",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = kExactCombatant,
+     .arguments = kDeliverPassengersArguments,
+     .returns = kRequestKey,
+     .effect = "slot.deliver_passengers",
+     .note = "the live actor unloads the squads through its native passenger manifest; "
+             "on_event_actor_path_state names this request in delivery_request_key"},
     {.name = "bind_combatant_to_squad",
      .kind = MemberKind::request,
      .call = CallForm::named,
      .gate = kExactCombatant,
+     .arguments = kBindCombatantArguments,
      .returns = kRequestKey,
      .note = "arms the actor for its scene's squad spawn"},
     {.name = "run_atoms",
@@ -686,6 +864,14 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kRunAtomsArguments,
      .returns = kRequestKey,
      .effect = "slot.run_atoms"},
+    {.name = "set_actor_controls",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .gate = kExactCombatant,
+     .arguments = kActorControlsArguments,
+     .returns = kRequestKey,
+     .effect = "slot.set_actor_controls",
+     .note = "replaces the live actor's whole control set and keeps its program"},
     {.name = "fire_trigger",
      .kind = MemberKind::request,
      .call = CallForm::named,
@@ -712,6 +898,7 @@ inline constexpr MemberSpec kSlotMembers[]{
      .kind = MemberKind::request,
      .call = CallForm::named,
      .gate = exact_class_gate(slot_format::kSequenceSlotType),
+     .arguments = kSequenceArguments,
      .returns = kRequestKey,
      .effect = "slot.play_sequence",
      .note = "plays the authored sequence; chosen for every other slot"},

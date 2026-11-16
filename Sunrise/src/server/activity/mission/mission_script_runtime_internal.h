@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -22,8 +23,10 @@
 #include "mission_script_actor_path_sense.h"
 #include "mission_script_combatant_damage_sense.h"
 #include "mission_script_device_sense.h"
+#include "mission_script_effect_sense.h"
 #include "mission_script_ghost_sense.h"
 #include "mission_script_object_sense.h"
+#include "mission_script_objective_sense.h"
 #include "mission_script_player_sense.h"
 #include "mission_script_runtime.h"
 #include "mission_script_squad_sense.h"
@@ -94,20 +97,16 @@ constexpr std::size_t kTriggerOccupancyCapacity = 32;
 constexpr std::size_t kSquadObservationCapacity = 160;
 /** Watched authored scenes retained per instance. */
 constexpr std::size_t kSceneObservationCapacity = 32;
-/** Watched objective sensors retained per instance. */
-constexpr std::size_t kObjectiveObservationCapacity = 32;
 static_assert(kSquadObjectiveGroupCount == host::kSquadObjectiveGroupCount);
 /** Watched Ghost links, damage monitors, interactable objects and named actors per instance. */
 constexpr std::size_t kGhostObservationCapacity = kGhostLinkCapacity;
+/** Watched mission effects, sized like the Host's own Sense object table; a later one is logged. */
+constexpr std::size_t kEffectObservationCapacity = host::kSenseObservationCapacity;
 constexpr std::size_t kDamageObservationCapacity = 8;
 constexpr std::size_t kObjectInteractionObservationCapacity = 64;
 constexpr std::size_t kActorPathObservationCapacity = 64;
 /** Watched device levels retained per instance. */
 constexpr std::size_t kDeviceObservationCapacity = 128;
-/** One objective sensor carries this many objective blocks. */
-constexpr std::size_t kObjectiveCapacity = 24;
-/** One objective block carries this many task counters. */
-constexpr std::size_t kObjectiveTaskCapacity = 24;
 /** How long a committed Host output may take to reach transport before the delivery faults. */
 constexpr std::uint64_t kTransportTimeoutMs = 15'000;
 /** How long an enqueued Host output may take to reach the reducer before it is reconciled. */
@@ -256,11 +255,52 @@ struct GhostObservation final {
     bool used{};
 };
 
+/** The Host-owned counter of a slot that a request is staged under and its report echoes. */
+enum class StagedCounter : std::uint8_t {
+    /** A hop-on sensor's revision. */
+    hopOn,
+    /** An actor's program revision. */
+    actorProgram,
+    /** An actor's passenger manifest revision. */
+    actorDelivery,
+};
+
+/** Requests reports on one counter still pair with; a report of an older one names none. */
+constexpr std::size_t kStagedRequestDepth = 4;
+
+/** The requests staged on one counter of one slot, by the revision the Host gave each. */
+struct StagedRequests final {
+    std::array<std::uint64_t, kStagedRequestDepth> requestKeys{};
+    std::array<std::uint64_t, kStagedRequestDepth> revisions{};
+    std::uint32_t registryKey{};
+    std::uint32_t objectTag{};
+    std::uint16_t slotIndex{};
+    StagedCounter counter{};
+    /** Entries in use, oldest first. */
+    std::uint8_t count{};
+    bool used{};
+};
+/** Every watched hop-on sensor, and every named actor with its program and manifest counters. */
+constexpr std::size_t kStagedRequestCapacity =
+    kEffectObservationCapacity + 2 * kActorPathObservationCapacity;
+
+/** Last hop-on sensor level seen for one type-26 slot. */
+struct EffectObservation final {
+    EffectLevel level{};
+    /** Link whose reports these levels were read from. */
+    std::uint64_t sourceGeneration{};
+    std::uint32_t registryKey{};
+    std::uint32_t objectTag{};
+    std::uint16_t slotIndex{};
+    bool used{};
+};
+
 /** The squad levels one row's edges were last derived from. */
 struct SquadPublishedLevels final {
     SquadObjectiveCosts objectiveCosts{};
     std::array<std::int32_t, host::kSquadSlotCapacity> slotCounts{};
     std::int32_t aliveCount{};
+    std::int32_t alertLevel{};
     std::uint8_t slotCountLength{};
     bool removalFlag{};
     /** Spawn generation retained with the comparison baseline. */
@@ -289,6 +329,8 @@ struct SquadObservation final {
     std::int32_t aliveCount{};
     /** Last spawn generation the squad Sense echoed from its placement Auth. */
     std::int32_t spawnGeneration{};
+    /** Last alert level the squad Sense reported. */
+    std::int32_t alertLevel{};
     /** Exact sensor slot within its registry. */
     std::uint16_t slotIndex{};
     std::uint8_t slotCountLength{};
@@ -315,21 +357,6 @@ struct SceneObservation final {
     std::uint16_t slotIndex{};
     std::uint8_t outputCount{};
     bool completed{};
-    /** This retained observation row has been initialized. */
-    bool used{};
-};
-
-/** Last task counters seen for one watched objective sensor, so only a rise raises an event. */
-struct ObjectiveObservation final {
-    std::array<std::array<std::uint8_t, kObjectiveTaskCapacity>, kObjectiveCapacity> counters{};
-    /** Link whose reports these levels were read from. */
-    std::uint64_t sourceGeneration{};
-    /** Registry identity of the observed scriptable sensor. */
-    std::uint32_t registryKey{};
-    /** Generated object tag resolving this observed sensor. */
-    std::uint32_t objectTag{};
-    /** Exact sensor slot within its registry. */
-    std::uint16_t slotIndex{};
     /** This retained observation row has been initialized. */
     bool used{};
 };
@@ -406,6 +433,8 @@ struct RuntimeInstance final {
     std::uint64_t lastLoggedRevision{};
     std::uint64_t lastMissionSequence{};
     std::uint64_t missionStateRevision{};
+    /** Record revision of the last accepted State snapshot; it moves with every State change. */
+    std::uint64_t missionRecordRevision{};
     std::uint32_t missionPhase{};
     std::uint64_t activityStateRevision{};
     std::uint64_t durableIntentSequence{};
@@ -427,6 +456,8 @@ struct RuntimeInstance final {
     /** Set once a shadow found no row, so its warning is logged once until a row frees. */
     bool squadShadowAtCapacity{};
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
+    std::array<EffectObservation, kEffectObservationCapacity> effectObservations{};
+    std::array<StagedRequests, kStagedRequestCapacity> stagedRequests{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
     std::array<CombatantDamageObservation, kSquadObservationCapacity> combatantDamageObservations{};
     /** Damage levels replicated by authored entities, kept apart from the Type-2 Sense rows. */
@@ -439,7 +470,8 @@ struct RuntimeInstance final {
         objectStateObservations{};
     std::array<ActorPathObservation, kActorPathObservationCapacity> actorPathObservations{};
     std::array<SceneObservation, kSceneObservationCapacity> sceneObservations{};
-    std::array<ObjectiveObservation, kObjectiveObservationCapacity> objectiveObservations{};
+    /** Last task counters seen per watched objective sensor, so only a rise raises an event. */
+    std::array<ObjectiveLevelRow, kObjectiveObservationCapacity> objectiveObservations{};
     // The table is exactly as large as the session table, so it can never overflow.
     std::array<SessionRosterWatch, state::activity::kSessionCapacity> sessionRoster{};
     std::vector<MemberInputState> memberInputs{};
@@ -610,14 +642,23 @@ void refresh_mission_members(RuntimeInstance& instance) noexcept;
 void observe_player_life(RuntimeInstance& instance,
                          const host::SenseObservationSnapshot& sense) noexcept;
 
-/** Raises one triggerState per report, and one edge per watched volume whose occupancy changed. */
+/**
+ * Raises one triggerState per report, and one edge per watched volume whose occupancy changed.
+ * @param region Region the volume must lie in, or kAnyRegion.
+ */
 void push_trigger_edges(RuntimeInstance& instance,
-                        const host::SenseObservationSnapshot& sense) noexcept;
+                        const host::SenseObservationSnapshot& sense,
+                        std::int32_t region) noexcept;
+/**
+ * Raises one dedicated type-31 edge from a decoded player-trigger msg-19 payload.
+ * @param region Region the volume must lie in, or kAnyRegion.
+ */
+void push_player_trigger(RuntimeInstance& instance,
+                         const host::Event& incident,
+                         std::int32_t region) noexcept;
 /** Raises one engagementState per type-70 report whose count, membership or value changed. */
 void push_engagement_edges(RuntimeInstance& instance,
                            const host::SenseObservationSnapshot& sense) noexcept;
-/** Raises one dedicated type-31 edge from a decoded player-trigger msg-19 payload. */
-void push_player_trigger(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Forwards one decoded integration report to the script with its three fields. */
 void push_integration(RuntimeInstance& instance, const host::Event& incident) noexcept;
 /** Raises one exact Type-6 start/finish edge from a decoded cinematic msg-19 payload. */
@@ -677,6 +718,22 @@ void publish_ghost_levels(RuntimeInstance& instance) noexcept;
  * @return False when the list could not be retained.
  */
 [[nodiscard]] bool publish_device_sources(const RuntimeInstance& instance, lua_vm::Vm& vm) noexcept;
+/** Hands the VM the retained objective task counters, so a callback can read any objective's. */
+void publish_objective_levels(RuntimeInstance& instance) noexcept;
+/** Keeps the request a slot's staged revision belongs to, so the report echoing it names it. */
+void record_staged_request(RuntimeInstance& instance,
+                           const host::ScriptableTarget& target,
+                           StagedCounter counter,
+                           std::uint64_t revision,
+                           std::uint64_t requestKey) noexcept;
+/** @return The request staged under one reported revision, or zero when none is kept. */
+[[nodiscard]] std::uint64_t staged_request_key(const RuntimeInstance& instance,
+                                               const host::SenseObservationKey& key,
+                                               StagedCounter counter,
+                                               std::int64_t revision) noexcept;
+/** Raises one event per type-26 mission effect whose revision or attachment changed. */
+void push_effect_edges(RuntimeInstance& instance,
+                       const host::SenseObservationSnapshot& sense) noexcept;
 /** Raises the squad state, spawn and death events derived from one msg 6 body. */
 void push_squad_edges(RuntimeInstance& instance,
                       const host::SenseObservationSnapshot& sense) noexcept;
@@ -713,6 +770,7 @@ template <typename Row, std::size_t N>
 /**
  * Retains generation-qualified population facts before the derived squad callback.
  * Only the link that simulates the squad reports here, so the population follows that link.
+ * @param linkAlive The link's alive count after this report, or null for an invalid count.
  * @param moved The squad's levels were last read from another link, so the report moves the
  * population even when it restates no count.
  */
@@ -720,6 +778,7 @@ template <typename Row, std::size_t N>
     RuntimeInstance& instance,
     const host::SenseObservation& observation,
     std::span<const middleware::bap::activity_message::sense_update::DecodedValue> values,
+    std::optional<std::int32_t> linkAlive,
     bool moved) noexcept;
 /** Raises one event per watched authored scene that latched complete. */
 void push_scene_edges(RuntimeInstance& instance,
@@ -731,7 +790,8 @@ void push_objective_edges(RuntimeInstance& instance,
 void queue_phase_entered(RuntimeInstance& instance, std::uint32_t previousPhase) noexcept;
 /** Moves every private member to the region a freshly selected mission state belongs to. */
 void arm_state_region_teleport(RuntimeInstance& instance,
-                               const server::bap::ActivityMissionSeedPlan& plan) noexcept;
+                               const server::bap::ActivityMissionSeedPlan& plan,
+                               std::uint32_t arrivalSpawnHash) noexcept;
 /** @return The identity every host-state edge that is not a Sense edge carries. */
 [[nodiscard]] host::Event state_edge_event(const RuntimeInstance& instance) noexcept;
 /** @return The identity every derived Sense edge carries. */
@@ -745,6 +805,8 @@ void push_session_roster_edges(RuntimeInstance& instance) noexcept;
 
 // The runtime unit owns these. The delivery state machine calls into them.
 
+/** Lets parked public reports try their owner again; called when an owner may be ready. */
+void note_owner_readiness() noexcept;
 /** Retires every queued mission event that belongs to one binding. */
 void clear_pending_events(const state::activity::SessionBinding& binding) noexcept;
 /** Copies one committed authoritative snapshot into the runtime's exact compare baseline. */
@@ -877,6 +939,8 @@ extern std::array<RuntimeInstance, host::kInstanceCapacity> g_instances;
 /** @return The open slot for one exact binding, or null. */
 [[nodiscard]] RuntimeInstance*
 find_instance(const state::activity::SessionBinding& binding) noexcept;
+/** True when one instance's link, SDK view and world view still match what it bound. */
+[[nodiscard]] bool still_exact(const RuntimeInstance& instance) noexcept;
 /** @return One unused slot, or null when every slot is open. */
 [[nodiscard]] RuntimeInstance* free_instance() noexcept;
 /** Frees one slot; its queued events are retired unless the caller keeps them for a reattach. */

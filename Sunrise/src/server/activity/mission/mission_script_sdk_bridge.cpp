@@ -136,6 +136,7 @@ resolve_activity_binding_locator(const void* context,
     }
     output.name = catalog.string(slots[squad.slotIndex].name);
     output.nativeRow = static_cast<std::uint32_t>(&squad - allSquads.data());
+    output.slotRow = squad.slotIndex;
     output.localRow = localRow;
     output.memberCount = members.size();
     return !output.id.empty();
@@ -229,9 +230,8 @@ resolve_activity_binding_locator(const void* context,
     output.senseSchema = slot.senseSchema;
     output.authSchema = slot.authSchema;
     output.flags = slot.flags;
-    output.outputChannelCount = slot.slotType == format::kChannelSlotType
-                                        && (slot.flags & format::kSlotOutputChannelsExact) != 0
-                                    ? slot.reserved
+    output.objectChannelCount = (slot.flags & sdk::format::kSlotObjectChannelsExact) != 0
+                                    ? static_cast<std::uint8_t>(slot.reserved)
                                     : 0;
     return !output.id.empty() && !output.objectId.empty();
 }
@@ -810,6 +810,39 @@ lua_vm::DefinitionApi definition_api(const sdk::BoundView& view) noexcept {
         .resolveCombatObjectiveGroup = &combat_objective::resolve,
         .resolveActorAbility = &actor_ability::resolve,
         .resolveActorAbilityTarget = &actor_ability::target,
+        .resolveActorTemperament =
+            [](const void* context, std::uint32_t slot, std::uint32_t id) noexcept {
+                const sdk::BoundView* const view = context_view(context);
+                if (!valid_view(view)) {
+                    return false;
+                }
+                const auto rows = view->catalog->actor_temperaments();
+                return std::binary_search(rows.begin(),
+                                          rows.end(),
+                                          format::ActorTemperament{slot, 0, id},
+                                          [](const format::ActorTemperament& left,
+                                             const format::ActorTemperament& right) {
+                                              return left.slotIndex != right.slotIndex
+                                                         ? left.slotIndex < right.slotIndex
+                                                         : left.id < right.id;
+                                          });
+            },
+        .resolveActorChannel =
+            [](const void* context, std::uint32_t slot, std::uint32_t name) noexcept {
+                const sdk::BoundView* const view = context_view(context);
+                if (!valid_view(view)) {
+                    return false;
+                }
+                const auto rows = view->catalog->actor_channels();
+                return std::binary_search(
+                    rows.begin(),
+                    rows.end(),
+                    format::ActorChannel{slot, 0, name},
+                    [](const format::ActorChannel& left, const format::ActorChannel& right) {
+                        return left.slotIndex != right.slotIndex ? left.slotIndex < right.slotIndex
+                                                                 : left.nameHash < right.nameHash;
+                    });
+            },
         .resolveActorProgramSource =
             [](const void* context, std::uint32_t slot, std::uint32_t& source) noexcept {
                 const auto* view = context_view(context);

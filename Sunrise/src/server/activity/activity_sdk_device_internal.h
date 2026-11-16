@@ -25,7 +25,10 @@ struct PreparedDevice final {
 [[nodiscard]] Status binding_status(const state::activity_sdk::BoundView& view,
                                     server::bap::ActivityLinkView& link) noexcept;
 
-/** Resolves one SDK slot through a published canonical group or its exact live occurrence. */
+/**
+ * Resolves one SDK slot through a published canonical group or its exact occurrence: the one in
+ * the client's region, else the one outside the client's bubble.
+ */
 [[nodiscard]] Status prepare_slot(const state::activity_sdk::BoundView& view,
                                   std::uint32_t slotRow,
                                   PreparedDevice& output) noexcept;

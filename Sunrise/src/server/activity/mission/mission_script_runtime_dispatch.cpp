@@ -12,6 +12,7 @@
 #include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
+#include "../../../state/activity/destination/activity_destination_spawn_binding.h"
 #include "../../../state/activity/entity_slots/member_leases.h"
 #include "../../../state/activity/membership/activity_membership_query.h"
 #include "../../../state/activity/membership/mission_party.h"
@@ -264,6 +265,18 @@ void finish_reserved_scene(RuntimeInstance& instance,
     return squadRow < squads.size() ? squads[squadRow].slotIndex : format::kAbsentIndex;
 }
 
+/** @return The choice mask and in-place flag a play_sequence intent asks for. */
+[[nodiscard]] scriptable_auth::Type5Selection
+sequence_selection(const lua_vm::Intent& intent) noexcept {
+    scriptable_auth::Type5Selection selection{};
+    if (intent.sequenceChoice >= 0) {
+        selection.choices =
+            scriptable_auth::type5_choice_mask(static_cast<std::size_t>(intent.sequenceChoice));
+    }
+    selection.retain = intent.sequenceRetain;
+    return selection;
+}
+
 /** @return The catalog slot row an intent's output names, or the absent index. */
 [[nodiscard]] std::uint32_t intent_slot_row(const sdk::BoundView& view,
                                             const lua_vm::Intent& intent) noexcept {
@@ -462,6 +475,35 @@ template <typename Result, typename Adapter>
                       });
 }
 
+/** @return True when the destination authors one spawn set that has spawn points. */
+[[nodiscard]] bool authored_spawn_set(const RuntimeInstance& instance,
+                                      std::uint32_t hash) noexcept {
+    namespace data = ::sunrise::state::build_data;
+    const auto& destination = instance.view.binding.destination;
+    const std::string_view package(reinterpret_cast<const char*>(destination.packageName.data()),
+                                   destination.packageNameLength);
+    data::scenarios::Definition layout{};
+    data::spawn_sets::NameHash spawn{};
+    return data::find_scenario_layout(package, layout)
+           && data::spawn_sets::find_hash(
+               {layout.spawnStem.data(), layout.spawnStemLength}, hash, spawn)
+           && spawn.pointCount != 0;
+}
+
+/**
+ * @return True when a spawn set is authored with points in the bubble of one selected region.
+ * The client searches for a spawn set only in the slice set its arrival names.
+ */
+[[nodiscard]] bool spawn_set_answers_region(const RuntimeInstance& instance,
+                                            std::uint32_t hash,
+                                            std::int32_t region) noexcept {
+    return region >= 0 && region <= ::sunrise::state::activity::membership::kMaximumSliceSetIndex
+           && authored_spawn_set(instance, hash)
+           && ::sunrise::state::activity::destination::spawn_set_slice_set(
+                  instance.view.binding.destination, hash, static_cast<std::uint16_t>(region))
+                  == region;
+}
+
 } // namespace
 
 /** Moves each pin of a one-bubble target to the link holding that bubble's grant. */
@@ -525,9 +567,12 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     // The native authority may replicate an enemy immediately after receiving its squad Auth.
     // Retain output until every recipient in that state's bubble can decode its entity
     // definitions. A client with no link in the bubble is not waited for: nothing can carry the
-    // output there, and a held intent never starts its lifetime.
+    // output there, and a held intent never starts its lifetime. A spawn hold is no output: it
+    // rides the participation record, whose roster publication waits for the arrival itself, and
+    // a release held here keeps the arrival it waits for from finishing.
     if (intent.kind != lua_vm::IntentKind::selectMissionState
         && intent.kind != lua_vm::IntentKind::restartCheckpoint
+        && intent.kind != lua_vm::IntentKind::holdSpawn
         && !server::bap::mission_seed_publication_ready(
             instance.view.binding, instance.view.activityClientGeneration, false)) {
         report_intent_status(
@@ -541,6 +586,15 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     }
     switch (intent.kind) {
     case lua_vm::IntentKind::selectMissionState: {
+        if (intent.arrivalSpawnHash != 0
+            && !spawn_set_answers_region(
+                instance, intent.arrivalSpawnHash, intent.effectiveRegion)) {
+            refuse_delivery(instance,
+                            "state_refused",
+                            "arrival_spawn_unavailable",
+                            host::EffectOutcome::refused);
+            return;
+        }
         if (intent.retirePlacedProps) {
             namespace retirement = server::gameplay::squad_entity_retirement;
             const auto* world = instance.worldView.snapshot();
@@ -600,7 +654,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         // move is one host event per selection: a re-dispatch while publication is pending does
         // not move back a player who has since left the region.
         if (instance.armedStateRevision != selected.revision) {
-            arm_state_region_teleport(instance, selected.plan);
+            arm_state_region_teleport(instance, selected.plan, intent.arrivalSpawnHash);
             instance.armedStateRevision = selected.revision;
         }
         if (!selected.regionArrivalPending
@@ -673,13 +727,6 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             }
             return;
         }
-        namespace data = ::sunrise::state::build_data;
-        const auto& destination = instance.view.binding.destination;
-        const std::string_view package(
-            reinterpret_cast<const char*>(destination.packageName.data()),
-            destination.packageNameLength);
-        data::scenarios::Definition layout{};
-        data::spawn_sets::NameHash spawn{};
         // Revalidate native member lifetimes: a reconnect withdraws its old life evidence.
         refresh_mission_members(instance);
         FireteamLife currentLife{};
@@ -694,11 +741,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         // A wipe restarts the whole party at an authored spawn set of the region they are in.
         if (instance.publicTarget || !currentLife.all_dead()
             || instance.activeRegion != intent.effectiveRegion
-            || !data::find_scenario_layout(package, layout)
-            || !data::spawn_sets::find_hash({layout.spawnStem.data(), layout.spawnStemLength},
-                                            intent.checkpointSpawnHash,
-                                            spawn)
-            || spawn.pointCount == 0) {
+            || !authored_spawn_set(instance, intent.checkpointSpawnHash)) {
             refuse_delivery(instance,
                             "checkpoint_refused",
                             "party_or_spawn_unavailable",
@@ -748,7 +791,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                                               std::nullopt,
                                               intent.squadRetireOnReturn,
                                               std::nullopt,
-                                              spawnRule);
+                                              spawnRule,
+                                              squads::intent_temperaments(intent));
             });
         if (status == squads::Status::queued) {
             await_host_commit(instance, now, "squad_enqueued", carrier);
@@ -786,7 +830,7 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         const devices::Status status = deliver_through_holder(
             instance, intent, kDeviceWalk, carrier, [&](const sdk::BoundView& view) noexcept {
                 return devices::bind_combatant_to_squad_reserved(
-                    view, intent.firstRow, reservation);
+                    view, intent.firstRow, reservation, intent.active, intent.squadRetireOnReturn);
             });
         finish_reserved(instance,
                         now,
@@ -802,15 +846,11 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         if (!reserve_or_refuse(instance, reservation, "object_refused")) {
             return;
         }
-        const scriptable_auth::Type4TimedClock timed{.present = intent.timedChild,
-                                                     .remainingSeconds =
-                                                         intent.timedRemainingSeconds,
-                                                     .totalSeconds = intent.timedTotalSeconds,
-                                                     .epochTicks = intent.timedEpochTicks,
-                                                     .running = intent.timedRunning,
-                                                     .inPlace = intent.timedInPlace};
+        const std::optional<std::uint32_t> location =
+            intent.objectLocationRow < 0 ? std::nullopt
+                                         : std::optional<std::uint32_t>{static_cast<std::uint32_t>(
+                                               intent.objectLocationRow)};
         const scriptable_auth::Type4PositionChild position{.present = intent.positionChild,
-                                                           .revision = intent.positionRevision,
                                                            .value = intent.positionValue,
                                                            .snap = intent.positionSnap};
         std::uint64_t carrier = 0;
@@ -822,8 +862,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                     std::span(intent.burstRows).first(intent.burstRowCount),
                     intent.entryIndex,
                     intent.active,
+                    location,
                     intent.capturePlate,
-                    timed,
                     position,
                     reservation);
             });
@@ -878,7 +918,8 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         const scenes::SceneStatus status = deliver_through_holder(
             instance, intent, kSceneWalk, carrier, [&](const sdk::BoundView& view) noexcept {
                 return sequence
-                           ? scenes::play_sequence_slot_reserved(view, intent.firstRow, reservation)
+                           ? scenes::play_sequence_slot_reserved(
+                                 view, intent.firstRow, reservation, sequence_selection(intent))
                            : scenes::set_cinematic_slot_active_reserved(
                                  view, intent.firstRow, intent.active, reservation);
             });
@@ -1050,6 +1091,11 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
     case lua_vm::IntentKind::setInteractableObject:
     case lua_vm::IntentKind::setGhostLink:
     case lua_vm::IntentKind::watchDamage:
+    case lua_vm::IntentKind::setActorControls:
+    case lua_vm::IntentKind::deliverPassengers:
+    case lua_vm::IntentKind::setHopOn:
+    case lua_vm::IntentKind::setObjectChannels:
+    case lua_vm::IntentKind::setEngagement:
     case lua_vm::IntentKind::applySlotAuth: {
         if (intent.authByteCount == 0 || intent.authByteCount != intent.authBody.size()) {
             refuse_delivery(
@@ -1064,12 +1110,22 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         }
         const host::ScriptableOverrideKind kind =
             intent.kind == lua_vm::IntentKind::setInteractableObject
-                ? host::ScriptableOverrideKind::interactableObject
+                ? (intent.objectInPlace ? host::ScriptableOverrideKind::interactableObjectInPlace
+                                        : host::ScriptableOverrideKind::interactableObject)
             : intent.kind == lua_vm::IntentKind::setGhostLink
                 ? host::ScriptableOverrideKind::ghostLink
             : intent.kind == lua_vm::IntentKind::watchDamage
                 ? host::ScriptableOverrideKind::damageWatch
-                : host::ScriptableOverrideKind::sdkAuth;
+            : intent.kind == lua_vm::IntentKind::setActorControls
+                ? host::ScriptableOverrideKind::combatantControls
+            : intent.kind == lua_vm::IntentKind::deliverPassengers
+                ? host::ScriptableOverrideKind::combatantDelivery
+            : intent.kind == lua_vm::IntentKind::setObjectChannels
+                ? host::ScriptableOverrideKind::objectChannels
+            : intent.kind == lua_vm::IntentKind::setEngagement
+                ? host::ScriptableOverrideKind::engagement
+            : intent.kind == lua_vm::IntentKind::setHopOn ? host::ScriptableOverrideKind::hopOn
+                                                          : host::ScriptableOverrideKind::sdkAuth;
         std::uint64_t carrier = 0;
         const devices::Status status = deliver_through_holder(
             instance, intent, kDeviceWalk, carrier, [&](const sdk::BoundView& view) noexcept {
@@ -1109,6 +1165,17 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             instance, now, reservation, status, "lifetime_enqueued", "lifetime_refused");
         return;
     }
+    case lua_vm::IntentKind::setActivityFlag: {
+        host::ScriptableOutputReservation reservation{};
+        if (!reserve_or_refuse(instance, reservation, "activity_flag_refused")) {
+            return;
+        }
+        const devices::Status status = lifetimes::set_activity_flag_reserved(
+            instance.view, {intent.activityFlagKey, intent.active}, reservation);
+        finish_reserved(
+            instance, now, reservation, status, "activity_flag_enqueued", "activity_flag_refused");
+        return;
+    }
     case lua_vm::IntentKind::stopAuthoredScene:
     case lua_vm::IntentKind::signalAuthoredScene:
     case lua_vm::IntentKind::activateAuthoredScene: {
@@ -1122,19 +1189,25 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         if (!reserve_or_refuse(instance, reservation, "scene_refused")) {
             return;
         }
+        // An activation's key is the input it starts with; a signal's is the input it sends.
+        const bool activation = intent.kind == lua_vm::IntentKind::activateAuthoredScene;
         std::uint64_t carrier = 0;
         const scenes::SceneStatus status = deliver_through_holder(
             instance, intent, kSceneWalk, carrier, [&](const sdk::BoundView& view) noexcept {
-                return intent.kind == lua_vm::IntentKind::activateAuthoredScene && intent.active
-                           ? scenes::activate_authored_scene_spawn_reserved(
-                                 view, intent.firstRow, intent.secondRow, reservation)
+                return activation && intent.active
+                           ? scenes::activate_authored_scene_spawn_reserved(view,
+                                                                            intent.firstRow,
+                                                                            intent.secondRow,
+                                                                            reservation,
+                                                                            intent.sceneEventKey)
                            : scenes::activate_authored_scene_reserved(
                                  view,
                                  intent.firstRow,
                                  intent.secondRow,
                                  reservation,
-                                 intent.sceneEventKey,
-                                 intent.kind == lua_vm::IntentKind::stopAuthoredScene);
+                                 activation ? 0 : intent.sceneEventKey,
+                                 intent.kind == lua_vm::IntentKind::stopAuthoredScene,
+                                 activation ? intent.sceneEventKey : 0);
             });
         finish_reserved_scene(
             instance, now, reservation, status, "scene_enqueued", "scene_refused", carrier);

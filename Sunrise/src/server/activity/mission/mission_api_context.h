@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 #include "../../../middleware/bap/activity_message/incident.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
@@ -31,36 +32,11 @@ inline constexpr ValueSpec kExactObjectSelector[]{{.kind = ValueKind::selector,
                                                    .ref = "mission.Slot",
                                                    .slot = kExactObject,
                                                    .handleAccepted = true}};
-/** The timed child's clock: remaining counts down from total, in whole seconds. */
-inline constexpr ValueSpec kActivateTimedFields[]{
-    {.name = "remaining",
-     .kind = ValueKind::integer,
-     .bound = between(
-         0, middleware::bap::activity_message::scriptable_auth::kType68MaximumClockSeconds)},
-    {.name = "total",
-     .kind = ValueKind::integer,
-     .bound = between(
-         0, middleware::bap::activity_message::scriptable_auth::kType68MaximumClockSeconds)},
-    {.name = "running",
-     .kind = ValueKind::boolean,
-     .optional = true,
-     .fallback = default_boolean(true),
-     .note = "false sends the window paused at its current value"},
-    {.name = "in_place",
-     .kind = ValueKind::boolean,
-     .optional = true,
-     .fallback = default_boolean(false),
-     .note = "repeats the object's current generation, updating the live object without respawn"},
-};
 /** The object's own state-machine position lane, applied to the live object in place. */
 inline constexpr ValueSpec kActivatePositionFields[]{
     {.name = "value",
      .kind = ValueKind::number,
      .note = "0 to 1; the object's graph owns the bins"},
-    {.name = "revision",
-     .kind = ValueKind::integer,
-     .bound = between(1, kInt32Maximum),
-     .note = "lane sequence; must exceed the last one the object took"},
     {.name = "snap",
      .kind = ValueKind::boolean,
      .optional = true,
@@ -78,11 +54,6 @@ inline constexpr ValueSpec kActivateObjectsArguments[]{
      .optional = true,
      .fallback = default_boolean(false),
      .note = "adds the capture-plate component Auth; it changes no plate field"},
-    {.name = "timed",
-     .kind = ValueKind::table,
-     .optional = true,
-     .fields = kActivateTimedFields,
-     .note = "adds the enabled timed component Auth with a clock of these whole seconds"},
     {.name = "position",
      .kind = ValueKind::table,
      .optional = true,
@@ -112,6 +83,13 @@ inline constexpr ValueSpec kSlotLookupArguments[]{
 inline constexpr ValueSpec kHoldSpawnArguments[]{
     {.name = "active", .kind = ValueKind::boolean, .note = "true holds the spawn, false releases"},
 };
+inline constexpr ValueSpec kActivityFlagArguments[]{
+    {.name = "key",
+     .kind = ValueKind::integer,
+     .bound = between(1, (std::numeric_limits<std::uint32_t>::max)()),
+     .note = "the id an activity_flag condition tests"},
+    {.name = "raised", .kind = ValueKind::boolean, .note = "false lowers the flag"},
+};
 inline constexpr ValueSpec kSendIncidentArguments[]{
     {.name = "target",
      .kind = ValueKind::integer,
@@ -133,6 +111,11 @@ inline constexpr ValueSpec kSelectStateOptionFields[]{
      .optional = true,
      .fallback = default_boolean(false),
      .note = "ends the map props captured from the old state before the move"},
+    {.name = "spawn_set_hash",
+     .kind = ValueKind::integer,
+     .optional = true,
+     .bound = between(1, kUint32Maximum - 1),
+     .note = "the authored spawn set this arrival uses instead of the declared one"},
 };
 inline constexpr ValueSpec kSelectStateArguments[]{
     {.name = "state",
@@ -301,6 +284,13 @@ inline constexpr MemberSpec kContextMembers[]{
      .returns = kRequestKey,
      .effect = "mission.send_incident",
      .note = "sends one msg-19 activity incident to the client, as the activity host would"},
+    {.name = "set_activity_flag",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .arguments = kActivityFlagArguments,
+     .returns = kRequestKey,
+     .effect = "mission.set_activity_flag",
+     .note = "raises or lowers one id every participation record lists"},
     {.name = "select_state",
      .kind = MemberKind::request,
      .call = CallForm::positional,
@@ -315,6 +305,12 @@ inline constexpr MemberSpec kContextMembers[]{
      .returns = kRequestKey,
      .effect = "mission.restart_checkpoint",
      .note = "arms a hard wipe at a spawn set, or releases one with release_request"},
+    {.name = "random",
+     .kind = MemberKind::maker,
+     .call = CallForm::positional,
+     .returns = kNumber,
+     .note = "draws a server random number in [0, 1); errors if entropy is unavailable; "
+             "store choices with set_variable when they must survive reload"},
     {.name = "set_phase",
      .kind = MemberKind::update,
      .call = CallForm::positional,
@@ -458,16 +454,23 @@ inline constexpr MemberSpec kPeerMembers[]{
     field("join_identity", kDecimal),
 };
 
-// The type of cohort.alive_count.
+// The types of cohort.alive_count and cohort.observed_alive.
 inline constexpr ValueSpec kCohortAlive[]{
     {.kind = ValueKind::integer, .optional = true, .note = "nil while any squad is unknown"}};
+inline constexpr ValueSpec kCohortObservedAlive[]{
+    {.kind = ValueKind::boolean, .optional = true, .note = "nil while any squad is unknown"}};
 
 /** Members of one cohort. A squad with a queued placement counts as unknown. */
 inline constexpr MemberSpec kCohortMembers[]{
     field("alive_count", kCohortAlive),
     field("observed_full", kBoolean, "every squad was seen at full strength"),
+    field("observed_alive", kCohortObservedAlive, "a member of any squad was seen alive"),
     field("cleared", kBoolean, "seen full, and now all dead"),
     field("size", kInteger),
+    field("members",
+          kInteger,
+          "members the squads hold in this attempt: their placed counts, more when more were seen, "
+          "or the authored members of a squad with no counts"),
 };
 
 // --- context.sdk makers and enums ---------------------------------------------------------------

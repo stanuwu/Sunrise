@@ -34,9 +34,13 @@ constexpr std::size_t kGroupVariantOffset = offsetof(Group, h6ea4a4fb.relative);
 constexpr std::size_t kVariantStride = sizeof(Variant);
 /** A variant holds its record array descriptor here. */
 constexpr std::size_t kVariantRecordField = offsetof(Variant, abilityList.relative);
-/** A variant's record count comes before its self-relative record offset. */
+/** A variant holds its sandbox perk index array descriptor here. */
+constexpr std::size_t kVariantPerkField = offsetof(Variant, perkList.relative);
+/** Both variant arrays store their count this far before their self-relative offset. */
 constexpr std::size_t kVariantCountBack =
     offsetof(Variant, abilityList.relative) - offsetof(Variant, abilityList.count);
+static_assert(offsetof(Variant, perkList.relative) - offsetof(Variant, perkList.count)
+              == kVariantCountBack);
 /** One pool record. */
 constexpr std::size_t kPoolRecordStride = sizeof(Record);
 /**
@@ -98,6 +102,49 @@ active_variant(std::int64_t groupCount, std::int32_t variantCount, const Entry& 
     return variantCount - 1;
 }
 
+/**
+ * Finds the record array or the sandbox perk array of an entry's active pool variant.
+ * A pool declares several variants. Which is active depends on the group count and on whether
+ * the entry carries a selector, so the entry is needed to read its own pool.
+ * @param blob Whole pool bytes.
+ * @param entry Entry naming the pool.
+ * @param subgroup Pool subgroup ordinal.
+ * @param field Offset of the array's self-relative member inside a variant.
+ * @param elements Receives the absolute offset of the first element.
+ * @return The element count, or 0 when the pool, the subgroup or the array does not read.
+ */
+[[nodiscard]] std::size_t variant_array(std::span<const std::byte> blob,
+                                        const Entry& entry,
+                                        std::uint8_t subgroup,
+                                        std::size_t field,
+                                        std::size_t& elements) noexcept {
+    std::int64_t groupCount = 0;
+    std::size_t groupArray = 0;
+    if (!read(blob, kPoolGroupCount, groupCount) || !follow(blob, kPoolGroupArray, groupArray)) {
+        return 0;
+    }
+    const std::size_t group = groupArray + reader::layout::TypedArrayHeader::kSize
+                              + static_cast<std::size_t>(subgroup) * kPoolGroupStride;
+    std::int64_t variantCount = 0;
+    std::size_t variantArray = 0;
+    if (!read(blob, group + kGroupVariantCount, variantCount) || variantCount <= 0
+        || variantCount > kMaximumCount
+        || !follow(blob, group + kGroupVariantOffset, variantArray)) {
+        return 0;
+    }
+    const auto variant = static_cast<std::size_t>(
+        active_variant(groupCount, static_cast<std::int32_t>(variantCount), entry));
+    const std::size_t member =
+        variantArray + reader::layout::TypedArrayHeader::kSize + variant * kVariantStride + field;
+    std::int64_t count = 0;
+    if (member < kVariantCountBack || !read(blob, member - kVariantCountBack, count) || count <= 0
+        || count > kMaximumCount || !follow(blob, member, elements)) {
+        return 0;
+    }
+    elements += reader::layout::TypedArrayHeader::kSize;
+    return static_cast<std::size_t>(count);
+}
+
 } // namespace
 
 /** Reads every entry of one socket-entry-list definition blob. */
@@ -133,34 +180,11 @@ std::size_t read_pool_records(std::span<const std::byte> blob,
                               const Entry& entry,
                               std::uint8_t subgroup,
                               std::span<PoolRecord> output) noexcept {
-    std::int64_t groupCount = 0;
-    std::size_t groupArray = 0;
-    if (!read(blob, kPoolGroupCount, groupCount) || !follow(blob, kPoolGroupArray, groupArray)) {
-        return 0;
-    }
-    const std::size_t group = groupArray + reader::layout::TypedArrayHeader::kSize
-                              + static_cast<std::size_t>(subgroup) * kPoolGroupStride;
-    std::int64_t variantCount = 0;
-    std::size_t variantArray = 0;
-    if (!read(blob, group + kGroupVariantCount, variantCount) || variantCount <= 0
-        || variantCount > kMaximumCount
-        || !follow(blob, group + kGroupVariantOffset, variantArray)) {
-        return 0;
-    }
-    const auto variant = static_cast<std::size_t>(
-        active_variant(groupCount, static_cast<std::int32_t>(variantCount), entry));
-    const std::size_t variantField = variantArray + reader::layout::TypedArrayHeader::kSize
-                                     + variant * kVariantStride + kVariantRecordField;
-    std::int64_t recordCount = 0;
     std::size_t records = 0;
-    if (variantField < kVariantCountBack
-        || !read(blob, variantField - kVariantCountBack, recordCount) || recordCount <= 0
-        || recordCount > kMaximumCount || !follow(blob, variantField, records)) {
-        return 0;
-    }
-    records += reader::layout::TypedArrayHeader::kSize;
+    const std::size_t recordCount =
+        variant_array(blob, entry, subgroup, kVariantRecordField, records);
     std::size_t count = 0;
-    while (count < static_cast<std::size_t>(recordCount) && count < output.size()) {
+    while (count < recordCount && count < output.size()) {
         const std::size_t base = records + count * kPoolRecordStride;
         PoolRecord record{};
         if (!read(blob, base + kRecordHash, record.definitionHash)
@@ -173,6 +197,21 @@ std::size_t read_pool_records(std::span<const std::byte> blob,
             break;
         }
         output[count++] = record;
+    }
+    return count;
+}
+
+/** Reads the sandbox perks one entry's active pool variant declares. */
+std::size_t read_pool_perks(std::span<const std::byte> blob,
+                            const Entry& entry,
+                            std::uint8_t subgroup,
+                            std::span<std::uint16_t> output) noexcept {
+    std::size_t perks = 0;
+    const std::size_t perkCount = variant_array(blob, entry, subgroup, kVariantPerkField, perks);
+    std::size_t count = 0;
+    while (count < perkCount && count < output.size()
+           && read(blob, perks + count * sizeof(std::uint16_t), output[count])) {
+        ++count;
     }
     return count;
 }

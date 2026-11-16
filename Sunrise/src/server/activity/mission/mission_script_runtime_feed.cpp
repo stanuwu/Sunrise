@@ -37,12 +37,23 @@ struct PendingMissionEvent final {
     bool senseAvailable{};
     bool clientMessageAvailable{};
     bool occupied{};
+    /** A public report waits here until its private owner can take it. */
+    bool parked{};
+    /** Region the public link stood in when the report first waited. */
+    std::int32_t parkedRegion{};
+    /** Owner readiness the report last tried. */
+    std::uint64_t ownerReadiness{};
+    /** Owner attempt the report first waited in, zero before an owner attached; no later attempt
+     * receives it. */
+    std::uint64_t parkedAttempt{};
 };
 
-/** The queue grows with real accepted input and is drained in the tick it arrives. */
+/** The queue grows with real accepted input; only a parked public report outlives its tick. */
 std::vector<PendingMissionEvent> g_pendingMissionEvents{};
 host::EventCursor g_eventCursor{};
 host::MissionInputCursor g_missionInputCursor{};
+/** Moves whenever a program loads or settles its region, so parked public reports try again. */
+std::uint64_t g_ownerReadiness{};
 
 void clear_pending_event(PendingMissionEvent& pending) noexcept {
     SecureZeroMemory(&pending, sizeof(pending));
@@ -65,6 +76,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::squadProvoked:
     case host::EventKind::entitySpawned:
     case host::EventKind::entityDied:
+    case host::EventKind::squadMemberLost:
     case host::EventKind::sceneFinished:
     case host::EventKind::sceneOutput:
     case host::EventKind::objectiveProgress:
@@ -84,6 +96,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::fireteamState:
     case host::EventKind::objectInteracted:
     case host::EventKind::ghostLinkState:
+    case host::EventKind::hopOnState:
         return false;
     default:
         return true;
@@ -138,9 +151,12 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     return &g_pendingMissionEvents.back();
 }
 
-/** Copies one accepted input and its values into a queue row; faults the instance when full. */
-[[nodiscard]] bool queue_mission_event(RuntimeInstance* instance,
-                                       const host::MissionInputEvent& input) noexcept {
+/**
+ * Copies one accepted input and its values into a queue row; faults the instance when full.
+ * @return The queued row, or null when the queue could not grow.
+ */
+[[nodiscard]] PendingMissionEvent*
+queue_mission_event(RuntimeInstance* instance, const host::MissionInputEvent& input) noexcept {
     PendingMissionEvent* const pending = free_pending_event();
     if (pending == nullptr) {
         if (instance != nullptr) {
@@ -148,7 +164,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
             clear_pending_events(instance->view.binding);
         }
         log_line(core::log::Level::warn, instance, "events", "allocation_failed");
-        return false;
+        return nullptr;
     }
     clear_pending_event(*pending);
     if (input.event.has_sense_observations()) {
@@ -161,7 +177,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     }
     pending->event = input.event;
     pending->occupied = true;
-    return true;
+    return pending;
 }
 
 /** @return True when the left sequence comes before the right one across the wrap. */
@@ -201,6 +217,92 @@ static_assert(!mission_sequence_precedes(1, (std::numeric_limits<std::uint64_t>:
     return host::instance_snapshot(binding, snapshot) && snapshot.active;
 }
 
+/** @return True for a link whose free-roam public activity runs no program. */
+[[nodiscard]] bool scriptless_public(const RuntimeInstance& instance) noexcept {
+    return instance.programStatus == ProgramStatus::missing && instance.publicTarget;
+}
+
+/** @return True when one Sense packet carries a volume occupancy level. */
+[[nodiscard]] bool carries_occupancy(const host::SenseObservationSnapshot& sense) noexcept {
+    return std::any_of(sense.observations.begin(),
+                       sense.observations.begin()
+                           + static_cast<std::ptrdiff_t>(sense.observationCount),
+                       [](const host::SenseObservation& observation) noexcept {
+                           return observation.key.slotType == format::kOccupancySlotType;
+                       });
+}
+
+/**
+ * @return True for a player trigger or an occupancy level on a scriptless public link.
+ * A client reports an object on the link that hosts its bubble, so a mission object in a public
+ * bubble reports there, and the report belongs to the private link the public one was advertised
+ * from.
+ */
+[[nodiscard]] bool public_report(const RuntimeInstance& instance,
+                                 const PendingMissionEvent& pending) noexcept {
+    const host::Event& event = pending.event;
+    return scriptless_public(instance)
+           && ((event.kind == host::EventKind::incidentReceived && event.hasPlayerTrigger)
+               || (event.kind == host::EventKind::senseUpdate && pending.senseAvailable
+                   && carries_occupancy(pending.sense)));
+}
+
+/**
+ * Hands one public report to the private link's mission, as that member's input.
+ * @return True while the owner has not attached or not settled the public link's region. The row
+ * is dropped when either link is replaced, the region changes, or the owner starts a new attempt.
+ */
+[[nodiscard]] bool park_public_report(const RuntimeInstance& source,
+                                      PendingMissionEvent& pending) noexcept {
+    const host::Event& event = pending.event;
+    bap::PublicLinkOwner link{};
+    if (!bap::public_link_owner(source.view.binding, event.sourceGeneration, link)
+        || link.publicRegion < 0 || (pending.parked && link.publicRegion != pending.parkedRegion)) {
+        return false;
+    }
+    if (pending.parked && pending.ownerReadiness == g_ownerReadiness) {
+        return true;
+    }
+    pending.ownerReadiness = g_ownerReadiness;
+    RuntimeInstance* const owner = find_instance(link.binding);
+    if (owner == nullptr) {
+        // An attach raises the readiness this row waits on.
+        pending.parkedRegion = link.publicRegion;
+        pending.parked = state::activity::binding_matches(link.binding);
+        return pending.parked;
+    }
+    if (owner->programStatus != ProgramStatus::loaded
+        || (pending.parkedAttempt != 0 && pending.parkedAttempt != owner->attempt.generation)) {
+        return false;
+    }
+    // The route's region is the one its script has been told; another member's is its link's.
+    const bool route = link.activityClientGeneration == owner->view.activityClientGeneration;
+    if (!still_exact(*owner) || link.privateRegion != link.publicRegion
+        || (route && owner->activeRegion != link.publicRegion)) {
+        pending.parkedAttempt = owner->attempt.generation;
+        pending.parkedRegion = link.publicRegion;
+        pending.parked = true;
+        return true;
+    }
+    refresh_mission_members(*owner);
+    if (event.kind == host::EventKind::senseUpdate) {
+        pending.sense.sourceGeneration = link.activityClientGeneration;
+        for (std::size_t index = 0; index < pending.sense.observationCount; ++index) {
+            pending.sense.observations[index].sourceGeneration = link.activityClientGeneration;
+        }
+        push_trigger_edges(*owner, pending.sense, link.publicRegion);
+        return false;
+    }
+    host::Event owned = event;
+    owned.binding = owner->view.binding;
+    owned.sourceGeneration = link.activityClientGeneration;
+    owned.attemptGeneration = owner->attempt.generation;
+    // A derived edge owns no input sequence of its own.
+    owned.missionSequence = 0;
+    push_player_trigger(*owner, owned, link.publicRegion);
+    return false;
+}
+
 /** Dispatches queued rows in mission-sequence order and retires those no callback can take. */
 void drain_pending_mission_events(std::uint64_t now) noexcept {
     bool progressed = false;
@@ -219,6 +321,9 @@ void drain_pending_mission_events(std::uint64_t now) noexcept {
                 continue;
             }
             if (instance->programStatus != ProgramStatus::loaded) {
+                if (public_report(*instance, pending) && park_public_report(*instance, pending)) {
+                    continue;
+                }
                 clear_pending_event(pending);
                 progressed = true;
                 continue;
@@ -391,7 +496,8 @@ void reconcile_input_feed_loss(const host::MissionInputRead& inputs) noexcept {
         const bool hasInputState =
             mission_state::input_sequence_snapshot(input.event.binding, inputState);
         if ((instance == nullptr && !state::activity::binding_matches(input.event.binding))
-            || (instance != nullptr && instance->programStatus != ProgramStatus::loaded)
+            || (instance != nullptr && instance->programStatus != ProgramStatus::loaded
+                && !scriptless_public(*instance))
             || (hasInputState
                 && (inputState.faulted
                     || mission_sequence_committed(input.event.missionSequence,
@@ -416,8 +522,15 @@ void reconcile_input_feed_loss(const host::MissionInputRead& inputs) noexcept {
                 continue;
             }
         }
-        if (!queue_mission_event(instance, input)) {
+        PendingMissionEvent* const queued = queue_mission_event(instance, input);
+        if (queued == nullptr) {
             return false;
+        }
+        // A scriptless public link keeps only what its private owner can take, so the rest never
+        // waits behind a parked report.
+        if (instance != nullptr && scriptless_public(*instance)
+            && !public_report(*instance, *queued)) {
+            clear_pending_event(*queued);
         }
         g_missionInputCursor.generation = inputs.cursor.generation;
         g_missionInputCursor.sequence = input.sequence;
@@ -426,6 +539,11 @@ void reconcile_input_feed_loss(const host::MissionInputRead& inputs) noexcept {
 }
 
 } // namespace
+
+/** Lets parked public reports try their owner again. */
+void note_owner_readiness() noexcept {
+    ++g_ownerReadiness;
+}
 
 /** Retires every queued mission event that belongs to one binding. */
 void clear_pending_events(const state::activity::SessionBinding& binding) noexcept {
@@ -558,26 +676,28 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
                 instance.activeRegion = event.currentRegionIndex;
             }
         }
+        note_owner_readiness();
         host::Event changed{};
         if (make_region_changed(event, changed)) {
             push_script_event(instance, changed);
         }
     }
     if (event.kind == host::EventKind::incidentReceived) {
-        push_player_trigger(instance, event);
+        push_player_trigger(instance, event, kAnyRegion);
         push_integration(instance, event);
         push_cinematic(instance, event);
     }
     if (event.kind == host::EventKind::senseUpdate && sense != nullptr) {
         observe_player_life(instance, *sense);
         publish_fireteam_life(now);
-        push_trigger_edges(instance, *sense);
+        push_trigger_edges(instance, *sense, kAnyRegion);
         push_engagement_edges(instance, *sense);
         push_ghost_edges(instance, *sense);
         push_object_interaction_edges(instance, *sense);
         // Shared counters and actor feedback keep one observation stream per target: the link
         // that simulates it. Member-local levels above use separate source histories and cannot
         // impersonate shared simulation output.
+        push_effect_edges(instance, *sense);
         push_damage_edges(instance, *sense);
         push_actor_path_edges(instance, *sense);
         push_squad_edges(instance, *sense);

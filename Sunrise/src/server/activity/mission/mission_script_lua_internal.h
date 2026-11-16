@@ -21,6 +21,25 @@ namespace sunrise::server::activity::mission::lua_vm::detail {
 
 int context_cohort(lua_State* state);
 void register_population_metatables(lua_State* state);
+/**
+ * Reads a squad's temperament list from argument table field `key` into the intent.
+ * @return False when the call gave none, so the squad keeps its last list.
+ */
+/**
+ * Reads an optional list of mission.ActorTemperament rows of one slot, at most an actor's capacity.
+ * @param slotRow The actor or squad slot the rows must belong to.
+ * @return False when the call gave no list.
+ */
+[[nodiscard]] bool read_temperament_list(
+    lua_State* state,
+    const char* key,
+    std::uint32_t slotRow,
+    std::array<std::uint32_t,
+               middleware::bap::activity_message::scriptable_auth::kType2TemperamentCapacity>&
+        output,
+    std::uint8_t& count);
+[[nodiscard]] bool
+read_squad_temperaments(lua_State* state, const char* key, std::uint32_t slotRow, Intent& intent);
 
 // Every mission API entry point, grouped by the translation unit that defines it. The names,
 // handles, re-read helpers and surface matchers live in the headers included above.
@@ -159,7 +178,6 @@ void register_actor_sequence_metatables(lua_State* state);
 /** Sets one verified device channel through the same guarded route. */
 [[nodiscard]] int slot_set_channel(lua_State* state);
 /** Sets an SDK-bounded prefix of authored object output channels. */
-[[nodiscard]] int slot_set_output_channels(lua_State* state);
 
 /** Applies one named device transition over the same guarded channel route. */
 [[nodiscard]] int slot_transition(lua_State* state);
@@ -182,6 +200,10 @@ void register_actor_sequence_metatables(lua_State* state);
 /** @return True when one live Slot row is an exact type-2 combatant. */
 [[nodiscard]] bool exact_combatant_slot(const SlotDefinition& definition) noexcept;
 
+/** @return True for an exact authored type-58 path of the actor's own object and registry. */
+[[nodiscard]] bool exact_actor_path(const SlotDefinition& path,
+                                    const SlotDefinition& actor) noexcept;
+
 /** Stages one authored native Auth body on the guarded message-5 route. */
 [[nodiscard]] int queue_slot_auth(lua_State* state,
                                   const SlotDefinition& slot,
@@ -189,12 +211,14 @@ void register_actor_sequence_metatables(lua_State* state);
                                   std::size_t bitCount,
                                   std::span<const std::byte> body,
                                   IntentKind kind = IntentKind::applySlotAuth,
-                                  bool active = false);
+                                  bool active = false,
+                                  bool objectInPlace = false);
 void push_atom_kinds(lua_State* state);
 
 /** Reads one integer field from a generated declaration table. */
 [[nodiscard]] lua_Integer directive_integer(lua_State* state, int table, const char* field);
 [[nodiscard]] int slot_assign_combat_objective(lua_State* state);
+[[nodiscard]] int slot_task_counter(lua_State* state);
 [[nodiscard]] int event_task_cost(lua_State* state);
 [[nodiscard]] int event_task_group(lua_State* state);
 
@@ -209,17 +233,21 @@ void push_atom_kinds(lua_State* state);
 [[nodiscard]] int slot_play_actor_path(lua_State* state);
 [[nodiscard]] int slot_play_actor_action(lua_State* state);
 [[nodiscard]] int slot_retire_actor(lua_State* state);
+[[nodiscard]] int slot_deliver_passengers(lua_State* state);
+/** @return The authored point parameters of one slot, counted from 0 until one is missing. */
+[[nodiscard]] std::size_t authored_point_count(lua_State* state, const SlotDefinition& slot);
 [[nodiscard]] int slot_bind_combatant_to_squad(lua_State* state);
 [[nodiscard]] int slot_set_darkness_zone(lua_State* state);
 [[nodiscard]] int slot_set_object_filter(lua_State* state);
 [[nodiscard]] int slot_generate_map(lua_State* state);
 [[nodiscard]] int slot_watch_damage(lua_State* state);
 /** Queues the authored type-26 hop-on after validating its filter and revision. */
-[[nodiscard]] int slot_set_hop_on(lua_State* state);
 [[nodiscard]] int slot_set_interactable_object(lua_State* state);
 [[nodiscard]] int slot_set_ghost_link(lua_State* state);
 [[nodiscard]] int slot_ghost_link(lua_State* state);
 [[nodiscard]] int slot_set_object_active(lua_State* state);
+/** Sets the verified prefix of an object's authored channels. */
+[[nodiscard]] int slot_set_object_channels(lua_State* state);
 [[nodiscard]] int slot_fire_trigger(lua_State* state);
 [[nodiscard]] int slot_disarm_trigger(lua_State* state);
 /** @return True for a positive counter accepted by every typed Auth body. */
@@ -235,5 +263,7 @@ void push_atom_kinds(lua_State* state);
 
 /** Loads the 32-lane client-atom program one type-2 combatant runs on its bound actor. */
 [[nodiscard]] int slot_run_atoms(lua_State* state);
+/** Replaces the controls of one live type-2 combatant. */
+[[nodiscard]] int slot_set_actor_controls(lua_State* state);
 
 } // namespace sunrise::server::activity::mission::lua_vm::detail

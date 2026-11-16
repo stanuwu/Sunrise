@@ -479,10 +479,12 @@ SceneStatus set_cinematic_active(const sdk::BoundView& view,
 }
 
 /** Plays one sequence slot against an already-reserved Host output revision. */
-SceneStatus play_sequence_reserved(const sdk::BoundView& view,
-                                   std::uint32_t occurrenceRow,
-                                   std::uint32_t slotRow,
-                                   const host::ScriptableOutputReservation& reservation) noexcept {
+SceneStatus play_sequence_reserved(
+    const sdk::BoundView& view,
+    std::uint32_t occurrenceRow,
+    std::uint32_t slotRow,
+    const host::ScriptableOutputReservation& reservation,
+    const middleware::bap::activity_message::scriptable_auth::Type5Selection& selection) noexcept {
     PreparedScene prepared{};
     const SceneStatus status = prepare_typed_behavior(view,
                                                       occurrenceRow,
@@ -501,7 +503,8 @@ SceneStatus play_sequence_reserved(const sdk::BoundView& view,
                prepared.rosterGroup,
                prepared.effectiveRegion,
                prepared.activityClientGeneration,
-               &reservation)
+               &reservation,
+               selection)
                ? SceneStatus::queued
                : SceneStatus::refused;
 }
@@ -541,7 +544,10 @@ set_cinematic_active_reserved(const sdk::BoundView& view,
                : SceneStatus::refused;
 }
 
-/** Finds the occurrence a slot currently belongs to. @return `invalidView` on a stale view. */
+/**
+ * Finds the occurrence a slot currently belongs to: the live or seed state's, else its own state's
+ * in a bubble the client is not in. @return `invalidView` on a stale view.
+ */
 [[nodiscard]] static SceneStatus current_behavior_occurrence(
     const sdk::BoundView& view, std::uint32_t slotRow, std::uint32_t& occurrenceRow) noexcept {
     occurrenceRow = sdk::format::kAbsentIndex;
@@ -559,13 +565,20 @@ set_cinematic_active_reserved(const sdk::BoundView& view,
     if (live != SceneStatus::ready) {
         return live;
     }
-    const auto selected = behavior_scope::select(occurrences,
+    auto selected = behavior_scope::select(occurrences,
+                                           view.catalog->states(),
+                                           view.catalog->bubbles(),
+                                           view.scenarioRow,
+                                           slots[slotRow].objectIndex,
+                                           snapshot.plan.stateRow,
+                                           link.effectiveRegion);
+    if (selected.row == sdk::format::kAbsentIndex) {
+        selected = behavior_scope::select_unheld(occurrences,
                                                  view.catalog->states(),
-                                                 view.catalog->bubbles(),
                                                  view.scenarioRow,
                                                  slots[slotRow].objectIndex,
-                                                 snapshot.plan.stateRow,
                                                  link.effectiveRegion);
+    }
     if (selected.ambiguous) {
         return SceneStatus::ambiguousTarget;
     }
@@ -585,14 +598,15 @@ reset_objectives_slot_reserved(const sdk::BoundView& view,
                : found;
 }
 
-SceneStatus
-play_sequence_slot_reserved(const sdk::BoundView& view,
-                            std::uint32_t slotRow,
-                            const host::ScriptableOutputReservation& reservation) noexcept {
+SceneStatus play_sequence_slot_reserved(
+    const sdk::BoundView& view,
+    std::uint32_t slotRow,
+    const host::ScriptableOutputReservation& reservation,
+    const middleware::bap::activity_message::scriptable_auth::Type5Selection& selection) noexcept {
     std::uint32_t occurrenceRow = 0;
     const SceneStatus found = current_behavior_occurrence(view, slotRow, occurrenceRow);
     return found == SceneStatus::ready
-               ? play_sequence_reserved(view, occurrenceRow, slotRow, reservation)
+               ? play_sequence_reserved(view, occurrenceRow, slotRow, reservation, selection)
                : found;
 }
 
@@ -725,14 +739,18 @@ SceneStatus activate_authored_scene_reserved(const sdk::BoundView& view,
                                              std::uint32_t slotRow,
                                              const host::ScriptableOutputReservation& reservation,
                                              std::uint32_t eventKey,
-                                             bool stop) noexcept {
+                                             bool stop,
+                                             std::uint32_t initialEventKey) noexcept {
     PreparedScene prepared{};
     const SceneStatus status = prepare_scene(view, occurrenceRow, slotRow, prepared);
     if (status != SceneStatus::ready) {
         return status;
     }
-    if (eventKey != 0 && !stop
-        && !sdk::scene_listens(view.catalog->authored_scene_event_keys(), slotRow, eventKey)) {
+    const auto listens = [&view, slotRow](std::uint32_t key) {
+        return sdk::scene_listens(view.catalog->authored_scene_event_keys(), slotRow, key);
+    };
+    if ((eventKey != 0 && !stop && !listens(eventKey))
+        || (initialEventKey != 0 && !listens(initialEventKey))) {
         return SceneStatus::unknownEvent;
     }
     if (prepared.omittedParticipants != 0) {
@@ -747,7 +765,8 @@ SceneStatus activate_authored_scene_reserved(const sdk::BoundView& view,
             &reservation,
             prepared.sceneDependencies,
             eventKey,
-            stop)) {
+            stop,
+            initialEventKey)) {
         return SceneStatus::queued;
     }
     return SceneStatus::refused;

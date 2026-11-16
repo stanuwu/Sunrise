@@ -10,6 +10,7 @@
 #include "../../../../middleware/bap/activity_message/incident.h"
 #include "../../../../middleware/bap/activity_message/integration_incident.h"
 #include "../../../../middleware/bap/activity_message/player_trigger_incident.h"
+#include "../../../../middleware/bap/activity_message/sense_observation_packet.h"
 #include "../../../../middleware/bap/activity_message/sense_update.h"
 #include "../../../../state/activity/bubble_authority/runtime.h"
 #include "../../../../state/activity/member_context.h"
@@ -132,6 +133,104 @@ resolve_sense_slot(const void* raw,
     return held;
 }
 
+/** @return True when the link published this key for the mission of the private link beside it. */
+[[nodiscard]] bool owner_published(const RosterDecodeMap& map,
+                                   std::uint64_t generation,
+                                   std::uint32_t registryKey) noexcept {
+    const RosterDecodeEntry* const entry = find_roster_decode_entry(map, generation, registryKey);
+    return entry != nullptr && entry->ownerPublished && map.ownerGeneration != 0;
+}
+
+/**
+ * Moves the objects of groups a public link published for its owner's mission from `shared` into
+ * `owned`. Each part keeps its values contiguous in report order, as a whole report does.
+ * @param owned Overwritten; receives the owner's objects with the packet's group counts.
+ * @return How many objects moved.
+ */
+std::size_t split_owner_objects(const RosterDecodeMap& map,
+                                std::uint64_t generation,
+                                sense_update::DecodedPacket& shared,
+                                sense_update::DecodedPacket& owned) noexcept {
+    owned.objectCount = 0;
+    owned.valueCount = 0;
+    owned.objectsDecoded = 0;
+    std::size_t keptObjects = 0;
+    std::size_t keptValues = 0;
+    std::uint32_t keptDecoded = 0;
+    for (std::size_t index = 0; index < shared.objectCount; ++index) {
+        sense_update::DecodedObject object = shared.objects[index];
+        const auto values = std::span(shared.values).subspan(object.firstValue, object.valueCount);
+        const bool decoded = object.status == sense_update::ObjectStatus::decoded;
+        if (owner_published(map, generation, object.registryKey)) {
+            std::copy(values.begin(),
+                      values.end(),
+                      owned.values.begin() + static_cast<std::ptrdiff_t>(owned.valueCount));
+            object.firstValue = static_cast<std::uint32_t>(owned.valueCount);
+            owned.valueCount += values.size();
+            owned.objects[owned.objectCount++] = object;
+            owned.objectsDecoded += decoded ? 1U : 0U;
+            continue;
+        }
+        // Kept values only move toward the front, so the copy never overlaps its own source.
+        if (keptValues != object.firstValue) {
+            std::copy(values.begin(),
+                      values.end(),
+                      shared.values.begin() + static_cast<std::ptrdiff_t>(keptValues));
+        }
+        object.firstValue = static_cast<std::uint32_t>(keptValues);
+        keptValues += values.size();
+        shared.objects[keptObjects++] = object;
+        keptDecoded += decoded ? 1U : 0U;
+    }
+    const std::size_t moved = owned.objectCount;
+    if (moved == 0) {
+        return 0;
+    }
+    owned.status = shared.status;
+    owned.bitsConsumed = shared.bitsConsumed;
+    owned.bitsRemaining = shared.bitsRemaining;
+    owned.groupsSeen = shared.groupsSeen;
+    owned.groupsDecoded = shared.groupsDecoded;
+    owned.groupsSkipped = shared.groupsSkipped;
+    owned.paddingBits = shared.paddingBits;
+    owned.objectsTruncated = false;
+    owned.valuesTruncated = false;
+    owned.objectsSeen = static_cast<std::uint32_t>(moved);
+    shared.objectCount = keptObjects;
+    shared.valueCount = keptValues;
+    shared.objectsDecoded = keptDecoded;
+    shared.objectsSeen =
+        shared.objectsSeen > owned.objectsSeen ? shared.objectsSeen - owned.objectsSeen : 0;
+    return moved;
+}
+
+/** Points one Sense input's summary at the packet it now carries. */
+void summarize_packet(server::activity::host::SenseInput& input) noexcept {
+    const sense_update::DecodedPacket& packet = input.decoded;
+    input.groupsSeen = packet.groupsSeen;
+    input.groupsDecoded = packet.groupsDecoded;
+    input.groupsSkipped = packet.groupsSkipped;
+    input.objectsSeen = packet.objectsSeen;
+    input.objectsDecoded = packet.objectsDecoded;
+    input.hasFirstObject = packet.objectCount != 0;
+    if (input.hasFirstObject) {
+        input.firstRegistryKey = packet.objects.front().registryKey;
+        input.firstSlotIndex = packet.objects.front().slotIndex;
+        input.firstSlotType = packet.objects.front().slotType;
+    }
+}
+
+/** Queues one Sense input and reports its refusal against the message. */
+void submit_sense_input(const server::activity::host::SenseInput& input,
+                        const service::Request& request) noexcept {
+    const auto refusal = server::activity::host::submit_sense(input);
+    if (refusal != server::activity::host::IngressRefusal::none) {
+        report_message(request.messageType,
+                       request.sessionId,
+                       server::activity::host::ingress_refusal_name(refusal));
+    }
+}
+
 /** One framing-only adapter and the handler that reads its body. */
 struct FramingRoute {
     IngressAdapter adapter;
@@ -245,11 +344,25 @@ bool frame_only(const ActivityClientBinding& binding,
         input.decoded = parsedSense.decoded;
         input.hasFirstObject = parsedSense.hasFirstObject;
         input.heldBubbles = held_bubbles(binding);
-        const auto refusal = server::activity::host::submit_sense(input);
-        if (refusal != server::activity::host::IngressRefusal::none) {
-            report_message(request.messageType,
-                           request.sessionId,
-                           server::activity::host::ingress_refusal_name(refusal));
+        // A public link's report on its owner's groups is the owner's own input, as the same
+        // report on the private link would be. The parsed copy holds that part.
+        const std::size_t moved =
+            sense_update::observation_packet(input.decoded)
+                ? split_owner_objects(
+                      rosterDecode, binding.bindingGeneration, input.decoded, parsedSense.decoded)
+                : 0;
+        if (moved != 0) {
+            summarize_packet(input);
+        }
+        if (moved == 0 || input.decoded.objectCount != 0) {
+            submit_sense_input(input, request);
+        }
+        if (moved != 0) {
+            input.decoded = parsedSense.decoded;
+            input.binding = rosterDecode.ownerBinding;
+            input.sourceGeneration = rosterDecode.ownerGeneration;
+            summarize_packet(input);
+            submit_sense_input(input, request);
         }
     } else if (isIncident && framed.verdict == store::Verdict::framed) {
         server::activity::host::IncidentInput input{};
@@ -276,6 +389,13 @@ bool frame_only(const ActivityClientBinding& binding,
             input.hasCinematic = cinematic_incident::decode(
                 std::span(parsedIncident.payload).first(parsedIncident.payloadLength),
                 input.cinematic);
+        }
+        // A trigger on a group the public link published for its owner is the owner's input.
+        if (input.hasPlayerTrigger
+            && owner_published(
+                rosterDecode, binding.bindingGeneration, input.playerTrigger.registryKey)) {
+            input.binding = rosterDecode.ownerBinding;
+            input.sourceGeneration = rosterDecode.ownerGeneration;
         }
         const auto refusal = server::activity::host::submit_incident(input);
         if (refusal != server::activity::host::IngressRefusal::none) {
@@ -379,7 +499,10 @@ bool prepare_authority_abdication(const ActivityClientBinding& binding,
                                   ActivityPlan& plan,
                                   bool& hasTransaction) noexcept {
     service::entity_authority::Release release{};
-    const bool parsed = service::entity_authority::parse_abdicate(request.payload, release);
+    const bool abandoned = adapter == IngressAdapter::authorityAbandon;
+    const bool parsed = abandoned
+                            ? service::entity_authority::parse_abandon(request.payload, release)
+                            : service::entity_authority::parse_abdicate(request.payload, release);
     if (!frame_only(binding, rosterDecode, adapter, request)) {
         return false;
     }
@@ -390,6 +513,7 @@ bool prepare_authority_abdication(const ActivityClientBinding& binding,
     plan.authorityAbdication.sourceGeneration = binding.bindingGeneration;
     plan.authorityAbdication.entities = release.mask;
     plan.authorityAbdication.bubble = release.selector;
+    plan.authorityAbdication.abandoned = abandoned;
     plan.authorityAbdication.pending = true;
     plan.delivery = Delivery::none;
     plan.mutationDomain = MutationDomain::authorityAbdication;

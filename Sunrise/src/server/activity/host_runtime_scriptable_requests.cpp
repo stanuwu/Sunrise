@@ -16,6 +16,15 @@ namespace scene = middleware::bap::activity_message::sensor_auth_update;
 namespace squad = middleware::bap::activity_message::squad_auth;
 using namespace detail;
 
+/** @return True when a retirement names this exact target, a known class and a real bubble. */
+[[nodiscard]] bool
+retirement_names_target(const state::gameplay::squad_entity_retirement::Eligibility& retirement,
+                        const ScriptableTarget& target) noexcept {
+    return retirement.squad.key == target.registryKey && retirement.squad.index == target.slotIndex
+           && retirement.squad.type == target.slotType && retirement.rsatTag != 0
+           && retirement.bubble < state::activity::defaults::kBubbleCapacity;
+}
+
 } // namespace
 
 namespace detail {
@@ -88,8 +97,6 @@ ActorProgramSourceStatus actor_program_source_status(const state::activity::Sess
         || !state::activity::binding_matches(binding)) {
         return ActorProgramSourceStatus::incompatible;
     }
-    ScriptableRequest request{};
-    request.programSource = source;
     AcquireSRWLockShared(&g_lock);
     const Instance* instance = find_instance(binding);
     auto status = ActorProgramSourceStatus::incompatible;
@@ -100,7 +107,7 @@ ActorProgramSourceStatus actor_program_source_status(const state::activity::Sess
             if (output != nullptr) {
                 *output = *retained;
             }
-            if (actor_program::source_ready(*instance, request)) {
+            if (actor_program::source_ready(*instance, source)) {
                 status = ActorProgramSourceStatus::ready;
             } else {
                 namespace patch = middleware::bap::activity_message::mission_auth_patch;
@@ -166,7 +173,8 @@ bool request_squad_objective(const state::activity::SessionBinding& binding,
                              const state::activity::mission::TypedIntent& decision,
                              std::uint16_t objectiveIndex,
                              std::uint64_t expectedActivityClientGeneration,
-                             const ScriptableOutputReservation& reservation) noexcept {
+                             const ScriptableOutputReservation& reservation,
+                             std::optional<squad::Temperaments> temperaments) noexcept {
     namespace objective = middleware::bap::activity_message::squad_objective;
     if (target.slotType != squad::kSlotType || target.authSchema != objective::kSchema
         || objectiveIndex > scene::kMaximumSlotIndex
@@ -192,6 +200,7 @@ bool request_squad_objective(const state::activity::SessionBinding& binding,
     request.objectivePreserveReservation = decision.objectivePreserveReservation;
     request.objectiveReserved = decision.objectiveReserved;
     request.objectiveRefreshAwareness = decision.objectiveRefreshAwareness;
+    request.squadTemperaments = temperaments;
     request.kind = ScriptableOverrideKind::squadObjective;
     return enqueue_request(request, &reservation);
 }
@@ -227,8 +236,8 @@ bool request_state_local_type4_override(
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::int32_t entryIndex,
     bool active,
+    const auth::Type2LaneClientRef& location,
     bool capturePlate,
-    const auth::Type4TimedClock& timed,
     const auth::Type4PositionChild& position,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation,
@@ -244,8 +253,8 @@ bool request_state_local_type4_override(
     request.stateLocalRosterGroup = stateLocalRosterGroup;
     request.entryIndex = entryIndex;
     request.active = active;
+    request.objectLocation = location;
     request.capturePlate = capturePlate;
-    request.timed = timed;
     request.position = position;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = ScriptableOverrideKind::object;
@@ -314,10 +323,13 @@ bool request_state_local_type2_squad_binding(
     const ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::uint64_t expectedActivityClientGeneration,
-    const ScriptableOutputReservation* reservation) noexcept {
+    const ScriptableOutputReservation* reservation,
+    bool spawn,
+    state::gameplay::squad_entity_retirement::Eligibility retirement) noexcept {
     if (target.slotType != auth::kType2SlotType || target.authSchema != auth::kType2Schema
         || !valid_state_local_group(target, stateLocalRosterGroup)
-        || expectedActivityClientGeneration == 0) {
+        || expectedActivityClientGeneration == 0
+        || (retirement.enabled && !retirement_names_target(retirement, target))) {
         return false;
     }
     ScriptableRequest request{};
@@ -326,6 +338,8 @@ bool request_state_local_type2_squad_binding(
     request.stateLocalRosterGroup = stateLocalRosterGroup;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = ScriptableOverrideKind::combatantBinding;
+    request.active = spawn;
+    request.squadRetirement = retirement;
     return enqueue_request(request, reservation);
 }
 
@@ -405,7 +419,8 @@ bool request_state_local_sequence_override(
     const ScriptableTarget& target,
     const state::build_data::scenarios::RosterGroup& stateLocalRosterGroup,
     std::uint64_t expectedActivityClientGeneration,
-    const ScriptableOutputReservation* reservation) noexcept {
+    const ScriptableOutputReservation* reservation,
+    const auth::Type5Selection& selection) noexcept {
     if (target.slotType != auth::kType5SlotType || target.authSchema != auth::kType5Schema
         || !valid_state_local_group(target, stateLocalRosterGroup)
         || expectedActivityClientGeneration == 0) {
@@ -417,6 +432,7 @@ bool request_state_local_sequence_override(
     request.stateLocalRosterGroup = stateLocalRosterGroup;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = ScriptableOverrideKind::sequence;
+    request.sequenceSelection = selection;
     return enqueue_request(request, reservation);
 }
 
@@ -517,12 +533,15 @@ bool request_state_local_authored_scene_override(
     const ScriptableOutputReservation* reservation,
     const AuthoredSceneDependencies& dependencies,
     std::uint32_t eventKey,
-    bool stop) noexcept {
+    bool stop,
+    std::uint32_t initialEventKey) noexcept {
     if (target.slotType != scene::kAuthoredSceneSlotType
         || target.authSchema != scene::kAuthoredSceneAuthSchema
         || !valid_state_local_group(target, stateLocalRosterGroup)
         || !scene::valid_authored_scene_dependencies(dependencies)
         || eventKey == (std::numeric_limits<std::uint32_t>::max)() || (stop && eventKey != 0)
+        || initialEventKey == (std::numeric_limits<std::uint32_t>::max)()
+        || (initialEventKey != 0 && (stop || eventKey != 0))
         || expectedActivityClientGeneration == 0) {
         return false;
     }
@@ -534,7 +553,7 @@ bool request_state_local_authored_scene_override(
     request.kind = stop            ? ScriptableOverrideKind::authoredSceneStop
                    : eventKey == 0 ? ScriptableOverrideKind::authoredScene
                                    : ScriptableOverrideKind::authoredSceneEvent;
-    request.sceneEventKey = eventKey;
+    request.sceneEventKey = eventKey != 0 ? eventKey : initialEventKey;
     request.sceneDependencies = dependencies;
     return enqueue_request(request, reservation);
 }
@@ -583,12 +602,10 @@ bool request_squad_override(const state::activity::SessionBinding& binding,
                             std::array<std::int8_t, 4> authoredProfile,
                             state::gameplay::squad_entity_retirement::Eligibility squadRetirement,
                             std::optional<squad::Destination> destination,
-                            std::optional<squad::SpawnRule> spawnRule) noexcept {
+                            std::optional<squad::SpawnRule> spawnRule,
+                            std::optional<squad::Temperaments> temperaments) noexcept {
     if (squadRetirement.enabled
-        && (squadRetirement.squad.key != target.registryKey
-            || squadRetirement.squad.index != target.slotIndex
-            || squadRetirement.squad.type != target.slotType || squadRetirement.rsatTag == 0
-            || squadRetirement.bubble >= 64
+        && (!retirement_names_target(squadRetirement, target)
             || !std::ranges::any_of(requestedCounts, [](auto count) { return count > 0; }))) {
         return false;
     }
@@ -616,6 +633,7 @@ bool request_squad_override(const state::activity::SessionBinding& binding,
     request.nameHash = nameHash;
     request.squadDestination = destination;
     request.squadSpawnRule = spawnRule;
+    request.squadTemperaments = temperaments;
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.squadMode = mode;
     request.kind = ScriptableOverrideKind::squad;
@@ -636,6 +654,23 @@ bool request_lifetime_override(const state::activity::SessionBinding& binding,
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = ScriptableOverrideKind::lifetime;
     request.lifetimeState = lifetimeState;
+    return enqueue_request(request, reservation);
+}
+
+/** Queues one activity flag change through the lifetime output slot. */
+bool request_activity_flag_override(
+    const state::activity::SessionBinding& binding,
+    const middleware::bap::activity_message::sensor_auth_update::ActivityFlagChange& change,
+    std::uint64_t expectedActivityClientGeneration,
+    const ScriptableOutputReservation* reservation) noexcept {
+    if (change.key == 0 || expectedActivityClientGeneration == 0) {
+        return false;
+    }
+    ScriptableRequest request{};
+    request.binding = binding;
+    request.expectedActivityClientGeneration = expectedActivityClientGeneration;
+    request.kind = ScriptableOverrideKind::lifetime;
+    request.activityFlag = change;
     return enqueue_request(request, reservation);
 }
 

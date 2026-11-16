@@ -28,6 +28,13 @@ inline constexpr std::size_t kSlotCount = kEncodedSize * kBitsPerMaskByte;
 /** Canonical slot bytes; slot i uses byte i / 8 and low bit i % 8. */
 using EntitySlotMask = std::array<std::byte, kEncodedSize>;
 
+/** @return True when the mask holds entity slot `slot`, which must be below kSlotCount. */
+[[nodiscard]] constexpr bool has_slot(const EntitySlotMask& mask, std::size_t slot) noexcept {
+    return (std::to_integer<unsigned>(mask[slot / kBitsPerMaskByte])
+            & (1U << (slot % kBitsPerMaskByte)))
+           != 0;
+}
+
 /**
  * Decodes the fixed big-endian word prefix into canonical slot bytes.
  * @param input Type-21 payload holding the whole mask prefix.

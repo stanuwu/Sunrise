@@ -9,6 +9,8 @@
 #include "../../../../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../gameplay/gameplay_advertisement.h"
+#include "../../../../gameplay/group/group_host_sessions.h"
+#include "../../../../gameplay/squad_entity_retirement.h"
 #include "../../../internal.h"
 #include "activity_arrival.h"
 #include "activity_roster_device_publication.h"
@@ -165,6 +167,17 @@ void report_roster_deferral(const Session& session,
                                  std::int32_t region) noexcept;
 
 /**
+ * Chooses how the host row of one advertised region is shared: a private region has its own, a
+ * public one is shared unless the source's mission authors content in its bubble.
+ * @param source Exact activity session the generated world is resolved for.
+ * @param bindingGeneration Connection generation that binds it.
+ */
+[[nodiscard]] server::gameplay::group::RegionHost
+region_host(const state::activity::SessionBinding& source,
+            std::uint64_t bindingGeneration,
+            std::int32_t region) noexcept;
+
+/**
  * Reads the authored publicity of every bubble from the installed packages.
  * @param session Exact ActivityClient owner whose generated world is read.
  * @param mask Receives one bit per public bubble.
@@ -223,6 +236,15 @@ struct RefreshReport final {
  */
 [[nodiscard]] state::activity::membership::ClientPlacement
 client_placement(const Session& session, const RefreshReport* refresh) noexcept;
+
+/**
+ * Prepares the purge of what a sole link released in a bubble its client has left.
+ * @param heldRegion Region the client holds a slice set in; a negative one prepares nothing.
+ */
+[[nodiscard]] bool prepare_departed_purge_locked(
+    const Session& session,
+    std::int32_t heldRegion,
+    server::gameplay::squad_entity_retirement::RetirementPlan& output) noexcept;
 
 /**
  * Tests whether the client holds the region it reported and no host move is waiting.
@@ -318,6 +340,7 @@ struct TailAuthOverride final {
     std::size_t& destinationLength,
     const middleware::bap::activity_message::patch_epoch::PatchEpoch* epoch = nullptr,
     std::uint8_t lifetimeState = 3,
+    const message::ActivityFlags& activityFlags = {},
     const message::AuthOverride* authOverride = nullptr,
     std::uint16_t rosterGroupIndex = 0,
     std::uint16_t rosterSlotOffset = 0,
@@ -375,6 +398,23 @@ find_existing_group(const state::build_data::scenarios::RosterGroup& candidate,
 
 /** @return One bit per bubble this link hosts; every bubble when no world is bound. */
 [[nodiscard]] std::uint64_t hosted_bubble_mask(const Session& session) noexcept;
+
+/** Records one key a public link publishes for its owner's mission. @return False when full. */
+[[nodiscard]] bool note_owner_key(Scratch& scratch, std::uint32_t key) noexcept;
+
+/** @return True when this body published the key for its owner's mission. */
+[[nodiscard]] bool owner_key(const Scratch& scratch, std::uint32_t key) noexcept;
+
+/**
+ * Adds the owner layout's per-bubble groups in the bubbles a public link publishes for it. The
+ * private link hosts none of those bubbles, so no other link registers them.
+ * @param ownerBubbles Bubbles public in the owner's world that this link hosts.
+ * @return False when a group cannot be read or placed, or its key collides with another group.
+ */
+[[nodiscard]] bool append_owner_layout_groups(const Session& owner,
+                                              std::uint64_t ownerBubbles,
+                                              Scratch& scratch,
+                                              message::Roster& roster) noexcept;
 
 /** @return True when this link registers the destination's top-level groups. */
 [[nodiscard]] bool publishes_top_level_groups(const Session& session) noexcept;
@@ -442,15 +482,30 @@ make_auth_override(const server::activity::host::PendingScriptableOverride& reta
 
 /**
  * Projects a binding's full retained Auth into this recipient; null means success.
+ * A private link leaves out the state-local targets its public link publishes.
+ * @param link The link the body goes out on.
+ * @param owner The private link whose estate a public link projects, or null for the link's own.
+ * @param ownerBubbles Bubbles the public link publishes for the owner; read only with an owner.
  * @param deliveredDialogueRevision Newest dialogue pulse this link carried; older ones stay out.
  */
 [[nodiscard]] const char* append_retained_auth_estate(
+    const Session& link,
+    const Session* owner,
+    std::uint64_t ownerBubbles,
     const state::build_data::scenarios::Definition& layout,
     const EffectiveRegion& region,
     Scratch& scratch,
     message::Snapshot& snapshot,
     std::span<const server::activity::host::PendingScriptableOverride> estate,
     std::uint64_t deliveredDialogueRevision) noexcept;
+
+/**
+ * Logs an owner's group whose key a public link already publishes with other wire fields. The
+ * collision refuses the whole body, so it is logged at warning level. Does nothing without an
+ * owner.
+ */
+void report_owner_key_conflict(const Session* owner,
+                               const server::activity::host::ScriptableTarget& target) noexcept;
 
 /** Tracks the bubble the client holds; a change moves no group and only logs the crossing. */
 void advance_region_epoch(Session& session, const RefreshReport* refresh) noexcept;

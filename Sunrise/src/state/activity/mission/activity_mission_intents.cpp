@@ -126,10 +126,12 @@ matching_device_publication(const MissionState& state,
                 candidate.squadPopulations.clear();
             }
             candidate.pendingIntents.erase(candidate.pendingIntents.begin());
-            if (!publish(activity, *record)) {
-                status = Status::revisionExhausted;
-            } else {
-                record->mission = std::move(candidate);
+            if (status == Status::ready) {
+                if (!publish(activity, *record)) {
+                    status = Status::revisionExhausted;
+                } else {
+                    record->mission = std::move(candidate);
+                }
             }
         }
     }

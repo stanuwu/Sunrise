@@ -20,6 +20,8 @@ using AppearanceHeader = std::array<std::uint8_t, kAppearanceHeaderSize>;
 inline constexpr std::size_t kDismantleRewardPolicyCapacity = 32;
 /** Native sentinel used when a character has no title equipped. */
 inline constexpr std::uint16_t kUnequippedTitleRecordIndex = 0xFFFFU;
+/** Native sentinel for no activity index; 0 is the orbit. */
+inline constexpr std::uint16_t kNoActivityIndex = 0xFFFFU;
 
 /** Gear classes a dismantle payout row can be limited to. */
 enum class DismantleGearClass : std::uint8_t {
@@ -174,6 +176,10 @@ struct CharacterState {
      * A launch moves it to the target before the client's launch commit, which latches it.
      */
     std::uint16_t currentActivityIndex{};
+    /** Activity before the character's current one, family-4 `+45892`; session only. */
+    std::uint16_t previousActivityIndex{kNoActivityIndex};
+    /** Activity the character occupies, family-4 `+45894`; session only. */
+    std::uint16_t activityOverrideIndex{kNoActivityIndex};
     /** Server policy that arms content checks only with the matching family-5 flag. */
     bool contentBypass{};
     /** Native DestinyRecordDefinition row of the equipped earned title. */

@@ -164,6 +164,26 @@ scene_population_sources(RuntimeInstance& instance,
         device.value = staged.channelValue;
         deviceJoin = &device;
     }
+    // A request whose report echoes a Host-owned counter is kept under the counter it staged.
+    const bool hopOn = intent.kind == lua_vm::IntentKind::setHopOn;
+    const bool program = intent.kind == lua_vm::IntentKind::runActorProgram
+                         || intent.kind == lua_vm::IntentKind::retireActor;
+    const bool delivery = intent.kind == lua_vm::IntentKind::deliverPassengers;
+    if (hopOn || program || delivery) {
+        host::PendingScriptableOverride staged{};
+        if (!host::staged_scriptable_override(
+                instance.view.binding, instance.expectedScriptableRevision, staged)) {
+            fault_instance(instance, "staged request has no Host counter");
+            return false;
+        }
+        record_staged_request(instance,
+                              staged.target,
+                              hopOn     ? StagedCounter::hopOn
+                              : program ? StagedCounter::actorProgram
+                                        : StagedCounter::actorDelivery,
+                              staged.generation,
+                              intent.requestKey);
+    }
     mission_state::Snapshot snapshot{};
     const mission_state::Status status =
         mission_state::acknowledge_intent_output(instance.view.binding,
@@ -406,6 +426,11 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
         return;
     }
     lua_vm::consume_intent(instance.vm);
+    // The transported assignment decides which reported costs echo its revision, and no earlier
+    // copy of the bodies holds it.
+    if (intent.kind == lua_vm::IntentKind::assignCombatObjective) {
+        instance.estateCopied = false;
+    }
     const char* result = nullptr;
     switch (intent.kind) {
     case lua_vm::IntentKind::placeSquad:
@@ -433,9 +458,14 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
         result = "device_staged";
         break;
     case lua_vm::IntentKind::applySlotAuth:
+    case lua_vm::IntentKind::setHopOn:
+    case lua_vm::IntentKind::setObjectChannels:
+    case lua_vm::IntentKind::setEngagement:
     case lua_vm::IntentKind::setInteractableObject:
     case lua_vm::IntentKind::setGhostLink:
     case lua_vm::IntentKind::watchDamage:
+    case lua_vm::IntentKind::setActorControls:
+    case lua_vm::IntentKind::deliverPassengers:
     case lua_vm::IntentKind::runActorProgram:
     case lua_vm::IntentKind::assignCombatObjective:
         result = "slot_auth_staged";
@@ -445,6 +475,9 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
         break;
     case lua_vm::IntentKind::setLifetime:
         result = "lifetime_staged";
+        break;
+    case lua_vm::IntentKind::setActivityFlag:
+        result = "activity_flag_staged";
         break;
     case lua_vm::IntentKind::restartCheckpoint:
         result = "checkpoint_staged";

@@ -167,6 +167,18 @@ void set_program_spawn_hold(std::uint64_t sessionId, bool held) noexcept;
  */
 [[nodiscard]] bool host_teleport_armed(std::uint64_t sessionId) noexcept;
 
+/** @return True from the arm of a host-named teleport until the client's spawn retires it. */
+[[nodiscard]] bool host_teleport_in_flight(std::uint64_t sessionId) noexcept;
+
+/**
+ * Raises an armed host teleport to its spawn state once the client holds the region it names.
+ * The client refuses the spawn until it has applied a roster whose lifetime state passes the spawn
+ * gate, so the caller raises only after that roster is delivered.
+ * @param sessionId Joined activity session the teleport moved.
+ * @return True when the state changed, so a membership body owes it to the client.
+ */
+[[nodiscard]] bool raise_host_teleport_spawn(std::uint64_t sessionId) noexcept;
+
 /**
  * Prepares a membership-revision advance so an already-applied snapshot can be corrected.
  * The client applies one update per revision and drops every repeat, so a body published with a
