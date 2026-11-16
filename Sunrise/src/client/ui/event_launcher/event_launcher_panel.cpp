@@ -97,7 +97,11 @@ void draw() noexcept {
         return;
     }
     if (!menu.owner.sessionId) {
-        ImGui::TextDisabled("Waiting for the local event host.");
+        ImGui::TextDisabled(
+            menu.scriptStopped
+                ? "This destination's event script stopped on an error. See the server log, "
+                  "then return to orbit and land again to restart it."
+                : "Waiting for the local event host.");
         return;
     }
     const auto* current = site_at(sites, here, menu.currentSite);

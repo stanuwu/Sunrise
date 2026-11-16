@@ -534,9 +534,16 @@ void read(const state::activity::SessionBinding& local, int region, Menu& menu) 
         std::copy(sites.begin(), sites.end(), menu.sites.begin());
         const RuntimeInstance* owner = nullptr;
         for (const auto& candidate : g_instances) {
-            if (!owns(candidate, region) || candidate.playerKey != source->playerKey
+            if (candidate.playerKey != source->playerKey
                 || candidate.view.activityRow != source->view.activityRow
                 || candidate.view.catalog != source->view.catalog) {
+                continue;
+            }
+            if (candidate.occupied && candidate.publicTarget
+                && VmAccess::get(candidate.vm).faulted) {
+                menu.scriptStopped = true;
+            }
+            if (!owns(candidate, region)) {
                 continue;
             }
             if (owner) {

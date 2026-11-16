@@ -43,6 +43,8 @@ struct Menu {
     std::int64_t acknowledged{};
     bool manual{};
     bool scriptFailed{};
+    /** The public host's script stopped on a callback error; no request reaches it. */
+    bool scriptStopped{};
 };
 
 /** Reads the local destination's sites; only its arrived public session can accept a request. */
