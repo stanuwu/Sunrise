@@ -129,11 +129,44 @@ bool Membership::depart(std::uint64_t account) noexcept {
     if (account == 0 || revision_ == maximumRevision) {
         return false;
     }
+    std::array<std::uint64_t, core::network_capacity::kPlayers> peers{};
+    std::size_t peerCount{};
     bool changed{};
     for (auto& edge : edges_) {
-        if (edge.joiner == account || edge.target == account) {
-            edge = {};
-            changed = true;
+        if (edge.joiner != account && edge.target != account) {
+            continue;
+        }
+        const auto peer = edge.joiner == account ? edge.target : edge.joiner;
+        if (edge.established && peerCount < peers.size()
+            && std::find(
+                   peers.begin(), peers.begin() + static_cast<std::ptrdiff_t>(peerCount), peer)
+                   == peers.begin() + static_cast<std::ptrdiff_t>(peerCount)) {
+            peers[peerCount++] = peer;
+        }
+        edge = {};
+        changed = true;
+    }
+    // Admission links each member to the one whose fireteam it joined, so the members who joined
+    // through the leaver are connected only through it. They stay one fireteam in the game, so
+    // they are linked to each other here. Every edge added replaces one just cleared.
+    for (std::size_t index = 1; index < peerCount; ++index) {
+        Edge* vacant{};
+        bool linked{};
+        for (auto& edge : edges_) {
+            if (matches(edge, peers[index], peers[0])) {
+                if (edge.established) {
+                    linked = true;
+                    break;
+                }
+                // A lookup between two members of one fireteam has nothing left to admit.
+                edge = {};
+            }
+            if (edge.joiner == 0 && vacant == nullptr) {
+                vacant = &edge;
+            }
+        }
+        if (!linked && vacant != nullptr) {
+            *vacant = {peers[index], peers[0], true};
         }
     }
     if (changed) {

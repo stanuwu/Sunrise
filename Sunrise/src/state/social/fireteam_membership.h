@@ -34,7 +34,10 @@ public:
     [[nodiscard]] std::uint64_t representative(std::uint64_t account) const noexcept;
     /** True while this account's own lookup still waits for native admission. */
     [[nodiscard]] bool joining(std::uint64_t account) const noexcept;
-    /** Explicit fireteam departure; ordinary activity travel does not call this. */
+    /**
+     * Explicit fireteam departure; ordinary activity travel does not call this. The members the
+     * account leaves behind stay linked to each other, as they stay one fireteam in the game.
+     */
     [[nodiscard]] bool depart(std::uint64_t account) noexcept;
     /** Explicit native release for one relation. */
     [[nodiscard]] bool release(std::uint64_t first, std::uint64_t second) noexcept;
