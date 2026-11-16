@@ -13,12 +13,35 @@
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
 #include "../content_manifest/content_manifest_state_runtime.h"
+#include "../content_manifest/fingerprint/content_manifest_fingerprint.h"
 #include "../mods/mods_runtime.h"
+
+// Sunrise.vcxproj and CMakeLists.txt write this before compiling. Without it the module file is
+// hashed instead.
+#if __has_include("sunrise_build_revision.h")
+#include "sunrise_build_revision.h"
+#endif
 
 namespace sunrise::state::coop::compatibility {
 namespace {
 
 namespace sha256 = middleware::crypto::sha256;
+
+/** Characters in a full git commit id. */
+constexpr std::size_t kRevisionLength = 40;
+#if defined(SUNRISE_BUILD_TREE_CLEAN) && SUNRISE_BUILD_TREE_CLEAN == 1
+/** The commit this module was built from. Set only for a build of an unmodified checkout. */
+constexpr std::string_view kBuildRevision = SUNRISE_BUILD_REVISION;
+#else
+constexpr std::string_view kBuildRevision = "";
+#endif
+#ifdef NDEBUG
+constexpr std::string_view kBuildConfiguration = "release";
+#else
+constexpr std::string_view kBuildConfiguration = "debug";
+#endif
+/** Separates a revision build identity from any other use of the same text. */
+constexpr std::string_view kBuildRevisionDomain = "sunrise-coop-build-revision:";
 
 /** Leads a summary. */
 constexpr std::array<char, 4> kSummaryMagic{'S', 'R', 'C', 'P'};
@@ -343,21 +366,67 @@ int describe_mods(const Record& local, const Record& host, std::span<char> outpu
         output.data(), output.size(), "Co-op refused: the mod list differs from the host's.");
 }
 
+/**
+ * Names this build. A clean checkout's build is named by its commit and configuration, so two
+ * builds of one commit match on any machine; any other build is named by its module file.
+ * @return False when the module file could not be hashed.
+ */
+[[nodiscard]] bool build_identity(void* module, Digest& output, bool& fromRevision) noexcept {
+    fromRevision = false;
+    if constexpr (kBuildRevision.size() == kRevisionLength) {
+        sha256::Stream stream;
+        stream.add(std::as_bytes(std::span(kBuildRevisionDomain)));
+        stream.add(std::as_bytes(std::span(kBuildRevision)));
+        stream.add(std::as_bytes(std::span(kBuildConfiguration)));
+        fromRevision = stream.finish(output);
+        if (fromRevision) {
+            return true;
+        }
+    }
+    return hash_module(module, output);
+}
+
+/** Copies the installed and mod package rows' fingerprint out of one snapshot. */
+[[nodiscard]] bool copy_rows_fingerprint(void* context,
+                                         const content_manifest::View& view) noexcept {
+    auto& output = *static_cast<content_manifest::Fingerprint*>(context);
+    return content_manifest::fingerprint::rows(view.rows, output);
+}
+
+/**
+ * Names the packages this install loads: each package's name, id and build signature. File
+ * sizes and modified times are left out, so identical game files downloaded on different
+ * machines match. @return False before the content catalog is ready.
+ */
+[[nodiscard]] bool content_identity(Digest& output) noexcept {
+    content_manifest::Fingerprint rows{};
+    if (!content_manifest::visit_snapshot(&copy_rows_fingerprint, &rows)) {
+        return false;
+    }
+    static_assert(sizeof(rows) == sizeof(output));
+    std::memcpy(output.data(), rows.data(), output.size());
+    return true;
+}
+
 } // namespace
 
 bool initialize(void* module) noexcept {
     Record& record = g_local;
     record = {};
-    if (!hash_module(module, record.build)) {
+    bool fromRevision = false;
+    if (!build_identity(module, record.build, fromRevision)) {
         core::log::write(core::log::Channel::state,
                          core::log::Level::error,
                          "ev=coop stage=build_hash result=fail");
         return false;
     }
-    content_manifest::Fingerprint content{};
-    if (content_manifest::build_fingerprint(content)) {
-        std::memcpy(record.content.data(), content.data(), record.content.size());
-    }
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::info,
+                      "ev=coop stage=build_identity source=%s revision=%.*s",
+                      fromRevision ? "revision" : "module_file",
+                      static_cast<int>(kBuildRevision.size()),
+                      kBuildRevision.data());
+    static_cast<void>(content_identity(record.content));
     const auto& settings = core::settings::get();
     record.cheats = settings.client.cheats || mods::cheat_count() != 0;
     if (settings.joinCodeLength != 0) {

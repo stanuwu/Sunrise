@@ -22,9 +22,15 @@ struct Mod final {
 
 /** What two installs must share before they play together. */
 struct Record final {
-    /** The Sunrise module file, so both sides run the same build. */
+    /**
+     * The Sunrise build, so both sides run the same code: its commit and configuration when it
+     * was built from an unmodified checkout, otherwise the module file itself.
+     */
     Digest build{};
-    /** The client content catalog, installed packages and mod packages together. */
+    /**
+     * Every installed and mod package's name, id and build signature. File sizes and modified
+     * times are not part of it, so the same game files installed on two machines match.
+     */
     Digest content{};
     /** Secret hash of the join code, mixed into the link keys; never sent. Zero when unset. */
     Digest joinSecret{};
@@ -54,7 +60,8 @@ inline constexpr std::size_t kRefusalCapacity =
     4 + 1 + 1 + kSummarySize + mods::kModCapacity * (1 + mods::kIdMaximumLength + 6 + 32);
 
 /**
- * Builds this install's record once at boot. Hashes the module file and every loaded mod's files.
+ * Builds this install's record once at boot. Names the build, the installed packages and every
+ * loaded mod's files.
  * @param module This module, whose file names the build.
  * @return False when a file could not be read or hashed.
  */
