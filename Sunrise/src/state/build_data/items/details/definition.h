@@ -5,13 +5,15 @@
 #include <cstdint>
 #include <optional>
 
+#include "../item_catalog.h"
+
 namespace sunrise::state::build_data::items::details {
 
 /**
  * Detail rows, one for every row the item catalog can hold. The installed build carries 15,424
  * items and mods add theirs after them, up to the 32,768 a signed native index allows.
  */
-inline constexpr std::size_t kDefinitionCapacity = 32768;
+inline constexpr std::size_t kDefinitionCapacity = items::kDefinitionCapacity;
 /** Family item instances have 12 fixed ordinary socket lanes. */
 inline constexpr std::size_t kInitialPlugCapacity = 12;
 /** Native equipment ids run from 0 to 19. */
