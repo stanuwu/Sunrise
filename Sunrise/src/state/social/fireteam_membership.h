@@ -32,6 +32,8 @@ public:
     [[nodiscard]] bool connected(std::uint64_t first, std::uint64_t second) const noexcept;
     /** Minimum account key of an established component, or zero for an unconnected account. */
     [[nodiscard]] std::uint64_t representative(std::uint64_t account) const noexcept;
+    /** True while this account's own lookup still waits for native admission. */
+    [[nodiscard]] bool joining(std::uint64_t account) const noexcept;
     /** Explicit fireteam departure; ordinary activity travel does not call this. */
     [[nodiscard]] bool depart(std::uint64_t account) noexcept;
     /** Explicit native release for one relation. */

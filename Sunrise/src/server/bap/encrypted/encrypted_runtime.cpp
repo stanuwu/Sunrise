@@ -535,7 +535,8 @@ bool consume(Session& session,
                 if (state::account::profiles::publish_local_presence(session.accountHandle,
                                                                      native)) {
                     const auto account = state::account_primary_soid(session.accountHandle);
-                    if (state::activity::fireteam::native_solo_split(previousNative, native)) {
+                    if (state::activity::fireteam::native_solo_split(
+                            account, previousNative, native)) {
                         static_cast<void>(state::activity::fireteam::depart(account));
                     }
                 }

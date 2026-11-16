@@ -119,6 +119,12 @@ std::uint64_t Membership::representative(std::uint64_t account) const noexcept {
                                           members.begin() + static_cast<std::ptrdiff_t>(count));
 }
 
+bool Membership::joining(std::uint64_t account) const noexcept {
+    return account != 0 && std::any_of(edges_.begin(), edges_.end(), [account](const Edge& edge) {
+               return !edge.established && edge.joiner == account;
+           });
+}
+
 bool Membership::depart(std::uint64_t account) noexcept {
     if (account == 0 || revision_ == maximumRevision) {
         return false;

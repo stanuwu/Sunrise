@@ -57,7 +57,8 @@ bool consume_account_projection(Session& session,
     middleware::secure_channel::advance_nonce(session.sendNonce);
     const auto& native = profile.presence.native;
     if (native.characterSoid == state::account::profiles::selected_character(session.accountHandle)
-        && state::activity::fireteam::native_solo_split(previousNative, native)) {
+        && state::activity::fireteam::native_solo_split(
+            profile.primarySoid, previousNative, native)) {
         static_cast<void>(state::activity::fireteam::depart(profile.primarySoid));
     }
     if (membershipGeneration
