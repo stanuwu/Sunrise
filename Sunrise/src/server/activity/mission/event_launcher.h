@@ -23,7 +23,7 @@ struct Site {
     int ordinal{};
 };
 
-/** Site zero returns the region to its normal rotation. */
+/** Site zero ends the event in the region and returns it to its normal rotation. */
 struct Request {
     std::int64_t serial{};
     int region{-1};

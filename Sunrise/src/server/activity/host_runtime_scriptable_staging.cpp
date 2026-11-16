@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "../../core/logging/log.h"
 #include "../../state/activity/mission/runtime.h"
 #include "../../state/activity/runtime.h"
 #include "../gameplay/squad_entity_retirement.h"
@@ -213,9 +214,10 @@ void note_scriptable_attempt(const state::activity::SessionBinding& binding,
         nextCounter = pending.generation > guard->hopOnRevision
                       && pending.generation <= squad::kMaximumGeneration;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::engagement) {
-        // A body that keeps its members repeats the committed revision.
-        nextCounter = pending.generation >= guard->engagementRevision && pending.generation > 0
-                      && pending.generation <= guard->engagementRevision + 1U;
+        // A body that keeps its members repeats the committed revision; a clearing body is the
+        // next one. A sensor never sent stands at one, as the encoder and the client count it.
+        const std::uint64_t committed = (std::max)(guard->engagementRevision, 1U);
+        nextCounter = pending.generation >= committed && pending.generation <= committed + 1U;
     } else if (guard != nullptr && pending.kind == ScriptableOverrideKind::ghostLink) {
         nextCounter = pending.generation > guard->ghostLink.generation
                       && pending.generation <= squad::kMaximumGeneration;
@@ -369,6 +371,25 @@ void note_scriptable_transport_staged(const state::activity::SessionBinding& bin
     Instance* const instance = find_instance(binding);
     ScriptableGuard* guard = instance != nullptr ? find_guard(*instance, pending.target) : nullptr;
     const bool nextCounter = staged_counter_matches(guard, pending);
+    if (instance != nullptr && !nextCounter) {
+        // The body reached the client but its guard declines it, so the script would only see a
+        // timeout. The transport retries every tick; one line per body is enough.
+        static std::uint64_t reported = 0;
+        if (reported != pending.revision) {
+            reported = pending.revision;
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::warn,
+                              "ev=activity stage=override_stage result=refused reason=counter "
+                              "kind=%u key=0x%08X slot_type=%u slot_index=%u generation=%llu "
+                              "guard=%d",
+                              static_cast<unsigned>(pending.kind),
+                              pending.target.registryKey,
+                              static_cast<unsigned>(pending.target.slotType),
+                              static_cast<unsigned>(pending.target.slotIndex),
+                              static_cast<unsigned long long>(pending.generation),
+                              guard != nullptr ? 1 : 0);
+        }
+    }
     if (instance != nullptr && nextCounter && instance->view.outputPending
         && instance->view.outputKind == OutputKind::scriptableOverride
         && same_pending(instance->pendingScriptable, pending)) {

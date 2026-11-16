@@ -121,7 +121,7 @@ void draw() noexcept {
                     "Queued: %s (%d s rally)", requested->name.data(), menu.request.rallySeconds);
             }
         } else {
-            ImGui::TextDisabled("Returning to the normal rotation...");
+            ImGui::TextDisabled("Ending the event and cleaning up...");
         }
     }
     ImGui::InputInt("Rally countdown (seconds)", &g_delay);
@@ -137,10 +137,13 @@ void draw() noexcept {
     ImGui::SameLine();
     const bool queued = menu.request.site && menu.request.region == here
                         && menu.request.serial != menu.acknowledged;
-    ImGui::BeginDisabled(!queued && !menu.manual);
-    if (ImGui::Button("Return to rotation")) {
+    // Site zero ends whatever runs here, forced or scheduled, and drops a queued selection.
+    ImGui::BeginDisabled(!queued && !menu.manual && !menu.currentSite);
+    if (ImGui::Button("End event")) {
         g_refused = !launcher::submit(menu.owner, here, 0, 0);
     }
+    ImGui::SetItemTooltip("Stops the event here, removes its enemies, objects, flag and HUD rows, "
+                          "and returns the area to its schedule.");
     ImGui::EndDisabled();
     if (!validDelay) {
         ImGui::TextDisabled("Enter 0 to %d seconds.", launcher::kMaxRallySeconds);
