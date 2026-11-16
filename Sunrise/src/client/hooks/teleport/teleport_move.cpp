@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <utility>
 
 #include "../../../core/logging/log.h"
 #include "../../../core/ui/runtime/ui_visibility_runtime.h"
@@ -43,6 +44,9 @@ constexpr std::uint16_t kForwardAction =
     static_cast<std::uint16_t>(state::account::settings::bindings::Action::moveForward);
 
 std::atomic_bool g_requested{false};
+/** An absolute target replaces the forward step of the open request. g_cameraPoseLock guards it. */
+bool g_moveToPending{false};
+Vector g_moveTo{};
 std::atomic_bool g_keyDown{false};
 std::atomic_uint32_t g_requestAge{0};
 /** Set while the feature is usable, so the per-tick path costs one atomic read when it is not. */
@@ -252,12 +256,23 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
  * @return True when the new position was stored.
  */
 [[nodiscard]] bool move_body(std::byte* body, float distance) noexcept {
-    AcquireSRWLockShared(&g_cameraPoseLock);
+    AcquireSRWLockExclusive(&g_cameraPoseLock);
     const Vector forward = g_cameraPose.forward;
-    ReleaseSRWLockShared(&g_cameraPoseLock);
+    const bool absolute = std::exchange(g_moveToPending, false);
+    const Vector target = g_moveTo;
+    ReleaseSRWLockExclusive(&g_cameraPoseLock);
     std::array<float, kVectorLanes> delta{};
+    std::array<float, kVectorLanes> current{};
+    if (absolute && !read_at(body + kBodyPositionX, current)) {
+        report_skip("body");
+        return false;
+    }
+    // A point move must land on the point, so no momentum may carry the body past it.
+    if (absolute) {
+        (void)write_vector(body + kBodyVelocityX, Vector{});
+    }
     for (std::size_t lane = 0; lane < kVectorLanes; ++lane) {
-        delta[lane] = forward[lane] * distance;
+        delta[lane] = absolute ? target[lane] - current[lane] : forward[lane] * distance;
     }
     std::array<float, kVectorLanes> position{};
     std::array<float, kVectorLanes> moved{};
@@ -390,6 +405,15 @@ void poll_request() noexcept {
         return;
     }
     g_keyDown.store(down, std::memory_order_relaxed);
+}
+
+void request_move_to(const Vector& target) noexcept {
+    AcquireSRWLockExclusive(&g_cameraPoseLock);
+    g_moveTo = target;
+    g_moveToPending = true;
+    ReleaseSRWLockExclusive(&g_cameraPoseLock);
+    g_requestAge.store(0, std::memory_order_relaxed);
+    g_requested.store(true, std::memory_order_release);
 }
 
 /** Moves the local player if a request is pending and this component owns them. */

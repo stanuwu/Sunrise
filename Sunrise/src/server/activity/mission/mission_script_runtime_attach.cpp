@@ -6,18 +6,21 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <new>
 #include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "../../../client/content/activity/scriptable_catalog_worker.h"
 #include "../../../core/logging/log.h"
 #include "../../../middleware/crypto/sha256.h"
 #include "../../../state/activity/membership/activity_membership_query.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
 #include "../../../state/activity_sdk/runtime.h"
+#include "../../../state/investment/store.h"
 #include "../../../state/mods/config/mod_config.h"
 #include "../../bap/runtime.h"
 #include "../activity_sdk_mission_runtime.h"
@@ -29,6 +32,93 @@
 #include "mission_script_vm.h"
 
 namespace sunrise::server::activity::mission {
+
+namespace save = state::investment::store;
+
+/** @return The save a flag reaches: `file`, or `session` when the run uses a memory copy. */
+[[nodiscard]] const char* flag_save_name() noexcept {
+    return save::session_copy_active() ? "session" : "file";
+}
+
+/**
+ * Logs one flag read, write or refusal.
+ * A session-copy write is a warning: it never reaches the save file.
+ */
+void log_save_flag(core::log::Level level,
+                   const char* result,
+                   std::string_view modId,
+                   const lua_vm::SaveFlag& flag,
+                   const char* reason) noexcept {
+    const std::string_view mod = modId.empty() ? std::string_view("-") : modId;
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=mission_script stage=flag result=%s name=%.*s mod=%.*s "
+                                      "present=%d value=%lld save=%s reason=%s",
+                                      result,
+                                      static_cast<int>(flag.name.length),
+                                      flag.name.bytes.data(),
+                                      static_cast<int>(mod.size()),
+                                      mod.data(),
+                                      flag.present ? 1 : 0,
+                                      static_cast<long long>(flag.value),
+                                      flag_save_name(),
+                                      reason);
+    if (written > 0) {
+        core::log::write(
+            core::log::Channel::server,
+            level,
+            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
+    }
+}
+
+/** Reads one per-save flag of a mod from the save. */
+[[nodiscard]] bool read_save_flag(std::string_view modId,
+                                  const state::activity::mission::StateKey& name,
+                                  lua_vm::SaveFlag& output) noexcept {
+    output = {};
+    output.name = name;
+    save::MissionFlag stored{};
+    if (!save::read_mission_flag(modId, {name.bytes.data(), name.length}, stored)) {
+        log_save_flag(core::log::Level::error, "refused", modId, output, "read_failed");
+        return false;
+    }
+    output.value = stored.value;
+    output.boolean = stored.boolean;
+    output.present = stored.present;
+    log_save_flag(core::log::Level::debug, "read", modId, output, "none");
+    return true;
+}
+
+/** Writes one callback's flag changes to the save in one transaction. */
+[[nodiscard]] bool write_save_flags(std::string_view modId,
+                                    std::span<const lua_vm::SaveFlag> flags) noexcept {
+    std::array<save::MissionFlag, lua_vm::kSaveFlagWriteCapacity> rows{};
+    const bool fits = flags.size() <= rows.size();
+    for (std::size_t index = 0; fits && index < flags.size(); ++index) {
+        const lua_vm::SaveFlag& flag = flags[index];
+        rows[index] = {.name = {flag.name.bytes.data(), flag.name.length},
+                       .value = flag.value,
+                       .boolean = flag.boolean,
+                       .present = flag.present};
+    }
+    const bool written =
+        fits && save::write_mission_flags(modId, std::span(rows).first(flags.size()));
+    // A session copy holds the write for this run only.
+    const core::log::Level level = !written                      ? core::log::Level::error
+                                   : save::session_copy_active() ? core::log::Level::warn
+                                                                 : core::log::Level::debug;
+    for (const lua_vm::SaveFlag& flag : flags) {
+        log_save_flag(level,
+                      !written       ? "refused"
+                      : flag.present ? "set"
+                                     : "removed",
+                      modId,
+                      flag,
+                      written ? "none" : "write_failed");
+    }
+    return written;
+}
 
 /** True when the link, the SDK view and the world view still match what the instance bound. */
 bool still_exact(const RuntimeInstance& instance) noexcept {
@@ -345,6 +435,8 @@ enum class InitialStateGate : std::uint8_t {
     instance.identity.playerKey = instance.playerKey;
     instance.identity.readModConfig = &state::mods::config::read;
     instance.identity.readModuleOwner = &module_source_owner;
+    instance.identity.readSaveFlag = &read_save_flag;
+    instance.identity.writeSaveFlags = &write_save_flags;
     std::span<const char> source{};
     switch (read_source(*instance.view.catalog, *activity, source, instance.identity.modId)) {
     case SourceStatus::missing:
@@ -506,6 +598,13 @@ void attach_instance(const host::InstanceSnapshot& hostInstance,
     generated_world::GeneratedWorldView worldView{};
     const generated_world::BindStatus worldStatus = generated_world::resolve(view, worldView);
     if (worldStatus != generated_world::BindStatus::ready) {
+        // A mod ships no shard: its world is the live extraction, so ask for this scenario's.
+        const format::Scenario* const scenario = sdk::bound_scenario(view);
+        if (worldStatus == generated_world::BindStatus::shardMissing && view.catalog->from_mod()
+            && scenario != nullptr) {
+            (void)client::content::activity::scriptables::request(
+                scenario->tag, view.catalog->string(scenario->name));
+        }
         report_attach_result(hostInstance.binding,
                              AttachResult::generatedWorldStatus,
                              generated_world::status_name(worldStatus),
@@ -554,6 +653,8 @@ lua_vm::OpenStatus prepare_reload_program(const RuntimeInstance& instance,
     identity.playerKey = instance.playerKey;
     identity.readModConfig = &state::mods::config::read;
     identity.readModuleOwner = &module_source_owner;
+    identity.readSaveFlag = &read_save_flag;
+    identity.writeSaveFlags = &write_save_flags;
     copy_text(identity.modId, modId);
     return lua_vm::open(
         vm, identity, sdk_bridge::definition_api(instance.view, instance.worldView), source);
@@ -577,6 +678,8 @@ bool rebind_reload_program(const RuntimeInstance& instance,
     rebound.playerKey = instance.playerKey;
     rebound.readModConfig = identity.readModConfig;
     rebound.readModuleOwner = identity.readModuleOwner;
+    rebound.readSaveFlag = identity.readSaveFlag;
+    rebound.writeSaveFlags = identity.writeSaveFlags;
     rebound.modId = identity.modId;
     if (!lua_vm::rebind(
             vm, rebound, sdk_bridge::definition_api(instance.view, instance.worldView))) {

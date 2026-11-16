@@ -251,8 +251,13 @@ bool load_mod_path(const wchar_t* path, std::shared_ptr<Catalog>& output, Status
         return false;
     }
     pending->mod_ = true;
+    // The build digest of a mod pack is a tagged hash of its payload digest.
+    constexpr auto kModBuildDomain = std::to_array("sunrise-activity-sdk-mod-build-v1");
     if (!valid_mod_header(*pending->header_, std::span(pending->view_, pending->size_))
-        || !valid_mod_catalog(*pending)) {
+        || !valid_mod_catalog(*pending)
+        || !middleware::crypto::sha256::hash_pair(std::as_bytes(std::span(kModBuildDomain)),
+                                                  pending->header_->payloadSha256,
+                                                  pending->modBuildSha256_)) {
         result = Status::catalogInvalid;
         return false;
     }

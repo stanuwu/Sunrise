@@ -8,6 +8,10 @@ sqlite3* g_database{};
 std::recursive_mutex g_mutex;
 Session g_session;
 std::uint64_t g_failureSerial{};
+namespace {
+/** True while the open handle is an in-memory copy of the save. */
+bool g_sessionCopy{};
+} // namespace
 
 /**
  * Rows whose definition the installed content lacks. A new save and the version 5 migration both
@@ -104,10 +108,22 @@ constexpr const char* kProfileSerialNumbering =
     "WHERE profile_unnumbered.position=profile_items.position) WHERE mutation_serial=0;"
     "DROP TABLE profile_unnumbered;";
 
+/** Per-save mission flags. A new save and the version 8 migration both create it from this text. */
+constexpr const char* kMissionFlagsTable =
+    "CREATE TABLE mission_flags ("
+    "mod_id TEXT NOT NULL CHECK (length(mod_id) <= 64),"
+    "name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 64),"
+    "boolean INTEGER NOT NULL CHECK (boolean IN (0, 1)),"
+    "value INTEGER NOT NULL CHECK (boolean = 0 OR value IN (0, 1)),"
+    "PRIMARY KEY (mod_id, name)"
+    ") STRICT, WITHOUT ROWID;";
+
 namespace {
 
 /** Newest save schema; open() upgrades an older save one version at a time. */
-constexpr int kSchemaVersion = 7;
+constexpr int kSchemaVersion = 8;
+/** Version the bundled schema stamps; open() stamps a new save with the newest one. */
+constexpr int kBundledSchemaVersion = 7;
 /** Application id every Sunrise save carries; the bundled schema sets it. */
 constexpr int kApplicationId = 1397902921;
 
@@ -380,8 +396,12 @@ bool open(std::string_view path,
                 && execute(kWalletSyncTable) && execute(kCharacterObjectivesTable)
                 && execute(defaultText.c_str()) && !settingsSchema.empty()
                 && !settingsDefaults.empty() && execute(preferenceSchema.c_str())
-                && execute(preferenceDefaults.c_str()) && transaction.commit();
-        // The bundled schema stamps the save; it must name the version this build writes.
+                && execute(preferenceDefaults.c_str());
+        // The bundled schema stamps its own version; the tables added after it come here.
+        int bundled = 0;
+        ready = ready && read_stamp(bundled) && bundled == kBundledSchemaVersion
+                && execute(kMissionFlagsTable) && execute("PRAGMA user_version=8")
+                && transaction.commit();
         int created = 0;
         ready = ready && read_stamp(created) && created == kSchemaVersion;
     } else if (ready) {
@@ -463,6 +483,14 @@ bool open(std::string_view path,
                         && execute(starterText.c_str())))
                 && execute(kCharacterObjectivesTable) && execute("PRAGMA user_version=7")
                 && transaction.commit();
+        if (ready) {
+            version = 7;
+        }
+    }
+    if (ready && version == 7) {
+        Transaction transaction;
+        ready = transaction.ready() && execute(kMissionFlagsTable)
+                && execute("PRAGMA user_version=8") && transaction.commit();
     }
     if (!ready) {
         shutdown();
@@ -510,7 +538,76 @@ bool use_session_copy() noexcept {
     sqlite3_commit_hook(memory, count_committed_write, nullptr);
     sqlite3_close_v2(g_database);
     g_database = memory;
+    g_sessionCopy = true;
     return true;
+}
+
+/** Reads the flag use_session_copy sets; shutdown clears it. */
+bool session_copy_active() noexcept {
+    const std::lock_guard lock(g_mutex);
+    return g_sessionCopy;
+}
+
+namespace {
+
+/** @return True when both key parts fit the table's bounds. */
+[[nodiscard]] bool valid_flag_key(std::string_view modId, std::string_view name) noexcept {
+    return modId.size() <= kMissionFlagTextCapacity && !name.empty()
+           && name.size() <= kMissionFlagTextCapacity;
+}
+
+} // namespace
+
+/** Reads one flag row; no row is a successful read with `present` false. */
+bool read_mission_flag(std::string_view modId,
+                       std::string_view name,
+                       MissionFlag& output) noexcept {
+    output = {};
+    output.name = name;
+    if (!valid_flag_key(modId, name)) {
+        return false;
+    }
+    const std::lock_guard lock(g_mutex);
+    Statement row("SELECT boolean,value FROM mission_flags WHERE mod_id=? AND name=?");
+    if (!row.parameters(modId, name)) {
+        return false;
+    }
+    const int result = row.step();
+    if (result == SQLITE_DONE) {
+        return true;
+    }
+    std::int32_t boolean = 0;
+    if (result != SQLITE_ROW || !row.columns(boolean, output.value)) {
+        return false;
+    }
+    output.boolean = boolean != 0;
+    output.present = true;
+    return true;
+}
+
+/** Applies every flag change of one callback, or none of them. */
+bool write_mission_flags(std::string_view modId, std::span<const MissionFlag> flags) noexcept {
+    for (const MissionFlag& flag : flags) {
+        if (!valid_flag_key(modId, flag.name)
+            || (flag.boolean && flag.value != 0 && flag.value != 1)) {
+            return false;
+        }
+    }
+    Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
+    }
+    Statement upsert("INSERT OR REPLACE INTO mission_flags VALUES(?,?,?,?)");
+    Statement remove("DELETE FROM mission_flags WHERE mod_id=? AND name=?");
+    for (const MissionFlag& flag : flags) {
+        const bool written = flag.present
+                                 ? upsert.write(modId, flag.name, flag.boolean ? 1 : 0, flag.value)
+                                 : remove.write(modId, flag.name);
+        if (!written) {
+            return false;
+        }
+    }
+    return transaction.commit();
 }
 
 /** The commit hook and selection writes move it under this same lock. */
@@ -525,6 +622,7 @@ void shutdown() noexcept {
     // This process owns the database even when teardown runs under a public request scope.
     sqlite3_close_v2(g_database);
     g_database = nullptr;
+    g_sessionCopy = false;
     g_session = {};
 }
 

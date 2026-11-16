@@ -13,15 +13,20 @@ namespace {
 namespace incident = middleware::bap::activity_message::incident;
 
 /** Raised whenever the event layout changes. */
-constexpr std::uint8_t kWireVersion = 1;
+constexpr std::uint8_t kWireVersion = 2;
 
 #pragma pack(push, 1)
 struct EventWire final {
     std::uint8_t version;
+    Kind kind;
     std::uint32_t primaryTarget;
     std::array<std::uint32_t, incident::kExtraTargetMaximum> extraTargets;
     std::uint32_t extraTargetCount;
     std::uint32_t payloadLength;
+    std::array<std::byte, incident::kPayloadMaximum> payload;
+    std::uint8_t hasArea;
+    std::uint32_t scenarioTag;
+    std::uint32_t bubbleNameHash;
     std::uint8_t packageLength;
     std::array<char, activity::destination::kPackageNameCapacity> package;
 };
@@ -34,18 +39,25 @@ SRWLOCK g_lock = SRWLOCK_INIT;
 
 } // namespace
 
+/** Packs one event into its fixed wire form. */
 bool encode(const Event& event, std::span<std::byte> output, std::size_t& written) noexcept {
     written = 0;
     if (output.size() < sizeof(EventWire) || event.extraTargetCount > incident::kExtraTargetMaximum
+        || event.payloadLength > event.payload.size()
         || event.packageLength > event.package.size()) {
         return false;
     }
     EventWire wire{};
     wire.version = kWireVersion;
+    wire.kind = event.kind;
     wire.primaryTarget = event.primaryTarget;
     wire.extraTargets = event.extraTargets;
     wire.extraTargetCount = event.extraTargetCount;
     wire.payloadLength = event.payloadLength;
+    wire.payload = event.payload;
+    wire.hasArea = event.hasArea ? 1U : 0U;
+    wire.scenarioTag = event.scenarioTag;
+    wire.bubbleNameHash = event.bubbleNameHash;
     wire.packageLength = event.packageLength;
     wire.package = event.package;
     std::memcpy(output.data(), &wire, sizeof wire);
@@ -53,6 +65,7 @@ bool encode(const Event& event, std::span<std::byte> output, std::size_t& writte
     return true;
 }
 
+/** Unpacks one event; a wrong size, version, kind or bound refuses it. */
 bool decode(std::span<const std::byte> input, Event& output) noexcept {
     output = {};
     if (input.size() != sizeof(EventWire)) {
@@ -60,14 +73,20 @@ bool decode(std::span<const std::byte> input, Event& output) noexcept {
     }
     EventWire wire{};
     std::memcpy(&wire, input.data(), sizeof wire);
-    if (wire.version != kWireVersion || wire.extraTargetCount > incident::kExtraTargetMaximum
-        || wire.packageLength > wire.package.size()) {
+    if (wire.version != kWireVersion || (wire.kind != Kind::interaction && wire.kind != Kind::kill)
+        || wire.hasArea > 1 || wire.extraTargetCount > incident::kExtraTargetMaximum
+        || wire.payloadLength > wire.payload.size() || wire.packageLength > wire.package.size()) {
         return false;
     }
+    output.kind = wire.kind;
     output.primaryTarget = wire.primaryTarget;
     output.extraTargets = wire.extraTargets;
     output.extraTargetCount = wire.extraTargetCount;
     output.payloadLength = wire.payloadLength;
+    output.payload = wire.payload;
+    output.hasArea = wire.hasArea != 0;
+    output.scenarioTag = wire.scenarioTag;
+    output.bubbleNameHash = wire.bubbleNameHash;
     output.packageLength = wire.packageLength;
     output.package = wire.package;
     return true;

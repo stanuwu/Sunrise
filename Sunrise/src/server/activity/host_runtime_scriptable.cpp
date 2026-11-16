@@ -2,6 +2,7 @@
 #include <cmath>
 #include <limits>
 #include <new>
+#include <span>
 
 #include "../../middleware/bap/activity_message/mission_auth_patch.h"
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
@@ -405,19 +406,21 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
                 candidate.squad.hasLast = candidate.squad.last != 0;
                 break;
             }
-            encoded = encoded && squad::next_generation(candidate.squad, generation)
-                      && squad::encode({counts,
-                                        generation,
-                                        request.squadMode,
-                                        request.nameHash,
-                                        request.squadAuthoredProfile,
-                                        request.squadDestination,
-                                        request.squadSpawnRule,
-                                        request.squadTemperaments},
-                                       candidate.squad,
-                                       pending.body,
-                                       written,
-                                       writtenBits);
+            encoded = encoded && squad::next_generation(candidate.squad, generation);
+            const squad::Preset preset{counts,
+                                       generation,
+                                       request.squadMode,
+                                       request.nameHash,
+                                       request.squadAuthoredProfile,
+                                       request.squadDestination,
+                                       request.squadSpawnRule,
+                                       request.squadTemperaments};
+            encoded = encoded
+                      && squad::encode(preset, candidate.squad, pending.body, written, writtenBits);
+            if (encoded && written <= pending.body.size()) {
+                log_squad_body(
+                    request.target, preset, std::span(pending.body).first(written), writtenBits);
+            }
         }
         pending.generation = generation;
         if (writtenBits <= (std::numeric_limits<std::uint16_t>::max)()) {

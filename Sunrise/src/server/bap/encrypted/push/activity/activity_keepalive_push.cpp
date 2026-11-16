@@ -498,10 +498,14 @@ bool consume_activity_keepalive(Session& session,
         const bool identityPublished =
             membershipSessionId != state::activity::kAbsentSessionId
             && state::activity::membership::join_identity(membershipSessionId) != 0;
-        const bool hasSnapshot = identityPublished
-                                 && state::activity::membership::prepare_refresh(
-                                     membershipSessionId, kCurrentRevision, kNoBubble, staged)
-                                 && staged.hasSnapshot;
+        // A solo copy goes out once per binding, so no later body could retire its teleport arm.
+        const bool hasSnapshot =
+            identityPublished
+            && (soloPublic
+                    ? state::activity::membership::prepare_public_copy(membershipSessionId, staged)
+                    : state::activity::membership::prepare_refresh(
+                          membershipSessionId, kCurrentRevision, kNoBubble, staged))
+            && staged.hasSnapshot;
         // The upstream switch controls public membership, including each owed co-op revision.
         const bool owesMembership =
             membershipEnabled && hasSnapshot

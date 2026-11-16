@@ -24,6 +24,7 @@
 #include "../../../../../state/unlocks/unlocks_records.h"
 #include "../../../../bap/internal.h"
 #include "activity_incident_grants.h"
+#include "activity_kill_progress.h"
 
 namespace sunrise::server::bap::encrypted::activity_message::receipts {
 
@@ -543,6 +544,10 @@ void apply_incident_grants(const message::incident::Incident& incident) noexcept
 
 void apply_reward_event(const reward_mail::Event& event) noexcept {
     const state::ScopedAccount local(state::kLocalAccount);
+    if (event.kind == reward_mail::Kind::kill) {
+        apply_mailed_kill(event);
+        return;
+    }
     commit_incident_grants(event);
 }
 

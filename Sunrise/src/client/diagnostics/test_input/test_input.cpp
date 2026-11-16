@@ -12,6 +12,7 @@
 #include <Xinput.h>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <intrin.h>
@@ -20,6 +21,8 @@
 #include "../../../core/logging/log.h"
 #include "../../hooking/detour.h"
 #include "../../hooks/polled_input/runtime.h"
+#include "../../hooks/teleport/runtime.h"
+#include "../../player/player_position.h"
 #include "../module_range.h"
 
 namespace sunrise::client::diagnostics::test_input {
@@ -63,7 +66,8 @@ std::array<hooking::detour::Handle, kPadSlots> g_padHandles{};
 std::array<void*, kPadSlots> g_padTargets{};
 std::array<HMODULE, 2> g_padModules{};
 std::array<std::atomic<std::uint32_t>, kPadSlots> g_padReads{};
-/** Test pad 0: buttons low 16 bits, left stick x and y as signed 16-bit halves above them. */
+/** Test pad 0: buttons, left stick x and y as signed 16-bit halves, then left and right trigger
+ * bytes. */
 std::atomic<std::uint64_t> g_pad{};
 /** Test pad 0's right stick: x and y as signed 16-bit halves. */
 std::atomic<std::uint32_t> g_padRight{};
@@ -279,6 +283,8 @@ __declspec(noinline) UINT WINAPI get_raw_input_data(
     state->Gamepad.wButtons = static_cast<WORD>(pad & 0xFFFF);
     state->Gamepad.sThumbLX = static_cast<SHORT>((pad >> 16U) & 0xFFFF);
     state->Gamepad.sThumbLY = static_cast<SHORT>((pad >> 32U) & 0xFFFF);
+    state->Gamepad.bLeftTrigger = static_cast<BYTE>((pad >> 48U) & 0xFF);
+    state->Gamepad.bRightTrigger = static_cast<BYTE>((pad >> 56U) & 0xFF);
     const std::uint32_t right = g_padRight.load(std::memory_order_relaxed);
     state->Gamepad.sThumbRX = static_cast<SHORT>(right & 0xFFFF);
     state->Gamepad.sThumbRY = static_cast<SHORT>(right >> 16U);
@@ -441,10 +447,41 @@ bool foreign_raw_input(LPARAM value) noexcept {
     return enabled() && (static_cast<std::uintptr_t>(value) & kRawMarkMask) != kRawMark;
 }
 
+namespace {
+
+/**
+ * Logs the published player position and camera pose; both are snapshots any thread may read.
+ * @param request The harness's id, echoed so it can match the reply.
+ */
+void log_pose(std::uint32_t request) noexcept {
+    const auto player = player::position::snapshot();
+    hooks::teleport::CameraPose camera{};
+    const bool seen = hooks::teleport::camera_pose(camera);
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::info,
+                      "ev=test_pose id=%u player=%d at=%.3f,%.3f,%.3f camera=%d eye=%.3f,%.3f,%.3f "
+                      "forward=%.4f,%.4f,%.4f",
+                      request,
+                      player.present ? 1 : 0,
+                      static_cast<double>(player.position[0]),
+                      static_cast<double>(player.position[1]),
+                      static_cast<double>(player.position[2]),
+                      seen ? 1 : 0,
+                      static_cast<double>(camera.position[0]),
+                      static_cast<double>(camera.position[1]),
+                      static_cast<double>(camera.position[2]),
+                      static_cast<double>(camera.forward[0]),
+                      static_cast<double>(camera.forward[1]),
+                      static_cast<double>(camera.forward[2]));
+}
+
+} // namespace
+
 /** Applies one posted test message; real mouse leaves are dropped. */
 bool handle(HWND window, UINT message, WPARAM word, LPARAM value) noexcept {
     if ((message != kKeyMessage && message != kCursorMessage && message != kShotMessage
-         && message != kPadMessage && message != WM_MOUSELEAVE)
+         && message != kPadMessage && message != kPoseMessage && message != kTeleportMessage
+         && message != WM_MOUSELEAVE)
         || !enabled()) {
         return false;
     }
@@ -468,6 +505,18 @@ bool handle(HWND window, UINT message, WPARAM word, LPARAM value) noexcept {
     }
     if (message == kShotMessage) {
         g_shotPending.store(true, std::memory_order_release);
+        return true;
+    }
+    if (message == kPoseMessage) {
+        log_pose(static_cast<std::uint32_t>(word));
+        return true;
+    }
+    if (message == kTeleportMessage) {
+        const auto bits = static_cast<std::uint64_t>(word);
+        hooks::teleport::request_move_to(
+            {std::bit_cast<float>(static_cast<std::uint32_t>(bits)),
+             std::bit_cast<float>(static_cast<std::uint32_t>(bits >> 32)),
+             std::bit_cast<float>(static_cast<std::uint32_t>(static_cast<std::uint64_t>(value)))});
         return true;
     }
     if (message == kCursorMessage) {

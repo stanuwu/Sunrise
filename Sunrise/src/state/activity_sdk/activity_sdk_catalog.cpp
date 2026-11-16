@@ -83,6 +83,9 @@ Catalog::~Catalog() noexcept {
 }
 
 std::span<const std::byte> Catalog::sdk_build_sha256() const noexcept {
+    if (mod_) {
+        return modBuildSha256_;
+    }
     return header_ != nullptr ? std::span<const std::byte>(header_->sdkBuildSha256)
                               : std::span<const std::byte>{};
 }

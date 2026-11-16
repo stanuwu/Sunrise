@@ -1447,7 +1447,7 @@ struct C808047cb final {
     static constexpr std::size_t kSize = 24;
     static constexpr std::size_t kAlign = 8;
 
-    std::uint32_t unk0;
+    std::uint32_t artKey;
     std::array<std::byte, 4> gap4;
     TagArray<C808047cd> entries;
 };
@@ -1472,8 +1472,8 @@ struct C808047cd final {
     static constexpr std::size_t kSize = 8;
     static constexpr std::size_t kAlign = 4;
 
-    std::uint32_t unk0;
-    std::uint32_t unk4;
+    std::uint32_t variant;
+    std::uint32_t hierarchy;
 };
 static_assert(sizeof(C808047cd) == C808047cd::kSize);
 

@@ -33,8 +33,8 @@ struct C80807519 final {
     static constexpr std::size_t kSize = 24;
     static constexpr std::size_t kAlign = 8;
 
-    std::uint32_t unk0;
-    std::array<std::byte, 4> gap4;
+    std::uint32_t nodeHash;
+    std::int32_t activityIndex;
     RewardCondition unlockExpression;
 };
 static_assert(sizeof(C80807519) == C80807519::kSize);

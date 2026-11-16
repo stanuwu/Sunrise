@@ -44,6 +44,7 @@ constexpr const api::MemberSpec& kSendIncident =
 constexpr const api::MemberSpec& kActivityFlag =
     api::member(api::Receiver::context, "set_activity_flag");
 constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::context, "select_state");
+constexpr const api::MemberSpec& kTeleport = api::member(api::Receiver::context, "teleport");
 
 /** Draws a server-owned random fraction for one active callback. */
 [[nodiscard]] int context_random(lua_State* state) {
@@ -243,6 +244,25 @@ constexpr const api::MemberSpec& kSelectState = api::member(api::Receiver::conte
     Intent intent{};
     intent.kind = IntentKind::restartCheckpoint;
     intent.checkpointReleaseRequest = release;
+    intent.effectiveRegion = static_cast<std::int32_t>(region);
+    intent.checkpointSpawnHash = static_cast<std::uint32_t>(hash);
+    return queue_intent(state, active_frame(state), intent);
+}
+
+/** Moves the player to an authored spawn set of a region. */
+[[nodiscard]] int context_teleport(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    refuse_unknown_arguments(state, kTeleport);
+    const lua_Integer region =
+        checked_integer_argument(state, required_key(kTeleport, "region", api::ValueKind::integer));
+    const lua_Integer hash = checked_integer_argument(
+        state, required_key(kTeleport, "spawn_set_hash", api::ValueKind::integer));
+    if (region < 0 || region > ::sunrise::state::activity::membership::kMaximumSliceSetIndex
+        || hash <= 0 || hash >= (std::numeric_limits<std::uint32_t>::max)()) {
+        return luaL_error(state, "teleport requires an authored region and spawn-set hash");
+    }
+    Intent intent{};
+    intent.kind = IntentKind::teleport;
     intent.effectiveRegion = static_cast<std::int32_t>(region);
     intent.checkpointSpawnHash = static_cast<std::uint32_t>(hash);
     return queue_intent(state, active_frame(state), intent);
@@ -666,10 +686,13 @@ constexpr std::array<ContextBinding, std::size(api::kContextMembers)> kContextBi
     {"set_activity_flag", &context_set_activity_flag},
     {"select_state", &context_select_state},
     {"restart_checkpoint", &context_restart_checkpoint},
+    {"teleport", &context_teleport},
     {"random", &context_random},
     {"set_phase", &context_set_phase},
     {"set_variable", &context_set_variable},
     {"clear_variable", &context_clear_variable},
+    {"set_flag", &context_set_flag},
+    {"get_flag", &context_get_flag},
     {"start_timer", &context_start_timer},
     {"cancel_timer", &context_cancel_timer},
     // A script no mod ships gets the handle too; every key it reads is nil.

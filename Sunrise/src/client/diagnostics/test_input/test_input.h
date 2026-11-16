@@ -14,8 +14,14 @@ inline constexpr UINT kKeyMessage = WM_APP + 0x5E1;
 inline constexpr UINT kCursorMessage = WM_APP + 0x5E2;
 /** Posted to the render window: the next presented frame is written to SUNRISE_TEST_SHOT. */
 inline constexpr UINT kShotMessage = WM_APP + 0x5E3;
-/** Posted to the render window: lParam is pad 0's buttons, then left x and y; wParam right x, y. */
+/** Posted to the render window: lParam is pad 0's buttons, left x and y, then both triggers; wParam
+ * right x, y. */
 inline constexpr UINT kPadMessage = WM_APP + 0x5E4;
+/** Posted to the render window: logs the player position and camera pose, tagged with wParam. */
+inline constexpr UINT kPoseMessage = WM_APP + 0x5E5;
+/** Posted to the render window: moves the player to a point; wParam holds x then y, lParam z, as
+ * float bits. */
+inline constexpr UINT kTeleportMessage = WM_APP + 0x5E6;
 /** A WM_INPUT handle with this mark in bits 16-31 carries mouse buttons, and dx and dy above. */
 inline constexpr std::uintptr_t kRawMark = 0x5EED0000, kRawMarkMask = 0xFFFF0000;
 

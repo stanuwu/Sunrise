@@ -1,6 +1,10 @@
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <limits>
+#include <span>
 
+#include "../../core/logging/log.h"
 #include "../../state/activity/mission/runtime.h"
 #include "../../state/activity/runtime.h"
 #include "../gameplay/squad_entity_retirement.h"
@@ -603,6 +607,64 @@ bool encode_dialogue_pulse(const Instance& instance,
     pending.bitCount = static_cast<std::uint16_t>(bits);
     pending.dialogueSequence = sequence;
     return encoded;
+}
+
+/**
+ * Logs one encoded squad body and its inputs at debug level.
+ * The hex stops at the line capacity; `bytes` is the full written length.
+ */
+void log_squad_body(const ScriptableTarget& target,
+                    const middleware::bap::activity_message::squad_auth::Preset& preset,
+                    std::span<const std::byte> body,
+                    std::size_t bits) noexcept {
+    if (!core::log::accepts(core::log::Channel::server, core::log::Level::debug)) {
+        return;
+    }
+    std::array<char, core::log::kLineCapacity> line{};
+    std::size_t used = 0;
+    const auto append = [&](const char* format, auto... values) {
+        if (used >= line.size()) {
+            return;
+        }
+        const int written =
+            std::snprintf(line.data() + used, line.size() - used, format, values...);
+        if (written > 0) {
+            used = (std::min)(used + static_cast<std::size_t>(written), line.size() - 1);
+        }
+    };
+    append("ev=scriptable stage=squad_body key=0x%08X slot=%u counts=",
+           static_cast<unsigned>(target.registryKey),
+           static_cast<unsigned>(target.slotIndex));
+    for (std::size_t index = 0; index < preset.requestedCounts.size(); ++index) {
+        append(index == 0 ? "%d" : ",%d", static_cast<int>(preset.requestedCounts[index]));
+    }
+    append(" gen=%u mode=%u name=0x%08X profile=%d,%d,%d,%d",
+           static_cast<unsigned>(preset.generation),
+           static_cast<unsigned>(preset.mode),
+           static_cast<unsigned>(preset.nameHash.value_or(0)),
+           static_cast<int>(preset.authoredProfile[0]),
+           static_cast<int>(preset.authoredProfile[1]),
+           static_cast<int>(preset.authoredProfile[2]),
+           static_cast<int>(preset.authoredProfile[3]));
+    if (preset.destination.has_value()) {
+        append(" dest=0x%08X/%u",
+               static_cast<unsigned>(preset.destination->registryKey),
+               static_cast<unsigned>(preset.destination->slotIndex));
+    } else {
+        append(" dest=none");
+    }
+    if (preset.spawnRule.has_value()) {
+        append(" rule=0x%08X/%u",
+               static_cast<unsigned>(preset.spawnRule->registryKey),
+               static_cast<unsigned>(preset.spawnRule->slotIndex));
+    } else {
+        append(" rule=none");
+    }
+    append(" bits=%zu bytes=%zu body=", bits, body.size());
+    for (const std::byte value : body) {
+        append("%02X", static_cast<unsigned>(value));
+    }
+    core::log::write(core::log::Channel::server, core::log::Level::debug, {line.data(), used});
 }
 
 } // namespace detail

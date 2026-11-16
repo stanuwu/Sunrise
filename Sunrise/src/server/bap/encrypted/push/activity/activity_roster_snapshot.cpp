@@ -594,6 +594,12 @@ build_roster_snapshot(Session& session,
             setOwner, snapshot.spawnSetHash, setAnswers)) {
         snapshot.spawnSetHash = message::kAbsentSpawnSetHash;
     }
+    // A host teleport that named a spawn set leaves it as this region's arrival point.
+    const std::uint32_t teleported = state::activity::membership::host_spawn_set(
+        session.activity.source.sessionId, region.index);
+    if (teleported != 0) {
+        snapshot.spawnSetHash = teleported;
+    }
     // An armed wipe respawns at its checkpoint spawn set, not at the arrival override.
     const std::uint32_t checkpoint = state::activity::membership::checkpoint_spawn_hash(
         session.activity.source.sessionId, region.index);

@@ -29,7 +29,7 @@ Binding g_binding{};
 std::atomic_uint g_activeCallbacks{};
 core::threading::SrwLock g_inputLock{};
 
-/** Counts active procedure calls so teardown can be retried before module unload. */
+/** Counts active calls so teardown can wait. /EHs runs its destructor when an exception passes. */
 class CallbackGuard final {
 public:
     /** Counts this call in before any binding state is read. */
@@ -64,12 +64,13 @@ public:
 
 /**
  * Calls the original procedure. The input lock must be released first, since game code runs.
+ * Not noexcept: exceptions from the game's procedure must unwind through, as without Sunrise.
  * @param original Procedure captured when the message entered this subclass.
  * @param message Win32 message ID.
  * @return Result from the original procedure, or DefWindowProc when there is none.
  */
 [[nodiscard]] LRESULT
-forward(WNDPROC original, HWND window, UINT message, WPARAM word, LPARAM value) noexcept {
+forward(WNDPROC original, HWND window, UINT message, WPARAM word, LPARAM value) {
     if (original == nullptr) {
         return DefWindowProcW(window, message, word, value);
     }
@@ -78,10 +79,11 @@ forward(WNDPROC original, HWND window, UINT message, WPARAM word, LPARAM value) 
 
 /**
  * Lets the presentation message through and captures only the input the UI asked for.
+ * Not noexcept, like forward: a noexcept frame turns a passing exception into std::terminate.
  * @param message Win32 message ID.
  * @return The capture result, or the original procedure's result.
  */
-LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM word, LPARAM value) noexcept {
+LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM word, LPARAM value) {
     const CallbackGuard callbackGuard;
     const WNDPROC original = original_for(window);
     if (message == kRequiredForwardMessage) {

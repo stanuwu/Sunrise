@@ -224,6 +224,7 @@ enum class IntentKind : std::uint8_t {
     /** Sends one msg-19 incident to the client; `firstRow` is the target, `authBody` the payload.
      */
     sendIncident,
+    teleport,
     setActorControls,
     deliverPassengers,
     /** Raises or lowers one activity flag; `active` false lowers it. */
@@ -288,7 +289,7 @@ struct TypedIntent final {
     std::uint32_t authSchema{};
     /** SDK-selected actor-command selector, never a wire constant owned by Mission State. */
     std::uint32_t actorCommandSelector{};
-    /** Spawn set a checkpoint restart respawns at. */
+    /** Spawn set a checkpoint restart respawns at, or a teleport arrives at. */
     std::uint32_t checkpointSpawnHash{};
     /** Spawn set a state selection's arrival uses; zero keeps the program's declared set. */
     std::uint32_t arrivalSpawnHash{};

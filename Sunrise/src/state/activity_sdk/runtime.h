@@ -125,7 +125,7 @@ public:
     Catalog& operator=(const Catalog&) = delete;
     ~Catalog() noexcept;
 
-    /** @return The generator build digest pinned by this mapping. */
+    /** @return The generator build digest pinned by this mapping; a mod pack's is derived. */
     [[nodiscard]] std::span<const std::byte> sdk_build_sha256() const noexcept;
     /** @return The exact authenticated payload digest of this mapped pack. */
     [[nodiscard]] std::span<const std::byte> payload_sha256() const noexcept;
@@ -291,6 +291,8 @@ private:
     const format::Header* header_{};
     core::path::Buffer artifactDirectory_{};
     bool mod_{};
+    // A mod pack's header has no build digest, so this one stands in for it.
+    std::array<std::byte, 32> modBuildSha256_{};
 };
 
 using Snapshot = std::shared_ptr<const Catalog>;

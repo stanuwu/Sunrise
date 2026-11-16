@@ -2,9 +2,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <span>
+#include <vector>
 
+#include "../../../../core/logging/log.h"
 #include "../../../../middleware/bap/activity_message/cinematic_incident.h"
 #include "../../../../middleware/bap/activity_message/entity_authority.h"
 #include "../../../../middleware/bap/activity_message/incident.h"
@@ -31,7 +34,66 @@ struct SenseResolverContext final {
     const ActivityClientBinding* binding{};
     const RosterDecodeMap* roster{};
     const activity_sdk::Catalog* catalog{};
+    // A mod's objects are in that mod's own pack.
+    const std::vector<activity_sdk::Snapshot>* mods{};
+    // Pack that placed the last group; its slot rows index this pack.
+    mutable const activity_sdk::Catalog* groupCatalog{};
 };
+
+/** Outcome of looking one roster object up in one pack. */
+enum class ObjectLookup : std::uint8_t { found, absent, repeated, keyDiffers };
+
+/**
+ * Finds the one object row a pack holds for a roster tag and registry key.
+ * @param row Receives the object row when found.
+ * @return found, or why the pack holds no single matching row.
+ */
+[[nodiscard]] ObjectLookup find_group_object(const activity_sdk::Catalog& catalog,
+                                             std::uint32_t objectTag,
+                                             std::uint32_t registryKey,
+                                             std::uint32_t& row) noexcept {
+    const auto objects = catalog.objects();
+    const activity_sdk::format::Object* match = nullptr;
+    for (const activity_sdk::format::Object& object : objects) {
+        if (object.objectTag != objectTag) {
+            continue;
+        }
+        if (match != nullptr) {
+            return ObjectLookup::repeated;
+        }
+        match = &object;
+    }
+    if (match == nullptr) {
+        return ObjectLookup::absent;
+    }
+    if (match->objectKey != registryKey) {
+        return ObjectLookup::keyDiffers;
+    }
+    row = static_cast<std::uint32_t>(match - objects.data());
+    return ObjectLookup::found;
+}
+
+/** Names one Sense group the roster or the SDK could not place. */
+void report_unresolved_group(std::uint32_t registryKey,
+                             std::uint32_t objectTag,
+                             const char* reason) noexcept {
+    if (!core::log::accepts(core::log::Channel::server, core::log::Level::debug)) {
+        return;
+    }
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=sense_group result=%s key=0x%08X "
+                                      "object=0x%08X",
+                                      reason,
+                                      registryKey,
+                                      objectTag);
+    if (written > 0 && static_cast<std::size_t>(written) < line.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
 
 /** Resolves the group one sense registry key names, against this connection's roster. */
 [[nodiscard]] sense_update::TargetStatus resolve_sense_group(
@@ -45,24 +107,31 @@ struct SenseResolverContext final {
     const RosterDecodeEntry* const entry = find_roster_decode_entry(
         *context->roster, context->binding->bindingGeneration, registryKey);
     if (entry == nullptr || entry->objectTag == 0) {
+        report_unresolved_group(registryKey, 0, "not_in_roster");
         return sense_update::TargetStatus::targetUnavailable;
     }
-    const auto objects = context->catalog->objects();
-    const activity_sdk::format::Object* match = nullptr;
-    for (const activity_sdk::format::Object& object : objects) {
-        if (object.objectTag != entry->objectTag) {
-            continue;
+    context->groupCatalog = context->catalog;
+    ObjectLookup lookup =
+        find_group_object(*context->catalog, entry->objectTag, registryKey, output.objectRow);
+    if (lookup == ObjectLookup::absent && context->mods != nullptr) {
+        for (const activity_sdk::Snapshot& mod : *context->mods) {
+            lookup = find_group_object(*mod, entry->objectTag, registryKey, output.objectRow);
+            if (lookup != ObjectLookup::absent) {
+                context->groupCatalog = mod.get();
+                break;
+            }
         }
-        if (match != nullptr) {
-            return sense_update::TargetStatus::targetUnavailable;
-        }
-        match = &object;
     }
-    if (match == nullptr || match->objectKey != registryKey) {
+    if (lookup != ObjectLookup::found) {
+        report_unresolved_group(registryKey,
+                                entry->objectTag,
+                                lookup == ObjectLookup::absent     ? "object_absent"
+                                : lookup == ObjectLookup::repeated ? "object_repeated"
+                                                                   : "key_differs");
+        output = {};
         return sense_update::TargetStatus::targetUnavailable;
     }
     output.objectTag = entry->objectTag;
-    output.objectRow = static_cast<std::uint32_t>(match - objects.data());
     return sense_update::TargetStatus::resolved;
 }
 
@@ -75,18 +144,18 @@ resolve_sense_slot(const void* raw,
                    sense_update::SlotTarget& output) noexcept {
     output = {};
     const auto* const context = static_cast<const SenseResolverContext*>(raw);
-    if (context == nullptr || context->catalog == nullptr
-        || group.objectRow >= context->catalog->objects().size()) {
+    if (context == nullptr || context->groupCatalog == nullptr
+        || group.objectRow >= context->groupCatalog->objects().size()) {
         return sense_update::TargetStatus::targetUnavailable;
     }
-    const activity_sdk::format::Object& object = context->catalog->objects()[group.objectRow];
+    const activity_sdk::Catalog& catalog = *context->groupCatalog;
+    const activity_sdk::format::Object& object = catalog.objects()[group.objectRow];
     if (object.objectTag != group.objectTag) {
         return sense_update::TargetStatus::targetUnavailable;
     }
-    const auto allSlots = context->catalog->slots();
+    const auto allSlots = catalog.slots();
     const activity_sdk::format::Slot* match = nullptr;
-    for (const activity_sdk::format::Slot& slot :
-         activity_sdk::object_slots(*context->catalog, object)) {
+    for (const activity_sdk::format::Slot& slot : activity_sdk::object_slots(catalog, object)) {
         if (slot.slotType != slotType || slot.slotIndex != slotIndex) {
             continue;
         }
@@ -295,7 +364,8 @@ bool frame_only(const ActivityClientBinding& binding,
     receipts::Framed framed{};
     if (isSense) {
         const activity_sdk::Snapshot catalog = activity_sdk::snapshot();
-        const SenseResolverContext context{&binding, &rosterDecode, catalog.get()};
+        const auto mods = activity_sdk::mod_catalogs();
+        const SenseResolverContext context{&binding, &rosterDecode, catalog.get(), mods.get()};
         const sense_update::Resolver resolver{&context, resolve_sense_group, resolve_sense_slot};
         std::size_t consumedBits = 0;
         static_cast<void>(sense_update::decode_sense_update(

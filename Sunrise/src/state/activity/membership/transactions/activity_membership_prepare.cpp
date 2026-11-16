@@ -93,6 +93,16 @@ bool prepare_refresh(std::uint64_t sessionId,
     return true;
 }
 
+/** Captures a source session's member table without its host teleport arm. */
+bool prepare_public_copy(std::uint64_t sourceSessionId, PendingMutation& mutation) noexcept {
+    // Zero asks for the current revision, and -1 names no bubble.
+    if (!prepare_refresh(sourceSessionId, 0, kAbsentRegionIndex, mutation)) {
+        return false;
+    }
+    mutation.snapshot.teleport = {};
+    return true;
+}
+
 /** Prepares one exact membership-revision advance without changing stored State. */
 bool prepare_republish(std::uint64_t sessionId, PendingMutation& mutation) noexcept {
     mutation = {};

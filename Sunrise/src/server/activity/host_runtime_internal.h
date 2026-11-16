@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "host_runtime.h"
@@ -440,5 +441,15 @@ void cancel_pending(Instance& instance,
  * discarding fields a later report omits.
  */
 void retain_squad_sense(Instance& instance, const SenseInput& input) noexcept;
+
+/**
+ * Logs one encoded squad body and the inputs it was built from, at debug level.
+ * @param body The written bytes only.
+ * @param bits The written bit count.
+ */
+void log_squad_body(const ScriptableTarget& target,
+                    const middleware::bap::activity_message::squad_auth::Preset& preset,
+                    std::span<const std::byte> body,
+                    std::size_t bits) noexcept;
 
 } // namespace sunrise::server::activity::host::detail

@@ -7,7 +7,9 @@
 #include <string_view>
 #include <utility>
 
+#include "../../build_data/scriptables/scriptable_catalog.h"
 #include "../../content_manifest/content_manifest_state_runtime.h"
+#include "codec.h"
 #include "runtime.h"
 
 namespace sunrise::state::activity_sdk::generated_world {
@@ -302,6 +304,101 @@ void retain_cached(std::wstring_view scenarioDirectory,
     return BindStatus::ready;
 }
 
+/** The last live extraction a mod activity bound, with the digest of its shard form. */
+struct LiveEntry final {
+    std::shared_ptr<const catalog::Snapshot> snapshot{};
+    Digest sourceFingerprint{};
+    Digest shardPayloadSha256{};
+};
+
+SRWLOCK g_liveLock{SRWLOCK_INIT};
+LiveEntry g_live{};
+
+/**
+ * Gets the shard digest of one live extraction; it is serialized once per snapshot.
+ * @param output Receives the digest.
+ * @return False when the extraction does not serialize.
+ */
+[[nodiscard]] bool live_shard_digest(const std::shared_ptr<const catalog::Snapshot>& snapshot,
+                                     const Digest& sourceFingerprint,
+                                     Digest& output) noexcept {
+    AcquireSRWLockShared(&g_liveLock);
+    const bool known = g_live.snapshot == snapshot && g_live.sourceFingerprint == sourceFingerprint;
+    if (known) {
+        output = g_live.shardPayloadSha256;
+    }
+    ReleaseSRWLockShared(&g_liveLock);
+    if (known) {
+        return true;
+    }
+    if (!payload_sha256(sourceFingerprint, *snapshot, output) || output == Digest{}) {
+        return false;
+    }
+    AcquireSRWLockExclusive(&g_liveLock);
+    g_live = {snapshot, sourceFingerprint, output};
+    ReleaseSRWLockExclusive(&g_liveLock);
+    return true;
+}
+
+/**
+ * Binds a mod activity to the scenario extracted from the loaded packages; a mod ships no shard.
+ * @return shardMissing until the full extraction of this scenario is published.
+ */
+[[nodiscard]] BindStatus resolve_live(const activity_sdk::BoundView& activitySdkView,
+                                      const Digest& sourceFingerprint,
+                                      Resolved& output) noexcept {
+    output = {};
+    const format::Scenario* scenario = nullptr;
+    std::string_view scenarioName;
+    if (!exact_bound_view(activitySdkView, scenario, scenarioName)) {
+        return BindStatus::invalidBoundView;
+    }
+    const auto sdkBuild = activitySdkView.catalog->sdk_build_sha256();
+    const auto sdkPayload = activitySdkView.catalog->payload_sha256();
+    manifest::SdkIdentity sdk{};
+    if (sdkBuild.size() != sdk.buildSha256.size()
+        || sdkPayload.size() != sdk.payloadSha256.size()) {
+        return BindStatus::invalidBoundView;
+    }
+    std::copy(sdkBuild.begin(), sdkBuild.end(), sdk.buildSha256.begin());
+    std::copy(sdkPayload.begin(), sdkPayload.end(), sdk.payloadSha256.begin());
+    std::shared_ptr<const catalog::Snapshot> live = catalog::snapshot();
+    if (live == nullptr || live->scenarioTag != scenario->tag
+        || live->status != catalog::BuildStatus::ready
+        || live->coverage != catalog::BuildCoverage::full) {
+        return BindStatus::shardMissing;
+    }
+    Digest shardPayloadSha256{};
+    if (!live_shard_digest(live, sourceFingerprint, shardPayloadSha256)) {
+        return BindStatus::shardInvalid;
+    }
+    std::shared_ptr<manifest::Catalog> manifestCatalog;
+    try {
+        manifestCatalog = std::make_shared<manifest::Catalog>();
+        manifest::ScenarioRecord record{};
+        record.scenarioTag = scenario->tag;
+        record.scenarioNameLength = static_cast<std::uint8_t>(scenarioName.size());
+        std::copy(scenarioName.begin(), scenarioName.end(), record.scenarioName.begin());
+        record.shardPayloadSha256 = shardPayloadSha256;
+        manifestCatalog->records.push_back(record);
+    } catch (...) {
+        return BindStatus::manifestInvalid;
+    }
+    // The one-record manifest has no file, so it takes its record's digest as its own.
+    manifestCatalog->sourceFingerprint = sourceFingerprint;
+    manifestCatalog->sdk = sdk;
+    manifestCatalog->payloadSha256 = shardPayloadSha256;
+
+    output.scenarioTag = scenario->tag;
+    output.scenarioName = scenarioName;
+    output.sourceFingerprint = sourceFingerprint;
+    output.manifestPayloadSha256 = shardPayloadSha256;
+    output.shardPayloadSha256 = shardPayloadSha256;
+    output.manifestCatalog = std::move(manifestCatalog);
+    output.snapshot = std::move(live);
+    return BindStatus::ready;
+}
+
 /** @return The bubble owning an effective region's one state; null for none or several. */
 [[nodiscard]] const catalog::Bubble* owning_bubble(const GeneratedWorldView& view,
                                                    std::int32_t effectiveRegion) noexcept {
@@ -441,6 +538,21 @@ BindStatus resolve(const activity_sdk::BoundView& activitySdkView,
     if (!state::content_manifest::installed_fingerprint(sourceFingerprint)
         || sourceFingerprint == Digest{}) {
         return BindStatus::contentManifestUnavailable;
+    }
+    if (activitySdkView.catalog->from_mod()) {
+        Resolved live{};
+        const BindStatus status = resolve_live(activitySdkView, sourceFingerprint, live);
+        if (status == BindStatus::ready) {
+            output = GeneratedWorldView(activitySdkView,
+                                        live.scenarioTag,
+                                        live.scenarioName,
+                                        live.sourceFingerprint,
+                                        live.manifestPayloadSha256,
+                                        live.shardPayloadSha256,
+                                        std::move(live.manifestCatalog),
+                                        std::move(live.snapshot));
+        }
+        return status;
     }
     core::path::Buffer manifestPath;
     core::path::Buffer scenarioDirectory;

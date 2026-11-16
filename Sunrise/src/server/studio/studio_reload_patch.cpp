@@ -220,4 +220,50 @@ bool retain(const manifest::Entry& entry, std::span<const std::byte> patchBlob) 
     }
 }
 
+/** Only the changed runs are written back, so bytes the client owns keep their value. */
+KeptReport apply_kept() noexcept {
+    KeptReport report{};
+    try {
+        const handles::Source source = tables();
+        for (const std::uint32_t tag : state::mods::load_patch::pending_tags()) {
+            handles::Resident resident{};
+            const std::uint32_t size = state::mods::load_patch::kept_size(tag);
+            if (size == 0) {
+                continue;
+            }
+            if (!handles::resident(source, tag, resident) || resident.size < size) {
+                ++report.absent;
+                continue;
+            }
+            std::vector<std::byte> before(size);
+            if (!client::memory::copy_current_process(nullptr, resident.address, before)) {
+                continue;
+            }
+            std::vector<std::byte> after = before;
+            if (state::mods::load_patch::apply(tag, resident.classId, after) == 0) {
+                continue;
+            }
+            bool changed = false;
+            for (std::size_t at = 0; at < after.size();) {
+                if (after[at] == before[at]) {
+                    ++at;
+                    continue;
+                }
+                std::size_t end = at;
+                while (end < after.size() && after[end] != before[end]) {
+                    ++end;
+                }
+                changed = client::memory::write_current_process(
+                              resident.address + at, std::span(after).subspan(at, end - at))
+                          || changed;
+                at = end;
+            }
+            report.patched += changed ? 1U : 0U;
+        }
+    } catch (...) {
+        return report;
+    }
+    return report;
+}
+
 } // namespace sunrise::server::studio::reload_patch

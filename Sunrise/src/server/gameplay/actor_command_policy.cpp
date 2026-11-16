@@ -201,6 +201,56 @@ std::array<DeferredPolicyRow, kDeferredPolicyCapacity> g_deferredPolicies{};
            && status == wire::CodecStatus::complete;
 }
 
+/** @return True when both digests have the same size and bytes. */
+[[nodiscard]] bool same_digest(std::span<const std::byte> left,
+                               std::span<const std::byte> right) noexcept {
+    return left.size() == right.size() && std::equal(left.begin(), left.end(), right.begin());
+}
+
+/**
+ * Maps one squad member's actor class to the installed row live entities resolve to.
+ * A mod pack's class row matches the one installed row with its RSAT and definition tags.
+ * @param installed Installed pack, which owns the classes, profiles and commands.
+ * @param squads Pack that owns the squad: the installed pack or a mod's own.
+ * @param actorClassIndex Class row of `squads`.
+ * @param output Receives the installed class row only on success.
+ * @return False when the row is out of range, or no single installed row matches.
+ */
+[[nodiscard]] bool installed_actor_class(const state::activity_sdk::Catalog& installed,
+                                         const state::activity_sdk::Catalog& squads,
+                                         std::uint32_t actorClassIndex,
+                                         std::uint32_t& output) noexcept {
+    output = format::kAbsentIndex;
+    const auto installedClasses = installed.actor_classes();
+    if (&installed == &squads) {
+        if (actorClassIndex >= installedClasses.size()) {
+            return false;
+        }
+        output = actorClassIndex;
+        return true;
+    }
+    const auto modClasses = squads.actor_classes();
+    if (actorClassIndex >= modClasses.size()) {
+        return false;
+    }
+    const format::ActorClass& wanted = modClasses[actorClassIndex];
+    if (wanted.rsatTag == 0 || wanted.rsatTag == format::kAbsentIndex) {
+        return false;
+    }
+    for (std::size_t index = 0; index < installedClasses.size(); ++index) {
+        const format::ActorClass& candidate = installedClasses[index];
+        if (candidate.rsatTag != wanted.rsatTag) {
+            continue;
+        }
+        if (output != format::kAbsentIndex || candidate.definitionTag != wanted.definitionTag) {
+            output = format::kAbsentIndex;
+            return false;
+        }
+        output = static_cast<std::uint32_t>(index);
+    }
+    return output != format::kAbsentIndex;
+}
+
 /** Reports one policy registration outcome. */
 void report_register(bool queued, const PolicyPlan& plan) noexcept {
     report(core::log::Level::info,
@@ -212,7 +262,7 @@ void report_register(bool queued, const PolicyPlan& plan) noexcept {
 }
 
 /**
- * Resolves one policy request against the published SDK and its host row.
+ * Resolves one policy request: the squad from the bound pack, the rest from the installed one.
  * @param request Mission-supplied request naming one squad and one command.
  * @param output Filled only when the return is queued.
  * @return queued when the plan is complete, otherwise the status to report.
@@ -243,32 +293,40 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
     output.linkPresent = peer::link_identity(output.host.groupSessionId, output.linkIdentity);
     output.snapshot = state::activity_sdk::snapshot();
     const state::activity_sdk::Snapshot& snapshot = output.snapshot;
-    if (snapshot == nullptr || snapshot->sdk_build_sha256().size() != request.sdkBuildSha256.size()
-        || !std::equal(snapshot->sdk_build_sha256().begin(),
-                       snapshot->sdk_build_sha256().end(),
-                       request.sdkBuildSha256.begin())) {
+    if (snapshot == nullptr) {
         return mission::ActorCommandPolicyStatus::refused;
     }
-    const auto squads = snapshot->squads();
-    const auto commands = snapshot->actor_command_definitions();
-    if (request.squadRow >= squads.size() || request.commandRow >= commands.size()) {
-        return mission::ActorCommandPolicyStatus::refused;
-    }
-    const format::Squad& squad = squads[request.squadRow];
     state::activity_sdk::BoundView activityView{};
-    if (server::bap::activity_link_view(
+    const bool viewBound =
+        server::bap::activity_link_view(
             request.binding, output.activityClientGeneration, activityLink)
         && state::activity_sdk::resolve(
                snapshot,
                {request.binding, activityLink.matchingLinks, activityLink.activityClientGeneration},
                activityView)
-               == state::activity_sdk::Status::ready
+               == state::activity_sdk::Status::ready;
+    // A mod activity's squads are in the mod's own pack, which the request names by its digest.
+    const state::activity_sdk::Catalog* squadCatalog = snapshot.get();
+    if (!same_digest(snapshot->sdk_build_sha256(), request.sdkBuildSha256)) {
+        if (!viewBound || !activityView.catalog->from_mod()
+            || !same_digest(activityView.catalog->sdk_build_sha256(), request.sdkBuildSha256)) {
+            return mission::ActorCommandPolicyStatus::refused;
+        }
+        squadCatalog = activityView.catalog.get();
+    }
+    const auto squads = squadCatalog->squads();
+    const auto commands = snapshot->actor_command_definitions();
+    if (request.squadRow >= squads.size() || request.commandRow >= commands.size()) {
+        return mission::ActorCommandPolicyStatus::refused;
+    }
+    const format::Squad& squad = squads[request.squadRow];
+    if (viewBound && activityView.catalog.get() == squadCatalog
         && activityView.scenarioRow == squad.scenarioIndex) {
         static_cast<void>(
             state::activity_sdk::generated_world::resolve(activityView, output.worldView));
     }
     const format::ActorCommandDefinition& command = commands[request.commandRow];
-    if (!resolve_selected_squad(*snapshot, squad, output.squad)
+    if (!resolve_selected_squad(*squadCatalog, squad, output.squad)
         || command.flags != format::kActorCommandDefinitionExact
         || command.selector != request.commandSelector
         || command.effect != format::ActorCommandEffect::setFaction
@@ -286,22 +344,24 @@ plan_policy(const mission::ActorCommandPolicyRequest& request, PolicyPlan& outpu
         state::activity_sdk::simulation_event_by_name(*snapshot, "ACTOR_MESSAGE");
     const format::SimulationEventDefinition* const damageEvent =
         state::activity_sdk::simulation_event_by_name(*snapshot, "DAMAGE");
-    const auto members = state::activity_sdk::squad_members(*snapshot, squad);
+    const auto members = state::activity_sdk::squad_members(*squadCatalog, squad);
     if (message == nullptr || actorEvent == nullptr || damageEvent == nullptr || members.empty()) {
         return mission::ActorCommandPolicyStatus::refused;
     }
     for (const format::SquadMember& member : members) {
+        std::uint32_t actorClass = format::kAbsentIndex;
         if (member.actorClassIndex == format::kAbsentIndex
-            || member.actorClassIndex >= snapshot->actor_classes().size()) {
+            || !installed_actor_class(
+                *snapshot, *squadCatalog, member.actorClassIndex, actorClass)) {
             return mission::ActorCommandPolicyStatus::refused;
         }
-        if (contains({output.classes.data(), output.classCount}, member.actorClassIndex)) {
+        if (contains({output.classes.data(), output.classCount}, actorClass)) {
             continue;
         }
         if (output.classCount == output.classes.size()) {
             return mission::ActorCommandPolicyStatus::refused;
         }
-        output.classes[output.classCount++] = member.actorClassIndex;
+        output.classes[output.classCount++] = actorClass;
     }
     output.messageIndex = static_cast<std::uint32_t>(message - catalog.messages.data());
     output.actorEventIndex = static_cast<std::uint32_t>(actorEvent - catalog.events.data());

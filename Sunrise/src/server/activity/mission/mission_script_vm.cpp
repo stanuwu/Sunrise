@@ -373,6 +373,17 @@ void initialize_candidate(const Impl& impl, Candidate& candidate) noexcept {
         impl.faulted = true;
         return CallStatus::outOfMemory;
     }
+    // The save write is the last step that can fail, so a refused write commits nothing.
+    if (candidate.saveFlagCount != 0
+        && (impl.identity.writeSaveFlags == nullptr
+            || !impl.identity.writeSaveFlags(
+                impl.identity.modId.data(),
+                std::span(candidate.saveFlags).first(candidate.saveFlagCount)))) {
+        detail::set_error(impl, "per-save flag write failed");
+        ++impl.refusedCallbacks;
+        impl.faulted = true;
+        return CallStatus::scriptError;
+    }
     for (Intent& intent : candidate.intents) {
         impl.outbox.push_back(std::move(intent));
     }
@@ -448,7 +459,7 @@ void initialize_candidate(const Impl& impl, Candidate& candidate) noexcept {
     lua_settop(impl.state, 0);
     collect_after_transaction(impl);
     if (!handled) {
-        if (durable_delta(impl, frame.candidate)) {
+        if (durable_delta(impl, frame.candidate) || frame.candidate.saveFlagCount != 0) {
             const CallStatus committed = commit_candidate(impl, frame.candidate);
             return committed == CallStatus::committed ? CallStatus::noHandler : committed;
         }

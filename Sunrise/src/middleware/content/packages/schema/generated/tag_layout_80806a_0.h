@@ -1159,19 +1159,21 @@ struct C80806a64 final {
 };
 static_assert(sizeof(C80806a64) == C80806a64::kSize);
 
-/** `c_80806a65`, class 0x80806A65. */
-struct C80806a65 final {
+/** `animation_event_kind6`, class 0x80806A65. */
+struct AnimationEventKind6 final {
     /** Registry class id, package size and alignment. */
     static constexpr std::uint32_t kClass = 0x80806A65U;
     static constexpr std::size_t kSize = 32;
     static constexpr std::size_t kAlign = 8;
 
-    std::array<std::byte, 8> gap0;
+    std::int16_t frame;
+    std::uint8_t eventKind;
+    std::array<std::byte, 5> gap3;
     RelativePointer<char> unk8;
     std::uint32_t unk10;
     std::array<std::byte, 12> gap14;
 };
-static_assert(sizeof(C80806a65) == C80806a65::kSize);
+static_assert(sizeof(AnimationEventKind6) == AnimationEventKind6::kSize);
 
 /** `c_80806a66`, class 0x80806A66. */
 struct C80806a66 final {

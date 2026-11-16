@@ -55,8 +55,11 @@ struct Candidate final {
     std::vector<Intent> intents{};
     std::array<ScriptVariable, kVariableCapacity> variables{};
     std::array<MissionTimer, kTimerCapacity> timers{};
+    /** Per-save flag changes, one row per name, written to the save at commit. */
+    std::array<SaveFlag, kSaveFlagWriteCapacity> saveFlags{};
     std::size_t variableCount{};
     std::size_t timerCount{};
+    std::size_t saveFlagCount{};
     std::uint64_t nextTimerSequence{state::activity::mission::kFirstTimerSequence};
     std::uint64_t nextIntentKey{state::activity::mission::kFirstIntentKey};
     std::uint32_t phase{};

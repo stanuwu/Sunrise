@@ -145,6 +145,16 @@ inline constexpr ValueSpec kRestartCheckpointArguments[]{
      .bound = at_least(1),
      .note = "the value of the arming request key; releases the wipe it armed"},
 };
+inline constexpr ValueSpec kTeleportArguments[]{
+    {.name = "region",
+     .kind = ValueKind::integer,
+     .bound = between(0, ::sunrise::state::activity::membership::kMaximumSliceSetIndex),
+     .note = "the region to arrive in"},
+    {.name = "spawn_set_hash",
+     .kind = ValueKind::integer,
+     .bound = between(1, kUint32Maximum - 1),
+     .note = "a spawn set the region declares"},
+};
 inline constexpr ValueSpec kPhaseArguments[]{
     {.name = "phase", .kind = ValueKind::integer, .bound = uint32_range()}};
 inline constexpr ValueSpec kName{
@@ -157,6 +167,16 @@ inline constexpr ValueSpec kSetVariableArguments[]{
      .bound = at_most(kMaximumScalarStringBytes),
      .note = "nil is refused; use clear_variable"},
 };
+inline constexpr ValueSpec kSetFlagArguments[]{
+    kName,
+    {.name = "value",
+     .kind = ValueKind::scalar,
+     .optional = true,
+     .note = "a boolean or an integer; nil removes the flag"},
+};
+inline constexpr ValueSpec kFlagValue[]{{.kind = ValueKind::scalar,
+                                         .optional = true,
+                                         .note = "a boolean or an integer; nil when unset"}};
 inline constexpr ValueSpec kStartTimerArguments[]{
     kName,
     {.name = "delay_ms", .kind = ValueKind::integer, .bound = uint32_range()},
@@ -305,6 +325,13 @@ inline constexpr MemberSpec kContextMembers[]{
      .returns = kRequestKey,
      .effect = "mission.restart_checkpoint",
      .note = "arms a hard wipe at a spawn set, or releases one with release_request"},
+    {.name = "teleport",
+     .kind = MemberKind::request,
+     .call = CallForm::named,
+     .arguments = kTeleportArguments,
+     .returns = kRequestKey,
+     .effect = "mission.teleport",
+     .note = "moves every player to a spawn set; refused during a hard wipe"},
     {.name = "random",
      .kind = MemberKind::maker,
      .call = CallForm::positional,
@@ -326,6 +353,17 @@ inline constexpr MemberSpec kContextMembers[]{
      .arguments = kNameArguments,
      .returns = kBoolean,
      .note = "true when the variable existed"},
+    {.name = "set_flag",
+     .kind = MemberKind::update,
+     .call = CallForm::positional,
+     .arguments = kSetFlagArguments,
+     .note = "per-save and per-mod; reaches the save when the callback commits"},
+    {.name = "get_flag",
+     .kind = MemberKind::query,
+     .call = CallForm::positional,
+     .arguments = kNameArguments,
+     .returns = kFlagValue,
+     .note = "sees a set_flag made earlier in this callback"},
     {.name = "start_timer",
      .kind = MemberKind::update,
      .call = CallForm::positional,
