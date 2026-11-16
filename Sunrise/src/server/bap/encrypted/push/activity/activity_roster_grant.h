@@ -102,10 +102,11 @@ struct HandoverClaim final {
 
 /**
  * A client granted a bubble another link released adopts the entities that link simulated there,
- * instead of leaving them frozen as replicas nobody runs. A sole link renewing its own release
- * takes those entities back once it has loaded the bubble, because the renewal's seed pass only
- * creates missing placements. A shared link renewing its own release and a body without a grant
- * claim nothing.
+ * instead of leaving them frozen as replicas nobody runs. A link renewing its own release takes
+ * those entities back once it has loaded the bubble, because the renewal's seed pass only creates
+ * missing placements. That holds for links that share a session too: when a state selection
+ * releases a shared bubble, the link that released it last can be the first one back in. A sole
+ * link claims nothing another binding released, and a body without a grant claims nothing.
  * @param input The grant body's view of the bubble.
  * @return The claim, with `pending` false when none is owed.
  */
@@ -113,7 +114,7 @@ struct HandoverClaim final {
     HandoverClaim claim{};
     const bool ownRelease = input.releasedBy == input.recipient;
     if (!input.granted || input.released == nullptr || input.releasedBy == 0
-        || (input.sharedBubbles ? ownRelease : !(ownRelease && input.resident))) {
+        || (ownRelease ? !input.resident : !input.sharedBubbles)) {
         return claim;
     }
     for (std::size_t index = 0; index < claim.slots.size(); ++index) {

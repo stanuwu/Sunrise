@@ -650,8 +650,8 @@ bool append_roster_notification(
         hasRetirement = prepare_departed_purge_locked(session, heldRegion, entityRetirement);
     }
     // A private link granted a bubble another link released adopts what that link simulated
-    // there, which would otherwise stay frozen as replicas nobody runs. A sole link takes back
-    // what it released itself once it has loaded the state it renews the bubble in.
+    // there, which would otherwise stay frozen as replicas nobody runs. A link takes back what it
+    // released itself once it has loaded the state it renews the bubble in.
     HandoverClaim handoverClaim{};
     if (encoded && snapshot.hasGrant && !snapshot.grant.release
         && session.activity.role == ActivityClientRole::privateCurrent
