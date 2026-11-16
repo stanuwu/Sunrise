@@ -378,6 +378,9 @@ bool is_current(const wchar_t* sdkDirectory, const state::activity_sdk::Catalog&
             || !copy_digest(catalog.logical_ir_sha256(), source.logicalIrSha256)) {
             return false;
         }
+        // The incident module refuses a notification without its text, so without the string
+        // table the rendering fails and every start rebuilds the whole SDK.
+        source.strings = catalog.string_bytes();
         source.activities = catalog.activities();
         source.states = catalog.states();
         source.slots = catalog.slots();
