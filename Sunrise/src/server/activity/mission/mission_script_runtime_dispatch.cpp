@@ -678,6 +678,43 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             complete_local_effect(instance, intent.active ? "spawn_held" : "spawn_released"));
         return;
     }
+    case lua_vm::IntentKind::teleport: {
+        namespace membership = ::sunrise::state::activity::membership;
+        namespace data = ::sunrise::state::build_data;
+        namespace dest = ::sunrise::state::activity::destination;
+        const auto& destination = instance.view.binding.destination;
+        const std::string_view package(
+            reinterpret_cast<const char*>(destination.packageName.data()),
+            destination.packageNameLength);
+        const auto target = static_cast<std::uint16_t>(intent.effectiveRegion);
+        data::scenarios::Definition layout{};
+        data::spawn_sets::NameHash spawn{};
+        // The client looks for the spawn set only inside the slice set the move names.
+        if (instance.publicTarget || !data::find_scenario_layout(package, layout)
+            || !data::spawn_sets::find_hash({layout.spawnStem.data(), layout.spawnStemLength},
+                                            intent.checkpointSpawnHash,
+                                            spawn)
+            || spawn.pointCount == 0
+            || dest::spawn_set_slice_set(destination, intent.checkpointSpawnHash, target)
+                   != target) {
+            refuse_delivery(instance,
+                            "teleport_refused",
+                            "region_or_spawn_unavailable",
+                            host::EffectOutcome::refused);
+            return;
+        }
+        // A wipe owns the spawn block until it is released.
+        if (membership::hard_wipe_active(instance.view.binding.sessionId)) {
+            refuse_delivery(
+                instance, "teleport_refused", "hard_wipe_active", host::EffectOutcome::refused);
+            return;
+        }
+        // Every member moves; a script teleport is a mission event, not one player's.
+        static_cast<void>(membership::arm_party_host_teleport(
+            instance.view.binding.sessionId, intent.effectiveRegion, intent.checkpointSpawnHash));
+        static_cast<void>(complete_local_effect(instance, "teleport_armed"));
+        return;
+    }
     case lua_vm::IntentKind::sendIncident: {
         namespace incident = middleware::bap::activity_message::incident;
         incident::Incident body{};

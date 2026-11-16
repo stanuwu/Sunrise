@@ -128,6 +128,51 @@ bool acknowledged(std::uint64_t sessionId) noexcept {
     return applied;
 }
 
+namespace {
+
+/** Arms or clears the host-named teleport on one member row. @return True when it changed. */
+bool arm_member_teleport(MembershipState& membership,
+                         std::int32_t sliceSetIndex,
+                         std::uint32_t spawnSetHash) noexcept {
+    if (sliceSetIndex == kAbsentSliceSetIndex) {
+        const bool changed = membership.hasHostTeleport;
+        membership.hasHostTeleport = false;
+        membership.hostTeleport = {};
+        return changed;
+    }
+    if (membership.hasHostTeleport && membership.hostTeleport.sliceSetIndex == sliceSetIndex
+        && membership.hostTeleport.spawnSetHash == spawnSetHash) {
+        return false;
+    }
+    // Step 0 latches the token, it does not compare it, so the increment is bookkeeping for the
+    // client's own arm. The state is what gates the step, and zero is idle.
+    const std::uint8_t token = static_cast<std::uint8_t>(membership.hostTeleport.token + 1U);
+    membership.hostTeleport.sliceSetIndex = sliceSetIndex;
+    membership.hostTeleport.spawnSetHash = spawnSetHash;
+    membership.hostTeleport.token = token;
+    membership.hostTeleport.state = kHostTeleportArmedState;
+    membership.hasHostTeleport = true;
+    // The roster's spawn override decides where the player arrives, so it must name the same
+    // set. A move that names none leaves the arrival to the roster's own choice.
+    const bool namesSet = spawnSetHash != 0 && spawnSetHash != kEmptyNameHash;
+    membership.hostSpawnRegion = namesSet ? sliceSetIndex : kAbsentRegionIndex;
+    membership.hostSpawnSetHash = namesSet ? spawnSetHash : 0;
+    // The client refuses a region record whose per-member token does not equal its own
+    // transition count. Anticipate the next transition until its native report arrives; that
+    // report replaces the prediction, including a request consumed by initial load.
+    const std::uint8_t current =
+        membership.hasTransitionToken ? membership.transitionToken : kInitialTransitionToken;
+    auto advanced = static_cast<std::uint8_t>(current + 1U);
+    if (advanced == 0) {
+        advanced = kInitialTransitionToken;
+    }
+    membership.transitionToken = advanced;
+    membership.hasTransitionToken = true;
+    return true;
+}
+
+} // namespace
+
 /** Arms or clears the host-named teleport region for one joined session. */
 bool arm_host_teleport(std::uint64_t sessionId,
                        std::int32_t sliceSetIndex,
@@ -140,39 +185,65 @@ bool arm_host_teleport(std::uint64_t sessionId,
     ActivityState& state = runtime::storage::g_state.activity;
     const std::size_t target = activity::transactions::find_session(state, sessionId);
     if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
-        MembershipState& membership = *selected_member(state.sessions[target]);
-        if (sliceSetIndex == kAbsentSliceSetIndex) {
-            changed = membership.hasHostTeleport;
-            membership.hasHostTeleport = false;
-            membership.hostTeleport = {};
-        } else if (!membership.hasHostTeleport
-                   || membership.hostTeleport.sliceSetIndex != sliceSetIndex
-                   || membership.hostTeleport.spawnSetHash != spawnSetHash) {
-            // Step 0 latches the token, it does not compare it, so the increment is bookkeeping
-            // for the client's own arm. The state is what gates the step, and zero is idle.
-            const std::uint8_t token =
-                static_cast<std::uint8_t>(membership.hostTeleport.token + 1U);
-            membership.hostTeleport.sliceSetIndex = sliceSetIndex;
-            membership.hostTeleport.spawnSetHash = spawnSetHash;
-            membership.hostTeleport.token = token;
-            membership.hostTeleport.state = kHostTeleportArmedState;
-            membership.hasHostTeleport = true;
-            // The client refuses a region record whose per-member token does not equal its own
-            // transition count. Anticipate the next transition until its native report arrives;
-            // that report replaces the prediction, including a request consumed by initial load.
-            const std::uint8_t current = membership.hasTransitionToken ? membership.transitionToken
-                                                                       : kInitialTransitionToken;
-            auto advanced = static_cast<std::uint8_t>(current + 1U);
-            if (advanced == 0) {
-                advanced = kInitialTransitionToken;
-            }
-            membership.transitionToken = advanced;
-            membership.hasTransitionToken = true;
-            changed = true;
+        changed = arm_member_teleport(
+            *selected_member(state.sessions[target]), sliceSetIndex, spawnSetHash);
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    return changed;
+}
+
+/** Arms the same host-named teleport on every member of one joined session. */
+bool arm_party_host_teleport(std::uint64_t sessionId,
+                             std::int32_t sliceSetIndex,
+                             std::uint32_t spawnSetHash) noexcept {
+    if (sessionId == kAbsentSessionId) {
+        return false;
+    }
+    bool changed = false;
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    for (std::size_t row = 0;
+         target != kInvalidSessionSlot && row < entity_slots::kMemberLeaseRowCount;
+         ++row) {
+        if (auto* member = member_state(state.sessions[target], row)) {
+            changed = arm_member_teleport(*member, sliceSetIndex, spawnSetHash) || changed;
         }
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
     return changed;
+}
+
+/** @return The spawn set the last host teleport named for this region, or zero. */
+std::uint32_t host_spawn_set(std::uint64_t sessionId, std::int32_t region) noexcept {
+    std::uint32_t result = 0;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const auto target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        const MembershipState& membership = *selected_member(state.sessions[target]);
+        if (region >= 0 && membership.hostSpawnRegion == region) {
+            result = membership.hostSpawnSetHash;
+        }
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return result;
+}
+
+/** @return True while any member of the session has a hard wipe armed. */
+bool hard_wipe_active(std::uint64_t sessionId) noexcept {
+    bool active = false;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const auto target = activity::transactions::find_session(state, sessionId);
+    for (std::size_t row = 0;
+         target != kInvalidSessionSlot && !active && row < entity_slots::kMemberLeaseRowCount;
+         ++row) {
+        const auto* member = member_state(state.sessions[target], row);
+        active = member != nullptr && member->hardWipe.active;
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return active;
 }
 
 /** @return True while the client has not yet mirrored the armed wipe's spawn block. */

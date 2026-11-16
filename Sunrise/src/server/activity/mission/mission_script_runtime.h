@@ -75,9 +75,12 @@ struct DiagnosticsSnapshot final {
 /** Generation-pinned actor command accepted by a gameplay policy provider. */
 struct ActorCommandPolicyRequest final {
     state::activity::SessionBinding binding{};
+    /** Build digest of the pack the activity is bound to: installed, or a mod's own. */
     std::array<std::byte, 32> sdkBuildSha256{};
     std::uint64_t activityClientGeneration{};
+    /** Squad row of that pack. */
     std::uint32_t squadRow{};
+    /** Command row of the installed pack. */
     std::uint32_t commandRow{};
     std::uint32_t commandSelector{};
     std::int32_t value{};

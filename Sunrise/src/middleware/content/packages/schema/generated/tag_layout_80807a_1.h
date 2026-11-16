@@ -31,7 +31,7 @@ struct C80807a35 final {
     static constexpr std::size_t kSize = 72;
     static constexpr std::size_t kAlign = 8;
 
-    std::uint32_t unk0;
+    std::uint32_t mapNodeHash;
     std::array<std::byte, 4> gap4;
     RelativePointer<char> unk8;
     std::array<std::byte, 8> gap10;
@@ -49,15 +49,16 @@ struct C80807a3a final {
     static constexpr std::size_t kAlign = 16;
 
     RewardCondition h373d2eff;
-    std::array<std::byte, 8> gap10;
+    std::uint8_t destinationIndex;
+    std::array<std::byte, 7> gap11;
     std::uint32_t unk18;
     std::array<std::byte, 4> gap1C;
     float unk20;
     float unk24;
     float unk28;
     std::array<std::byte, 4> gap2C;
-    std::uint32_t unk30;
-    std::uint32_t unk34;
+    std::uint32_t mapNameHash;
+    std::uint32_t bubbleHash;
     std::uint32_t unk38;
     std::uint32_t unk3c;
     std::array<std::byte, 16> gap40;

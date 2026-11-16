@@ -21,6 +21,8 @@ struct Kept final {
     std::uint32_t classId{};
     std::uint32_t size{};
     std::vector<std::vector<Range>> updates;
+    /** Updates the last load of the tag received. */
+    std::atomic<std::size_t> received{};
 };
 
 SRWLOCK g_lock{SRWLOCK_INIT};
@@ -40,7 +42,41 @@ std::atomic<std::size_t> g_count{};
     return true;
 }
 
+/** @return True when every range of the update lies inside the tag and already holds its bytes. */
+[[nodiscard]] bool already_held(std::span<const Range> update,
+                                std::span<const std::byte> blob) noexcept {
+    for (const Range& range : update) {
+        if (range.offset > blob.size() || range.bytes.size() > blob.size() - range.offset
+            || std::memcmp(blob.data() + range.offset, range.bytes.data(), range.bytes.size())
+                   != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
+
+/** Lists the tags a load has not fully received; an allocation failure lists none. */
+std::vector<std::uint32_t> pending_tags() noexcept {
+    std::vector<std::uint32_t> tags;
+    if (g_count.load(std::memory_order_acquire) == 0) {
+        return tags;
+    }
+    AcquireSRWLockShared(&g_lock);
+    try {
+        tags.reserve(g_kept.size());
+        for (const auto& [tag, kept] : g_kept) {
+            if (kept.received.load(std::memory_order_acquire) < kept.updates.size()) {
+                tags.push_back(tag);
+            }
+        }
+    } catch (...) {
+        tags.clear();
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return tags;
+}
 
 std::uint32_t crc32(std::span<const std::byte> bytes) noexcept {
     std::uint32_t crc = kCrcAllOnes;
@@ -105,6 +141,11 @@ std::size_t apply(std::uint32_t tag, std::uint32_t classId, std::span<std::byte>
         total = found->second.updates.size();
         blob = blob.first(found->second.size);
         for (const std::vector<Range>& update : found->second.updates) {
+            // A copy the client kept in memory may hold the earlier updates already.
+            if (already_held(update, blob)) {
+                ++written;
+                continue;
+            }
             if (!guards_hold(update, blob)) {
                 break;
             }
@@ -113,6 +154,7 @@ std::size_t apply(std::uint32_t tag, std::uint32_t classId, std::span<std::byte>
             }
             ++written;
         }
+        found->second.received.store(written, std::memory_order_release);
     }
     ReleaseSRWLockShared(&g_lock);
     if (known) {

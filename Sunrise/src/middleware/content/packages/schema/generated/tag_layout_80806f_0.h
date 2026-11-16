@@ -708,7 +708,11 @@ struct UnknownSkyEntry final {
     float unk5c;
     std::uint32_t modelWrapper;
     float unk64;
-    std::array<std::byte, 8> gap68;
+    std::array<std::byte, 4> gap68;
+    std::uint8_t lightShaftPass;
+    std::uint8_t lightShaftPassAlt;
+    std::uint8_t hiddenInTransparents;
+    std::array<std::byte, 1> gap6F;
     float unk70;
     float unk74;
     std::uint32_t unk78;

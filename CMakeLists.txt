@@ -109,6 +109,13 @@ if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set_source_files_properties(${VENDOR_SOURCES} PROPERTIES
         COMPILE_OPTIONS "/W3"
     )
+
+    # The game's window procedure can throw through CallWindowProcW; /EHc- turns /EHsc into /EHs.
+    set_property(SOURCE
+        "Sunrise/src/client/hooks/graphics/input/graphics_window_input.cpp"
+        "Sunrise/src/client/hooks/graphics/input/graphics_raw_input_window.cpp"
+        APPEND PROPERTY COMPILE_OPTIONS "/EHc-"
+    )
 endif()
 
 if(CMAKE_HOST_LINUX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")

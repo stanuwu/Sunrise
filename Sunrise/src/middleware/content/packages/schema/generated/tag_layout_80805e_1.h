@@ -180,16 +180,16 @@ struct C80805e84 final {
     static constexpr std::size_t kSize = 64;
     static constexpr std::size_t kAlign = 8;
 
-    std::uint32_t unk0;
+    std::uint32_t rowHash;
     std::array<std::byte, 4> gap4;
     TagArray<C808076d8> linkedActivityGraphs;
     RewardCondition displayUnlockExpression;
-    std::array<std::byte, 4> gap28;
-    std::uint32_t unk2c;
-    std::array<std::byte, 4> gap30;
-    std::uint32_t unk34;
-    std::array<std::byte, 4> gap38;
-    std::uint32_t unk3c;
+    std::uint32_t nameBank;
+    std::uint32_t nameHash;
+    std::uint32_t descriptionBank;
+    std::uint32_t descriptionHash;
+    std::uint32_t shortNameBank;
+    std::uint32_t shortNameHash;
 };
 static_assert(sizeof(C80805e84) == C80805e84::kSize);
 

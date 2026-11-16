@@ -17,6 +17,7 @@
 #include "../../middleware/content/packages/reader/overlay.h"
 #include "../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../state/activity/forced/activity_forced_destination.h"
+#include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/build_data/runtime/build_data_invalidation.h"
 #include "../../state/mods/mods_runtime.h"
 #include "../bap/runtime.h"
@@ -389,6 +390,29 @@ Reply reload_bubble(std::string_view bubble) noexcept {
         reply.status = wire::Status::failed;
         set_message(reply, "The player is in no world, so there is no bubble to reload.");
         return reply;
+    }
+    // A private session moves the player in place; the client unloads the slice set and loads it
+    // again. The player lands at the last host-named spawn set, else the region's default.
+    if (!view.publicTarget && view.effectiveRegion >= 0) {
+        namespace membership = state::activity::membership;
+        const std::uint64_t session = view.binding.sessionId;
+        const std::uint32_t named = membership::host_spawn_set(session, view.effectiveRegion);
+        // A pending update of a tag the client does not hold shows only when the destination
+        // loads again, so the move is used only when every pending update reached a loaded tag.
+        const patch::KeptReport kept = patch::apply_kept();
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::info,
+                          "ev=studio stage=reload_bubble region=%d patched=%zu absent=%zu",
+                          view.effectiveRegion,
+                          kept.patched,
+                          kept.absent);
+        if (kept.absent == 0 && !membership::hard_wipe_active(session)
+            && membership::arm_host_teleport(
+                session, view.effectiveRegion, named != 0 ? named : membership::kEmptyNameHash)) {
+            reply.status = wire::Status::ok;
+            set_message(reply, "The game is loading region %d again.", view.effectiveRegion);
+            return reply;
+        }
     }
     const auto& destination = view.binding.destination;
     state::activity::forced::ForcedDestination forced{};

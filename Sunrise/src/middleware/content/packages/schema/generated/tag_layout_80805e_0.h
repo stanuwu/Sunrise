@@ -1263,10 +1263,10 @@ struct C80805e77 final {
     static constexpr std::size_t kSize = 24;
     static constexpr std::size_t kAlign = 8;
 
-    std::uint32_t unk0;
+    std::uint32_t graphHash;
     std::array<std::byte, 4> gap4;
     RelativePointer<char> unk8;
-    std::uint32_t unk10;
+    std::uint32_t graph;
     std::array<std::byte, 4> gap14;
 };
 static_assert(sizeof(C80805e77) == C80805e77::kSize);
@@ -1292,10 +1292,12 @@ struct C80805e79 final {
     static constexpr std::size_t kAlign = 8;
 
     std::array<std::byte, 8> gap0;
-    std::uint32_t unk8;
-    std::array<std::byte, 4> gapC;
+    std::uint32_t artKey;
+    std::uint16_t nameBank;
+    std::array<std::byte, 2> gapE;
     std::uint32_t unk10;
-    std::array<std::byte, 4> gap14;
+    std::uint16_t subtitleBank;
+    std::array<std::byte, 2> gap16;
     std::uint32_t unk18;
     std::array<std::byte, 4> gap1C;
     TagArray<C80805e83> displayProgressions;
@@ -1305,7 +1307,7 @@ struct C80805e79 final {
     TagArray<Unknown> connections;
     TagArray<C80805e86> artElements;
     TagArray<Unknown> timerElements;
-    std::uint32_t unk90;
+    std::uint32_t mapTransform;
     std::array<std::byte, 4> gap94;
 };
 static_assert(sizeof(C80805e79) == C80805e79::kSize);
@@ -1449,7 +1451,7 @@ struct C80805e88 final {
 
     TagArray<C80805e8c> activities;
     TagArray<Unknown> featuringStates;
-    std::uint32_t unk20;
+    std::uint32_t nodeHash;
     std::uint32_t unk24;
     std::array<std::byte, 12> gap28;
     std::uint32_t unk34;

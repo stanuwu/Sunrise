@@ -92,6 +92,17 @@ struct PendingMutation final {
                                    PendingMutation& mutation) noexcept;
 
 /**
+ * Captures a private source session's member table for its public target's link.
+ * The target gets this body once per binding, so the host teleport arm is left out: no later body
+ * would retire it there.
+ * @param sourceSessionId Joined private session the target copies.
+ * @param mutation Cleared output; hasSnapshot is false before the first identity.
+ * @return True when the source session is joined.
+ */
+[[nodiscard]] bool prepare_public_copy(std::uint64_t sourceSessionId,
+                                       PendingMutation& mutation) noexcept;
+
+/**
  * Tests whether the client has applied the current membership revision.
  * Every membership push makes the client rebuild its region table and its player snapshots, so an
  * acknowledged snapshot is re-sent only when something changes it.
@@ -102,6 +113,9 @@ struct PendingMutation final {
 
 /** Current recipient's publishable revision, or zero for an absent/replaced binding. */
 [[nodiscard]] std::uint32_t current_revision(const SessionBinding& binding) noexcept;
+
+/** @return The spawn set the last host teleport named for this region, or zero. */
+[[nodiscard]] std::uint32_t host_spawn_set(std::uint64_t sessionId, std::int32_t region) noexcept;
 
 /**
  * Arms or clears the host-named region the client teleports to.
@@ -115,6 +129,14 @@ struct PendingMutation final {
 [[nodiscard]] bool arm_host_teleport(std::uint64_t sessionId,
                                      std::int32_t sliceSetIndex,
                                      std::uint32_t spawnSetHash) noexcept;
+
+/** Arms the same teleport on every member of the session. @return True when any arm changed. */
+[[nodiscard]] bool arm_party_host_teleport(std::uint64_t sessionId,
+                                           std::int32_t sliceSetIndex,
+                                           std::uint32_t spawnSetHash) noexcept;
+
+/** @return True while any member of the session has a hard wipe armed. */
+[[nodiscard]] bool hard_wipe_active(std::uint64_t sessionId) noexcept;
 
 /** @return True while an armed wipe's spawn block still has to reach the client. */
 [[nodiscard]] bool hard_wipe_needs_publish(std::uint64_t sessionId) noexcept;

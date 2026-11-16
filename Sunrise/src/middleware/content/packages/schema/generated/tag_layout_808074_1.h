@@ -68,10 +68,13 @@ struct C80807459 final {
     static constexpr std::size_t kSize = 40;
     static constexpr std::size_t kAlign = 8;
 
-    std::array<std::byte, 8> gap0;
+    std::uint32_t mapNodeIndex;
+    std::array<std::byte, 4> gap4;
     RewardCondition h373d2eff;
-    std::uint32_t unk18;
-    std::array<std::byte, 12> gap1C;
+    std::uint32_t kindHash;
+    std::array<std::byte, 4> gap1C;
+    std::uint32_t activityIndex;
+    std::array<std::byte, 4> gap24;
 };
 static_assert(sizeof(C80807459) == C80807459::kSize);
 

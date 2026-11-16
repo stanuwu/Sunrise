@@ -80,6 +80,8 @@ void shutdown() noexcept;
 [[nodiscard]] bool use_session_copy() noexcept;
 /** @return A count that moves on every committed write and selection change. */
 [[nodiscard]] std::uint64_t revision() noexcept;
+/** @return True after use_session_copy succeeded: no write reaches the save file. */
+[[nodiscard]] bool session_copy_active() noexcept;
 [[nodiscard]] bool read_account(AccountState& output) noexcept;
 [[nodiscard]] AccountState account() noexcept;
 [[nodiscard]] bool read_account_identity(AccountIdentity& output) noexcept;
@@ -180,6 +182,35 @@ struct ParkedRow {
     std::size_t position{};
     account::inventory::Item item;
 };
+
+/** Longest mod id or flag name a mission flag row holds. */
+inline constexpr std::size_t kMissionFlagTextCapacity = 64;
+
+/** One per-save mission flag; a mod id and a name key it. */
+struct MissionFlag {
+    std::string_view name{};
+    std::int64_t value{};
+    /** The value is 0 or 1 and reads back as a boolean. */
+    bool boolean{};
+    /** False removes the row. */
+    bool present{};
+};
+
+/**
+ * Reads one mission flag.
+ * @param modId Owning mod id; empty for a script no mod ships.
+ * @param output Receives the value; `present` is false when no row exists.
+ * @return False when the key is invalid or the row does not read.
+ */
+[[nodiscard]] bool
+read_mission_flag(std::string_view modId, std::string_view name, MissionFlag& output) noexcept;
+
+/**
+ * Writes or removes several mission flags of one mod in one transaction.
+ * @return False when any key is invalid or any row does not write; then no row changes.
+ */
+[[nodiscard]] bool write_mission_flags(std::string_view modId,
+                                       std::span<const MissionFlag> flags) noexcept;
 
 /** Adds one parked row; `row.id` is ignored. */
 [[nodiscard]] bool park(const ParkedRow& row) noexcept;

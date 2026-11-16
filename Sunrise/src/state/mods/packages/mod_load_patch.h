@@ -33,11 +33,15 @@ struct Range final {
 /** @return The size the tag's kept updates need, or zero when it has none. */
 [[nodiscard]] std::uint32_t kept_size(std::uint32_t tag) noexcept;
 
+/** @return Every tag with a kept update that no load of the tag has received yet. */
+[[nodiscard]] std::vector<std::uint32_t> pending_tags() noexcept;
+
 /**
- * Writes the kept updates into a tag the client has just loaded, before any class code reads it.
- * Stops at the first update whose guard fails, so the tag is never a mix of two generations.
+ * Writes the kept updates into a tag's bytes, before any class code reads them. An update the
+ * bytes already hold counts as written. Stops at the first other update whose guard fails, so
+ * the tag is never a mix of two generations.
  * @param blob The loaded tag's slot; it may own more bytes than the entry.
- * @return Updates written.
+ * @return Updates the bytes now hold.
  */
 std::size_t apply(std::uint32_t tag, std::uint32_t classId, std::span<std::byte> blob) noexcept;
 

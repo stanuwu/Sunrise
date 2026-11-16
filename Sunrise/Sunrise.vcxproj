@@ -314,9 +314,14 @@
     <ClCompile Include="src\client\hooks\exception_probe\exception_probe.cpp" />
     <ClCompile Include="src\client\hooks\graphics\graphics_hook_replacements.cpp" />
     <ClCompile Include="src\client\diagnostics\test_input\test_input.cpp" />
-    <ClCompile Include="src\client\hooks\graphics\input\graphics_window_input.cpp" />
+    <!-- /EHs: the game's window procedure can throw through CallWindowProcW. -->
+    <ClCompile Include="src\client\hooks\graphics\input\graphics_window_input.cpp">
+      <ExceptionHandling>SyncCThrow</ExceptionHandling>
+    </ClCompile>
     <ClCompile Include="src\client\hooks\graphics\textures\graphics_texture_upload.cpp" />
-    <ClCompile Include="src\client\hooks\graphics\input\graphics_raw_input_window.cpp" />
+    <ClCompile Include="src\client\hooks\graphics\input\graphics_raw_input_window.cpp">
+      <ExceptionHandling>SyncCThrow</ExceptionHandling>
+    </ClCompile>
     <ClCompile Include="src\client\hooks\polled_input\polled_input_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\polled_input\polled_input_replacements.cpp" />
     <ClCompile Include="src\middleware\datagen\family4\loadout\subclass_socket_selection.cpp" />

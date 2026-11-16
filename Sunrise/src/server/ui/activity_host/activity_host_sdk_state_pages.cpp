@@ -224,8 +224,11 @@ struct SlotCounts final {
     ImGui::TableSetupColumn("object", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableSetupColumn("slot");
     table_layout::frozen_headers();
+    int occurrenceRow = 0;
     for (const sdk::format::Occurrence& occurrence :
          sdk::scenario_occurrences(catalog, *scenario)) {
+        // One object can sit in several occurrences, so a slot row alone is not a unique id.
+        const int occurrenceId = occurrenceRow++;
         if (occurrence.objectIndex >= objects.size()) {
             continue;
         }
@@ -244,12 +247,14 @@ struct SlotCounts final {
             ++counts.listed;
             table_layout::next_row();
             ImGui::TableNextColumn();
+            ImGui::PushID(occurrenceId);
             ImGui::PushID(static_cast<int>(slotRow));
             std::array<char, 96> label{};
             label_of(name.empty() ? std::string_view("unnamed") : name, label);
             if (table_layout::selectable(label.data(), slotRow == selected)) {
                 selected = slotRow;
             }
+            ImGui::PopID();
             ImGui::PopID();
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(objectId.data(), objectId.data() + objectId.size());

@@ -322,8 +322,8 @@ void complete_snapshot_host_session(const ActivityClientBinding& binding) noexce
     }
     if (source != nullptr && state::activity::binding_matches(*source)) {
         plan.joinMembershipBody = JoinMembershipBody::publicSource;
-        static_cast<void>(state::activity::membership::prepare_refresh(
-            source->sessionId, kCurrentRevision, kNoBubble, plan.membershipMutation));
+        static_cast<void>(state::activity::membership::prepare_public_copy(
+            source->sessionId, plan.membershipMutation));
     } else if (plan.bindingIntent == BindingIntent::preserveCurrent
                && binding.role == ActivityClientRole::privateCurrent) {
         // A private join's burst carries the seed membership; the commit lands the same seed.

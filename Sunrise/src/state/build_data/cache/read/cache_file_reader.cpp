@@ -193,9 +193,11 @@ LoadStatus load(const wchar_t* path,
     };
     // Equipment selects the client extraction inputs, so a changed loadout invalidates the cache
     // like a changed executable does; every decoded domain and the payload checksum follow.
+    // A rebuilt mod changes the content hash, and its scenarios and spawn sets must be re-read.
     if (cachedBuild.imageTimestamp != expectedBuild.imageTimestamp
         || cachedBuild.imageSize != expectedBuild.imageSize
-        || cachedBuild.configuredEquipmentHash != expectedBuild.configuredEquipmentHash) {
+        || cachedBuild.configuredEquipmentHash != expectedBuild.configuredEquipmentHash
+        || cachedBuild.contentHash != expectedBuild.contentHash) {
         return close_with(file, LoadStatus::stale);
     }
 

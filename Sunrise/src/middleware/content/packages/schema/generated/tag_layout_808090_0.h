@@ -405,29 +405,33 @@ struct C80809030 final {
 };
 static_assert(sizeof(C80809030) == C80809030::kSize);
 
-/** `c_80809031`, class 0x80809031. */
-struct C80809031 final {
+/** `animation_event_kind5`, class 0x80809031. */
+struct AnimationEventKind5 final {
     /** Registry class id, package size and alignment. */
     static constexpr std::uint32_t kClass = 0x80809031U;
     static constexpr std::size_t kSize = 12;
     static constexpr std::size_t kAlign = 4;
 
-    std::array<std::byte, 8> gap0;
+    std::int16_t frame;
+    std::uint8_t eventKind;
+    std::array<std::byte, 5> gap3;
     std::uint32_t unk8;
 };
-static_assert(sizeof(C80809031) == C80809031::kSize);
+static_assert(sizeof(AnimationEventKind5) == AnimationEventKind5::kSize);
 
-/** `c_80809032`, class 0x80809032. */
-struct C80809032 final {
+/** `animation_event_kind4`, class 0x80809032. */
+struct AnimationEventKind4 final {
     /** Registry class id, package size and alignment. */
     static constexpr std::uint32_t kClass = 0x80809032U;
     static constexpr std::size_t kSize = 8;
     static constexpr std::size_t kAlign = 4;
 
-    std::array<std::byte, 4> gap0;
+    std::int16_t frame;
+    std::uint8_t eventKind;
+    std::array<std::byte, 1> gap3;
     std::uint32_t unk4;
 };
-static_assert(sizeof(C80809032) == C80809032::kSize);
+static_assert(sizeof(AnimationEventKind4) == AnimationEventKind4::kSize);
 
 /** `animation_tag_event`, class 0x80809033. */
 struct AnimationTagEvent final {
@@ -438,7 +442,10 @@ struct AnimationTagEvent final {
 
     std::int16_t frame;
     std::uint8_t eventKind;
-    std::array<std::byte, 5> gap3;
+    std::array<std::byte, 1> gap3;
+    std::uint8_t viewFilter;
+    std::uint8_t detachedSpawn;
+    std::array<std::byte, 2> gap6;
     std::uint32_t attachmentPoint;
     std::array<std::byte, 4> gapC;
     RelativePointer<char> audioPath;
@@ -469,16 +476,18 @@ struct C80809036 final {
 };
 static_assert(sizeof(C80809036) == C80809036::kSize);
 
-/** `c_8080903a`, class 0x8080903A. */
-struct C8080903a final {
+/** `animation_event_kind2`, class 0x8080903A. */
+struct AnimationEventKind2 final {
     /** Registry class id, package size and alignment. */
     static constexpr std::uint32_t kClass = 0x8080903AU;
     static constexpr std::size_t kSize = 6;
     static constexpr std::size_t kAlign = 2;
 
-    std::array<std::byte, 6> gap0;
+    std::int16_t frame;
+    std::uint8_t eventKind;
+    std::array<std::byte, 3> gap3;
 };
-static_assert(sizeof(C8080903a) == C8080903a::kSize);
+static_assert(sizeof(AnimationEventKind2) == AnimationEventKind2::kSize);
 
 /** `c_8080903b`, class 0x8080903B. */
 struct C8080903b final {

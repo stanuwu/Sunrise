@@ -150,7 +150,10 @@ struct C808076d8 final {
     static constexpr std::size_t kSize = 24;
     static constexpr std::size_t kAlign = 8;
 
-    std::array<std::byte, 8> gap0;
+    std::uint8_t graphIndex;
+    std::array<std::byte, 1> gap1;
+    std::uint16_t nodeIndex;
+    std::array<std::byte, 4> gap4;
     RewardCondition h90b11fae;
 };
 static_assert(sizeof(C808076d8) == C808076d8::kSize);

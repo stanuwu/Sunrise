@@ -273,6 +273,121 @@ void log_variable_write(const StateKey& key, const VariableValue& value) noexcep
     lua_pushboolean(state, found ? 1 : 0);
     return 1;
 }
+namespace {
+
+/** @return The staged row for one flag name, or the count when none is staged. */
+[[nodiscard]] std::size_t staged_save_flag(const Candidate& candidate,
+                                           const StateKey& key) noexcept {
+    const std::string_view selected = state_key_view(key);
+    for (std::size_t index = 0; index < candidate.saveFlagCount; ++index) {
+        if (state_key_view(candidate.saveFlags[index].name) == selected) {
+            return index;
+        }
+    }
+    return candidate.saveFlagCount;
+}
+
+/** Logs a flag call the sandbox refuses before it reaches the save. `name` may be empty. */
+void log_flag_refusal(const Impl& impl, std::string_view name, const char* reason) noexcept {
+    const std::string_view mod(impl.identity.modId.data());
+    const std::string_view shownName = name.empty() ? std::string_view("-") : name;
+    const std::string_view shownMod = mod.empty() ? std::string_view("-") : mod;
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=mission_script stage=flag result=refused name=%.*s mod=%.*s reason=%s",
+                      static_cast<int>(shownName.size()),
+                      shownName.data(),
+                      static_cast<int>(shownMod.size()),
+                      shownMod.data(),
+                      reason);
+    if (written > 0) {
+        core::log::write(
+            core::log::Channel::server,
+            core::log::Level::warn,
+            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
+    }
+}
+
+} // namespace
+
+/**
+ * Stages one per-save flag write: set_flag(name, value). A nil value removes the flag.
+ * The value is a boolean or an integer; it reaches the save when the callback commits.
+ * @return Zero Lua results; a refused call raises a Lua error.
+ */
+[[nodiscard]] int context_set_flag(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    const Impl* const impl = impl_from_state(state);
+    StateKey key{};
+    if (!parse_state_key(state, 2, key)) {
+        log_flag_refusal(*impl, {}, "invalid_name");
+        return luaL_argerror(state, 2, "flag name is invalid");
+    }
+    SaveFlag flag{};
+    flag.name = key;
+    const int valueType = lua_type(state, 3);
+    if (valueType == LUA_TBOOLEAN) {
+        flag.boolean = true;
+        flag.value = lua_toboolean(state, 3) != 0 ? 1 : 0;
+        flag.present = true;
+    } else if (valueType == LUA_TNUMBER && lua_isinteger(state, 3)) {
+        flag.value = static_cast<std::int64_t>(lua_tointeger(state, 3));
+        flag.present = true;
+    } else if (valueType != LUA_TNIL && valueType != LUA_TNONE) {
+        log_flag_refusal(*impl, state_key_view(key), "invalid_value");
+        return luaL_argerror(state, 3, "flag value must be a boolean, an integer or nil");
+    }
+    if (impl->identity.writeSaveFlags == nullptr) {
+        log_flag_refusal(*impl, state_key_view(key), "no_store");
+        return luaL_error(state, "per-save flags are unavailable");
+    }
+    Candidate& candidate = active_frame(state).candidate;
+    const std::size_t row = staged_save_flag(candidate, key);
+    if (row == candidate.saveFlags.size()) {
+        log_flag_refusal(*impl, state_key_view(key), "capacity");
+        return luaL_error(state, "flag writes in one callback exceed their capacity");
+    }
+    candidate.saveFlags[row] = flag;
+    candidate.saveFlagCount = (std::max)(candidate.saveFlagCount, row + 1);
+    return 0;
+}
+
+/**
+ * Reads one per-save flag: get_flag(name), including a write made earlier in this callback.
+ * @return One Lua result: the boolean, the integer, or nil when the flag is unset.
+ */
+[[nodiscard]] int context_get_flag(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    const Impl* const impl = impl_from_state(state);
+    StateKey key{};
+    if (!parse_state_key(state, 2, key)) {
+        log_flag_refusal(*impl, {}, "invalid_name");
+        return luaL_argerror(state, 2, "flag name is invalid");
+    }
+    const Candidate& candidate = active_frame(state).candidate;
+    SaveFlag flag{};
+    const std::size_t row = staged_save_flag(candidate, key);
+    if (row < candidate.saveFlagCount) {
+        // A staged write answers the read; the store logs every read it serves.
+        flag = candidate.saveFlags[row];
+    } else if (impl->identity.readSaveFlag == nullptr) {
+        log_flag_refusal(*impl, state_key_view(key), "no_store");
+        return luaL_error(state, "per-save flags are unavailable");
+    } else if (!impl->identity.readSaveFlag(impl->identity.modId.data(), key, flag)) {
+        return luaL_error(state, "per-save flag read failed");
+    }
+    if (!flag.present) {
+        lua_pushnil(state);
+    } else if (flag.boolean) {
+        lua_pushboolean(state, flag.value != 0 ? 1 : 0);
+    } else {
+        lua_pushinteger(state, static_cast<lua_Integer>(flag.value));
+    }
+    return 1;
+}
+
 /** Arms or replaces one timer at an absolute authoritative deadline. */
 [[nodiscard]] int context_start_timer(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));

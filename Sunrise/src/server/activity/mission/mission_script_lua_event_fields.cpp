@@ -154,6 +154,8 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "mission.hold_spawn";
     case ActionKind::sendIncident:
         return "mission.send_incident";
+    case ActionKind::teleport:
+        return "mission.teleport";
     case ActionKind::selectMissionState:
         return "mission.select_state";
     case ActionKind::setObjectChannels:

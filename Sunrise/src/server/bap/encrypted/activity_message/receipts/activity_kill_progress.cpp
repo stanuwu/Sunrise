@@ -2,21 +2,25 @@
 
 #include "activity_kill_progress.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
 #include <span>
+#include <string_view>
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../core/runtime/server_clock.h"
 #include "../../../../../middleware/bap/activity_message/kill_incident.h"
+#include "../../../../../state/account/account_context.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/activity/runtime.h"
 #include "../../../../../state/activity_sdk/generated_world/runtime.h"
 #include "../../../../../state/activity_sdk/runtime.h"
 #include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/runtime/runtime.h"
+#include "../../../../bap/activity_link_selection.h"
 #include "../../../../bap/internal.h"
 #include "activity_incident_grants.h"
 
@@ -43,7 +47,8 @@ constexpr std::int32_t kKillTypeCode = 1;
 /**
  * Names the bubble the client has instantiated in one activity session, from the generated world
  * of the activity that session binds. The caller owns the session lock, as every route does.
- * @return Absent when the region, the session's one link or its generated world does not resolve.
+ * @return Absent when the region, the session's mission link or its generated world does not
+ * resolve.
  */
 [[nodiscard]] std::optional<state::KillArea> kill_area_locked(std::uint64_t sessionId) noexcept {
     namespace sdk = state::activity_sdk;
@@ -54,7 +59,8 @@ constexpr std::int32_t kKillTypeCode = 1;
         return std::nullopt;
     }
     std::size_t links = 0;
-    const bap::Session* const link = bap::unique_activity_link_locked(binding, links);
+    // Every joined link binds the same generated world; co-op has more than one.
+    const bap::Session* const link = bap::mission_activity_link_locked(binding, links);
     sdk::BoundView bound{};
     sdk::generated_world::GeneratedWorldView world{};
     state::KillArea area{};
@@ -73,35 +79,36 @@ constexpr std::int32_t kKillTypeCode = 1;
 struct AreaLookup {
     std::uint64_t sessionId{};
     std::optional<state::KillArea> area{};
+    /** Set when the host already named the area, so no world is read here. */
+    bool carried{};
 };
 
 /** Resolves the bubble when State asks for it, inside the call that holds the session lock. */
 [[nodiscard]] std::optional<state::KillArea> resolve_kill_area(void* context) noexcept {
     auto& lookup = *static_cast<AreaLookup*>(context);
-    lookup.area = kill_area_locked(lookup.sessionId);
+    if (!lookup.carried) {
+        lookup.area = kill_area_locked(lookup.sessionId);
+    }
     return lookup.area;
 }
 
-} // namespace
-
-/** Decodes the kill, names the live destination, lets State credit it, and arms its publication. */
-void apply_kill_progress(const message::incident::Incident& incident) noexcept {
-    if (!reports_kill(incident)) {
-        return;
+/** Decodes one kill payload. @return False, after a log line, when the payload is malformed. */
+[[nodiscard]] bool decode_kill(std::span<const std::byte> payload,
+                               message::kill_incident::Payload& kill) noexcept {
+    if (message::kill_incident::decode(payload, kill)) {
+        return true;
     }
-    message::kill_incident::Payload kill{};
-    if (incident.payloadLength > incident.payload.size()
-        || !message::kill_incident::decode(
-            std::span(incident.payload).first(incident.payloadLength), kill)) {
-        core::log::writef(core::log::Channel::server,
-                          core::log::Level::warn,
-                          "ev=kill_progress stage=decode result=fail bytes=%u",
-                          incident.payloadLength);
-        return;
-    }
-    // The destination follows the instantiated region, not the delivering session.
-    const LiveDestination destination = live_destination();
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::warn,
+                      "ev=kill_progress stage=decode result=fail bytes=%zu",
+                      payload.size());
+    return false;
+}
 
+/** Lets State credit one kill to the bound account, and arms its publication. */
+void credit_kill(const message::kill_incident::Payload& kill,
+                 std::string_view destination,
+                 AreaLookup& lookup) noexcept {
     state::KillObservation observation{};
     observation.killerKey = kill.killer.playerKey;
     observation.victimKey = kill.victim.playerKey;
@@ -113,15 +120,14 @@ void apply_kill_progress(const message::incident::Incident& incident) noexcept {
     observation.equipmentSlot = kill.equipmentSlot;
     observation.abilitySelector = kill.abilitySelector;
     observation.damageType = kill.damageType;
-    observation.destination = destination.package_name();
+    observation.destination = destination;
     // The bubble costs a generated-world scan, so State asks only when a held rule names an area.
-    AreaLookup lookup{destination.sessionId};
     observation.resolveArea = resolve_kill_area;
     observation.areaContext = &lookup;
 
     state::KillReport report{};
-    const state::KillProgress progress = state::advance_kill_objectives(
-        observation, core::runtime::server_clock_seconds(), report);
+    const state::KillProgress progress =
+        state::advance_kill_objectives(observation, core::runtime::server_clock_seconds(), report);
     core::log::writef(core::log::Channel::server,
                       progress == state::KillProgress::advanced ? core::log::Level::info
                                                                 : core::log::Level::debug,
@@ -155,6 +161,64 @@ void apply_kill_progress(const message::incident::Incident& incident) noexcept {
     }
     bap::arm_item_values_refresh_everywhere(
         std::span(report.advancedItems.instanceSoids).first(report.advancedItems.count));
+}
+
+} // namespace
+
+/** Decodes the kill, names the live destination, lets State credit it, and arms its publication. */
+void apply_kill_progress(const message::incident::Incident& incident) noexcept {
+    if (!reports_kill(incident) || incident.payloadLength > incident.payload.size()) {
+        return;
+    }
+    const auto payload = std::span(incident.payload).first(incident.payloadLength);
+    message::kill_incident::Payload kill{};
+    if (!decode_kill(payload, kill)) {
+        return;
+    }
+    // The destination follows the instantiated region, not the delivering session.
+    const LiveDestination destination = live_destination();
+    AreaLookup lookup{destination.sessionId};
+    if (state::local_account_access()) {
+        credit_kill(kill, destination.package_name(), lookup);
+        return;
+    }
+    // A guest's kill is credited by the guest's own install. Only this host holds the activity's
+    // generated world, so the area goes with it.
+    const std::uint64_t owner = state::account_primary_soid(state::bound_account());
+    if (owner == 0) {
+        return;
+    }
+    reward_mail::Event event{};
+    event.kind = reward_mail::Kind::kill;
+    event.primaryTarget = incident.primaryTarget;
+    event.payloadLength = incident.payloadLength;
+    std::copy(payload.begin(), payload.end(), event.payload.begin());
+    if (const auto area = kill_area_locked(lookup.sessionId)) {
+        event.hasArea = true;
+        event.scenarioTag = area->scenarioTag;
+        event.bubbleNameHash = area->bubbleNameHash;
+    }
+    const std::string_view packageName = destination.package_name();
+    event.packageLength = static_cast<std::uint8_t>(packageName.size());
+    std::copy(packageName.begin(), packageName.end(), event.package.begin());
+    reward_mail::post(owner, event);
+}
+
+/** Credits a mailed kill with the area the host carried; no world is read here. */
+void apply_mailed_kill(const reward_mail::Event& event) noexcept {
+    message::kill_incident::Payload kill{};
+    if (event.kind != reward_mail::Kind::kill || event.payloadLength > event.payload.size()
+        || !decode_kill(std::span(event.payload).first(event.payloadLength), kill)) {
+        return;
+    }
+    AreaLookup lookup{};
+    lookup.carried = true;
+    if (event.hasArea) {
+        lookup.area = state::KillArea{event.scenarioTag, event.bubbleNameHash};
+    }
+    const std::size_t length =
+        (std::min)(static_cast<std::size_t>(event.packageLength), event.package.size());
+    credit_kill(kill, std::string_view(event.package.data(), length), lookup);
 }
 
 } // namespace sunrise::server::bap::encrypted::activity_message::receipts

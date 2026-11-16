@@ -51,6 +51,26 @@ using ModConfigReader = bool (*)(std::string_view modId,
 /** Resolves a loaded file's mod id; empty means unowned and false refuses attribution. */
 using ModuleOwnerReader = bool (*)(std::string_view path, std::span<char> modId) noexcept;
 
+/** One per-save flag value, keyed by the program's mod id and a name. */
+struct SaveFlag final {
+    state::activity::mission::StateKey name{};
+    std::int64_t value{};
+    /** The value is 0 or 1 and reads back as a boolean. */
+    bool boolean{};
+    /** False means no flag: read as nil, written as a removal. */
+    bool present{};
+};
+
+/** Flag changes one callback may stage; they are written when it commits. */
+inline constexpr std::size_t kSaveFlagWriteCapacity = 32;
+
+/** Reads one flag; false when the save does not answer. */
+using SaveFlagReader = bool (*)(std::string_view modId,
+                                const state::activity::mission::StateKey& name,
+                                SaveFlag& output) noexcept;
+/** Writes one callback's flag changes in one transaction; false changes none. */
+using SaveFlagWriter = bool (*)(std::string_view modId, std::span<const SaveFlag> flags) noexcept;
+
 /** Current generated identity selected by the runtime before a program attaches. */
 struct ProgramIdentity final {
     std::array<char, 72> sdkBuildId{};
@@ -70,6 +90,9 @@ struct ProgramIdentity final {
     /** Reads `context.mod_config`; null leaves every entry nil. */
     ModConfigReader readModConfig{};
     ModuleOwnerReader readModuleOwner{};
+    /** Per-save flag store; null refuses every flag call. */
+    SaveFlagReader readSaveFlag{};
+    SaveFlagWriter writeSaveFlags{};
     /** Exact ActivityClient directory selected for this VM. */
     bool publicTarget{};
 };

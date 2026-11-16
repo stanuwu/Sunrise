@@ -53,6 +53,9 @@ void capture_camera_pose(std::uint32_t playerIndex) noexcept;
 /** Latches one teleport request if the bound key went down this frame. */
 void poll_request() noexcept;
 
+/** Latches one move of the player's body to an absolute world point, for test runs. */
+void request_move_to(const Vector& target) noexcept;
+
 /** Runs the move for a request no physics tick collected, and drives the sync for it. */
 void force_pending() noexcept;
 

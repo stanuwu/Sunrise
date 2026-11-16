@@ -8,6 +8,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include "../../core/logging/log.h"
+
 namespace sunrise::client::player::position {
 namespace {
 
@@ -24,6 +26,11 @@ std::atomic_bool g_present{false};
  * while the teleport feature is switched on.
  */
 std::atomic<void*> g_component{nullptr};
+/**
+ * The last component that failed the ownership test. The test can fail for a few frames while the
+ * player still drives it, and the sync tick that would find it again stops for a player at rest.
+ */
+std::atomic<void*> g_candidate{nullptr};
 
 /**
  * Reads one component's body position and publishes it.
@@ -69,6 +76,9 @@ void observe(void* component) noexcept {
 void poll() noexcept {
     void* component = g_component.load(std::memory_order_relaxed);
     if (component == nullptr) {
+        component = g_candidate.load(std::memory_order_relaxed);
+    }
+    if (component == nullptr) {
         // The teleport hook keeps one too whenever its own feature is on.
         component = teleport::local_player_component();
     }
@@ -76,10 +86,21 @@ void poll() noexcept {
         return;
     }
     if (!teleport::owns_local_player(component)) {
-        g_component.store(nullptr, std::memory_order_relaxed);
+        if (g_component.exchange(nullptr, std::memory_order_relaxed) != nullptr) {
+            std::uint32_t handle = 0;
+            const bool known = teleport::controlled_handle(handle);
+            core::log::writef(core::log::Channel::client,
+                              core::log::Level::debug,
+                              "ev=player_position stage=drop component=%p controlled=%d handle=0x%08X",
+                              component,
+                              known ? 1 : 0,
+                              handle);
+        }
+        g_candidate.store(component, std::memory_order_relaxed);
         g_present.store(false, std::memory_order_release);
         return;
     }
+    g_candidate.store(nullptr, std::memory_order_relaxed);
     g_component.store(component, std::memory_order_relaxed);
     (void)publish_from(component);
 }
@@ -92,6 +113,7 @@ void* component() noexcept {
 /** Drops the published position. */
 void reset() noexcept {
     g_component.store(nullptr, std::memory_order_relaxed);
+    g_candidate.store(nullptr, std::memory_order_relaxed);
     g_present.store(false, std::memory_order_release);
 }
 

@@ -52,4 +52,16 @@ struct Written {
 [[nodiscard]] bool retain(const reload_manifest::Entry& entry,
                           std::span<const std::byte> patchBlob) noexcept;
 
+/** Tags whose loaded copy `apply_kept` changed, and pending tags the client does not hold. */
+struct KeptReport {
+    std::size_t patched{};
+    std::size_t absent{};
+};
+
+/**
+ * Writes every kept update into the copy of its tag the client holds now. A tag the client does
+ * not hold was read once when its destination loaded; only a new load of the destination shows it.
+ */
+KeptReport apply_kept() noexcept;
+
 } // namespace sunrise::server::studio::reload_patch

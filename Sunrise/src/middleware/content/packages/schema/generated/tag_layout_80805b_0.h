@@ -76,7 +76,7 @@ struct C80805b03 final {
     static constexpr std::size_t kSize = 24;
     static constexpr std::size_t kAlign = 8;
 
-    std::uint32_t unk0;
+    std::uint32_t mapNodeHash;
     std::array<std::byte, 4> gap4;
     TagArray<C80805b05> h8e00af4d;
 };
@@ -101,11 +101,12 @@ struct C80805b05 final {
     static constexpr std::size_t kSize = 28;
     static constexpr std::size_t kAlign = 4;
 
-    std::array<std::byte, 8> gap0;
-    std::uint32_t unk8;
-    std::array<std::byte, 4> gapC;
-    std::uint32_t unk10;
-    std::uint32_t unk14;
+    std::array<std::byte, 4> gap0;
+    std::uint32_t nameBank;
+    std::uint32_t nameHash;
+    std::uint32_t actionBank;
+    std::uint32_t actionHash;
+    std::uint32_t spawnSetHash;
     std::array<std::byte, 4> gap18;
 };
 static_assert(sizeof(C80805b05) == C80805b05::kSize);

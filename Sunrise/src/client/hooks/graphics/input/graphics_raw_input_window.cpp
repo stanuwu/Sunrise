@@ -50,15 +50,28 @@ SRWLOCK g_rawLock{SRWLOCK_INIT};
     return nullptr;
 }
 
+/** Counts active calls for teardown. /EHs runs its destructor when an exception passes. */
+class RawCallbackGuard final {
+public:
+    RawCallbackGuard() noexcept {
+        g_rawActiveCallbacks.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    ~RawCallbackGuard() noexcept {
+        g_rawActiveCallbacks.fetch_sub(1, std::memory_order_acq_rel);
+    }
+
+    RawCallbackGuard(const RawCallbackGuard&) = delete;
+    RawCallbackGuard& operator=(const RawCallbackGuard&) = delete;
+};
+
 /**
  * Takes raw input while the interface is visible and forwards everything else.
+ * Not noexcept: exceptions from the game's procedure must unwind through, as without Sunrise.
  * @return Default result for captured raw input, or the exact original procedure result.
  */
-LRESULT CALLBACK raw_window_procedure(HWND window,
-                                      UINT message,
-                                      WPARAM word,
-                                      LPARAM value) noexcept {
-    g_rawActiveCallbacks.fetch_add(1, std::memory_order_acq_rel);
+LRESULT CALLBACK raw_window_procedure(HWND window, UINT message, WPARAM word, LPARAM value) {
+    const RawCallbackGuard callbackGuard;
     AcquireSRWLockShared(&g_rawLock);
     const WNDPROC original = g_rawBinding.window == window ? g_rawBinding.original : nullptr;
     ReleaseSRWLockShared(&g_rawLock);
@@ -72,10 +85,8 @@ LRESULT CALLBACK raw_window_procedure(HWND window,
                               || steam::interfaces::methods::pending_invitation(invitation)
                               || diagnostics::test_input::foreign_raw_input(value));
     const bool forward = !captured && original != nullptr;
-    const LRESULT result = forward ? CallWindowProcW(original, window, message, word, value)
-                                   : DefWindowProcW(window, message, word, value);
-    g_rawActiveCallbacks.fetch_sub(1, std::memory_order_acq_rel);
-    return result;
+    return forward ? CallWindowProcW(original, window, message, word, value)
+                   : DefWindowProcW(window, message, word, value);
 }
 
 } // namespace

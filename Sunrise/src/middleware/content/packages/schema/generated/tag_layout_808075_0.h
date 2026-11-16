@@ -219,10 +219,10 @@ struct C80807510 final {
     static constexpr std::size_t kSize = 24;
     static constexpr std::size_t kAlign = 8;
 
-    std::uint32_t unk0;
+    std::uint32_t graphHash;
     std::array<std::byte, 4> gap4;
     RelativePointer<char> unk8;
-    std::uint32_t unk10;
+    std::uint32_t graph;
     std::array<std::byte, 4> gap14;
 };
 static_assert(sizeof(C80807510) == C80807510::kSize);
@@ -271,7 +271,7 @@ struct C80807514 final {
     static constexpr std::size_t kSize = 40;
     static constexpr std::size_t kAlign = 8;
 
-    std::uint32_t unk0;
+    std::uint32_t nodeHash;
     std::array<std::byte, 4> gap4;
     TagArray<C80807519> activities;
     TagArray<C80807517> states;

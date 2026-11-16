@@ -166,6 +166,8 @@ void register_actor_sequence_metatables(lua_State* state);
 [[nodiscard]] int context_select_state(lua_State* state);
 [[nodiscard]] int context_set_variable(lua_State* state);
 [[nodiscard]] int context_clear_variable(lua_State* state);
+[[nodiscard]] int context_set_flag(lua_State* state);
+[[nodiscard]] int context_get_flag(lua_State* state);
 [[nodiscard]] int context_start_timer(lua_State* state);
 [[nodiscard]] int context_cancel_timer(lua_State* state);
 [[nodiscard]] int state_index(lua_State* state);

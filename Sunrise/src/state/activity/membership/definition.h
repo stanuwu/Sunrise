@@ -49,6 +49,8 @@ inline constexpr std::int8_t kHostTeleportSpawnState = 3;
  * link's, which reads the same player block) cannot run the move a second time.
  */
 inline constexpr std::int8_t kHostTeleportMovingState = 0;
+/** FNV-1 of the empty name: a spawn set field that names no set, so the client uses `default`. */
+inline constexpr std::uint32_t kEmptyNameHash = 0x811C9DC5U;
 /** The client resets its teleport byte to zero when the spawn call finishes. */
 inline constexpr std::int8_t kClientTeleportResetState = 0;
 /** The mirrored 10-bit slice-set field reaches logical 1022. */
@@ -192,6 +194,10 @@ struct MembershipState final {
      */
     TeleportState hostTeleport{};
     bool hasHostTeleport{};
+    /** Region the last host teleport that named a spawn set moved to; -1 while none did. */
+    std::int32_t hostSpawnRegion{kAbsentRegionIndex};
+    /** Spawn set that teleport named. The roster's spawn override carries it in that region. */
+    std::uint32_t hostSpawnSetHash{};
     HardWipeState hardWipe{};
     /** Region of the slice set the client holds; -1 while it holds none. */
     RegionState currentRegion{};
