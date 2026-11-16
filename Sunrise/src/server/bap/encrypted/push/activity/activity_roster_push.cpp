@@ -115,8 +115,7 @@ void refuse_roster_outputs(Session& session,
         return;
     }
     MissionSeedLease& seed = session.activityMissionSeed;
-    const bool seedOwed = seed.configured && seed.bindingGeneration == generation
-                          && seed.revision != seed.publishedRevision && !seed.regionArrivalPending;
+    const bool seedOwed = mission_seed_roster_owed(session);
     if (seedOwed) {
         seed.refusedRevision = seed.revision;
     }

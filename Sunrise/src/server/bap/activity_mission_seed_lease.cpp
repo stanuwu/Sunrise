@@ -388,6 +388,29 @@ bool mission_seed_plan_hosted(const Session& session,
     return bubble < state::build_data::scenarios::kBubbleCapacity && ((hosted >> bubble) & 1U) != 0;
 }
 
+bool mission_seed_roster_owed(const Session& link) noexcept {
+    const auto& lease = link.activityMissionSeed;
+    if (!lease.configured || !lease.revision
+        || lease.bindingGeneration != link.activity.bindingGeneration
+        || lease.regionArrivalPending) {
+        return false;
+    }
+    if (lease.revision != lease.publishedRevision) {
+        return true;
+    }
+    // Selecting the adopted plan keeps its revision. Its pre-arrival receipt covers only the
+    // subset.
+    if (link.activity.role != ActivityClientRole::publicTarget || !lease.scriptSelected
+        || lease.fullSetTransportRevision == lease.revision
+        || !mission_seed_plan_hosted(link, lease.plan)) {
+        return false;
+    }
+    const auto placement =
+        state::activity::membership::reported_placement(link.activity.session.sessionId);
+    return encrypted::push::activity::mission_seed_arrival_window_closed(
+        state::activity::membership::instantiated_region(placement), lease.plan.effectiveRegion);
+}
+
 namespace {
 
 /**
