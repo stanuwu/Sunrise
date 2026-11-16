@@ -18,7 +18,8 @@ namespace sunrise::server::bap::encrypted::activity_transaction {
  * @param nonce Local send nonce advanced only by complete staged notifications.
  * @param response Lock-owned complete-frame staging storage.
  * @param written Existing staged byte count, updated only by complete notifications.
- * @return True when required notifications are staged; refresh roster debt may await an epoch.
+ * @return True when required notifications are staged; a refresh's roster may await an epoch
+ * or the host push that carries its entity allocation.
  */
 [[nodiscard]] bool stage_notifications(Session& session,
                                        Scratch& scratch,
