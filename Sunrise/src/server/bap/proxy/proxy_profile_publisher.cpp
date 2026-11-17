@@ -153,8 +153,8 @@ void service() noexcept {
         }
         social::session_directory() = g_directory;
         if (hadPrevious
-            && state::activity::fireteam::native_solo_split(previousNative,
-                                                            g_snapshot.presence.native)) {
+            && state::activity::fireteam::native_solo_split(
+                row.primarySoid, previousNative, g_snapshot.presence.native)) {
             static_cast<void>(state::activity::fireteam::depart(row.primarySoid));
         }
         if (membership != profiles::membership_generation(state::kLocalAccount)) {

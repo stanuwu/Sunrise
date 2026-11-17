@@ -74,6 +74,9 @@ namespace {
         && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration;
     const push::activity::RefreshReport refresh{activity.membershipMutation.bubbleIndex,
                                                 activity.membershipMutation.requestedRevision};
+    // A roster owing an entity allocation goes out with it on the next host push. The refresh
+    // answers the rest, since a refresh left unanswered closes a hosted session's link.
+    bool rosterOnHostPush = false;
     const bool complete =
         membershipReady
         && push::activity::append_global_state_notification(
@@ -94,7 +97,10 @@ namespace {
                                                           nullptr,
                                                           true,
                                                           &refresh,
-                                                          allowEntityRetirement));
+                                                          allowEntityRetirement,
+                                                          false,
+                                                          &rosterOnHostPush)
+            || rosterOnHostPush);
     if (!complete) {
         push::activity::discard_staged_roster(session);
         discard_staged_advertisement(session);
@@ -192,7 +198,8 @@ namespace {
  * @param nonce Local send nonce advanced only by complete staged notifications.
  * @param response Lock-owned complete-frame staging storage.
  * @param written Existing staged byte count, updated only by complete notifications.
- * @return True when required notifications are staged; refresh roster debt may await an epoch.
+ * @return True when required notifications are staged; a refresh's roster may await an epoch
+ * or the host push that carries its entity allocation.
  */
 bool stage_notifications(Session& session,
                          Scratch& scratch,

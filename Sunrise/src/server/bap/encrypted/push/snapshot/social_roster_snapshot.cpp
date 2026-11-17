@@ -75,8 +75,10 @@ struct MemberFacts final {
 /**
  * Resolves the fireteam and activity fields one account root publishes.
  * The account's own native publication owns the key when it has one; otherwise the established
- * fireteam supplies it, which is what gives two players who publish none a shared key. The seat
- * names the live activity: a follower who never sent a launch request has nothing else.
+ * fireteam supplies it, which is what gives two players who publish none a shared key. The member
+ * count follows the server's fireteam; an upload counting more members stands only while the
+ * account's own join waits for admission. The seat names the live activity: a follower who never
+ * sent a launch request has nothing else.
  * @param account Account snapshot already read under the profile lock.
  * @param characterSoid Selected character the member record is about.
  * @param facts Cleared, then filled with whatever resolves.
@@ -104,6 +106,12 @@ void resolve_member_facts(const state::AccountState& account,
             }
         }
         facts.memberCount = members;
+    } else if (facts.memberCount > 1 && !state::activity::fireteam::joining(account.primarySoid)) {
+        // A member leaving does not change the join descriptor of the one who stays, so that
+        // client does not upload again soon and its last count still names the member who left.
+        // Alone in the server's fireteam the account is one member, unless its own join is still
+        // waiting for admission.
+        facts.memberCount = 1;
     }
     state::activity::destination::DestinationSelection seat{};
     const auto seatSession =

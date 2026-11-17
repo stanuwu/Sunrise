@@ -22,7 +22,8 @@ namespace sunrise::state::activity::bubble_authority {
 /**
  * Picks the bubble a link that shares its session may be granted, if one is owed. A bubble nobody
  * holds is owed to a link whose client holds it. The link that released it takes it back only while
- * its pending leg names no other bubble, or on a body that moves its client into it.
+ * its pending leg names no other bubble, or on a body that moves its client into it. A bubble a
+ * state selection released goes back to the link that released it and to no other.
  * @param sessionId Joined activity session.
  * @param generation ActivityClient generation of the asking link.
  * @param sliceSetIndex Slice set the client holds.
@@ -87,10 +88,13 @@ void release_holder(std::uint64_t sessionId, std::uint64_t generation) noexcept;
  * @param sessionId Joined activity session.
  * @param bubble Bubble named by the accepted abdication.
  * @param mask Optional exact released entities, merged with earlier reports.
+ * @param forSelection Whether the release answers a state selection, so the bubble waits for the
+ * releaser to load the selected state.
  */
 void record_abdication(std::uint64_t sessionId,
                        std::uint8_t bubble,
-                       const EntitySlotMask* mask = nullptr) noexcept;
+                       const EntitySlotMask* mask = nullptr,
+                       bool forSelection = false) noexcept;
 
 /**
  * Copies the released entities awaiting a claim in one bubble.

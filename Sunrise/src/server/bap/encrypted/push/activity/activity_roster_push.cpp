@@ -255,7 +255,8 @@ bool append_roster_notification(
     bool solicited,
     const RefreshReport* refresh,
     bool allowEntityRetirement,
-    bool peerLeave) noexcept {
+    bool peerLeave,
+    bool* hostPushOwed) noexcept {
     // The client reported it is leaving and the leave delta already went out on this link.
     const bool left = session.activityLeftGeneration != 0
                       && session.activityLeftGeneration == session.activity.bindingGeneration;
@@ -596,6 +597,9 @@ bool append_roster_notification(
     // Client reports commit their own State revision after this builder. Publish the dependent
     // allocation and roster together on the next host push, against committed client state.
     if (allocationOwed && solicited) {
+        if (hostPushOwed != nullptr) {
+            *hostPushOwed = true;
+        }
         session.activityRosterGroupLeases = initialLeases;
         session.activityRosterSends = initialRosterSends;
         session.activityRosterState = initialRosterState;
@@ -650,8 +654,8 @@ bool append_roster_notification(
         hasRetirement = prepare_departed_purge_locked(session, heldRegion, entityRetirement);
     }
     // A private link granted a bubble another link released adopts what that link simulated
-    // there, which would otherwise stay frozen as replicas nobody runs. A sole link takes back
-    // what it released itself once it has loaded the state it renews the bubble in.
+    // there, which would otherwise stay frozen as replicas nobody runs. A link takes back what it
+    // released itself once it has loaded the state it renews the bubble in.
     HandoverClaim handoverClaim{};
     if (encoded && snapshot.hasGrant && !snapshot.grant.release
         && session.activity.role == ActivityClientRole::privateCurrent

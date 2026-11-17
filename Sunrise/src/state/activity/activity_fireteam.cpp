@@ -43,6 +43,13 @@ std::uint64_t revision() noexcept {
     return value;
 }
 
+bool joining(std::uint64_t account) noexcept {
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const bool value = runtime::storage::g_state.activity.fireteams.joining(account);
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return value;
+}
+
 bool depart(std::uint64_t account) noexcept {
     if (!account || account != account_primary_soid(bound_account())) {
         return false;
@@ -57,10 +64,12 @@ bool depart(std::uint64_t account) noexcept {
     return changed;
 }
 
-bool native_solo_split(const social::NativePresence& before,
+bool native_solo_split(std::uint64_t account,
+                       const social::NativePresence& before,
                        const social::NativePresence& after) noexcept {
     return before.published && after.published && before.hasGroup && after.hasGroup
            && before.characterSoid != 0 && before.characterSoid == after.characterSoid
-           && before.memberCount > 1 && after.memberCount == 1 && before.groupKey != after.groupKey;
+           && after.memberCount == 1 && before.groupKey != after.groupKey
+           && (before.memberCount > 1 || representative(account) != 0);
 }
 } // namespace sunrise::state::activity::fireteam
