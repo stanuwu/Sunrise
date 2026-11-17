@@ -378,6 +378,7 @@ bool is_current(const wchar_t* sdkDirectory, const state::activity_sdk::Catalog&
             || !copy_digest(catalog.logical_ir_sha256(), source.logicalIrSha256)) {
             return false;
         }
+        source.strings = catalog.string_bytes();
         source.activities = catalog.activities();
         source.states = catalog.states();
         source.slots = catalog.slots();

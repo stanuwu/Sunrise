@@ -330,6 +330,7 @@ struct TailAuthOverride final {
  * @param stateLocalRosterGroup Request-owned complete group, or null for a canonical group.
  * @param exactRegion Prepared transaction region, or null to resolve committed membership.
  * @param refresh The client refresh this body answers, or null.
+ * @param pendingOwner Private mission generation for a forwarded body, zero for the link's own.
  * @return published when the destination gives a roster that binds the player, or the refusal.
  */
 [[nodiscard]] RosterOutcome build_roster_snapshot(
@@ -350,7 +351,8 @@ struct TailAuthOverride final {
     const state::build_data::scenarios::RosterGroup* stateLocalRosterGroup = nullptr,
     const EffectiveRegion* exactRegion = nullptr,
     const RefreshReport* refresh = nullptr,
-    std::span<const TailAuthOverride> tailOverrides = {}) noexcept;
+    std::span<const TailAuthOverride> tailOverrides = {},
+    std::uint64_t pendingOwner = 0) noexcept;
 
 /** Result of joining a generated group against every group already staged in this roster. */
 enum class ExistingGroup : std::uint8_t {

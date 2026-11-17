@@ -294,15 +294,10 @@ bool consume_activity_keepalive(Session& session,
     const bool arrivalDue =
         rosterOpen && !hostRefused && session.activityRosterAwaitClientSync && incidentClientReady
         && !state::activity::membership::program_spawn_hold(session.activity.source.sessionId);
-    // A script-selected state revision that has not reached the client's roster. Nothing else
-    // makes a roster due for it, so it would otherwise wait for the next solicited report.
     const MissionSeedLease& missionSeed = session.activityMissionSeed;
-    const bool missionSeedDue =
-        rosterOpen && missionSeed.configured
-        && missionSeed.bindingGeneration == session.activity.bindingGeneration
-        && missionSeed.revision != missionSeed.publishedRevision
-        && missionSeed.revision != missionSeed.refusedRevision && !missionSeed.regionArrivalPending
-        && regionReady;
+    const bool missionSeedDue = rosterOpen && regionReady
+                                && missionSeed.revision != missionSeed.refusedRevision
+                                && mission_seed_roster_owed(session);
     // The region the client holds, which is the one its advertisement must describe. The pending
     // leg alone names the region behind the player after a z-leg switch, and advertising that
     // hands the client an ambassadorship for a region it has left.

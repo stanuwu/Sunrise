@@ -238,6 +238,16 @@ inline constexpr ValueSpec kPublicEventSchedule[]{{.kind = ValueKind::table,
                                                        "nil before the table is extracted or for a "
                                                        "site no row lists"}};
 
+/** The overlay's last request for this public host; site zero cancels the manual event. */
+inline constexpr ValueSpec kEventRequestFields[]{
+    {.name = "serial", .kind = ValueKind::integer},
+    {.name = "region", .kind = ValueKind::integer},
+    {.name = "site", .kind = ValueKind::integer},
+    {.name = "rally_seconds", .kind = ValueKind::integer, .note = "seconds from flag placement"},
+};
+inline constexpr ValueSpec kEventRequest[]{
+    {.kind = ValueKind::table, .optional = true, .fields = kEventRequestFields}};
+
 /** Members of the mission context, in __index order. */
 inline constexpr MemberSpec kContextMembers[]{
     field("sdk_build_id", kString, "sha256:<64 hex>"),
@@ -252,6 +262,7 @@ inline constexpr MemberSpec kContextMembers[]{
     field("mission_complete", kBoolean, "true after complete_mission was accepted"),
     field(
         "host_unix_seconds", kInteger, "the host wall clock in Unix seconds, read at each access"),
+    field("public_event_request", kEventRequest, "manual start or cancellation for this host"),
     {.name = "public_event_schedule",
      .kind = MemberKind::query,
      .call = CallForm::named,

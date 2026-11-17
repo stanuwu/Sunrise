@@ -3323,6 +3323,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\client\ui\mission_launch\mission_launch_panel.cpp" />
+    <ClCompile Include="src\client\ui\event_launcher\event_launcher_panel.cpp" />
+    <ClInclude Include="src\client\ui\event_launcher\event_launcher_panel.h" />
+    <ClInclude Include="src\server\activity\mission\event_launcher.h" />
     <ClInclude Include="src\client\ui\mission_launch\mission_launch_panel.h" />
     <ClInclude Include="src\client\ui\mission_launch\mission_launch_model.h" />
     <ClInclude Include="src\client\ui\mission_launch\mission_launch_cards.h" />

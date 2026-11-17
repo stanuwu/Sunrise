@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "event_launcher.h"
 #include "lauxlib.h"
 #include "lua.h"
 #include "lualib.h"
@@ -110,6 +111,8 @@ struct CallFrame final {
 
 /** Complete per-activity VM state; no allocation is shared with another instance. */
 struct Impl final {
+    std::vector<event_launcher::Site> eventSites{};
+    event_launcher::Request eventRequest{};
     state::activity::mission::AttemptState attempt{};
     std::vector<state::activity::mission::DeviceRequestReport> deviceRequests{};
     /** Links whose device requests read as applied: the route and every joined private link. */

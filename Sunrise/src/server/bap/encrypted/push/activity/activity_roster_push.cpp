@@ -115,8 +115,7 @@ void refuse_roster_outputs(Session& session,
         return;
     }
     MissionSeedLease& seed = session.activityMissionSeed;
-    const bool seedOwed = seed.configured && seed.bindingGeneration == generation
-                          && seed.revision != seed.publishedRevision && !seed.regionArrivalPending;
+    const bool seedOwed = mission_seed_roster_owed(session);
     if (seedOwed) {
         seed.refusedRevision = seed.revision;
     }
@@ -465,7 +464,8 @@ bool append_roster_notification(
                                                       : nullptr,
             exactRegion,
             refresh,
-            std::span(tailOverrides).first(tailCount));
+            std::span(tailOverrides).first(tailCount),
+            ownerScriptable ? scriptableSource.activity.bindingGeneration : 0);
     }
     const std::string_view name(destination.data(), destinationLength);
     if (outcome != RosterOutcome::published) {

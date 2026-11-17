@@ -70,6 +70,9 @@ mission_seed_hosted_publication_locked(const state::activity::SessionBinding& bi
 [[nodiscard]] bool mission_seed_publication_pending(const MissionSeedLease& lease,
                                                     std::uint64_t generation) noexcept;
 
+/** True when this link owes a selection or the rest of its public roster after arrival. */
+[[nodiscard]] bool mission_seed_roster_owed(const Session& link) noexcept;
+
 /** Commits only the generation and selection actually carried by the staged frame. */
 void commit_mission_seed_publication(Session& session, const RosterPublication& staged) noexcept;
 

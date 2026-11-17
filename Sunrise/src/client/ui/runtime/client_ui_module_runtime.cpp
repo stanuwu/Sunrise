@@ -4,6 +4,7 @@
 
 #include "../../../core/ui/modules/registry/ui_module_registry.h"
 #include "../../../core/ui/modules/ui_module_descriptor.h"
+#include "../event_launcher/event_launcher_panel.h"
 #include "../mission_launch/mission_launch_panel.h"
 #include "../movement/movement_panel.h"
 #include "../player/player_panel.h"
@@ -22,6 +23,7 @@ constexpr std::string_view kPlayerDisplayName = "Player";
 core::ui::modules::registry::PageRegistration g_movementPage;
 core::ui::modules::registry::PageRegistration g_playerPage;
 core::ui::modules::registry::PageRegistration g_activityLauncherPage;
+core::ui::modules::registry::PageRegistration g_eventLauncherPage;
 
 } // namespace
 
@@ -36,11 +38,16 @@ bool initialize() noexcept {
                                                               "client.mission_launch",
                                                               "Activity Launcher",
                                                               &mission_launch::draw);
-    return movementOwned && playerOwned && launcherOwned;
+    const bool eventsOwned = g_eventLauncherPage.acquire(core::ui::modules::Owner::client,
+                                                         "client.event_launcher",
+                                                         "Event Launcher",
+                                                         &event_launcher::draw);
+    return movementOwned && playerOwned && launcherOwned && eventsOwned;
 }
 
 /** Removes the Client modules from the Core UI registry. */
 void shutdown() noexcept {
+    g_eventLauncherPage.release();
     g_activityLauncherPage.release();
     g_playerPage.release();
     g_movementPage.release();

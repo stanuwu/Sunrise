@@ -6,6 +6,7 @@
 #include <shared_mutex>
 #include <span>
 
+#include "../../core/logging/log.h"
 #include "../../state/build_data/runtime.h"
 #include "../activity/activity_sdk_behavior_scope.h"
 #include "../activity/host_runtime.h"
@@ -138,6 +139,17 @@ valid_canonical_sdk_auth_target(const activity::host::ScriptableTarget& target) 
 [[nodiscard]] bool carries_state_local_target(const Session& session,
                                               const activity::host::ScriptableTarget& target,
                                               std::int32_t clientRegion) noexcept {
+    if (session.activity.role == ActivityClientRole::publicTarget) {
+        if (clientRegion < 0 || target.stateLocalRegion != clientRegion) {
+            return false;
+        }
+        const auto bubble = static_cast<std::uint32_t>(clientRegion) / tables::kSliceSetIndexFactor;
+        return bubble < layouts::kBubbleCapacity
+               && ((advertised_bubble(session) >> bubble) & 1U) != 0;
+    }
+    if (session.activity.role != ActivityClientRole::privateCurrent) {
+        return false;
+    }
     return target.stateLocalRegion == clientRegion
            || (activity::behavior_scope::other_bubble(target.stateLocalRegion, clientRegion)
                && !publishes_on_public(session, target));
@@ -173,9 +185,7 @@ state_local_type23_available_locked(const Session& session,
                                     std::int32_t expectedRegion,
                                     std::uint64_t expectedGeneration) noexcept {
     const std::int32_t region = selected_region_index_locked(session);
-    return expectedRegion >= 0 && expectedGeneration != 0
-           && session.activity.role == ActivityClientRole::privateCurrent
-           && region == expectedRegion
+    return expectedRegion >= 0 && expectedGeneration != 0 && region == expectedRegion
            && carries_state_local_target(session, target, expectedRegion)
            && session.activity.bindingGeneration == expectedGeneration
            && valid_state_local_type23_target(target, stateLocalRosterGroup);
@@ -203,9 +213,7 @@ state_local_sdk_auth_available_locked(const Session& session,
                                       std::int32_t expectedRegion,
                                       std::uint64_t expectedGeneration) noexcept {
     const std::int32_t region = selected_region_index_locked(session);
-    return expectedRegion >= 0 && expectedGeneration != 0
-           && session.activity.role == ActivityClientRole::privateCurrent
-           && region == expectedRegion
+    return expectedRegion >= 0 && expectedGeneration != 0 && region == expectedRegion
            && carries_state_local_target(session, target, expectedRegion)
            && session.activity.bindingGeneration == expectedGeneration
            && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup);
@@ -225,6 +233,70 @@ valid_state_local_authored_scene_target(const activity::host::ScriptableTarget& 
            && group.slotTypes[target.rosterSlotOffset] == target.slotType
            && group.slotIndices[target.rosterSlotOffset] == target.slotIndex
            && (group.slotFlags[target.rosterSlotOffset] & roster_message::kSlotAuthFlag) != 0;
+}
+
+/** @return The first gate that keeps a state-local request off its link, named for the log. */
+[[nodiscard]] const char* state_local_refusal(const Session* session,
+                                              const activity::host::ScriptableTarget& target,
+                                              std::int32_t expectedRegion,
+                                              std::uint64_t expectedGeneration) noexcept {
+    if (session == nullptr) {
+        return "no_link";
+    }
+    if (expectedRegion < 0 || expectedGeneration == 0) {
+        return "no_expected_state";
+    }
+    if (selected_region_index_locked(*session) != expectedRegion) {
+        return "region_moved";
+    }
+    if (!carries_state_local_target(*session, target, expectedRegion)) {
+        return "link_does_not_carry";
+    }
+    if (session->activity.bindingGeneration != expectedGeneration) {
+        return "stale_generation";
+    }
+    // Every link gate passed: the target failed its slot check or the Host refused the request.
+    return "target_or_host";
+}
+
+/** @return The link kind as the log names it. */
+[[nodiscard]] const char* role_name(const Session* session) noexcept {
+    if (session == nullptr) {
+        return "none";
+    }
+    return session->activity.role == ActivityClientRole::privateCurrent ? "private"
+           : session->activity.role == ActivityClientRole::publicTarget ? "public"
+                                                                        : "none";
+}
+
+/**
+ * Logs one refused state-local request with its target, its link and the gate that refused it.
+ * A script sees only "refused"; this line is what tells a lost route from a stale request.
+ * @param kind Request family, as the mission log names its refusals.
+ */
+void report_refusal(const char* kind,
+                    const Session* session,
+                    std::size_t linkCount,
+                    const activity::host::ScriptableTarget& target,
+                    std::int32_t expectedRegion,
+                    std::uint64_t expectedGeneration) noexcept {
+    core::log::writef(
+        core::log::Channel::server,
+        core::log::Level::warn,
+        "ev=activity stage=override_route result=refused kind=%s reason=%s role=%s links=%zu "
+        "key=0x%08X slot_type=%u slot_index=%u target_region=%d expected_region=%d "
+        "selected_region=%d advertised_region=%d",
+        kind,
+        state_local_refusal(session, target, expectedRegion, expectedGeneration),
+        role_name(session),
+        linkCount,
+        target.registryKey,
+        static_cast<unsigned>(target.slotType),
+        static_cast<unsigned>(target.slotIndex),
+        static_cast<int>(target.stateLocalRegion),
+        static_cast<int>(expectedRegion),
+        session != nullptr ? static_cast<int>(selected_region_index_locked(*session)) : -1,
+        session != nullptr ? static_cast<int>(session->activity.advertisedRegion) : -1);
 }
 
 } // namespace
@@ -330,6 +402,9 @@ bool request_activity_state_local_type23_override(
                                                                snap,
                                                                expectedGeneration,
                                                                reservation);
+    if (!queued) {
+        report_refusal("device", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
@@ -369,6 +444,9 @@ bool request_activity_sdk_auth_override(
                                                                      expectedGeneration,
                                                                      reservation,
                                                                      kind);
+    if (!queued && target.stateLocalRoster) {
+        report_refusal("slot_auth", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
@@ -408,12 +486,14 @@ bool request_activity_state_local_type31_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && region == expectedRegion && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_type31_target(target, stateLocalRosterGroup)
         && activity::host::request_state_local_type31_override(
             binding, target, stateLocalRosterGroup, expectedGeneration, reservation, enabled);
+    if (!queued) {
+        report_refusal("pulse", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
@@ -433,14 +513,16 @@ bool request_activity_state_local_sequence_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && region == expectedRegion && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType5SlotType
         && target.authSchema == middleware::bap::activity_message::scriptable_auth::kType5Schema
         && activity::host::request_state_local_sequence_override(
             binding, target, stateLocalRosterGroup, expectedGeneration, reservation, selection);
+    if (!queued) {
+        report_refusal("sequence", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
@@ -460,14 +542,16 @@ bool request_activity_state_local_cinematic_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && region == expectedRegion && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType6SlotType
         && target.authSchema == middleware::bap::activity_message::scriptable_auth::kType6Schema
         && activity::host::request_state_local_cinematic_override(
             binding, target, stateLocalRosterGroup, active, expectedGeneration, reservation);
+    if (!queued) {
+        report_refusal("cinematic", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
@@ -495,6 +579,10 @@ bool request_activity_state_local_performance_override(
         && target.authSchema == middleware::bap::activity_message::scriptable_auth::kType42Schema
         && activity::host::request_state_local_performance_override(
             binding, target, stateLocalRosterGroup, stateNameHash, expectedGeneration, reservation);
+    if (!queued) {
+        report_refusal(
+            "performance", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
@@ -517,8 +605,7 @@ bool request_activity_state_local_authored_scene_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && region == expectedRegion && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_authored_scene_target(target, stateLocalRosterGroup)
         && activity::host::request_state_local_authored_scene_override(binding,
@@ -530,6 +617,9 @@ bool request_activity_state_local_authored_scene_override(
                                                                        eventKey,
                                                                        stop,
                                                                        initialEventKey);
+    if (!queued) {
+        report_refusal("scene", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
@@ -551,8 +641,7 @@ bool request_activity_state_local_dialogue_override(
     const std::int32_t region = session != nullptr ? selected_region_index_locked(*session) : -1;
     const bool queued =
         expectedRegion >= 0 && expectedGeneration != 0 && session != nullptr
-        && session->activity.role == ActivityClientRole::privateCurrent && region == expectedRegion
-        && carries_state_local_target(*session, target, expectedRegion)
+        && region == expectedRegion && carries_state_local_target(*session, target, expectedRegion)
         && session->activity.bindingGeneration == expectedGeneration
         && valid_state_local_sdk_auth_target(target, stateLocalRosterGroup)
         && target.slotType == middleware::bap::activity_message::scriptable_auth::kType53SlotType
@@ -565,6 +654,9 @@ bool request_activity_state_local_dialogue_override(
                                                                  expectedGeneration,
                                                                  reservation,
                                                                  filter);
+    if (!queued) {
+        report_refusal("dialogue", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
@@ -591,6 +683,10 @@ bool request_activity_state_local_objective_reset(
         && target.authSchema == middleware::bap::activity_message::scriptable_auth::kType3Schema
         && activity::host::request_state_local_objective_reset(
             binding, target, stateLocalRosterGroup, expectedGeneration, reservation);
+    if (!queued) {
+        report_refusal(
+            "objective_reset", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
@@ -617,6 +713,9 @@ bool request_activity_state_local_task_override(
         && target.authSchema == middleware::bap::activity_message::scriptable_auth::kType38Schema
         && activity::host::request_state_local_task_override(
             binding, target, stateLocalRosterGroup, expectedGeneration, reservation);
+    if (!queued) {
+        report_refusal("task", session, linkCount, target, expectedRegion, expectedGeneration);
+    }
     return queued;
 }
 
